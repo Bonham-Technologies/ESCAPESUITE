@@ -3,6 +3,7 @@ import {
   DEFAULT_GIF_FPS,
   DEFAULT_GIF_RESOLUTION,
   EXPORT_NO_WEBCODECS_REASON,
+  GIF_ALWAYS_AVAILABLE_NOTE,
   ExportAbortedError,
   ExportError,
   GIF_FPS_OPTIONS,
@@ -770,12 +771,21 @@ describe('isGIFExportSupported', () => {
   })
 })
 
-describe('GIF_LONG_RANGE_WARNING', () => {
+describe('GIF sentences', () => {
   it('names the 30-second threshold it is shown past, and suggests WebM', () => {
     // A soft warning, never a refusal (spec). The dialog compares the export's
     // own length against GIF_LONG_RANGE_SECONDS.
     expect(GIF_LONG_RANGE_SECONDS).toBe(30)
     expect(GIF_LONG_RANGE_WARNING).toMatch(/30 seconds/)
     expect(GIF_LONG_RANGE_WARNING).toMatch(/WebM/)
+  })
+
+  it('names WebCodecs and GIF in the note shown when no video format is possible', () => {
+    // Pinned here with the other export sentences, because its whole job is to
+    // stop EXPORT_NO_WEBCODECS_REASON from reading as "you cannot export": it has
+    // to name the capability that is missing and the format that does not need it.
+    expect(GIF_ALWAYS_AVAILABLE_NOTE).toMatch(/WebCodecs/)
+    expect(GIF_ALWAYS_AVAILABLE_NOTE).toMatch(/GIF/)
+    expect(EXPORT_NO_WEBCODECS_REASON).toMatch(/WebCodecs/)
   })
 })

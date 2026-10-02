@@ -2475,7 +2475,12 @@ The third export format (ESCSUITE-34), and the only one that needs nothing from 
   `writer.finish()` means a cancel that landed during the finalise never hands a blob back. A
   failing frame wraps in `ExportError` with the diagnostic log and the frame it reached, the same
   shape both other exporters produce, and every exit — success, throw, abort — calls
-  `releaseElementSources`.
+  `releaseElementSources`. It also refuses **two** things at the door rather than one: the 2x2
+  resolved-resolution guard both video exporters keep, and a frame count below 1 — an empty or
+  reversed range would otherwise run no iterations at all and `finish()` a stream with no frames,
+  which writes the end-of-stream byte alone (`gifenc` writes the header lazily on the first frame),
+  handing back a one-byte file typed `image/gif` after a "complete" report. The video exporters do
+  not need that guard: their muxer still finalises a valid, if empty, container.
 - **Frame rate and resolution are their own presets.** `GIF_FPS_OPTIONS` is 10/15/20 and
   `gifFrameRate(options.fps)` is the only reader of `ExportOptions.fps`, so `undefined` (every
   caller that predates the format), a stale saved setting and a hand-built headless job spec all
@@ -2541,8 +2546,11 @@ different questions, on purpose, and the dialog reads each one differently:
   and exports fifteen frames anyway). It is a function rather than a `true` so the dialog can
   read all three formats' support the same way, and so a future reason to refuse has one place
   to live. Its companion sentence `GIF_ALWAYS_AVAILABLE_NOTE` exists because "this browser
-  cannot export" stopped being true when GIF landed: the no-WebCodecs state below is now "no
-  **video** format is possible", with one that still is.
+  cannot export" stopped being true the moment GIF landed in `core/` — but **the dialog has not
+  changed yet**: the three-support-states table below still describes it exactly as it behaves
+  today, including a no-WebCodecs state that disables every button. Turning that state into "no
+  **video** format is possible, and here is the one that still is" is the dialog's own change, and
+  this section gets rewritten with it.
 
 The dialog's **three support states**:
 

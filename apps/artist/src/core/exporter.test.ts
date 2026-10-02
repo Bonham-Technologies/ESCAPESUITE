@@ -2,13 +2,18 @@
 // exportMP4.test.ts / exportWebM.test.ts and the shared helpers in
 // exportTypes.test.ts; what this file pins down is the barrel's own contract —
 // that every name callers import from './exporter' resolves to the real
-// implementation, and that the two entry points refuse to start on a browser
-// without WebCodecs, on an empty timeline, or under an already-cancelled export.
+// implementation, and that the three entry points refuse to start on an empty
+// timeline or under an already-cancelled export — the two video ones also on a
+// browser without WebCodecs, and the GIF one deliberately **not** (ESCSUITE-34).
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   ExportAbortedError,
+  GIF_ALWAYS_AVAILABLE_NOTE,
+  estimateGifBytes,
+  exportToGIF,
   exportToMP4,
   exportToWebM,
+  isGIFExportSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
 } from './exporter'
@@ -141,5 +146,50 @@ describe('exportToMP4', () => {
         controller.signal
       )
     ).rejects.toBeInstanceOf(ExportAbortedError)
+  })
+})
+
+describe('exportToGIF through the barrel', () => {
+  it('refuses to export an empty timeline', async () => {
+    // No WebCodecs doubles installed, on purpose: unlike its two siblings this
+    // export needs none, so the empty-timeline refusal is the first thing it can
+    // reach. The pipeline's own behaviour is covered by exportGIF.test.ts; what
+    // this pins is that the name resolves to it through the barrel.
+    await expect(
+      exportToGIF([], [], makeExportOptions({ format: 'gif' }), vi.fn())
+    ).rejects.toThrow('No clips to export')
+  })
+
+  it('throws ExportAbortedError when the signal is already aborted', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(
+      exportToGIF(
+        clips,
+        sourceVideos,
+        makeExportOptions({ format: 'gif' }),
+        vi.fn(),
+        undefined,
+        controller.signal
+      )
+    ).rejects.toBeInstanceOf(ExportAbortedError)
+  })
+
+  it('reports GIF export as supported with no WebCodecs at all', () => {
+    restores.push(removeWebCodecsGlobals())
+
+    // The asymmetry the barrel exists to expose: both video probes answer false
+    // here (above), and this one is a constant.
+    expect(isGIFExportSupported()).toBe(true)
+    expect(isMP4ExportSupported()).toBe(false)
+  })
+
+  it('exposes the up-front size heuristic', () => {
+    expect(estimateGifBytes(640, 360, 15)).toBe(Math.round(640 * 360 * 15 * 0.3))
+  })
+
+  it('exposes the note shown when no video format can be encoded', () => {
+    expect(GIF_ALWAYS_AVAILABLE_NOTE).toMatch(/GIF/)
   })
 })

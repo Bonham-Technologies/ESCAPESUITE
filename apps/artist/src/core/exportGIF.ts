@@ -128,6 +128,21 @@ export async function exportToGIF(
   const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
+  // The second door guard, and the same argument as the 2x2 one above: an empty
+  // or reversed range gives a frame count of zero or less, the loop never runs,
+  // and `finish()` on a stream with no frames writes the end-of-stream byte
+  // alone — `gifenc` writes the header lazily on the first `writeFrame` — so the
+  // export would hand back a one-byte file typed `image/gif` after reporting
+  // "Export complete!". The two video exporters degrade better than that (their
+  // muxer still finalises a structurally valid, if empty, container), so this is
+  // the one place a GIF export needs to refuse where they do not.
+  if (!Number.isFinite(totalFrames) || totalFrames < 1) {
+    throw new ExportError(
+      `Cannot export a GIF of ${totalFrames} frames: the selected range is empty`,
+      exportLog
+    );
+  }
+
   // One canvas for the whole export. `willReadFrequently` because every frame
   // reads the whole raster back: without the hint a browser keeps the backing
   // store on the GPU and each `getImageData` is a readback stall. `alpha: false`

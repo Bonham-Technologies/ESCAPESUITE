@@ -174,6 +174,33 @@ describe('exportToGIF preconditions', () => {
     expect(createGifWriter).not.toHaveBeenCalled()
   })
 
+  it('refuses a range with no frames in it', async () => {
+    // `Math.ceil(0 * fps)` is 0, so the loop would never run and `finish()` would
+    // write the trailer byte alone — `gifenc` writes the header lazily on the
+    // first frame — handing back a 1-byte file typed `image/gif` after a
+    // "complete" report. Same reachability argument as the 2x2 guard above: no
+    // shipped caller can produce it today, and a hand-built headless job spec or
+    // an empty in/out range can the moment one exists.
+    const error = await run({
+      clips: [makeClip({ duration: 2, endTime: 2 })],
+      options: { timeRange: { start: 0.5, end: 0.5 } },
+    }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toMatch(/range is empty/)
+    expect(createGifWriter).not.toHaveBeenCalled()
+  })
+
+  it('refuses a reversed range, which has fewer than no frames', async () => {
+    const error = await run({
+      clips: [makeClip({ duration: 2, endTime: 2 })],
+      options: { timeRange: { start: 1, end: 0.5 } },
+    }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(createGifWriter).not.toHaveBeenCalled()
+  })
+
   it('exports with no WebCodecs in the browser at all', async () => {
     // The whole reason the format exists: `gifenc` is pure JavaScript, so this
     // is the one export that works where neither VP9/VP8 nor H.264 can be
@@ -303,6 +330,40 @@ describe('exportToGIF frames', () => {
       // And the read-back follows the last of them.
       expect(methods.indexOf('getImageData')).toBeGreaterThan(methods.lastIndexOf('drawImage'))
     }
+  })
+
+  it('falls back to one default track and the base dimensions with neither argument', async () => {
+    // `tracks` and `projectResolution` are both optional on the signature, and
+    // `exportToWebM`'s own suite covers the same two fallbacks: without tracks
+    // the exporter synthesises one visible video track, and without a project
+    // resolution 'project' resolves to `getBaseDimensions`' answer — the bottom
+    // media clip's own source size, 640x360 here.
+    //
+    // The clip sits on `'default'` on purpose. `getClipsAtTime` resolves a clip
+    // against the track list it is handed and drops a clip whose track is not in
+    // it, so a drawn frame is what proves the *synthesised* track is the one the
+    // composer composited against, rather than merely that the fallback
+    // expression evaluated.
+    const blob = await exportToGIF(
+      [makeClip({ trackId: 'default', duration: 0.2, endTime: 0.2 })],
+      [makeSourceVideo({ width: 640, height: 360 })],
+      makeExportOptions({ format: 'gif', resolution: 'project' }),
+      vi.fn()
+    )
+
+    expect(blob.type).toBe('image/gif')
+    expect(frames()).toHaveLength(3)
+    expect(frames()[0]).toMatchObject({ width: 640, height: 360 })
+    expect(ctx().canvas.width).toBe(640)
+    expect(ctx().canvas.height).toBe(360)
+    // Drawn, not just sized: the default track carried the clip.
+    expect(ctx().argsFor('drawImage')).toHaveLength(3)
+    // And the *drawing space* fell back too, which the output size alone cannot
+    // show — `getResolution` has a source fallback of its own, so the raster
+    // would be 640x360 either way. With no project resolution the project space
+    // **is** the base dimensions, so `openOutputFrame`'s matrix is the identity;
+    // any other fallback would scale every draw call.
+    expect(ctx().argsFor('setTransform')[0]).toEqual([1, 0, 0, 1, 0, 0])
   })
 
   it('releases every media element when it finishes', async () => {
