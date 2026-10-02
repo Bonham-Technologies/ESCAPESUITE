@@ -262,6 +262,58 @@ describe('hitTestHandles z-order', () => {
     ).toBe('plain')
   })
 
+  // ESCSUITE-155: a clip evaluated fully transparent at the current time does
+  // not catch the click — the point falls through to whatever is underneath,
+  // the same `continue` the loop already gives a clip of an unknown kind.
+  it('falls through a clip animated to opacity 0 to the plain one beneath it', () => {
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const plain = mediaClip({ id: 'plain', trackId: track.id })
+    const transparent = mediaClip({
+      id: 'transparent',
+      trackId: upper.id,
+      animation: makeAnimation({ keyframes: { opacity: [kf(0, 0)] } }),
+    })
+
+    expect(
+      hitAt(CENTER_X, CENTER_Y, scene({ clips: [plain, transparent], tracks: [track, upper] }))
+        ?.clipId
+    ).toBe('plain')
+  })
+
+  // The control for the case above: opacity 0 is the only value that falls
+  // through — anything above it, however faint, is still picked.
+  it('still hits a clip animated to a barely-visible opacity', () => {
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const plain = mediaClip({ id: 'plain', trackId: track.id })
+    const barelyVisible = mediaClip({
+      id: 'barely-visible',
+      trackId: upper.id,
+      animation: makeAnimation({ keyframes: { opacity: [kf(0, 0.01)] } }),
+    })
+
+    expect(
+      hitAt(CENTER_X, CENTER_Y, scene({ clips: [plain, barelyVisible], tracks: [track, upper] }))
+        ?.clipId
+    ).toBe('barely-visible')
+  })
+
+  // The static case: pre-existing, not introduced by ESCSUITE-3's keyframed
+  // extension — a clip with no animation at all set to opacity 0.
+  it('falls through a statically-transparent clip to the plain one beneath it', () => {
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const plain = mediaClip({ id: 'plain', trackId: track.id })
+    const transparent = mediaClip({
+      id: 'transparent',
+      trackId: upper.id,
+      transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 0 },
+    })
+
+    expect(
+      hitAt(CENTER_X, CENTER_Y, scene({ clips: [plain, transparent], tracks: [track, upper] }))
+        ?.clipId
+    ).toBe('plain')
+  })
+
   // ESCSUITE-3 review round 1, MAJOR-1: every case above keyframes a property
   // to its own default value, so the animated position and the base position
   // are the same number and never distinguish "evaluated at the animated
