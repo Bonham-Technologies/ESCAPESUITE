@@ -1126,8 +1126,11 @@ describe('VideoLibrary', () => {
   })
 
   // ESCSUITE-84: removing media takes every clip that uses it, so a clip on a
-  // locked track makes its media un-removable — the store refuses, and the
-  // button says so rather than doing nothing.
+  // locked track makes its media un-removable. This pins the *disabled
+  // button* only — since ESCSUITE-154 deleted the store's own refusal, the
+  // handler's `lockedMedia.has(id)` guard ahead of `deleteVideo` is a
+  // belt-and-braces check behind this button, not a store-level refusal, and
+  // is unreachable from here while the button stays disabled.
   it('refuses to remove media a clip on a locked track uses', async () => {
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
@@ -1140,13 +1143,25 @@ describe('VideoLibrary', () => {
     expect(screen.queryByTitle('Remove media')).not.toBeInTheDocument()
   })
 
-  it('still offers to remove media only unlocked clips use', () => {
+  // ESCSUITE-154 review, MINOR 3: the button being enabled is not the same as
+  // a removal actually landing — this also proves one does, with an
+  // unrelated track locked, now that the deleted `removeSourceVideo`'s own
+  // "still removes a source video only unlocked clips use" no longer exists
+  // to pin that at the store level.
+  it('still offers to remove media only unlocked clips use, and the removal lands with an unrelated track locked', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
     const clip = addClip('clip1', 0, 4)
     store().updateTrack(clip.trackId, { locked: false })
+    const otherTrack = store().addTrack('Other')
+    store().updateTrack(otherTrack.id, { locked: true })
     render(<VideoLibrary />)
 
     expect(screen.getByTitle('Remove media')).toBeEnabled()
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
   it('keeps the video when the confirmation is declined', async () => {
@@ -1258,6 +1273,9 @@ describe('VideoLibrary', () => {
   // `removeSourceVideosPermanently` instead, a failed delete must not drop
   // the tile from the store — the same shape as Clear Unused and Clear All,
   // which only ever hand over the ids whose bytes are confirmed gone.
+  // No `showNotification` prop at all — this is the no-prop arm (ESCSUITE-154
+  // review, MINOR 1): the optional call must not throw when the caller never
+  // passed one.
   it('leaves the tile in place when deleteVideo rejects', async () => {
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
@@ -1271,6 +1289,26 @@ describe('VideoLibrary', () => {
     expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
     expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toContain('video1')
     removeSourceVideosPermanently.mockRestore()
+    vi.mocked(storageModule.deleteVideo).mockRestore()
+  })
+
+  // ESCSUITE-154 review, MINOR 1: before this, a failed delete left the tile
+  // in place (good) but told the user nothing beyond a `console.error` — the
+  // natural response is clicking Remove again and failing again in silence.
+  // The other arm (the case above) proves the call is optional; this one
+  // proves it actually fires, with the right message and type, when a caller
+  // does pass it.
+  it('tells the caller when deleteVideo rejects', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
+    const onNotification = vi.fn()
+    render(<VideoLibrary showNotification={onNotification} />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(storageModule.deleteVideo).toHaveBeenCalledWith('video1'))
+    expect(onNotification).toHaveBeenCalledWith("Couldn't remove that file from storage.", 'error')
     vi.mocked(storageModule.deleteVideo).mockRestore()
   })
 

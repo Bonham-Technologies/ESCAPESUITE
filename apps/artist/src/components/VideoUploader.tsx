@@ -500,9 +500,23 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   );
 }
 
+interface VideoLibraryProps {
+  /**
+   * Reports a per-item Remove whose `deleteVideo` rejected (ESCSUITE-154
+   * review, MINOR 1) — optional, and the only thing it is used for, unlike
+   * `VideoUploaderProps.showNotification`: a removal's tile staying put with
+   * only a `console.error` behind it is the one failure this component can
+   * have, where `VideoUploader`'s own Clear Unused/Clear All failures are
+   * common enough to make the prop required there. Typed inline for the same
+   * reason as `VideoUploaderProps.showNotification` — this is `components/`,
+   * and nothing here reaches into `app/` even for a type.
+   */
+  showNotification?: (message: string, type: 'error' | 'success' | 'info') => void;
+}
+
 // Video Library component to show uploaded videos
 // Check if media dimensions differ significantly from project resolution
-export function VideoLibrary() {
+export function VideoLibrary({ showNotification }: VideoLibraryProps = {}) {
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -641,12 +655,13 @@ export function VideoLibrary() {
           await deleteVideo(id);
         } catch (e) {
           console.error('Failed to delete video from storage:', e);
+          showNotification?.("Couldn't remove that file from storage.", 'error');
           return;
         }
         removeSourceVideosPermanently([id]);
       }
     },
-    [lockedMedia, clips, removeSourceVideosPermanently]
+    [lockedMedia, clips, removeSourceVideosPermanently, showNotification]
   );
 
   if (sourceVideos.length === 0) {

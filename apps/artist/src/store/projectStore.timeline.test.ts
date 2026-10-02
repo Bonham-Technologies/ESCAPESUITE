@@ -1120,10 +1120,15 @@ describe('projectStore remaining behaviours', () => {
     // belonged to `removeSourceVideo`, deleted when the per-item Remove
     // button — its only caller — moved to the non-undoable
     // `removeSourceVideosPermanently`, which trusts its caller to have
-    // already filtered locked ids out (ESCSUITE-84 is enforced in
-    // `VideoUploader.tsx` alone now, pinned by
-    // `VideoUploader.test.tsx`'s "refuses to remove media a clip on a locked
-    // track uses").
+    // already filtered locked ids out. ESCSUITE-84's *protection* is intact —
+    // `VideoUploader.tsx`'s own `lockedMedia.has(id)` guard sits ahead of
+    // `deleteVideo`, and the button is never rendered enabled for a locked
+    // source in the first place — but there is no longer a store-level
+    // refusal for a test here to pin. `VideoUploader.test.tsx`'s "refuses to
+    // remove media a clip on a locked track uses" pins only the *disabled
+    // button*; the component's own guard behind it is a belt-and-braces
+    // check, unreachable while that button is rendered disabled, and has no
+    // executed-refusal pin of its own (ESCSUITE-154 review, MINOR 2).
     it('still edits a clip on an unlocked track while another track is locked', () => {
       store().updateClipBlendMode('f1', 'multiply')
       expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')
