@@ -202,6 +202,113 @@ describe('loadManifest', () => {
   })
 })
 
+describe('loadManifest "meta"', () => {
+  // ESCSUITE-158: a manifest source had no way to say it is audio-only, so an ESCAPECRAFT
+  // take recorded with no picture -- typed "video/webm;codecs=vp9,opus" even though it has
+  // none -- was re-derived as video from its MIME type alone and both exporters built a frame
+  // source over a file with nothing to show. `meta` mirrors the bundle's, validated the same
+  // way (`assertSourceMeta`, shared with `loadBundle`).
+  async function writeManifestWithMeta(meta: unknown): Promise<string> {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'project.json'), path.join(dir, 'project.json'))
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    const source: Record<string, unknown> = { id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' }
+    if (meta !== undefined) source.meta = meta
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({ project: { $ref: './project.json' }, sources: [source] }),
+    )
+    return path.join(dir, 'manifest.json')
+  }
+
+  it('forwards a source\'s "meta.mediaType" into sourceVideos, so an audio-only file keeps mediaType "audio"', async () => {
+    const manifestPath = await writeManifestWithMeta({ mediaType: 'audio' })
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0]).toEqual({
+      id: 'src-0',
+      name: 'src-0.mp4',
+      mimeType: 'video/mp4',
+      mediaType: 'audio',
+    })
+    await job.cleanup()
+  })
+
+  it('leaves sourceVideos exactly as before when a source carries no "meta"', async () => {
+    const manifestPath = await writeManifestWithMeta(undefined)
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0]).toEqual({ id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4' })
+    await job.cleanup()
+  })
+
+  it('rejects a non-object "meta" field, the same rejection shape the bundle gives', async () => {
+    const manifestPath = await writeManifestWithMeta('not-an-object')
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      'manifest source "src-0" field "meta" must be an object',
+    )
+  })
+
+  it('rejects a "meta.mediaType" that is not video, image or audio', async () => {
+    const manifestPath = await writeManifestWithMeta({ mediaType: 'bogus' })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      'manifest source "src-0" field "meta.mediaType" must be one of video, image, audio',
+    )
+  })
+
+  it('rejects an unusable "meta.width"', async () => {
+    const manifestPath = await writeManifestWithMeta({ width: -5 })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      'manifest source "src-0" field "meta.width" must be a finite number >= 0',
+    )
+  })
+
+  it('rejects a non-positive "meta.duration"', async () => {
+    const manifestPath = await writeManifestWithMeta({ duration: 0 })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      'manifest source "src-0" field "meta.duration" must be a finite positive number',
+    )
+  })
+
+  it('still applies the explicit top-level width/height/duration over a differing "meta"', async () => {
+    // The top-level fields predate "meta" and are the author's explicit, more specific word --
+    // "meta" is spread first so it never clobbers them, mirroring loadBundle's own
+    // `{ ...video.meta, id, name, mimeType }` ordering.
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'project.json'), path.join(dir, 'project.json'))
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { $ref: './project.json' },
+        sources: [
+          {
+            id: 'src-0',
+            file: 'src-0.mp4',
+            mimeType: 'video/mp4',
+            width: 1920,
+            meta: { mediaType: 'audio', width: 100 },
+          },
+        ],
+      }),
+    )
+
+    const job = await loadManifest(path.join(dir, 'manifest.json'))
+    expect(job.sourceVideos[0]).toEqual({
+      id: 'src-0',
+      name: 'src-0.mp4',
+      mimeType: 'video/mp4',
+      mediaType: 'audio',
+      width: 1920,
+    })
+    await job.cleanup()
+  })
+})
+
 describe('writeBase64ToFile', () => {
   it('rejects rather than crashing when the destination cannot be written', async () => {
     const dir = await makeTempDir()
@@ -359,6 +466,7 @@ describe('loadBundle', () => {
   it.each([
     ['audio/webm', 'audio/webm'],
     ['video/webm with a codecs parameter', 'video/webm;codecs=vp9,opus'],
+    ['a mixed-case MIME type', 'Video/WebM'],
   ])('names a temp file ending .webm for %s', async (_label, mimeType) => {
     const dir = await makeTempDir()
     const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
