@@ -347,6 +347,21 @@ describe('projectStore remaining behaviours', () => {
 
       expect(store().project.timeline.clips[0].animation!.keyframes.x!.map((kf) => kf.time)).toEqual([0.5, 1, 2])
     })
+
+    it('seeds time 0 again once a property has been emptied by deletion and gets a new keyframe', () => {
+      // "First keyframe this property has" means the property's state before the
+      // write, so a property the user emptied is a first-time property again.
+      addClip('clip1', 0, 5)
+
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.3, easing: 'linear' })
+      store().removeClipKeyframe('clip1', 'opacity', 0)
+      store().removeClipKeyframe('clip1', 'opacity', 1)
+      expect(store().project.timeline.clips[0].animation?.keyframes.opacity ?? []).toEqual([])
+
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.6, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.opacity!.map((kf) => kf.time)).toEqual([0, 2])
+    })
   })
 
   describe('keyframe panel state', () => {
