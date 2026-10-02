@@ -69,22 +69,36 @@ no second draw of the part that is staying). When the media element is not avail
 mid-load, an image that has not decoded — the same ring is filled with a translucent veil
 instead, so the kept region still reads as the kept region.
 
-**Reason the handles are DOM rather than canvas hit-testing.** The ticket's requirement is that
-they are hit-tested *in screen pixels* (ESCSUITE-90's rule), and a DOM button is sized and
-positioned in CSS pixels by construction — a 12px handle is 12px under the pointer whatever the
-project's resolution, with no `screenScale` multiplication to get wrong. It also buys the
-accessibility requirement outright (eight focusable, named, individually disable-able controls
-with real keyboard focus) where canvas chrome would need a parallel invisible DOM layer anyway,
-and it keeps `useTransformHandles.ts`'s 718-line pointer state machine untouched: in crop mode
-the canvas' own mouse handlers are **unbound**, the same way they already are while the inline
+**Reason the handles are DOM rather than canvas chrome with a hit test** (ruled by the operator,
+2026-10-02). What the ticket asks for is handles that behave in *screen* pixels the way
+ESCSUITE-90 made the selection chrome behave — and a DOM button **is** screen pixels by
+construction: a 12px handle is 12px under the pointer whatever the project's resolution, with no
+`screenScale` multiplication to get wrong, and no second copy of the hit-zone arithmetic to drift
+from the drawing. The same move buys the accessibility requirements outright — eight focusable
+controls with real names, real focus and a real `disabled` — where canvas chrome would have
+needed a parallel invisible DOM layer for exactly that. And it keeps
+`useTransformHandles.ts`'s 718-line pointer state machine and `hitTest.ts` **untouched**: in crop
+mode the canvas' own mouse handlers are unbound, the same way they already are while the inline
 text editor is open (`onMouseDown={editingTextClipId ? undefined : handleMouseDown}` becomes
 `editingTextClipId || cropActive`), so a crop drag cannot be mistaken for a move, a resize or a
 marquee. The rotation that would be the hard part of positioning eight handles is one CSS
 `rotate()` on their container.
 
+**One consequence, intended:** the buttons sit *above* the canvas in the same positioned wrapper,
+so a pointer over a handle is the button's event and the canvas never sees it — there is no
+canvas hit test to lose a race with, because in crop mode the canvas is not listening at all.
+Everywhere else on the canvas the pointer does nothing until crop mode is left.
+
 ### 3. What a pointer move writes
 
-**Decision.** Per move, **one** store write: `updateClip(clipId, { crop, transform })`.
+**Decision** (accepted by the operator, 2026-10-02). Per move, **one** store write:
+`updateClip(clipId, { crop, transform })` — the crop and, beside it, the compensating centre that
+keeps the edges the drag is not touching still on screen (see §5, including the one clip that gets
+the crop alone: a keyframed placement). One write, so one undo entry
+per gesture through `useGestureHistory`, one locked-track check and one re-render per move. It is
+the shape the **resize** handles already use: `useTransformHandles.ts`'s west and north drags
+write `x`/`y` next to the scale for the same reason, so this is an existing rule applied to a new
+gesture rather than a new one.
 
 The crop is computed in source pixels and normalised:
 
@@ -101,6 +115,8 @@ The crop is computed in source pixels and normalised:
 5. `cropUpdateFor(crop, source)` — v1's `normaliseCrop` wrapped — decides what is stored:
    the clamp to `MAX_CROP_INSET` (90%), `undefined` for an all-zero crop, and a **refusal**
    (write nothing) for anything leaving less than a source pixel.
+6. `cropWriteFor(start, crop, source, project, compensate)` assembles the update: the crop, plus
+   the compensating `transform` when the clip's placement is not keyframed (§5).
 
 **Shift keeps the aspect** of the kept region **as it was when the gesture began**. There is no
 "active preset" to read: `CROP_ASPECT_PRESETS` writes insets and remembers nothing, by v1's
@@ -147,6 +163,16 @@ deltaX / 2`). It is one `updateClip` write rather than two actions, so it is one
 one locked-track check and one re-render per move; `updateClip` merges a `Partial<Clip>`, and
 `transform` is passed whole (`{ ...startTransform, x, y }`) from the transform the gesture
 started with, which is what the resize drag does with its own start measurements.
+
+**The one exception: a clip whose placement is keyframed gets no compensation** (ruled by the
+operator, 2026-10-02). If the clip carries custom keyframes on `x`, `y`, `scaleX` or `scaleY`, the
+write is the **crop alone** — writing a static centre onto a clip whose centre is animated would
+fight its keyframes, and the keyframes would win at playback anyway. `cropDrag.ts`'s
+`cropCompensatesCentre(animation)` is that question and `cropWriteFor(..., compensate)` is what
+acts on it, so the decision is one branch in one pure function with a case on each side. On such a
+clip the picture therefore shrinks about its centre as it is cropped — both edges of the axis
+move, half as far as the pointer — while the handles keep following `getOverlayBounds`' animated
+box; that inexactness is accepted and documented rather than papered over.
 
 ### 6. The minimum kept size
 
@@ -227,14 +253,13 @@ straight at the element — and neither announces anything, because nothing was 
   selected, so a clip animated to `opacity: 0` still shows its crop handles. That is deliberate:
   the user chose this clip, and refusing to show the handles of an invisible clip would be a
   mode that silently does nothing.
-- **A keyframed clip** can be cropped. The handles follow `getOverlayBounds`, so they sit on the
-  clip's *animated* box, while the arithmetic and the compensating centre use the clip's
-  **static** transform — because `crop` is static and so is `transform.x`/`y` under a keyframed
-  animation's interpolation. The consequence, documented rather than fixed: on a clip whose
-  scale or position is keyframed, the handles track the picture but the compensation is computed
-  against the static transform, so the pinned edge is only exactly pinned where the animation
-  is at its base value. The alternative — refusing crop mode on keyframed clips — hides a static
-  property behind an unrelated animation.
+- **A keyframed clip** can be cropped, and on one whose **position or scale** is keyframed the
+  crop is written without the compensating centre (§5's exception): the handles follow
+  `getOverlayBounds`' animated box, the picture shrinks about its centre rather than holding its
+  un-dragged edges, and nothing static is written over an animated placement. A clip keyframed on
+  rotation, opacity or blur alone still compensates, using its static rotation — the same family
+  of inexactness, one step smaller. Refusing crop mode on keyframed clips was the alternative and
+  is worse: it hides a static property behind an unrelated animation.
 
 ### 11. What the perf files pin
 
@@ -256,7 +281,9 @@ straight at the element — and neither announces anything, because nothing was 
 - `core/cropDrag.test.ts` — `sourceDelta` unrotated, rotated 90° and scaled; `cropForHandleMove`
   for all eight handles, both directions, the 0 floor, the one-pixel floor with the opposite edge
   pinned, and the Shift arms (corner, side-x, side-y); `cropRegionAspect`; `cropCentreFor`
-  unrotated, rotated and scaled.
+  unrotated, rotated and scaled; `cropCompensatesCentre` for a clip with no animation, with an
+  animation but no keyframes, keyframed on position, keyframed on scale and keyframed on rotation
+  alone; `cropWriteFor` with the compensation and without it.
 - `core/clipCrop.test.ts` — `cropUpdateFor`'s five answers (no source + zero, no source +
   non-zero, zeroes, a valid crop, a refused crop).
 - `components/Preview/cropOverlay.test.ts` — `fullSourceBox` and `cropFrameBox` arithmetic; the
@@ -264,7 +291,8 @@ straight at the element — and neither announces anything, because nothing was 
   fallback with no element.
 - `components/Preview/CropHandles.test.tsx` — eight buttons, eight distinct names, positions
   derived from `croppedSourceRect` × the clip's transform in a letterboxed box and in a rotated
-  clip; a drag writes the crop and the compensating centre; **one** undo entry per drag; a
+  clip; a drag writes the crop and the compensating centre; a drag on a clip keyframed on
+  position writes the crop and **leaves the centre alone**; **one** undo entry per drag; a
   locked row's handles are disabled and write nothing; arrow and Shift+arrow nudges; the
   announcement; Escape leaves crop mode.
 - `components/Preview/PreviewPlayer.crop.test.tsx` — the chrome branch replaces the selection

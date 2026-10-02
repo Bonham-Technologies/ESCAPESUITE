@@ -6,7 +6,7 @@
 
 **Architecture:** four new modules and no new stored shape. `ClipCrop` is exactly what ESCSUITE-6 defined, `MAX_CROP_INSET` is still 0.9, and v1's four pure functions keep their behaviour to the letter.
 
-1. **The arithmetic** — `src/core/cropDrag.ts`, pure: which insets each handle owns (`CROP_HANDLES`, `CROP_HANDLE_LABELS`), a pointer displacement turned into source pixels in the clip's own unrotated frame (`sourceDelta`, the same `R(-θ)` as `previewGeometry.ts`'s `toLocalPoint`), the insets a handle's move produces with the opposite edge pinned and the aspect optionally held (`cropForHandleMove`), the region's aspect at the press (`cropRegionAspect`), the compensating centre (`cropCentreFor`), the "did anything change" test (`cropsEqual`) and the live region's words (`cropAnnouncement`).
+1. **The arithmetic** — `src/core/cropDrag.ts`, pure: which insets each handle owns (`CROP_HANDLES`, `CROP_HANDLE_LABELS`), a pointer displacement turned into source pixels in the clip's own unrotated frame (`sourceDelta`, the same `R(-θ)` as `previewGeometry.ts`'s `toLocalPoint`), the insets a handle's move produces with the opposite edge pinned and the aspect optionally held (`cropForHandleMove`), the region's aspect at the press (`cropRegionAspect`), the compensating centre (`cropCentreFor`) and whether the clip's placement allows one at all (`cropCompensatesCentre`), the whole update a write hands `updateClip` (`cropWriteFor`), the "did anything change" test (`cropsEqual`) and the live region's words (`cropAnnouncement`).
 2. **The write decision** — one new export on the existing `src/core/clipCrop.ts`: `cropUpdateFor(crop, source)`, which is the body of v1's `handleCropChange` lifted out of the inspector so the canvas cannot drift from it. `handleCropChange` becomes two lines over it; its seven existing tests are the proof that nothing moved.
 3. **The chrome** — `src/components/Preview/cropOverlay.ts`: `cropTarget` (the one definition of "crop mode is on": the latch names the selected clip, the clip and its source exist, nothing is playing), `fullSourceBox` / `cropFrameBox` (the geometry, in project pixels and in CSS pixels), and `drawCropOverlay`, which runs where `drawSelectionHandles` runs — **never per frame** — and dims everything outside the kept rectangle with one `drawImage` under an evenodd clip.
 4. **The handles** — `src/components/Preview/CropHandles.tsx` and `useCropHandleGesture.ts`: a DOM layer inside `.videoWrapper` beside `MarqueeSelection` and `InlineTextEditorAnchor`, positioned through `contentBox` exactly as the inline text editor is, rotated by one CSS `rotate()`, with the pointer drag and the keyboard nudges in a hook of its own over `hooks/useGestureHistory.ts`.
@@ -18,7 +18,7 @@ Crop mode itself is **one latch** in `src/store/uiSlice.ts` — `cropClipId: str
 **Spec:** `docs/superpowers/specs/2026-10-02-crop-handles-design.md` — the binding authority. Read it before Task 1. Two places where the spec's prose needs a line drawn, resolved here and binding on the implementer:
 
 - The spec says a drag writes "through the same `handleCropChange` path". `handleCropChange` is a member of `useClipEditorActions()`, a hook the preview cannot call (it holds the inspector's own slider gesture). "The same path" therefore means **the same decision**: `cropUpdateFor` is extracted in Task 1 and both callers use it, each with its own gesture history. The store action is the same one (`updateClip`), so the locked-track refusal and the history push are literally shared.
-- The spec says the handles are "hit-tested in screen pixels like the existing selection chrome (ESCSUITE-90)". They are **DOM buttons**, so there is no `screenScale` multiplication: a handle is a 12 CSS-pixel square whatever the project's resolution, which is the property ESCSUITE-90 exists to hold. `hitTest.ts` and `useTransformHandles.ts` gain nothing and lose nothing.
+- The spec says the handles behave in screen pixels the way ESCSUITE-90 made the selection chrome behave. They are **DOM buttons**, which *is* that property rather than an approximation of it: a handle is a 12 CSS-pixel square whatever the project's resolution, with no `screenScale` multiplication and no second copy of the hit-zone arithmetic. `hitTest.ts` and `useTransformHandles.ts` gain nothing and lose nothing, and while the handles are up the canvas is not listening — so a pointer over a handle reaching only the button is intended, not a gap (operator ruling, 2026-10-02).
 
 **Out of scope (do not build any of it here):**
 - Any change to `ClipCrop`, `MAX_CROP_INSET`, `croppedSourceRect`, `isValidCrop`, `normaliseCrop` or `cropForAspect`. Task 1 **adds** one function to `core/clipCrop.ts` and edits none of the existing five.
@@ -39,18 +39,20 @@ Crop mode itself is **one latch** in `src/store/uiSlice.ts` — `cropClipId: str
 5. **The per-frame ceiling files and the rerender pins stay byte-identical.** `apps/artist/src/components/Preview/drawFrame.perf.test.ts`, `apps/artist/src/core/exportMP4.perf.test.ts`, `apps/artist/src/core/exportWebM.perf.test.ts`, `apps/artist/src/components/Timeline/timelineGestures.perf.test.ts`, `apps/artist/src/App.rerender.test.tsx`, `apps/artist/src/components/ClipEditor/ClipEditor.rerender.test.tsx` and `apps/artist/src/components/Toolbar/Toolbar.rerender.test.tsx` must not change by one byte, and neither may `src/test/fixtures/perfScene.ts`. This is achievable because nothing is added to `drawPreviewFrame` or to either exporter, and because the one new inspector subscription (`cropClipId`) is a scalar that cannot change on a playback tick. Tasks 2, 3 and 4 each verify it with `git diff --name-only`.
 6. **No new `*.perf.test.ts` file.** The crop chrome is not a per-frame path — it is drawn where `drawSelectionHandles` is drawn and returns early while `isPlaying` — so a per-frame ceiling would be measuring something that does not run per frame. The conservation laws live in `cropOverlay.test.ts` instead (Task 3) and are asserted **exactly**: zero context calls when crop mode is off, and when it is on, one `drawImage`, one `clip`, one `translate`, one `rotate`, and `save` balanced with `restore`.
 7. **`cropClipId` is a latch, never a synchronised copy.** Nothing clears it on a selection change, a clip removal, a project load or an undo. Every reader goes through `cropTarget`, which requires `cropClipId === selectedClipId`. Do not add an effect, a `setSelectedClipId` edit, or a `pruneSelection` clause.
-8. **The crop gesture makes ONE store write per move:** `updateClip(clipId, { crop, transform })`. Not two actions. `updateClip` merges a `Partial<Clip>` and `transform` is handed over whole, built from the transform the gesture *started* with — so one history push, one locked-track check, and no compounding from the previous move of the same drag (the ESCSUITE-110 lesson).
-9. **Insets stay fractions of the source frame.** The gesture computes in source pixels and divides; nothing stores a pixel count. Same rule `ClipMask.radius` and `ClipStroke.width` follow.
-10. **`DB_VERSION` stays 1 and no migration line is added.** Nothing persisted changes. `cropClipId` is view state and is not written to a `.veditor`, a session snapshot or the undo history.
-11. **Type-only declarations go in `src/store/types.ts`** (excluded from the coverage `include`), runtime constants and functions in the measured modules.
-12. **No existing test may be deleted or weakened.** Task 1's extraction keeps all seven `handleCropChange` cases exactly as they are. Task 2 adds to `CropSection.test.tsx`; if an existing case there addresses a button positionally, make its query explicit rather than changing what it asserts.
-13. **Update `apps/artist/CLAUDE.md`** where the behaviour is documented (Task 6). The root `CLAUDE.md` gets **one clause** extended — nowhere near the coverage section.
-14. **Changeset:** `.changeset/escsuite-157-crop-handles.md`, `'@escapesuite/artist': minor`, a headline line then one paragraph in the user's words. Task 6.
-15. **Typecheck and lint every task:** `pnpm --filter @escapesuite/artist typecheck` (vitest does not type-check) and `pnpm --filter @escapesuite/artist lint`.
-16. **Run the whole artist suite at the end of every task**, not just the files you touched: `pnpm --filter @escapesuite/artist exec vitest run`.
-17. **Every line number in this plan was verified against the worktree at `2cae295`.** Line numbers drift as you edit; after Task 2, locate code by the quoted text rather than by line.
-18. **Branch:** `feat/escsuite-157-crop-handles` in the worktree `/Users/littlemac/Projects/ESCAPESUITE-e157`. Never touch `/Users/littlemac/Projects/ESCAPESUITE` or any other worktree. Run `pnpm install --offline` first if `node_modules` is missing.
-19. **Commit trailers on every commit** (blank line before them):
+8. **The crop gesture makes ONE store write per move:** `updateClip(clipId, { crop, transform })`. Not two actions. `updateClip` merges a `Partial<Clip>` and `transform` is handed over whole, built from the transform the gesture *started* with — so one history push, one locked-track check, and no compounding from the previous move of the same drag (the ESCSUITE-110 lesson). One undo entry per gesture, through `hooks/useGestureHistory.ts`. This is **the shape the resize handles already use** — `useTransformHandles.ts`'s west and north drags write `x`/`y` beside the scale for exactly the same reason — not a new rule (operator ruling, 2026-10-02).
+9. **…except on a clip whose placement is keyframed, where the write is the crop ALONE.** If the clip carries custom keyframes on `x`, `y`, `scaleX` or `scaleY`, no `transform` goes with the crop: a static centre written onto an animated placement fights its keyframes, and the keyframes win at playback regardless (operator ruling, 2026-10-02). The decision is `cropDrag.ts`'s `cropCompensatesCentre(animation)` and `cropWriteFor(..., compensate)` is what acts on it — **one** branch, in one pure function, with a red case on each side. The accepted consequence, which Task 6 documents: on such a clip the picture shrinks about its centre as it is cropped while the handles keep following `getOverlayBounds`' animated box.
+10. **The handles are DOM buttons over the canvas, and the canvas does not listen while they are up.** `useTransformHandles.ts` and `hitTest.ts` are untouched (operator ruling, 2026-10-02): a pointer over a handle is that button's event, there is no canvas hit test to race, and in crop mode the canvas' own mouse handlers are unbound. Screen-pixel sizing, accessible names, focus and `disabled` all come from the DOM rather than from a second copy of the chrome's arithmetic.
+11. **Insets stay fractions of the source frame.** The gesture computes in source pixels and divides; nothing stores a pixel count. Same rule `ClipMask.radius` and `ClipStroke.width` follow.
+12. **`DB_VERSION` stays 1 and no migration line is added.** Nothing persisted changes. `cropClipId` is view state and is not written to a `.veditor`, a session snapshot or the undo history.
+13. **Type-only declarations go in `src/store/types.ts`** (excluded from the coverage `include`), runtime constants and functions in the measured modules.
+14. **No existing test may be deleted or weakened.** Task 1's extraction keeps all seven `handleCropChange` cases exactly as they are. Task 2 adds to `CropSection.test.tsx`; if an existing case there addresses a button positionally, make its query explicit rather than changing what it asserts.
+15. **Update `apps/artist/CLAUDE.md`** where the behaviour is documented (Task 6). The root `CLAUDE.md` gets **one clause** extended — nowhere near the coverage section.
+16. **Changeset:** `.changeset/escsuite-157-crop-handles.md`, `'@escapesuite/artist': minor`, a headline line then one paragraph in the user's words. Task 6.
+17. **Typecheck and lint every task:** `pnpm --filter @escapesuite/artist typecheck` (vitest does not type-check) and `pnpm --filter @escapesuite/artist lint`.
+18. **Run the whole artist suite at the end of every task**, not just the files you touched: `pnpm --filter @escapesuite/artist exec vitest run`.
+19. **Every line number in this plan was verified against the worktree at `2cae295`.** Line numbers drift as you edit; after Task 2, locate code by the quoted text rather than by line.
+20. **Branch:** `feat/escsuite-157-crop-handles` in the worktree `/Users/littlemac/Projects/ESCAPESUITE-e157`. Never touch `/Users/littlemac/Projects/ESCAPESUITE` or any other worktree. Run `pnpm install --offline` first if `node_modules` is missing.
+21. **Commit trailers on every commit** (blank line before them):
 
 ```
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
@@ -65,7 +67,7 @@ Claude-Session: https://claude.ai/code/session_01QKvh2qnXJThTDcwYbZ54SU
 
 | File | Responsibility |
 |---|---|
-| `apps/artist/src/core/cropDrag.ts` | The crop *gesture's* arithmetic: the eight handles and their names, which insets each owns, a pointer displacement in the clip's own frame, the insets a move produces, the aspect lock, the compensating centre, the equality test and the announcement |
+| `apps/artist/src/core/cropDrag.ts` | The crop *gesture's* arithmetic: the eight handles and their names, which insets each owns, a pointer displacement in the clip's own frame, the insets a move produces, the aspect lock, the compensating centre, whether a clip's placement allows one, the whole update a write hands `updateClip`, the equality test and the announcement |
 | `apps/artist/src/core/cropDrag.test.ts` | That arithmetic directly — no clip, no store, no DOM |
 | `apps/artist/src/components/Preview/cropOverlay.ts` | `cropTarget` (is crop mode on, and on what), `fullSourceBox`, `cropFrameBox`, `CROP_HANDLE_MODES` and `drawCropOverlay` (the dim pass and the kept rectangle's edge) |
 | `apps/artist/src/components/Preview/cropOverlay.test.ts` | Those, against a recording canvas, plus the conservation laws of one chrome paint |
@@ -109,7 +111,7 @@ Claude-Session: https://claude.ai/code/session_01QKvh2qnXJThTDcwYbZ54SU
 - Modify: `apps/artist/src/components/ClipEditor/useClipEditorActions.ts` (`handleCropChange`'s body only)
 
 **Interfaces:**
-- Consumes: `ClipCrop` (`store/types.ts`), `croppedSourceRect` and `normaliseCrop` (`core/clipCrop.ts`).
+- Consumes: `ClipCrop`, `ClipAnimation`, `ClipTransform` (`store/types.ts`), `croppedSourceRect` and `normaliseCrop` (`core/clipCrop.ts`).
 - Produces, in `apps/artist/src/core/clipCrop.ts`:
   ```ts
   export function cropUpdateFor(
@@ -130,6 +132,8 @@ Claude-Session: https://claude.ai/code/session_01QKvh2qnXJThTDcwYbZ54SU
   export function cropForHandleMove(start: ClipCrop | undefined, handle: CropHandle, delta: { x: number; y: number }, source: SourceSize, keepAspect?: number): ClipCrop;
   export function cropRegionAspect(crop: ClipCrop | undefined, source: SourceSize): number;
   export function cropCentreFor(start: { crop: ClipCrop | undefined; transform: CropGestureTransform }, next: ClipCrop, source: SourceSize, project: { width: number; height: number }): { x: number; y: number };
+  export function cropCompensatesCentre(animation: ClipAnimation | undefined): boolean;
+  export function cropWriteFor(start: { crop: ClipCrop | undefined; transform: ClipTransform }, next: ClipCrop | undefined, source: SourceSize, project: { width: number; height: number }, compensate: boolean): { crop: ClipCrop | undefined; transform?: ClipTransform };
   export function cropsEqual(a: ClipCrop | undefined, b: ClipCrop | undefined): boolean;
   export function cropAnnouncement(handle: CropHandle, crop: ClipCrop | undefined, source: SourceSize): string;
   ```
@@ -140,6 +144,7 @@ Claude-Session: https://claude.ai/code/session_01QKvh2qnXJThTDcwYbZ54SU
 - **A drag is computed from the gesture's start, every move.** `cropForHandleMove` takes the crop the gesture began with, not the clip's current one. Rebasing each move from the previous move's output is what ESCSUITE-110 found compounding a trim; the same trap is here.
 - **Two floors, and the stricter wins.** `cropForHandleMove` keeps one source pixel on each axis, which is `croppedSourceRect`'s own floor expressed as an inset; `normaliseCrop` then clamps to `MAX_CROP_INSET` and refuses what is left of the impossible. Neither replaces the other: the first keeps the handle from asking for something absurd, the second is the store's rule and is unchanged.
 - **The compensating centre is arithmetic, not policy.** `cropCentreFor` says how far the kept region's centre moved *within the source* and carries that displacement out through the clip's scale and rotation. It knows nothing about handles.
+- **Whether to compensate at all is one question, asked in one place.** `cropCompensatesCentre` is false for a clip carrying custom keyframes on `x`, `y`, `scaleX` or `scaleY`, and `cropWriteFor` is the only thing that reads it: with the compensation it returns `{ crop, transform }`, without it `{ crop }` and nothing else (operator ruling, 2026-10-02). Rotation, opacity and blur keyframes do **not** turn it off — the compensation still uses the clip's static rotation there, which is the same family of inexactness one step smaller, and is named in the docs rather than branched on.
 - **`cropUpdateFor` is v1's decision moved, not changed.** The no-source arm, the all-zero arm, the clamp and the refusal come across verbatim; the seven existing `handleCropChange` cases are the regression test and must not be edited.
 - **`cropsEqual` is why a nudge that cannot move costs nothing.** ArrowUp on the left handle, or ArrowLeft on a handle already at the frame's edge, produces the crop the clip already has — and a write of that would spend an undo entry on a change of nothing.
 
@@ -162,13 +167,16 @@ import {
   CROP_NUDGE,
   cropAnnouncement,
   cropCentreFor,
+  cropCompensatesCentre,
   cropForHandleMove,
   cropRegionAspect,
+  cropWriteFor,
   cropsEqual,
   sourceDelta,
   type CropGestureTransform,
 } from './cropDrag'
-import type { ClipCrop } from '../store/types'
+import { makeAnimation } from '../test/fixtures/clipFixtures'
+import type { ClipCrop, ClipTransform } from '../store/types'
 
 const SOURCE = { width: 400, height: 200 }
 const PROJECT = { width: 1920, height: 1080 }
@@ -377,6 +385,94 @@ describe('cropCentreFor', () => {
   })
 })
 
+describe('cropCompensatesCentre', () => {
+  // Whether a crop write may move the clip's centre to hold the edges the drag
+  // is not touching. Not on a clip whose placement is keyframed: a static centre
+  // written onto an animated one fights its keyframes, and the keyframes win at
+  // playback anyway (operator ruling, 2026-10-02).
+  const kf = [{ time: 0, value: 0.5, easing: 'linear' as const }]
+
+  it('compensates a clip with no animation at all', () => {
+    expect(cropCompensatesCentre(undefined)).toBe(true)
+  })
+
+  it('compensates a clip whose animation carries no keyframes', () => {
+    expect(cropCompensatesCentre(makeAnimation())).toBe(true)
+  })
+
+  it('does not compensate a clip keyframed on position', () => {
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { x: kf } }))).toBe(false)
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { y: kf } }))).toBe(false)
+  })
+
+  it('does not compensate a clip keyframed on scale', () => {
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { scaleX: kf } }))).toBe(false)
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { scaleY: kf } }))).toBe(false)
+  })
+
+  it('still compensates a clip keyframed on rotation, opacity or blur alone', () => {
+    // Those do not move the clip's centre, so the centre is still the gesture's
+    // to write. The rotation case carries a known inexactness — the
+    // compensation uses the static rotation — which is documented, not branched
+    // on.
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { rotation: kf } }))).toBe(true)
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { opacity: kf } }))).toBe(true)
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { blur: kf } }))).toBe(true)
+  })
+
+  it('ignores an empty keyframe list, which is what deleting the last one leaves', () => {
+    expect(cropCompensatesCentre(makeAnimation({ keyframes: { x: [] } }))).toBe(true)
+  })
+})
+
+describe('cropWriteFor', () => {
+  const full: ClipTransform = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 0.8 }
+
+  it('writes the crop and the compensating transform, carrying the rest of it over', () => {
+    const write = cropWriteFor(
+      { crop: undefined, transform: full },
+      crop({ left: 0.25 }),
+      SOURCE,
+      PROJECT,
+      true
+    )
+
+    expect(write.crop).toEqual(crop({ left: 0.25 }))
+    expect(write.transform!.x).toBeCloseTo(0.5 + 50 / 1920)
+    // Everything the gesture is not changing comes across untouched — the write
+    // hands `updateClip` a whole ClipTransform, not a patch.
+    expect(write.transform!.opacity).toBe(0.8)
+    expect(write.transform!.scaleX).toBe(1)
+  })
+
+  it('writes the crop ALONE when the clip\'s placement is keyframed', () => {
+    const write = cropWriteFor(
+      { crop: undefined, transform: full },
+      crop({ left: 0.25 }),
+      SOURCE,
+      PROJECT,
+      false
+    )
+
+    expect(write).toEqual({ crop: crop({ left: 0.25 }) })
+    expect('transform' in write).toBe(false)
+  })
+
+  it('carries an undefined crop through — the clip going back to its whole frame', () => {
+    const write = cropWriteFor(
+      { crop: crop({ left: 0.25 }), transform: full },
+      undefined,
+      SOURCE,
+      PROJECT,
+      true
+    )
+
+    expect(write.crop).toBeUndefined()
+    // Back to no crop at all, so the centre comes back to where it started.
+    expect(write.transform!.x).toBeCloseTo(0.5 - 50 / 1920)
+  })
+})
+
 describe('cropsEqual', () => {
   it('treats no crop and four zeroes as the same thing', () => {
     expect(cropsEqual(undefined, crop())).toBe(true)
@@ -434,7 +530,7 @@ Expected: the file errors before any test runs, with `Failed to resolve import "
 //
 // Pure: numbers in, numbers out. No clip, no store, no canvas, no pointer
 // event. The hook that drives it is `components/Preview/useCropHandleGesture.ts`.
-import type { ClipCrop } from '../store/types';
+import type { AnimatableProperty, ClipAnimation, ClipCrop, ClipTransform } from '../store/types';
 import { croppedSourceRect } from './clipCrop';
 
 /** One of the eight handles, by compass point. */
@@ -679,6 +775,60 @@ export function cropCentreFor(
     x: start.transform.x + (px * Math.cos(rad) - py * Math.sin(rad)) / project.width,
     y: start.transform.y + (px * Math.sin(rad) + py * Math.cos(rad)) / project.height,
   };
+}
+
+/** The transform properties that decide where the clip's picture sits. */
+const PLACEMENT_PROPERTIES: readonly AnimatableProperty[] = ['x', 'y', 'scaleX', 'scaleY'];
+
+/**
+ * May a crop write move the clip's centre as well (operator ruling,
+ * 2026-10-02)?
+ *
+ * Not on a clip whose **placement** is keyframed. {@link cropCentreFor}'s whole
+ * job is to write a static centre that holds the edges the drag is not touching;
+ * on a clip whose `x`, `y`, `scaleX` or `scaleY` is animated, that static value
+ * is overridden at every frame the animation covers, so writing it would fight
+ * the keyframes and change nothing the user can see. The crop is then written
+ * alone and the picture shrinks about its centre as it is cropped — the accepted
+ * inexactness, documented in `apps/artist/CLAUDE.md`.
+ *
+ * Keyframes on `rotation`, `opacity` or `blur` do not turn it off: none of them
+ * moves the clip's centre, so the centre is still the gesture's to write. (A
+ * rotation-keyframed clip's compensation is computed with the clip's *static*
+ * rotation, which is the same family of inexactness one step smaller, and is
+ * documented rather than branched on.)
+ */
+export function cropCompensatesCentre(animation: ClipAnimation | undefined): boolean {
+  if (!animation?.keyframes) return true;
+  for (const property of PLACEMENT_PROPERTIES) {
+    const keyframes = animation.keyframes[property];
+    if (keyframes && keyframes.length > 0) return false;
+  }
+  return true;
+}
+
+/**
+ * The whole `Partial<Clip>` one crop write hands `updateClip`: the crop, and —
+ * only where {@link cropCompensatesCentre} allows it — the compensating centre
+ * beside it.
+ *
+ * One function so there is exactly one place that decides whether a crop write
+ * carries a transform, and one `updateClip` either way: one history push, one
+ * locked-track check, one re-render per move. `transform` is handed over whole
+ * rather than as a patch, built from the transform the gesture started with, so
+ * `opacity`, `rotation` and `scaleLocked` come across untouched.
+ */
+export function cropWriteFor(
+  start: { crop: ClipCrop | undefined; transform: ClipTransform },
+  next: ClipCrop | undefined,
+  source: SourceSize,
+  project: { width: number; height: number },
+  compensate: boolean
+): { crop: ClipCrop | undefined; transform?: ClipTransform } {
+  if (!compensate) return { crop: next };
+
+  const centre = cropCentreFor(start, next ?? NO_CROP_INSETS, source, project);
+  return { crop: next, transform: { ...start.transform, x: centre.x, y: centre.y } };
 }
 
 /**
@@ -2108,7 +2258,7 @@ This task writes the keyboard *plumbing* (`onKeyDown`, `onKeyUp`, `message`) bec
 
 **What this task pins:**
 
-- **One store write per move, and the gesture's start is its only reference.** `updateClip(id, { crop, transform })`, built from the crop and the transform captured at the press — never from the clip as the previous move of the same drag left it.
+- **One store write per move, and the gesture's start is its only reference.** `updateClip(id, { crop, transform })`, built from the crop and the transform captured at the press — never from the clip as the previous move of the same drag left it. On a clip keyframed on position or scale the same write carries **no** `transform` at all (Task 1's `cropWriteFor`), and the case below that drags such a clip is what proves it.
 - **One undo entry per drag, however many moves it took.** `gestureHistory.begin()` at the press, `commit` around the write **inside the rAF updater** (the throttler coalesces a frame's moves, so "first write" has to mean the first that reaches the store), `end()` at the release.
 - **A locked row's handles are inert through `disabled` alone.** React does not deliver mouse events to a disabled form control, and a disabled button takes no focus, so there is **no `locked` branch in the gesture hook** — one mechanism, not two, and nothing defensive to leave untested. The explanation is `ClipEditorHeader`'s existing notice, and `updateClip`'s own refusal is the backstop for a row locked *mid*-gesture (whose open document listeners keep running) and for the one path `disabled` does not block, a keydown dispatched straight at the element.
 - **No listener outlives the component.** The drag's `mousemove`/`mouseup` pair is installed at the press and removed at the release *or* at unmount — the ESCSUITE-120 shape.
@@ -2340,6 +2490,30 @@ describe('the crop handle layer', () => {
     expect(crop.bottom).toBe(0)
   })
 
+  it('writes the crop alone on a clip whose position is keyframed', () => {
+    // A static centre written onto an animated one would fight its keyframes and
+    // lose at playback, so the compensation is skipped and the picture shrinks
+    // about its centre instead (operator ruling, 2026-10-02).
+    const clip = addClip('clip1', 0, 4)
+    store().setClipKeyframe(clip.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    drag(screen.getByRole('button', { name: 'Crop left' }) as HTMLButtonElement, 96, 0)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).transform.x).toBe(0.5)
+  })
+
   it('holds the region\'s aspect while Shift is down', () => {
     const { clip, handle } = mount()
 
@@ -2465,6 +2639,12 @@ live region should be until something happens).
 // move. The same thing the resize handles do when they write `x`/`y` beside a
 // scale.
 //
+// **Except on a clip whose placement is keyframed**, where the crop is written
+// alone: a static centre on an animated one fights its keyframes and loses at
+// playback. `cropCompensatesCentre` is that question, `cropWriteFor` acts on it,
+// and the picture then shrinks about its centre as it is cropped (operator
+// ruling, 2026-10-02; documented in `apps/artist/CLAUDE.md`).
+//
 // **One undo entry.** `hooks/useGestureHistory.ts`, unchanged: `begin` at the
 // press, `commit` around the write inside the throttled updater — the throttler
 // coalesces a frame's moves, so "the gesture's first write" has to mean the
@@ -2477,10 +2657,10 @@ import { useEditorStore } from '../../store/projectStore';
 import { useGestureHistory, useThrottledDragUpdate } from '../../hooks';
 import { cropUpdateFor } from '../../core/clipCrop';
 import {
-  NO_CROP_INSETS,
-  cropCentreFor,
+  cropCompensatesCentre,
   cropForHandleMove,
   cropRegionAspect,
+  cropWriteFor,
   sourceDelta,
   type CropHandle,
 } from '../../core/cropDrag';
@@ -2553,24 +2733,26 @@ export function useCropHandleGesture({
   useEffect(() => () => endDragRef.current?.(), []);
 
   /**
-   * Normalise one crop and write it, with the centre that keeps the pinned
-   * edges still. Returns whether the store wrote.
+   * Normalise one crop and write it — with the centre that keeps the pinned
+   * edges still, unless the clip's placement is keyframed, in which case the
+   * crop goes alone (operator ruling, 2026-10-02). Returns whether the store
+   * wrote.
    */
   const write = useCallback(
     (next: ClipCrop, start: Pick<CropGestureStart, 'crop' | 'transform'>): boolean => {
       const update = cropUpdateFor(next, source);
       if (!update) return false;
 
-      const centre = cropCentreFor(start, update.crop ?? NO_CROP_INSETS, source, projectSize);
-      return gestureHistory.commit((skipHistory) =>
-        updateClip(
-          clip.id,
-          { crop: update.crop, transform: { ...start.transform, x: centre.x, y: centre.y } },
-          skipHistory
-        )
+      const payload = cropWriteFor(
+        start,
+        update.crop,
+        source,
+        projectSize,
+        cropCompensatesCentre(clip.animation)
       );
+      return gestureHistory.commit((skipHistory) => updateClip(clip.id, payload, skipHistory));
     },
-    [clip.id, source, projectSize, updateClip, gestureHistory]
+    [clip.id, clip.animation, source, projectSize, updateClip, gestureHistory]
   );
 
   const onMouseDown = useCallback(
@@ -3219,6 +3401,22 @@ the inspector's sliders: the clamp to `MAX_CROP_INSET`, `undefined` for an
 all-zero crop, and a refusal (write nothing) for anything leaving less than a
 source pixel.
 
+**A clip whose placement is keyframed is cropped without that compensation.**
+`cropCompensatesCentre` is false for custom keyframes on `x`, `y`, `scaleX` or
+`scaleY`, and `cropWriteFor` then returns the crop with no `transform` beside it:
+writing a static centre onto an animated one would fight the keyframes and lose
+at playback. The accepted consequence is that on such a clip the picture shrinks
+about its centre as it is cropped — both edges of the axis move, half as far as
+the pointer — while the handles keep following `getOverlayBounds`' animated box.
+Keyframes on rotation, opacity or blur do not turn the compensation off; a
+rotation-keyframed clip's compensation uses the clip's static rotation, the same
+inexactness one step smaller.
+
+**And the handles are above the canvas, which is not listening.** In crop mode
+the canvas' four mouse handlers are unbound, so a pointer over a handle is that
+button's event and no canvas hit test can race it — intended, and the reason
+`hitTest.ts` needed no crop-aware pass.
+
 **Keyboard and lock.** Each handle takes **arrow keys for one source pixel and
 Shift+arrow for ten**, through the same `cropForHandleMove` a drag uses; a
 focused handle claims all four arrows (an arrow it owns no inset for is
@@ -3298,4 +3496,4 @@ The last command must list no `*.perf.test.ts` file, no `*.rerender.test.tsx` fi
 
 1. `pnpm --filter @escapesuite/artist test:coverage` and write the coverage paragraph (constraint 2 keeps the implementer out of it). Expect branches to move most: `cropForHandleMove`'s two axis arms and `withAspect`'s three, `cropTarget`'s five conditions, `drawCropOverlay`'s element arm, `cropsEqual`, `e.repeat` and the `ARROW_STEPS` lookup — every one of them reached from both sides by the tests above.
 2. Raise a floor only if a whole percent was crossed, and never lower one.
-3. File the follow-ups this ticket deliberately did not take: the keyframed-clip compensation (the handles follow the animated box while the compensation is static), ESCSUITE-147's chrome-under-a-transition gap, and the uncropped timeline thumbnail.
+3. File the follow-ups this ticket deliberately did not take: a cropped clip on a keyframed placement shrinking about its centre (the ruled behaviour — a real improvement would keyframe the compensation, which means animating something the crop is not), ESCSUITE-147's chrome-under-a-transition gap, and the uncropped timeline thumbnail.
