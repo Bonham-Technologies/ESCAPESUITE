@@ -112,7 +112,7 @@ describe('VideoUploader', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetStoreForTest()
-    store().removeSourceVideo('video1')
+    store().removeSourceVideosPermanently(['video1'])
     scriptStorage(50 * MB, 500 * MB)
     mockProcessVideoFile.mockResolvedValue(videoMeta)
     mockProcessImageFile.mockResolvedValue(imageMeta)
@@ -1025,7 +1025,7 @@ describe('VideoLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetStoreForTest()
-    store().removeSourceVideo('video1')
+    store().removeSourceVideosPermanently(['video1'])
     // The quiet case: nothing stored to rebuild from, so the lazy rebuild
     // (ESCSUITE-117) reads once per thumbnail-less source and sets nothing.
     mockResolveThumbnailUrl.mockReset()
@@ -1369,7 +1369,7 @@ describe('VideoLibrary', () => {
       render(<VideoLibrary />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
-      act(() => { store().removeSourceVideo('video1') })
+      act(() => { store().removeSourceVideosPermanently(['video1']) })
       const orphaned = URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
       await land('video1', orphaned)
 

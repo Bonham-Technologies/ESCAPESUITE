@@ -121,7 +121,7 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
   // for the first: `pruneSelection` running in every removing action and in
   // undo/redo means a ghost should rarely reach here at all, the same way
   // `pasteClips`'s "track no longer on the timeline" check rarely fires now
-  // that `removeTrack`/`removeSourceVideo` prune the clipboard themselves.
+  // that `removeTrack`/`removeSourceVideosPermanently` prune the clipboard themselves.
   deleteSelectedClips: () => {
     const state = get();
     if (state.selectedClipIds.size === 0) return false;
@@ -188,10 +188,10 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     }));
 
     // A clone keeps its clipboard trackId, and that track can be gone by the
-    // time paste runs — `removeTrack`/`removeSourceVideo` prune the clipboard
-    // themselves, so this is a belt-and-braces guard reached only through a
-    // project load that replaced the tracks out from under an existing
-    // clipboard. All-or-nothing, like the lock right below.
+    // time paste runs — `removeTrack`/`removeSourceVideosPermanently` prune
+    // the clipboard themselves, so this is a belt-and-braces guard reached
+    // only through a project load that replaced the tracks out from under an
+    // existing clipboard. All-or-nothing, like the lock right below.
     const trackIds = new Set(state.project.timeline.tracks.map((t) => t.id));
     if (newClips.some((clip) => !trackIds.has(clip.trackId))) return false; // ESCSUITE-100
 

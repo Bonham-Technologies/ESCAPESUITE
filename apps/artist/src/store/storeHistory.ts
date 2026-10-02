@@ -99,8 +99,8 @@ export function scrubDeadThumbnails(
  * snapshot" apart from "truly nothing to do" with `history === state.history`
  * — needed because an id can legitimately be gone from the *live* library
  * (nothing left to remove or revoke there) while an older snapshot still
- * names it, e.g. a source deleted once already via the undoable
- * `removeSourceVideo` and then named again in a later storage clear.
+ * names it, e.g. a source already gone from a `resetProject` teardown and
+ * then named again in a later storage clear.
  */
 export function scrubRemovedSources(
   history: { past: UndoableState[]; future: UndoableState[] },

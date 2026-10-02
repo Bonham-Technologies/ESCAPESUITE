@@ -58,19 +58,21 @@ export async function resolveThumbnailUrl(id: string): Promise<string | undefine
  * does this on its own — a blob URL lives for the life of the document, not
  * for the life of the record it points at — so every path that drops a
  * source's `thumbnailUrl` on the floor without freeing it first leaked one:
- * `store/projectSlice.ts`'s `removeSourceVideo` (the one leaving) and
- * `resetProject` (all of them, on teardown); that same file's `addSourceVideo`,
- * in its replace-in-place branch, for the *previous* entry's handle when a
- * re-add under an id already held carries a different `thumbnailUrl` — the one
- * place a source's thumbnail changes without the source itself ever leaving
- * the library, which is how a session restore landing on a library the CRAFT
- * handoff already filled frees only the id it actually replaces; and
- * `useProjectActions.ts`'s `loadProjectFile`, over a REFUSED load's *incoming*
- * sources (`loadProject` mints their thumbnails before validation ever runs) —
- * a *successful* load's outgoing library is `resetProject`'s to free, not this
- * callback's. The media library's Clear All / Clear Unused reach this only
- * indirectly, through `removeSourceVideo` (ESCSUITE-113). A handle that never
- * reached the library at all — `setSourceThumbnail`'s, when the lazy rebuild it
+ * `store/projectSlice.ts`'s `removeSourceVideosPermanently` (every one in the
+ * batch) and `resetProject` (all of them, on teardown); that same file's
+ * `addSourceVideo`, in its replace-in-place branch, for the *previous*
+ * entry's handle when a re-add under an id already held carries a different
+ * `thumbnailUrl` — the one place a source's thumbnail changes without the
+ * source itself ever leaving the library, which is how a session restore
+ * landing on a library the CRAFT handoff already filled frees only the id it
+ * actually replaces; and `useProjectActions.ts`'s `loadProjectFile`, over a
+ * REFUSED load's *incoming* sources (`loadProject` mints their thumbnails
+ * before validation ever runs) — a *successful* load's outgoing library is
+ * `resetProject`'s to free, not this callback's. The media library's
+ * per-item Remove, Clear All and Clear Unused (ESCSUITE-149, ESCSUITE-154)
+ * reach this only indirectly, through `removeSourceVideosPermanently`
+ * (ESCSUITE-113). A handle that never reached the library at all —
+ * `setSourceThumbnail`'s, when the lazy rebuild it
  * carries lost a race with a real load and the source already has a live
  * thumbnail — goes through `revokeThumbnailUrl` directly (ESCSUITE-117). A source with no
  * thumbnail, or a `thumbnailUrl` that is not a `blob:` handle (there is no

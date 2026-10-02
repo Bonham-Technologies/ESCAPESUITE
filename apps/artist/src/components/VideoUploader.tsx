@@ -91,10 +91,10 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
   // Clear Unused and Clear All both delete bytes from IndexedDB themselves —
-  // a storage clear, not an edit — so neither goes through the undoable
-  // per-id `removeSourceVideo`; both batch the ids whose `deleteVideo`
-  // actually succeeded into one `removeSourceVideosPermanently` call
-  // (ESCSUITE-149).
+  // a storage clear, not an edit — so neither makes an undoable write; both
+  // batch the ids whose `deleteVideo` actually succeeded into one
+  // `removeSourceVideosPermanently` call (ESCSUITE-149) — the per-item
+  // Remove below does the same, a batch of one (ESCSUITE-154).
   const removeSourceVideosPermanently = useEditorStore((state) => state.removeSourceVideosPermanently);
 
   /**
@@ -509,8 +509,8 @@ export function VideoLibrary() {
   const addClipToTimeline = useEditorStore((state) => state.addClipToTimeline);
   // ESCSUITE-154: Remove deletes the source's bytes itself, the same storage
   // clear Clear Unused and Clear All already are (ESCSUITE-149), so it goes
-  // through the non-undoable `removeSourceVideosPermanently` rather than the
-  // undoable `removeSourceVideo`.
+  // through the non-undoable `removeSourceVideosPermanently` rather than an
+  // undoable per-id removal.
   const removeSourceVideosPermanently = useEditorStore((state) => state.removeSourceVideosPermanently);
   const setSourceThumbnail = useEditorStore((state) => state.setSourceThumbnail);
 

@@ -548,9 +548,9 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
     // made and revoke them in the effect's cleanup. Every one of them had
     // already been handed to `addSourceVideo`, so the cleanup was freeing
     // handles the media library was showing. Since ESCSUITE-113 the store owns
-    // every `SourceVideo.thumbnailUrl` — `removeSourceVideo`, `resetProject`
-    // and `addSourceVideo`'s replace-in-place branch free them — so the handoff
-    // keeps no owner of its own.
+    // every `SourceVideo.thumbnailUrl` — `removeSourceVideosPermanently`,
+    // `resetProject` and `addSourceVideo`'s replace-in-place branch free them —
+    // so the handoff keeps no owner of its own.
     it('leaves the thumbnails it made to the library when the editor goes away', async () => {
       seedTake()
       vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb']) as never)

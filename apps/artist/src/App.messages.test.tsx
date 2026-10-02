@@ -289,7 +289,7 @@ describe('App URL parameters', () => {
     // effect's cleanup — handles it had already given to `addSourceVideo`, so
     // the media library was left showing dead URLs after StrictMode's second
     // mount found the take already imported. The store owns them now
-    // (ESCSUITE-113): `removeSourceVideo`, `resetProject` and
+    // (ESCSUITE-113): `removeSourceVideosPermanently`, `resetProject` and
     // `addSourceVideo`'s replace-in-place branch are what free a thumbnail.
     it('leaves the thumbnail it created to the library when the editor goes away', async () => {
       vi.mocked(getVideo).mockResolvedValueOnce({
