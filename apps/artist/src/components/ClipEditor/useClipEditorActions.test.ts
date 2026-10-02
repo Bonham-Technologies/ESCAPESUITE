@@ -1170,4 +1170,39 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     expect(clipNow(clip.id).crop).toBeUndefined()
     expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
   })
+
+  it('opens crop mode on the selected clip', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleCropOnCanvasToggle())
+
+    expect(store().cropClipId).toBe(clip.id)
+    expect(result.current.cropOnCanvas).toBe(true)
+  })
+
+  it('closes it again, rather than re-opening it on the same clip', () => {
+    mediaClip()
+    const { result } = mount()
+    act(() => result.current.handleCropOnCanvasToggle())
+
+    act(() => result.current.handleCropOnCanvasToggle())
+
+    expect(store().cropClipId).toBeNull()
+    expect(result.current.cropOnCanvas).toBe(false)
+  })
+
+  it('reads crop mode as off while the latch names another clip', () => {
+    // The latch is never cleared on a selection change; the readers compare it
+    // to the selection, and so does the toggle's own pressed state.
+    const clip = mediaClip()
+    store().setCropClipId('some-other-clip')
+    const { result } = mount()
+
+    expect(result.current.cropOnCanvas).toBe(false)
+
+    act(() => result.current.handleCropOnCanvasToggle())
+
+    expect(store().cropClipId).toBe(clip.id)
+  })
 })

@@ -18,20 +18,30 @@ function renderClosed({
   sourceWidth = 400,
   sourceHeight = 200,
   disabled,
-}: { crop?: ClipCrop; sourceWidth?: number; sourceHeight?: number; disabled?: boolean } = {}) {
+  cropOnCanvas = false,
+}: {
+  crop?: ClipCrop
+  sourceWidth?: number
+  sourceHeight?: number
+  disabled?: boolean
+  cropOnCanvas?: boolean
+} = {}) {
   const user = userEvent.setup()
   const onCropChange = vi.fn()
+  const onCropOnCanvasToggle = vi.fn()
   render(
     <CropSection
       crop={crop}
       sourceWidth={sourceWidth}
       sourceHeight={sourceHeight}
       onCropChange={onCropChange}
+      cropOnCanvas={cropOnCanvas}
+      onCropOnCanvasToggle={onCropOnCanvasToggle}
       sliderGesture={inertSliderGesture}
       disabled={disabled}
     />
   )
-  return { user, onCropChange }
+  return { user, onCropChange, onCropOnCanvasToggle }
 }
 
 async function renderOpen(options: Parameters<typeof renderClosed>[0] = {}) {
@@ -147,5 +157,35 @@ describe('CropSection', () => {
     expect(screen.getByLabelText('Left crop percent')).toBeDisabled()
     expect(screen.getByRole('button', { name: '1:1' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled()
+  })
+
+  it('offers a Crop on canvas toggle in its header, pressed when crop mode is on', () => {
+    renderClosed({ cropOnCanvas: true })
+
+    // In the header, so it is reachable without opening the section — and so a
+    // locked track's <fieldset disabled> does not reach it.
+    expect(screen.getByRole('button', { name: 'Crop on canvas' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
+  })
+
+  it('reports a press, and does not change the crop itself', () => {
+    const { onCropChange, onCropOnCanvasToggle } = renderClosed()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Crop on canvas' }))
+
+    expect(onCropOnCanvasToggle).toHaveBeenCalledTimes(1)
+    expect(onCropChange).not.toHaveBeenCalled()
+  })
+
+  it('stays live on a locked track — looking at a crop is not editing one', () => {
+    const { onCropOnCanvasToggle } = renderClosed({ disabled: true, cropOnCanvas: false })
+    const toggle = screen.getByRole('button', { name: 'Crop on canvas' })
+
+    expect(toggle).not.toBeDisabled()
+    fireEvent.click(toggle)
+
+    expect(onCropOnCanvasToggle).toHaveBeenCalledTimes(1)
   })
 })
