@@ -302,6 +302,14 @@ describe('projectStore remaining behaviours', () => {
       expect(copy.mask).toEqual({ kind: 'circle' })
       expect(copy.stroke).toEqual({ color: '#ff0000', width: 0.004 })
     })
+
+    it('loads a project written before crops existed with no crop on any clip', () => {
+      // `crop` is optional with `undefined === none`, so no migration line was
+      // added and DB_VERSION stayed 1. This is the proof.
+      store().setProject(preMaskProject())
+
+      expect(store().project.timeline.clips.every((c) => c.crop === undefined)).toBe(true)
+    })
   })
 })
 
@@ -480,6 +488,45 @@ describe('parseProject (ESCSUITE-102)', () => {
     const result = parseProject(project)
 
     expect(result.ok).toBe(true)
+  })
+
+  it('accepts a clip carrying a valid crop', () => {
+    const good = validProject()
+    good.timeline.clips[0].crop = { left: 0.25, top: 0, right: 0.1, bottom: 0 }
+
+    const result = parseProject(good)
+
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.project.timeline.clips[0].crop).toEqual({
+        left: 0.25,
+        top: 0,
+        right: 0.1,
+        bottom: 0,
+      })
+    }
+  })
+
+  it('accepts a clip with no crop at all', () => {
+    // Which is every clip in every project saved before ESCSUITE-6: absent is
+    // not malformed.
+    expect(parseProject(validProject()).ok).toBe(true)
+  })
+
+  it.each([
+    ['a crop that is not an object', 0.5],
+    ['a crop missing an edge', { left: 0.1, top: 0, right: 0 }],
+    ['a crop with a non-numeric edge', { left: '0.1', top: 0, right: 0, bottom: 0 }],
+    ['a crop with a NaN edge', { left: Number.NaN, top: 0, right: 0, bottom: 0 }],
+    ['a crop with a negative edge', { left: -0.1, top: 0, right: 0, bottom: 0 }],
+    ['a crop that leaves no picture', { left: 0.6, top: 0, right: 0.6, bottom: 0 }],
+  ])('rejects %s, naming the clip (ESCSUITE-6)', (_label, badCrop) => {
+    const bad = validProject()
+    // The cast is the point: this is what JSON.parse hands over, and the type
+    // checker is not what stops it reaching the renderer.
+    bad.timeline.clips[0].crop = badCrop as never
+
+    expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid crop' })
   })
 
   describe('resolution validation (ESCSUITE-152)', () => {
