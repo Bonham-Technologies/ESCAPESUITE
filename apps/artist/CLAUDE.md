@@ -993,6 +993,13 @@ centre) are the clip's own geometry and never scale, and the body hit test is un
 project in a 700px preview drew ~1.5px handles before this; it now draws 44-project-pixel ones,
 which are the same 8px under the pointer as a 720p project's.
 
+**Crop mode draws its own chrome instead** (ESCSUITE-157), and its handles are
+DOM buttons rather than canvas squares — so they are sized in CSS pixels
+directly and take no `screenScale` at all. The one thing that chrome scales is
+the pen: `drawCropOverlay` takes the same `screenScale` and multiplies its
+`lineWidth` by it. See the crop-mode paragraphs further down in this Preview
+section (`cropOverlay.ts`, `CropHandles.tsx`).
+
 `screenScale` defaults to **1** — the right answer for a canvas that *is* its own screen (both
 exporters, the headless bundle, the unit tests that build one) and for the preview before its
 first `ResizeObserver` callback — so every caller that passes nothing behaves exactly as it did.
@@ -1451,6 +1458,49 @@ the same mark parity, so a right-then-left-then-right sequence whose first and
 third announcements coincide can still collide on screen (an undo or any other
 silent intervening change does not share this problem, since it makes no
 announce call at all).
+
+**Shift means two different things depending on which hand is on it.** On the
+mouse it locks the kept region's aspect for the drag (`cropRegionAspect`,
+above); on the keyboard it is `CROP_NUDGE.coarse` — ten source pixels instead
+of one — and does nothing to the aspect, because a single-inset nudge has no
+shape to hold.
+
+**Known wrinkles, left as they are rather than fixed in this ticket.** The drag
+is **mouse events only** (`mousedown`/`mousemove`/`mouseup`), the same scope
+`useTransformHandles.ts` already has, so there is no crop drag from a touch
+pointer. An **unmount mid-drag commits** the pending move instead of abandoning
+it — the gesture's teardown runs the same `throttled.flush()` → `end()` its own
+`mouseup` handler does, so a drag cut off by the layer going away (an Escape
+fired elsewhere, a selection change, a delete) still writes its last pending
+position. **Escape on a focused handle does not return focus to the
+inspector's "Crop on canvas" toggle**: the two live in separate component
+trees, and reaching across would mean threading a ref through the store, so
+the handles unmount and focus falls to the document — the known wart spec §8
+names rather than a bug.
+
+Two canvas gestures the crop branch leaves alone: a **double-click still opens
+the inline text editor** on a text overlay sitting above the cropped clip
+(`handleDoubleClick` stays bound regardless of crop mode, since it only ever
+acts on a text clip at the point), which reassigns `selectedClipId` and so
+leaves crop mode exactly as spec §1 asks for any other selection change; and
+`drawMultiSelectHandles` is a separate callback that still runs and would draw
+dashed boxes for any *other* selected clips, though nothing in the app today
+appears to reach that — `toggleClipSelection` and `selectClipsInRange`
+(`store/selectionSlice.ts`) both reassign `selectedClipId` too, which usually
+makes `cropTarget` null before a second clip could join the selection.
+
+**The handle layer needs the canvas element, and the canvas can go away out
+from under it.** `PreviewPlayer` mounts `CropHandles` only while
+`canvasRef.current` is non-null (`cropping && canvasRef.current && …`), but
+the canvas itself renders only in the `hasContent && !isLoading` arm — so
+importing another video, or anything else that empties and refills the
+timeline, unmounts the canvas and remounts it on a render where the ref
+briefly reads `null` while the dim chrome keeps painting over nothing to lay
+handles on. It self-heals on the very next render for any reason (a playhead
+move, a selection change), so the visible cost is a dropped frame of handles
+rather than a stuck one. The real fix — a state-backed `ref={setCanvasEl}`
+shared by `CropHandles`, `InlineTextEditorAnchor` and the marquee — is a
+follow-up, not taken here.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
