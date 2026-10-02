@@ -111,7 +111,11 @@ export interface SliderGesture {
  * listeners standing by to supply the eventual `mouseup` regardless of focus,
  * a slider's pointer drag has no such backstop — blur IS the substitute for a
  * `pointerup` that may never come — so it closes whatever is open regardless
- * of key or pointer state.
+ * of key or pointer state. It still has to reset `pointerDownRef` on its way
+ * out, the same as `onPointerUp`/`onPointerCancel` do: leaving it stuck
+ * `true` would hand every later keydown/keyup to the pointer guard above
+ * instead of to the keyboard, closing the door a blur is supposed to open
+ * (ESCSUITE-169 review round 1).
  */
 export function useSliderGesture(): SliderGesture {
   // Not state: this is read and written by DOM listeners and at write time,
@@ -151,7 +155,14 @@ export function useSliderGesture(): SliderGesture {
       if (!RANGE_KEYS.has(event.key)) return;
       history.end();
     },
-    onBlur: history.end,
+    onBlur: () => {
+      // Give the gesture back to the keyboard too: leaving the flag stuck
+      // `true` made every later onKeyDown/onKeyUp short-circuit on the
+      // pointer guard above before ever reaching `RANGE_KEYS` or
+      // `begin`/`resume` (ESCSUITE-169 review round 1).
+      pointerDownRef.current = false;
+      history.end();
+    },
   }), [history]);
 
   return { handlers, commit: history.commit };
