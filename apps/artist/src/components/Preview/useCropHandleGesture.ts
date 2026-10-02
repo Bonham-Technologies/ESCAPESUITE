@@ -1,10 +1,16 @@
 // One crop handle's gesture: the pointer drag, Escape, and the one store write a
 // move makes (ESCSUITE-157). The arrow-key nudges join it in the same shape.
 //
-// The arithmetic is `core/cropDrag.ts` and the write decision is
-// `core/clipCrop.ts`'s `cropUpdateFor`, shared with the inspector's sliders.
-// What is here is the gesture: when it begins, what it reads, and the single
-// `updateClip` it issues per animation frame.
+// The arithmetic is `core/cropDrag.ts`, and **both** of the decisions a crop
+// write makes are shared with the inspector's own crop controls
+// (`components/ClipEditor/useClipEditorActions.ts`' `handleCropChange`):
+// `core/clipCrop.ts`'s `cropUpdateFor` for what the store may hold, and
+// `cropDrag.ts`'s `cropWriteFor` for where the picture then sits (ESCSUITE-171 —
+// before it, the inspector shared only the first and wrote `{ crop }` alone).
+// What is here is the gesture, which is the one thing that is NOT shared: when
+// it begins, what it reads, and the single `updateClip` it issues per animation
+// frame. A drag rebases every move from the press; each inspector write is its
+// own gesture and rebases from the clip's current state.
 //
 // **One write, not two.** A crop alone would shrink the picture about the clip's
 // centre, so both edges of the axis would move and the handle would lag the
