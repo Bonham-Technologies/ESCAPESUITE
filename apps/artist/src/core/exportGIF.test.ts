@@ -563,6 +563,22 @@ describe('exportToGIF failures', () => {
 
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
+
+  // ESCSUITE-156. The same gap `exportWebM.ts` had, narrower: between the media
+  // load and the frame loop's `try` sit the rewind, the composer and the
+  // writer, and a throw from any of them left every loaded element behind.
+  it('releases the media elements when the writer cannot be built', async () => {
+    createGifWriter.mockImplementationOnce(() => {
+      throw new Error('gifenc exploded')
+    })
+    vi.mocked(URL.revokeObjectURL).mockClear()
+
+    const error = await run({ options: { fps: 10 } }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toBe('gifenc exploded')
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('estimateGifBytes', () => {

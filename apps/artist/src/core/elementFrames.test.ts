@@ -14,7 +14,7 @@ import {
   releaseElementSources,
   rewindElementSources,
 } from './elementFrames'
-import { storeVideo } from './storage'
+import { getVideoBlob, storeVideo } from './storage'
 import {
   getLastCanvasContext,
   installCanvasDouble,
@@ -24,6 +24,61 @@ import {
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { makeClip, makeSourceVideo, makeTrack } from '../test/fixtures/clipFixtures'
 import type { Clip, SourceVideo } from '../store/types'
+
+// Real storage — fake-indexeddb, the same bytes `store()` writes — with
+// `getVideoBlob` wrapped so one case can make a single read fail. That is the
+// only way to reach `loadElementSources`' own ownership guard: once both media
+// branches warn and skip, a failed read is the one thing left inside its loop
+// that can reject (ESCSUITE-156).
+vi.mock('./storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./storage')>()
+  return { ...actual, getVideoBlob: vi.fn(actual.getVideoBlob) }
+})
+
+const realGetVideoBlob = (await vi.importActual<typeof import('./storage')>('./storage'))
+  .getVideoBlob
+
+/**
+ * A counted `requestAnimationFrame`, with the queue a browser would drain on
+ * its next frame. `flush()` runs every callback still pending, so a poll that
+ * re-queues itself is visible as a rising `requests`, and one that has been
+ * cancelled is visible as a `requests` that stops moving.
+ */
+function installCountedRaf() {
+  const pending = new Map<number, FrameRequestCallback>()
+  const cancels: number[] = []
+  const realRequest = globalThis.requestAnimationFrame
+  const realCancel = globalThis.cancelAnimationFrame
+  let nextHandle = 1
+  let requests = 0
+
+  globalThis.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+    requests += 1
+    const handle = nextHandle++
+    pending.set(handle, cb)
+    return handle
+  }) as typeof globalThis.requestAnimationFrame
+  globalThis.cancelAnimationFrame = ((handle: number) => {
+    cancels.push(handle)
+    pending.delete(handle)
+  }) as typeof globalThis.cancelAnimationFrame
+
+  return {
+    get requests() {
+      return requests
+    },
+    cancels,
+    flush() {
+      const due = [...pending.values()]
+      pending.clear()
+      for (const cb of due) cb(0)
+    },
+    uninstall() {
+      globalThis.requestAnimationFrame = realRequest
+      globalThis.cancelAnimationFrame = realCancel
+    },
+  }
+}
 
 let media: MediaDoubles
 let warns: ReturnType<typeof vi.spyOn>
@@ -149,6 +204,49 @@ describe('loadElementSources', () => {
     expect(sources.videoElements.size).toBe(0)
     expect(sources.imageElements.size).toBe(0)
     expect(warns).toHaveBeenCalledWith('Failed to load media v1')
+  })
+
+  // ESCSUITE-156. The video branch degrades — video, then image, then a warning
+  // — and the image branch used to have no fallback at all: one corrupt PNG
+  // rejected the whole load and took every element already loaded with it.
+  it('warns and skips an image that will not decode, keeping the sources around it', async () => {
+    await store('v1')
+    await store('i1', 'image/png', 'image')
+    media.script({ image: { fail: true } })
+
+    const sources = await loadElementSources(
+      [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'i1' })],
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'i1', mediaType: 'image' })])
+    )
+
+    expect([...sources.videoElements.keys()]).toEqual(['v1'])
+    expect(sources.imageElements.size).toBe(0)
+    expect(warns).toHaveBeenCalledWith('Failed to load media i1')
+    // The video is the caller's to draw from and to free: a skipped image must
+    // not take the elements loaded before it with it.
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(sources.videoElements.get('v1')!.src)
+  })
+
+  it('releases what it has already loaded when a read fails partway through', async () => {
+    await store('v1')
+    await store('v2')
+    vi.mocked(getVideoBlob)
+      .mockImplementationOnce(realGetVideoBlob)
+      .mockImplementationOnce(async () => {
+        throw new Error('IndexedDB read failed')
+      })
+    vi.mocked(URL.revokeObjectURL).mockClear()
+
+    await expect(
+      loadElementSources(
+        [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'v2' })],
+        sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2' })])
+      )
+    ).rejects.toThrow('IndexedDB read failed')
+
+    // v1's <video> never reaches a caller, so there is nobody else who could
+    // free it: the loader owns what it has loaded until it returns.
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -385,5 +483,90 @@ describe('createFrameComposer', () => {
     expect(video.pause).toHaveBeenCalledTimes(1)
     expect(playbackState.get('v1')).toEqual({ playing: false, targetTime: 0 })
     expect(ctx.argsFor('drawImage')).toHaveLength(0)
+  })
+})
+
+// ESCSUITE-156. A `<video>` below HAVE_CURRENT_DATA is waited for two ways at
+// once: a `requestAnimationFrame` poll on `readyState`, and a 300 ms
+// `setTimeout` that gives up. Whichever settles the wait has to stop the other
+// — the poll used to keep re-queueing itself after the fallback had already
+// resolved, so a source that never becomes ready cost an animation frame per
+// frame for the life of the page, long after the export that started it.
+describe('createFrameComposer readiness wait', () => {
+  /** The composer over one not-yet-ready source, positioned so no frame seeks. */
+  async function composerOverUnreadyVideo() {
+    await store('v1')
+    media.script({ video: { readyState: 1 } })
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    return { composeFrame, sources }
+  }
+
+  it('stops polling once the 300 ms fallback has resolved the wait', async () => {
+    const { composeFrame } = await composerOverUnreadyVideo()
+    // Only the timeout is faked: the rAF poll is this test's own stub and the
+    // doubles fire their events in microtasks.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const raf = installCountedRaf()
+
+    try {
+      // The element sits at 0 after the rewind, so frame 0 needs no seek and
+      // the readiness wait is the only thing the frame is parked on.
+      const frame = composeFrame(0)
+      expect(raf.requests).toBe(1)
+
+      // Two frames of a browser that still has no picture: the poll re-queues.
+      raf.flush()
+      raf.flush()
+      expect(raf.requests).toBe(3)
+
+      vi.advanceTimersByTime(300)
+      await frame
+
+      // Nothing is left queued, and the handle outstanding when the fallback
+      // fired was cancelled rather than left to run.
+      expect(raf.cancels).toEqual([3])
+      raf.flush()
+      expect(raf.requests).toBe(3)
+    } finally {
+      raf.uninstall()
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the 300 ms fallback when the frame data arrives first', async () => {
+    const { composeFrame, sources } = await composerOverUnreadyVideo()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const raf = installCountedRaf()
+
+    try {
+      const frame = composeFrame(0)
+      expect(vi.getTimerCount()).toBe(1)
+
+      // The picture lands before the next animation frame.
+      ;(sources.videoElements.get('v1') as unknown as { readyState: number }).readyState = 2
+      raf.flush()
+      await frame
+
+      expect(vi.getTimerCount()).toBe(0)
+      expect(raf.requests).toBe(1)
+    } finally {
+      raf.uninstall()
+      vi.useRealTimers()
+    }
   })
 })

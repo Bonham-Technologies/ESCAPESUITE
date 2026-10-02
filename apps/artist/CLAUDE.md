@@ -127,7 +127,24 @@ pnpm lint                # Run ESLint
   `<video>` to 0 once — the seeks `exportWebM.perf.test.ts` discounts as `initSeeks`),
   `createFrameComposer` (one frame: `openOutputFrame`, sync the live videos to their clip
   times, then the single track-ordered interleaved draw pass and the transition) and
-  `releaseElementSources` (pause everything and revoke the object URLs). The composer takes
+  `releaseElementSources` (pause everything and revoke the object URLs).
+  **Who owns the elements** (ESCSUITE-156): `loadElementSources` owns every element it has
+  created until it returns, and the caller owns them from then on — a caller only ever
+  receives the map, so a rejection partway through the load would strand the elements before
+  it with no handle left to free them by. Both media branches therefore degrade rather than
+  reject: a video that will not load is retried as an image and then warned about
+  (`Failed to load media <id>`), and an **image** that will not decode gets the same
+  warn-and-skip rather than failing the whole export, which is what it used to do — one
+  corrupt PNG in the library aborted the load and leaked every element ahead of it. The one
+  rejection still possible inside the loop, a failed storage read, releases what it has
+  loaded before rethrowing. On the caller's side the ownership starts at the load, which is
+  why **both exporters' `try` begins there and not at the frame loop**: `output.start()`,
+  either `configure()`, the caller's own `onProgress`, the rewind and the GIF writer all sit
+  between the two, and a throw from any of them used to escape past the only
+  `releaseElementSources` on the error path — one `<video>`/`<img>` and its object URL per
+  source, held for the life of the page. `exportWebM.ts` records each encoder in an
+  `openEncoders` list as it is built and its catch closes whatever exists, so the cleanup
+  does not have to name handles that may not be in scope yet. The composer takes
   the output `frameRate` because the seek tolerance is a little under half a frame of it —
   the one value that had to become a parameter, 30 for WebM and 10/15/20 for GIF.
   `exportMP4.ts` is deliberately
@@ -2728,7 +2745,13 @@ To prevent black frames during export:
 - **Frame readiness**: the element-drawing frame composer (`elementFrames.ts`'s
   `syncVideoToTime`, which `exportWebM.ts` had inline until ESCSUITE-34) waits for
   `video.readyState >= 2`
-  (`HAVE_CURRENT_DATA`), event-based with a `requestAnimationFrame` poll and a 300ms fallback
+  (`HAVE_CURRENT_DATA`), event-based with a `requestAnimationFrame` poll and a 300ms fallback.
+  The two halves cancel each other (ESCSUITE-156): whichever settles the wait stops the other
+  — `cancelAnimationFrame` on the outstanding poll handle when the fallback fires,
+  `clearTimeout` on the fallback when the frame data arrives first. The poll used to keep
+  re-queueing itself after the fallback had already resolved the wait, so a source that never
+  reaches `HAVE_CURRENT_DATA` cost an animation frame per frame **for the life of the page**,
+  long after the export that started it finished
 - **Post-seek verification**: Always waits for frame data after successful seek
 - **Transition safety**: `drawTransition()` (`canvasRenderer.ts`) warns when a transition's video
   is below `readyState >= 1` — "forgiving" on purpose, per its own comment, to match the preview
