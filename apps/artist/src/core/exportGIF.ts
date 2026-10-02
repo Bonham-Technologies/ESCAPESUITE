@@ -137,7 +137,13 @@ export async function exportToGIF(
   // "Export complete!". The two video exporters degrade better than that (their
   // muxer still finalises a structurally valid, if empty, container), so this is
   // the one place a GIF export needs to refuse where they do not.
-  if (!Number.isFinite(totalFrames) || totalFrames < 1) {
+  if (!Number.isFinite(totalFrames)) {
+    throw new ExportError(
+      'Cannot export a GIF: the selected range has no finite length',
+      exportLog
+    );
+  }
+  if (totalFrames < 1) {
     throw new ExportError(
       `Cannot export a GIF of ${totalFrames} frames: the selected range is empty`,
       exportLog

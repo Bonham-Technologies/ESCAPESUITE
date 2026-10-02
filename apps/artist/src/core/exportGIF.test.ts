@@ -215,6 +215,9 @@ describe('exportToGIF preconditions', () => {
     }).catch((e: unknown) => e)
 
     expect(error).toBeInstanceOf(ExportError)
+    // Its own sentence: "a GIF of Infinity frames: the selected range is empty"
+    // would name the wrong cause.
+    expect((error as ExportError).message).toMatch(/no finite length/)
     expect(createGifWriter).not.toHaveBeenCalled()
   })
 
