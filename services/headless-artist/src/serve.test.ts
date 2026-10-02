@@ -280,7 +280,7 @@ describe('the sink allow-list', () => {
   it('still refuses an invalid spec before it looks at the sink', async () => {
     await start({ allowedSinks: ['volume'] })
 
-    const res = await postSpec(validSpec('job-1', { options: { format: 'gif' } }))
+    const res = await postSpec(validSpec('job-1', { options: { format: 'avi' } }))
 
     expect(res.status).toBe(400)
   })
@@ -347,10 +347,14 @@ describe('POST /render', () => {
   it('returns 400 with the validation message for an invalid spec', async () => {
     await start()
 
-    const res = await postSpec(validSpec('job-1', { options: { format: 'gif' } }))
+    // 'avi' rather than the 'gif' this case used before ESCSUITE-34, which is a
+    // format the kit now renders.
+    const res = await postSpec(validSpec('job-1', { options: { format: 'avi' } }))
 
     expect(res.status).toBe(400)
-    expect(await res.json()).toEqual({ error: 'options.format must be one of "mp4" or "webm"' })
+    expect(await res.json()).toEqual({
+      error: 'options.format must be one of "mp4", "webm", or "gif"',
+    })
     expect(runJob).not.toHaveBeenCalled()
   })
 

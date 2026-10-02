@@ -32,7 +32,7 @@ export interface RenderFileInput {
 
 /** Describes the encoded OUTPUT (after resolution/timeRange options), for the verification manifest (Plan 2). */
 export interface RenderMeta {
-  format: 'mp4' | 'webm'
+  format: 'mp4' | 'webm' | 'gif'
   byteLength: number
   /** Encoded duration in seconds — the timeRange length when one is given, else the full timeline. */
   durationSec: number

@@ -1,14 +1,16 @@
 import type { JobSpec } from './types'
 
 const JOB_ID_RE = /^[A-Za-z0-9._-]{1,128}$/
-const FORMATS = ['mp4', 'webm']
+const FORMATS = ['mp4', 'webm', 'gif']
 const QUALITIES = ['low', 'medium', 'high']
-const RESOLUTIONS = ['project', '1080p', '720p', '480p']
+const RESOLUTIONS = ['project', '1080p', '720p', '480p', '360p']
 const SINKS = ['volume', 's3', 'webhook', 'command']
+/** GIF only. The three rates ESCAPEARTIST's own export offers (ESCSUITE-34). */
+const GIF_FPS = [10, 15, 20]
 
 /** Every key `parseJobSpec` reads; anything else is a typo worth warning about. */
 const TOP_LEVEL_KEYS = ['jobId', 'input', 'options', 'output']
-const OPTIONS_KEYS = ['format', 'quality', 'resolution', 'timeRange']
+const OPTIONS_KEYS = ['format', 'quality', 'resolution', 'timeRange', 'fps']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -47,7 +49,7 @@ function parseOptions(value: unknown): JobSpec['options'] {
 
   const format = value.format
   if (typeof format !== 'string' || !FORMATS.includes(format)) {
-    throw new Error('options.format must be one of "mp4" or "webm"')
+    throw new Error('options.format must be one of "mp4", "webm", or "gif"')
   }
 
   const quality = value.quality === undefined ? 'high' : value.quality
@@ -60,13 +62,33 @@ function parseOptions(value: unknown): JobSpec['options'] {
     quality: quality as JobSpec['options']['quality'],
   }
 
+  // All five heights are accepted for every format. `getResolution` answers each
+  // of them whatever is being encoded, and an MP4 at 640x360 is a legitimate — if
+  // unusual — thing to ask a render farm for; ESCAPEARTIST's own export dialog
+  // offers 360p for GIF alone, which is a choice about what to offer rather than
+  // about what works. A validator's job is to refuse what cannot work.
   if (value.resolution !== undefined) {
     if (typeof value.resolution !== 'string' || !RESOLUTIONS.includes(value.resolution)) {
       throw new Error(
-        'options.resolution must be one of "project", "1080p", "720p", or "480p"',
+        'options.resolution must be one of "project", "1080p", "720p", "480p", or "360p"',
       )
     }
     options.resolution = value.resolution as NonNullable<JobSpec['options']['resolution']>
+  }
+
+  // GIF only, and said rather than ignored: a `format: "mp4", fps: 20` job is a
+  // caller who misunderstood something, and rendering at 30 fps anyway is
+  // exactly the quiet-wrong-output failure `collectUnknownKeys` exists to stop —
+  // for a field that is known but inapplicable rather than misspelled. The format
+  // check above has already run, so `format` is one of the three here.
+  if (value.fps !== undefined) {
+    if (format !== 'gif') {
+      throw new Error('options.fps applies to "gif" only')
+    }
+    if (typeof value.fps !== 'number' || !GIF_FPS.includes(value.fps)) {
+      throw new Error('options.fps must be one of 10, 15, or 20')
+    }
+    options.fps = value.fps as NonNullable<JobSpec['options']['fps']>
   }
 
   if (value.timeRange !== undefined) {

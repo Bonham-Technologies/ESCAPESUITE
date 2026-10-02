@@ -2897,13 +2897,16 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
 - Streaming variant `window.__renderProjectToFile(input, onProgress?)`
   (`RenderFileInput` → `RenderMeta`): sources arrive as `File`s in the hidden
   `<input type="file" id="__sources">` (Playwright `setInputFiles`) and the result
-  leaves as a browser download named `<outputName>.<mp4|webm>`, so large media
+  leaves as a browser download named `<outputName>.<mp4|webm|gif>`, so large media
   never crosses the `evaluate()` boundary. `sourceVideos` entries may carry only
   `id`/`name`/`mimeType`; `seedSources` probes the rest from the bytes.
 - `renderProject.ts` validates the input (every media clip must have a source and
   bytes — it fails instead of rendering black), seeds sources into IndexedDB via
-  `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM` the editor
-  uses. No engine fork.
+  `seedSources.ts`, then calls the **same** `exportToMP4`/`exportToWebM`/`exportToGIF` the
+  editor uses. No engine fork. The format decision is a three-way dispatch on
+  `options.format` with `'mp4'` as the fallback for an unrecognised value, which is what it has
+  always been (ESCSUITE-34: before GIF landed it was `=== 'webm' ? 'webm' : 'mp4'`, so a
+  `'gif'` job rendered an MP4 whose `meta.format` agreed with itself and with nothing else).
   That is a claim `services/headless-artist/src/verify.chromium.test.ts` now **tests** rather
   than asserts: a clip masked to a circle and given an outline is rendered through this bundle
   in real Chromium and probed with ffmpeg — the frame's corner comes back black, its centre red
@@ -2952,6 +2955,12 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   `SecurityError: Failed to construct 'Worker'`.
 - `options.resolution` defaults to `'project'`; `meta` describes the encoded output
   (honours `resolution` and `timeRange`).
+- **A GIF's `meta.durationSec` is its frame delays, not its range.** `options.fps`
+  (`10 | 15 | 20`, GIF only, default 15 through `gifFrameRate`) feeds the encoder's
+  `ceil(seconds x rate)` frames of `round(1000 / rate)` ms each, and a GIF plays for as long as
+  those delays say — 15 fps of a one-second range is 15 x 67 ms = 1.005 s. The verification
+  manifest describes the bytes, so the headless path reports that rather than the requested
+  range; the two video formats encode the range itself and are unchanged.
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.

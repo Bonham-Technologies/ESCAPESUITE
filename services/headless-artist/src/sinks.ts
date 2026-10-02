@@ -14,11 +14,13 @@ export interface OutputSink {
 const FORMAT_TO_EXTENSION: Record<VerificationManifest['format'], string> = {
   mp4: 'mp4',
   webm: 'webm',
+  gif: 'gif',
 }
 
 const FORMAT_TO_MIME: Record<VerificationManifest['format'], string> = {
   mp4: 'video/mp4',
   webm: 'video/webm',
+  gif: 'image/gif',
 }
 
 /** Pretty JSON with a trailing newline, the shape every sink writes its manifest sidecar as. */
