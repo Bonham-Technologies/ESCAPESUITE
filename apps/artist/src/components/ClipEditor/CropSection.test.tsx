@@ -13,6 +13,9 @@ import type { ClipCrop } from '../../store/types'
 
 const NO_CROP = { left: 0, top: 0, right: 0, bottom: 0 }
 
+/** Why "Crop on canvas" is refused with no source frame to crop. */
+const NO_SOURCE_REASON = "This clip's source is no longer in the media library"
+
 function renderClosed({
   crop,
   sourceWidth = 400,
@@ -177,6 +180,25 @@ describe('CropSection', () => {
 
     expect(onCropOnCanvasToggle).toHaveBeenCalledTimes(1)
     expect(onCropChange).not.toHaveBeenCalled()
+  })
+
+  it('disables the toggle when the clip\'s source has left the media library', () => {
+    // `sourceWidth` 0 is `sourceVideo?.width ?? 0`: there is no source frame to
+    // crop, so the preview's crop mode would refuse and draw nothing. Latching it
+    // would be a pressed toggle with an empty canvas behind it — a dead end.
+    renderClosed({ sourceWidth: 0, sourceHeight: 0 })
+    const toggle = screen.getByRole('button', { name: 'Crop on canvas' })
+
+    expect(toggle).toBeDisabled()
+    expect(toggle).toHaveAttribute('title', NO_SOURCE_REASON)
+  })
+
+  it('leaves the toggle live, and untitled, once the source is there', () => {
+    renderClosed()
+    const toggle = screen.getByRole('button', { name: 'Crop on canvas' })
+
+    expect(toggle).toBeEnabled()
+    expect(toggle).not.toHaveAttribute('title')
   })
 
   it('stays live on a locked track — looking at a crop is not editing one', () => {

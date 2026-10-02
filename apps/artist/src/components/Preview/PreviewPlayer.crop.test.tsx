@@ -234,6 +234,33 @@ describe('crop mode on the preview', () => {
     expect(preview.view.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
   })
 
+  it('draws and mounts nothing once the playhead leaves the clip, and brings both back', async () => {
+    // The chrome has always refused to draw outside the clip's window; the DOM
+    // handle layer had no such guard, so scrubbing off the clip left eight live
+    // handles over an unrelated frame and a drag there wrote a crop on a clip
+    // the user could not see. Both now gate on the one `visibleCropTarget`.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    const preview = await renderPreview()
+    store().setCropClipId(clip.id)
+    const handles = () => preview.view.queryByRole('group', { name: 'Crop handles' })
+
+    expect(handles()).toBeInTheDocument()
+
+    preview.clearCalls()
+    store().setCurrentTime(5)
+
+    expect(handles()).not.toBeInTheDocument()
+    expect(preview.calls('clip')).toHaveLength(0)
+
+    // And back: the latch survives a scrub, so re-entering the clip returns the
+    // mode rather than silently dropping it.
+    store().setCurrentTime(1)
+
+    expect(handles()).toBeInTheDocument()
+    expect(preview.calls('clip').length).toBeGreaterThan(0)
+  })
+
   it('draws and mounts nothing during playback', async () => {
     croppingClip()
     const preview = await renderPreview()

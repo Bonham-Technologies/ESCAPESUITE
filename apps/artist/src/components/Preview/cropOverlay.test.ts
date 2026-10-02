@@ -16,6 +16,7 @@ import {
   cropTarget,
   drawCropOverlay,
   fullSourceBox,
+  visibleCropTarget,
   type CropOverlayScene,
 } from './cropOverlay'
 import { contentBox } from './previewGeometry'
@@ -100,6 +101,36 @@ describe('cropTarget', () => {
     expect(
       cropTarget(scene({ clips: [mediaClip({ overlayType: 'text', sourceVideoId: '' })] }))
     ).toBeNull()
+  })
+})
+
+describe('visibleCropTarget', () => {
+  // The one answer both layers gate from: the chrome below AND `PreviewPlayer`'s
+  // decision to mount the eight DOM handles. `cropTarget` knows nothing about
+  // time, so before this existed the handles outlived the chrome — eight live,
+  // draggable buttons over a frame the cropped clip is not even in.
+  it('is the target while the playhead is inside the clip', () => {
+    expect(visibleCropTarget(scene(), 1)).toEqual({ clip: mediaClip(), source })
+  })
+
+  it('is null once the playhead has left the clip', () => {
+    // The clip spans 0-4, and its end is exclusive, exactly as the chrome's own
+    // guard and `selectionOverlay`'s have always been.
+    expect(visibleCropTarget(scene(), 4)).toBeNull()
+    expect(visibleCropTarget(scene(), 9)).toBeNull()
+  })
+
+  it('is null before the clip starts', () => {
+    expect(
+      visibleCropTarget(scene({ clips: [mediaClip({ timelinePosition: 4 })] }), 1)
+    ).toBeNull()
+  })
+
+  it('is null for every reason `cropTarget` is', () => {
+    // It is `cropTarget` plus the window, not a second copy of it.
+    expect(visibleCropTarget(scene({ cropClipId: null }), 1)).toBeNull()
+    expect(visibleCropTarget(scene({ isPlaying: true }), 1)).toBeNull()
+    expect(visibleCropTarget(scene({ sourceVideos: [] }), 1)).toBeNull()
   })
 })
 

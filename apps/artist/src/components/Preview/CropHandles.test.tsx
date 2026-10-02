@@ -396,6 +396,23 @@ describe('the crop handle layer', () => {
     expect(past()).toBe(before)
   })
 
+  it('offers each handle its own resize cursor', () => {
+    const { handle } = mount()
+
+    expect(handle('Crop left').style.cursor).toBe('ew-resize')
+    expect(handle('Crop top left').style.cursor).toBe('nwse-resize')
+  })
+
+  it('offers not-allowed instead on a locked track', () => {
+    // ESCSUITE-88's answer for a locked row's handle. The cursor is computed
+    // once, inline: the stylesheet's `:disabled` rule cannot reach past an inline
+    // `style`, so a locked handle used to advertise a resize it would refuse.
+    const { handle } = mount({ locked: true })
+
+    expect(handle('Crop left').style.cursor).toBe('not-allowed')
+    expect(handle('Crop top left').style.cursor).toBe('not-allowed')
+  })
+
   it('clamps a drag past the far edge to the stored maximum', () => {
     const { clip, handle } = mount()
 
