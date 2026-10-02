@@ -164,6 +164,76 @@ describe('useSliderGesture', () => {
     expect(write()).toBe(false)
   })
 
+  it('does not begin a gesture for a key the range input does not act on (ESCSUITE-169)', () => {
+    // Shift reaches the input too, but a range input does nothing with it on
+    // its own; treating it as the start of a gesture is the bug this fixes —
+    // in the full sequence below it reset the "have I pushed?" flag mid an
+    // already-open pointer drag.
+    const { on, write } = gesture()
+
+    on().onKeyDown({ repeat: false, key: 'Shift' })
+
+    expect(write()).toBe(false)
+  })
+
+  it('does not end a keyboard gesture on a key the range input does not act on (ESCSUITE-169)', () => {
+    const { on, write } = gesture()
+
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+    write()
+    on().onKeyUp({ key: 'Shift' })
+
+    // Still part of the arrow key's gesture: Shift's keyup must not have
+    // closed it.
+    expect(write()).toBe(true)
+  })
+
+  it('still ends the gesture on the arrow key that opened it', () => {
+    const { on, write } = gesture()
+
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+    write()
+    on().onKeyUp({ key: 'ArrowRight' })
+
+    expect(write()).toBe(false)
+  })
+
+  it('ignores a keydown while a pointer drag owns the gesture (ESCSUITE-169)', () => {
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    // A real arrow key reaching the input while the mouse is still dragging
+    // it must not reopen the "have I pushed?" flag the pointer drag is
+    // already carrying.
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+
+    expect(write()).toBe(true)
+  })
+
+  it('ignores a keyup while a pointer drag owns the gesture (ESCSUITE-169)', () => {
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    on().onKeyUp({ key: 'ArrowRight' })
+
+    expect(write()).toBe(true)
+  })
+
+  it('leaves a pointer drag open through a full Shift tap mid-drag (ESCSUITE-169)', () => {
+    // The exact reported shape: a Shift tap — keydown then keyup — while the
+    // mouse is still holding a slider's pointer drag open.
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    on().onKeyDown({ repeat: false, key: 'Shift' })
+    on().onKeyUp({ key: 'Shift' })
+
+    expect(write()).toBe(true)
+  })
+
   it('keeps one identity for the listeners across renders', () => {
     const { result, rerender } = renderHook(() => useSliderGesture())
     const first = result.current

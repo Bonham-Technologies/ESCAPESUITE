@@ -583,6 +583,37 @@ describe('the Escape cascade, in order', () => {
     expect(deps.setCropClipId).not.toHaveBeenCalled()
   })
 
+  it('falls through an INERT crop latch and clears the in/out points instead (ESCSUITE-170)', () => {
+    // The latch names a clip ('clip-2') that is not the selection
+    // ('clip-1' from `everything`) — crop mode is already off on screen, the
+    // way it is after the selection changed without Escape ever touching the
+    // latch. Reading the raw `cropClipId` here used to claim Escape for a mode
+    // that was already off and return before the in/out points were touched.
+    mountShortcuts({ ...everything, showShortcuts: false, cropClipId: 'clip-2' })
+
+    expect(press('Escape')).toBe(false)
+    expect(deps.setCropClipId).not.toHaveBeenCalled()
+    expect(deps.clearInOutPoints).toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('In/Out points cleared', 'info')
+  })
+
+  it('leaves the key unclaimed when an INERT crop latch is the only thing set (ESCSUITE-170)', () => {
+    mountShortcuts({
+      showShortcuts: false,
+      cropClipId: 'clip-2',
+      selectedClipId: 'clip-1',
+      inPoint: null,
+      outPoint: null,
+      selectedClipIds: new Set<string>(),
+    })
+
+    expect(press('Escape')).toBe(true)
+    expect(deps.setCropClipId).not.toHaveBeenCalled()
+    expect(deps.clearInOutPoints).not.toHaveBeenCalled()
+    expect(deps.clearMultiSelection).not.toHaveBeenCalled()
+    expect(deps.setSelectedClipId).not.toHaveBeenCalled()
+  })
+
   it('then clears the in/out points', () => {
     mountShortcuts({ ...everything, showShortcuts: false })
 

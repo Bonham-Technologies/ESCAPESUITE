@@ -328,6 +328,50 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).crop).toEqual({ left: 0.25, top: 0, right: 0, bottom: 0 })
   })
 
+  it('is still one undo entry when Shift is released mid-drag (ESCSUITE-169)', async () => {
+    // `onMouseDown` focuses the handle explicitly (so the arrow keys have
+    // something to nudge once the mouse lets go), which means a Shift keyup —
+    // released to drop the aspect lock without releasing the mouse — reaches
+    // this component mid-drag. `onKeyUp` used to be `gestureHistory.end()` for
+    // ANY key, which closed the gesture out from under the still-open mouse
+    // drag: every write after it then pushed its own entry.
+    const { clip, handle } = mount()
+    const before = past()
+
+    const button = handle('Crop left')
+    fireEvent.mouseDown(button, { clientX: 0, clientY: 0 })
+    for (let step = 1; step <= 5; step++) {
+      fireEvent.mouseMove(document, { clientX: step * 48, clientY: 0 })
+      if (step === 1) fireEvent.keyUp(button, { key: 'Shift' })
+      await frame()
+    }
+    fireEvent.mouseUp(document)
+
+    expect(past()).toBe(before + 1)
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.25, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('is still one undo entry when blur reaches the handle mid-drag (ESCSUITE-169)', async () => {
+    // `onBlur` is bound to the same callback as `onKeyUp`, so a focus change —
+    // a window switch, say — mid-drag closed the gesture exactly as a keyup
+    // did. The mouse is still driving the drag; only its own `mouseup` should
+    // end it.
+    const { clip, handle } = mount()
+    const before = past()
+
+    const button = handle('Crop left')
+    fireEvent.mouseDown(button, { clientX: 0, clientY: 0 })
+    for (let step = 1; step <= 5; step++) {
+      fireEvent.mouseMove(document, { clientX: step * 48, clientY: 0 })
+      if (step === 1) fireEvent.blur(button)
+      await frame()
+    }
+    fireEvent.mouseUp(document)
+
+    expect(past()).toBe(before + 1)
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.25, top: 0, right: 0, bottom: 0 })
+  })
+
   it('derives every move from the crop the drag started with, not the one the last move wrote', async () => {
     // Constraint 8's other headline clause, and the one a stale-prop drag hides:
     // the component is re-rendered with the clip the FIRST write produced, and
