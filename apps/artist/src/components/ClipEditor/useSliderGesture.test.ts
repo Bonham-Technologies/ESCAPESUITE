@@ -107,15 +107,15 @@ describe('useSliderGesture', () => {
   it('treats a key press and its repetitions as one gesture', () => {
     const { on, write } = gesture()
 
-    on().onKeyDown({ repeat: false })
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
     expect(write()).toBe(false)
 
     // The browser fires keydown again for every repetition while the key is
     // held. Each brings one more input event, and all of them belong to the
     // entry the first write pushed.
-    on().onKeyDown({ repeat: true })
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
     expect(write()).toBe(true)
-    on().onKeyDown({ repeat: true })
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
     expect(write()).toBe(true)
   })
 
@@ -124,7 +124,7 @@ describe('useSliderGesture', () => {
 
     // Focus can arrive mid-hold, so a repeat is also a valid way to start: it
     // opens the gesture and the first write still pushes.
-    on().onKeyDown({ repeat: true })
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
 
     expect(write()).toBe(false)
     expect(write()).toBe(true)
@@ -133,9 +133,9 @@ describe('useSliderGesture', () => {
   it('ends the gesture on keyup', () => {
     const { on, write } = gesture()
 
-    on().onKeyDown({ repeat: false })
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
     write()
-    on().onKeyUp()
+    on().onKeyUp({ key: 'ArrowRight' })
 
     expect(write()).toBe(false)
   })

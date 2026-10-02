@@ -601,7 +601,7 @@ describe('the Escape cascade, in order', () => {
     mountShortcuts({
       showShortcuts: false,
       cropClipId: 'clip-2',
-      selectedClipId: 'clip-1',
+      selectedClipId: null,
       inPoint: null,
       outPoint: null,
       selectedClipIds: new Set<string>(),

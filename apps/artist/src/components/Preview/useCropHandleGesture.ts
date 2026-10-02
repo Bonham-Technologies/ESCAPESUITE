@@ -25,8 +25,10 @@
 // press, `commit` around the write inside the throttled updater — the throttler
 // coalesces a frame's moves, so "the gesture's first write" has to mean the
 // first that reaches the store — and `end` at the release. A keydown that is
-// not a repeat begins; a repeat resumes; keyup and blur end. `useSliderGesture`'s
-// rule verbatim.
+// not a repeat begins; a repeat resumes; a keyup for a nudging key ends it, and
+// blur ends it regardless of key — both ignored while a mouse drag is open
+// (ESCSUITE-169), so a key released, or focus lost, mid-drag cannot end the
+// gesture the mouse is still driving. `useSliderGesture`'s rule, equivalent.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 import { useEditorStore } from '../../store/projectStore';
@@ -85,8 +87,21 @@ export interface CropHandleGestureDeps {
 export interface CropHandleGesture {
   onMouseDown: (handle: CropHandle, e: ReactMouseEvent<HTMLButtonElement>) => void;
   onKeyDown: (handle: CropHandle, e: ReactKeyboardEvent<HTMLButtonElement>) => void;
-  /** Ends a keyboard gesture. Bound to keyup AND blur, as the sliders' is. */
-  onKeyUp: () => void;
+  /**
+   * Ends a keyboard nudge gesture — but only for a key that actually nudges
+   * (the same `ARROW_STEPS` filter `onKeyDown` applies), and only while no
+   * mouse drag is open (ESCSUITE-169): a key released — Shift, dropping the
+   * aspect lock — mid-drag must not close the gesture the mouse is still
+   * driving.
+   */
+  onKeyUp: (e: ReactKeyboardEvent<HTMLButtonElement>) => void;
+  /**
+   * Ends a keyboard gesture on focus loss. Carries the same open-mouse-drag
+   * guard as `onKeyUp`, but none of its key filter — blur has no key, and (as
+   * `CropHandles.test.tsx` already held) it closes whatever keyboard gesture
+   * is open regardless of which key is still down.
+   */
+  onBlur: () => void;
   message: string;
 }
 
@@ -270,7 +285,27 @@ export function useCropHandleGesture({
     [clip, source, onLeave, gestureHistory, write, announce]
   );
 
-  const onKeyUp = useCallback(() => gestureHistory.end(), [gestureHistory]);
+  const onKeyUp = useCallback(
+    (e: ReactKeyboardEvent<HTMLButtonElement>) => {
+      // A mouse drag already owns this gesture; its own `mouseup` is what
+      // ends it, so a key released mid-drag — Shift, most often, releasing
+      // the aspect lock without releasing the mouse — must leave it open.
+      if (endDragRef.current) return;
+      // Selective the way `onKeyDown` already is: only a key that actually
+      // nudges a handle closes the keyboard gesture it opened. Any other
+      // keyup reaching a focused handle must not end one.
+      if (!ARROW_STEPS[e.key]) return;
+      gestureHistory.end();
+    },
+    [gestureHistory]
+  );
 
-  return { onMouseDown, onKeyDown, onKeyUp, message };
+  const onBlur = useCallback(() => {
+    // Same guard as `onKeyUp`'s first: a focus change mid-drag — a window
+    // switch, say — must not end a gesture the mouse is still driving either.
+    if (endDragRef.current) return;
+    gestureHistory.end();
+  }, [gestureHistory]);
+
+  return { onMouseDown, onKeyDown, onKeyUp, onBlur, message };
 }

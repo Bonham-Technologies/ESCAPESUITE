@@ -1457,6 +1457,23 @@ is never what leaves crop mode — and the same Escape leaves it from a focused
 handle itself (below), rather than falling through to that cascade, because
 `CropHandles`' own `onKeyDown` claims it first.
 
+**That branch has to apply the same "inert unless it names the selection" rule
+the other readers do, not just state it** (ESCSUITE-170). It used to gate on
+the raw `cropClipId` alone — `if (cropClipId) { … return; }` — so an inert
+latch (crop mode opened on clip A, the selection since moved to clip B) made
+Escape claim the key for a mode that was already off on screen, clear nothing,
+and `return` before the in/out points were ever reached: the symptom was
+"Escape does nothing the first time, and needs pressing twice, with no
+announcement either time." The branch now reads `cropClipId &&
+cropClipId === selectedClipId` — `selectedClipId` was already a dep of this
+hook — so an inert latch takes neither side of this `if` and the cascade falls
+through to the in/out points exactly as if no latch were set at all. The latch
+itself is still not cleared by this fall-through (clearing it would mean
+`setSelectedClipId` writing into the crop slice, the cross-slice write
+ESCSUITE-157 deliberately left alone), so re-selecting clip A still re-enters
+crop mode on its own — a live wart, not this ticket's to close — but Escape no
+longer swallows a keypress for a mode that is already inert.
+
 While crop mode is open, `PreviewPlayer` renders `components/Preview/CropHandles.tsx`
 over the canvas instead of the ordinary resize handles — a DOM layer, not canvas
 chrome, because a handle has to be focusable and independently `disabled` for a
@@ -1557,6 +1574,36 @@ mouse it locks the kept region's aspect for the drag (`cropRegionAspect`,
 above); on the keyboard it is `CROP_NUDGE.coarse` — ten source pixels instead
 of one — and does nothing to the aspect, because a single-inset nudge has no
 shape to hold.
+
+**A keyup or blur ends only the gesture it actually belongs to** (ESCSUITE-169).
+`onMouseDown` focuses the handle explicitly — so the arrow keys have something
+to nudge once the mouse lets go — which means Shift's own keyup, released to
+drop the aspect lock without releasing the mouse, reaches the handle mid-drag
+too. `onKeyUp` used to be `gestureHistory.end()` for any key at all, so
+releasing Shift (or any other key) mid-drag closed the gesture the mouse was
+still driving: every write the throttler made afterwards then pushed its own
+undo entry, five moves becoming five entries for one drag. The fix is two
+guards. `onKeyUp` is as selective as `onKeyDown` already is — it ends the
+gesture only for a key `ARROW_STEPS` recognises, so Shift's keyup (and any
+other key's) does nothing. And both `onKeyUp` and `onBlur` are ignored while a
+mouse drag is open (`endDragRef.current` non-null, the same ref the drag's own
+teardown uses) — the drag's own `mouseup` is what ends it, so a key released,
+or focus lost to a window switch, mid-drag must not end it early. Neither
+guard touches a **keyboard** nudge's own gesture: outside a mouse drag, the
+arrow key that opened it still ends it on keyup, and blur still closes a held
+key's gesture exactly as before (`CropHandles.test.tsx`'s own case for that).
+`ClipEditor/useSliderGesture.ts` carried the identical shape in the other
+direction — `onKeyDown` called `begin()` for ANY non-repeat key, Shift
+included, and `onKeyUp` `end()`d for any key, so a Shift tap mid-**pointer**-drag
+of an inspector slider split that drag too — and took the same two guards:
+`onKeyDown`/`onKeyUp` act only on a key the range input itself responds to
+(`RANGE_KEYS`: the arrows, Home, End, Page Up/Down), and both are ignored while
+`pointerDownRef.current` is true. Its `onBlur` keeps neither guard, same as
+crop's reasoning but the opposite conclusion: a slider's pointer drag has no
+document-level listener standing by to supply the eventual release, so blur
+*is* the substitute for a `pointerup` that may never come, and must end the
+gesture regardless of key or pointer state — `ClipEditor.sliderHistory.test.tsx`'s
+"ends a gesture on blur as well as on release" is the case that pins it.
 
 **Playback takes the handles away and gives them back.** `cropTarget`'s
 `isPlaying` condition makes the chrome stop and the eight handles **unmount** the
