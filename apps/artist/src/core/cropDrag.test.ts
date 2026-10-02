@@ -128,6 +128,20 @@ describe('cropForHandleMove', () => {
     })
   })
 
+  it('refuses to move at all on a source so narrow the opposite inset alone already leaves less than a pixel', () => {
+    // `axisLimit(w) = 1 - 1/w` falls below 0.9 for any source narrower than 10px
+    // — on a 5px-wide source that is 0.8 — so an opposite inset of 0.9 (itself
+    // ordinary; `clampInset` bounds each inset at MAX_CROP_INSET independent of
+    // the source's own size) drives `axisLimit(5) - 0.9 = -0.1` negative. The
+    // inner `Math.max(0, …)` is what stops that from going on to clamp the
+    // moved inset against a negative ceiling: the handle cannot move it at all,
+    // the floor holds, and the pinned opposite edge still does not move.
+    const narrow = { width: 5, height: 5 }
+    const start = crop({ right: 0.9 })
+
+    expect(cropForHandleMove(start, 'w', { x: 100, y: 0 }, narrow)).toEqual(start)
+  })
+
   describe('with Shift holding the aspect', () => {
     it('derives the height from the width for a side handle, about the region\'s centre', () => {
       // 50% off the right leaves 200x200 at (0,0); held at 2:1 that is 200x100,
