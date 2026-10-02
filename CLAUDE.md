@@ -1901,6 +1901,27 @@ bundle suite's own rejections and acceptances (the stricter bundle-side validati
 introduced had no bundle-side test until then). **No floor crossed**; the kit's floors stay
 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-159 (a WebM export that fails mid-way
+cancels its muxer — only while mediabunny's own `state` is `'started'`, and only after its encoders
+are closed, so no queued chunk reaches a cancelled output; a throw after the success-path release
+no longer releases the export's media twice, in either element exporter; the seek wait clears its
+timeout on `seeked` and drops its listener on timeout): 99.80 / 99.23 / 95.53 / 99.67,
+byte-identical on every percentage to the 99.80 / 99.23 / 95.53 / 99.67 the commit this branch lands
+on (`7dc92b7`) measures. Measured in one sitting, the base gives 4,729 / 4,950 branches and this
+branch 4,733 / 4,954: four new branches, four covered, the same 221 uncovered as before (lines
+7,498 / 7,513 → 7,516 / 7,531, statements 8,435 / 8,500 → 8,453 / 8,518, functions 1,821 / 1,827 →
+1,824 / 1,830, every denominator growing by exactly what the numerator did; the same 15 / 65 / 6
+uncovered). The four are `core/elementFrames.ts`'s run-once `createElementSourceRelease` (released
+already or not — both exporters call it from the success path and the catch) and
+`core/exportWebM.ts`'s `muxerOutput?.state === 'started'` guard (a mid-loop throw cancels once; a
+throw after `finalize()` resolved, or a rejected `finalize()` that mediabunny has already moved to
+`'canceled'`, cancels nothing), each reached from both sides by the red cases — the queued-chunk
+`lateAdds` case that the review's MAJOR 1 turned up, the rejecting `cancel()` whose warning is
+asserted, the throwing `complete` callback in both exporters, and the no-bytes refusal. The seek
+wait's cancellation adds statements and functions and no decision, like the readiness wait's did in
+ESCSUITE-156. The four export and preview ceiling files and every rerender pin are byte-identical.
+**No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
