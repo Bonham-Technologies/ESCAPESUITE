@@ -1,6 +1,6 @@
 // What an edit burst costs the global keyboard cascade.
 //
-// `useAppKeyboardShortcuts` closes over 39 values (ESCSUITE-157 added
+// `useAppKeyboardShortcuts` closes over 40 values (ESCSUITE-157 added
 // `cropClipId` and `setCropClipId`) and lists all of them in its dependency
 // array, so every change to one of them tears the `keydown` listener off
 // `window` and binds a fresh closure. `apps/artist/CLAUDE.md` records that

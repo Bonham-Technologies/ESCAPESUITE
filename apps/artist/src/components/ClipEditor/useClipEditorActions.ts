@@ -128,6 +128,8 @@ export interface ClipEditorActions {
   handleCropChange: (crop: ClipCrop) => void;
   /** Whether the preview's crop mode is open on the selected clip (ESCSUITE-157). */
   cropOnCanvas: boolean;
+  /** The "Crop on canvas" button's handler. Only valid while a clip is selected — it reads
+   * `selectedClip.id` unguarded, the same as `handleResetToDefaults` below. */
   handleCropOnCanvasToggle: () => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
@@ -341,9 +343,12 @@ export function useClipEditorActions(): ClipEditorActions {
   // without anything having to clear it.
   const cropOnCanvas = selectedClip != null && cropClipId === selectedClip.id;
 
+  // No `!selectedClip` guard: `ClipEditor`'s own early return means `CropSection`
+  // — and so the button that calls this — is never rendered without a selected
+  // clip, so the guard would be an operand no caller can reach. Deleted rather
+  // than tested, per the ESCSUITE-110/118 precedent for exactly that situation.
   const handleCropOnCanvasToggle = useCallback(() => {
-    if (!selectedClip) return;
-    setCropClipId(cropOnCanvas ? null : selectedClip.id);
+    setCropClipId(cropOnCanvas ? null : selectedClip!.id);
   }, [selectedClip, cropOnCanvas, setCropClipId]);
 
   const handleBlurChange = useCallback(
