@@ -292,6 +292,69 @@ describe('KeyframePanel', () => {
     })
   })
 
+  // Review round 1, MAJOR 1 + MINOR 6: every property row's diamond drag
+  // shares ONE live region, owned by the panel, so this is where the
+  // re-read alternation that makes a second identical refusal audible is
+  // actually exercised end to end — `useKeyframeDrag.test.ts` only proves
+  // the hook forwards the same raw text twice; it has no live region of its
+  // own to alternate.
+  describe('a diamond row drag refuses an occupied drop (ESCSUITE-167 / M6)', () => {
+    const diamondsIn = (label: string) =>
+      Array.from(trackFor(label).querySelectorAll<HTMLElement>(`.${trackStyles.diamond}`))
+
+    beforeEach(() => {
+      openPanelWithClip()
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
+    })
+
+    it('announces the same refusal twice with two different live-region strings', () => {
+      render(<KeyframePanel />)
+      measureTrackArea('Opacity')
+      // Keyframes sit at 0, 1 and 2 seconds; drag the one at 1s onto the one
+      // at 2s (200px and 300px into a 430px/4.3s track, left offset 100).
+      const custom = diamondsIn('Opacity')[1]
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 })
+      fireEvent.mouseUp(window)
+      const first = screen.getByRole('status').textContent
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 })
+      fireEvent.mouseUp(window)
+      const second = screen.getByRole('status').textContent
+
+      // Two different strings (the mark alternates) that read the same once
+      // it is stripped off.
+      expect(second).not.toBe(first)
+      expect((second ?? '').replace(/\u200B$/, '')).toBe((first ?? '').replace(/\u200B$/, ''))
+      expect((first ?? '').replace(/\u200B$/, '')).toBe(
+        'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
+      )
+      // Neither refusal moved the keyframe.
+      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 1, 2])
+    })
+
+    it('clears the live region once a later drop in the same row lands', () => {
+      render(<KeyframePanel />)
+      measureTrackArea('Opacity')
+      const custom = diamondsIn('Opacity')[1]
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 }) // exactly 2s — refused
+      fireEvent.mouseUp(window)
+      expect(screen.getByRole('status').textContent).not.toBe('')
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 400 }) // 3s — lands
+      fireEvent.mouseUp(window)
+
+      expect(screen.getByRole('status')).toHaveTextContent('')
+      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 2, 3])
+    })
+  })
+
   describe('editing keyframes in the graph', () => {
     beforeEach(() => {
       openPanelWithClip()

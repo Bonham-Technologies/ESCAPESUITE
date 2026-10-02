@@ -25,6 +25,7 @@ function renderTrack(
   const onSelect = vi.fn()
   const onKeyframeMoved = vi.fn()
   const onAddKeyframe = vi.fn()
+  const onAnnounce = vi.fn()
   const view = render(
     <KeyframeTrack
       property={property}
@@ -41,9 +42,10 @@ function renderTrack(
       onSelect={onSelect}
       onKeyframeMoved={onKeyframeMoved}
       onAddKeyframe={onAddKeyframe}
+      onAnnounce={onAnnounce}
     />
   )
-  return { ...view, onSelect, onKeyframeMoved, onAddKeyframe }
+  return { ...view, onSelect, onKeyframeMoved, onAddKeyframe, onAnnounce }
 }
 
 /** jsdom measures nothing, so the track needs a box for time↔pixel maths. */
@@ -240,9 +242,14 @@ describe('KeyframeTrack', () => {
       expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(2.02, 6)
     })
 
+    // Review round 1, MINOR 6: the row no longer renders its own live region
+    // — `KeyframePanel` owns the one shared region every row's drag reports
+    // into (KeyframePanel.test.tsx pins the shared alternation) — so this
+    // checks the raw text the row hands up through `onAnnounce` instead of
+    // querying a `role="status"` here.
     it('refuses a drop that lands exactly on another keyframe, and says why', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
-      const { container, onKeyframeMoved } = renderTrack('opacity', { playheadTime: 0 })
+      const { container, onKeyframeMoved, onAnnounce } = renderTrack('opacity', { playheadTime: 0 })
       measureTrack(container)
       // keyframes now sit at 0, 1 and 2 seconds; drag the one at 1s exactly
       // onto the one at 2s.
@@ -253,7 +260,7 @@ describe('KeyframeTrack', () => {
       fireEvent.mouseUp(window)
 
       expect(onKeyframeMoved).not.toHaveBeenCalled()
-      expect(screen.getByRole('status')).toHaveTextContent(
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith(
         'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
       )
     })

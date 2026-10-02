@@ -57,8 +57,9 @@ describe('useKeyframeDrag listener lifecycle (ESCSUITE-167 / m4)', () => {
 
   it('binds exactly one window listener pair per gesture, however many moves it makes', () => {
     const onKeyframeMoved = vi.fn()
+    const onAnnounce = vi.fn()
     const { result } = renderHook(() =>
-      useKeyframeDrag(CLIP_DURATION, -1, [], onKeyframeMoved)
+      useKeyframeDrag(CLIP_DURATION, -1, [], onKeyframeMoved, onAnnounce)
     )
     result.current.trackRef.current = trackElement()
 
@@ -92,5 +93,52 @@ describe('useKeyframeDrag listener lifecycle (ESCSUITE-167 / m4)', () => {
     // live position. Before the fix, 10 moves produced 22 of each (one extra
     // pair per move).
     expect({ adds, removes }).toEqual({ adds: 2, removes: 2 })
+  })
+
+  // Review round 1, MINOR 2: `occupiedTimesRef` used to be recomputed (and
+  // reallocated) on every pointer move inside `findSnapTime`, plus once more
+  // in `handleMouseUp` — a per-frame array the keyframe times cannot
+  // actually justify, since nothing writes to the store between mousedown
+  // and mouseup. It is now a `.filter()` taken once, on `startDrag`, into a
+  // ref read by both. Spying on the exact array instance the hook is handed
+  // (rather than `Array.prototype`) is what lets this count only the calls
+  // this hook makes on its own input, the same reason
+  // `components/Timeline/timelineGestures.perf.test.ts` wraps the element
+  // instance after `setRect` rather than spying on the prototype.
+  it('computes the occupied-times array once per gesture, however many moves it makes', () => {
+    const onKeyframeMoved = vi.fn()
+    const onAnnounce = vi.fn()
+    const allKeyframeTimes = [1, 5, 9]
+    const filterSpy = vi.spyOn(allKeyframeTimes, 'filter')
+
+    const { result } = renderHook(() =>
+      useKeyframeDrag(CLIP_DURATION, -1, allKeyframeTimes, onKeyframeMoved, onAnnounce)
+    )
+    result.current.trackRef.current = trackElement()
+
+    act(() => {
+      result.current.startDrag('opacity', keyframe(2), {
+        preventDefault: () => {},
+        stopPropagation: () => {},
+      } as unknown as React.MouseEvent)
+    })
+
+    for (let i = 0; i < MOVES; i++) {
+      act(() => {
+        window.dispatchEvent(new MouseEvent('mousemove', { clientX: TRACK_LEFT + i, clientY: 10 }))
+      })
+    }
+
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mouseup'))
+    })
+
+    // Measured 2026-10-02, after the fix: exactly one `.filter()` call for
+    // the whole gesture. Before this fix round, it was called once per move
+    // inside `findSnapTime` plus once more in `handleMouseUp` — 11 times
+    // over 10 moves — because the occupied list was recomputed from
+    // `dragState.originalTime` on every call instead of cached at the
+    // gesture's start.
+    expect(filterSpy).toHaveBeenCalledTimes(1)
   })
 })

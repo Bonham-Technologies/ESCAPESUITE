@@ -42,16 +42,18 @@ function releaseMouse() {
 
 function render(options: { playheadTime?: number; allKeyframeTimes?: number[] } = {}) {
   const onKeyframeMoved = vi.fn()
+  const onAnnounce = vi.fn()
   const hook = renderHook(() =>
     useKeyframeDrag(
       CLIP_DURATION,
       options.playheadTime ?? -1,
       options.allKeyframeTimes ?? [],
-      onKeyframeMoved
+      onKeyframeMoved,
+      onAnnounce
     )
   )
   hook.result.current.trackRef.current = trackElement()
-  return { ...hook, onKeyframeMoved }
+  return { ...hook, onKeyframeMoved, onAnnounce }
 }
 
 describe('useKeyframeDrag', () => {
@@ -122,8 +124,9 @@ describe('useKeyframeDrag', () => {
 
   it('does nothing while the track element is not mounted', () => {
     const onKeyframeMoved = vi.fn()
+    const onAnnounce = vi.fn()
     const { result } = renderHook(() =>
-      useKeyframeDrag(CLIP_DURATION, -1, [], onKeyframeMoved)
+      useKeyframeDrag(CLIP_DURATION, -1, [], onKeyframeMoved, onAnnounce)
     )
 
     act(() => result.current.startDrag('opacity', keyframe(2), mouseDownEvent()))
@@ -165,16 +168,25 @@ describe('useKeyframeDrag', () => {
       expect(result.current.dragState.currentTime).toBe(5)
     })
 
-    it('never snaps a keyframe back to where it started', () => {
-      const { result } = render({ allKeyframeTimes: [5.04] })
+    // Review round 1, MINOR 4: a keyframe sitting on the playhead DOES snap
+    // back to where it started — `occupiedTimesRef` excludes `originalTime`
+    // itself, so `playheadOccupied` is false and the ordinary playhead-snap
+    // branch fires. Harmless (currentTime === originalTime means no move and
+    // no refusal either), but it is the real behaviour; the prior version of
+    // this test used `allKeyframeTimes` with no playhead at all and so passed
+    // for an unrelated reason (nothing snaps once keyframe times are not
+    // candidates) rather than proving anything about the keyframe being
+    // dragged.
+    it('still snaps to the playhead when a keyframe sits exactly on it', () => {
+      const { result } = render({ playheadTime: 5.04, allKeyframeTimes: [5.04] })
 
       act(() => result.current.startDrag('opacity', keyframe(5.04), mouseDownEvent()))
       moveMouse(TRACK_LEFT + 250)
 
-      expect(result.current.dragState.currentTime).toBe(5)
+      expect(result.current.dragState.currentTime).toBe(5.04)
     })
 
-    it('prefers the playhead over a nearby keyframe', () => {
+    it('snaps to the playhead even with a keyframe nearby', () => {
       const { result } = render({ playheadTime: 5.02, allKeyframeTimes: [5.04] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
@@ -198,16 +210,52 @@ describe('useKeyframeDrag', () => {
 
   describe('refusing an occupied drop (ESCSUITE-167 / M6)', () => {
     it('refuses a drop that would land on another keyframe, and says why', () => {
-      const { result, onKeyframeMoved } = render({ allKeyframeTimes: [1, 5, 9] })
+      const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
       moveMouse(TRACK_LEFT + 250) // exactly 5s, occupied by the keyframe at 5
       releaseMouse()
 
       expect(onKeyframeMoved).not.toHaveBeenCalled()
-      expect(result.current.announcement).toBe(
+      // The hook forwards the raw text — no re-read mark. `KeyframePanel`,
+      // which owns the live region this is ultimately displayed in, is the
+      // one that alternates it (review round 1, MAJOR 1 + MINOR 6); that
+      // alternation is pinned at the panel level in KeyframePanel.test.tsx.
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith(
         'Opacity keyframe not moved: another keyframe is at 5.00 seconds'
       )
+    })
+
+    it('forwards the identical text for two consecutive refusals — this hook does no deduplication of its own', () => {
+      const { result, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250)
+      releaseMouse()
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250)
+      releaseMouse()
+
+      expect(onAnnounce).toHaveBeenCalledTimes(2)
+      expect(onAnnounce.mock.calls[0][0]).toBe(onAnnounce.mock.calls[1][0])
+    })
+
+    it('clears a stale refusal once a later drop in the same row lands', () => {
+      const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250) // exactly 5s — refused
+      releaseMouse()
+      expect(onAnnounce).toHaveBeenLastCalledWith(
+        'Opacity keyframe not moved: another keyframe is at 5.00 seconds'
+      )
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 300) // 6s — nowhere near a keyframe, lands
+      releaseMouse()
+
+      expect(onKeyframeMoved).toHaveBeenCalledExactlyOnceWith('opacity', 0, 6)
+      expect(onAnnounce).toHaveBeenLastCalledWith('')
     })
 
     it('leaves the keyframe at its original time when the drop is refused', () => {
