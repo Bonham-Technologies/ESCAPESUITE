@@ -615,16 +615,20 @@ describe('ExportDialog', () => {
       fireEvent.click(advancedExport())
 
       await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      // `fps` rides along on every advanced export and every saved setting
+      // since ESCSUITE-34 — the two video formats ignore it, GIF reads it.
       expect(webmArgs()[2]).toEqual({
         format: 'webm',
         quality: 'high',
         resolution: '720p',
+        fps: 15,
         timeRange: undefined,
       })
       expect(mockSetSetting).toHaveBeenCalledWith('lastExportSettings', {
         format: 'webm',
         quality: 'high',
         resolution: '720p',
+        fps: 15,
       })
     })
 
@@ -1138,6 +1142,7 @@ describe('ExportDialog', () => {
           format: 'webm',
           quality: 'medium',
           resolution: 'project',
+          fps: 15,
           timeRange: undefined,
         })
       } finally {
@@ -1211,6 +1216,7 @@ describe('ExportDialog', () => {
           format: 'mp4',
           quality: 'medium',
           resolution: 'project',
+          fps: 15,
           timeRange: undefined,
         })
       } finally {

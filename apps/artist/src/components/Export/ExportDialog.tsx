@@ -4,19 +4,31 @@ import { useEditorStore } from '../../store/projectStore';
 import {
   exportToWebM,
   exportToMP4,
+  exportToGIF,
+  estimateGifBytes,
   isMP4ExportSupported,
   isWebMExportSupported,
   ExportAbortedError,
   ExportError,
   EXPORT_NO_WEBCODECS_REASON,
   WEBM_NO_CODEC_REASON,
+  GIF_ALWAYS_AVAILABLE_NOTE,
 } from '../../core/exporter';
-import { getResolution } from '../../core/exportTypes';
+import {
+  getResolution,
+  gifFrameRate,
+  resolutionForFormat,
+  DEFAULT_GIF_FPS,
+  GIF_FPS_OPTIONS,
+  GIF_RESOLUTIONS,
+  GIF_LONG_RANGE_SECONDS,
+  GIF_LONG_RANGE_WARNING,
+} from '../../core/exportTypes';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import type { ExportOptions, ExportProgress } from '../../store/types';
-import { formatTime } from '../../utils/timeUtils';
+import { formatTime, formatFileSize } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
 
 /**
@@ -35,6 +47,14 @@ function resolutionOptionLabel(
   return `${label} — ${width}×${height}`;
 }
 
+/** The resolution presets a format offers, in the order the dropdown lists them. */
+const VIDEO_RESOLUTIONS: readonly ExportOptions['resolution'][] = ['project', '1080p', '720p', '480p'];
+
+/** A preset's dropdown label — `'project'` reads as "Project", the rest as themselves. */
+function resolutionPresetLabel(preset: ExportOptions['resolution']): string {
+  return preset === 'project' ? 'Project' : preset;
+}
+
 interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -45,6 +65,8 @@ interface LastExportSettings {
   format: ExportOptions['format'];
   quality: ExportOptions['quality'];
   resolution: ExportOptions['resolution'];
+  /** GIF only, and absent from every setting saved before ESCSUITE-34. */
+  fps?: ExportOptions['fps'];
 }
 
 export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: ExportDialogProps) {
@@ -65,6 +87,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     format: 'webm',
     quality: 'medium',
     resolution: 'project',
+    fps: DEFAULT_GIF_FPS,
   });
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [progress, setProgress] = useState<ExportProgress | null>(null);
@@ -134,13 +157,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     };
   }, [isOpen, projectResolution.width, projectResolution.height, advancedOptions.resolution]);
 
-  // Neither format can be exported — no WebCodecs in this browser at all
-  // (Firefox/Safari before their recent VideoEncoder support, or any browser
-  // with it disabled). Both download buttons are disabled below, with this
-  // sentence shown in the main body rather than behind the collapsed
+  // Neither *video* format can be exported — no WebCodecs in this browser at
+  // all (Firefox/Safari before their recent VideoEncoder support, or any
+  // browser with it disabled). Both primary buttons are disabled below, with
+  // this sentence shown in the main body rather than behind the collapsed
   // Advanced panel — the ESCSUITE-22 fix for the dialog offering an enabled
   // "Download WebM" button that silently failed as soon as it was clicked.
-  const neitherFormatSupported = !mp4Supported && !webmSupported;
+  // Since ESCSUITE-34 it is no longer a dead end: GIF needs no WebCodecs, so
+  // the alert carries GIF_ALWAYS_AVAILABLE_NOTE beside it and the GIF radio
+  // stays enabled. Hence the rename — "neither format" stopped being true the
+  // moment a format that needs no WebCodecs existed.
+  const noVideoFormatSupported = !mp4Supported && !webmSupported;
 
   // Why the WebM-flavoured buttons (primary + advanced) are disabled, or
   // null when WebM is offered. Mirrors `separateTracksBlockedReason` in
@@ -148,7 +175,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // specifically needs — VP9/VP8 — distinct from "no WebCodecs at all".
   const webmBlockedReason = webmSupported
     ? null
-    : neitherFormatSupported
+    : noVideoFormatSupported
       ? EXPORT_NO_WEBCODECS_REASON
       : WEBM_NO_CODEC_REASON;
 
@@ -161,9 +188,36 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // in a now-MP4-less browser must still export, as WebM. Gating on this
   // effective format rather than the selected one keeps that export reachable
   // while still refusing to run an export that would fail outright.
-  const effectiveAdvancedFormat: 'webm' | 'mp4' =
-    advancedOptions.format === 'mp4' && mp4Supported ? 'mp4' : 'webm';
+  // GIF short-circuits the MP4 fallback entirely: it is always available
+  // (`gifenc` is pure JavaScript), so nothing can block it (ESCSUITE-34).
+  const effectiveAdvancedFormat: ExportOptions['format'] =
+    advancedOptions.format === 'gif'
+      ? 'gif'
+      : advancedOptions.format === 'mp4' && mp4Supported
+        ? 'mp4'
+        : 'webm';
   const advancedBlockedReason = effectiveAdvancedFormat === 'webm' ? webmBlockedReason : null;
+
+  // What a GIF export would actually produce, for the estimate and the warning.
+  // Computed unconditionally (it is arithmetic over values already in scope) and
+  // rendered only when GIF is the selected format.
+  const gifFps = gifFrameRate(advancedOptions.fps);
+  const timelineDuration = clips.reduce(
+    (max, clip) => Math.max(max, clip.timelinePosition + clip.duration),
+    0
+  );
+  // The length that will be encoded: the in/out section when there is one, the
+  // whole timeline otherwise. The warning is about the output, not the project.
+  const gifSeconds = timeRange ? timeRange.end - timeRange.start : timelineDuration;
+  // Frames, never seconds, derived from the rate — the same expression
+  // `exportToGIF` itself uses, so the estimate counts what will be encoded.
+  const gifFrames = Math.ceil(gifSeconds * gifFps);
+  const gifOutput = getResolution(
+    advancedOptions.resolution,
+    projectResolution.width,
+    projectResolution.height,
+    projectResolution
+  );
 
   // Load last export settings on dialog open
   useEffect(() => {
@@ -174,6 +228,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             format: saved.format,
             quality: saved.quality,
             resolution: saved.resolution,
+            // Through `gifFrameRate`, so a setting saved before ESCSUITE-34
+            // (no `fps` at all) or one carrying a rate this build no longer
+            // offers lands on the default rather than on `undefined`.
+            fps: gifFrameRate(saved.fps),
           });
           setShowAdvanced(true);
         }
@@ -181,7 +239,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     }
   }, [isOpen]);
 
-  const handleExport = useCallback(async (formatOverride?: 'webm' | 'mp4', useAdvanced?: boolean, exportFullVideo?: boolean) => {
+  const handleExport = useCallback(async (formatOverride?: ExportOptions['format'], useAdvanced?: boolean, exportFullVideo?: boolean) => {
     if (clips.length === 0) {
       setError('No clips to export');
       return;
@@ -212,7 +270,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
 
     const requestedFormat = formatOverride || exportOptions.format;
-    const format = requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
+    // GIF needs no WebCodecs, so it never falls back; MP4 still does.
+    const format: ExportOptions['format'] =
+      requestedFormat === 'gif' ? 'gif' : requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
     analytics.exportStarted(format);
 
     // Save advanced settings if using advanced options
@@ -221,6 +281,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         format: advancedOptions.format,
         quality: advancedOptions.quality,
         resolution: advancedOptions.resolution,
+        fps: gifFrameRate(advancedOptions.fps),
       });
     }
 
@@ -232,7 +293,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       let blob: Blob;
       let extension: string;
 
-      if (format === 'mp4') {
+      if (format === 'gif') {
+        blob = await exportToGIF(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        extension = 'gif';
+      } else if (format === 'mp4') {
         blob = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'mp4';
       } else {
@@ -275,7 +339,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         return Math.max(max, clipEnd);
       }, 0);
 
-      analytics.exportCompleted(extension as 'webm' | 'mp4', totalDuration);
+      analytics.exportCompleted(extension as 'webm' | 'mp4' | 'gif', totalDuration);
 
       if (isCurrentRun()) {
         setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
@@ -301,7 +365,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
       console.error('Export failed:', err);
       if (err instanceof ExportError) {
-        console.debug(`[${format === 'mp4' ? 'MP4' : 'WebM'} Export] Diagnostic log:`, err.exportLog);
+        console.debug(`[${format === 'gif' ? 'GIF' : format === 'mp4' ? 'MP4' : 'WebM'} Export] Diagnostic log:`, err.exportLog);
       }
 
       // Track the failure
@@ -317,8 +381,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
           // problem (the VP9/VP8 probe found nothing, or the encoder reported
           // one mid-export) rather than a generic crash, so — when MP4 is
           // actually available — offer it as a one-click alternative here,
-          // the same thing MP4's own failure screen offers for WebM.
-          setOfferMp4Fallback(err instanceof ExportError && mp4Supported);
+          // the same thing MP4's own failure screen offers for WebM. A GIF
+          // failure is not a codec problem another codec would solve, so it is
+          // offered nothing further (ESCSUITE-34).
+          setOfferMp4Fallback(format === 'webm' && err instanceof ExportError && mp4Supported);
         }
         setProgress(null);
       }
@@ -423,6 +489,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 />
               </div>
               <span className={styles.progressPercent}>{Math.round(progress.progress)}%</span>
+              {/* GIF only: the exporter projects the finished size from the
+                  bytes it has actually written, which is the one number a user
+                  wants while a GIF encodes. Absent on every WebM and MP4
+                  report, so this row simply does not exist for them. */}
+              {progress.estimatedBytes !== undefined && (
+                <span className={styles.summary} role="status">
+                  Estimated size: ~{formatFileSize(progress.estimatedBytes)}
+                </span>
+              )}
             </div>
           ) : (
             <>
@@ -431,14 +506,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   dialog's only other "not supported" notice, MP4's, lived
                   there, which is exactly what let an unusable WebM button
                   through unremarked — ESCSUITE-22). */}
-              {neitherFormatSupported && (
+              {noVideoFormatSupported && (
                 <div className={styles.error} role="alert">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" />
                     <line x1="15" y1="9" x2="9" y2="15" />
                     <line x1="9" y1="9" x2="15" y2="15" />
                   </svg>
-                  {EXPORT_NO_WEBCODECS_REASON}
+                  {/* Since ESCSUITE-34 this is no longer a dead end: the second
+                      sentence names the one export that needs no WebCodecs. */}
+                  {EXPORT_NO_WEBCODECS_REASON} {GIF_ALWAYS_AVAILABLE_NOTE}
                 </div>
               )}
 
@@ -502,7 +579,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   own reason already lives in the Advanced panel below; this
                   is the WebM-side mirror, said where the primary button
                   actually is. */}
-              {!neitherFormatSupported && webmBlockedReason && (
+              {!noVideoFormatSupported && webmBlockedReason && (
                 <div className={styles.summary} role="status">
                   {webmBlockedReason} Choose MP4 under Advanced options to export anyway.
                 </div>
@@ -515,10 +592,19 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   (ESCSUITE-153 / ESCSUITE-29 Mechanism 2: a worker that fails to
                   start, missing from a standalone download or blocked by a CSP, is
                   the case this hedge is for). The progress line below says so for
-                  that run specifically, once the exporter knows. */}
-              {mp4Supported && (
+                  that run specifically, once the exporter knows. Hidden when GIF
+                  is selected: it is about the two video formats' decoders, and
+                  GIF has none (ESCSUITE-34). */}
+              {mp4Supported && advancedOptions.format !== 'gif' && (
                 <div className={styles.summary}>
                   MP4 exports keep encoding in a background tab when the decoder is available. WebM needs this tab visible.
+                </div>
+              )}
+
+              {/* The two things a GIF surprises people with, said once. */}
+              {advancedOptions.format === 'gif' && (
+                <div className={styles.summary}>
+                  GIF export needs this tab visible and has no sound.
                 </div>
               )}
 
@@ -553,7 +639,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                             name="format"
                             value="webm"
                             checked={advancedOptions.format === 'webm'}
-                            onChange={() => setAdvancedOptions({ ...advancedOptions, format: 'webm' })}
+                            onChange={() => setAdvancedOptions({
+                              ...advancedOptions,
+                              format: 'webm',
+                              resolution: resolutionForFormat('webm', advancedOptions.resolution),
+                            })}
                             disabled={!webmSupported}
                           />
                           <span>WebM (VP9 + Opus)</span>
@@ -567,13 +657,37 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                             name="format"
                             value="mp4"
                             checked={advancedOptions.format === 'mp4'}
-                            onChange={() => setAdvancedOptions({ ...advancedOptions, format: 'mp4' })}
+                            onChange={() => setAdvancedOptions({
+                              ...advancedOptions,
+                              format: 'mp4',
+                              resolution: resolutionForFormat('mp4', advancedOptions.resolution),
+                            })}
                             disabled={!mp4Supported}
                           />
                           <span>MP4 (H.264 + AAC)</span>
                           <span className={styles.radioHint}>
                             {mp4Supported ? 'Best compatibility' : 'Not supported in this browser'}
                           </span>
+                        </label>
+                        {/* Never disabled: `gifenc` is pure JavaScript, so this is
+                            the one format that works in a browser where both
+                            others are refused. The label and hint deliberately
+                            avoid the words "WebM" and "MP4" — the suite finds the
+                            other two radios by exactly those words. */}
+                        <label className={styles.radio}>
+                          <input
+                            type="radio"
+                            name="format"
+                            value="gif"
+                            checked={advancedOptions.format === 'gif'}
+                            onChange={() => setAdvancedOptions({
+                              ...advancedOptions,
+                              format: 'gif',
+                              resolution: resolutionForFormat('gif', advancedOptions.resolution),
+                            })}
+                          />
+                          <span>GIF (256 colours, no audio)</span>
+                          <span className={styles.radioHint}>No WebCodecs needed</span>
                         </label>
                       </div>
                     </div>
@@ -591,6 +705,31 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       </select>
                     </div>
 
+                    {/* GIF only: 10/15/20, the three rates a format whose size is
+                        roughly linear in its frame count can sensibly offer. */}
+                    {advancedOptions.format === 'gif' && (
+                      <div className={styles.section}>
+                        <label className={styles.label} htmlFor="export-gif-fps">
+                          Frames per second
+                        </label>
+                        <select
+                          id="export-gif-fps"
+                          className={styles.select}
+                          value={gifFps}
+                          onChange={(e) => setAdvancedOptions({
+                            ...advancedOptions,
+                            fps: Number(e.target.value) as ExportOptions['fps'],
+                          })}
+                        >
+                          {GIF_FPS_OPTIONS.map((fps) => (
+                            <option key={fps} value={fps}>
+                              {fps === 10 ? '10 fps (smallest file)' : fps === 20 ? '20 fps (smoothest)' : '15 fps'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
                     <div className={styles.section}>
                       <label className={styles.label}>Resolution</label>
                       <select
@@ -598,12 +737,35 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                         value={advancedOptions.resolution}
                         onChange={(e) => setAdvancedOptions({ ...advancedOptions, resolution: e.target.value as ExportOptions['resolution'] })}
                       >
-                        <option value="project">{resolutionOptionLabel('Project', 'project', projectResolution)}</option>
-                        <option value="1080p">{resolutionOptionLabel('1080p', '1080p', projectResolution)}</option>
-                        <option value="720p">{resolutionOptionLabel('720p', '720p', projectResolution)}</option>
-                        <option value="480p">{resolutionOptionLabel('480p', '480p', projectResolution)}</option>
+                        {/* Per format: GIF offers three fixed heights, the video
+                            formats offer the project's own size and three
+                            presets. Every format radio runs the current
+                            selection through `resolutionForFormat`, so the value
+                            is always one this list contains. */}
+                        {(advancedOptions.format === 'gif' ? GIF_RESOLUTIONS : VIDEO_RESOLUTIONS).map((preset) => (
+                          <option key={preset} value={preset}>
+                            {resolutionOptionLabel(resolutionPresetLabel(preset), preset, projectResolution)}
+                          </option>
+                        ))}
                       </select>
                     </div>
+
+                    {/* The up-front estimate: pixels x frames x ~0.3 bytes, which
+                        the exporter replaces with a real one (bytes written /
+                        frames done x frames total) as soon as it has a frame. */}
+                    {advancedOptions.format === 'gif' && (
+                      <div className={styles.summary} role="status">
+                        Estimated size: ~{formatFileSize(estimateGifBytes(gifOutput.width, gifOutput.height, gifFrames))}
+                        {' '}at {gifOutput.width}×{gifOutput.height}, {gifFrames} frames
+                      </div>
+                    )}
+
+                    {/* A warning, never a refusal. */}
+                    {advancedOptions.format === 'gif' && gifSeconds > GIF_LONG_RANGE_SECONDS && (
+                      <div className={styles.summary} role="status">
+                        {GIF_LONG_RANGE_WARNING}
+                      </div>
+                    )}
 
                     <button
                       className={styles.advancedExportButton}
@@ -611,7 +773,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       disabled={clips.length === 0 || advancedBlockedReason !== null}
                       title={advancedBlockedReason ?? undefined}
                     >
-                      Download {advancedOptions.format === 'mp4' ? 'MP4' : 'WebM'}
+                      Download {advancedOptions.format === 'gif' ? 'GIF' : advancedOptions.format === 'mp4' ? 'MP4' : 'WebM'}
                     </button>
                   </div>
                 )}

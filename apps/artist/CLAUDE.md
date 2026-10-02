@@ -268,7 +268,7 @@ standalone build fetches under whatever `connect-src` it sets itself, so this on
 hosted deployment. See the root `CLAUDE.md`'s "URL params (ARTIST)" bullet.
 
 ```ts
-{ type: 'EXPORT_COMPLETE', payload: { blob: Blob, format: 'mp4' | 'webm', name: string } }
+{ type: 'EXPORT_COMPLETE', payload: { blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string } }
 // name is `${projectName || 'export'}.${format}`
 ```
 
@@ -2546,19 +2546,19 @@ different questions, on purpose, and the dialog reads each one differently:
   and exports fifteen frames anyway). It is a function rather than a `true` so the dialog can
   read all three formats' support the same way, and so a future reason to refuse has one place
   to live. Its companion sentence `GIF_ALWAYS_AVAILABLE_NOTE` exists because "this browser
-  cannot export" stopped being true the moment GIF landed in `core/` — but **the dialog has not
-  changed yet**: the three-support-states table below still describes it exactly as it behaves
-  today, including a no-WebCodecs state that disables every button. Turning that state into "no
-  **video** format is possible, and here is the one that still is" is the dialog's own change, and
-  this section gets rewritten with it.
+  cannot export" stopped being true the moment GIF landed in `core/`, and since ESCSUITE-34
+  **the dialog says so**: `neitherFormatSupported` is now `noVideoFormatSupported` (its old name
+  stopped being true), the `role="alert"` it gates carries `GIF_ALWAYS_AVAILABLE_NOTE` as a second
+  sentence, and the GIF radio is the one control that state leaves enabled. The primary buttons
+  stay disabled — they are WebM's.
 
-The dialog's **three support states**:
+The dialog's **three video-support states** (GIF is in none of them: it is always possible):
 
 | State | Shown |
 |---|---|
-| Both formats possible (the common case) | No notice; both are offered as usual |
+| Both video formats possible (the common case) | No notice; both are offered as usual |
 | Only one is possible | The unsupported one's primary button is `disabled`, with its reason in both a `title` and a visible line in the main body: `WEBM_NO_CODEC_REASON` ("This browser cannot encode WebM video — Chrome or Edge can.") for WebM. MP4's own "Not supported in this browser" is unchanged by this ticket and still lives only in the Advanced panel's radio — the one place MP4 can be chosen at all — so the main body gets *louder* for the WebM-unsupported half and no louder for the MP4-unsupported half (that asymmetry is section ESCSUITE-22's own finding and is still open; see below) |
-| Neither is possible (no WebCodecs at all) | `EXPORT_NO_WEBCODECS_REASON` ("Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.") as a `role="alert"` row in the dialog's **main body**, not behind "Advanced options" — every download button, primary **and** Advanced, stays on screen, `disabled`, the same say-why-do-not-hide shape ESCAPECRAFT's MP4/M4A buttons and `separateTracksBlockedReason` use (`apps/craft/CLAUDE.md`'s "Download Formats") |
+| Neither video format is possible (no WebCodecs at all) | `EXPORT_NO_WEBCODECS_REASON` ("Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.") **followed by `GIF_ALWAYS_AVAILABLE_NOTE`** ("GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.") as one `role="alert"` row in the dialog's **main body**, not behind "Advanced options" — every download button, primary **and** Advanced, stays on screen, `disabled`, the same say-why-do-not-hide shape ESCAPECRAFT's MP4/M4A buttons and `separateTracksBlockedReason` use (`apps/craft/CLAUDE.md`'s "Download Formats"). Both video radios are `disabled`; the **GIF radio is not**, and choosing it enables an Advanced "Download GIF" button with no `title` — this is the one state where the dialog is still useful, and ESCSUITE-34 is why it is no longer a dead end |
 
 Before ESCSUITE-22, the dialog's only "not supported" notice was MP4's, and it lived behind the
 collapsed Advanced panel — so a browser with no WebCodecs at all still showed an enabled "Download
@@ -2571,13 +2571,51 @@ file: nothing has gone wrong yet.
 the one selected in the radio** (review round 1, MAJOR 1). `handleExport` already falls back from
 `'mp4'` to `'webm'` whenever MP4 is unsupported — the intentional behaviour behind a restored
 `{format:'mp4'}` setting in a now-MP4-less browser still exporting, as WebM, when the Advanced
-button is clicked — so `effectiveAdvancedFormat` recomputes that same fallback
-(`advancedOptions.format === 'mp4' && mp4Supported ? 'mp4' : 'webm'`) and the button disables
-exactly when *that* format is blocked, with the blocking reason as its `title`. The button's
-*label* still reads the selected format, not the effective one, deliberately: relabelling it would
-read correctly but breaks nothing for the user, since the one existing case where they can diverge
-(a stale `'mp4'` setting with MP4 now unsupported) already explains itself via the one-format
-sentence above the primary section.
+button is clicked — so `effectiveAdvancedFormat` recomputes that same fallback and the button
+disables exactly when *that* format is blocked, with the blocking reason as its `title`. Since
+ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a `'gif'` selection
+is its own effective format, so `advancedBlockedReason` is `null` whenever GIF is chosen and
+nothing can disable that button but an empty timeline. The button's *label* still reads the
+selected format, not the effective one, deliberately: relabelling it would read correctly but
+breaks nothing for the user, since the one existing case where they can diverge (a stale `'mp4'`
+setting with MP4 now unsupported) already explains itself via the one-format sentence above the
+primary section.
+
+**The GIF controls (ESCSUITE-34).** GIF is a third radio under Advanced options, beside MP4 — not
+a fourth primary button: WebM stays the default and GIF is a deliberate choice, like MP4. Four
+things appear only while it is selected, and one disappears:
+
+- **A frame-rate `<select>`** (`id="export-gif-fps"`, label "Frames per second"): `GIF_FPS_OPTIONS`
+  rendered as "10 fps (smallest file)" / "15 fps" / "20 fps (smoothest)", read back through
+  `gifFrameRate`. It is absent for the two video formats, which always encode at 30.
+- **A per-format resolution list.** GIF offers exactly `GIF_RESOLUTIONS` (720p/480p/360p); the
+  video formats offer `VIDEO_RESOLUTIONS` (project/1080p/720p/480p). Every format radio's
+  `onChange` runs the current selection through `resolutionForFormat`, so a 1080p selection becomes
+  480p on the way *into* GIF and a 360p selection becomes 480p on the way *out* — the user never
+  sees a `<select>` whose value is not in its own list.
+- **Two size estimates, at the two moments there is something to say.** Before the export,
+  `estimateGifBytes(gifOutput.width, gifOutput.height, gifFrames)` beside the output dimensions and
+  the frame count, where `gifFrames` is `Math.ceil(gifSeconds × gifFps)` — the same expression
+  `exportToGIF` itself uses, derived from frames and never from seconds. During the export,
+  `progress.estimatedBytes`, gated on `!== undefined` because the exporter sets it only from inside
+  the frame loop, so the up-front heuristic is what shows until the first frame lands. Both render
+  through `formatFileSize`, the formatter the media library already uses.
+- **A 30-second warning that never refuses.** `gifSeconds > GIF_LONG_RANGE_SECONDS` renders
+  `GIF_LONG_RANGE_WARNING` as a `role="status"` line. `gifSeconds` is the in/out section's length
+  when there is one and the timeline's otherwise, because that is what will actually be encoded. No
+  button is disabled by it.
+- **The background-tab note is hidden.** It is about the two video formats' decoders and GIF has
+  none; in its place GIF gets one line naming the two things a GIF actually surprises people with:
+  it needs the tab visible, and it has no sound.
+
+The GIF radio's accessible name and hint — "GIF (256 colours, no audio)" and "No WebCodecs needed" —
+contain neither the word "WebM" nor "MP4" on purpose: `ExportDialog.test.tsx` finds the other two
+radios by exactly those words in a dozen places, and this is a constraint on the copy, not a
+stylistic preference. `LastExportSettings` gained an optional `fps`, carried in and out through
+`gifFrameRate`, so a setting saved before this ticket restores at the default rather than at
+`undefined`. A failed GIF export is reported inline like a failed WebM one but is offered no "Try
+MP4 Instead" (next paragraph): that button exists because a WebM `ExportError` is a diagnosed codec
+problem another codec might not have, and a GIF failure is not.
 
 **A WebM failure can offer MP4 as a retry, the mirror of MP4's own "Try WebM Instead."** MP4's
 failure has always replaced the dialog with a dedicated recovery screen (`mp4FailedError`) offering
