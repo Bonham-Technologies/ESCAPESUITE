@@ -523,6 +523,37 @@ describe('PreviewPlayer keyframe-mode drags', () => {
     store().setKeyframePanelOpen(true)
   }
 
+  /**
+   * Two adjacent clips, the first fading into the second over its last second,
+   * with a slide-left out-preset over the same second (ESCSUITE-147).
+   *
+   * The transition owns that exit, so the renderer draws the first clip at its
+   * base x 0.5 for the whole window. At 1.5s the preset alone would read 0.25.
+   */
+  const transitionWithOutPreset = () => {
+    const trackId = store().project.timeline.tracks[0].id
+    addClip('a', 0, 2, trackId)
+    addClip('b', 2, 2, trackId)
+    store().updateClipTransition('a', { type: 'fade', duration: 1 })
+    store().updateClipAnimation('a', { out: { type: 'slide-left', duration: 1, easing: 'linear' } })
+    store().setCurrentTime(1.5)
+    return clipOf('a')
+  }
+
+  it('seeds from where a transition draws the clip, not from its out-preset', async () => {
+    inKeyframeMode(transitionWithOutPreset())
+
+    const preview = await renderPreview()
+    // A tenth of the project to the right: 0.5 + 0.1 from the drawn position,
+    // and 0.25 + 0.1 from the one the suppressed preset would have seeded.
+    await drag(preview, [
+      [960, 540],
+      [1152, 540],
+    ])
+
+    expect(last(clipOf('a').animation!.keyframes!.x!).value).toBeCloseTo(0.6, 5)
+  })
+
   it('writes x and y keyframes at the playhead instead of moving the shape', async () => {
     const shape = addShape()
     inKeyframeMode(shape)

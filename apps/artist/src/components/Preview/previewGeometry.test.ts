@@ -26,6 +26,7 @@ import {
   makeShapeData,
   makeSourceVideo,
   makeTextData,
+  makeTransitionInfo,
 } from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
@@ -34,6 +35,7 @@ import {
   uninstallCanvasDouble,
 } from '../../test/doubles/canvas'
 import { setRect } from '../../test/doubles/layout'
+import type { TransitionInfo } from '../../core/exportTypes'
 import type { Clip, Keyframe, SourceVideo } from '../../store/types'
 
 /** The project's default resolution, and the canvas every case below draws to. */
@@ -414,6 +416,130 @@ describe('getClipOpacity', () => {
     })
 
     expect(getClipOpacity(clip, 1)).toBe(0.75)
+  })
+})
+
+describe('getClipOpacity during a transition (ESCSUITE-147)', () => {
+  /**
+   * The incoming side of a transition, with a `fade` in-preset over the same
+   * second.
+   *
+   * A `fade` in-preset's first keyframe is `opacity: 0` at clip time 0, and
+   * `interpolateKeyframes` floors any earlier time to it — so a same-track
+   * incoming clip, whose `timelinePosition` sits at the outgoing clip's end,
+   * evaluates to 0 for the *whole* window. The renderer draws it at the
+   * transition's own rising alpha instead, because it suppresses the `in` side.
+   */
+  const incomingFade = makeClip({
+    id: 'in-fade',
+    duration: 4,
+    timelinePosition: 4,
+    animation: makeAnimation({ in: { type: 'fade', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({
+    outgoingClip: makeClip({
+      id: 'out-fade',
+      duration: 4,
+      transition: { type: 'fade', duration: 1 },
+    }),
+    incomingClip: incomingFade,
+  })
+
+  it('reads the clip’s own opacity, not the in-preset the transition owns', () => {
+    expect(getClipOpacity(incomingFade, 3.5, { transition })).toBe(1)
+  })
+
+  it('applies the in-preset when no transition is handed over', () => {
+    expect(getClipOpacity(incomingFade, 3.5)).toBe(0)
+    expect(getClipOpacity(incomingFade, 3.5, { transition: null })).toBe(0)
+  })
+
+  it('leaves an overlay’s own preset alone, as the renderer does', () => {
+    const overlay = makeClip({
+      ...incomingFade,
+      id: 'overlay-fade',
+      sourceVideoId: '',
+      overlayType: 'text',
+      textData: makeTextData(),
+    })
+
+    expect(
+      getClipOpacity(overlay, 3.5, { transition: { ...transition, incomingClip: overlay } })
+    ).toBe(0)
+  })
+})
+
+describe('getOverlayBounds during a transition (ESCSUITE-147)', () => {
+  const source: SourceVideo = makeSourceVideo({ width: 400, height: 200 })
+
+  /**
+   * A clip whose last second slides out to the left, and a clip on the track
+   * above whose first second slides in from the right. The transition window is
+   * the outgoing clip's last second, and at 3.5s both presets are exactly
+   * halfway: the outgoing clip's own x reads 0.25 and the incoming clip's 0.75,
+   * while the renderer — which suppresses the side the transition owns — draws
+   * both at the base 0.5.
+   */
+  const outgoing = makeClip({
+    id: 'out1',
+    duration: 4,
+    animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const incoming = makeClip({
+    id: 'in1',
+    trackId: 'track2',
+    duration: 4,
+    timelinePosition: 3,
+    animation: makeAnimation({ in: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({ outgoingClip: outgoing, incomingClip: incoming })
+
+  /** The clip's box at 3.5s, with the canvas as its own project. */
+  const centerXAt = (
+    clip: Clip,
+    options?: { transition?: TransitionInfo | null }
+  ): number | undefined => {
+    const canvas = makeCanvas()
+    return getOverlayBounds(clip, canvas, 3.5, [source], canvas, options)?.centerX
+  }
+
+  it('reports the outgoing clip where the picture is, not where its out-preset would put it', () => {
+    expect(centerXAt(outgoing, { transition })).toBe(0.5 * CANVAS_W)
+  })
+
+  it('reports the incoming clip where the picture is, not where its in-preset would put it', () => {
+    expect(centerXAt(incoming, { transition })).toBe(0.5 * CANVAS_W)
+  })
+
+  it('applies both presets when no transition is handed over', () => {
+    expect(centerXAt(outgoing)).toBe(0.25 * CANVAS_W)
+    expect(centerXAt(incoming)).toBe(0.75 * CANVAS_W)
+  })
+
+  it('reads a null transition as no transition at all', () => {
+    expect(centerXAt(outgoing, { transition: null })).toBe(0.25 * CANVAS_W)
+  })
+
+  it('leaves an overlay’s own preset alone, because the renderer never suppresses it', () => {
+    // `drawFrame.ts` draws an overlay through `drawOverlayClip`, before the
+    // transition skip and with no modifiers, so a text or shape overlay that
+    // carries a transition keeps its out-preset whatever the transition says.
+    // The box has to say the same, or it is wrong in the one configuration it
+    // used to be right about.
+    const overlay = shapeClip({
+      id: 'overlay1',
+      duration: 4,
+      animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+    })
+    const overlayTransition = makeTransitionInfo({ outgoingClip: overlay, incomingClip: incoming })
+
+    expect(centerXAt(overlay, { transition: overlayTransition })).toBe(0.25 * CANVAS_W)
+  })
+
+  it('leaves a clip the transition does not name alone', () => {
+    // A third clip with the same out-preset, running at the same time on a
+    // track of its own: the transition owns neither of its sides.
+    expect(centerXAt(makeClip({ ...outgoing, id: 'other' }), { transition })).toBe(0.25 * CANVAS_W)
   })
 })
 

@@ -4,6 +4,7 @@
 // and the tests all need to name the same things, and none of them should have
 // to import the component to do it.
 import type { Clip, SourceVideo, Track } from '../../store/types';
+import type { TransitionInfo } from '../../core/exportTypes';
 
 // Drag modes for different transform operations
 export type DragMode = 'move' | 'resize-nw' | 'resize-ne' | 'resize-sw' | 'resize-se' |
@@ -65,4 +66,18 @@ export interface PreviewSceneContext {
   selectedClipIds: Set<string>;
   keyframePanelOpen: boolean;
   isPlaying: boolean;
+  /**
+   * The transition active at the instant this scene is being asked about —
+   * `currentTime` for the hit test, the `time` argument for the chrome the
+   * selection overlay draws — as `getActiveTransition` reports it
+   * (ESCSUITE-147).
+   *
+   * Derived rather than read off the store, and derived by the caller: the
+   * component and the gesture hook already hold `clips` and `tracks`, and
+   * computing it once where the scene is assembled keeps the pure modules below
+   * from each reaching a different answer. Optional, because a reader with no
+   * scene (and every test that is not about a transition) has none to give: that
+   * reads as "no transition here", which is what these functions always assumed.
+   */
+  transition?: TransitionInfo | null;
 }

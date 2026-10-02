@@ -11,7 +11,12 @@ import {
   type SelectionOverlayContext,
 } from './selectionOverlay'
 import { HANDLE_SIZE, ROTATION_HANDLE_OFFSET } from './previewGeometry'
-import { makeAnimation, makeClip, makeSourceVideo } from '../../test/fixtures/clipFixtures'
+import {
+  makeAnimation,
+  makeClip,
+  makeSourceVideo,
+  makeTransitionInfo,
+} from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
   getCanvasContext,
@@ -245,6 +250,41 @@ describe('drawSelectionHandles', () => {
     }))
 
     expect(ctx.argsFor('strokeRect')[0]).toEqual([-100, -100, 200, 200])
+  })
+})
+
+describe('the chrome during a transition (ESCSUITE-147)', () => {
+  // The clip's last second slides out to the left, so at 3.5s its own animation
+  // puts it at x 0.25 while the renderer — which suppresses the preset the
+  // transition owns — draws it at the base 0.5.
+  const sliding = mediaClip({
+    animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({
+    outgoingClip: sliding,
+    incomingClip: mediaClip({ id: 'next', timelinePosition: 4 }),
+  })
+
+  it('boxes the selected clip where the transition draws it', () => {
+    drawSelectionHandles(canvas, 3.5, selection({ clips: [sliding], transition }))
+
+    expect(ctx.argsFor('translate')).toEqual([[CANVAS_W / 2, CANVAS_H / 2]])
+  })
+
+  it('boxes it at the preset’s own position when no transition owns that side', () => {
+    drawSelectionHandles(canvas, 3.5, selection({ clips: [sliding] }))
+
+    expect(ctx.argsFor('translate')).toEqual([[0.25 * CANVAS_W, CANVAS_H / 2]])
+  })
+
+  it('boxes a multi-selected clip where the transition draws it too', () => {
+    drawMultiSelectHandles(
+      canvas,
+      3.5,
+      multiSelection({ clips: [sliding], selectedClipIds: new Set(['clip1', 'other']), transition })
+    )
+
+    expect(ctx.argsFor('translate')).toEqual([[CANVAS_W / 2, CANVAS_H / 2]])
   })
 })
 

@@ -15,13 +15,13 @@ import type { PreviewSceneContext, ProjectSize } from './types';
 /** The slice of the scene the full selection handles read. */
 export type SelectionOverlayContext = Pick<
   PreviewSceneContext,
-  'clips' | 'sourceVideos' | 'selectedClipId' | 'isPlaying' | 'keyframePanelOpen'
+  'clips' | 'sourceVideos' | 'selectedClipId' | 'isPlaying' | 'keyframePanelOpen' | 'transition'
 >;
 
 /** The slice of the scene the multi-selection boxes read. */
 export type MultiSelectOverlayContext = Pick<
   PreviewSceneContext,
-  'clips' | 'sourceVideos' | 'selectedClipId' | 'selectedClipIds' | 'isPlaying'
+  'clips' | 'sourceVideos' | 'selectedClipId' | 'selectedClipIds' | 'isPlaying' | 'transition'
 >;
 
 /**
@@ -29,8 +29,10 @@ export type MultiSelectOverlayContext = Pick<
  *
  * Drawn in project pixels, on top of whatever transform the frame left on the
  * context — so the box, the handles and the grip land on the clip wherever the
- * frame put it. `project` defaults to the canvas' own size for a canvas that is
- * its own project.
+ * frame put it. Wherever: `scene.transition` is the transition active at `time`,
+ * and a clip that is one side of it is boxed with the preset that side owns left
+ * out, exactly as the frame drew it (ESCSUITE-147). `project` defaults to the
+ * canvas' own size for a canvas that is its own project.
  *
  * `screenScale` is **project pixels per CSS pixel** — how much bigger the
  * project's grid is than the box the viewer actually sees it in. Every constant
@@ -50,7 +52,7 @@ export function drawSelectionHandles(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): void {
-  const { clips, sourceVideos, selectedClipId, isPlaying } = scene;
+  const { clips, sourceVideos, selectedClipId, isPlaying, transition } = scene;
   if (!selectedClipId || isPlaying) return;
 
   const ctx = canvas.getContext('2d');
@@ -72,7 +74,7 @@ export function drawSelectionHandles(
   // keyframes (ESCSUITE-155; `getOverlayBounds` below reads the same
   // `getAnimatedValues` `hitTest.ts` does), simply unresponsive to a drag once
   // drawn.
-  const bounds = getOverlayBounds(selectedClip, canvas, time, sourceVideos, project);
+  const bounds = getOverlayBounds(selectedClip, canvas, time, sourceVideos, project, { transition });
   if (!bounds) return;
 
   const { centerX, centerY, width, height, rotation } = bounds;
@@ -161,7 +163,7 @@ export function drawMultiSelectHandles(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): void {
-  const { clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying } = scene;
+  const { clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying, transition } = scene;
   if (selectedClipIds.size <= 1 || isPlaying) return;
 
   const ctx = canvas.getContext('2d');
@@ -178,7 +180,7 @@ export function drawMultiSelectHandles(
     const clipEnd = clip.timelinePosition + clip.duration;
     if (time < clip.timelinePosition || time >= clipEnd) continue;
 
-    const bounds = getOverlayBounds(clip, canvas, time, sourceVideos, project);
+    const bounds = getOverlayBounds(clip, canvas, time, sourceVideos, project, { transition });
     if (!bounds) continue;
 
     const { centerX, centerY, width, height, rotation } = bounds;

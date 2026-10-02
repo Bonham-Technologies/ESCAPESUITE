@@ -425,6 +425,26 @@ describe('PreviewPlayer selection handles', () => {
   })
 })
 
+describe('PreviewPlayer selection handles during a transition (ESCSUITE-147)', () => {
+  it('boxes the selected clip where the transition draws it', async () => {
+    const trackId = store().project.timeline.tracks[0].id
+    addClip('a', 0, 2, trackId)
+    addClip('b', 2, 2, trackId)
+    store().updateClipTransition('a', { type: 'fade', duration: 1 })
+    store().updateClipAnimation('a', { out: { type: 'slide-left', duration: 1, easing: 'linear' } })
+    store().setSelectedClipId('a')
+    store().setCurrentTime(1.5)
+
+    const preview = await renderPreview()
+
+    // The transition owns the exit, so the box is on the base position (960) and
+    // not on the 0.25 the suppressed slide-left preset would read halfway.
+    const translates = preview.frame().argsFor('translate')
+    expect(translates).toContainEqual([960, 540])
+    expect(translates).not.toContainEqual([480, 540])
+  })
+})
+
 describe('PreviewPlayer cursor', () => {
   const selectedShape = async () => {
     const shape = addShape()

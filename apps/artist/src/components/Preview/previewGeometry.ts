@@ -8,6 +8,35 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo } from '../../store/types';
 import type { ManipulableClipType, NormalizedPoint, OverlayBounds, ProjectSize } from './types';
 import { croppedSourceRect } from '../../core/clipCrop';
+import { presetSuppressionFor } from '../../core/exportTypes';
+import type { TransitionInfo } from '../../core/exportTypes';
+
+/**
+ * Per-call adjustments to what this module reports about a clip — its box
+ * ({@link getOverlayBounds}) and its opacity ({@link getClipOpacity}). Optional,
+ * and every default is what this module always answered.
+ */
+export interface OverlayBoundsOptions {
+  /**
+   * The transition active at `time`, as `getActiveTransition` reports it
+   * (ESCSUITE-147).
+   *
+   * A clip that is one side of it is evaluated with the preset that side owns
+   * left out — the incoming clip's Animate In, the outgoing clip's Animate Out —
+   * because that is how the renderer draws it (ESCSUITE-139), and a box drawn
+   * any other way is a box around nothing. `null`/absent is "no transition
+   * here", which is every call outside a window and every caller that has no
+   * scene to look in (`InlineTextEditorAnchor` asks for a clip's box with no
+   * time at all).
+   *
+   * An overlay is never suppressed, whichever side of the transition it is on,
+   * because the renderer never suppresses one; see {@link presetSuppressionFor}.
+   *
+   * The transition's OWN geometry — a slide-\*'s offset, a wipe's clip region —
+   * is deliberately not applied; see the limit named in `apps/artist/CLAUDE.md`.
+   */
+  transition?: TransitionInfo | null;
+}
 
 /** The project size the preview assumes when a project records none. */
 export const DEFAULT_PROJECT_WIDTH = 1920;
@@ -31,13 +60,17 @@ export const ROTATION_HANDLE_OFFSET = 25; // Distance above the bounding box
  * the canvas *is* the project (the exporters' canvases, and the tests that
  * build one). The preview rasterises at its displayed size and passes its
  * project resolution explicitly.
+ *
+ * `options` is how a caller that knows the scene hands over the transition
+ * active at `time`; see {@link OverlayBoundsOptions}.
  */
 export function getOverlayBounds(
   clip: Clip,
   canvas: HTMLCanvasElement,
   time: number | undefined,
   sourceVideos: SourceVideo[],
-  project: ProjectSize = canvas
+  project: ProjectSize = canvas,
+  options?: OverlayBoundsOptions
 ): OverlayBounds | null {
   // Calculate animated values if time is provided
   let animatedX: number | undefined;
@@ -76,7 +109,10 @@ export function getOverlayBounds(
         clip.duration,
         clip.animation,
         baseTransform,
-        clip.effects || DEFAULT_EFFECTS
+        clip.effects || DEFAULT_EFFECTS,
+        // Minus whichever preset side an active transition has taken over, so
+        // the box follows the picture (ESCSUITE-147).
+        presetSuppressionFor(clip, options?.transition)
       );
 
       animatedX = animated.x;
@@ -203,8 +239,17 @@ export function getOverlayBounds(
  * clip's duration" case to fall back from, and none is coded here. A future
  * caller that cannot make the same guarantee should bounds-check before
  * calling in, the way every current caller of {@link getOverlayBounds} does.
+ *
+ * `options` carries the active transition, for the same reason and through the
+ * same {@link OverlayBoundsOptions} {@link getOverlayBounds} takes it by
+ * (ESCSUITE-147): opacity is the property a `fade` preset drives, so the side a
+ * transition owns has to be left out here too. Without it this reads 0 for the
+ * whole of a same-track transition — a `fade` in-preset's first keyframe is
+ * opacity 0 at clip time 0, and the incoming clip's clip time is at or below 0
+ * for the entire window — and the clip the viewer can see arriving would be
+ * refused the click.
  */
-export function getClipOpacity(clip: Clip, time: number): number {
+export function getClipOpacity(clip: Clip, time: number, options?: OverlayBoundsOptions): number {
   if (!clip.animation) return (clip.transform || DEFAULT_TRANSFORM).opacity;
 
   const clipTime = time - clip.timelinePosition;
@@ -213,7 +258,8 @@ export function getClipOpacity(clip: Clip, time: number): number {
     clip.duration,
     clip.animation,
     clip.transform || DEFAULT_TRANSFORM,
-    clip.effects || DEFAULT_EFFECTS
+    clip.effects || DEFAULT_EFFECTS,
+    presetSuppressionFor(clip, options?.transition)
   ).opacity;
 }
 

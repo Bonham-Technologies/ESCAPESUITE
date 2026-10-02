@@ -11,6 +11,7 @@ import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { drawPreviewFrame } from './drawFrame';
 import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
+import { getActiveTransition } from './transitions';
 import { usePreviewMedia } from './usePreviewMedia';
 import { usePreviewRenderLoop } from './usePreviewRenderLoop';
 import { useTransformHandles } from './useTransformHandles';
@@ -177,7 +178,15 @@ export function PreviewPlayer() {
     return scaleX > 0 ? 1 / scaleX : 1;
   }, [canvasDimensions]);
 
-  // Draw selection handles for the selected overlay or media clip
+  // Draw selection handles for the selected overlay or media clip.
+  //
+  // The transition is derived here, from the `time` the chrome is being drawn at
+  // rather than from the store's playhead: these two are called with the display
+  // time the render loop is on, and the box has to follow the frame that loop
+  // just composited (ESCSUITE-147). It is a function of `clips`, `tracks` and
+  // that argument, so it costs one pass over the clips per repaint of the chrome
+  // — and nothing at all while the preview is playing, where both of these
+  // return before measuring anything.
   const drawSelectionHandles = useCallback((time: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -187,8 +196,9 @@ export function PreviewPlayer() {
       selectedClipId,
       isPlaying,
       keyframePanelOpen,
+      transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
-  }, [canvasDimensions, clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
+  }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
       handleScreenScale]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
@@ -201,8 +211,9 @@ export function PreviewPlayer() {
       selectedClipId,
       selectedClipIds,
       isPlaying,
+      transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
-  }, [canvasDimensions, clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying,
+  }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, selectedClipIds, isPlaying,
       handleScreenScale]);
 
   // Everything a pointer does to the canvas: drag a handle, sweep a marquee,
