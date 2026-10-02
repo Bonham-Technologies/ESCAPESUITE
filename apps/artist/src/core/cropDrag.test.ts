@@ -101,10 +101,15 @@ describe('cropForHandleMove', () => {
   it('leaves the other three edges exactly as the gesture found them', () => {
     const start = crop({ left: 0.1, top: 0.2, right: 0.3, bottom: 0.05 })
 
-    expect(cropForHandleMove(start, 'n', { x: 999, y: 20 }, SOURCE)).toEqual({
-      ...start,
-      top: 0.3,
-    })
+    const result = cropForHandleMove(start, 'n', { x: 999, y: 20 }, SOURCE)
+
+    // The other three edges are untouched input, so they compare exactly; the
+    // moved one is 0.2 + 20 / 200, which IEEE-754 does not round-trip through
+    // the literal 0.3 (0.30000000000000004 !== 0.3), so it alone is toBeCloseTo.
+    expect(result.left).toBe(start.left)
+    expect(result.right).toBe(start.right)
+    expect(result.bottom).toBe(start.bottom)
+    expect(result.top).toBeCloseTo(0.3)
   })
 
   it('stops at the edge it started from rather than going negative', () => {
