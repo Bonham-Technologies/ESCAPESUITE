@@ -692,18 +692,28 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       </div>
                     </div>
 
-                    <div className={styles.section}>
-                      <label className={styles.label}>Quality</label>
-                      <select
-                        className={styles.select}
-                        value={advancedOptions.quality}
-                        onChange={(e) => setAdvancedOptions({ ...advancedOptions, quality: e.target.value as ExportOptions['quality'] })}
-                      >
-                        <option value="low">Low (faster export)</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High (slower export)</option>
-                      </select>
-                    </div>
+                    {/* Hidden when GIF is selected: Quality is a video/audio
+                        bitrate knob and `exportGIF.ts` never reads it, so the
+                        labels' promise of a "faster"/"slower export" trade-off
+                        would be a promise the format cannot keep (ESCSUITE-34
+                        final review, MAJOR 1). Gated the same way the frame-rate
+                        select is, and the value itself stays in
+                        `advancedOptions` and in `lastExportSettings` so
+                        switching back to a video format restores it. */}
+                    {advancedOptions.format !== 'gif' && (
+                      <div className={styles.section}>
+                        <label className={styles.label}>Quality</label>
+                        <select
+                          className={styles.select}
+                          value={advancedOptions.quality}
+                          onChange={(e) => setAdvancedOptions({ ...advancedOptions, quality: e.target.value as ExportOptions['quality'] })}
+                        >
+                          <option value="low">Low (faster export)</option>
+                          <option value="medium">Medium</option>
+                          <option value="high">High (slower export)</option>
+                        </select>
+                      </div>
+                    )}
 
                     {/* GIF only: 10/15/20, the three rates a format whose size is
                         roughly linear in its frame count can sensibly offer. */}

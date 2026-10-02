@@ -14,6 +14,10 @@ while it runs — which is the number you want when you are deciding whether a c
 to paste into a chat. Past thirty seconds there is a note suggesting WebM instead; it is only a
 note, and nothing stops you.
 
+The Quality setting disappears while GIF is selected, because it is a video and audio bitrate
+setting and a GIF has neither — it would have offered you a "faster export" / "slower export"
+choice that changed nothing. Whatever you had it on comes back when you switch to WebM or MP4.
+
 A GIF has no sound, and it needs the tab to stay visible while it encodes. But it needs nothing
 else: GIF export does not use WebCodecs at all, so it is the one format that works in a browser
 where WebM and MP4 cannot be exported — and in that browser the dialog now says so instead of

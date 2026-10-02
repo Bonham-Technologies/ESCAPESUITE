@@ -68,9 +68,10 @@ export async function exportToGIF(
   projectResolution?: { width: number; height: number }
 ): Promise<Blob> {
   // No capability check: there is nothing to check. `gifenc` is pure
-  // JavaScript and a 2D canvas is all this pipeline needs, which is why
-  // `isGIFExportSupported()` is a constant and why this export is still
-  // offered in a browser where both video formats are refused.
+  // JavaScript and a 2D canvas is all this pipeline needs, which is why this
+  // export is still offered in a browser where both video formats are refused —
+  // the dialog achieves that by simply never disabling the GIF radio, with no
+  // predicate in between (ESCSUITE-34 final review, MINOR 1).
 
   if (clips.length === 0) {
     throw new Error('No clips to export');

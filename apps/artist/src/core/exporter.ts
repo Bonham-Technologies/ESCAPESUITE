@@ -22,7 +22,6 @@ export { gifFrameDelayMs } from './exportTypes';
 export {
   isMP4ExportSupported,
   isWebMExportSupported,
-  isGIFExportSupported,
   EXPORT_NO_WEBCODECS_REASON,
   WEBM_NO_CODEC_REASON,
   GIF_ALWAYS_AVAILABLE_NOTE,

@@ -114,7 +114,7 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | `input.bundle.path` | — | A `.veditor` file exported from the editor. |
 | `input.manifest.path` | — | A manifest JSON file (see [Inputs](#inputs)). |
 | `options.format` | yes | `mp4` (H.264 + AAC), `webm` (VP9 + Opus) or `gif` (animated GIF, 256 colours per frame, no audio). |
-| `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. |
+| `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. **Video formats only — a `gif` render ignores it** (a GIF's size comes from its palette, its resolution and `fps`). It is accepted rather than rejected on a `gif` job, unlike `fps` on a video one, because `parseOptions` always fills a default in: rejecting it would refuse specs doing nothing wrong. |
 | `options.fps` | no | **`gif` only** — `10`, `15` (default) or `20`. Rejected for the other two formats, which always encode at 30. A GIF stores each frame's delay in centiseconds, so 10 and 20 fps are exact while 15 fps really plays at about 14.3. |
 | `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p`, `480p` and `360p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. All five are accepted for every format; ESCAPEARTIST's own export dialog offers `720p`, `480p` (its default) and `360p` for `gif`, because a GIF at 1080p is enormous and one at the project's own resolution is unpredictable. The kit applies no such narrowing and issues no size warning — ask for `{ "format": "gif", "resolution": "1080p" }` and you get exactly that, however large (see [Sizing and throughput](#sizing-and-throughput) on GIF memory, which grows with duration). |
 | `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both numbers, `start` strictly less than `end`. Omit to render the whole timeline. |
@@ -392,7 +392,7 @@ Every successful render is accompanied by `<jobId>.manifest.json`:
 | `jobId` | The job that produced it. |
 | `format` | `mp4`, `webm` or `gif`, as requested. |
 | `byteLength` | Size of the delivered file, re-read from disk after encoding. |
-| `durationSec` | Encoded duration — the `timeRange` length when one was given, else the whole timeline. For a `gif`, the frame delays it actually plays for: `ceil(seconds x fps)` frames of the delay the **file stores**, which is `round(1000 / fps)` ms quantised to whole centiseconds. At 15 fps that is 70 ms, not 67, so a 15 fps GIF of a 1 s range reports **1.05** — the figure `ffprobe` will agree with. 10 and 20 fps are exact, and report the range itself. |
+| `durationSec` | Encoded duration — the `timeRange` length when one was given, else the whole timeline. For a `gif`, the frame delays it actually plays for: `ceil(seconds x fps)` frames of the delay the **file stores**, which is `round(1000 / fps)` ms quantised to whole centiseconds. At 15 fps that is 70 ms, not 67, so a 15 fps GIF of a 1 s range reports **1.05** — the figure `ffprobe` will agree with. 10 and 20 fps survive both roundings exactly, so `durationSec` is the range rounded up to a whole frame rather than up to a whole frame *and* a coarser delay — not the range itself unless `seconds x fps` is already a whole number (a 1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = 1.05). |
 | `width`, `height` | Encoded frame size after `options.resolution` is applied (not necessarily the project's own resolution). |
 | `gpu` | Whether Chromium was launched with GPU acceleration. |
 | `sha256` | SHA-256 of the delivered file, streamed while hashing. |
@@ -822,9 +822,10 @@ Rules of thumb:
   4 GB is comfortable for 1080p; budget 8 GB or more for 4K. A `.veditor` input is the
   exception: it also needs headroom for the whole JSON document.
 - **`gif` is the other exception, and it does scale with duration.** The GIF format has no
-  streaming muxer, so the encoder accumulates the entire output in one growing buffer, then
-  copies it to finish the file and again to hand it over — peak page memory is roughly **three
-  times the finished GIF** and grows with duration x frame size. A 1080p GIF of a two-minute
+  streaming muxer, so the encoder accumulates the entire output in one growing buffer and then
+  copies it once, into the `Blob` handed back — peak page memory is roughly **twice the finished
+  GIF** and grows with duration x frame size. (It was three times until the encoder stopped
+  `slice`ing its buffer on the way out; `finish()` returns a view over it instead.) A 1080p GIF of a two-minute
   timeline is a multi-gigabyte file and needs several times that in RAM; keep GIF jobs short and
   small, which is what the resolution and `fps` limits are for.
 - **Disk**: the scratch directory holds one complete output for the duration of the job, plus

@@ -65,17 +65,20 @@ declare module 'gifenc' {
     /** Writes the end-of-stream trailer byte. */
     finish(): void;
     /**
-     * A copy of everything written so far.
+     * A zero-copy view of everything written so far — its length is the stream
+     * cursor, and its buffer is the stream's whole (power-of-two) capacity.
      *
      * `Uint8Array<ArrayBuffer>`, not the default `Uint8Array<ArrayBufferLike>`:
-     * the stream's backing store is a plain `new Uint8Array(capacity)` and both
-     * accessors derive from it (`slice` here, `subarray` below), so neither can
-     * be backed by a `SharedArrayBuffer` — and `new Blob([...])` will not take a
-     * view that might be. Same narrowing, same reason, as `LevelMeter.data` in
-     * ESCAPECRAFT's `core/webcodecs-recorder.ts`.
+     * the stream's backing store is a plain `new Uint8Array(capacity)` and this
+     * is a `subarray` of it, so it cannot be backed by a `SharedArrayBuffer` —
+     * and `new Blob([...])` will not take a view that might be. Same narrowing,
+     * same reason, as `LevelMeter.data` in ESCAPECRAFT's
+     * `core/webcodecs-recorder.ts`.
+     *
+     * The package's sibling `bytes()` (the same range, `slice`d into a buffer of
+     * its own) is deliberately **not** declared: nothing here needs a copy, and
+     * this file declares only the surface `core/gifEncoder.ts` uses.
      */
-    bytes(): Uint8Array<ArrayBuffer>;
-    /** A zero-copy view of everything written so far — its length is the stream cursor. */
     bytesView(): Uint8Array<ArrayBuffer>;
     reset(): void;
     readonly buffer: ArrayBuffer;

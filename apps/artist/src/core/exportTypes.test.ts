@@ -23,7 +23,6 @@ import {
   getSourceDimensions,
   gifFrameDelayMs,
   gifFrameRate,
-  isGIFExportSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
   loadImageElement,
@@ -786,22 +785,6 @@ describe('resolutionForFormat', () => {
       expect(resolutionForFormat('webm', resolution)).toBe(resolution)
     }
   )
-})
-
-describe('isGIFExportSupported', () => {
-  it('is true with no WebCodecs at all', () => {
-    const restore = removeWebCodecsGlobals()
-
-    // The whole point of the format: `gifenc` is pure JS, so a browser that can
-    // encode neither VP9/VP8 nor H.264 can still export a GIF (ESCSUITE-34).
-    expect(isGIFExportSupported()).toBe(true)
-
-    restore()
-  })
-
-  it('is true with WebCodecs present', () => {
-    expect(isGIFExportSupported()).toBe(true)
-  })
 })
 
 describe('GIF sentences', () => {

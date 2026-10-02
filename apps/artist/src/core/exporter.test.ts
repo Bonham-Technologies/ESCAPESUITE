@@ -14,7 +14,6 @@ import {
   exportToMP4,
   exportToWebM,
   gifFrameDelayMs,
-  isGIFExportSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
 } from './exporter'
@@ -175,15 +174,6 @@ describe('exportToGIF through the barrel', () => {
         controller.signal
       )
     ).rejects.toBeInstanceOf(ExportAbortedError)
-  })
-
-  it('reports GIF export as supported with no WebCodecs at all', () => {
-    restores.push(removeWebCodecsGlobals())
-
-    // The asymmetry the barrel exists to expose: both video probes answer false
-    // here (above), and this one is a constant.
-    expect(isGIFExportSupported()).toBe(true)
-    expect(isMP4ExportSupported()).toBe(false)
   })
 
   it('exposes the up-front size heuristic', () => {

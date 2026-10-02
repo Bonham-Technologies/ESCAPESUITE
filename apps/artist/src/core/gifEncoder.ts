@@ -27,12 +27,21 @@ export interface GifWriter {
   /** Bytes written to the GIF stream so far — the live size estimate's numerator. */
   bytesWritten(): number;
   /**
-   * Write the end-of-stream byte (once) and return the finished file.
+   * Write the end-of-stream byte (once) and return the finished file as a **live
+   * view** over the encoder's own buffer — not a copy of it.
+   *
+   * The one caller puts this straight into `new Blob([bytes], …)`, which copies
+   * the bytes it is given, so returning `bytes()` (a `slice`) would have made a
+   * second full-size allocation that nothing ever read: peak page memory of
+   * about twice the finished GIF rather than three times, which for the 30 s 720p
+   * case `services/headless-artist/README.md` warns about is roughly 180 MB
+   * (ESCSUITE-34 final review, MINOR 5). The view cannot go stale under its
+   * reader: the stream is closed for writing, `addFrame` after `finish()` throws,
+   * and nothing else holds the encoder.
    *
    * `Uint8Array<ArrayBuffer>` rather than the default `Uint8Array<ArrayBufferLike>`,
-   * because its one caller puts it straight into a `Blob` and `BlobPart` refuses a
-   * view that might be backed by a `SharedArrayBuffer`. `gifenc`'s stream never is
-   * — see `src/types/gifenc.d.ts`.
+   * because `BlobPart` refuses a view that might be backed by a
+   * `SharedArrayBuffer`. `gifenc`'s stream never is — see `src/types/gifenc.d.ts`.
    */
   finish(): Uint8Array<ArrayBuffer>;
 }
@@ -71,7 +80,8 @@ export function createGifWriter(): GifWriter {
         encoder.finish();
         finished = true;
       }
-      return encoder.bytes();
+      // The view, not `bytes()`'s copy: see the interface's doc comment.
+      return encoder.bytesView();
     },
   };
 }

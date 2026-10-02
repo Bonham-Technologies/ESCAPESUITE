@@ -604,20 +604,6 @@ export const GIF_ALWAYS_AVAILABLE_NOTE =
   'GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.';
 
 /**
- * Whether GIF export is possible. It always is.
- *
- * A function rather than a `true` constant so the export dialog reads all three
- * formats' support the same way, and so a future reason to refuse (a missing
- * `getImageData`, say) has one place to live. This is the asymmetry
- * `apps/artist/CLAUDE.md`'s "Export Dialog Browser Support" section describes:
- * MP4's support is a synchronous globals check, WebM's is a real asynchronous
- * codec probe, and GIF's is a constant.
- */
-export function isGIFExportSupported(): boolean {
-  return true;
-}
-
-/**
  * Load a video blob and create an HTMLVideoElement
  */
 export async function loadVideoElement(blob: Blob): Promise<HTMLVideoElement> {

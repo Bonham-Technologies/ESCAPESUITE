@@ -2481,7 +2481,18 @@ The third export format (ESCSUITE-34), and the only one that needs nothing from 
   reversed range would otherwise run no iterations at all and `finish()` a stream with no frames,
   which writes the end-of-stream byte alone (`gifenc` writes the header lazily on the first frame),
   handing back a one-byte file typed `image/gif` after a "complete" report. The video exporters do
-  not need that guard: their muxer still finalises a valid, if empty, container.
+  not need that guard: their muxer still finalises a valid, if empty, container. The guard's other
+  half is `!Number.isFinite(totalFrames)`, and it is the load-bearing one: `Math.ceil(Infinity)` is
+  `Infinity`, which is not `< 1`, so a non-finite range or a clip whose `duration` is non-finite
+  (the shape ESCSUITE-97 fixed at the source-metadata level; `JSON.parse` turns a headless job
+  spec's `1e999` into `Infinity` past every `typeof === 'number'` check) would otherwise run
+  `for (let i = 0; i < Infinity; i++)` and hang the tab.
+- **A timeline with no picture in it exports as black, and completes.** `loadElementSources`
+  skips an audio-only source — there is nothing to draw from it — so a project whose only clip is
+  audio produces its `ceil(seconds x rate)` frames of the raster `openOutputFrame` cleared and
+  nothing else: a valid, silent, all-black GIF under a "complete" report. That is intended, not
+  incidental (final review, NIT 6, pinned by `exportGIF.test.ts`): a GIF has nowhere to put the
+  sound, and refusing would refuse a timeline both video formats export happily.
 - **Frame rate and resolution are their own presets.** `GIF_FPS_OPTIONS` is 10/15/20 and
   `gifFrameRate(options.fps)` is the only reader of `ExportOptions.fps`, so `undefined` (every
   caller that predates the format), a stale saved setting and a hand-built headless job spec all
@@ -2514,8 +2525,8 @@ The third export format (ESCSUITE-34), and the only one that needs nothing from 
 
 ### Export Dialog Browser Support (`src/components/Export/ExportDialog.tsx`, `src/core/exportTypes.ts`)
 
-`isMP4ExportSupported()`, `isWebMExportSupported()` and `isGIFExportSupported()` answer three
-different questions, on purpose, and the dialog reads each one differently:
+`isMP4ExportSupported()` and `isWebMExportSupported()` answer two different questions, on purpose,
+and the dialog reads each one differently. GIF is the third format and has **no predicate at all**:
 
 - **`isMP4ExportSupported()`** is a synchronous read of which globals exist —
   `VideoEncoder`/`VideoDecoder`/`VideoFrame` — unchanged by ESCSUITE-22/29. It says nothing about
@@ -2540,13 +2551,17 @@ different questions, on purpose, and the dialog reads each one differently:
   reason, only once the probe actually says no. The effect's `cancelled` flag is the ESCSUITE-98
   run-identity shape: closing the dialog before a probe resolves, then reopening it before the
   stale one settles, must not let the stale answer overwrite the fresh one.
-- **`isGIFExportSupported()`** (ESCSUITE-34) is a **constant**: it returns `true`. `gifenc` is
-  pure JavaScript and a 2D canvas is the only browser capability `exportGIF.ts` uses, so there
-  is nothing to probe and nothing to check at the exporter's door either — `exportGIF.ts` has no
-  capability guard at all, which is the point (`exportGIF.test.ts` deletes the WebCodecs globals
-  and exports fifteen frames anyway). It is a function rather than a `true` so the dialog can
-  read all three formats' support the same way, and so a future reason to refuse has one place
-  to live. Its companion sentence `GIF_ALWAYS_AVAILABLE_NOTE` exists because "this browser
+- **GIF has no support predicate** (ESCSUITE-34). `gifenc` is pure JavaScript and a 2D canvas is
+  the only browser capability `exportGIF.ts` uses, so there is nothing to probe and nothing to
+  check at the exporter's door either — `exportGIF.ts` has no capability guard at all, which is
+  the point (`exportGIF.test.ts` deletes the WebCodecs globals and exports fifteen frames
+  anyway). The dialog makes GIF always available by **never passing `disabled` to the GIF
+  radio**, not by reading a third predicate. There was briefly an
+  `isGIFExportSupported()` that returned `true`, on the argument that the dialog would read all
+  three the same way; it never had a caller, so the final review deleted it rather than leave a
+  tested function whose docstring described a caller that did not exist. A future reason to
+  refuse GIF would be a real predicate with a real reader, written then. Its companion sentence
+  `GIF_ALWAYS_AVAILABLE_NOTE` exists because "this browser
   cannot export" stopped being true the moment GIF landed in `core/`, and since ESCSUITE-34
   **the dialog says so**: `neitherFormatSupported` is now `noVideoFormatSupported` (its old name
   stopped being true), the `role="alert"` it gates carries `GIF_ALWAYS_AVAILABLE_NOTE` as a second
@@ -2584,7 +2599,7 @@ primary section.
 
 **The GIF controls (ESCSUITE-34).** GIF is a third radio under Advanced options, beside MP4 — not
 a fourth primary button: WebM stays the default and GIF is a deliberate choice, like MP4. Four
-things appear only while it is selected, and one disappears:
+things appear only while it is selected, and two disappear:
 
 - **A frame-rate `<select>`** (`id="export-gif-fps"`, label "Frames per second"): `GIF_FPS_OPTIONS`
   rendered as "10 fps (smallest file)" / "15 fps" / "20 fps (smoothest)", read back through
@@ -2608,6 +2623,16 @@ things appear only while it is selected, and one disappears:
 - **The background-tab note is hidden.** It is about the two video formats' decoders and GIF has
   none; in its place GIF gets one line naming the two things a GIF actually surprises people with:
   it needs the tab visible, and it has no sound.
+- **The Quality `<select>` is hidden** (final review, MAJOR 1). It is a video/audio bitrate knob:
+  `exportGIF.ts` never reads `options.quality`, so for GIF the three options would promise a
+  "faster export" / "slower export" trade-off that does not exist, which is exactly the
+  say-why-don't-pretend rule the rest of the suite follows. Gated on the selected format the same
+  way the frame-rate select is, and the *value* stays in `advancedOptions` and in
+  `lastExportSettings` — switching back to WebM or MP4 restores what was chosen, the same ruling
+  `fps` gets in the other direction. The headless kit is deliberately **asymmetric** here: it
+  rejects `fps` on a video job but *accepts* `quality` on a GIF job and ignores it, because
+  `parseOptions` always fills a default in, so rejecting it would refuse specs doing nothing
+  wrong — `services/headless-artist/README.md`'s `options.quality` row says so.
 
 The GIF radio's accessible name and hint — "GIF (256 colours, no audio)" and "No WebCodecs needed" —
 contain neither the word "WebM" nor "MP4" on purpose: `ExportDialog.test.tsx` finds the other two
@@ -2970,8 +2995,10 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   70 — a one-second range is 15 x 70 ms = **1.05 s**, and a "15 fps" GIF really plays at about
   14.3. `gifFrameDelayMs(fps)` in `core/exportTypes.ts` (re-exported through `core/exporter.ts`)
   is the one home for that rule; `headless/renderProject.ts` multiplies it by the frame count and
-  nothing re-derives it. 10 fps (100 ms) and 20 fps (50 ms) survive both roundings exactly and
-  report the range itself. The verification manifest describes the bytes — the kit README tells
+  nothing re-derives it. 10 fps (100 ms) and 20 fps (50 ms) survive both roundings exactly, so
+  `durationSec` is the range rounded up to a whole frame rather than up to a whole frame *and* a
+  coarser delay — not the range itself unless `seconds x rate` happens to be a whole number (a
+  1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = **1.05**). The verification manifest describes the bytes — the kit README tells
   callers to compare `durationSec` against `ffprobe` — so the headless path reports that rather
   than the requested range; the two video formats encode the range itself and are unchanged.
   `exportGIF.ts`'s own `addFrame` argument stays the first rounding (67 ms at 15 fps): `gifenc`
