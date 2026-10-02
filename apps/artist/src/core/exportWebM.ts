@@ -31,8 +31,8 @@ import {
 } from './exportTypes';
 import {
   createFrameComposer,
+  createElementSourceRelease,
   loadElementSources,
-  releaseElementSources,
   rewindElementSources,
 } from './elementFrames';
 import { extractAndMixAudio } from './audioMixer';
@@ -183,8 +183,18 @@ export async function exportToWebM(
   // the page. The two handles the `catch` needs live out here: `frameCount`, for
   // the diagnostic log, and every encoder built so far, so the catch can close
   // what exists without caring how far construction got.
+  //
+  // The muxer is the third (ESCSUITE-159): an `Output` that has been started
+  // holds its target and its packet sources — and, in a real browser, the
+  // encoders those sources own — and `cancel()` is Mediabunny's own call for
+  // releasing them. The handle is dropped again the moment `finalize()`
+  // succeeds, because a finalized output has nothing left to release and says so
+  // on the console if asked.
   const openEncoders: Array<VideoEncoder | AudioEncoder> = [];
+  let unfinalizedOutput: Output | null = null;
   let frameCount = 0;
+
+  const releaseSources = createElementSourceRelease(sources);
 
   try {
     onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
@@ -195,6 +205,7 @@ export async function exportToWebM(
       format: new WebMOutputFormat(),
       target,
     });
+    unfinalizedOutput = output;
 
     // Create video packet source — the family actually negotiated above, which
     // is VP8 whenever the VP9 probe failed.
@@ -429,6 +440,7 @@ export async function exportToWebM(
     }
 
     await output.finalize();
+    unfinalizedOutput = null;
 
     // A cancel that landed while we were muxing still counts: never hand back
     // an export the caller asked to stop. Thrown before the 'complete' report,
@@ -436,7 +448,7 @@ export async function exportToWebM(
     checkAborted(signal);
 
     // Clean up media elements
-    releaseElementSources(sources);
+    releaseSources();
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
@@ -447,8 +459,19 @@ export async function exportToWebM(
     }
     return new Blob([buffer], { type: 'video/webm' });
   } catch (error) {
-    // Clean up resources on error
-    releaseElementSources(sources);
+    // Clean up resources on error. The release is the same one the success path
+    // made and runs at most once: the two paths are not exclusive — the
+    // `complete` report and the empty-buffer refusal both sit after it and both
+    // reach here (ESCSUITE-159).
+    releaseSources();
+
+    // Release the muxer if it is still holding anything: null before
+    // `output.start()` ever ran, and null again once `finalize()` has written
+    // the file. A `finalize()` that threw leaves it set, which is exactly the
+    // state Mediabunny means `cancel()` for (ESCSUITE-159).
+    if (unfinalizedOutput) {
+      await unfinalizedOutput.cancel().catch(() => { /* the export already failed */ });
+    }
 
     // Close every encoder that was built — none at all when the setup threw
     // before the first one, one when it threw between them (ESCSUITE-156).
