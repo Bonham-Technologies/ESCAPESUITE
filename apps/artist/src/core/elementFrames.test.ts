@@ -570,3 +570,76 @@ describe('createFrameComposer readiness wait', () => {
     }
   })
 })
+
+// ESCSUITE-159. The seek wait is the readiness wait's one-shot twin: a 'seeked'
+// listener racing a 500 ms fallback, with neither side cancelling the other. A
+// seek that lands left the timer pending for half a second, to resolve a promise
+// that was already settled; a fallback that won left a `{ once: true }` listener
+// on an element whose object URL the export is about to revoke.
+describe('createFrameComposer seek wait', () => {
+  /** A composer over one ready source, so the seek is the only thing a frame waits on. */
+  async function composerOverReadyVideo() {
+    await store('v1')
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    return { composeFrame, video: sources.videoElements.get('v1')! }
+  }
+
+  it('clears the 500 ms fallback once the seek lands', async () => {
+    const { composeFrame } = await composerOverReadyVideo()
+    // Only the timeout is faked: the doubles dispatch 'seeked' in a microtask.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+    try {
+      // The element sits at 0 after the rewind, so a frame half a second in
+      // really does seek.
+      const frame = composeFrame(0.5)
+      expect(vi.getTimerCount()).toBe(1)
+
+      await frame
+
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('removes the seeked listener when the 500 ms fallback wins', async () => {
+    media.script({ video: { stallSeek: true } })
+    const { composeFrame, video } = await composerOverReadyVideo()
+    const added = vi.spyOn(video, 'addEventListener')
+    const removed = vi.spyOn(video, 'removeEventListener')
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+    try {
+      const frame = composeFrame(0.5)
+      const seekListener = added.mock.calls.find(([type]) => type === 'seeked')?.[1]
+      expect(seekListener).toBeTypeOf('function')
+
+      vi.advanceTimersByTime(500)
+      await frame
+
+      // The element is about to have its object URL revoked; the listener that
+      // can no longer settle anything must not still be on it.
+      expect(removed).toHaveBeenCalledWith('seeked', seekListener)
+    } finally {
+      vi.useRealTimers()
+      added.mockRestore()
+      removed.mockRestore()
+    }
+  })
+})

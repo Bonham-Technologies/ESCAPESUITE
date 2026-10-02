@@ -579,6 +579,21 @@ describe('exportToGIF failures', () => {
     expect((error as ExportError).message).toBe('gifenc exploded')
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
+
+  // ESCSUITE-159. `releaseElementSources` runs once the GIF is finished, and the
+  // one thing left after it — the caller's own `complete` report — reaches the
+  // catch when it throws, which releases again: two `revokeObjectURL` calls per
+  // source for one export. `exportWebM.ts` had the same pair.
+  it('releases each media element once when the completion callback throws', async () => {
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'complete') throw new Error('dialog blew up')
+    }
+
+    await expect(run({ options: { fps: 10 }, onProgress })).rejects.toThrow('dialog blew up')
+
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('estimateGifBytes', () => {

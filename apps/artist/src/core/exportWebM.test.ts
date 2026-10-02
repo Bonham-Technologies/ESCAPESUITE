@@ -897,6 +897,102 @@ describe('exportToWebM failure handling', () => {
   })
 })
 
+// ESCSUITE-159. The `catch` owns everything built after the media load
+// (ESCSUITE-156), and the Mediabunny `Output` is one of those things: a throw
+// after `output.start()` left the muxer holding its target and its packet
+// sources — and, in a real browser, the encoders those sources own — with no
+// handle left to release them by. `cancel()` is Mediabunny's own call for
+// exactly that, and the one thing it must never do is run on an export that
+// finished: the output has nothing left to release and says so on the console.
+describe('exportToWebM muxer cancellation', () => {
+  it('cancels the muxer when the frame loop fails', async () => {
+    webcodecs.script.videoErrorAfterEncodes = 2
+
+    await expect(run()).rejects.toBeInstanceOf(ExportError)
+
+    expect(lastMediabunnyOutput().cancelCalls).toBe(1)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+  })
+
+  it('cancels the muxer when finalizing fails', async () => {
+    getMediabunnyState().finalizeError = new Error('muxer exploded')
+
+    await expect(run()).rejects.toThrow('muxer exploded')
+
+    // Mediabunny treats a cancel during finalization as the ordinary way out of
+    // a failed finalize — it is the one state it deliberately does not warn
+    // about — so this is the call the half-written file is released by.
+    expect(lastMediabunnyOutput().cancelCalls).toBe(1)
+  })
+
+  it('never cancels the muxer of an export that succeeded', async () => {
+    await run()
+
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(lastMediabunnyOutput().cancelCalls).toBe(0)
+  })
+
+  it('leaves a finalized muxer alone when the abort lands during muxing', async () => {
+    // The post-finalize abort check reaches the catch with the file already
+    // written: there is nothing left for `cancel()` to release, and asking
+    // anyway only puts "Output has already been finalized." on the console of
+    // an export the user called off.
+    const controller = new AbortController()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'muxing') controller.abort()
+    }
+
+    await expect(run({ signal: controller.signal, onProgress })).rejects.toBeInstanceOf(
+      ExportAbortedError
+    )
+
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(lastMediabunnyOutput().cancelCalls).toBe(0)
+  })
+
+  it('has no muxer to cancel when the setup fails before one exists', async () => {
+    // The first report after the media load is made before the Output is
+    // constructed, so the catch runs with nothing recorded — the other side of
+    // the same question.
+    const onProgress = (p: ExportProgress) => {
+      if (p.message === 'Initializing encoder...') throw new Error('dialog blew up')
+    }
+
+    await expect(run({ onProgress })).rejects.toThrow('dialog blew up')
+
+    expect(getMediabunnyState().outputs).toHaveLength(0)
+  })
+})
+
+// ESCSUITE-159. `releaseElementSources` runs once the frame loop and the muxer
+// are done, and anything that throws *after* it reaches the catch, which
+// releases again — two `revokeObjectURL` calls per source for one export. A
+// handle freed twice reads, to anyone counting, as a handle something else still
+// holds.
+describe('exportToWebM release on the way out', () => {
+  it('releases each media element once when the completion callback throws', async () => {
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'complete') throw new Error('dialog blew up')
+    }
+
+    await expect(run({ onProgress })).rejects.toThrow('dialog blew up')
+
+    expect(revoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases each media element once when the muxer wrote no bytes', async () => {
+    getMediabunnyState().producesBuffer = false
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+
+    await expect(run()).rejects.toThrow('Export failed: no data was written to buffer')
+
+    expect(revoke).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('exportToWebM codec selection', () => {
   it('configures VP9 by default', async () => {
     await run()

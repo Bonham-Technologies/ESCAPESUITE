@@ -100,6 +100,7 @@ export class OutputDouble {
   readonly target: BufferTargetDouble
   startCalls = 0
   finalizeCalls = 0
+  cancelCalls = 0
 
   constructor(options: { format: OutputFormatDouble; target: BufferTargetDouble }) {
     this.format = options.format
@@ -121,6 +122,18 @@ export class OutputDouble {
     state.callLog.push('Output.start')
     this.startCalls++
     if (state.startError) throw state.startError
+  })
+
+  /**
+   * Mediabunny's own cancellation call (ESCSUITE-159): it releases the target
+   * and force-closes every packet source, which is what an export that threw
+   * after `start()` owes the muxer it opened. Recorded, not modelled — the real
+   * one is a no-op once the output has been finalized, and the exporter's job is
+   * to call it exactly when there is something left to release.
+   */
+  cancel = vi.fn(async () => {
+    state.callLog.push('Output.cancel')
+    this.cancelCalls++
   })
 
   finalize = vi.fn(async () => {
