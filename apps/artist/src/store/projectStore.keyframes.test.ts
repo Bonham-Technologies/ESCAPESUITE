@@ -305,6 +305,48 @@ describe('projectStore remaining behaviours', () => {
         { time: 0, value: 0.5, easing: 'linear' },
       ])
     })
+
+    // ESCSUITE-166: the seed used to be gated on "does the array I am about to
+    // write have a keyframe at 0", which is true on the first write (nothing
+    // there yet) but stays true-shaped logic on every later one too — so a
+    // keyframe at 0 the user deliberately removed, or moved away from 0, came
+    // back on the very next edit to an unrelated keyframe, holding the clip's
+    // *static* transform value rather than whatever the user had built.
+    it('does not re-seed a time-0 keyframe the user deleted, on a later edit', () => {
+      addClip('clip1', 0, 5)
+
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.3, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.8, easing: 'linear' })
+      // Auto-created at time 0, then the two user keyframes above.
+      expect(store().project.timeline.clips[0].animation!.keyframes.opacity!.map((kf) => kf.time)).toEqual([0, 1, 2])
+
+      store().removeClipKeyframe('clip1', 'opacity', 0)
+
+      // Nudging the keyframe at time 1 must not bring time 0 back.
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.opacity).toEqual([
+        { time: 1, value: 0.5, easing: 'linear' },
+        { time: 2, value: 0.8, easing: 'linear' },
+      ])
+    })
+
+    it('does not re-seed a time-0 keyframe the user moved away from 0, on a later edit', () => {
+      addClip('clip1', 0, 5)
+
+      store().setClipKeyframe('clip1', 'x', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'x', { time: 2, value: 0.9, easing: 'linear' })
+      // Auto-created at time 0 (the clip's default x, 0.5), then the two user keyframes.
+      expect(store().project.timeline.clips[0].animation!.keyframes.x!.map((kf) => kf.time)).toEqual([0, 1, 2])
+
+      store().moveClipKeyframe('clip1', 'x', 0, 0.5)
+      expect(store().project.timeline.clips[0].animation!.keyframes.x!.map((kf) => kf.time)).toEqual([0.5, 1, 2])
+
+      // Changing the keyframe at time 2 must not bring time 0 back.
+      store().setClipKeyframe('clip1', 'x', { time: 2, value: 1, easing: 'linear' })
+
+      expect(store().project.timeline.clips[0].animation!.keyframes.x!.map((kf) => kf.time)).toEqual([0.5, 1, 2])
+    })
   })
 
   describe('keyframe panel state', () => {
