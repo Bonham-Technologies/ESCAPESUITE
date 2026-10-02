@@ -27,6 +27,7 @@
   "dependencies": {
     "@escapesuite/shared": "workspace:*",
     "@vercel/analytics": "^2.0.1",
+    "gifenc": "1.0.3",
     "idb": "^8.0.3",
     "mediabunny": "^1.60.0",
     "mp4box": "^2.4.1",
