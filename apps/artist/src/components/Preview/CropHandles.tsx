@@ -87,6 +87,15 @@ export function CropHandles({
   // ESCSUITE-147 gap rather than inventing a second geometry.
   const bounds = getOverlayBounds(clip, canvas, time, [source], projectSize);
   if (!bounds) return null;
+  // A preview whose panel has been dragged shut reports a 0x0 box — the case
+  // ESCSUITE-90's `handleScreenScale` guards for the same arithmetic — and a
+  // content box with no area is a `contentScale` of 0 for the gesture to divide
+  // a pointer displacement by: one move would be an infinite delta and a crop
+  // slammed to its clamp. Nothing is drawn at all instead, which is also the
+  // honest answer for a layer with no pixels to lay handles on. One condition
+  // and not two: `contentBox` derives each axis from the other, so a zero on
+  // one is a zero on both.
+  if (content.scaleX <= 0) return null;
 
   const frame = cropFrameBox(bounds, content);
 
