@@ -212,12 +212,23 @@ describe('useTrimDrag following the pointer', () => {
     const { result } = mountTrim()
     grabEdge(result, 'start')
 
+    // Out past the source's own beginning on the opening move. The clamp holds
+    // the clip exactly where it already sits, so there is nothing to write and
+    // the no-op gate refuses it rather than re-rendering for an unchanged clip.
+    moveTo(1)
+    expect(actions.trimClip).not.toHaveBeenCalled()
+
+    // Into the source and back out past its beginning: the clamped values now
+    // differ from the clip's, so the write lands — and it is still the limit,
+    // not the two seconds of source the pointer asked to reveal.
+    moveTo(2.5)
     moveTo(1)
 
-    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'start', {
+    expect(actions.trimClip).toHaveBeenLastCalledWith('clip1', 'start', {
       startTime: 0,
       timelinePosition: 2,
-    }, ORIGIN, false)
+    }, ORIGIN, true)
+    expect(theClip('clip1')).toMatchObject({ startTime: 0, timelinePosition: 2, duration: 2 })
   })
 
   it('takes the end edge out into the rest of the source', () => {

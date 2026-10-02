@@ -30,7 +30,8 @@
 // a paste keep it. Both are arithmetic over the clips they are handed, with no
 // store and no DOM. `clampTrimToNeighbours` allocates nothing at all, because a
 // trim calls it on every mousemove; `firstFreeGroupStart` builds and sorts one
-// span per collision, and runs once per Ctrl+V.
+// span per (member, same-row clip) pair whether the two collide or not, and
+// runs once per Ctrl+V.
 import type { Clip, Track, TrimOrigin } from './types';
 
 // Get snap points from all clip edges
@@ -66,6 +67,29 @@ export function findNearestSnapPoint(
   return nearest;
 }
 
+/**
+ * How far inside a clip another one must reach before this counts as an
+ * overlap: one nanosecond (ESCSUITE-161 / 162 review).
+ *
+ * The two writers that butt a clip up against its neighbour aim at the
+ * neighbour's exact edge and cannot land on it in binary floating point. A
+ * clamped end trim writes `endTime = startTime + (mouseTime - timelinePosition)`
+ * and `trimClip` derives `duration = endTime - startTime`, so the clip's end is
+ * `p + ((s + (L - p)) - s)` — not `L`: fuzzed over 2e6 random triples, 8.0% of
+ * end trims land strictly past the limit, worst 3.55e-15 s. A relocated paste is
+ * the same shape from the other side (`offset + (occupantEnd - offset)`, short
+ * of the occupant's end in 3.2% of cases, worst 3.55e-15 s).
+ *
+ * A strict comparison read those misses as collisions, which is not harmless:
+ * `canMoveSelectedClips` is state-based rather than sampled, so a group holding
+ * both butted clips refused every drag, silently and for good. One nanosecond is
+ * far below a frame and below `MIN_CLIP_DURATION` and `MIN_SPLIT_DISTANCE`, so
+ * no overlap a user can make falls inside it; it lives in the shared predicate
+ * rather than as a tolerance sprinkled over the two writers, so every reader of
+ * the invariant answers the same question.
+ */
+const OVERLAP_EPSILON = 1e-9;
+
 // Check if clip placement would overlap with another on same track
 export function wouldOverlap(
   clips: Clip[],
@@ -81,8 +105,8 @@ export function wouldOverlap(
     if (clip.id === excludeClipId) continue;
 
     const clipEnd = clip.timelinePosition + clip.duration;
-    // Overlap if ranges intersect
-    if (position < clipEnd && end > clip.timelinePosition) {
+    // Overlap if ranges intersect by more than a float bit's worth.
+    if (position < clipEnd - OVERLAP_EPSILON && end > clip.timelinePosition + OVERLAP_EPSILON) {
       return true;
     }
   }

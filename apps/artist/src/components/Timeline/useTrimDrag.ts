@@ -46,13 +46,19 @@
 // pointer asked for. `clampTrimToNeighbours` now holds the pointer time to the
 // facing edge of the neighbour on the clip's own row before `computeTrimUpdate`
 // ever sees it, so an end trim stops at the next clip's start and a start trim
-// at the previous clip's end.
+// at the previous clip's end. Once the pointer is out past that edge every move
+// computes the same update, so `changesClip` refuses the write rather than
+// re-rendering the timeline per frame for no change.
 //
-// **The clamp lives here and not in `trimClip`**, deliberately, for two
-// reasons. The **ripple** tool is excepted: it lengthens the clip over its
-// neighbours during the drag and pushes them out of the way on release, so the
-// overlap is real and transient and refusing it would break the tool — and
-// which tool is out is something only the gesture knows, never the store. And
+// **The clamp lives here and not in `trimClip`**, deliberately, for three
+// reasons. The **ripple** tool's end trim is excepted: it lengthens the clip
+// over its neighbours during the drag and pushes them out of the way on
+// release, so the overlap is real and transient and refusing it would break the
+// tool — and which tool is out is something only the gesture knows, never the
+// store. Its *start* trim is not excepted, and that is the asymmetry the review
+// caught: `handleMouseUp` measures the shift from the clip's end, which a start
+// trim never moves, so a ripple start trim shifts nothing and its overlap would
+// be permanent rather than transient. And
 // the store is already not where a trim's geometry is enforced: the source's
 // length and `MIN_CLIP_DURATION` are `computeTrimUpdate`'s rules too, with
 // `trimClip` enforcing only what it owns (the locked row, ESCSUITE-84). It also
@@ -79,6 +85,23 @@ import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
 import { computeTrimUpdate, pointerTime, type TrimOrigin } from './timelineGeometry';
 import type { TrimState } from './types';
 import { useTrackAreaCache } from './useTrackAreaCache';
+
+/**
+ * Whether a computed update would actually change the clip (ESCSUITE-101's "a
+ * no-op edit refuses", applied to the one gesture that writes per frame).
+ *
+ * `computeTrimUpdate` returns the same update for every pointer position past a
+ * limit, and the clamp above turns "past a limit" from a rare case — the
+ * source's own length — into the normal one for a gesture the user holds against
+ * the neighbour. Writing it anyway costs a new clips array, a new `modified` and
+ * a re-render every frame for no change. Comparing only the keys the update
+ * carries is enough: `trimClip` derives `duration` from them and rebases the
+ * animation from `trim.origin` by the resulting duration, so an update that
+ * changes none of them would hand back the clip it was given.
+ */
+function changesClip(clip: Clip, update: Partial<Clip>): boolean {
+  return (Object.keys(update) as (keyof Clip)[]).some((key) => clip[key] !== update[key]);
+}
 
 /** What a trim gesture needs that it cannot reach on its own. */
 export interface TrimDragDeps {
@@ -169,11 +192,14 @@ export function useTrimDrag({
     const area = trackArea.read(container);
     const mouseTime = pointerTime(e.clientX, area.left, container.scrollLeft, pixelsPerSecond);
 
-    // The ripple tool is the one trim allowed to run over its neighbours: the
-    // release shifts them by however much the end moved, so the overlap the
-    // drag makes lasts only as long as the drag.
+    // The ripple tool's END trim is the one trim allowed to run over its
+    // neighbours: the release shifts them by however much the end moved, so the
+    // overlap the drag makes lasts only as long as the drag. A ripple START
+    // trim earns no such exception — `handleMouseUp` measures its shift from
+    // the clip's **end**, and a start trim never moves the end, so the delta is
+    // 0, nothing is shifted and the overlap would be permanent.
     const limitedTime =
-      activeTool === 'ripple'
+      activeTool === 'ripple' && trim.edge === 'end'
         ? mouseTime
         : clampTrimToNeighbours(clips, clip, trim.edge, trim.origin, mouseTime);
 
@@ -185,7 +211,7 @@ export function useTrimDrag({
       origin: trim.origin,
     });
 
-    if (update) {
+    if (update && changesClip(clip, update)) {
       gestureHistory.commit((skipHistory) => trimClip(trim.clipId, trim.edge, update, trim.origin, skipHistory));
     }
   };
