@@ -111,6 +111,20 @@ describe('crop mode on the preview', () => {
     expect(preview.view.getByRole('button', { name: 'Crop bottom right' })).toBeEnabled()
   })
 
+  it('leaves crop mode when Escape is pressed on a mounted handle', async () => {
+    // The preview hands `CropHandles` an `onLeave` that clears the latch; the
+    // component suite pins the key with a spy, this pins the wire to the store.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    const preview = await renderPreview()
+    store().setCropClipId(clip.id)
+
+    fireEvent.keyDown(preview.view.getByRole('button', { name: 'Crop top left' }), { key: 'Escape' })
+
+    expect(store().cropClipId).toBeNull()
+    expect(preview.view.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
+  })
+
   it('moves the handles with the playhead, onto the box the clip is animated to', async () => {
     // The `time={currentTime}` half of the props the mount computes: the frame
     // follows the clip's ANIMATED centre, not its stored one. Nothing else pins
