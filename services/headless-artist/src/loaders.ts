@@ -48,6 +48,7 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   'audio/ogg': 'ogg',
   'audio/mp4': 'm4a',
   'audio/aac': 'aac',
+  'audio/webm': 'webm',
 }
 
 // Base64 chars decoded per chunk. Must be a multiple of 4 so each slice decodes cleanly on its own.
@@ -91,6 +92,9 @@ function assertVeditorVideo(value: unknown, index: number): asserts value is Ved
     if (typeof value[field] !== 'string') {
       throw new Error(`bundle video #${index} field "${field}" must be a string`)
     }
+  }
+  if (value.meta !== undefined && !isRecord(value.meta)) {
+    throw new Error(`bundle video #${index} field "meta" must be an object`)
   }
 }
 
@@ -144,12 +148,29 @@ export async function writeBase64ToFile(
   await pipeline(Readable.from(chunks()), createWriteStream(destPath))
 }
 
+/**
+ * The `SourceVideo` fields a bundle video's optional `meta` may carry — `projectManager.ts`'s
+ * `SourceVideoMeta` (ESCSUITE-97), as the kit sees it through `SourceVideoInput`: everything but
+ * the three the entry already states at its own top level.
+ */
+type VeditorVideoMeta = Omit<SourceVideoInput, 'id' | 'name' | 'mimeType'>
+
 interface VeditorVideo {
   id: string
   name: string
   mimeType: string
   data: string
   thumbnail?: string
+  /**
+   * The live `SourceVideo`'s own fields, exactly as `saveProject` writes them. Notably
+   * `mediaType`: an ESCAPECRAFT audio-only take (mic alone, screen and webcam both off) is
+   * typed `video/webm;codecs=vp9,opus` even though it has no picture in it, and `meta.mediaType`
+   * is the only thing that says it is audio (ESCSUITE-150). Without forwarding it, `seedSources`
+   * re-derives `mediaType` from the MIME type alone, sees `video/`, and both exporters build a
+   * frame source over a file with nothing to show — disagreeing with the editor, which trusts
+   * `meta` on the same file.
+   */
+  meta?: VeditorVideoMeta
 }
 
 interface VeditorBundle {
@@ -218,11 +239,16 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
   try {
     for (const video of videos) {
       // Every field was validated above, before mkdtemp — nothing here can be undefined.
-      const ext = MIME_TO_EXTENSION[video.mimeType] ?? extensionOf(video.name) ?? 'bin'
+      // Strip a `;codecs=...` parameter before the lookup, so "video/webm;codecs=vp9,opus"
+      // still resolves to "webm" rather than falling through to the name or ".bin".
+      const mimeBase = video.mimeType.split(';')[0].trim()
+      const ext = MIME_TO_EXTENSION[mimeBase] ?? extensionOf(video.name) ?? 'bin'
       const destPath = path.join(dir, `${video.id}.${ext}`)
       await writeBase64ToFile(video.data, destPath)
       sourceFiles[video.id] = destPath
-      sourceVideos.push({ id: video.id, name: video.name, mimeType: video.mimeType })
+      // `meta` first so the entry's own id/name/mimeType — the source of truth — always win,
+      // the same order `projectManager.ts`'s `loadProject` applies to the identical `meta`.
+      sourceVideos.push({ ...video.meta, id: video.id, name: video.name, mimeType: video.mimeType })
     }
   } catch (err) {
     await fs.rm(dir, { recursive: true, force: true })

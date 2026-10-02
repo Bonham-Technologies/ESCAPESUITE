@@ -3047,4 +3047,14 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   out. It builds this same `dist-headless/headless.html` (via `pnpm --filter=@escapesuite/artist
   run build:headless`) and calls `__renderProjectToFile` through the file input, never
   `__renderProject`'s base64 path — see `services/headless-artist/README.md` for the job spec,
-  sinks, and how to build/pack the kit.
+  sinks, and how to build/pack the kit. Its `.veditor` bundle loader (`loaders.ts`'s
+  `loadBundle`) forwards each `videos[]` entry's optional `meta` — the same object
+  `projectManager.ts`'s `saveProject` writes — into that source's `SourceVideoInput`, ahead of
+  anything `seedSources` would otherwise probe from the bytes (ESCSUITE-150). Without it, an
+  ESCAPECRAFT audio-only take (microphone alone, screen and webcam both off) — typed
+  `video/webm;codecs=vp9,opus` even though it has no picture, with `meta.mediaType: 'audio'` the
+  only thing that says so — would have both exporters build a frame source over a file with
+  nothing to show, disagreeing with the editor loading the same file. `MIME_TO_EXTENSION` also
+  strips a `;codecs=...` parameter before naming that source's temp file and now knows
+  `audio/webm`, so either MIME type still lands on a `.webm` temp file rather than `.bin` or a
+  mismatched extension.
