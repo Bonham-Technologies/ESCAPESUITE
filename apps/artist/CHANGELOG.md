@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.15.2
+
+### Patch Changes
+
+- 6526528: The crop handles no longer disappear for a moment when the preview's canvas is rebuilt while crop mode is open.
+
 ## 2.15.1
 
 ### Patch Changes
