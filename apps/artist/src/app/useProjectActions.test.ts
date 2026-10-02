@@ -129,6 +129,45 @@ describe('opening a project', () => {
     expect(deps.showNotification).toHaveBeenCalledWith('Project loaded successfully', 'success')
     expect(result.current.showProjectLoadDialog).toBe(false)
     expect(result.current.isLoading).toBe(false)
+    // ESCSUITE-164: resetProject() + setProject() + one addSourceVideo per
+    // source each push history on their own — clearHistory() runs once every
+    // source has landed, parity with useSessionRestore and handleNewProject,
+    // so opening a file is one undoable step at most (here: none at all).
+    expect(deps.clearHistory).toHaveBeenCalled()
+  })
+
+  // ESCSUITE-164: on the REAL store, resetProject() + setProject() + two
+  // addSourceVideo calls are four separate history pushes — one Ctrl+Z used
+  // to land the user on "loaded project, one of two sources missing" rather
+  // than back on whatever was open before. clearHistory() makes the whole
+  // load a single non-undoable step, the way a session restore and New
+  // Project already are.
+  it('is not undoable — clearHistory() once every source is in, so opening a project is a new document, not an edit', async () => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    const srcA = { ...sampleVideo, id: 'srcA' }
+    const srcB = { ...sampleVideo, id: 'srcB' }
+    vi.mocked(loadProject).mockResolvedValue({
+      project: { ...deps.project, name: 'Loaded Project' },
+      sourceVideos: [srcA, srcB],
+    })
+    const { result } = mountActions({
+      clipCount: 0,
+      resetProject: () => store().resetProject(),
+      setProject: (p) => store().setProject(p),
+      addSourceVideo: (v) => store().addSourceVideo(v),
+      clearHistory: () => store().clearHistory(),
+    })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(useEditorStore.getState().history).toEqual({ past: [], future: [] })
+
+    act(() => { store().undo() })
+
+    expect(useEditorStore.getState().project.name).toBe('Loaded Project')
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['srcA', 'srcB'])
   })
 
   it('asks first when there is work on the timeline', async () => {
@@ -257,6 +296,10 @@ describe('opening a project', () => {
     expect(deps.addSourceVideo).toHaveBeenCalledTimes(2)
     expect(revokeSourceThumbnails).toHaveBeenCalledTimes(1)
     expect(revokeSourceThumbnails).toHaveBeenCalledWith([incoming[1], incoming[2]])
+    // ESCSUITE-164: clearHistory() only runs once every source has landed —
+    // a load that dies partway through must not wipe whatever undo history
+    // the editor held before the user picked this (now-rejected) file.
+    expect(deps.clearHistory).not.toHaveBeenCalled()
   })
 
   it('does not revoke a source that made it into the store before a load is reported successful', async () => {
