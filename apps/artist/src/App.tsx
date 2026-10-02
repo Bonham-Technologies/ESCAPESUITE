@@ -86,6 +86,8 @@ function App() {
   const setInPoint = useEditorStore((state) => state.setInPoint);
   const setOutPoint = useEditorStore((state) => state.setOutPoint);
   const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
+  const cropClipId = useEditorStore((state) => state.cropClipId);
+  const setCropClipId = useEditorStore((state) => state.setCropClipId);
 
   // The hooks below are called in a fixed order, because that order is the
   // order their effects run in — and it is the order the six effects ran in
@@ -202,6 +204,8 @@ function App() {
     clearInOutPoints,
     inPoint,
     outPoint,
+    cropClipId,
+    setCropClipId,
   });
 
   const { timelineHeight, isResizing, handleResizeStart, handleResizeDoubleClick } = useTimelineHeight({

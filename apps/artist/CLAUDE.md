@@ -64,7 +64,7 @@ pnpm lint                # Run ESLint
 | `selectionSlice.ts` | `selectedClipId`, `selectedClipIds`, `selectedTrackId`, `clipboard`, and the eleven actions over them: `setSelectedClipId`, `setSelectedTrackId`, `toggleClipSelection`, `selectClipsInRange`, `clearMultiSelection`, `moveSelectedClips`, `deleteSelectedClips`, `copySelectedClips`, `pasteClips`, `muteSelectedClips`, `unmuteSelectedClips` |
 | `playbackSlice.ts` | `currentTime`, `isPlaying`, `inPoint`, `outPoint` and their five setters. No history: moving the playhead is not an undoable edit |
 | `markerSlice.ts` | `markers` and the six marker actions, `goToNextMarker`/`goToPreviousMarker` included — which write `currentTime`, playback's field, off the `state` argument rather than importing anything |
-| `uiSlice.ts` | The five shell preferences the store carries — `zoom` (clamped to 0.1–10 by `setZoom`), `snapEnabled`, `snapThreshold`, `activeTool`, `loopPlayback` — and their four setters. Twenty-one lines, no history, no `get` |
+| `uiSlice.ts` | The six shell preferences the store carries — `zoom` (clamped to 0.1–10 by `setZoom`), `snapEnabled`, `snapThreshold`, `activeTool`, `loopPlayback`, `cropClipId` (ESCSUITE-157, the preview's crop-mode latch) — and their five setters. No history, no `get` |
 
 ### Core Modules (`src/core/`)
 - `storage.ts`: IndexedDB layer using `idb` library. Stores video blobs, thumbnails, projects, and settings in separate object stores. `video-editor-db` is shared with ESCAPECRAFT (root `CLAUDE.md`, Data Flow), so **nothing in ARTIST clears a whole object store** — every bulk delete iterates the ids the library itself holds, per id, the way the media library's Clear All and Clear Unused both do (ESCSUITE-142); `clearAllVideos()` and `clearAllData()`, the two functions that used to do exactly that, were deleted for this reason. `resolveThumbnailUrl(id)` is the one mechanism for turning a *stored* thumbnail into a live `URL.createObjectURL` handle — `undefined` when nothing is stored — that both `projectManager.loadProject` and `useSessionRestore.handleRestoreSession` call rather than trusting a `thumbnailUrl` that arrived from disk (ESCSUITE-96). `revokeSourceThumbnails(sources)` is the other half: nothing else ever frees that handle, so it is the one function every path that retires a `blob:` `thumbnailUrl` calls — a no-op for a source with none, or with a non-`blob:` URL. `revokeThumbnailUrl(url)` is the same revoke for a single handle that is not (yet) a source's, so a caller holding one does not fabricate a `SourceVideo` to get it past the guard; `revokeSourceThumbnails` is written in terms of it, so there is still one place a thumbnail handle is freed and one `blob:` check to read. Its callers each own a moment a source's *old* handle stops being needed: `store/projectSlice.ts`'s `removeSourceVideo` (the one leaving), `removeSourceVideosPermanently` (every one in the batch, on a storage clear — ESCSUITE-149) and `resetProject` (all of them, on teardown); `addSourceVideo`'s replace-in-place branch, when a re-add under an id already held carries a *different* `thumbnailUrl` than the one it is replacing — the one place a source's thumbnail changes without the source itself ever leaving the library, and so the one place a session restore landing on a library the CRAFT handoff already filled can free just the id it actually replaces, leaving every other handed-off thumbnail live; and `useProjectActions.ts`'s `loadProjectFile`, over a REFUSED load's *incoming* sources (`loadProject` mints their thumbnails before validation ever runs) — the outgoing library on a *successful* load is `resetProject`'s to free, not this callback's, so the same URLs are never revoked twice (ESCSUITE-113). A handle that never reached the library at all — `setSourceThumbnail`'s, when the media library's lazy rebuild lost a race with a real load — goes through `revokeThumbnailUrl` directly (ESCSUITE-117). **Nothing else revokes a `SourceVideo.thumbnailUrl`** — in particular the `?loadVideo=` handoff (`useHostIntegration.ts`) keeps no owner of its own: it used to hold the URLs `importTake` had already handed to `addSourceVideo` and revoke them in its effect's cleanup, which under StrictMode's double mount (every development build) left every tile of the take dead, because the second run finds the parts already in the library and mints nothing to replace them with (ESCSUITE-117). Undo/redo never call it — a source coming back via redo still needs a working URL — but a `thumbnailUrl` a revoke just killed is also scrubbed (to `undefined`, not rebuilt) out of every undo/redo snapshot that still carries the same string, by `scrubDeadThumbnails` (`store/storeHistory.ts`), called from the same action that revokes: undoing back past a removal, a reset or a replace lands a source with no thumbnail rather than one nothing can ever open, the same as a source that never had one. Since ESCSUITE-117 it does not wait to be genuinely reloaded either: `VideoLibrary` (`components/VideoUploader.tsx`) calls `resolveThumbnailUrl` for every source in the library that has no `thumbnailUrl` — once per source per mount, in-flight ids tracked in a ref so a re-render issues no second read — and hands what comes back to `setSourceThumbnail`. The handle is the effect's until the store takes it, so it is revoked instead if the source has left the library, the editor has unmounted, or a real load got there first. "Has unmounted" is a `mountedRef` scoped to the **component**, deliberately not a flag scoped to the effect run: a rebuild that lands writes the store, which hands the component a new `sourceVideos` array and re-runs the effect, so a per-run flag cleared by the previous run's cleanup told every read still parked that the editor had gone — each freed the handle it had just minted, the re-run skipped those ids as already read, and exactly one tile per burst was repaired (review round 1, which is why undo across a project load — the ticket's own headline case, restoring every source at once — has two tests of its own). The ref is set `true` on the way in as well as `false` on cleanup, because StrictMode's cleanup-then-remount of the same instance keeps the ref, and a clear-only ref would have left every development build "unmounted" from its second mount onward
@@ -225,7 +225,8 @@ pnpm lint                # Run ESLint
   `thumbnailUrl` is still refreshed from what is actually stored (ESCSUITE-96).
 - `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
 - `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
-- `clipCrop.ts`: a media clip's **crop** (ESCSUITE-6) — four insets, as fractions of the source frame. `croppedSourceRect(w, h, crop?)` is the region to draw and is read by both media draws in `canvasRenderer.ts` **and** by `components/Preview/previewGeometry.ts`, so the picture and the chrome round it can never disagree; it floors the region at one source pixel, because `drawImage` throws `IndexSizeError` on a zero-width source rect and a throw inside a preview frame kills the whole frame. `isValidCrop(value)` is the shape check `parseProject` runs — four finite insets >= 0 leaving something on each axis — and takes no dimensions, because a project is validated before its media is re-linked. `normaliseCrop(crop, w, h)` is what the inspector stores: clamped to 0-90% per edge, `undefined` for an all-zero crop, and a refusal (`{ ok: false }`, write nothing) for anything that would leave less than a source pixel. `cropForAspect(w, h, aspect, crop?)` is the aspect presets, computed against the region the clip **already** shows rather than the whole frame, so presets compose and Reset is the thing that starts over. Static: `crop` is not an `AnimatableProperty` and never passes through `getAnimatedValues`
+- `clipCrop.ts`: a media clip's **crop** (ESCSUITE-6) — four insets, as fractions of the source frame. `croppedSourceRect(w, h, crop?)` is the region to draw and is read by both media draws in `canvasRenderer.ts` **and** by `components/Preview/previewGeometry.ts`, so the picture and the chrome round it can never disagree; it floors the region at one source pixel, because `drawImage` throws `IndexSizeError` on a zero-width source rect and a throw inside a preview frame kills the whole frame. `isValidCrop(value)` is the shape check `parseProject` runs — four finite insets >= 0 leaving something on each axis — and takes no dimensions, because a project is validated before its media is re-linked. `normaliseCrop(crop, w, h)` is what the inspector stores: clamped to 0-90% per edge, `undefined` for an all-zero crop, and a refusal (`{ ok: false }`, write nothing) for anything that would leave less than a source pixel. `cropForAspect(w, h, aspect, crop?)` is the aspect presets, computed against the region the clip **already** shows rather than the whole frame, so presets compose and Reset is the thing that starts over. `cropUpdateFor(crop, source)` (ESCSUITE-157) is the one decision both crop surfaces make about what to write — `null` for "write nothing", `{ crop: undefined }` for "no crop at all", or `{ crop }` — lifted out of `useClipEditorActions`' `handleCropChange`, which is now a thin wrapper over it, so the inspector's sliders and the on-canvas handles (`components/Preview/CropHandles.tsx`) cannot disagree about what the store may hold. Static: `crop` is not an `AnimatableProperty` and never passes through `getAnimatedValues`
+- `cropDrag.ts`: the crop **gesture's** arithmetic (ESCSUITE-157), kept out of `clipCrop.ts` because that module is read by the renderer on every media clip of every frame and none of this is. Eight handles (`CROP_HANDLES`/`CROP_HANDLE_LABELS`, compass points, reading order); `sourceDelta` un-rotates and un-scales a canvas displacement into source pixels; `cropForHandleMove(start, handle, delta, source, keepAspect?)` turns that into the next crop, always rebased from the crop the gesture **started** with (never the previous move's output — the ESCSUITE-110 trim-compounding trap in a different gesture) and clamped on the inset that moved, so the edge a handle does not own never drifts; `cropRegionAspect` reads the kept region's own ratio for Shift-lock. `cropCentreFor` is the compensating-centre arithmetic a crop write needs — cropping shrinks the picture about the clip's centre (ESCSUITE-6), so a crop written alone moves both edges of an axis and a dragged handle visibly lags — and `cropCompensatesCentre(animation)` is the one place that decides whether a write may apply it: false for a clip keyframed on `x`/`y`/`scaleX`/`scaleY` (a static centre would fight the keyframes and lose at playback), true for rotation/opacity/blur keyframes or none at all (operator ruling, 2026-10-02). `cropWriteFor` is the one function that builds the whole `Partial<Clip>` a crop gesture hands `updateClip` — `{ crop, transform }` or `{ crop }` — so there is exactly one history push and one locked-track check per move. `CROP_NUDGE` (`{ fine: 1, coarse: 10 }` source pixels) is the arrow key's step and Shift's; `cropsEqual` is why a nudge that cannot move (an arrow key already at the frame's edge, or one the handle owns no inset on) costs no undo entry, and `cropAnnouncement` is the live-region text, in source pixels rather than the inspector's percentages because a one-pixel nudge of a wide source would round to "0%". Pure throughout — no clip, no store, no canvas, no pointer event — consumed by `components/Preview/useCropHandleGesture.ts`, the hook that drives the eight on-canvas handles (`CropHandles.tsx`), both by mouse drag and by the keyboard
 
 ### Video Decode Worker (`src/workers/decodeWorker.ts`)
 Web Worker for WebCodecs-based video decoding, enabling full-speed exports in background tabs:
@@ -940,6 +941,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 | `cursor.ts` | The CSS cursor a drag mode advertises |
 | `types.ts` | The shapes the above share (`DragMode`, `OverlayBounds`, `HandleHit`, `PreviewSceneContext`). **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
 | `InlineTextEditorAnchor.tsx` | Positioning `InlineTextEditor` over the text it edits, through the canvas' object-fit mapping |
+| `CropHandles.tsx` | The eight on-canvas crop handles (ESCSUITE-157), mounted over the canvas only while crop mode is open **and the playhead is on the clip** — the one `visibleCropTarget` answer the chrome gates on, so handles and dim come and go together; the mouse drag and the arrow-key nudges both land through `useCropHandleGesture.ts`. Positioned off the same `getOverlayBounds` every other reader of a clip's box uses, under the same ESCSUITE-147 transition suppression (its optional `transition` prop). The gesture and the keyboard nudges are documented beside `CropSection.tsx`, further down |
 | `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts (Space, the arrows, Home, End — bound on `window` here, not in the App cascade); no canvas at all. Takes `modalOpen`, the same gate the App cascade carries, so Space cannot start playback from behind a dialog |
 | `PreviewTimecode.tsx` | The playhead readout `<span>` — the only thing that re-renders on a playback tick (see below) |
 
@@ -991,6 +993,13 @@ centre) are the clip's own geometry and never scale, and the body hit test is un
 project in a 700px preview drew ~1.5px handles before this; it now draws 44-project-pixel ones,
 which are the same 8px under the pointer as a 720p project's.
 
+**Crop mode draws its own chrome instead** (ESCSUITE-157), and its handles are
+DOM buttons rather than canvas squares — so they are sized in CSS pixels
+directly and take no `screenScale` at all. The one thing that chrome scales is
+the pen: `drawCropOverlay` takes the same `screenScale` and multiplies its
+`lineWidth` by it. See the crop-mode paragraphs further down in this Preview
+section (`cropOverlay.ts`, `CropHandles.tsx`).
+
 `screenScale` defaults to **1** — the right answer for a canvas that *is* its own screen (both
 exporters, the headless bundle, the unit tests that build one) and for the preview before its
 first `ResizeObserver` callback — so every caller that passes nothing behaves exactly as it did.
@@ -1040,11 +1049,13 @@ round 1, NIT-4; `handleMouseDown` already had the clip in hand and needed no cha
 
 No `suppressPreset` outside a transition is not the same as "a hit test is never inside one" —
 the preview does draw transitions, and the pointer works during them. The renderer suppresses
-one preset side per side of an active transition (`core/canvasRenderer.ts`), and
-`getOverlayBounds` has no way to be told, so inside a transition the hit box, the selection
-chrome, the marquee and the drag seed can all disagree with the drawn frame. That is
-ESCSUITE-147's gap; it applied to every clip carrying a preset before this ticket and now
-applies to keyframed ones too — this ticket neither introduces nor fixes it.
+one preset side per side of an active transition (`core/canvasRenderer.ts`), and at the time of
+this ticket `getOverlayBounds` had no way to be told, so inside a transition the hit box, the
+selection chrome, the marquee and the drag seed could all disagree with the drawn frame. That
+was ESCSUITE-147's gap; it applied to every clip carrying a preset before this ticket and to
+keyframed ones too. ESCSUITE-147 has since closed it: the readers take the active transition as a
+trailing option and evaluate under the same suppression the renderer uses (see "The chrome and
+the picture agree through a transition" below).
 
 **A fully transparent clip does not catch the click, and a keyframed clip's selection chrome
 matches its picture** (ESCSUITE-155, closing two gaps the ESCSUITE-3 review left open). The body
@@ -1072,10 +1083,12 @@ its context and so never could distinguish a locked clip's chrome from an unlock
 asymmetry the review named — a keyframed selection showing in the inspector and on the timeline row
 but nowhere on the canvas — is closed.
 
-No `suppressPreset` outside a transition still means a hit test inside one can disagree with the
-drawn frame (ESCSUITE-147's gap, untouched by this ticket): `getOverlayBounds` has no way to be
-told which preset side an active transition has suppressed, so `getClipOpacity` reading the full,
-un-suppressed opacity for a clip mid-transition is the same kind of gap, not a new one.
+At the time of this ticket a hit test inside a transition could still disagree with the drawn
+frame (ESCSUITE-147's gap): `getOverlayBounds` had no way to be told which preset side an active
+transition had suppressed, and `getClipOpacity` read the full, un-suppressed opacity for a clip
+mid-transition. ESCSUITE-147 has since closed both — `getClipOpacity` takes the same trailing
+`{ transition }` and evaluates under `presetSuppressionFor`, so a clip a transition is fading in
+reads as opaque and stays clickable.
 
 **The playhead position does not re-render the preview, the timeline body, or `App`.**
 `usePreviewRenderLoop` used to hold it as `displayTime` state and call `setDisplayTime` every
@@ -1378,11 +1391,185 @@ dimensions, so pressing it on a cropped clip fills the frame with the picture
 that is actually drawn rather than reserving room for the part that is no
 longer on screen.
 
-**Two deliberate v1 limits.** The **timeline thumbnail is not cropped** —
-`utils/maskClipPath.ts` is untouched, so a cropped clip's tile still shows the
-whole frame's picture (masked, if it is masked). And there are **no on-canvas
-crop handles**: v1 is inspector-only, and the preview's resize handles still
-change `scaleX`/`scaleY` as they always did. Both are the v2 ticket's.
+**One deliberate v1 limit remains.** The **timeline thumbnail is not
+cropped** — `utils/maskClipPath.ts` is untouched, so a cropped clip's tile
+still shows the whole frame's picture (masked, if it is masked). The v2
+ticket's (ESCSUITE-157) other limit — **no on-canvas crop handles** — is
+closed: `cropClipId` (`store/uiSlice.ts`) names the clip crop mode is open
+on, or `null`; `CropSection`'s header carries a second button, "Crop on
+canvas", beside Reset — `aria-pressed` on whether the latch names the
+*selected* clip (and **looking** pressed, not just reading as pressed: a
+`.resetButton[aria-pressed='true']` rule fills it with the same accent every
+other `aria-pressed` control in the panel uses), live on a locked track because
+looking at a crop is reading, not editing (the eight handles go inert there, via
+their own `disabled`, not the latch). The **one** thing that disables it is a
+clip whose source has left the media library — `sourceWidth` 0, which
+`cropTarget` refuses — where latching would mean a pressed toggle with nothing on
+the canvas, so it is `disabled` with a `title` saying why instead. It is a latch deliberately left unsynchronised: nothing clears it
+on a selection change, a clip delete, a project load or an undo, because every
+reader is required to compare it to the current selection rather than trust it
+on its own — which is how all four of those leave crop mode for free. Escape
+leaves it too, second in the cascade (`useAppKeyboardShortcuts.ts`, above),
+ahead of the in/out points and the two selection branches so that deselecting
+is never what leaves crop mode — and the same Escape leaves it from a focused
+handle itself (below), rather than falling through to that cascade, because
+`CropHandles`' own `onKeyDown` claims it first.
+
+While crop mode is open, `PreviewPlayer` renders `components/Preview/CropHandles.tsx`
+over the canvas instead of the ordinary resize handles — a DOM layer, not canvas
+chrome, because a handle has to be focusable and independently `disabled` for a
+locked track, and because ESCSUITE-90's CSS-pixel-sized chrome is exactly what a
+button already is. Each handle's cursor is computed **once**, inline — its resize
+keyword from `cursor.ts`' table, or `not-allowed` when the row is locked
+(ESCSUITE-88's answer); a stylesheet `:disabled { cursor }` rule cannot reach past
+an inline style, which is why there is no longer one. Eight `<button>`s at the kept region's corners and edges
+(`CROP_HANDLES`'s compass points, in reading order so a screen reader walks
+top, sides, bottom), inside one `role="group"` framed in the clip's own CSS box
+and rotated with it by a single `rotate()`; the dim over the cropped-away
+picture is separate canvas chrome in `cropOverlay.ts`. A handle owns the one or
+two insets its compass point names (a corner owns both axes) and writes
+through `useCropHandleGesture`, which also carries the compensating `transform`
+a crop write needs (`cropWriteFor`) — except on a clip whose placement is
+keyframed, where the crop goes alone.
+
+**The inspector's four sliders carry no compensating centre at all**: they write
+`{ crop }` and nothing else, as they have since ESCSUITE-6
+(`useClipEditorActions.ts`' `handleCropChange`). So the same inset reached from
+the two surfaces repositions the clip differently — a handle drag pins the edge
+it is *not* dragging, while a slider shrinks the picture about the clip's own
+centre, moving both edges of that axis. A carried v1 limit, named here rather
+than a drift: both surfaces share `cropUpdateFor`, which is the decision about
+what the store may *hold*, not about where the picture sits.
+
+**Crop mode's chrome and its handles appear and disappear together**, because
+both ask one question. `visibleCropTarget` (`cropOverlay.ts`) is `cropTarget`
+plus the clip's own time window — end exclusive, as `selectionOverlay.ts`' test
+has always been — and `PreviewPlayer` calls it once for all three of the chrome,
+the canvas' own pointer handlers and the handle layer's mount. Scrubbing the
+playhead off the cropped clip therefore unmounts the eight handles rather than
+leaving them live and draggable over an unrelated frame; the latch survives, so
+scrubbing back in returns the mode. Before the final review the chrome carried
+that comparison alone and the layer carried none.
+
+**The crop frame follows the picture through a transition** (ESCSUITE-147's
+suppression, threaded here). Both halves of crop mode's geometry are measured off
+the one `getOverlayBounds` the selection box, the hit test, the marquee and the
+drag seed read, so both take that function's optional `{ transition }`:
+`drawCropOverlay` as a trailing `options` argument after `screenScale`, and
+`CropHandles` as an optional `transition` prop. `PreviewPlayer` derives each with
+`getActiveTransition` — the chrome's inside the chrome callback, from the `time`
+it is drawing at, exactly as the selection chrome's is; the handles' inside the
+`{cropping && …}` mount, from `currentTime`, so it costs one pass over the clips
+per render while crop mode is open and nothing at all the rest of the time.
+Without it, a clip carrying a **geometric** Animate Out preset (`slide-*`,
+`scale-*`, `pop`) inside a transition window drew its crop frame — and laid its
+eight draggable handles — where the preset says the clip is rather than where the
+renderer draws it: halfway through a 1 s `slide-left` out-preset under a `fade`,
+on a 1920-wide project, the picture is at x 960 and the frame was at 480. A crop
+surface is the one place that is unarguable, because the user is deciding which
+part of *that* picture to keep. The transition's own geometry is still not
+applied, which is the same documented v1 limit `getOverlayBounds`' other readers
+carry.
+
+**Mouse and keyboard reach the same write.** Dragging a handle rebases every
+move from the crop and transform the gesture **started** with — never the
+previous move's own output, the ESCSUITE-110 trim-compounding trap in a
+different gesture — and throttles to one `updateClip` per animation frame, one
+undo entry for however many moves a drag makes. The **arrow keys** nudge a
+focused handle instead: one source pixel per press, ten with Shift
+(`CROP_NUDGE`), through the same `cropForHandleMove`. A focused handle owns
+all four arrows unconditionally — including the two it has no inset on, which
+it still claims and simply does nothing with, so the playhead cannot step out
+from under a user whose focus is on a crop handle — and `e.repeat` (held key)
+resumes the open gesture rather than starting a new one, `useSliderGesture`'s
+rule for a held slider arrow, so one held key is one undo entry. Each press
+reads the clip's crop and transform fresh off the store
+(`useEditorStore.getState()`) rather than off the `clip` prop: unlike a drag, a
+key press has no gesture-start object to rebase a *later*, separate press
+from, and in an isolated render (without `PreviewPlayer`'s own subscription
+re-rendering this component between keydowns) the prop would otherwise still
+hold what it did before the first press landed. A nudge that cannot move — an
+arrow the handle does not own, or one already clamped at the frame's edge —
+writes nothing and costs no undo entry (`cropsEqual`), and a write the store
+refuses (a track locked mid-gesture) is as silent as everywhere else
+(ESCSUITE-87's shape).
+
+The same `<span role="status" aria-live="polite" aria-atomic="true">` that sits
+beside the handles announces a landed nudge — "Crop left: left 1 px", in
+source pixels rather than the inspector's percentage because a one-pixel nudge
+of a wide source rounds a percentage to "0%" — through the identical
+zero-width-mark alternation `KeyframePanel/hooks/useKeyframeGraphKeyboard.ts`
+uses (copied rather than imported, so the preview does not take a dependency on
+the keyframe panel for one character): two consecutive announcements of the
+same text differ by a trailing zero-width space (`​`) so an `aria-atomic` region whose text
+would otherwise be unchanged is still re-read. The mark only disambiguates two
+*immediately adjacent* announcements, not an arbitrary round trip — two
+announcements separated by exactly one other real announcement land back on
+the same mark parity, so a right-then-left-then-right sequence whose first and
+third announcements coincide can still collide on screen (an undo or any other
+silent intervening change does not share this problem, since it makes no
+announce call at all).
+
+**Shift means two different things depending on which hand is on it.** On the
+mouse it locks the kept region's aspect for the drag (`cropRegionAspect`,
+above); on the keyboard it is `CROP_NUDGE.coarse` — ten source pixels instead
+of one — and does nothing to the aspect, because a single-inset nudge has no
+shape to hold.
+
+**Playback takes the handles away and gives them back.** `cropTarget`'s
+`isPlaying` condition makes the chrome stop and the eight handles **unmount** the
+moment playback starts, while the latch itself survives — so the mode returns on
+pause, on the clip the user left it on. Related, and not fixed: a focused handle
+claims only Escape and the four arrows, so `PlaybackControls`' own window listener
+(which skips only input/textarea/select targets) still takes **Space**, **Home**
+and **End** from it. Space therefore starts playback and unmounts the very control
+the user's focus was on. Arrow-stealing was fixed deliberately (spec §8); this is
+its sibling, left alone here.
+
+**Known wrinkles, left as they are rather than fixed in this ticket.** The drag
+is **mouse events only** (`mousedown`/`mousemove`/`mouseup`), the same scope
+`useTransformHandles.ts` already has, so there is no crop drag from a touch
+pointer. On a clip whose **scale or rotation is keyframed** the drag does not
+track the pointer exactly: the handles sit on `getOverlayBounds`' *animated* box,
+while `sourceDelta` divides by `start.transform.scaleX/Y` and un-rotates by
+`start.transform.rotation` — the **static** values — so a clip animated to 2x
+moves its handle at half the pointer's rate, and one animated 45° off its static
+rotation grows the crop along the wrong axis. The same accepted family as the
+compensating centre above, named rather than discovered. Eight 12px handles also
+**overlap** on a clip drawn small on screen, which is inherent to a fixed CSS
+size rather than a defect. An **unmount mid-drag commits** the pending move
+instead of abandoning it — the gesture's teardown runs the same `throttled.flush()` → `end()` its own
+`mouseup` handler does, so a drag cut off by the layer going away (an Escape
+fired elsewhere, a selection change, a delete) still writes its last pending
+position. **Escape on a focused handle does not return focus to the
+inspector's "Crop on canvas" toggle**: the two live in separate component
+trees, and reaching across would mean threading a ref through the store, so
+the handles unmount and focus falls to the document — the known wart spec §8
+names rather than a bug.
+
+Two canvas gestures the crop branch leaves alone: a **double-click still opens
+the inline text editor** on a text overlay sitting above the cropped clip
+(`handleDoubleClick` stays bound regardless of crop mode, since it only ever
+acts on a text clip at the point), which reassigns `selectedClipId` and so
+leaves crop mode exactly as spec §1 asks for any other selection change; and
+`drawMultiSelectHandles` is a separate callback that still runs and would draw
+dashed boxes for any *other* selected clips, though nothing in the app today
+appears to reach that — `toggleClipSelection` and `selectClipsInRange`
+(`store/selectionSlice.ts`) both reassign `selectedClipId` too, which usually
+makes `cropTarget` null before a second clip could join the selection.
+
+**The handle layer needs the canvas element, and the canvas can go away out
+from under it.** `PreviewPlayer` mounts `CropHandles` only while
+`canvasRef.current` is non-null (`cropping && canvasRef.current && …`), but
+the canvas itself renders only in the `hasContent && !isLoading` arm — so
+importing another video, or anything else that empties and refills the
+timeline, unmounts the canvas and remounts it on a render where the ref
+briefly reads `null` while the dim chrome keeps painting over nothing to lay
+handles on. It self-heals on the very next render for any reason (a playhead
+move, a selection change), so the visible cost is a dropped frame of handles
+rather than a stuck one. The real fix — a state-backed `ref={setCanvasEl}`
+shared by `CropHandles`, `InlineTextEditorAnchor` and the marquee — is
+**ESCSUITE-160**, filed for exactly it and not taken here.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
@@ -1412,7 +1599,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
 | `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
 | `MaskSection.tsx` | "Mask & Stroke": the mask kind over `CLIP_MASK_KINDS`, a corner-radius slider shown for `rounded` only, and the stroke's width and colour — the width labelled in **pixels at the project's resolution**, because what is stored is a fraction of the frame width and a fraction is not a number anyone can act on. Collapsed by default. Media clips only, gated exactly as Blend Mode is. It normalises nothing: "`none` with a radius" and "a width of 0 with a colour" are things a user can express, and turning them into absent fields is `useClipEditorActions`' job |
-| `CropSection.tsx` | "Crop" (ESCSUITE-6): which rectangle of its source frame the clip shows — four rows of slider plus number field, each inset a whole percentage capped at `MAX_CROP_INSET` (90%), five aspect-preset buttons over `CROP_ASPECT_PRESETS` (None, 1:1, 16:9, 9:16, 4:3) and a header Reset. Collapsed by default. Media clips only, gated exactly as Mask & Stroke is and placed **immediately after it**, before Effects — an overlay has no source frame for an inset to be a fraction of, and the condition is byte-identical to its neighbours' so no existing section's positional open/closed slot changes meaning. Like `MaskSection` it normalises nothing: 90% off two opposite edges is something a user can express, and the **one** new handler `handleCropChange` is what decides what gets stored. The **presets are computed here**, from `cropForAspect` — this is the only place holding both the source's shape and the clip's current crop — which is why they are not a second handler, and why "None" and the header Reset make literally the same write: four zeroes, which `normaliseCrop` turns into `crop: undefined`. The four sliders carry the undo gesture; the number fields and the preset buttons keep an entry each — a number field has no gesture listeners, so it reports on every keystroke and typing `45` into an empty one lands two undo entries, same as `TextContentSection`'s font-size field |
+| `CropSection.tsx` | "Crop" (ESCSUITE-6): which rectangle of its source frame the clip shows — four rows of slider plus number field, each inset a whole percentage capped at `MAX_CROP_INSET` (90%), five aspect-preset buttons over `CROP_ASPECT_PRESETS` (None, 1:1, 16:9, 9:16, 4:3) and a header with two buttons, "Crop on canvas" then Reset. Collapsed by default. Media clips only, gated exactly as Mask & Stroke is and placed **immediately after it**, before Effects — an overlay has no source frame for an inset to be a fraction of, and the condition is byte-identical to its neighbours' so no existing section's positional open/closed slot changes meaning. Like `MaskSection` it normalises nothing: 90% off two opposite edges is something a user can express, and the **one** new handler `handleCropChange` is what decides what gets stored. The **presets are computed here**, from `cropForAspect` — this is the only place holding both the source's shape and the clip's current crop — which is why they are not a second handler, and why "None" and the header Reset make literally the same write: four zeroes, which `normaliseCrop` turns into `crop: undefined`. The four sliders carry the undo gesture; the number fields and the preset buttons keep an entry each — a number field has no gesture listeners, so it reports on every keystroke and typing `45` into an empty one lands two undo entries, same as `TextContentSection`'s font-size field. "Crop on canvas" (ESCSUITE-157) opens or closes crop mode — `aria-pressed` on whether `useClipEditorActions`' `cropOnCanvas` is true, i.e. whether the store's `cropClipId` latch names this clip, with a matching accent fill from `.resetButton[aria-pressed='true']` so the state is visible and not screen-reader-only — and is deliberately **not** disabled by the track's lock: it is reading, not editing, so it stays live on a locked track where Reset does not, which is why it is also in `headerRight` and so outside the section's `<fieldset disabled>`. It **is** disabled, with a `title` giving the reason, when `sourceWidth` is 0 — the clip's source has left the media library, `cropTarget` would refuse it, and latching the mode would leave a pressed toggle over an empty canvas |
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
@@ -1970,9 +2157,10 @@ a live array rather than a count: `useAppKeyboardShortcuts`' Ctrl+B (split) bran
 `clips.find(...)`, while `useProjectActions`' `clipCount` and the header's `canExport` only
 ever want `clips.length`.
 
-**The keyboard cascade's 38 deps re-bind the listener, and that is fine — measured, not
-assumed.** Every change to one of the 38 values `useAppKeyboardShortcuts` closes over tears the
-`keydown` listener off `window` and binds a fresh closure. Round 2 counted it rather than
+**The keyboard cascade's 40 deps re-bind the listener, and that is fine — measured, not
+assumed.** Every change to one of the 40 values `useAppKeyboardShortcuts` closes over tears the
+`keydown` listener off `window` and binds a fresh closure (ESCSUITE-157 added two,
+`cropClipId` and `setCropClipId`, to what Round 2 measured at 38). Round 2 counted it rather than
 guessing: `useAppKeyboardShortcuts.rebinds.test.tsx` drives the hook through `App`'s own
 selectors over a scripted 20-edit burst and measures **15 re-binds** (2026-09-13) — about one
 listener swap per edit and none per frame; five edits (a playhead write, a transform, a clip
@@ -1981,7 +2169,9 @@ dependency only through its `length`. **15 is a lower bound, not the app's figur
 harness holds `App`'s own seven callbacks at fixed identities, so the count is the store's
 contribution alone, and in the live `App` `handleSaveProject` closes over `clipCount` and the
 two zoom handlers over the zoom. The extra churn coincides with edits that already re-bind
-through `clips.length`, so it does not change the decision. Fifteen listener swaps spread over
+through `clips.length`, so it does not change the decision. The burst still never opens crop
+mode, so `cropClipId`'s addition moves nothing in the measurement — it is a dep the harness
+mirrors only so the type checks. Fifteen listener swaps spread over
 a minute of editing is
 not worth changing the Ctrl+B staleness semantics for, so **the array stays verbatim**. The test
 pins that finding, with the assertion to lower if the handler is ever moved into a ref.
@@ -2019,7 +2209,7 @@ and queries `styles.menuBackdrop`.
 | `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect. `handleRestoreSession` rebuilds every source's `thumbnailUrl` before writing the store — the snapshot no longer carries one — resolving each with `Promise.all` (the reads are independent) so the library renders once with live pictures rather than once broken and once fixed (ESCSUITE-96). It does **not** revoke anything itself: the library is not reliably empty when a restore lands — the CRAFT handoff (`useHostIntegration` → `importTake`) adds a take's parts to it as soon as they arrive, well before the placement that waits on `sessionDecisionPending` — so a blanket revoke of "whatever is here" would kill the handoff's still-live thumbnails. `addSourceVideo` (`store/projectSlice.ts`) is the one place that owns freeing a replaced source's *old* thumbnailUrl, exactly when a restored source happens to share an id the handoff already added (ESCSUITE-113). Restoring is therefore asynchronous, not the single-tick write it used to be, and is guarded against both ways that window can be walked into: a `restoreAttemptRef` set at entry makes a second `handleRestoreSession` call while one is already reading thumbnails a no-op, and `handleDeclineSession` clears it, so "Start Fresh" clicked mid-restore wins — the restore finds its answer overruled when its reads come back and does not commit. `SessionRestorePrompt` disables both buttons the moment either is clicked, as the first line of defence against the same race. A rejected thumbnail read is answered the same way a decline is — the ref is cleared, the prompt closes, `sessionRestored` settles, and the user is left with a fresh project — except the notification says the restore failed and the saved session is left in storage rather than cleared, so a reload can still offer it |
 | `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
-| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → in/out points → multi-selection → single selection. Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fourth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **38 deps, measured and left verbatim** — see below. Its five editing branches — Delete/Backspace on a multi-selection, Delete/Backspace on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — ask `store/trackLock.ts` about the lock on demand before calling the store and toast "Track is locked" instead when it would refuse (ESCSUITE-84) |
+| `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → crop mode → in/out points → multi-selection → single selection (the crop-mode branch, ESCSUITE-157, sits there so deselecting never leaves crop mode as a side effect and takes the selection with it). Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fourth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **40 deps, measured and left verbatim** — see below. Its five editing branches — Delete/Backspace on a multi-selection, Delete/Backspace on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — ask `store/trackLock.ts` about the lock on demand before calling the store and toast "Track is locked" instead when it would refuse (ESCSUITE-84) |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **fifth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
 | `useHostIntegration.ts` | The inbound `postMessage` handler and the startup work the URL parameters ask for. The editor's **sixth and last** effect. Its deps are `[]` even though it closes over four values: the handler is installed once, `GET_STATE` works around the staleness with an explicit `getState()`, and the rest rely on those four being stable for the component's life. Keeps no thumbnail owner: the take's parts and their thumbnails are the library's from the moment `importTake` hands them over, so neither the cleanup, nor the cancelled-import path, nor a take dropped at placement time revokes them (ESCSUITE-117) |
 | `takeImport.ts` | The storage half of the `?loadVideo=` handoff: resolve the take's parts, read each one's blob and thumbnail, add it to the library with a resolved duration, and return the parts to place (`ImportedTake`: `clipParts`, `missingParts`). Every thumbnail URL it mints goes to `addSourceVideo` with its part and is the store's to free from there (ESCSUITE-117) — it keeps its own list only long enough to revoke it if the import throws part-way, and does not report it, since ESCSUITE-140 nothing outside its own tests read that report. Lives beside the hook rather than inside it because the hook's effect is already the app's longest and these are the arms worth testing on their own |
@@ -2445,9 +2635,11 @@ transition's alpha belongs to no clip's animation — the same boundary as the g
 below — and the clip arriving is exactly what the user is reaching for.
 
 Also additive: `hitTest.ts` and `selectionOverlay.ts`
-carry it as an optional `transition` field on the `PreviewSceneContext` slice they already take; and
+carry it as an optional `transition` field on the `PreviewSceneContext` slice they already take;
 `dragGeometry.ts`'s `measureDragStart`, `clipsIntersectingMarquee` and `textClipAtPoint` take it as
-a trailing argument. `measureDragStart` passes it to its *second* lookup too — the one that derives
+a trailing argument; and crop mode's two halves (ESCSUITE-157) take it the same way —
+`cropOverlay.ts`'s `drawCropOverlay` as a trailing `options` after `screenScale`, `CropHandles.tsx`
+as an optional `transition` prop. `measureDragStart` passes it to its *second* lookup too — the one that derives
 the seeded scale for an image or video clip — so the seeded position and the seeded scale describe
 one picture. Absent or `null` reads as "no transition here", which is what all of them assumed
 before.
@@ -2457,7 +2649,10 @@ The transition is derived by the two callers that own a scene, with `getActiveTr
 marquee, the double-click and the drag seed cannot disagree, and the memo is `null` and therefore
 referentially stable through an ordinary scrub), and `PreviewPlayer.tsx` derives it inside each of
 the two chrome callbacks from the `time` they are drawing at rather than from the store's playhead —
-the render loop calls them with its own display time. That is one pass over the clips per repaint of
+the render loop calls them with its own display time. (The crop chrome is drawn from the first of
+those two callbacks and takes the same derivation; crop mode's DOM handle layer is the one
+exception to "from the draw time", because it is a React child rather than a canvas pass and so is
+derived from `currentTime` inside its own mount guard.) That is one pass over the clips per repaint of
 the chrome (two, in fact — one per callback — on top of `drawFrame`'s own), and none at all during
 playback, because neither callback is *called* then: `usePreviewRenderLoop`'s scrub effect returns on
 `isPlaying` and its playback effect draws the frame alone. (`selectionOverlay`'s own `isPlaying`
@@ -2468,8 +2663,9 @@ count, and the new `getActiveTransition` call is on the selection-chrome path, w
 `drawFrame.perf.test.ts` does not draw (its scene has no transition under the selected clip either).
 
 Every reader now suppresses: the selection box and the multi-select boxes, the handle
-cascade, the z-order body hit (position *and* opacity), the marquee, the double-click, and the drag
-seed — every one of them through `presetSuppressionFor`. Two readers deliberately do **not**
+cascade, the z-order body hit (position *and* opacity), the marquee, the double-click, the drag
+seed, and — since ESCSUITE-157 — crop mode's dim and its eight handles — every one of them through
+`presetSuppressionFor`. Two readers deliberately do **not**
 suppress. `InlineTextEditorAnchor` asks for a clip's box with no
 `time` at all, so it takes no animation lookup to suppress. And the keyframe panel's graph and track
 (`KeyframeGraph.tsx`, `KeyframeTrack.tsx`) plot both preset sides as authored, because they edit the
@@ -3059,7 +3255,7 @@ outcome, not on the double.
 - **`src/test/fixtures/`** — shared data and the store reset. `projectStore.ts` exports
   `store()`, `addClip()` and **`resetStoreForTest()`**, which puts the module-singleton store
   back to a freshly loaded editor holding one source video (`resetProject()` alone leaves
-  `zoom`, `activeTool`, `loopPlayback`, the keyframe panel and the history behind).
+  `zoom`, `activeTool`, `loopPlayback`, `cropClipId`, the keyframe panel and the history behind).
   `store()`'s action calls run inside `act()`, because a zustand change with a component
   mounted is a React update. `animation.ts` and `clipFixtures.ts` hold the clip/transform
   and export shapes their suites share.

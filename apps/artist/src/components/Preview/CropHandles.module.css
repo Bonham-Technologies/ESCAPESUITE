@@ -1,0 +1,62 @@
+/* Crop mode's handle layer (ESCSUITE-157): a frame on the kept region, with
+   eight handles on its corners and edges.
+
+   Sizes are CSS pixels and stay CSS pixels: a handle is the same size under the
+   pointer whatever the project's resolution, which is what ESCSUITE-90 asks of
+   chrome and what a DOM element gets for free. The frame is positioned in the
+   element's own pixels by the component and rotated about its centre, so each
+   handle's position inside it is a percentage and nothing here knows about
+   rotation. */
+.frame {
+  position: absolute;
+  box-sizing: border-box;
+  z-index: 11;
+  pointer-events: none;
+}
+
+.handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  border: 2px solid #2196f3;
+  border-radius: 2px;
+  pointer-events: auto;
+}
+
+/* No `cursor` here: the component sets one inline on every handle, which beats
+   any class rule, so `not-allowed` for a locked row is computed there. */
+.handle:disabled {
+  background: #9e9e9e;
+  border-color: #607d8b;
+}
+
+.handle:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+
+.nw { left: 0; top: 0; }
+.n { left: 50%; top: 0; }
+.ne { left: 100%; top: 0; }
+.w { left: 0; top: 50%; }
+.e { left: 100%; top: 50%; }
+.sw { left: 0; top: 100%; }
+.s { left: 50%; top: 100%; }
+.se { left: 100%; top: 100%; }
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

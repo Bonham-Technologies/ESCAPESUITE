@@ -87,6 +87,8 @@ beforeEach(() => {
     clearInOutPoints: vi.fn(),
     inPoint: null,
     outPoint: null,
+    cropClipId: null,
+    setCropClipId: vi.fn(),
   }
 })
 
@@ -562,6 +564,23 @@ describe('the Escape cascade, in order', () => {
     expect(press('Escape')).toBe(true)
     expect(deps.setShowShortcuts).toHaveBeenCalledWith(false)
     expect(deps.clearInOutPoints).not.toHaveBeenCalled()
+  })
+
+  it('then leaves crop mode', () => {
+    mountShortcuts({ ...everything, showShortcuts: false, cropClipId: 'clip-1' })
+
+    expect(press('Escape')).toBe(false)
+    expect(deps.setCropClipId).toHaveBeenCalledWith(null)
+    expect(deps.clearInOutPoints).not.toHaveBeenCalled()
+  })
+
+  it('leaves the shortcuts sheet ahead of it', () => {
+    mountShortcuts({ ...everything, cropClipId: 'clip-1' })
+
+    press('Escape')
+
+    expect(deps.setShowShortcuts).toHaveBeenCalledWith(false)
+    expect(deps.setCropClipId).not.toHaveBeenCalled()
   })
 
   it('then clears the in/out points', () => {

@@ -10,6 +10,7 @@ import {
   MAX_CROP_INSET,
   cropForAspect,
   croppedSourceRect,
+  cropUpdateFor,
   isValidCrop,
   normaliseCrop,
 } from './clipCrop'
@@ -154,5 +155,34 @@ describe('cropForAspect', () => {
       right: 0,
       bottom: 0.25,
     })
+  })
+})
+
+describe('cropUpdateFor', () => {
+  // The decision `handleCropChange` used to make inline, lifted so the preview's
+  // crop handles cannot drift from the inspector's sliders (ESCSUITE-157). Every
+  // answer below is the one v1 gave; the seven cases in
+  // `useClipEditorActions.test.ts` are the regression test for that.
+  const source = { width: W, height: H }
+
+  it('clears the crop of a clip with no source media, and writes nothing else', () => {
+    // An overlay is exactly this case: no source frame for an inset to be a
+    // fraction of. Clearing is allowed, cropping is not.
+    expect(cropUpdateFor(crop(), undefined)).toEqual({ crop: undefined })
+    expect(cropUpdateFor(crop({ left: 0.25 }), undefined)).toBeNull()
+  })
+
+  it('stores no crop at all for four zeroes', () => {
+    expect(cropUpdateFor(crop(), source)).toEqual({ crop: undefined })
+  })
+
+  it('stores the normalised crop', () => {
+    expect(cropUpdateFor(crop({ left: 2, top: 0.1 }), source)).toEqual({
+      crop: { left: MAX_CROP_INSET, top: 0.1, right: 0, bottom: 0 },
+    })
+  })
+
+  it('writes nothing for a crop that would leave less than a source pixel', () => {
+    expect(cropUpdateFor(crop({ left: 0.9, right: 0.9 }), source)).toBeNull()
   })
 })

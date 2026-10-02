@@ -167,3 +167,33 @@ export function cropForAspect(
     bottom: (sourceHeight - (centreY + height / 2)) / sourceHeight,
   };
 }
+
+/**
+ * What to write for the crop a user asked for, or `null` for "write nothing".
+ *
+ * The one decision both crop surfaces make: the inspector's four sliders
+ * (`useClipEditorActions`' `handleCropChange`) and the preview's eight handles
+ * (`components/Preview/useCropHandleGesture.ts`). It was the body of the former
+ * until ESCSUITE-157 needed the latter, and it is shared rather than copied for
+ * the obvious reason — two normalisations would be two sets of rules about what
+ * the store may hold.
+ *
+ * `{ crop: undefined }` is a write: the clip goes back to showing its whole
+ * frame. `null` is not: a crop that would leave less than a source pixel, or
+ * any crop at all on a clip with no source frame to be a fraction of, is
+ * refused so the control the user is dragging snaps back to what is stored
+ * rather than to a number nobody asked for.
+ */
+export function cropUpdateFor(
+  crop: ClipCrop,
+  source: { width: number; height: number } | undefined
+): { crop: ClipCrop | undefined } | null {
+  if (!source) {
+    const empty = crop.left === 0 && crop.top === 0 && crop.right === 0 && crop.bottom === 0;
+    return empty ? { crop: undefined } : null;
+  }
+
+  const decision = normaliseCrop(crop, source.width, source.height);
+  if (!decision.ok) return null;
+  return { crop: decision.crop };
+}

@@ -1398,4 +1398,42 @@ describe('projectStore remaining behaviours', () => {
       ])
     })
   })
+
+  describe('crop mode (ESCSUITE-157)', () => {
+    // A latch, not a synchronised copy: every reader asks whether it names the
+    // SELECTED clip (`components/Preview/cropOverlay.ts`'s `cropTarget`), so
+    // nothing has to clear it and nothing can leave it half-cleared.
+    it('starts off', () => {
+      expect(store().cropClipId).toBeNull()
+    })
+
+    it('names the clip crop mode was opened on', () => {
+      const clip = addClip('clip1', 0)
+
+      store().setCropClipId(clip.id)
+
+      expect(store().cropClipId).toBe(clip.id)
+    })
+
+    it('is not cleared by a selection change — the readers compare it to the selection', () => {
+      const first = addClip('clip1', 0)
+      addClip('clip2', 4)
+      store().setCropClipId(first.id)
+
+      store().setSelectedClipId('clip2')
+
+      expect(store().cropClipId).toBe(first.id)
+    })
+
+    it('is not part of the undo history', () => {
+      const clip = addClip('clip1', 0)
+      store().setCropClipId(clip.id)
+
+      store().updateClip(clip.id, { name: 'renamed' })
+      store().undo()
+
+      expect(store().project.timeline.clips[0].name).toBe('clip1')
+      expect(store().cropClipId).toBe(clip.id)
+    })
+  })
 })

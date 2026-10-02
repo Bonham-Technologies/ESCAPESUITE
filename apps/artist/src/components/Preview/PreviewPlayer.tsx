@@ -8,16 +8,20 @@
 // machine in the three hooks beside them.
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
-import { drawPreviewFrame } from './drawFrame';
+import { drawPreviewFrame, isDrawableImage, isDrawableVideo } from './drawFrame';
 import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { getActiveTransition } from './transitions';
+import * as cropOverlay from './cropOverlay';
+import { CropHandles } from './CropHandles';
+import { isTrackLocked } from '../../store/trackLock';
 import { usePreviewMedia } from './usePreviewMedia';
 import { usePreviewRenderLoop } from './usePreviewRenderLoop';
 import { useTransformHandles } from './useTransformHandles';
 import { InlineTextEditorAnchor } from './InlineTextEditorAnchor';
 import { MarqueeSelection } from './MarqueeSelection';
 import { PreviewTimecode } from './PreviewTimecode';
+import type { SourceVideo } from '../../store/types';
 import styles from './PreviewPlayer.module.css';
 
 export function PreviewPlayer() {
@@ -47,6 +51,8 @@ export function PreviewPlayer() {
   const selectedClipId = useEditorStore((state) => state.selectedClipId);
   const selectedClipIds = useEditorStore((state) => state.selectedClipIds);
   const updateTextOverlayData = useEditorStore((state) => state.updateTextOverlayData);
+  const cropClipId = useEditorStore((state) => state.cropClipId);
+  const setCropClipId = useEditorStore((state) => state.setCropClipId);
 
   // Keyframe mode: when keyframe panel is open, manipulations create keyframes
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
@@ -96,6 +102,52 @@ export function PreviewPlayer() {
     videoUrlsKey,
     imageUrlsKey,
   } = usePreviewMedia();
+
+  // Crop mode (ESCSUITE-157). `visibleCropTarget` is the single answer to "is it
+  // on, and on what": the latch has to name the SELECTED clip, so a selection
+  // change leaves the mode with nothing to clear, and the playhead has to be on
+  // that clip, so the chrome and the handles appear and disappear together. It
+  // gates three things — the chrome below, the canvas' own pointer handlers, and
+  // the DOM handle layer — and all three ask it once, here.
+  //
+  // Taking `currentTime` means this value's identity changes on every scrub tick
+  // *while crop mode is open* (it stays a stable `null` the rest of the time, so
+  // nothing downstream of it churns when the mode is off). The cost is bounded by
+  // the mode being open, the same argument `CropHandles`' own ResizeObserver
+  // makes.
+  const cropScene = useMemo<cropOverlay.CropOverlayScene>(
+    () => ({ clips, sourceVideos, cropClipId, selectedClipId, isPlaying }),
+    [clips, sourceVideos, cropClipId, selectedClipId, isPlaying]
+  );
+  const cropping = useMemo(
+    () => cropOverlay.visibleCropTarget(cropScene, currentTime),
+    [cropScene, currentTime]
+  );
+
+  /**
+   * The decoded element a source draws from, for the crop chrome's dim pass —
+   * or `undefined` when there is nothing in it to draw yet.
+   *
+   * It applies the frame path's own readiness test (`drawFrame.ts`'s
+   * `isDrawableImage` / `isDrawableVideo`) rather than asking whether the
+   * element exists: `usePreviewMedia` puts an element into its map when it
+   * CREATES it, before anything has loaded, and `drawImage` on a `<video>` at
+   * `readyState` 0 or an undecoded `<img>` is a silent no-op — which would leave
+   * the ring neither dimmed nor veiled. Handing back `undefined` is what makes
+   * `drawCropOverlay` take its veil fallback for exactly the window the spec
+   * names.
+   */
+  const mediaElementFor = useCallback(
+    (source: SourceVideo): CanvasImageSource | undefined => {
+      if (source.mediaType === 'image') {
+        const img = imageElementsRef.current.get(source.id);
+        return isDrawableImage(img) ? img : undefined;
+      }
+      const video = videoElementsRef.current.get(source.id);
+      return isDrawableVideo(video) ? video : undefined;
+    },
+    [imageElementsRef, videoElementsRef]
+  );
 
   // Draw a single frame to canvas
   const drawFrame = useCallback((time: number) => {
@@ -190,6 +242,28 @@ export function PreviewPlayer() {
   const drawSelectionHandles = useCallback((time: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    // In crop mode the crop chrome REPLACES the transform chrome: the canvas'
+    // own pointer handling is off (see the canvas element below), so resize
+    // handles would be visible and inert, over the same rectangle as the crop
+    // frame.
+    if (cropping) {
+      cropOverlay.drawCropOverlay(
+        canvas,
+        time,
+        cropScene,
+        mediaElementFor(cropping.source),
+        canvasDimensions,
+        handleScreenScale(canvas),
+        // From the `time` the chrome is being drawn at, exactly as the selection
+        // chrome below derives its own: the crop frame is the user's picture of
+        // what the crop keeps, so it has to sit on the frame the render loop just
+        // composited (ESCSUITE-147).
+        { transition: getActiveTransition(clips, tracks, time) }
+      );
+      return;
+    }
+
     selectionOverlay.drawSelectionHandles(canvas, time, {
       clips,
       sourceVideos,
@@ -199,7 +273,7 @@ export function PreviewPlayer() {
       transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
   }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
-      handleScreenScale]);
+      handleScreenScale, cropping, cropScene, mediaElementFor]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {
@@ -336,10 +410,10 @@ export function PreviewPlayer() {
             width={canvasDimensions.width}
             height={canvasDimensions.height}
             style={{ cursor }}
-            onMouseDown={editingTextClipId ? undefined : handleMouseDown}
-            onMouseMove={editingTextClipId ? undefined : handleMouseMoveForCursor}
-            onMouseUp={editingTextClipId ? undefined : handleMouseUp}
-            onMouseLeave={editingTextClipId ? undefined : handleMouseLeave}
+            onMouseDown={editingTextClipId || cropping ? undefined : handleMouseDown}
+            onMouseMove={editingTextClipId || cropping ? undefined : handleMouseMoveForCursor}
+            onMouseUp={editingTextClipId || cropping ? undefined : handleMouseUp}
+            onMouseLeave={editingTextClipId || cropping ? undefined : handleMouseLeave}
             onDoubleClick={handleDoubleClick}
           />
         )}
@@ -358,6 +432,21 @@ export function PreviewPlayer() {
             startY={marqueeStart.y}
             currentX={marqueeCurrent.x}
             currentY={marqueeCurrent.y}
+          />
+        )}
+        {cropping && canvasRef.current && (
+          <CropHandles
+            clip={cropping.clip}
+            source={cropping.source}
+            canvas={canvasRef.current}
+            projectSize={canvasDimensions}
+            time={currentTime}
+            locked={isTrackLocked(tracks, cropping.clip.trackId)}
+            // Derived here rather than in a memo of its own: `cropping` is the
+            // guard above, so this costs one pass over the clips per render
+            // *while crop mode is open* and nothing at all the rest of the time.
+            transition={getActiveTransition(clips, tracks, currentTime)}
+            onLeave={() => setCropClipId(null)}
           />
         )}
       </div>

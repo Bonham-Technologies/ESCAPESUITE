@@ -136,7 +136,7 @@ function drawClip(
 
   if (isImage) {
     const img = media.imageElements.get(clip.sourceVideoId);
-    if (!img || !img.complete) return;
+    if (!isDrawableImage(img)) return;
     drawImageToCanvasWithModifiers(
       ctx, img, clip, clipTime, size.width, size.height, transitionModifiers, options
     );
@@ -144,14 +144,41 @@ function drawClip(
   }
 
   const video = media.videoElements.get(clip.sourceVideoId);
-  // Allow drawing if video has any data (readyState >= 1 means metadata loaded)
-  // During seeking, readyState may temporarily drop, but we can still draw the current frame
-  // This prevents black flashes during scrubbing
-  if (!video || video.readyState < 1) return;
-  // If video dimensions aren't available yet, skip
-  if (!video.videoWidth || !video.videoHeight) return;
+  if (!isDrawableVideo(video)) return;
   drawClipToCanvas(
     ctx, video, clip, clipTime, size.width, size.height, transitionModifiers, options
+  );
+}
+
+/**
+ * Is this `<img>` decoded enough to draw?
+ *
+ * Exported because the crop chrome asks the same question (ESCSUITE-157): a
+ * media element `usePreviewMedia` has created but not yet loaded is in its map
+ * and is **not** drawable, and `drawImage` on one is a silent no-op — so the
+ * chrome has to refuse exactly what this path refuses and take its veil
+ * fallback instead of painting nothing. One predicate, so the two cannot drift.
+ */
+export function isDrawableImage(img: HTMLImageElement | undefined): img is HTMLImageElement {
+  return img !== undefined && img.complete;
+}
+
+/**
+ * Does this `<video>` have a frame to draw? See {@link isDrawableImage} for why
+ * this is exported.
+ *
+ * `readyState >= 1` is metadata loaded — not `>= 2`, because during a seek it
+ * can temporarily drop back and the frame already on screen is still drawable,
+ * and refusing it is what used to flash the preview black while scrubbing. The
+ * dimensions are a separate question: a video reports metadata before it reports
+ * a size, and a zero-width source rect makes `drawImage` throw `IndexSizeError`.
+ */
+export function isDrawableVideo(video: HTMLVideoElement | undefined): video is HTMLVideoElement {
+  return (
+    video !== undefined &&
+    video.readyState >= 1 &&
+    video.videoWidth > 0 &&
+    video.videoHeight > 0
   );
 }
 

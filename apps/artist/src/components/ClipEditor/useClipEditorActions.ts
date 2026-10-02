@@ -77,7 +77,7 @@ import type {
   AnimationPresetType,
   EasingType,
 } from '../../store/types';
-import { croppedSourceRect, normaliseCrop } from '../../core/clipCrop';
+import { croppedSourceRect, cropUpdateFor } from '../../core/clipCrop';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
@@ -126,6 +126,11 @@ export interface ClipEditorActions {
   handleMaskChange: (mask: ClipMask) => void;
   handleStrokeChange: (stroke: ClipStroke) => void;
   handleCropChange: (crop: ClipCrop) => void;
+  /** Whether the preview's crop mode is open on the selected clip (ESCSUITE-157). */
+  cropOnCanvas: boolean;
+  /** The "Crop on canvas" button's handler. Only valid while a clip is selected — it reads
+   * `selectedClip.id` unguarded, the same as `handleResetToDefaults` below. */
+  handleCropOnCanvasToggle: () => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
   handleTransitionDurationChange: (duration: number) => void;
@@ -197,6 +202,11 @@ export function useClipEditorActions(): ClipEditorActions {
   const addShapeOverlayClip = useEditorStore((state) => state.addShapeOverlayClip);
   const setKeyframePanelOpen = useEditorStore((state) => state.setKeyframePanelOpen);
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
+  // `cropClipId` is a scalar that changes only when the toggle below is
+  // pressed, so it cannot move a playback-tick render count — see constraint 5
+  // and `ClipEditor.rerender.test.tsx`.
+  const cropClipId = useEditorStore((state) => state.cropClipId);
+  const setCropClipId = useEditorStore((state) => state.setCropClipId);
 
   const sourceVideo = useMemo(() => {
     if (!selectedClip) return null;
@@ -313,40 +323,33 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClip, commit]
   );
 
-  // ESCSUITE-6. `CropSection` reports what the user did — four percentages, and
-  // the insets an aspect preset computed — and this decides what gets stored, so
-  // the store only ever holds canonical shapes: insets inside 0-90%, no
-  // all-zero crop, and nothing that would leave less than one source pixel.
-  //
-  // `sourceVideo` is the guard that keeps a crop off an overlay: insets are
-  // fractions of a source frame, and an overlay has none. It is also what the
-  // one-pixel floor is measured against, which is why it is read here rather
-  // than in the section.
-  //
-  // A *media* clip can still have no `sourceVideo` — its source has left the
-  // library (a session restored against a cleared store, say). There are no
-  // dimensions to measure a real inset against, so any non-zero crop is
-  // refused exactly as an overlay's would be (MINOR 4, final review). But an
-  // all-zero write needs no dimensions at all — it means "no crop" — and a
-  // clip in that state should not be stuck with a stored crop forever: Reset
-  // and the "None" preset both report it, so both keep working.
+  // The decision is `core/clipCrop.ts`'s `cropUpdateFor` (ESCSUITE-157), shared
+  // with the preview's crop handles so the two surfaces cannot disagree about
+  // what the store may hold. `null` means write nothing — two opposite sliders
+  // at their 90% maximum ask for exactly that — and the slider the user is
+  // dragging snaps back to the stored value rather than to one nobody asked for.
   const handleCropChange = useCallback(
     (crop: ClipCrop) => {
       if (!selectedClip) return;
-      if (!sourceVideo) {
-        if (crop.left !== 0 || crop.top !== 0 || crop.right !== 0 || crop.bottom !== 0) return;
-        commit((skipHistory) => updateClip(selectedClip.id, { crop: undefined }, skipHistory));
-        return;
-      }
-      const decision = normaliseCrop(crop, sourceVideo.width, sourceVideo.height);
-      // Refused: a crop that would leave nothing on an axis is not written at
-      // all, so the slider the user is dragging snaps back to what is stored
-      // rather than to a number nobody asked for.
-      if (!decision.ok) return;
-      commit((skipHistory) => updateClip(selectedClip.id, { crop: decision.crop }, skipHistory));
+      const update = cropUpdateFor(crop, sourceVideo ?? undefined);
+      if (!update) return;
+      commit((skipHistory) => updateClip(selectedClip.id, update, skipHistory));
     },
     [selectedClip, sourceVideo, updateClip, commit]
   );
+
+  // Crop mode is a latch (`store/uiSlice.ts`): it is "on" only while it names
+  // the selected clip, which is what makes a selection change leave the mode
+  // without anything having to clear it.
+  const cropOnCanvas = selectedClip != null && cropClipId === selectedClip.id;
+
+  // No `!selectedClip` guard: `ClipEditor`'s own early return means `CropSection`
+  // — and so the button that calls this — is never rendered without a selected
+  // clip, so the guard would be an operand no caller can reach. Deleted rather
+  // than tested, per the ESCSUITE-110/118 precedent for exactly that situation.
+  const handleCropOnCanvasToggle = useCallback(() => {
+    setCropClipId(cropOnCanvas ? null : selectedClip!.id);
+  }, [selectedClip, cropOnCanvas, setCropClipId]);
 
   const handleBlurChange = useCallback(
     (blur: number) => {
@@ -580,6 +583,8 @@ export function useClipEditorActions(): ClipEditorActions {
     handleMaskChange,
     handleStrokeChange,
     handleCropChange,
+    cropOnCanvas,
+    handleCropOnCanvasToggle,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
