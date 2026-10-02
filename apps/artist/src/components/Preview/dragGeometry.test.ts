@@ -7,11 +7,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { clipsIntersectingMarquee, measureDragStart, textClipAtPoint } from './dragGeometry'
 import {
+  makeAnimation,
   makeClip,
   makeShapeData,
   makeSourceVideo,
   makeTextData,
   makeTrack,
+  makeTransitionInfo,
 } from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
@@ -20,7 +22,7 @@ import {
   uninstallCanvasDouble,
 } from '../../test/doubles/canvas'
 import { setRect } from '../../test/doubles/layout'
-import type { Clip } from '../../store/types'
+import type { AnimationPresetType, Clip } from '../../store/types'
 
 const CANVAS_W = 1920
 const CANVAS_H = 1080
@@ -96,6 +98,87 @@ describe('measureDragStart', () => {
 
     expect(measured.startScaleX).toBe(3)
     expect(measured.startScaleY).toBe(3)
+  })
+})
+
+/**
+ * A clip whose last second slides out to the left under a transition that owns
+ * that exit (ESCSUITE-147), and the 400x200 source it draws.
+ *
+ * At 3.5s the out-preset is exactly halfway, so the clip's own animation reads
+ * x 0.25 while the renderer — which suppresses the preset the transition owns —
+ * draws it at the base 0.5.
+ */
+const TRANSITION_SOURCE = makeSourceVideo({ width: 400, height: 200 })
+
+const slidingOut = (preset: AnimationPresetType = 'slide-left'): Clip =>
+  makeClip({
+    id: 'out1',
+    duration: 4,
+    animation: makeAnimation({ out: { type: preset, duration: 1, easing: 'linear' } }),
+  })
+
+const owningTransition = (clip: Clip) =>
+  makeTransitionInfo({ outgoingClip: clip, incomingClip: makeClip({ id: 'in1', timelinePosition: 4 }) })
+
+describe('measureDragStart during a transition (ESCSUITE-147)', () => {
+  it('seeds a keyframe-mode drag where the picture is, not where the out-preset would put it', () => {
+    const clip = slidingOut()
+
+    const measured = measureDragStart(
+      clip, 'video', makeCanvas(), 3.5, true, [TRANSITION_SOURCE], undefined, owningTransition(clip)
+    )
+
+    expect(measured.startX).toBe(0.5)
+  })
+
+  it('seeds it from the preset position when no transition owns that side', () => {
+    const measured = measureDragStart(
+      slidingOut(), 'video', makeCanvas(), 3.5, true, [TRANSITION_SOURCE]
+    )
+
+    expect(measured.startX).toBe(0.25)
+  })
+
+  it('seeds the scale the same way', () => {
+    // A scale-down out-preset halves the clip over its last second, so halfway
+    // through it the clip's own animation reads 0.5 and the drawn scale is 1.
+    const clip = slidingOut('scale-down')
+
+    expect(
+      measureDragStart(
+        clip, 'video', makeCanvas(), 3.5, true, [TRANSITION_SOURCE], undefined, owningTransition(clip)
+      ).startScaleX
+    ).toBe(1)
+    expect(
+      measureDragStart(clip, 'video', makeCanvas(), 3.5, true, [TRANSITION_SOURCE]).startScaleX
+    ).toBe(0.5)
+  })
+})
+
+describe('clipsIntersectingMarquee during a transition (ESCSUITE-147)', () => {
+  // The canvas is laid out at half size, so these client coordinates are canvas
+  // x 900-1000: inside the drawn box (x 760-1160, centred) and clear of the one
+  // the out-preset alone would put at x 280-680.
+  const strip = { start: { x: 450, y: 250 }, current: { x: 500, y: 290 } }
+
+  it('sweeps up the clip where the picture is', () => {
+    const clip = slidingOut()
+
+    expect(
+      clipsIntersectingMarquee(
+        makeCanvas(), strip.start, strip.current, [clip], 3.5, [TRANSITION_SOURCE],
+        undefined, owningTransition(clip)
+      )
+    ).toEqual(['out1'])
+  })
+
+  it('sweeps the preset’s own box when no transition owns that side', () => {
+    expect(
+      clipsIntersectingMarquee(
+        makeCanvas(), strip.start, strip.current, [slidingOut()], 3.5, [TRANSITION_SOURCE]
+      )
+    ).toEqual([])
   })
 })
 

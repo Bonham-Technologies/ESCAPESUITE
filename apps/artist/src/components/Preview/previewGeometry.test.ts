@@ -26,6 +26,7 @@ import {
   makeShapeData,
   makeSourceVideo,
   makeTextData,
+  makeTransitionInfo,
 } from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
@@ -34,6 +35,7 @@ import {
   uninstallCanvasDouble,
 } from '../../test/doubles/canvas'
 import { setRect } from '../../test/doubles/layout'
+import type { TransitionInfo } from '../../core/exportTypes'
 import type { Clip, Keyframe, SourceVideo } from '../../store/types'
 
 /** The project's default resolution, and the canvas every case below draws to. */
@@ -414,6 +416,64 @@ describe('getClipOpacity', () => {
     })
 
     expect(getClipOpacity(clip, 1)).toBe(0.75)
+  })
+})
+
+describe('getOverlayBounds during a transition (ESCSUITE-147)', () => {
+  const source: SourceVideo = makeSourceVideo({ width: 400, height: 200 })
+
+  /**
+   * A clip whose last second slides out to the left, and a clip on the track
+   * above whose first second slides in from the right. The transition window is
+   * the outgoing clip's last second, and at 3.5s both presets are exactly
+   * halfway: the outgoing clip's own x reads 0.25 and the incoming clip's 0.75,
+   * while the renderer — which suppresses the side the transition owns — draws
+   * both at the base 0.5.
+   */
+  const outgoing = makeClip({
+    id: 'out1',
+    duration: 4,
+    animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const incoming = makeClip({
+    id: 'in1',
+    trackId: 'track2',
+    duration: 4,
+    timelinePosition: 3,
+    animation: makeAnimation({ in: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({ outgoingClip: outgoing, incomingClip: incoming })
+
+  /** The clip's box at 3.5s, with the canvas as its own project. */
+  const centerXAt = (
+    clip: Clip,
+    options?: { transition?: TransitionInfo | null }
+  ): number | undefined => {
+    const canvas = makeCanvas()
+    return getOverlayBounds(clip, canvas, 3.5, [source], canvas, options)?.centerX
+  }
+
+  it('reports the outgoing clip where the picture is, not where its out-preset would put it', () => {
+    expect(centerXAt(outgoing, { transition })).toBe(0.5 * CANVAS_W)
+  })
+
+  it('reports the incoming clip where the picture is, not where its in-preset would put it', () => {
+    expect(centerXAt(incoming, { transition })).toBe(0.5 * CANVAS_W)
+  })
+
+  it('applies both presets when no transition is handed over', () => {
+    expect(centerXAt(outgoing)).toBe(0.25 * CANVAS_W)
+    expect(centerXAt(incoming)).toBe(0.75 * CANVAS_W)
+  })
+
+  it('reads a null transition as no transition at all', () => {
+    expect(centerXAt(outgoing, { transition: null })).toBe(0.25 * CANVAS_W)
+  })
+
+  it('leaves a clip the transition does not name alone', () => {
+    // A third clip with the same out-preset, running at the same time on a
+    // track of its own: the transition owns neither of its sides.
+    expect(centerXAt(makeClip({ ...outgoing, id: 'other' }), { transition })).toBe(0.25 * CANVAS_W)
   })
 })
 

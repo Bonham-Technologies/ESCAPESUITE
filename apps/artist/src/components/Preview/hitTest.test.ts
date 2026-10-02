@@ -13,6 +13,7 @@ import {
   makeSourceVideo,
   makeTextData,
   makeTrack,
+  makeTransitionInfo,
 } from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
@@ -343,6 +344,33 @@ describe('hitTestHandles z-order', () => {
 
     expect(hitAt(CENTER_X, CENTER_Y + 150, scene({ clips: [clip] }))?.mode).toBe('move')
     expect(hitAt(CENTER_X + 150, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+  })
+})
+
+describe('hitTestHandles during a transition (ESCSUITE-147)', () => {
+  // The clip's last second slides out to the left, so at 3.5s its own animation
+  // puts it at x 0.25 (box 280-680) while the renderer — which suppresses the
+  // preset the transition owns — draws it at the base 0.5 (box 760-1160).
+  const sliding = mediaClip({
+    animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({
+    outgoingClip: sliding,
+    incomingClip: mediaClip({ id: 'next', timelinePosition: 4 }),
+  })
+
+  it('picks the clip where the transition draws it, not where its out-preset would', () => {
+    const inTransition = scene({ clips: [sliding], currentTime: 3.5, transition })
+
+    expect(hitAt(CENTER_X, CENTER_Y, inTransition)?.clipId).toBe('clip1')
+    expect(hitAt(0.25 * CANVAS_W, CENTER_Y, inTransition)).toBeNull()
+  })
+
+  it('picks it at the preset’s own position when no transition owns that side', () => {
+    const outsideTransition = scene({ clips: [sliding], currentTime: 3.5 })
+
+    expect(hitAt(0.25 * CANVAS_W, CENTER_Y, outsideTransition)?.clipId).toBe('clip1')
+    expect(hitAt(CENTER_X, CENTER_Y, outsideTransition)).toBeNull()
   })
 })
 

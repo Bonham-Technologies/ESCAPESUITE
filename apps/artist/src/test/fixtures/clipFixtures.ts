@@ -15,7 +15,7 @@ import type {
   TextOverlayData,
   Track,
 } from '../../store/types'
-import type { AnimatedOverlayValues } from '../../core/exportTypes'
+import type { AnimatedOverlayValues, TransitionInfo } from '../../core/exportTypes'
 import type { SliderGestureHandlers } from '../../components/ClipEditor/useSliderGesture'
 
 /**
@@ -144,6 +144,23 @@ export function makeAnimated(
     rotation: 0,
     opacity: 1,
     blur: 0,
+    ...overrides,
+  }
+}
+
+/**
+ * An active transition between two clips, as `getActiveTransition` reports one.
+ *
+ * Halfway through a fade by default — the progress at which a geometric preset
+ * on the side the transition owns is at its most visibly wrong (ESCSUITE-147),
+ * and the one every reader of a clip's animation has to agree about.
+ */
+export function makeTransitionInfo(overrides: Partial<TransitionInfo> = {}): TransitionInfo {
+  return {
+    outgoingClip: makeClip({ id: 'outgoing' }),
+    incomingClip: makeClip({ id: 'incoming', timelinePosition: 5 }),
+    progress: 0.5,
+    type: 'fade',
     ...overrides,
   }
 }
