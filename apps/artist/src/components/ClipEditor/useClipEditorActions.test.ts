@@ -540,6 +540,36 @@ describe('useClipEditorActions transform', () => {
     expect(clipNow(clip.id).transform).toMatchObject({ scaleX: 0.5, scaleY: 0.5 })
   })
 
+  it('fits the cropped region rather than the whole source (MINOR 2, final review)', () => {
+    // A wide, short source so width stays the controlling axis both before and
+    // after the crop, and the arithmetic reads cleanly: uncropped, the picture
+    // is 2000px wide and Fit to Canvas picks 1920/2000 = 0.96; cropped to half
+    // its width, the picture actually drawn is 1000px wide, so the scale that
+    // fits it is exactly double.
+    const wide: SourceVideo = { ...video, id: 'wide', width: 2000, height: 100 }
+    store().addSourceVideo(wide)
+    store().addClipToTimeline(
+      {
+        id: 'wideClip',
+        sourceVideoId: wide.id,
+        name: 'wideClip',
+        startTime: 0,
+        endTime: 2,
+        duration: 2,
+        crop: { left: 0, top: 0, right: 0.5, bottom: 0 },
+      },
+      undefined,
+      0
+    )
+    const clip = select(store().project.timeline.clips.find((c) => c.id === 'wideClip')!)
+    const { result } = mount()
+
+    act(() => result.current.handleFitToCanvas())
+
+    expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleX: 1.92, scaleY: 1.92 })
+    expect(clipNow(clip.id).transform).toMatchObject({ scaleX: 1.92, scaleY: 1.92 })
+  })
+
   it('does not fit a clip that has no source video', () => {
     shapeClip()
     const { result } = mount()
@@ -1059,6 +1089,58 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     act(() => result.current.handleCropChange({ ...CROP }))
 
     expect(spies.updateClip).not.toHaveBeenCalled()
+  })
+
+  // MINOR 4, final review. A media clip can name a source the library has
+  // lost — a session restored against a cleared store — and `sourceVideo` is
+  // then undefined even though the clip is not an overlay. There are no
+  // dimensions to measure a real inset's one-pixel floor against, but an
+  // all-zero write needs no dimensions at all: it means "no crop", and a
+  // clip whose source is gone should not be stuck with one forever.
+  it('clears a stored crop with an all-zero write even when the source has left the library', () => {
+    store().addClipToTimeline(
+      {
+        id: 'clip1',
+        sourceVideoId: 'gone',
+        name: 'clip1',
+        startTime: 0,
+        endTime: 2,
+        duration: 2,
+        crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+      },
+      undefined,
+      0
+    )
+    const clip = select(store().project.timeline.clips.find((c) => c.id === 'clip1')!)
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ left: 0, top: 0, right: 0, bottom: 0 }))
+
+    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { crop: undefined }, false)
+    expect(clipNow(clip.id).crop).toBeUndefined()
+  })
+
+  it('still refuses a non-zero inset when the source has left the library', () => {
+    store().addClipToTimeline(
+      {
+        id: 'clip1',
+        sourceVideoId: 'gone',
+        name: 'clip1',
+        startTime: 0,
+        endTime: 2,
+        duration: 2,
+        crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+      },
+      undefined,
+      0
+    )
+    const clip = select(store().project.timeline.clips.find((c) => c.id === 'clip1')!)
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ left: 0.3, top: 0, right: 0, bottom: 0 }))
+
+    expect(spies.updateClip).not.toHaveBeenCalled()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.2, top: 0, right: 0, bottom: 0 })
   })
 
   it('asks the slider gesture what each crop write should do about history', () => {

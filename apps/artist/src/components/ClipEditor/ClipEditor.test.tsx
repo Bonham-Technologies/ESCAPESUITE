@@ -292,12 +292,22 @@ describe('ClipEditor', () => {
     it('offers the crop to a media clip whose source is missing from the library', async () => {
       // ESCSUITE-6. The source's pixel dimensions are what the insets are
       // fractions of, and a clip can name a source the library has lost — a
-      // session restored against a cleared store, say. The section still draws,
-      // reads and resets; only the aspect presets have nothing to compute
-      // against, and `handleCropChange` is what refuses them.
+      // session restored against a cleared store, say. The section still draws
+      // and reads; the aspect presets have nothing to compute against, and
+      // `handleCropChange` refuses any non-zero inset without dimensions — but
+      // an all-zero write needs no dimensions at all, so the header Reset
+      // still clears a crop that is already stored (MINOR 4, final review).
       const user = userEvent.setup()
       store().addClipToTimeline(
-        { id: 'clip1', sourceVideoId: 'gone', name: 'clip1', startTime: 0, endTime: 2, duration: 2 },
+        {
+          id: 'clip1',
+          sourceVideoId: 'gone',
+          name: 'clip1',
+          startTime: 0,
+          endTime: 2,
+          duration: 2,
+          crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+        },
         undefined,
         0
       )
@@ -305,9 +315,14 @@ describe('ClipEditor', () => {
       render(<ClipEditor />)
 
       await user.click(screen.getByRole('button', { name: 'Crop' }))
-      expect(screen.getByLabelText('Left')).toHaveValue('0')
+      expect(screen.getByLabelText('Left')).toHaveValue('20')
 
       await user.click(screen.getByRole('button', { name: '1:1' }))
+      // Refused: there is no source frame to compute the preset's insets against.
+      expect(clipNow().crop).toEqual({ left: 0.2, top: 0, right: 0, bottom: 0 })
+
+      const cropSection = screen.getByRole('button', { name: 'Crop' }).closest(`.${styles.collapsible}`) as HTMLElement
+      await user.click(within(cropSection).getByRole('button', { name: 'Reset' }))
       expect(clipNow().crop).toBeUndefined()
     })
   })
