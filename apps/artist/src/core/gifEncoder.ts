@@ -41,6 +41,8 @@ export function createGifWriter(): GifWriter {
 
   return {
     addFrame(rgba, width, height, delayMs) {
+      // `delayMs` is trusted as given: the only caller (exportGIF) derives it from a
+      // fixed fps set (10/15/20), so no clamping or validation happens here.
       if (finished) {
         throw new Error('GIF writer: addFrame() after finish()');
       }
