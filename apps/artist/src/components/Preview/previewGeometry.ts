@@ -191,20 +191,23 @@ export function getOverlayBounds(
  * A clip's opacity at a point in time, evaluated the same way the renderer
  * does (`core/canvasRenderer.ts`'s `animatedValuesFor`): the static
  * `transform.opacity` for a clip with no `animation`, or `getAnimatedValues`'
- * interpolated value for one that has keyframes or a preset — the same
- * condition {@link getOverlayBounds} above branches on to decide whether to
- * animate position at all. Opacity lives on `ClipTransform` for every clip
- * kind, including a text or shape overlay (their own `textData.opacity` /
- * `shapeData.opacity` fields are unused for this), so unlike that function
- * this needs no per-kind base-transform substitution (ESCSUITE-155).
+ * interpolated value for one that has keyframes or a preset. Opacity lives on
+ * `ClipTransform` for every clip kind, including a text or shape overlay
+ * (their own `textData.opacity` / `shapeData.opacity` fields are unused for
+ * this), so unlike {@link getOverlayBounds} this needs no per-kind
+ * base-transform substitution (ESCSUITE-155).
+ *
+ * `time` is assumed to fall within the clip's active window — every current
+ * caller (`hitTest.ts`'s z-order loop) only ever sees a clip `getClipsAtTime`
+ * has already filtered to `time`, so there is no reachable "outside the
+ * clip's duration" case to fall back from, and none is coded here. A future
+ * caller that cannot make the same guarantee should bounds-check before
+ * calling in, the way every current caller of {@link getOverlayBounds} does.
  */
 export function getClipOpacity(clip: Clip, time: number): number {
-  const baseOpacity = (clip.transform || DEFAULT_TRANSFORM).opacity;
-  if (!clip.animation) return baseOpacity;
+  if (!clip.animation) return (clip.transform || DEFAULT_TRANSFORM).opacity;
 
   const clipTime = time - clip.timelinePosition;
-  if (clipTime < 0 || clipTime > clip.duration) return baseOpacity;
-
   return getAnimatedValues(
     clipTime,
     clip.duration,

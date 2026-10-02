@@ -450,6 +450,28 @@ describe('hitTestHandles handles on the selected clip', () => {
     })
   })
 
+  // ESCSUITE-155 review, MINOR-2: the opacity skip added to the second pass'
+  // all-clips body loop must not leak into the first pass' handle cascade on
+  // the *selected* clip — selectionOverlay.ts draws its chrome regardless of
+  // opacity, so the resize/rotate handles it draws have to stay grabbable.
+  it('still offers handles on a selected clip evaluated fully transparent', () => {
+    const transparent = scene({
+      clips: [
+        mediaClip({
+          transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 0 },
+        }),
+      ],
+      selectedClipId: 'clip1',
+    })
+
+    expect(hitAt(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET, transparent)).toEqual({
+      clipId: 'clip1',
+      clipType: 'video',
+      mode: 'rotate',
+    })
+    expect(hitAt(CENTER_X - HALF_W, CENTER_Y - HALF_H, transparent)?.mode).toBe('resize-nw')
+  })
+
   it('offers no handles on a clip that is not the selected one', () => {
     const other = scene({
       clips: [mediaClip(), mediaClip({ id: 'clip2' })],
