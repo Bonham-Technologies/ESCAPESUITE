@@ -201,6 +201,23 @@ describe('exportToGIF preconditions', () => {
     expect(createGifWriter).not.toHaveBeenCalled()
   })
 
+  it('refuses a frame count that is not finite, rather than looping forever', async () => {
+    // The load-bearing half of that same guard, and the half `totalFrames < 1`
+    // cannot cover: `Math.ceil(Infinity)` is `Infinity`, which is not `< 1`, so
+    // `for (let i = 0; i < Infinity; i++)` would encode until the tab died.
+    // Reachable without bypassing the type system — a clip whose `duration` is
+    // non-finite (the data shape ESCSUITE-97 had to fix at the source-metadata
+    // level) reaches `calculateTimelineDuration`, and `JSON.parse` turns the
+    // `1e999` a headless job spec may carry into `Infinity` past every
+    // `typeof === 'number'` check `jobSpec.ts` makes.
+    const error = await run({
+      clips: [makeClip({ duration: Infinity, endTime: Infinity })],
+    }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(createGifWriter).not.toHaveBeenCalled()
+  })
+
   it('exports with no WebCodecs in the browser at all', async () => {
     // The whole reason the format exists: `gifenc` is pure JavaScript, so this
     // is the one export that works where neither VP9/VP8 nor H.264 can be
@@ -364,6 +381,72 @@ describe('exportToGIF frames', () => {
     // **is** the base dimensions, so `openOutputFrame`'s matrix is the identity;
     // any other fallback would scale every draw call.
     expect(ctx().argsFor('setTransform')[0]).toEqual([1, 0, 0, 1, 0, 0])
+  })
+
+  it('draws both sides of an active transition', async () => {
+    // GIF drives `elementFrames.ts`'s composer, so it gets the transition pass —
+    // and with it ESCSUITE-133's clamped incoming clip time and ESCSUITE-139's
+    // preset suppression — for free rather than by reimplementation. The shape
+    // is `exportWebM.test.ts`'s own transition case: clip `a` carries a fade as
+    // long as itself, so the transition is active from timeline 0, and the frame
+    // inside that window draws both clips instead of one.
+    await storeVideo('video2', new Blob([new Uint8Array(8)], { type: 'video/webm' }), makeSourceVideo({ id: 'video2' }))
+
+    await run({
+      clips: [
+        makeClip({
+          id: 'a',
+          duration: 0.2,
+          endTime: 0.2,
+          timelinePosition: 0,
+          transition: { type: 'fade', duration: 0.2 },
+        }),
+        makeClip({
+          id: 'b',
+          sourceVideoId: 'video2',
+          duration: 0.2,
+          endTime: 0.2,
+          timelinePosition: 0.2,
+        }),
+      ],
+      sources: [
+        makeSourceVideo({ width: 640, height: 360 }),
+        makeSourceVideo({ id: 'video2', width: 640, height: 360 }),
+      ],
+      options: { fps: 10, timeRange: { start: 0, end: 0.1 } },
+    })
+
+    // One frame, two draws: the outgoing clip and the incoming one, not one
+    // clip and a black half.
+    expect(frames()).toHaveLength(1)
+    expect(ctx().argsFor('drawImage')).toHaveLength(2)
+    const alphas = ctx().stateFor('drawImage').map((s) => s.globalAlpha)
+    expect(alphas[0]).toBe(1)
+    expect(alphas[1]).toBe(0)
+  })
+
+  it('exports an audio-only project as the cleared raster, and completes', async () => {
+    // `loadElementSources` skips an audio source — there is nothing to draw from
+    // it — so every frame is the black `openOutputFrame` painted. That is the
+    // intended outcome and not an accident: a valid, silent, all-black GIF under
+    // a "complete" report, rather than a refusal. A GIF has no audio track to
+    // put the sound in, and refusing would be refusing a timeline the two video
+    // formats export happily.
+    await storeVideo('audio1', new Blob([new Uint8Array(8)], { type: 'audio/mp4' }), makeSourceVideo({ id: 'audio1' }))
+
+    const blob = await run({
+      clips: [makeClip({ sourceVideoId: 'audio1', duration: 0.3, endTime: 0.3 })],
+      sources: [makeSourceVideo({ id: 'audio1', mediaType: 'audio', width: 0, height: 0 })],
+      options: { fps: 10 },
+    })
+
+    expect(blob.type).toBe('image/gif')
+    expect(frames()).toHaveLength(3)
+    expect(frames()[0]).toMatchObject({ width: 640, height: 360 })
+    // Cleared once per frame and never drawn into.
+    expect(ctx().argsFor('fillRect')).toHaveLength(3)
+    expect(ctx().argsFor('drawImage')).toHaveLength(0)
+    expect(writer().finishes).toBe(1)
   })
 
   it('releases every media element when it finishes', async () => {

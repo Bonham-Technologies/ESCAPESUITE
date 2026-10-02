@@ -83,6 +83,23 @@ describe('createGifWriter', () => {
     expect(writer.finish().byteLength).toBe(afterSecond + 1)
   })
 
+  it('hands back a view over the encoder’s own buffer rather than a copy', () => {
+    // The finished GIF goes straight into `new Blob([bytes])`, which copies the
+    // bytes it is given — so a `slice()` on the way out is a second full-size
+    // allocation that nothing ever reads. Two views of one stream share a
+    // buffer; two slices of it cannot, which is what makes this discriminating.
+    const writer = createGifWriter()
+    writer.addFrame(solidFrame(255, 0, 0), 2, 2, 100)
+
+    const first = writer.finish()
+    const second = writer.finish()
+
+    expect(second.buffer).toBe(first.buffer)
+    // A view into the stream's capacity, not a right-sized copy of it: gifenc
+    // grows its buffer in powers of two and never trims it.
+    expect(first.buffer.byteLength).toBeGreaterThan(first.byteLength)
+  })
+
   it('refuses a frame written after finish()', () => {
     const writer = createGifWriter()
     writer.addFrame(solidFrame(255, 0, 0), 2, 2, 100)

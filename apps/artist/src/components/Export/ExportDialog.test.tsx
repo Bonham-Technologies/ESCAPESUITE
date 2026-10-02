@@ -1370,6 +1370,33 @@ describe('ExportDialog', () => {
       expect(screen.getByText('20 fps (smoothest)')).toBeInTheDocument()
     })
 
+    it('hides the Quality control for GIF, which cannot act on it', () => {
+      // `exportGIF.ts` never reads `options.quality` — it is a video/audio
+      // bitrate knob — so offering a select whose own labels promise "faster
+      // export" / "slower export" would promise a trade-off that does not
+      // exist. Hidden the same way the frame-rate select is shown: on the
+      // selected format, with the value left in `advancedOptions` and in
+      // `lastExportSettings` so switching back restores it.
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      expect(screen.getByText('Quality')).toBeInTheDocument()
+      expect(screen.getByText('Low (faster export)')).toBeInTheDocument()
+
+      fireEvent.click(gifRadio())
+
+      expect(screen.queryByText('Quality')).not.toBeInTheDocument()
+      expect(screen.queryByText('Low (faster export)')).not.toBeInTheDocument()
+      expect(screen.queryByText('Medium')).not.toBeInTheDocument()
+      expect(screen.queryByText('High (slower export)')).not.toBeInTheDocument()
+
+      // And back: MP4 is a video format, so the control returns.
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      expect(screen.getByText('Quality')).toBeInTheDocument()
+      expect(screen.getByDisplayValue('Medium')).toBeInTheDocument()
+    })
+
     it('offers only 720p, 480p and 360p for GIF, defaulting to 480p', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       chooseGif()
