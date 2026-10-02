@@ -210,11 +210,13 @@ export function hitTestHandles(
   // so it does not stand between the pointer and whatever is drawn beneath it
   // (ESCSUITE-155). `getClipOpacity` reads the same base `transform.opacity`
   // and the same `getAnimatedValues` call `getOverlayBounds` below already
-  // makes for position, so the two agree about what is actually on screen.
+  // makes for position — under the same transition suppression, which is what
+  // keeps a clip the transition is *fading in* clickable (ESCSUITE-147) — so
+  // the two agree about what is actually on screen.
   for (const { clip } of manipulableClips) {
     const clipType = getClipType(clip, sourceVideos);
     if (!clipType) continue;
-    if (getClipOpacity(clip, currentTime) <= 0) continue;
+    if (getClipOpacity(clip, currentTime, { transition }) <= 0) continue;
 
     const bounds = getOverlayBounds(clip, canvas, currentTime, sourceVideos, project, { transition });
     if (!bounds) continue;

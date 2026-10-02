@@ -2432,7 +2432,19 @@ the editor's. (That configuration is separately inconsistent and older than this
 for the window the preview draws it in. Untouched here.)
 
 The plumbing is additive, so no existing caller moved: `getOverlayBounds` gained an **optional
-trailing options argument** (`{ transition }`) after `project`; `hitTest.ts` and `selectionOverlay.ts`
+trailing options argument** (`{ transition }`) after `project`, and ESCSUITE-155's `getClipOpacity`
+takes the same `OverlayBoundsOptions` for the same reason — opacity is the property a `fade` preset
+drives, so the gate that refuses a click on a transparent clip has to evaluate it with the
+transition's side left out. Without that it read 0 for the *whole* of a same-track transition (a
+`fade` in-preset's first keyframe is opacity 0 at clip time 0, and `interpolateKeyframes` floors
+any earlier time to it, which is where the incoming clip sits for the entire window), so the clip
+the viewer could see arriving was unclickable until the transition ended. **The converse is a
+deliberate ruling: a clip the transition is drawing at alpha 0.02 IS clickable.** The suppressed
+opacity reads the clip's own (≈1) while the drawn alpha may be almost nothing, because the
+transition's alpha belongs to no clip's animation — the same boundary as the geometric offset
+below — and the clip arriving is exactly what the user is reaching for.
+
+Also additive: `hitTest.ts` and `selectionOverlay.ts`
 carry it as an optional `transition` field on the `PreviewSceneContext` slice they already take; and
 `dragGeometry.ts`'s `measureDragStart`, `clipsIntersectingMarquee` and `textClipAtPoint` take it as
 a trailing argument. `measureDragStart` passes it to its *second* lookup too — the one that derives
@@ -2455,7 +2467,10 @@ No `*.perf.test.ts` figure moves: the suppression is an argument to lookups thos
 count, and the new `getActiveTransition` call is on the selection-chrome path, which
 `drawFrame.perf.test.ts` does not draw (its scene has no transition under the selected clip either).
 
-Two readers deliberately do **not** suppress. `InlineTextEditorAnchor` asks for a clip's box with no
+Every reader now suppresses: the selection box and the multi-select boxes, the handle
+cascade, the z-order body hit (position *and* opacity), the marquee, the double-click, and the drag
+seed — every one of them through `presetSuppressionFor`. Two readers deliberately do **not**
+suppress. `InlineTextEditorAnchor` asks for a clip's box with no
 `time` at all, so it takes no animation lookup to suppress. And the keyframe panel's graph and track
 (`KeyframeGraph.tsx`, `KeyframeTrack.tsx`) plot both preset sides as authored, because they edit the
 *animation* rather than the frame — a graph drag moves an existing keyframe in `(time, value)` space,

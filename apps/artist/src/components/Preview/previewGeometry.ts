@@ -12,8 +12,9 @@ import { presetSuppressionFor } from '../../core/exportTypes';
 import type { TransitionInfo } from '../../core/exportTypes';
 
 /**
- * Per-call adjustments to the box a clip reports. Optional, and every default is
- * what this module always answered.
+ * Per-call adjustments to what this module reports about a clip — its box
+ * ({@link getOverlayBounds}) and its opacity ({@link getClipOpacity}). Optional,
+ * and every default is what this module always answered.
  */
 export interface OverlayBoundsOptions {
   /**
@@ -238,8 +239,17 @@ export function getOverlayBounds(
  * clip's duration" case to fall back from, and none is coded here. A future
  * caller that cannot make the same guarantee should bounds-check before
  * calling in, the way every current caller of {@link getOverlayBounds} does.
+ *
+ * `options` carries the active transition, for the same reason and through the
+ * same {@link OverlayBoundsOptions} {@link getOverlayBounds} takes it by
+ * (ESCSUITE-147): opacity is the property a `fade` preset drives, so the side a
+ * transition owns has to be left out here too. Without it this reads 0 for the
+ * whole of a same-track transition — a `fade` in-preset's first keyframe is
+ * opacity 0 at clip time 0, and the incoming clip's clip time is at or below 0
+ * for the entire window — and the clip the viewer can see arriving would be
+ * refused the click.
  */
-export function getClipOpacity(clip: Clip, time: number): number {
+export function getClipOpacity(clip: Clip, time: number, options?: OverlayBoundsOptions): number {
   if (!clip.animation) return (clip.transform || DEFAULT_TRANSFORM).opacity;
 
   const clipTime = time - clip.timelinePosition;
@@ -248,7 +258,8 @@ export function getClipOpacity(clip: Clip, time: number): number {
     clip.duration,
     clip.animation,
     clip.transform || DEFAULT_TRANSFORM,
-    clip.effects || DEFAULT_EFFECTS
+    clip.effects || DEFAULT_EFFECTS,
+    presetSuppressionFor(clip, options?.transition)
   ).opacity;
 }
 
