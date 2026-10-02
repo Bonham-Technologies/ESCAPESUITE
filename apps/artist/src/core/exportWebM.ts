@@ -10,21 +10,14 @@ import {
   EncodedPacket,
 } from 'mediabunny';
 import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
-import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
-import { getVideoBlob } from './storage';
-import { getClipsAtTime } from '../store/projectStore';
-import { getAnimatedValues } from '../utils/animation';
 import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
-import { openOutputFrame, projectToOutputScale } from './outputTransform';
+import { projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
   getQualitySettings,
   getResolution, getBaseDimensions,
-  loadVideoElement,
-  loadImageElement,
   yieldToMain,
   calculateTimelineDuration,
-  getActiveTransition,
   findSupportedVideoConfig,
   webMVideoCodecConfigs,
   waitForEncoderBackpressure,
@@ -37,12 +30,11 @@ import {
   type ExportLogEntry,
 } from './exportTypes';
 import {
-  drawClipToCanvas,
-  drawImageToCanvasWithModifiers,
-  drawTransition,
-  drawTextOverlayToCanvasAnimated,
-  drawShapeOverlayToCanvasAnimated,
-} from './canvasRenderer';
+  createFrameComposer,
+  loadElementSources,
+  releaseElementSources,
+  rewindElementSources,
+} from './elementFrames';
 import { extractAndMixAudio } from './audioMixer';
 
 /**
@@ -180,39 +172,7 @@ export async function exportToWebM(
   // Load all unique source media (videos and images)
   onProgress({ phase: 'preparing', progress: 12, message: 'Loading media files...' });
 
-  const videoElements: Map<string, HTMLVideoElement> = new Map();
-  const imageElements: Map<string, HTMLImageElement> = new Map();
-
-  // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
-  const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
-
-  for (const sourceId of uniqueSourceIds) {
-    const source = sourceMap.get(sourceId);
-    const blob = await getVideoBlob(sourceId);
-
-    if (blob) {
-      if (source?.mediaType === 'image') {
-        // Load as image
-        const img = await loadImageElement(blob);
-        imageElements.set(sourceId, img);
-      } else if (source?.mediaType !== 'audio') {
-        // Load as video (skip audio-only files for visual rendering)
-        try {
-          const video = await loadVideoElement(blob);
-          videoElements.set(sourceId, video);
-        } catch (e) {
-          console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
-          // Try loading as image as fallback
-          try {
-            const img = await loadImageElement(blob);
-            imageElements.set(sourceId, img);
-          } catch {
-            console.warn(`Failed to load media ${sourceId}`);
-          }
-        }
-      }
-    }
-  }
+  const sources = await loadElementSources(clips, sourceMap);
 
   onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
 
@@ -304,52 +264,22 @@ export async function exportToWebM(
   const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
   let frameCount = 0;
 
-  // Track which videos are currently playing and their state
-  const videoPlaybackState = new Map<string, { playing: boolean; targetTime: number }>();
+  // Pause and rewind every source before the frame loop: one seek per element,
+  // never part of the per-frame cost.
+  const playbackState = rewindElementSources(sources);
 
-  // Initialize all videos as paused
-  for (const [sourceId, video] of videoElements) {
-    video.pause();
-    video.currentTime = 0;
-    videoPlaybackState.set(sourceId, { playing: false, targetTime: 0 });
-  }
-
-  // Helper to sync a video to target time - uses playback for small forward movements
-  const syncVideoToTime = async (video: HTMLVideoElement, _sourceId: string, targetTime: number): Promise<void> => {
-    // Always seek to exact time for frame-accurate export.
-    // Skip if already within half a frame of the target.
-    const frameDuration = 1 / frameRate;
-    if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
-      video.currentTime = targetTime;
-      await new Promise<void>((resolve) => {
-        video.addEventListener('seeked', () => resolve(), { once: true });
-        setTimeout(resolve, 500);
-      });
-    }
-
-    // Ensure frame data is decoded (readyState >= 2 = HAVE_CURRENT_DATA)
-    if (video.readyState < 2) {
-      await new Promise<void>((resolve) => {
-        const check = () => {
-          if (video.readyState >= 2) resolve();
-          else requestAnimationFrame(check);
-        };
-        check();
-        setTimeout(resolve, 300);
-      });
-    }
-  };
-
-  // Helper to clean up resources on abort or completion
-  const cleanup = () => {
-    videoElements.forEach((v) => {
-      v.pause();
-      URL.revokeObjectURL(v.src);
-    });
-    imageElements.forEach((img) => {
-      URL.revokeObjectURL(img.src);
-    });
-  };
+  const composeFrame = createFrameComposer({
+    ctx,
+    canvas,
+    clips,
+    tracks: exportTracks,
+    sources,
+    playbackState,
+    projectSize,
+    outputSize,
+    drawOptions,
+    frameRate,
+  });
 
   try {
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
@@ -365,156 +295,7 @@ export async function exportToWebM(
 
       const currentTime = rangeStart + frameIndex / frameRate;
 
-      // Check for active transition
-      const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
-
-      // Get all clips at current time
-      const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
-
-      // Clear the raster to black and put the context in project pixels: every
-      // draw below is project-space, exactly as the preview's is.
-      openOutputFrame(ctx, projectSize, outputSize);
-
-      // Media clips need their source video synced to time (below) before
-      // anything can be drawn; overlays don't. `activeClips` itself —
-      // `getClipsAtTime`'s result — is already sorted by track index, and
-      // stays the single source of composite order: see the draw loop below.
-      const mediaClips: typeof activeClips = [];
-
-      for (const clipData of activeClips) {
-        if (!clipData.clip.overlayType) {
-          mediaClips.push(clipData);
-        }
-      }
-
-      // Sync all active videos to their target times
-      const syncPromises: Promise<void>[] = [];
-      const activeVideoIds = new Set<string>();
-
-      for (const { clip, clipTime } of mediaClips) {
-        const video = videoElements.get(clip.sourceVideoId);
-        if (!video) continue;
-
-        const sourceTime = clip.startTime + clipTime;
-        activeVideoIds.add(clip.sourceVideoId);
-        syncPromises.push(syncVideoToTime(video, clip.sourceVideoId, sourceTime));
-      }
-
-      // Also sync transition clips
-      if (activeTransition) {
-        const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
-        if (incomingVideo) {
-          const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
-          const incomingClipTime = currentTime - clipEnd;
-          const sourceTime = incomingClipTime >= 0
-            ? activeTransition.incomingClip.startTime + incomingClipTime
-            : activeTransition.incomingClip.startTime;
-          activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
-          syncPromises.push(syncVideoToTime(incomingVideo, activeTransition.incomingClip.sourceVideoId, sourceTime));
-        }
-      }
-
-      // Pause videos that are no longer active
-      for (const [sourceId, video] of videoElements) {
-        if (!activeVideoIds.has(sourceId)) {
-          const state = videoPlaybackState.get(sourceId)!;
-          if (state.playing) {
-            video.pause();
-            state.playing = false;
-          }
-        }
-      }
-
-      await Promise.all(syncPromises);
-
-      // Helper to calculate clip time
-      const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
-
-      // Composite media and overlay clips in one pass, in `activeClips`' own
-      // track order — the same single interleaved pass the preview draws
-      // (`components/Preview/drawFrame.ts`), so an overlay on a lower track
-      // than a media clip is exactly as hidden behind it here as it is on
-      // screen, and a blur shape only reaches the content actually below it.
-      for (const { clip } of activeClips) {
-        // Skip clips that are part of an active transition
-        if (activeTransition &&
-            (clip.id === activeTransition.outgoingClip.id || clip.id === activeTransition.incomingClip.id)) {
-          continue;
-        }
-
-        if (!clip.overlayType) {
-          const clipTime = getClipTime(clip);
-
-          // Try video first, then image - require readyState >= 2 (frame data available)
-          const video = videoElements.get(clip.sourceVideoId);
-          if (video && video.readyState >= 2) {
-            drawClipToCanvas(
-              ctx, video, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
-            );
-            continue;
-          }
-
-          const image = imageElements.get(clip.sourceVideoId);
-          if (image) {
-            drawImageToCanvasWithModifiers(
-              ctx, image, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
-            );
-          }
-          continue;
-        }
-
-        const overlayClipTime = getClipTime(clip);
-
-        // Build base transform from overlay's own properties
-        let baseTransform = clip.transform || DEFAULT_TRANSFORM;
-
-        if (clip.overlayType === 'text' && clip.textData) {
-          baseTransform = {
-            ...DEFAULT_TRANSFORM,
-            ...clip.transform,
-            x: clip.textData.x,
-            y: clip.textData.y,
-            scaleX: clip.textData.scale ?? 1,
-            scaleY: clip.textData.scale ?? 1,
-            rotation: clip.textData.rotation ?? 0,
-          };
-        } else if (clip.overlayType === 'shape' && clip.shapeData) {
-          baseTransform = {
-            ...DEFAULT_TRANSFORM,
-            ...clip.transform,
-            x: clip.shapeData.x,
-            y: clip.shapeData.y,
-            rotation: clip.shapeData.rotation,
-          };
-        }
-
-        const animated = getAnimatedValues(
-          overlayClipTime,
-          clip.duration,
-          clip.animation,
-          baseTransform,
-          clip.effects || DEFAULT_EFFECTS
-        );
-
-        if (clip.overlayType === 'shape' && clip.shapeData) {
-          drawShapeOverlayToCanvasAnimated(
-            ctx, clip.shapeData, projectSize.width, projectSize.height, animated, canvas,
-            undefined, drawOptions.filterScale
-          );
-        } else if (clip.overlayType === 'text' && clip.textData) {
-          drawTextOverlayToCanvasAnimated(
-            ctx, clip.textData, projectSize.width, projectSize.height, animated, drawOptions.filterScale
-          );
-        }
-      }
-
-      // Draw transition if active
-      if (activeTransition) {
-        drawTransition(
-          ctx, videoElements, imageElements, activeTransition, currentTime,
-          projectSize.width, projectSize.height, drawOptions
-        );
-      }
+      await composeFrame(currentTime);
 
       // Create VideoFrame from canvas — timestamp relative to export start (not timeline)
       const exportTime = currentTime - rangeStart;
@@ -640,7 +421,7 @@ export async function exportToWebM(
     checkAborted(signal);
 
     // Clean up media elements
-    cleanup();
+    releaseElementSources(sources);
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
@@ -652,7 +433,7 @@ export async function exportToWebM(
     return new Blob([buffer], { type: 'video/webm' });
   } catch (error) {
     // Clean up resources on error
-    cleanup();
+    releaseElementSources(sources);
 
     // Close encoders if they exist
     try {

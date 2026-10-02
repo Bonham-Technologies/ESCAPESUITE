@@ -108,6 +108,22 @@ pnpm lint                # Run ESLint
 - `exporter.ts`: Two export paths using WebCodecs + `mediabunny` for muxing:
   - **WebM**: VP9 video + Opus audio, frame-by-frame encoding with audio mixing
   - **MP4**: H.264 video + AAC audio, frame-by-frame encoding with WebCodecs decoding
+- `elementFrames.ts`: the per-frame machinery an exporter that draws media **elements**
+  (`<video>` / `<img>`) needs, lifted out of `exportWebM.ts` by ESCSUITE-34 so a second
+  element-drawing pipeline reuses it rather than copying it. Four functions:
+  `loadElementSources` (each unique source into an element, skipping audio-only sources,
+  sources with no bytes and overlays), `rewindElementSources` (pause and seek every
+  `<video>` to 0 once — the seeks `exportWebM.perf.test.ts` discounts as `initSeeks`),
+  `createFrameComposer` (one frame: `openOutputFrame`, sync the live videos to their clip
+  times, then the single track-ordered interleaved draw pass and the transition) and
+  `releaseElementSources` (pause everything and revoke the object URLs). The composer takes
+  the output `frameRate` because the seek tolerance is a little under half a frame of it —
+  the one value that had to become a parameter, 30 for WebM. `exportMP4.ts` is deliberately
+  **not** a caller: it decodes through `videoDecodeManager.ts` / `frameSource.ts` and draws
+  `VideoFrame`s, so it shares `canvasRenderer.ts` but not this. The extraction is a pure
+  move — the same warning strings, the same 500 ms seek and 300 ms readiness fallbacks, the
+  same `readyState >= 2` gate — and both export `*.perf.test.ts` ceiling files are
+  byte-identical across it, which is what pins the call order
 - `audioMixer.ts`: `extractAndMixAudio` is the export pipeline's one audio mixer — both
   `exportWebM.ts` and `exportMP4.ts` call it directly, on the main thread. It decodes each
   clip's source with `OfflineAudioContext`, applies `getAnimatedVolume` per sample (so a
@@ -2196,7 +2212,8 @@ premise this ticket falsified.
 **Nothing else composites.** `workers/decodeWorker.ts` decodes and holds frames; it has no
 canvas at all. The compositing is in
 `exportWebM.ts` and `exportMP4.ts` and nowhere else, which is why two call sites were the whole
-fix. The headless kit drives these same exporters through `window.__renderProject`, so it gets
+fix (since ESCSUITE-34, WebM's half of it lives in `elementFrames.ts`, which `exportWebM.ts` is
+the first caller of — still one composite per pipeline). The headless kit drives these same exporters through `window.__renderProject`, so it gets
 the fix for free — including the manifest, which `headless/renderProject.ts` sizes with the same
 `getResolution`.
 
@@ -2501,10 +2518,12 @@ in the Advanced panel: there is no up-front answer to show in the main body for 
 now is for WebM. Giving MP4 the same up-front treatment is unclaimed follow-up work, not a defect
 in this ticket.
 
-### Black Flash Prevention (`src/core/exportWebM.ts`, `src/core/canvasRenderer.ts`)
+### Black Flash Prevention (`src/core/elementFrames.ts`, `src/core/canvasRenderer.ts`)
 To prevent black frames during export:
 - **Seek timeout**: 500ms for reliable seeking
-- **Frame readiness**: `exportWebM.ts`'s frame loop waits inline for `video.readyState >= 2`
+- **Frame readiness**: the element-drawing frame composer (`elementFrames.ts`'s
+  `syncVideoToTime`, which `exportWebM.ts` had inline until ESCSUITE-34) waits for
+  `video.readyState >= 2`
   (`HAVE_CURRENT_DATA`), event-based with a `requestAnimationFrame` poll and a 300ms fallback
 - **Post-seek verification**: Always waits for frame data after successful seek
 - **Transition safety**: `drawTransition()` (`canvasRenderer.ts`) warns when a transition's video
