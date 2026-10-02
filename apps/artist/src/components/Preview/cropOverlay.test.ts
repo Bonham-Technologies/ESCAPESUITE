@@ -181,6 +181,30 @@ describe('drawCropOverlay', () => {
   })
 
   it('punches the kept region out of it, so the frame\'s own picture stays bright', () => {
+    // A CROPPED scene, so the two rectangles differ and the even-odd region is
+    // a real ring: the full source reaches 100px further left (25% of 400) than
+    // the 300-wide kept box, and the dim covers exactly that strip.
+    drawCropOverlay(
+      canvas,
+      1,
+      scene({ clips: [mediaClip({ crop: { left: 0.25, top: 0, right: 0, bottom: 0 } })] }),
+      element
+    )
+
+    const rects = ctx.argsFor('rect')
+    expect(rects).toEqual([
+      [-250, -100, 400, 200],
+      [-150, -100, 300, 200],
+    ])
+    expect(rects[0]).not.toEqual(rects[1])
+    expect(ctx.argsFor('clip')).toEqual([['evenodd']])
+  })
+
+  it('draws the degenerate ring for a clip with no crop, and still clips evenodd', () => {
+    // No crop at all: the full source box IS the kept box, so the even-odd
+    // region is empty and the paint dims nothing. The call shape is the same
+    // either way — the chrome has no "is there anything to dim" branch, because
+    // crop mode is worth entering on an uncropped clip.
     drawCropOverlay(canvas, 1, scene(), element)
 
     expect(ctx.argsFor('rect')).toEqual([
@@ -226,6 +250,14 @@ describe('drawCropOverlay', () => {
 
   it('draws nothing while the clip is off screen at this time', () => {
     drawCropOverlay(canvas, 9, scene(), element)
+
+    expect(ctx.calls).toEqual([])
+  })
+
+  it('draws nothing before the clip starts either', () => {
+    // The other side of the same guard: a clip that has not begun yet, rather
+    // than one that has ended.
+    drawCropOverlay(canvas, 1, scene({ clips: [mediaClip({ timelinePosition: 4 })] }), element)
 
     expect(ctx.calls).toEqual([])
   })
