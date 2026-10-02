@@ -120,8 +120,8 @@ export function getIncomingClipTime(transition: TransitionInfo, currentTime: num
 /**
  * The `getAnimatedValues` options a clip is evaluated under while this
  * transition owns one of its preset sides (ESCSUITE-147) — `undefined` when
- * none does, which is every clip outside a transition window and the third clip
- * inside one.
+ * none does, which is every clip outside a transition window, the third clip
+ * inside one, and any overlay at all.
  *
  * The renderer never needs this: `drawTransition` knows which side it is about
  * to draw and `transitionSideModifiers` stamps the suppression on from there
@@ -130,14 +130,27 @@ export function getIncomingClipTime(transition: TransitionInfo, currentTime: num
  * keyframe drag's seed — and each has to arrive at the renderer's answer or it
  * reports a position the picture has left. One function for all of them, so the
  * readers cannot drift from each other or from the draw.
+ *
+ * **An overlay is never suppressed**, which is why this takes the clip rather
+ * than its id. The suppression reaches a draw through `TransitionModifiers`, and
+ * only the two *media* paths take modifiers: `drawFrame.ts` (and both exporters'
+ * overlay passes) dispatch `clip.overlayType` through `drawOverlayClip` ahead of
+ * the "skip a clip the transition will draw" check and hand it nothing, so a text
+ * or shape overlay carrying a transition is drawn with its own Animate Out preset
+ * fully applied. A reader that suppressed it would box and hit-test that overlay
+ * where the picture is not — this ticket's own bug with the sides reversed, in
+ * the one configuration that used to agree. (The editor cannot author it:
+ * `ClipEditor` hides the transition section for an overlay, so it takes an
+ * imported or hand-edited project. The guard is here because the invariant is
+ * the renderer's, not the editor's.)
  */
 export function presetSuppressionFor(
-  clipId: string,
+  clip: Clip,
   transition: TransitionInfo | null | undefined
 ): AnimatedValuesOptions | undefined {
-  if (!transition) return undefined;
-  if (transition.outgoingClip.id === clipId) return PRESET_SUPPRESSION.out;
-  if (transition.incomingClip.id === clipId) return PRESET_SUPPRESSION.in;
+  if (!transition || clip.overlayType) return undefined;
+  if (transition.outgoingClip.id === clip.id) return PRESET_SUPPRESSION.out;
+  if (transition.incomingClip.id === clip.id) return PRESET_SUPPRESSION.in;
   return undefined;
 }
 

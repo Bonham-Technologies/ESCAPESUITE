@@ -27,12 +27,14 @@ import {
   isWebMExportSupported,
   loadImageElement,
   loadVideoElement,
+  presetSuppressionFor,
   resolutionForFormat,
   waitForEncoderBackpressure,
   webMVideoCodecConfigs,
   yieldToMain,
 } from './exportTypes'
 import type { Clip, Track, SourceVideo, TransitionType } from '../store/types'
+import { PRESET_SUPPRESSION } from '../utils/animation'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { lastObjectUrl } from '../test/objectUrls'
 import { installWebCodecsDoubles, removeWebCodecsGlobals, VideoFrameDouble } from '../test/doubles/webcodecs'
@@ -249,6 +251,48 @@ describe('getIncomingClipTime', () => {
       incomingClip: timedClip('over', 't1', 1, 20),
     }
     expect(getIncomingClipTime(overlapping, 4.5)).toBe(3.5)
+  })
+})
+
+describe('presetSuppressionFor', () => {
+  // ESCSUITE-147: the readers of a clip's animation — the selection box, the hit
+  // test, the marquee, a keyframe drag's seed — have to leave out whichever
+  // preset side the active transition owns, because that is how the renderer
+  // draws it. This is the one answer they all ask for.
+  const outgoingClip = timedClip('a', 't0', 0, 5, { type: 'fade', duration: 1 })
+  const incomingClip = timedClip('b', 't0', 5, 5)
+  const transition = { outgoingClip, incomingClip, progress: 0.5, type: 'fade' as TransitionType }
+
+  it('hands back the renderer’s own frozen options object for each side', () => {
+    // Identity, not shape: the renderer indexes this very pair, and a reader
+    // that built a literal would allocate one per pointer move.
+    expect(presetSuppressionFor(outgoingClip, transition)).toBe(PRESET_SUPPRESSION.out)
+    expect(presetSuppressionFor(incomingClip, transition)).toBe(PRESET_SUPPRESSION.in)
+  })
+
+  it('suppresses nothing without a transition', () => {
+    expect(presetSuppressionFor(outgoingClip, null)).toBeUndefined()
+    expect(presetSuppressionFor(outgoingClip, undefined)).toBeUndefined()
+  })
+
+  it('suppresses nothing on a clip the transition does not name', () => {
+    expect(presetSuppressionFor(timedClip('c', 't1', 0, 5), transition)).toBeUndefined()
+  })
+
+  it('suppresses nothing on an overlay clip, which the renderer never suppresses', () => {
+    // `drawFrame.ts` dispatches an overlay through `drawOverlayClip` before the
+    // transition skip and passes it no modifiers, so a text or shape overlay
+    // carrying a transition is drawn with its own out-preset fully applied —
+    // whatever the transition says. A reader that suppressed it would box and
+    // hit-test that overlay where the picture is not: this ticket's bug, with
+    // the sides reversed.
+    const overlay = timedClip('o', 't0', 0, 5, { type: 'fade', duration: 1 }, {
+      sourceVideoId: '',
+      overlayType: 'text',
+    })
+    const overlayTransition = { ...transition, outgoingClip: overlay }
+
+    expect(presetSuppressionFor(overlay, overlayTransition)).toBeUndefined()
   })
 })
 

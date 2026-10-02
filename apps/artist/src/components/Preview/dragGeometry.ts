@@ -105,7 +105,7 @@ export function measureDragStart(
           clip.effects || DEFAULT_EFFECTS,
           // The same suppression `boundsOf` above measured the box under, so the
           // seeded scale and the seeded position describe one picture.
-          presetSuppressionFor(clip.id, transition)
+          presetSuppressionFor(clip, transition)
         );
         startScaleX = animatedValues.scaleX;
         startScaleY = animatedValues.scaleY;

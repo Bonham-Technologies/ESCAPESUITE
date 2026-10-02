@@ -470,6 +470,22 @@ describe('getOverlayBounds during a transition (ESCSUITE-147)', () => {
     expect(centerXAt(outgoing, { transition: null })).toBe(0.25 * CANVAS_W)
   })
 
+  it('leaves an overlay’s own preset alone, because the renderer never suppresses it', () => {
+    // `drawFrame.ts` draws an overlay through `drawOverlayClip`, before the
+    // transition skip and with no modifiers, so a text or shape overlay that
+    // carries a transition keeps its out-preset whatever the transition says.
+    // The box has to say the same, or it is wrong in the one configuration it
+    // used to be right about.
+    const overlay = shapeClip({
+      id: 'overlay1',
+      duration: 4,
+      animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+    })
+    const overlayTransition = makeTransitionInfo({ outgoingClip: overlay, incomingClip: incoming })
+
+    expect(centerXAt(overlay, { transition: overlayTransition })).toBe(0.25 * CANVAS_W)
+  })
+
   it('leaves a clip the transition does not name alone', () => {
     // A third clip with the same out-preset, running at the same time on a
     // track of its own: the transition owns neither of its sides.

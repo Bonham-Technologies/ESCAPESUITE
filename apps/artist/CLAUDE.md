@@ -2411,12 +2411,25 @@ click target and the seed were all at a position the picture had left — halfwa
 three were at 480 — and a keyframe-mode drag started there wrote every keyframe it made offset by
 the preset's delta. (Under a `fade` or `dissolve`, which move nothing, they agreed throughout.)
 
-`presetSuppressionFor(clipId, transition)` in `core/exportTypes.ts` is now the single answer to
+`presetSuppressionFor(clip, transition)` in `core/exportTypes.ts` is now the single answer to
 "which preset side does this transition own for this clip", beside `getIncomingClipTime` and for
 the same reason: the renderer knows the *side* it is drawing and reaches for `PRESET_SUPPRESSION`
 directly, while every reader knows a clip and a transition instead, and one function is what keeps
 the readers from drifting from each other or from the draw. It returns `undefined` for a clip the
 transition does not name, which is every clip outside a window and the third clip inside one.
+
+It takes the **clip**, not its id, for one reason: **an overlay is never suppressed.** The
+suppression reaches a draw through `TransitionModifiers`, and only the two media paths take
+modifiers — `drawFrame.ts` and both exporters' interleaved passes dispatch a `clip.overlayType`
+through `drawOverlayClip` *ahead* of the "skip a clip the transition will draw" check and hand it
+nothing — so a text or shape overlay carrying a transition is drawn with its own Animate Out preset
+fully applied, whatever the transition says. A reader keyed on the id alone would have suppressed
+it, which is this ticket's bug with the sides reversed, in the one configuration that previously
+agreed. `ClipEditor` hides the transition section for an overlay, so only an imported or
+hand-edited project can reach it; the guard lives here because the invariant is the renderer's, not
+the editor's. (That configuration is separately inconsistent and older than this ticket:
+`exportMP4.ts` skips *any* transition-side clip, overlays included, so an export drops the overlay
+for the window the preview draws it in. Untouched here.)
 
 The plumbing is additive, so no existing caller moved: `getOverlayBounds` gained an **optional
 trailing options argument** (`{ transition }`) after `project`; `hitTest.ts` and `selectionOverlay.ts`
@@ -2433,10 +2446,20 @@ marquee, the double-click and the drag seed cannot disagree, and the memo is `nu
 referentially stable through an ordinary scrub), and `PreviewPlayer.tsx` derives it inside each of
 the two chrome callbacks from the `time` they are drawing at rather than from the store's playhead —
 the render loop calls them with its own display time. That is one pass over the clips per repaint of
-the chrome, and none at all during playback, where both callbacks return before measuring anything.
+the chrome (two, in fact — one per callback — on top of `drawFrame`'s own), and none at all during
+playback, because neither callback is *called* then: `usePreviewRenderLoop`'s scrub effect returns on
+`isPlaying` and its playback effect draws the frame alone. (`selectionOverlay`'s own `isPlaying`
+early return is the weaker guarantee of the two — it is reached after the argument has been
+evaluated.)
 No `*.perf.test.ts` figure moves: the suppression is an argument to lookups those files already
 count, and the new `getActiveTransition` call is on the selection-chrome path, which
 `drawFrame.perf.test.ts` does not draw (its scene has no transition under the selected clip either).
+
+Two readers deliberately do **not** suppress. `InlineTextEditorAnchor` asks for a clip's box with no
+`time` at all, so it takes no animation lookup to suppress. And the keyframe panel's graph and track
+(`KeyframeGraph.tsx`, `KeyframeTrack.tsx`) plot both preset sides as authored, because they edit the
+*animation* rather than the frame — a graph drag moves an existing keyframe in `(time, value)` space,
+never by a screen delta, so there is no seed to displace and nothing for the suppression to protect.
 
 **The limit:** the transition's OWN geometry is still not applied — a `slide-*` transition slides the
 picture a whole frame width, and the box stays where the clip is. That is not an oversight of the

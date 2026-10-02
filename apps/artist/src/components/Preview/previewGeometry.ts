@@ -28,6 +28,9 @@ export interface OverlayBoundsOptions {
    * scene to look in (`InlineTextEditorAnchor` asks for a clip's box with no
    * time at all).
    *
+   * An overlay is never suppressed, whichever side of the transition it is on,
+   * because the renderer never suppresses one; see {@link presetSuppressionFor}.
+   *
    * The transition's OWN geometry — a slide-\*'s offset, a wipe's clip region —
    * is deliberately not applied; see the limit named in `apps/artist/CLAUDE.md`.
    */
@@ -108,7 +111,7 @@ export function getOverlayBounds(
         clip.effects || DEFAULT_EFFECTS,
         // Minus whichever preset side an active transition has taken over, so
         // the box follows the picture (ESCSUITE-147).
-        presetSuppressionFor(clip.id, options?.transition)
+        presetSuppressionFor(clip, options?.transition)
       );
 
       animatedX = animated.x;
