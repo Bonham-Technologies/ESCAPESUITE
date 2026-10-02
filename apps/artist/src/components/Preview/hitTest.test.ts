@@ -366,6 +366,53 @@ describe('hitTestHandles during a transition (ESCSUITE-147)', () => {
     expect(hitAt(0.25 * CANVAS_W, CENTER_Y, inTransition)).toBeNull()
   })
 
+  it('accepts the click on a clip the transition is fading in', () => {
+    // A cross-track transition whose incoming clip starts at this very instant,
+    // so its clip time is 0 — where a `fade` in-preset's first keyframe reads
+    // opacity 0. The renderer suppresses that preset and draws the clip at the
+    // transition's own rising alpha, so the opacity gate (ESCSUITE-155) has to
+    // read it suppressed too or the clip the viewer can see arriving is
+    // unclickable for the whole window.
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const arriving = mediaClip({
+      id: 'arriving',
+      trackId: upper.id,
+      timelinePosition: 3.5,
+      animation: makeAnimation({ in: { type: 'fade', duration: 1, easing: 'linear' } }),
+    })
+    const crossTrack = makeTransitionInfo({ outgoingClip: sliding, incomingClip: arriving })
+    const scene3 = scene({
+      clips: [sliding, arriving],
+      tracks: [track, upper],
+      currentTime: 3.5,
+      transition: crossTrack,
+    })
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene3)?.clipId).toBe('arriving')
+  })
+
+  it('still refuses the click on a transparent clip with no transition over it', () => {
+    // The ESCSUITE-155 gate itself, unchanged: the same clip at the same instant
+    // with no transition handed over keeps its in-preset, evaluates to 0 and is
+    // passed over for the clip beneath it.
+    const upper = makeTrack({ id: 'track2', index: 5 })
+    const arriving = mediaClip({
+      id: 'arriving',
+      trackId: upper.id,
+      timelinePosition: 3.5,
+      animation: makeAnimation({ in: { type: 'fade', duration: 1, easing: 'linear' } }),
+    })
+    const plain = mediaClip({ id: 'beneath' })
+
+    expect(
+      hitAt(CENTER_X, CENTER_Y, scene({
+        clips: [plain, arriving],
+        tracks: [track, upper],
+        currentTime: 3.5,
+      }))?.clipId
+    ).toBe('beneath')
+  })
+
   it('picks it at the preset’s own position when no transition owns that side', () => {
     const outsideTransition = scene({ clips: [sliding], currentTime: 3.5 })
 

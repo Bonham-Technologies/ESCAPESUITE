@@ -419,6 +419,56 @@ describe('getClipOpacity', () => {
   })
 })
 
+describe('getClipOpacity during a transition (ESCSUITE-147)', () => {
+  /**
+   * The incoming side of a transition, with a `fade` in-preset over the same
+   * second.
+   *
+   * A `fade` in-preset's first keyframe is `opacity: 0` at clip time 0, and
+   * `interpolateKeyframes` floors any earlier time to it — so a same-track
+   * incoming clip, whose `timelinePosition` sits at the outgoing clip's end,
+   * evaluates to 0 for the *whole* window. The renderer draws it at the
+   * transition's own rising alpha instead, because it suppresses the `in` side.
+   */
+  const incomingFade = makeClip({
+    id: 'in-fade',
+    duration: 4,
+    timelinePosition: 4,
+    animation: makeAnimation({ in: { type: 'fade', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({
+    outgoingClip: makeClip({
+      id: 'out-fade',
+      duration: 4,
+      transition: { type: 'fade', duration: 1 },
+    }),
+    incomingClip: incomingFade,
+  })
+
+  it('reads the clip’s own opacity, not the in-preset the transition owns', () => {
+    expect(getClipOpacity(incomingFade, 3.5, { transition })).toBe(1)
+  })
+
+  it('applies the in-preset when no transition is handed over', () => {
+    expect(getClipOpacity(incomingFade, 3.5)).toBe(0)
+    expect(getClipOpacity(incomingFade, 3.5, { transition: null })).toBe(0)
+  })
+
+  it('leaves an overlay’s own preset alone, as the renderer does', () => {
+    const overlay = makeClip({
+      ...incomingFade,
+      id: 'overlay-fade',
+      sourceVideoId: '',
+      overlayType: 'text',
+      textData: makeTextData(),
+    })
+
+    expect(
+      getClipOpacity(overlay, 3.5, { transition: { ...transition, incomingClip: overlay } })
+    ).toBe(0)
+  })
+})
+
 describe('getOverlayBounds during a transition (ESCSUITE-147)', () => {
   const source: SourceVideo = makeSourceVideo({ width: 400, height: 200 })
 
