@@ -45,8 +45,16 @@ function renderGraph(
   } = {}
 ) {
   const clip = currentClip()
-  const onKeyframeMoved = vi.fn()
-  const onKeyframeValueChanged = vi.fn()
+  // `true` is the ordinary answer (ESCSUITE-87/163): an unlocked track, and a
+  // move that found a keyframe to move. `handleMouseUp`'s gesture history
+  // reads this to decide whether a diagonal drag's value half should commit —
+  // a test that wants the refusal says so with `mockReturnValue(false)`.
+  const onKeyframeMoved = vi.fn(
+    (_property: AnimatableProperty, _originalTime: number, _newTime: number, _skipHistory?: boolean) => true
+  )
+  const onKeyframeValueChanged = vi.fn(
+    (_property: AnimatableProperty, _time: number, _newValue: number, _skipHistory?: boolean) => true
+  )
   const onAddKeyframe = vi.fn()
   // Since ESCSUITE-88 the delete handler reports whether the store removed the
   // keyframe, and the graph only clears its selection when it did.
@@ -479,13 +487,18 @@ describe('KeyframeGraph', () => {
       opacityKeyframes()
     })
 
+    // Kept past the fix (it is the sentinel for ESCSUITE-163 / M1's old shape:
+    // a diagonal drag used to commit its value in a `setTimeout(…, 0)`, which is
+    // what made it a second, separate undo entry). Awaiting it now is a no-op —
+    // both writes land synchronously — so it stays only in the one test below
+    // that specifically needs to look past where that deferral used to be.
     async function flushValueCommit() {
       await act(async () => {
         await new Promise((resolve) => setTimeout(resolve, 0))
       })
     }
 
-    it('moves a keyframe in time and value together', async () => {
+    it('moves a keyframe in time and value together, synchronously, as one gesture', () => {
       const { container, onKeyframeMoved, onKeyframeValueChanged } = renderGraph('opacity')
       measureGraph(container)
 
@@ -493,16 +506,36 @@ describe('KeyframeGraph', () => {
       fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.2) })
       fireEvent.mouseUp(window)
 
+      // Both writes land before mouseUp returns (ESCSUITE-163 / M1) — no
+      // setTimeout, so no race with whatever the gesture does next.
       expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
       expect(onKeyframeMoved.mock.calls[0][0]).toBe('opacity')
       expect(onKeyframeMoved.mock.calls[0][1]).toBeCloseTo(1, 6)
       expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(3, 6)
+      // The move is the gesture's first write: it is not told to skip history.
+      expect(onKeyframeMoved.mock.calls[0][3]).toBe(false)
 
-      // The new value is applied only once the move has landed.
-      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
-      await flushValueCommit()
+      expect(onKeyframeValueChanged).toHaveBeenCalledTimes(1)
       expect(onKeyframeValueChanged.mock.calls[0][1]).toBeCloseTo(3, 6)
       expect(onKeyframeValueChanged.mock.calls[0][2]).toBeCloseTo(0.2, 6)
+      // The value write joins the move's undo entry instead of pushing its own.
+      expect(onKeyframeValueChanged.mock.calls[0][3]).toBe(true)
+    })
+
+    it('leaves the value alone when the move is refused', async () => {
+      const { container, onKeyframeMoved, onKeyframeValueChanged } = renderGraph('opacity')
+      measureGraph(container)
+      onKeyframeMoved.mockReturnValue(false)
+
+      fireEvent.mouseDown(points(container)[1])
+      fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.2) })
+      fireEvent.mouseUp(window)
+      // Past where the old setTimeout(…, 0) would have fired, so this fails on
+      // the un-fixed code even though the fixed code needs no wait at all.
+      await flushValueCommit()
+
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
     })
 
     it('moves a keyframe in time only while Alt is held', () => {
@@ -574,7 +607,7 @@ describe('KeyframeGraph', () => {
       expect(onKeyframeValueChanged).not.toHaveBeenCalled()
     })
 
-    it('clamps a drag that leaves the plot area', () => {
+    it('clamps a drag that leaves the plot area, committing both halves', () => {
       const { container, onKeyframeMoved, onKeyframeValueChanged } = renderGraph('opacity')
       measureGraph(container)
 
@@ -582,8 +615,12 @@ describe('KeyframeGraph', () => {
       fireEvent.mouseMove(window, { clientX: -400, clientY: 900 })
       fireEvent.mouseUp(window)
 
+      // This landing clamps time AND value away from where the keyframe
+      // started (1s/0.5 to 0s/0) — both halves of the diagonal-drag gesture
+      // commit synchronously (ESCSUITE-163 / M1).
       expect(onKeyframeMoved.mock.calls[0][2]).toBe(0)
-      expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+      expect(onKeyframeValueChanged.mock.calls[0][1]).toBe(0)
+      expect(onKeyframeValueChanged.mock.calls[0][2]).toBe(0)
     })
 
     it('leaves the keyframe selected where the drag ended', () => {

@@ -187,4 +187,47 @@ describe('keyframe actions and the undo stack', () => {
       expect(past()).toBe(1)
     })
   })
+
+  describe('moveClipKeyframe with nothing to move (ESCSUITE-163 / m2)', () => {
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      clearHistoryAndModified()
+    })
+
+    /** Assert the call answered false and wrote nothing: same clips array, no history entry. */
+    const refusesFalse = (act: () => boolean) => {
+      const before = clipsRef(); const entries = past()
+      expect(act()).toBe(false)
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses for an unknown clip id', () => {
+      refusesFalse(() => store().moveClipKeyframe('no-such-clip', 'opacity', 1, 2))
+    })
+
+    it('refuses for a clip that exists but has no animation at all', () => {
+      addClip('clip2', 6, 2) // never had setClipKeyframe called on it — animation is undefined
+      refusesFalse(() => store().moveClipKeyframe('clip2', 'opacity', 0, 1))
+    })
+
+    it('refuses for a property the clip has no keyframes on', () => {
+      refusesFalse(() => store().moveClipKeyframe('clip1', 'scaleX', 1, 2))
+    })
+
+    it('refuses for an originalTime with no keyframe (outside KEYFRAME_TIME_EPSILON)', () => {
+      refusesFalse(() => store().moveClipKeyframe('clip1', 'opacity', 5, 6))
+      // The keyframes that DO exist are untouched.
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
+    })
+
+    it('still moves, and reports true, for a keyframe that actually exists', () => {
+      expect(store().moveClipKeyframe('clip1', 'opacity', 1, 2)).toBe(true)
+      expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 2])
+      expect(past()).toBe(1)
+    })
+  })
 })

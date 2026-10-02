@@ -142,14 +142,15 @@ describe('KeyframeTrack', () => {
     expect(onAddKeyframe).not.toHaveBeenCalled()
   })
 
-  it('adds a keyframe at the double-clicked time', () => {
+  it('adds a keyframe at the double-clicked time, at the curve value there', () => {
     const { container, onAddKeyframe } = renderTrack('opacity')
     const area = measureTrack(container)
 
     fireEvent.doubleClick(area, { clientX: 200 })
 
-    // 100px into a 400px track over a 4s clip.
-    expect(onAddKeyframe).toHaveBeenCalledWith('opacity', 1)
+    // 100px into a 400px track over a 4s clip; no keyframes yet, so the curve
+    // sits at the clip's own default opacity (1).
+    expect(onAddKeyframe).toHaveBeenCalledWith('opacity', 1, 1)
   })
 
   it('clamps a double-click past the end of the track to the clip duration', () => {
@@ -158,7 +159,23 @@ describe('KeyframeTrack', () => {
 
     fireEvent.doubleClick(area, { clientX: 900 })
 
-    expect(onAddKeyframe).toHaveBeenCalledWith('opacity', CLIP_DURATION)
+    expect(onAddKeyframe).toHaveBeenCalledWith('opacity', CLIP_DURATION, 1)
+  })
+
+  // ESCSUITE-167 / m3: a double-click used to add at the clip's static default
+  // rather than the curve's own value there, jumping the shape visibly.
+  it('adds a keyframe at the value the curve already holds, not the clip default', () => {
+    store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.2, easing: 'linear' })
+    const { container, onAddKeyframe } = renderTrack('opacity')
+    const area = measureTrack(container)
+
+    // 200px into a 400px track over a 4s clip = 2s, after the last keyframe —
+    // the curve holds 0.2 there, not the clip's default opacity of 1.
+    fireEvent.doubleClick(area, { clientX: 300 })
+
+    expect(onAddKeyframe.mock.calls[0][0]).toBe('opacity')
+    expect(onAddKeyframe.mock.calls[0][1]).toBe(2)
+    expect(onAddKeyframe.mock.calls[0][2]).toBeCloseTo(0.2, 6)
   })
 
   describe('dragging keyframes', () => {
@@ -204,7 +221,9 @@ describe('KeyframeTrack', () => {
       expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 1, 3)
     })
 
-    it('snaps a drag that lands near another keyframe onto it', () => {
+    // ESCSUITE-167 / M6: landing near a neighbour no longer snaps onto it —
+    // that used to let moveClipKeyframe silently delete the neighbour.
+    it('does not snap a drag near another keyframe onto it', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
       const { container, onKeyframeMoved } = renderTrack('opacity', { playheadTime: 0 })
       measureTrack(container)
@@ -215,7 +234,28 @@ describe('KeyframeTrack', () => {
       fireEvent.mouseMove(window, { clientX: 302 })
       fireEvent.mouseUp(window)
 
-      expect(onKeyframeMoved).toHaveBeenCalledWith('opacity', 1, 2)
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(onKeyframeMoved.mock.calls[0][0]).toBe('opacity')
+      expect(onKeyframeMoved.mock.calls[0][1]).toBe(1)
+      expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(2.02, 6)
+    })
+
+    it('refuses a drop that lands exactly on another keyframe, and says why', () => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
+      const { container, onKeyframeMoved } = renderTrack('opacity', { playheadTime: 0 })
+      measureTrack(container)
+      // keyframes now sit at 0, 1 and 2 seconds; drag the one at 1s exactly
+      // onto the one at 2s.
+      const custom = diamonds(container)[1]
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 }) // exactly 2s
+      fireEvent.mouseUp(window)
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
+      )
     })
 
     it('reports nothing when the keyframe is released where it started', () => {

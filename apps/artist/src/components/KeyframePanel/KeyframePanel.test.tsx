@@ -310,6 +310,31 @@ describe('KeyframePanel', () => {
       expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 3])
     })
 
+    // ESCSUITE-163 / M1: a diagonal drag used to commit the move synchronously
+    // and the value in a setTimeout(…, 0) — two writes, two undo entries, so
+    // one Ctrl+Z put the value back but left the keyframe at its new time
+    // (exactly the ESCSUITE-79 shape the clip drag was fixed for).
+    it('moves a keyframe in time and value together as a single undo entry', () => {
+      render(<KeyframePanel />)
+      measureGraph()
+      const historyBefore = store().history.past.length
+
+      // t=3 (x = 50 + 100*3), value=0.2 (y = 20 + (1-0.2)*150).
+      fireEvent.mouseDown(graphPoints()[1])
+      fireEvent.mouseMove(window, { clientX: 50 + 100 * 3, clientY: 20 + (1 - 0.2) * 150 })
+      fireEvent.mouseUp(window)
+
+      const moved = keyframesOf('opacity')![1]
+      expect(moved.time).toBe(3)
+      expect(moved.value).toBeCloseTo(0.2, 6)
+      expect(moved.easing).toBe('linear')
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+
+      // One undo restores BOTH halves of the drag, not just the value.
+      store().undo()
+      expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0.5, easing: 'linear' })
+    })
+
     it('changes a keyframe value, keeping its easing, when it is dragged vertically', () => {
       render(<KeyframePanel />)
       measureGraph()

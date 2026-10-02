@@ -152,13 +152,17 @@ describe('useKeyframeDrag', () => {
       expect(result.current.dragState.currentTime).toBe(5)
     })
 
-    it('snaps to another keyframe on the track', () => {
+    // ESCSUITE-167 / M6: snapping onto another keyframe's time is exactly the
+    // case that makes moveClipKeyframe silently delete it — findSnapTime no
+    // longer offers one as a candidate at all, so the raw (unsnapped) pointer
+    // position is what the drag shows.
+    it('does not snap onto another keyframe — that would destroy it', () => {
       const { result } = render({ allKeyframeTimes: [1, 5.04, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 250)
+      moveMouse(TRACK_LEFT + 250) // 5.0s, 0.04s from the neighbour at 5.04
 
-      expect(result.current.dragState.currentTime).toBe(5.04)
+      expect(result.current.dragState.currentTime).toBe(5)
     })
 
     it('never snaps a keyframe back to where it started', () => {
@@ -177,6 +181,59 @@ describe('useKeyframeDrag', () => {
       moveMouse(TRACK_LEFT + 250)
 
       expect(result.current.dragState.currentTime).toBe(5.02)
+    })
+
+    // ESCSUITE-167 / M6: the playhead is a snap target only when no keyframe
+    // already sits there — snapping onto it would be indistinguishable from
+    // snapping onto that keyframe, which moveClipKeyframe would then delete.
+    it('does not snap to the playhead when a keyframe already sits there', () => {
+      const { result } = render({ playheadTime: 5.0, allKeyframeTimes: [5.0] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 252) // 5.04s — within the 0.1s threshold of both
+
+      expect(result.current.dragState.currentTime).toBeCloseTo(5.04, 6)
+    })
+  })
+
+  describe('refusing an occupied drop (ESCSUITE-167 / M6)', () => {
+    it('refuses a drop that would land on another keyframe, and says why', () => {
+      const { result, onKeyframeMoved } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250) // exactly 5s, occupied by the keyframe at 5
+      releaseMouse()
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(result.current.announcement).toBe(
+        'Opacity keyframe not moved: another keyframe is at 5.00 seconds'
+      )
+    })
+
+    it('leaves the keyframe at its original time when the drop is refused', () => {
+      const { result } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250)
+      releaseMouse()
+
+      expect(result.current.dragState).toEqual({
+        isDragging: false,
+        keyframe: null,
+        property: null,
+        originalTime: 0,
+        currentTime: 0,
+      })
+    })
+
+    it('does not refuse a drop near, but not within epsilon of, a keyframe', () => {
+      const { result, onKeyframeMoved } = render({ allKeyframeTimes: [1, 5.5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250) // 5.0s — 0.5s from the neighbour, nowhere near it
+      releaseMouse()
+
+      expect(onKeyframeMoved).toHaveBeenCalledExactlyOnceWith('opacity', 0, 5)
     })
   })
 
