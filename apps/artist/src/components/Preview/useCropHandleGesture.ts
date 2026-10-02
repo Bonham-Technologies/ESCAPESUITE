@@ -233,16 +233,14 @@ export function useCropHandleGesture({
       // the prop holds, because `PreviewPlayer` re-renders this component from a
       // store subscription before the next keydown can reach it; reading the
       // store directly makes that true by construction rather than by timing.
-      // The non-null assertion carries the same precondition the rest of this
-      // hook already relies on without a guard (`write`'s `clip.id`/
-      // `clip.animation`, `onMouseDown`'s `clip.crop`/`clip.transform`): this
-      // component is only mounted while `cropping.clip` names a clip that is
-      // still on the timeline, and nothing it renders survives the clip
-      // leaving — a real race is a render away from an unmount, not a branch
-      // worth asking the gesture to carry.
+      // Unlike the rest of this hook's unguarded reads of the `clip` prop,
+      // `clip` here is a prop a caller can hand this component directly — this
+      // file's own tests render it with an id the store does not hold — so the
+      // lookup's absence is reachable, and refused rather than asserted away.
       const live = useEditorStore.getState().project.timeline.clips.find(
         (c) => c.id === clip.id
-      )!;
+      );
+      if (!live) return;
 
       const distance = e.shiftKey ? CROP_NUDGE.coarse : CROP_NUDGE.fine;
       const next = cropForHandleMove(
@@ -264,7 +262,10 @@ export function useCropHandleGesture({
       // Refused by the store (a locked row): nothing changed, so the live region
       // must not say otherwise (ESCSUITE-87's shape).
       if (!write(next, { crop: live.crop, transform: live.transform })) return;
-      announce(cropAnnouncement(handle, cropUpdateFor(next, source)?.crop, source));
+      // `?.` would be a dead branch: `write` only returns true after its own,
+      // identical `cropUpdateFor(next, source)` call already returned truthy,
+      // over the same two pure arguments — so this one cannot come back null.
+      announce(cropAnnouncement(handle, cropUpdateFor(next, source)!.crop, source));
     },
     [clip, source, onLeave, gestureHistory, write, announce]
   );
