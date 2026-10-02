@@ -2957,10 +2957,18 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   (honours `resolution` and `timeRange`).
 - **A GIF's `meta.durationSec` is its frame delays, not its range.** `options.fps`
   (`10 | 15 | 20`, GIF only, default 15 through `gifFrameRate`) feeds the encoder's
-  `ceil(seconds x rate)` frames of `round(1000 / rate)` ms each, and a GIF plays for as long as
-  those delays say — 15 fps of a one-second range is 15 x 67 ms = 1.005 s. The verification
-  manifest describes the bytes, so the headless path reports that rather than the requested
-  range; the two video formats encode the range itself and are unchanged.
+  `ceil(seconds x rate)` frames, and a GIF plays for as long as the delays it **stores** say.
+  There are two roundings, not one: `exportGIF.ts` asks the writer for `round(1000 / rate)` ms
+  and `gifenc` writes `round(that / 10)` **centiseconds**, so 15 fps asks for 67 ms and stores
+  70 — a one-second range is 15 x 70 ms = **1.05 s**, and a "15 fps" GIF really plays at about
+  14.3. `gifFrameDelayMs(fps)` in `core/exportTypes.ts` (re-exported through `core/exporter.ts`)
+  is the one home for that rule; `headless/renderProject.ts` multiplies it by the frame count and
+  nothing re-derives it. 10 fps (100 ms) and 20 fps (50 ms) survive both roundings exactly and
+  report the range itself. The verification manifest describes the bytes — the kit README tells
+  callers to compare `durationSec` against `ffprobe` — so the headless path reports that rather
+  than the requested range; the two video formats encode the range itself and are unchanged.
+  `exportGIF.ts`'s own `addFrame` argument stays the first rounding (67 ms at 15 fps): `gifenc`
+  does the second one, and `gifEncoder.test.ts` decodes the Graphic Control Extension to pin it.
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.

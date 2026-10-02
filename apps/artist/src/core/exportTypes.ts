@@ -529,6 +529,28 @@ export function gifFrameRate(fps: number | undefined): GifFps {
 }
 
 /**
+ * The on-screen time one GIF frame ends up with, in milliseconds, as the file
+ * **stores** it — which is not `1000 / fps`.
+ *
+ * There are two roundings between a frame rate and a delay, and this is the only
+ * place both live. `exportGIF.ts` asks the writer for `round(1000 / rate)` ms,
+ * and `gifenc` puts `round(delay / 10)` **centiseconds** into each frame's
+ * Graphic Control Extension (`gifEncoder.ts`, pinned by `gifEncoder.test.ts`'s
+ * decode of that block). So 10 fps (100 ms) and 20 fps (50 ms) survive both
+ * exactly, while 15 fps asks for 67 ms and is written as 7 cs = 70 ms — a GIF
+ * labelled 15 fps really plays at about 14.3, and `frames x 70` is what `ffprobe`
+ * will report for its duration.
+ *
+ * `headless/renderProject.ts` reports a GIF's `durationSec` from this, so a
+ * verification manifest describes the delivered bytes rather than the request.
+ * The rate (and its default) comes from {@link gifFrameRate}, so there is no
+ * second fallback here.
+ */
+export function gifFrameDelayMs(fps: number | undefined): number {
+  return Math.round(Math.round(1000 / gifFrameRate(fps)) / 10) * 10;
+}
+
+/**
  * The resolution presets GIF offers, and only GIF. A GIF at 1080p is enormous
  * and a GIF at the project's own resolution is unpredictable, so the list is
  * three fixed heights with the project's aspect — `getResolution` does the

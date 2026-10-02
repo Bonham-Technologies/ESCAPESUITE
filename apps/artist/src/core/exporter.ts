@@ -15,6 +15,9 @@ export { exportToWebM } from './exportWebM';
 export { exportToMP4 } from './exportMP4';
 export { exportToGIF, estimateGifBytes } from './exportGIF';
 
+// Public API - the GIF frame delay a file stores, which a duration is derived from
+export { gifFrameDelayMs } from './exportTypes';
+
 // Public API - capability checks
 export {
   isMP4ExportSupported,

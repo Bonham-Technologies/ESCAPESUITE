@@ -1,6 +1,12 @@
 // apps/artist/src/headless/renderProject.ts
 import { exportToGIF, exportToMP4, exportToWebM } from '../core/exporter'
-import { calculateTimelineDuration, getBaseDimensions, getResolution, gifFrameRate } from '../core/exportTypes'
+import {
+  calculateTimelineDuration,
+  getBaseDimensions,
+  getResolution,
+  gifFrameDelayMs,
+  gifFrameRate,
+} from '../core/exportTypes'
 import { convertLegacyOverlays } from '../store/legacyOverlays'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, RenderMeta, RenderResult, SourceVideoInput } from './types'
@@ -48,15 +54,15 @@ function validateInput(request: RenderRequest): void {
 
 /**
  * How long a GIF of `seconds` of timeline actually plays, which is not `seconds`:
- * the encoder writes `ceil(seconds x rate)` frames and gives each the same
- * `round(1000 / rate)` ms delay, so the total is a whole number of those delays.
- * The frame count and the rate both come from the exporter's own rules
- * (`exportGIF.ts`, `gifFrameRate`) rather than being derived a second time here.
+ * the encoder writes `ceil(seconds x rate)` frames and gives each the same delay,
+ * so the total is a whole number of those delays. Both rules come from the
+ * exporter's own helpers rather than being derived a second time here — the frame
+ * count mirrors `exportGIF.ts`, and `gifFrameDelayMs` owns the two roundings a
+ * frame's on-screen time goes through on the way into the file (67 ms asked for at
+ * 15 fps, 70 ms stored).
  */
 function gifDurationSec(seconds: number, fps: number | undefined): number {
-  const frameRate = gifFrameRate(fps)
-  const delayMs = Math.round(1000 / frameRate)
-  return (Math.ceil(seconds * frameRate) * delayMs) / 1000
+  return (Math.ceil(seconds * gifFrameRate(fps)) * gifFrameDelayMs(fps)) / 1000
 }
 
 /**
@@ -106,12 +112,13 @@ async function render(
   const rangeStart = options.timeRange?.start ?? 0
   const rangeEnd = options.timeRange?.end ?? fullDuration
   // A GIF plays for as long as its frame delays say, and the format stores those
-  // in centiseconds: `exportToGIF` encodes `ceil(seconds x rate)` frames of
-  // `round(1000 / rate)` ms each, so a 15 fps GIF of a one-second range is 15
-  // frames of 67 ms — 1.005 s of GIF, not 1. The manifest describes the bytes,
-  // so it reports the frame delays rather than the requested range; the two
-  // video formats encode the range itself and are unchanged. `gifFrameRate`
-  // owns the rate (and its default), the same way the exporter reads it.
+  // in centiseconds: `exportToGIF` encodes `ceil(seconds x rate)` frames, each
+  // asked for at `round(1000 / rate)` ms and written as `round(that / 10)` cs, so
+  // a 15 fps GIF of a one-second range is 15 frames of 70 ms — 1.05 s of GIF, not
+  // 1. The manifest describes the bytes, so it reports those stored delays rather
+  // than the requested range; the two video formats encode the range itself and
+  // are unchanged. `gifFrameRate` and `gifFrameDelayMs` own the rate, its default
+  // and the rounding, the same way the exporter and `gifenc` do.
   const rangeSeconds = rangeEnd - rangeStart
   const durationSec = format === 'gif'
     ? gifDurationSec(rangeSeconds, options.fps)
