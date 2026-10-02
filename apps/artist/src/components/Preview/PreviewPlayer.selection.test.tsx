@@ -385,17 +385,21 @@ describe('PreviewPlayer selection handles', () => {
     await settle(FRAME_MS)
   })
 
-  it('draws no handles for a clip whose custom keyframes lock it', async () => {
+  // ESCSUITE-155 (the ESCSUITE-3 review's MINOR-4): a keyframed clip's chrome
+  // used to vanish entirely outside keyframe mode, the one asymmetry with a
+  // locked track's — whose full box and handles are drawn and simply inert.
+  // It now draws just the same, whether or not the keyframe panel is open.
+  it('still draws the handles for a clip whose custom keyframes lock it', async () => {
     const shape = addShape()
     store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
     store().setSelectedClipId(shape.id)
 
     const preview = await renderPreview()
 
-    expect(preview.frame().of('arc')).toHaveLength(0)
+    expect(preview.frame().of('arc')).not.toHaveLength(0)
   })
 
-  it('draws the handles again once the keyframe panel is open', async () => {
+  it('keeps drawing the handles once the keyframe panel is open', async () => {
     const shape = addShape()
     store().setClipKeyframe(shape.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
     store().setSelectedClipId(shape.id)

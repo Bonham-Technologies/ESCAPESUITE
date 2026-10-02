@@ -6,7 +6,6 @@
 // wherever they are pointed — the preview, or a test's recording double.
 import {
   getOverlayBounds,
-  hasCustomKeyframes,
   isManipulableClip,
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
@@ -51,7 +50,7 @@ export function drawSelectionHandles(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): void {
-  const { clips, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen } = scene;
+  const { clips, sourceVideos, selectedClipId, isPlaying } = scene;
   if (!selectedClipId || isPlaying) return;
 
   const ctx = canvas.getContext('2d');
@@ -65,10 +64,14 @@ export function drawSelectionHandles(
   const clipEnd = selectedClip.timelinePosition + selectedClip.duration;
   if (time < selectedClip.timelinePosition || time >= clipEnd) return;
 
-  // Don't draw handles if the clip can't be interacted with
-  // Case 1: Clip has custom keyframes but we're not in keyframe mode
-  if (hasCustomKeyframes(selectedClip) && !keyframePanelOpen) return;
-
+  // A clip carrying custom keyframes is only manipulable from the keyframe
+  // panel outside of which it is picked but never dragged (ESCSUITE-3) — the
+  // same way a clip on a locked track is picked but never dragged. Neither
+  // case is hidden by the condition that makes it inert: the full box and
+  // handles are drawn either way, at the clip's **animated** position for
+  // keyframes (ESCSUITE-155; `getOverlayBounds` below reads the same
+  // `getAnimatedValues` `hitTest.ts` does), simply unresponsive to a drag once
+  // drawn.
   const bounds = getOverlayBounds(selectedClip, canvas, time, sourceVideos, project);
   if (!bounds) return;
 
