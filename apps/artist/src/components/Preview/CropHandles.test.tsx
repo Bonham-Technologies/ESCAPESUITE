@@ -500,9 +500,12 @@ describe('nudging a crop handle from the keyboard', () => {
     (screen.getByRole('status').textContent ?? '').replace(/\u200B$/, '')
 
   it('crops one source pixel per arrow press, in the direction the arrow points', () => {
+    // The playhead must not step under a nudge that DOES move something, any
+    // more than under one that does not (the swallow case below): the key is
+    // claimed either way, so `fireEvent.keyDown` reports it as handled.
     const { clip, handle } = mount()
 
-    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowRight' })
+    expect(fireEvent.keyDown(handle('Crop left'), { key: 'ArrowRight' })).toBe(false)
 
     expect(clipNow(clip.id).crop).toEqual({ left: 1 / 1920, top: 0, right: 0, bottom: 0 })
   })
@@ -542,9 +545,11 @@ describe('nudging a crop handle from the keyboard', () => {
   it('swallows an arrow the handle has no inset for, and does nothing with it', () => {
     // The playhead must not step out from under a user whose focus is on a crop
     // handle, so the key is claimed; there is simply nothing for it to move.
+    // 'w' owns no y inset at all, so both of its unowned arrows are proved here.
     const { clip, handle } = mount()
 
     expect(fireEvent.keyDown(handle('Crop left'), { key: 'ArrowUp' })).toBe(false)
+    expect(fireEvent.keyDown(handle('Crop left'), { key: 'ArrowDown' })).toBe(false)
     expect(clipNow(clip.id).crop).toBeUndefined()
     expect(announced()).toBe('')
   })
@@ -560,7 +565,7 @@ describe('nudging a crop handle from the keyboard', () => {
   })
 
   it('leaves one undo entry per press, and one for a held key', () => {
-    const { handle } = mount()
+    const { clip, handle } = mount()
     const button = handle('Crop left')
     const before = past()
 
@@ -570,6 +575,10 @@ describe('nudging a crop handle from the keyboard', () => {
     fireEvent.keyUp(button, { key: 'ArrowRight' })
 
     expect(past()).toBe(before + 1)
+    // One undo entry, but the hold still moved three source pixels — not the
+    // same one pixel written three times over, which would pass the line
+    // above identically.
+    expect(clipNow(clip.id).crop!.left).toBeCloseTo(3 / 1920, 6)
   })
 
   it('starts a fresh entry for the next press', () => {
@@ -583,6 +592,31 @@ describe('nudging a crop handle from the keyboard', () => {
     fireEvent.keyUp(button, { key: 'ArrowRight' })
 
     expect(past()).toBe(before + 2)
+  })
+
+  it('ends a held key\'s gesture on blur exactly as keyup does, so a later press starts a new one', () => {
+    // `onKeyUp` is bound to both keyup AND blur (Task 4) — the sliders' own
+    // rule, carried over in case focus ever leaves a handle mid-hold without a
+    // keyup reaching it first (tabbing away, say). A held key that is still
+    // continuing its own gesture when blur arrives must close out at exactly
+    // one entry, the same as keyup would; a press that comes after that is a
+    // new gesture, not a continuation of the one blur just closed.
+    const { clip, handle } = mount()
+    const button = handle('Crop left')
+    const before = past()
+
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    fireEvent.keyDown(button, { key: 'ArrowRight', repeat: true })
+    fireEvent.blur(button)
+
+    expect(past()).toBe(before + 1)
+    expect(clipNow(clip.id).crop!.left).toBeCloseTo(2 / 1920, 6)
+
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    fireEvent.keyUp(button, { key: 'ArrowRight' })
+
+    expect(past()).toBe(before + 2)
+    expect(clipNow(clip.id).crop!.left).toBeCloseTo(3 / 1920, 6)
   })
 
   it('announces the stored crop in source pixels', () => {
@@ -647,6 +681,34 @@ describe('nudging a crop handle from the keyboard', () => {
     // `locked={false}` with a locked track is the row-locked-mid-gesture case:
     // the button is live, the store refuses, and the live region must not claim
     // an edit that did not happen.
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Crop left' }), { key: 'ArrowRight' })
+
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(announced()).toBe('')
+  })
+
+  it('writes and announces nothing for a clip the store does not hold', () => {
+    // `CropHandles` takes `clip` as a prop; nudging reads the live crop/transform
+    // off the store by that id rather than off the prop (so a separate key press
+    // sees what the one before it actually stored), and this is the other side
+    // of that lookup: a prop naming an id the store has no clip for at all. Not
+    // reachable from the UI today — `PreviewPlayer` derives the prop from the
+    // same `clips` list the lookup reads, so the two cannot disagree across a
+    // render — but the type says a caller could, and the nudge must do nothing
+    // rather than throw reading a lookup that found nothing.
+    const clip = addClip('clip1', 0, 4)
+    render(
+      <CropHandles
+        clip={{ ...clip, id: 'gone' }}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
     fireEvent.keyDown(screen.getByRole('button', { name: 'Crop left' }), { key: 'ArrowRight' })
 
     expect(clipNow(clip.id).crop).toBeUndefined()
