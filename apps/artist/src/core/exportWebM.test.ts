@@ -782,6 +782,44 @@ describe('exportToWebM failure handling', () => {
     expect(webcodecs.videoEncoders[0].state).toBe('closed')
   })
 
+  // ESCSUITE-156. Between the media load and the frame loop sit the muxer, two
+  // `configure()` calls and the caller's own progress callback, and a throw from
+  // any of them used to escape past the only `releaseElementSources` on the
+  // error path — leaking a `<video>` or `<img>` and its object URL per source
+  // for the life of the page, with nothing in the UI to say so.
+  it('releases the media elements when the encoder refuses its configuration', async () => {
+    const Encoder = globalThis.VideoEncoder as unknown as {
+      prototype: { configure(config: unknown): void }
+    }
+    vi.spyOn(Encoder.prototype, 'configure').mockImplementation(() => {
+      throw new DOMException('Unsupported configuration', 'NotSupportedError')
+    })
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+
+    await expect(run()).rejects.toThrow('Unsupported configuration')
+
+    // One source, so one URL out and the same one back in — and the encoder
+    // that was built before the throw is closed with it.
+    expect(revoke).toHaveBeenCalledTimes(1)
+    expect(webcodecs.videoEncoders[0].state).toBe('closed')
+  })
+
+  it('releases the media elements when the setup fails before any encoder exists', async () => {
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+
+    // The caller's own callback, throwing on the first report after the load.
+    const onProgress = (p: ExportProgress) => {
+      if (p.message === 'Initializing encoder...') throw new Error('dialog blew up')
+    }
+
+    await expect(run({ onProgress })).rejects.toThrow('dialog blew up')
+
+    expect(revoke).toHaveBeenCalledTimes(1)
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+  })
+
   // ESCSUITE-29 Mechanism 1: the error callback used to only console.error —
   // nothing ever read the flag it set, so a mid-export encoder failure never
   // failed the export. It now surfaces as an ExportError, the same shape
