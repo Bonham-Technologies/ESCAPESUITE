@@ -426,4 +426,29 @@ describe('drawWithMaskAndStroke', () => {
     ])
     expect(ctx.argsFor('rect')[0]).toEqual([50, 30, 200, 100])
   })
+
+  it('reads the rounded radius as a fraction of the shorter CROPPED side (ESCSUITE-6 review follow-up)', () => {
+    // Unlike every other case in this suite, the destination box here is NOT
+    // the fixture-wide BOX (200x100, min 100) — it is what canvasRenderer.ts
+    // actually hands this function for a clip cropped to the right half of a
+    // 640x360 source at scale 1 (canvasRenderer.clips.test.ts's own crop
+    // fixture): 320x360, min 320. 0.25 x 320 = 80, not the 0.25 x min(640, 360)
+    // = 90 an uncropped clip at the same scale would give — the rounded corner
+    // is a fraction of the box this helper is handed, the same box the circle
+    // case above is inscribed in, not of the source frame's own shape.
+    drawWithMaskAndStroke(
+      asCtx(),
+      SOURCE,
+      { sx: 320, sy: 0, sw: 320, sh: 360 },
+      { kind: 'rounded', radius: 0.25 },
+      undefined,
+      800,
+      360,
+      320,
+      360,
+      1280
+    )
+
+    expect(ctx.argsFor('roundRect')[0]).toEqual([800, 360, 320, 360, 80])
+  })
 })

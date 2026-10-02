@@ -648,6 +648,17 @@ describe('drawImageToCanvasWithModifiers with a mask and a stroke', () => {
   )
 })
 
+describe('destBox', () => {
+  it('throws rather than return a plausible wrong box for a three-argument drawImage (ESCSUITE-6 review follow-up)', () => {
+    // canvasRenderer.ts's shape-overlay background blur draws exactly this
+    // form — ctx.drawImage(offscreen, 0, 0) — on the same context a media clip
+    // draws to. Without the guard, destBox(['img', 0, 0]) would silently
+    // return ['img', 0, 0, undefined]: a four-element array that looks like a
+    // box but whose first element is the source, not an x coordinate.
+    expect(() => destBox(['img', 0, 0])).toThrow(/3-argument drawImage/)
+  })
+})
+
 // ESCSUITE-6. Written twice, once per draw function, for the same reason the
 // mask cases are: these two are near-duplicates and a crop added to one and not
 // the other would give videos a crop and images none.
@@ -690,6 +701,29 @@ describe('drawClipToCanvas with a crop', () => {
     // min(320, 360) / 2 = 160, centred on (960, 540) — not the 180 an uncropped
     // clip gets from min(640, 360).
     expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 160, 160, 0, 0, Math.PI * 2])
+  })
+
+  it('rotates about the cropped rectangle’s centre, which the crop never moves (ESCSUITE-6 review follow-up)', () => {
+    // The crop moves the destination box's ORIGIN (constraint 4 of the Task 2
+    // review) but never its centre, so the pivot `ctx.translate` moves to and
+    // back from is unaffected by the crop even though the box it rotates is
+    // smaller. Pinning that the pivot is still (960, 540) — not, say, a corner
+    // of the cropped box — is the property a future change to how x/y are
+    // derived could break silently.
+    draw(
+      makeClip({
+        crop: RIGHT_HALF,
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 90, opacity: 1 },
+      })
+    )
+
+    expect(ctx.argsFor('translate')).toEqual([
+      [960, 540],
+      [-960, -540],
+    ])
+    // The destination box itself is unmoved by the rotation: same 320x360 box
+    // centred on (960, 540) as the unrotated case above.
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([800, 360, 320, 360])
   })
 })
 
