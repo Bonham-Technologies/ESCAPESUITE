@@ -30,6 +30,7 @@ import {
   allFramesClosed,
   installWebCodecsDoubles,
   removeWebCodecsGlobals,
+  webcodecsCallLog,
   type WebCodecsDoubles,
 } from '../test/doubles/webcodecs'
 import {
@@ -894,6 +895,151 @@ describe('exportToWebM failure handling', () => {
     expect(
       error.exportLog.some((e) => e.detail === 'Video encoder error before finalize: video encoder failed')
     ).toBe(true)
+  })
+})
+
+// ESCSUITE-159. The `catch` owns everything built after the media load
+// (ESCSUITE-156), and the Mediabunny `Output` is one of those things: a throw
+// after `output.start()` left the muxer holding its writer and its unfinalised
+// target with no handle left to release them by. `cancel()` is Mediabunny's own
+// call for exactly that, and the state it is for is `'started'` — the output is
+// still mid-file. Everything else is already done with: a `'pending'` output
+// wrote nothing, a `'finalized'` one is a finished file whose target
+// `finalize()` closed (asking anyway only logs "Output has already been
+// finalized."), and a *rejected* `finalize()` leaves `'canceled'`, which has
+// released what it had. The exporter reads mediabunny's own `state` rather than
+// keeping its own flag, exactly as ESCAPECRAFT's recorder `cleanup()` does.
+describe('exportToWebM muxer cancellation', () => {
+  it('cancels the started muxer when the frame loop fails', async () => {
+    webcodecs.script.videoErrorAfterEncodes = 2
+
+    await expect(run()).rejects.toBeInstanceOf(ExportError)
+
+    expect(lastMediabunnyOutput().cancelCalls).toBe(1)
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(0)
+    expect(lastMediabunnyOutput().state).toBe('canceled')
+  })
+
+  it('closes its encoders before cancelling the muxer, so no late packet reaches it', async () => {
+    // The ordinary cancellation path, in miniature. The audio chunks are encoded
+    // in one synchronous loop and the pre-finalize error check throws
+    // immediately after it, so a packet is still sitting undelivered inside the
+    // audio encoder when the catch runs. Closing the encoders first abandons it;
+    // cancelling the muxer first would let it arrive at a packet source that now
+    // throws 'Output has been canceled.' from inside an `output:` callback
+    // nobody awaits — an unhandled rejection on top of the failure being
+    // reported.
+    mixAudio.mockResolvedValue(audioFor(0.2))
+    webcodecs.script.videoErrorAfterEncodes = 6
+
+    await expect(run()).rejects.toBeInstanceOf(ExportError)
+    // Let anything the encoders had queued arrive.
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(getMediabunnyState().lateAdds).toBe(0)
+    const log = webcodecsCallLog
+    expect(log).toContain('Output.cancel')
+    expect(log.indexOf('VideoEncoder.close')).toBeLessThan(log.indexOf('Output.cancel'))
+    expect(log.indexOf('AudioEncoder.close')).toBeLessThan(log.indexOf('Output.cancel'))
+  })
+
+  it('reports the export failure, not the muxer, when the cancel itself fails', async () => {
+    webcodecs.script.videoErrorAfterEncodes = 2
+    getMediabunnyState().cancelError = new Error('muxer would not let go')
+
+    const error = (await run().catch((e: unknown) => e)) as ExportError
+
+    // A muxer that will not release is not what the user needs told: the export
+    // failed for its own reason, and the refusal goes to the console the way
+    // ESCAPECRAFT's `cancelOutput` reports one.
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error.message).toBe('video encoder failed')
+    expect(warns).toHaveBeenCalledWith(
+      'The export output could not be cancelled:',
+      expect.any(Error)
+    )
+  })
+
+  it('leaves a muxer a failed finalize already cancelled alone', async () => {
+    getMediabunnyState().finalizeError = new Error('muxer exploded')
+
+    await expect(run()).rejects.toThrow('muxer exploded')
+
+    // Mediabunny's own `finalize()` catch sets the state to `'canceled'` and its
+    // `finally` closes the targets, so by the time the exporter's catch runs
+    // there is nothing left to release — a `cancel()` here would take the
+    // library's first early return and do nothing at all.
+    expect(lastMediabunnyOutput().state).toBe('canceled')
+    expect(lastMediabunnyOutput().cancel).not.toHaveBeenCalled()
+  })
+
+  it('never cancels the muxer of an export that succeeded', async () => {
+    await run()
+
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(lastMediabunnyOutput().state).toBe('finalized')
+    expect(lastMediabunnyOutput().cancel).not.toHaveBeenCalled()
+  })
+
+  it('leaves a finalized muxer alone when the abort lands during muxing', async () => {
+    // The post-finalize abort check reaches the catch with the file already
+    // written: there is nothing left for `cancel()` to release, and asking
+    // anyway only puts "Output has already been finalized." on the console of
+    // an export the user called off.
+    const controller = new AbortController()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'muxing') controller.abort()
+    }
+
+    await expect(run({ signal: controller.signal, onProgress })).rejects.toBeInstanceOf(
+      ExportAbortedError
+    )
+
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(lastMediabunnyOutput().cancel).not.toHaveBeenCalled()
+  })
+
+  it('has no muxer to cancel when the setup fails before one exists', async () => {
+    // The first report after the media load is made before the Output is
+    // constructed, so the catch runs with nothing recorded — the other side of
+    // the same question.
+    const onProgress = (p: ExportProgress) => {
+      if (p.message === 'Initializing encoder...') throw new Error('dialog blew up')
+    }
+
+    await expect(run({ onProgress })).rejects.toThrow('dialog blew up')
+
+    expect(getMediabunnyState().outputs).toHaveLength(0)
+  })
+})
+
+// ESCSUITE-159. `releaseElementSources` runs once the frame loop and the muxer
+// are done, and anything that throws *after* it reaches the catch, which
+// releases again — two `revokeObjectURL` calls per source for one export. A
+// handle freed twice reads, to anyone counting, as a handle something else still
+// holds.
+describe('exportToWebM release on the way out', () => {
+  it('releases each media element once when the completion callback throws', async () => {
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+    const onProgress = (p: ExportProgress) => {
+      if (p.phase === 'complete') throw new Error('dialog blew up')
+    }
+
+    await expect(run({ onProgress })).rejects.toThrow('dialog blew up')
+
+    expect(revoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases each media element once when the muxer wrote no bytes', async () => {
+    getMediabunnyState().producesBuffer = false
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+
+    await expect(run()).rejects.toThrow('Export failed: no data was written to buffer')
+
+    expect(revoke).toHaveBeenCalledTimes(1)
   })
 })
 

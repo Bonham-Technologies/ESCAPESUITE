@@ -27,8 +27,8 @@ import {
 } from './exportTypes';
 import {
   createFrameComposer,
+  createElementSourceRelease,
   loadElementSources,
-  releaseElementSources,
   rewindElementSources,
 } from './elementFrames';
 import { createGifWriter } from './gifEncoder';
@@ -170,7 +170,15 @@ export async function exportToGIF(
   // used to escape past the only `releaseElementSources` on the error path,
   // leaking a `<video>` or `<img>` and its object URL per source. `frameCount` is
   // out here because the catch reports it.
+  //
+  // The release is shared between the success path and the catch, and runs at
+  // most once (ESCSUITE-159): the caller's own `complete` report sits after the
+  // successful release and reaches the catch when it throws, which used to free
+  // every object URL a second time. There is no muxer here to cancel — `gifenc`
+  // writes into plain JS buffers the GC takes care of.
   let frameCount = 0;
+
+  const releaseSources = createElementSourceRelease(sources);
 
   try {
     const playbackState = rewindElementSources(sources);
@@ -242,13 +250,13 @@ export async function exportToGIF(
     // back an export the caller asked to stop.
     checkAborted(signal);
 
-    releaseElementSources(sources);
+    releaseSources();
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
     return new Blob([bytes], { type: 'image/gif' });
   } catch (error) {
-    releaseElementSources(sources);
+    releaseSources();
 
     // Re-throw ExportAbortedError and ExportError as-is
     if (error instanceof ExportError || (error instanceof Error && error.name === 'ExportAbortedError')) {

@@ -27,6 +27,19 @@ const liveFrames = new Set<VideoFrameDouble>()
  */
 const frameTotals = { created: 0, closed: 0 }
 
+/**
+ * One ordered log of the codec *and* muxer lifecycle calls that have to happen
+ * in a particular order (ESCSUITE-159).
+ *
+ * `apps/artist/src/test/doubles/mediabunny.ts` pushes `'Output.cancel'` into it,
+ * the way ESCAPECRAFT's pair of doubles already share one list: counting the
+ * calls cannot answer "were the encoders closed before the muxer was
+ * cancelled", and that order is what keeps a packet still queued inside an
+ * encoder from landing on an output that has been cancelled. Cleared by
+ * `installWebCodecsDoubles()`.
+ */
+export const webcodecsCallLog: string[] = []
+
 /** VideoFrameDoubles constructed and closed since the last reset. */
 export function frameCounts(): { created: number; closed: number } {
   return { ...frameTotals }
@@ -217,6 +230,7 @@ type EncoderInit = {
  * flush() resolves only once every queued output callback has settled.
  */
 export function installWebCodecsDoubles(): WebCodecsDoubles {
+  webcodecsCallLog.length = 0
   const previous = {
     VideoFrame: stash('VideoFrame'),
     VideoEncoder: stash('VideoEncoder'),
@@ -285,10 +299,17 @@ export function installWebCodecsDoubles(): WebCodecsDoubles {
       }
       this.emitted.push(chunk)
       this.encodeQueueSize += 1
-      // A real encoder delivers output on a later task, never inside encode().
+      // A real encoder delivers output on a later task, never inside encode() —
+      // and `close()` aborts whatever it had not delivered yet (ESCSUITE-159),
+      // which is what makes closing the encoders before cancelling the muxer
+      // the difference between a dropped packet and one that lands on a
+      // cancelled output.
       this.pending.push(
         Promise.resolve()
-          .then(() => this.init.output(chunk, { decoderConfig: this.configs[0] }))
+          .then(() => {
+            if (this.state === 'closed') return
+            return this.init.output(chunk, { decoderConfig: this.configs[0] })
+          })
           .then(() => {
             this.encodeQueueSize -= 1
           })
@@ -311,6 +332,7 @@ export function installWebCodecsDoubles(): WebCodecsDoubles {
     close(): void {
       this.closes += 1
       this.state = 'closed'
+      webcodecsCallLog.push('VideoEncoder.close')
     }
   }
 
@@ -355,9 +377,14 @@ export function installWebCodecsDoubles(): WebCodecsDoubles {
       }
       this.emitted.push(chunk)
       this.encodeQueueSize += 1
+      // Same as the video encoder above: a `close()` abandons what has not been
+      // delivered yet (ESCSUITE-159).
       this.pending.push(
         Promise.resolve()
-          .then(() => this.init.output(chunk, { decoderConfig: this.configs[0] }))
+          .then(() => {
+            if (this.state === 'closed') return
+            return this.init.output(chunk, { decoderConfig: this.configs[0] })
+          })
           .then(() => {
             this.encodeQueueSize -= 1
           })
@@ -380,6 +407,7 @@ export function installWebCodecsDoubles(): WebCodecsDoubles {
     close(): void {
       this.closes += 1
       this.state = 'closed'
+      webcodecsCallLog.push('AudioEncoder.close')
     }
   }
 

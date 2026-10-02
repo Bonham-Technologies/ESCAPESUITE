@@ -146,6 +146,28 @@ export function releaseElementSources(sources: ElementSources): void {
 }
 
 /**
+ * A release that runs at most once (ESCSUITE-159).
+ *
+ * Both element exporters release at the end of a successful export *and* in the
+ * `catch` that owns everything built after the media load (ESCSUITE-156) — and
+ * the two are not exclusive: anything that throws between them reaches both. The
+ * caller's own `onProgress({ phase: 'complete' })` callback is one such thing,
+ * and the WebM "no data was written to buffer" refusal is another, so one export
+ * could revoke every object URL twice. The browser does not mind; a reader does
+ * — a handle freed twice looks like a handle something else still holds — and a
+ * release that is only correct because nothing after it throws is a release
+ * waiting for the next line of code.
+ */
+export function createElementSourceRelease(sources: ElementSources): () => void {
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    releaseElementSources(sources);
+  };
+}
+
+/**
  * Sync a video to a target time. Always seeks to the exact time for
  * frame-accurate export, skipping the seek when the element is already within
  * (a little under) half an output frame of it.
@@ -160,9 +182,23 @@ async function syncVideoToTime(
   const frameDuration = 1 / frameRate;
   if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
     video.currentTime = targetTime;
+    // Two waits race here as well, and — ESCSUITE-159 — whichever settles the
+    // wait cancels the other, exactly as the readiness poll below now does. The
+    // seek used to leave its 500 ms fallback pending, to resolve an
+    // already-settled promise half a second later (a frame apiece, for a whole
+    // export's worth of frames), and a fallback that won used to leave its
+    // `{ once: true }` 'seeked' listener on an element whose object URL the
+    // export is about to revoke.
     await new Promise<void>((resolve) => {
-      video.addEventListener('seeked', () => resolve(), { once: true });
-      setTimeout(resolve, 500);
+      const onSeeked = () => {
+        clearTimeout(fallback);
+        resolve();
+      };
+      const fallback = setTimeout(() => {
+        video.removeEventListener('seeked', onSeeked);
+        resolve();
+      }, 500);
+      video.addEventListener('seeked', onSeeked, { once: true });
     });
   }
 

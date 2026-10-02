@@ -126,8 +126,10 @@ pnpm lint                # Run ESLint
   sources with no bytes and overlays), `rewindElementSources` (pause and seek every
   `<video>` to 0 once — the seeks `exportWebM.perf.test.ts` discounts as `initSeeks`),
   `createFrameComposer` (one frame: `openOutputFrame`, sync the live videos to their clip
-  times, then the single track-ordered interleaved draw pass and the transition) and
-  `releaseElementSources` (pause everything and revoke the object URLs).
+  times, then the single track-ordered interleaved draw pass and the transition),
+  `releaseElementSources` (pause everything and revoke the object URLs) and —
+  ESCSUITE-159 — `createElementSourceRelease`, which wraps that last one in a
+  run-at-most-once closure both exporters use.
   **Who owns the elements** (ESCSUITE-156): `loadElementSources` owns every element it has
   created until it returns, and the caller owns them from then on — a caller only ever
   receives the map, so a rejection partway through the load would strand the elements before
@@ -144,7 +146,34 @@ pnpm lint                # Run ESLint
   `releaseElementSources` on the error path — one `<video>`/`<img>` and its object URL per
   source, held for the life of the page. `exportWebM.ts` records each encoder in an
   `openEncoders` list as it is built and its catch closes whatever exists, so the cleanup
-  does not have to name handles that may not be in scope yet. The composer takes
+  does not have to name handles that may not be in scope yet — and, since ESCSUITE-159, the
+  **muxer** beside it: an `Output` that is still mid-file holds its writer and its
+  unfinalised target (the encoders are the exporter's own, and the same catch closes them;
+  an `EncodedVideoPacketSource` owns none), so the catch `await`s Mediabunny's own
+  `output.cancel()`. **Which** outputs get that call is answered by Mediabunny's own
+  `state` rather than by a flag the exporter keeps: only `'started'` is mid-file —
+  `'pending'` wrote nothing, `'finalized'` is a finished file whose target `finalize()`
+  closed (asking anyway only logs "Output has already been finalized.", which the two
+  reachable post-finalize paths — the abort check and the empty-buffer refusal — would
+  otherwise print), and a `finalize()` that *rejected* leaves `'canceled'`, having already
+  released what it had. That is exactly the state test ESCAPECRAFT's recorder `cleanup()`
+  applies to its own outputs, and it cannot drift from the library the way a hand-kept
+  handle can. **Order matters inside the catch**: the encoders are closed *first*, because
+  `close()` abandons the packets an encoder had not delivered yet, and cancelling the output
+  first would leave them to arrive at a packet source that refuses them (`Output has been
+  canceled.`) from inside an `output:` callback nobody awaits — an unhandled rejection on
+  top of the failure being reported, on the ordinary path of a user clicking Cancel
+  mid-export. A `cancel()` that itself fails is warned about and goes no further, the way
+  ESCAPECRAFT's `cancelOutput` reports one. The GIF pipeline has no muxer to cancel:
+  `gifenc` writes into plain JS buffers.
+  **Releasing exactly once** is the other half of the same ownership (ESCSUITE-159): the
+  success path's release and the catch's are *not* exclusive, because the caller's own
+  `onProgress({ phase: 'complete' })` callback — and, in `exportWebM.ts`, the "no data was
+  written to buffer" refusal — sit after the first and reach the second, so one export used
+  to revoke every object URL twice. Both exporters therefore hold a
+  `createElementSourceRelease(sources)` closure and call *that* from both paths rather than
+  `releaseElementSources` directly, which also keeps the success-path ordering (release,
+  then the `complete` report) exactly as it was. The composer takes
   the output `frameRate` because the seek tolerance is a little under half a frame of it —
   the one value that had to become a parameter, 30 for WebM and 10/15/20 for GIF.
   `exportMP4.ts` is deliberately
@@ -2829,7 +2858,10 @@ The third export format (ESCSUITE-34), and the only one that needs nothing from 
   `writer.finish()` means a cancel that landed during the finalise never hands a blob back. A
   failing frame wraps in `ExportError` with the diagnostic log and the frame it reached, the same
   shape both other exporters produce, and every exit — success, throw, abort — calls
-  `releaseElementSources`. It also refuses **two** things at the door rather than one: the 2x2
+  the one `createElementSourceRelease` closure, which releases on the first of them to run
+  and does nothing on any later one (ESCSUITE-159: the `complete` report sits between the
+  success release and the catch's, so a callback that throws there used to free every object
+  URL twice). It also refuses **two** things at the door rather than one: the 2x2
   resolved-resolution guard both video exporters keep, and a frame count below 1 — an empty or
   reversed range would otherwise run no iterations at all and `finish()` a stream with no frames,
   which writes the end-of-stream byte alone (`gifenc` writes the header lazily on the first frame),
@@ -3020,7 +3052,13 @@ in this ticket.
 
 ### Black Flash Prevention (`src/core/elementFrames.ts`, `src/core/canvasRenderer.ts`)
 To prevent black frames during export:
-- **Seek timeout**: 500ms for reliable seeking
+- **Seek timeout**: 500ms for reliable seeking. One-shot, and since ESCSUITE-159 the two
+  halves cancel each other the way the readiness wait's do: the `'seeked'` listener clears
+  the fallback, and the fallback removes the listener. A seek that landed used to leave the
+  timer pending for the rest of its half-second, to resolve a promise that had already
+  settled — one per seeked frame, for a whole export's worth of frames — and a fallback that
+  won used to leave its `{ once: true }` listener on an element whose object URL the export
+  is about to revoke
 - **Frame readiness**: the element-drawing frame composer (`elementFrames.ts`'s
   `syncVideoToTime`, which `exportWebM.ts` had inline until ESCSUITE-34) waits for
   `video.readyState >= 2`
