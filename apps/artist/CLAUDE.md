@@ -642,6 +642,19 @@ Clips support animated properties via keyframes:
 - **Preset animations**: Clips can have in/out presets (`fade`, `slide-*`, `scale-*`, `pop`, `blur`)
 - **Custom keyframes**: Per-property keyframe arrays override presets when present; each keyframe's
   easing is editable on its own in the keyframe panel, not only per preset
+- **The time-0 seed fires once per property, not once per write (ESCSUITE-166)**.
+  `store/keyframeSlice.ts`'s `setClipKeyframe` is the one write that does more than store what
+  it is given: the very first keyframe a property ever gets, if it isn't already at time 0,
+  also seeds a keyframe AT 0 holding that property's current base value (the clip's transform,
+  effect or overlay field, read fresh at seed time), so there is always a "from" value to
+  animate out of. The gate is `currentKeyframes.length === 0` — the property's state *before*
+  this write — not whether the array about to be written happens to lack a keyframe at 0; the
+  latter was also true on every later write to the property, so a keyframe at 0 the user
+  deleted, or dragged away to another time, silently came back on the very next unrelated edit
+  to that property, snapping the animation's start value back to the static transform. Fixed by
+  reading the gate off `currentKeyframes` instead. `moveClipKeyframe`, `removeClipKeyframe` and
+  the preset generators below carry no twin of this pattern — none of them re-derive "should a
+  keyframe exist at 0" from the array they are about to write.
 - `getAnimatedValues(time, clipDuration, animation, transform, effects, options?)`: Returns interpolated values for a given time — the one entry point, for both the preview and the exporters
 - **One preset side can be left out of an evaluation (`AnimatedValuesOptions.suppressPreset`,
   ESCSUITE-139)**, and that is the whole of the option argument. `'in'` skips the in-preset,

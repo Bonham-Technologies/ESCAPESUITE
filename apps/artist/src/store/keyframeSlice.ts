@@ -1,8 +1,12 @@
 // Keyframe slice: the per-clip animation curves and the floating keyframe panel
 // that edits them. `setClipKeyframe` is the one that does more than store what
-// it is given — the first keyframe a property gets away from time 0 also seeds a
-// keyframe AT 0 holding that property's current base value, so there is always a
-// "from" value to animate out of.
+// it is given — the very first keyframe a property EVER gets, if it isn't
+// already at time 0, also seeds a keyframe AT 0 holding that property's
+// current base value, so there is always a "from" value to animate out of.
+// Gated on the property having no keyframes before this write, not on the
+// written-out array happening to lack one at 0 (ESCSUITE-166) — the latter is
+// also true on every later write, so a 0 keyframe the user deleted or moved
+// away would silently come back on the next unrelated edit to that property.
 //
 // `setClipKeyframe` and `moveClipKeyframe` also take a trailing `skipHistory`,
 // exactly as `clipSlice`'s `updateClipTransform` does: the edit lands, but no
@@ -56,11 +60,14 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
           newKeyframes = [...currentKeyframes, keyframe].sort((a, b) => a.time - b.time);
         }
 
-        // AUTO-CREATE START KEYFRAME: If this is the first keyframe for this property
-        // and it's not at time 0, create a keyframe at time 0 with the base value.
-        // This ensures there's always a "from" value to animate from.
-        const hasKeyframeAtZero = newKeyframes.some(kf => Math.abs(kf.time) < 0.001);
-        if (!hasKeyframeAtZero && newKeyframes.length > 0) {
+        // AUTO-CREATE START KEYFRAME: If this is the first keyframe this property has
+        // EVER had (nothing there before this write) and it's not at time 0, create a
+        // keyframe at time 0 with the base value, so there is always a "from" value to
+        // animate from. Gated on `currentKeyframes` (the state before this write), not
+        // on whether `newKeyframes` happens to lack one at 0 — that was true on every
+        // later write too, so a keyframe at 0 the user deleted, or dragged away from 0,
+        // silently came back on the next unrelated edit (ESCSUITE-166).
+        if (currentKeyframes.length === 0 && Math.abs(keyframe.time) >= 0.001) {
           // Get the base value for this property from the clip's transform/effects/overlayData
           let baseValue: number;
           if (property === 'blur') {
