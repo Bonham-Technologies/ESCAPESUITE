@@ -160,6 +160,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     rulerRef,
     pixelsPerSecond,
     timelineDuration,
+    inPoint,
+    outPoint,
     setInPoint,
     setOutPoint,
   });

@@ -139,6 +139,15 @@ export function useProjectActions({
       }
       mintedButNotYetOwned = undefined;
 
+      // ESCSUITE-164: resetProject() + setProject() + one addSourceVideo per
+      // source each push their own history entry — left alone, one Ctrl+Z
+      // after a load lands on "loaded project, one source missing" rather
+      // than whatever was open before. Opening a file is a new document, not
+      // an edit, so it is not undoable at all: parity with the session
+      // restore and New Project, which already clearHistory() once their
+      // own sources are in.
+      clearHistory();
+
       showNotification('Project loaded successfully', 'success');
     } catch (error) {
       console.error('Load failed:', error);
@@ -147,7 +156,7 @@ export function useProjectActions({
     } finally {
       setIsLoading(false);
     }
-  }, [resetProject, setProject, addSourceVideo, showNotification]);
+  }, [resetProject, setProject, addSourceVideo, clearHistory, showNotification]);
 
   // Given a project file: ask before replacing work in progress, load it
   // straight away when there is none. Shared by Ctrl+O / the File menu (which
