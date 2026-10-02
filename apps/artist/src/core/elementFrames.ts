@@ -50,10 +50,16 @@ export type VideoPlaybackState = Map<string, { playing: boolean; targetTime: num
 /**
  * Load every unique media source the clips reference into an element.
  *
- * A source with no bytes in storage, an audio-only source, and a clip with no
- * source id at all (every overlay) are all skipped rather than failing the
- * export: a timeline that references something missing renders without it, the
- * way the editor's own preview does.
+ * A source with no bytes in storage, an audio-only source, a clip with no
+ * source id at all (every overlay) and — since ESCSUITE-156 — a file that will
+ * not decode as either a video or an image are all skipped rather than failing
+ * the export: a timeline that references something missing renders without it,
+ * the way the editor's own preview does.
+ *
+ * The loader owns every element it has created until it returns, and nothing
+ * else can: a caller only ever gets the map, so a rejection partway through —
+ * a storage read that fails on the fourth source, say — would strand the three
+ * before it with no handle left to free them by (ESCSUITE-156).
  */
 export async function loadElementSources(
   clips: Clip[],
@@ -65,32 +71,47 @@ export async function loadElementSources(
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
   const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
 
-  for (const sourceId of uniqueSourceIds) {
-    const source = sourceMap.get(sourceId);
-    const blob = await getVideoBlob(sourceId);
+  try {
+    for (const sourceId of uniqueSourceIds) {
+      const source = sourceMap.get(sourceId);
+      const blob = await getVideoBlob(sourceId);
 
-    if (blob) {
-      if (source?.mediaType === 'image') {
-        // Load as image
-        const img = await loadImageElement(blob);
-        imageElements.set(sourceId, img);
-      } else if (source?.mediaType !== 'audio') {
-        // Load as video (skip audio-only files for visual rendering)
-        try {
-          const video = await loadVideoElement(blob);
-          videoElements.set(sourceId, video);
-        } catch (e) {
-          console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
-          // Try loading as image as fallback
+      if (blob) {
+        if (source?.mediaType === 'image') {
+          // Load as image. A corrupt or unsupported image is warned about and
+          // skipped, exactly as a video that loads as neither is below
+          // (ESCSUITE-156): one bad file in the library degrades the export
+          // rather than failing it.
           try {
             const img = await loadImageElement(blob);
             imageElements.set(sourceId, img);
           } catch {
             console.warn(`Failed to load media ${sourceId}`);
           }
+        } else if (source?.mediaType !== 'audio') {
+          // Load as video (skip audio-only files for visual rendering)
+          try {
+            const video = await loadVideoElement(blob);
+            videoElements.set(sourceId, video);
+          } catch (e) {
+            console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
+            // Try loading as image as fallback
+            try {
+              const img = await loadImageElement(blob);
+              imageElements.set(sourceId, img);
+            } catch {
+              console.warn(`Failed to load media ${sourceId}`);
+            }
+          }
         }
       }
     }
+  } catch (e) {
+    // Nothing reaches a caller, so nothing else could free what is already
+    // loaded. Both media branches warn and skip, so the only way here is a
+    // failed storage read.
+    releaseElementSources({ videoElements, imageElements });
+    throw e;
   }
 
   return { videoElements, imageElements };
@@ -145,15 +166,30 @@ async function syncVideoToTime(
     });
   }
 
-  // Ensure frame data is decoded (readyState >= 2 = HAVE_CURRENT_DATA)
+  // Ensure frame data is decoded (readyState >= 2 = HAVE_CURRENT_DATA).
+  //
+  // Two waits race: a `requestAnimationFrame` poll on `readyState` and a 300 ms
+  // fallback that gives up. Whichever settles the wait cancels the other
+  // (ESCSUITE-156) — the poll used to keep re-queueing itself after the
+  // fallback had already resolved, so a source that never becomes ready cost an
+  // animation frame per frame for the life of the page, long outliving the
+  // export that started it.
   if (video.readyState < 2) {
     await new Promise<void>((resolve) => {
+      let pollHandle = 0;
+      const fallback = setTimeout(() => {
+        cancelAnimationFrame(pollHandle);
+        resolve();
+      }, 300);
       const check = () => {
-        if (video.readyState >= 2) resolve();
-        else requestAnimationFrame(check);
+        if (video.readyState >= 2) {
+          clearTimeout(fallback);
+          resolve();
+        } else {
+          pollHandle = requestAnimationFrame(check);
+        }
       };
       check();
-      setTimeout(resolve, 300);
     });
   }
 }

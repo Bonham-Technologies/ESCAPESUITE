@@ -163,28 +163,36 @@ export async function exportToGIF(
 
   const sources = await loadElementSources(clips, sourceMap);
 
-  const playbackState = rewindElementSources(sources);
-
-  const composeFrame = createFrameComposer({
-    ctx,
-    canvas,
-    clips,
-    tracks: exportTracks,
-    sources,
-    playbackState,
-    projectSize,
-    outputSize,
-    drawOptions,
-    frameRate,
-  });
-
-  onProgress({ phase: 'encoding', progress: 15, message: 'Encoding frames...' });
-  log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
-
-  const writer = createGifWriter();
+  // From here on the media elements are this function's to free, so the `try`
+  // starts at the load and not at the frame loop (ESCSUITE-156) — the same gap
+  // `exportWebM.ts` had, narrower: the rewind, the composer, the caller's own
+  // progress callback and the writer all sit in it, and a throw from any of them
+  // used to escape past the only `releaseElementSources` on the error path,
+  // leaking a `<video>` or `<img>` and its object URL per source. `frameCount` is
+  // out here because the catch reports it.
   let frameCount = 0;
 
   try {
+    const playbackState = rewindElementSources(sources);
+
+    const composeFrame = createFrameComposer({
+      ctx,
+      canvas,
+      clips,
+      tracks: exportTracks,
+      sources,
+      playbackState,
+      projectSize,
+      outputSize,
+      drawOptions,
+      frameRate,
+    });
+
+    onProgress({ phase: 'encoding', progress: 15, message: 'Encoding frames...' });
+    log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
+
+    const writer = createGifWriter();
+
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // The one place cancellation happens. There is no encoder queue to drain
       // and no muxer to finalize, so "between frames" is the whole of this

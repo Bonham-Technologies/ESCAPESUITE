@@ -174,114 +174,129 @@ export async function exportToWebM(
 
   const sources = await loadElementSources(clips, sourceMap);
 
-  onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
-
-  // Create Mediabunny output with WebM format
-  const target = new BufferTarget();
-  const output = new Output({
-    format: new WebMOutputFormat(),
-    target,
-  });
-
-  // Create video packet source — the family actually negotiated above, which
-  // is VP8 whenever the VP9 probe failed.
-  const videoSource = new EncodedVideoPacketSource(videoCodecFamily);
-  output.addVideoTrack(videoSource, { frameRate });
-
-  // Opus, probed independently of video — a browser with no Opus encoder
-  // still gets a working, silent WebM, the same way exportMP4.ts drops audio
-  // when AAC is unsupported rather than refusing the whole export.
-  let audioSource: EncodedAudioPacketSource | null = null;
-  if (audioData) {
-    const opusConfig = {
-      codec: 'opus',
-      sampleRate,
-      numberOfChannels: 2,
-      bitrate: audioBitrate,
-    };
-    try {
-      const support = await AudioEncoder.isConfigSupported(opusConfig);
-      if (!support.supported) {
-        console.warn('Opus not supported, exporting without audio');
-        audioData = null;
-      } else {
-        audioSource = new EncodedAudioPacketSource('opus');
-        output.addAudioTrack(audioSource);
-      }
-    } catch (e) {
-      console.warn('Failed to check Opus support, exporting without audio:', e);
-      audioData = null;
-    }
-  }
-
-  // Start the output
-  await output.start();
-
-  // Create video encoder with error tracking (ESCSUITE-29: the error
-  // callback used to only console.error — nothing ever read the flag it set,
-  // so the only way a mid-export encoder failure surfaced was whatever
-  // DOMException happened to escape the next call).
-  let videoEncoderError: Error | null = null;
-  const videoEncoder = new VideoEncoder({
-    output: async (chunk, meta) => {
-      await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-    },
-    error: (e) => {
-      console.error('Video encoder error:', e);
-      videoEncoderError = e instanceof Error ? e : new Error(String(e));
-    },
-  });
-
-  await videoEncoder.configure(videoConfig);
-
-  // Create audio encoder if we have audio
-  let audioEncoder: AudioEncoder | null = null;
-  let audioEncoderError: Error | null = null;
-  if (audioData && audioSource) {
-    audioEncoder = new AudioEncoder({
-      output: async (chunk, meta) => {
-        await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-      },
-      error: (e) => {
-        console.error('Audio encoder error:', e);
-        audioEncoderError = e instanceof Error ? e : new Error(String(e));
-      },
-    });
-
-    await audioEncoder.configure({
-      codec: 'opus',
-      sampleRate,
-      numberOfChannels: 2,
-      bitrate: audioBitrate,
-    });
-  }
-
-  onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
-  log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
-
-  // Use real-time playback approach for reliable frame capture
-  // This plays videos at normal speed and captures frames, avoiding seek issues
-  const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+  // From here on the media elements are this function's to free, so the `try`
+  // starts at the load and not at the frame loop (ESCSUITE-156). Everything
+  // between the two can throw — `output.start()`, either `configure()`, the
+  // caller's own progress callback, the rewind — and every one of those throws
+  // used to escape past the only `releaseElementSources` on the error path,
+  // leaking a `<video>` or `<img>` and its object URL per source for the life of
+  // the page. The two handles the `catch` needs live out here: `frameCount`, for
+  // the diagnostic log, and every encoder built so far, so the catch can close
+  // what exists without caring how far construction got.
+  const openEncoders: Array<VideoEncoder | AudioEncoder> = [];
   let frameCount = 0;
 
-  // Pause and rewind every source before the frame loop: one seek per element,
-  // never part of the per-frame cost.
-  const playbackState = rewindElementSources(sources);
-
-  const composeFrame = createFrameComposer({
-    ctx,
-    canvas,
-    clips,
-    tracks: exportTracks,
-    sources,
-    playbackState,
-    projectSize,
-    outputSize,
-    drawOptions,
-    frameRate,
-  });
-
   try {
+    onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
+
+    // Create Mediabunny output with WebM format
+    const target = new BufferTarget();
+    const output = new Output({
+      format: new WebMOutputFormat(),
+      target,
+    });
+
+    // Create video packet source — the family actually negotiated above, which
+    // is VP8 whenever the VP9 probe failed.
+    const videoSource = new EncodedVideoPacketSource(videoCodecFamily);
+    output.addVideoTrack(videoSource, { frameRate });
+
+    // Opus, probed independently of video — a browser with no Opus encoder
+    // still gets a working, silent WebM, the same way exportMP4.ts drops audio
+    // when AAC is unsupported rather than refusing the whole export.
+    let audioSource: EncodedAudioPacketSource | null = null;
+    if (audioData) {
+      const opusConfig = {
+        codec: 'opus',
+        sampleRate,
+        numberOfChannels: 2,
+        bitrate: audioBitrate,
+      };
+      try {
+        const support = await AudioEncoder.isConfigSupported(opusConfig);
+        if (!support.supported) {
+          console.warn('Opus not supported, exporting without audio');
+          audioData = null;
+        } else {
+          audioSource = new EncodedAudioPacketSource('opus');
+          output.addAudioTrack(audioSource);
+        }
+      } catch (e) {
+        console.warn('Failed to check Opus support, exporting without audio:', e);
+        audioData = null;
+      }
+    }
+
+    // Start the output
+    await output.start();
+
+    // Create video encoder with error tracking (ESCSUITE-29: the error
+    // callback used to only console.error — nothing ever read the flag it set,
+    // so the only way a mid-export encoder failure surfaced was whatever
+    // DOMException happened to escape the next call).
+    let videoEncoderError: Error | null = null;
+    const videoEncoder = new VideoEncoder({
+      output: async (chunk, meta) => {
+        await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+      },
+      error: (e) => {
+        console.error('Video encoder error:', e);
+        videoEncoderError = e instanceof Error ? e : new Error(String(e));
+      },
+    });
+
+    openEncoders.push(videoEncoder);
+
+    await videoEncoder.configure(videoConfig);
+
+    // Create audio encoder if we have audio
+    let audioEncoder: AudioEncoder | null = null;
+    let audioEncoderError: Error | null = null;
+    if (audioData && audioSource) {
+      audioEncoder = new AudioEncoder({
+        output: async (chunk, meta) => {
+          await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+        },
+        error: (e) => {
+          console.error('Audio encoder error:', e);
+          audioEncoderError = e instanceof Error ? e : new Error(String(e));
+        },
+      });
+
+      openEncoders.push(audioEncoder);
+
+      await audioEncoder.configure({
+        codec: 'opus',
+        sampleRate,
+        numberOfChannels: 2,
+        bitrate: audioBitrate,
+      });
+    }
+
+    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+    log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
+
+    // Use real-time playback approach for reliable frame capture
+    // This plays videos at normal speed and captures frames, avoiding seek issues
+    const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+
+    // Pause and rewind every source before the frame loop: one seek per element,
+    // never part of the per-frame cost.
+    const playbackState = rewindElementSources(sources);
+
+    const composeFrame = createFrameComposer({
+      ctx,
+      canvas,
+      clips,
+      tracks: exportTracks,
+      sources,
+      playbackState,
+      projectSize,
+      outputSize,
+      drawOptions,
+      frameRate,
+    });
+
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // Check for abort at start of each frame
       checkAborted(signal);
@@ -435,18 +450,15 @@ export async function exportToWebM(
     // Clean up resources on error
     releaseElementSources(sources);
 
-    // Close encoders if they exist
-    try {
-      if (videoEncoder.state !== 'closed') {
-        videoEncoder.close();
-      }
-    } catch { /* ignore */ }
-
-    try {
-      if (audioEncoder && audioEncoder.state !== 'closed') {
-        audioEncoder.close();
-      }
-    } catch { /* ignore */ }
+    // Close every encoder that was built — none at all when the setup threw
+    // before the first one, one when it threw between them (ESCSUITE-156).
+    for (const encoder of openEncoders) {
+      try {
+        if (encoder.state !== 'closed') {
+          encoder.close();
+        }
+      } catch { /* ignore */ }
+    }
 
     // Re-throw ExportAbortedError and ExportError as-is
     if (error instanceof ExportError || (error instanceof Error && error.name === 'ExportAbortedError')) {
