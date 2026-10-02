@@ -3,16 +3,20 @@
 // legacy arrays a project saved before overlays became clips still carries —
 // which `convertLegacyOverlays` folds into ordinary overlay clips on load.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen } from '@testing-library/react'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import {
+  DEFAULT_RECT,
   FRAME_MS,
+  imageSource,
   installPreviewDoubles,
   last,
   renderPreview,
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
+import { setRect } from '../../test/doubles/layout'
+import { getVideoBlob } from '../../core/storage'
 import type {
   Clip,
   ShapeOverlay,
@@ -309,6 +313,54 @@ describe('PreviewPlayer overlay drawing', () => {
 
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
     expect(preview.frame().of('fillText')).toHaveLength(1)
+  })
+
+  it('restores the inline text editor as soon as the canvas remounts while editing (ESCSUITE-160)', async () => {
+    addText({ text: 'Editing' })
+    const preview = await renderPreview()
+
+    fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
+    await settle(FRAME_MS)
+    expect(screen.getByRole('textbox')).toBeInTheDocument()
+
+    // A second clip whose source has not resolved yet puts the preview back
+    // into its `isLoading` state, which unmounts the <canvas> exactly the way
+    // an empty timeline does (`hasContent && !isLoading`) — a late CRAFT
+    // handoff or an import landing mid-edit does this for real.
+    // `editingTextClipId` is PreviewPlayer's own state, untouched by either
+    // edit, so the editor should disappear the moment the canvas does (a
+    // `ref.current` read during render would still see the OLD, about-to-be-
+    // detached canvas for that one pass and keep drawing over it) and come
+    // straight back once the new canvas exists, with no further write of its
+    // own needed either way.
+    let release: (blob: Blob) => void = () => {}
+    vi.mocked(getVideoBlob).mockReturnValueOnce(
+      new Promise<Blob>((resolve) => { release = resolve })
+    )
+    store().addSourceVideo(imageSource)
+    const mediaTrack = store().addTrack('Media').id
+    store().addClipToTimeline(
+      { id: 'pic', sourceVideoId: imageSource.id, name: 'pic', startTime: 0, endTime: 2, duration: 2 },
+      mediaTrack,
+      0
+    )
+    await settle()
+
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(screen.getByText('Loading videos...')).toBeInTheDocument()
+
+    await act(async () => {
+      release(new Blob(['i'], { type: 'image/png' }))
+      await vi.advanceTimersByTimeAsync(60)
+    })
+
+    // The new canvas has no layout box of its own in jsdom — a real browser
+    // would already know it — so give it the same one `renderPreview` gave
+    // the first canvas. `InlineTextEditorAnchor` reads it straight off the
+    // element each render rather than caching it, so nothing else is needed.
+    setRect(preview.view.container.querySelector('canvas')!, DEFAULT_RECT)
+
+    expect(screen.getByRole('textbox')).toBeInTheDocument()
   })
 })
 

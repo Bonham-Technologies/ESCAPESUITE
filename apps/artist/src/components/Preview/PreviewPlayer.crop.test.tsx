@@ -8,9 +8,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent } from '@testing-library/react'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import {
+  DEFAULT_RECT,
   imageSource,
   installPreviewDoubles,
   renderPreview,
+  settle,
   type Preview,
   type PreviewDoubles,
 } from '../../test/renderPreview'
@@ -305,6 +307,43 @@ describe('crop mode on the preview', () => {
 
     expect(handles()).toBeInTheDocument()
     expect(preview.calls('clip').length).toBeGreaterThan(0)
+  })
+
+  it('mounts the handles as soon as the canvas remounts under an open crop mode (ESCSUITE-160)', async () => {
+    // `hasContent && !isLoading` unmounts the <canvas> entirely when the
+    // timeline empties and mounts a NEW one when it fills again — the same
+    // remount a project load or an undo back past "no clips" produces. The
+    // crop latch survives that the whole time (it is view state, not cleared
+    // by either edit), so the handles should come back the moment the new
+    // canvas exists, not one render later.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    const preview = await renderPreview()
+    store().setCropClipId(clip.id)
+    expect(preview.view.getByRole('group', { name: 'Crop handles' })).toBeInTheDocument()
+
+    // Unmount the canvas (the timeline empties, `hasContent` takes the
+    // no-clips placeholder) and remount it (a clip is back), with the
+    // selection and the crop latch already restored before the assertion —
+    // the latch itself needs no further write once the new canvas exists.
+    store().removeClipFromTimeline(clip.id)
+    expect(preview.view.container.querySelector('canvas')).not.toBeInTheDocument()
+
+    addClip(clip.id, 0, 4)
+    store().setSelectedClipId(clip.id)
+    store().setCropClipId(clip.id)
+    await settle()
+    expect(preview.view.container.querySelector('canvas')).toBeInTheDocument()
+
+    // A real browser fires a ResizeObserver callback the moment a new element
+    // is observed, reporting its actual box immediately — the test double
+    // does not do this for free, so this reproduces that one browser
+    // behaviour for the freshly mounted canvas. It is not a store write: the
+    // crop latch and the selection are already set above, and this changes
+    // neither.
+    preview.resize({ width: DEFAULT_RECT.width ?? 0, height: DEFAULT_RECT.height ?? 0 })
+
+    expect(preview.view.getByRole('group', { name: 'Crop handles' })).toBeInTheDocument()
   })
 
   it('draws and mounts nothing during playback', async () => {

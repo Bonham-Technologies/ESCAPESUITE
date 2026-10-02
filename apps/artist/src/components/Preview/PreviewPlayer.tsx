@@ -26,6 +26,28 @@ import styles from './PreviewPlayer.module.css';
 
 export function PreviewPlayer() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /**
+   * The same element as `canvasRef.current`, held in state so the DOM layers
+   * below (the crop handles, the inline text editor anchor) can gate on it
+   * during render instead of reading a ref there.
+   *
+   * A `ref.current` read during render sees the value from the PREVIOUS
+   * commit — React assigns refs after rendering, as part of the commit itself
+   * — so the render that mounts a brand new canvas (the `hasContent &&
+   * !isLoading` arm below, remounted after the timeline empties and refills)
+   * still sees the old, now-null ref on that first pass. A layer gated on
+   * `canvasRef.current` would then be absent for one commit and only appear
+   * once something else happens to trigger a second render (ESCSUITE-160).
+   * `setCanvasEl` runs in the same callback-ref commit that mounts the new
+   * canvas, so the state update — and the render it schedules — lands before
+   * the browser paints: no missing frame, and no per-frame cost, since the
+   * callback only fires on mount/unmount rather than once a frame.
+   */
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
+  const setCanvasRefs = useCallback((node: HTMLCanvasElement | null) => {
+    canvasRef.current = node;
+    setCanvasEl(node);
+  }, []);
   const canvasCtxRef = useRef<CanvasRenderingContext2D | null>(null); // Cached 2d context
   const blurCanvasRef = useRef<HTMLCanvasElement | null>(null); // Reusable scratch canvas for shape blur
   const isPlayingRef = useRef(false);
@@ -401,7 +423,7 @@ export function PreviewPlayer() {
           </div>
         ) : (
           <canvas
-            ref={canvasRef}
+            ref={setCanvasRefs}
             className={styles.canvas}
             /* The project size is only the starting point: the first draw
                re-sizes the backing store to the box the observer reports. React
@@ -417,10 +439,10 @@ export function PreviewPlayer() {
             onDoubleClick={handleDoubleClick}
           />
         )}
-        {editingTextClipId && canvasRef.current && (
+        {editingTextClipId && canvasEl && (
           <InlineTextEditorAnchor
             clip={clips.find(c => c.id === editingTextClipId)}
-            canvas={canvasRef.current}
+            canvas={canvasEl}
             projectSize={canvasDimensions}
             onCommit={handleInlineTextCommit}
             onCancel={handleInlineTextCancel}
@@ -434,11 +456,11 @@ export function PreviewPlayer() {
             currentY={marqueeCurrent.y}
           />
         )}
-        {cropping && canvasRef.current && (
+        {cropping && canvasEl && (
           <CropHandles
             clip={cropping.clip}
             source={cropping.source}
-            canvas={canvasRef.current}
+            canvas={canvasEl}
             projectSize={canvasDimensions}
             time={currentTime}
             locked={isTrackLocked(tracks, cropping.clip.trackId)}

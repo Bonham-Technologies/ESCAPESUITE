@@ -1588,17 +1588,24 @@ appears to reach that — `toggleClipSelection` and `selectClipsInRange`
 makes `cropTarget` null before a second clip could join the selection.
 
 **The handle layer needs the canvas element, and the canvas can go away out
-from under it.** `PreviewPlayer` mounts `CropHandles` only while
-`canvasRef.current` is non-null (`cropping && canvasRef.current && …`), but
-the canvas itself renders only in the `hasContent && !isLoading` arm — so
-importing another video, or anything else that empties and refills the
-timeline, unmounts the canvas and remounts it on a render where the ref
-briefly reads `null` while the dim chrome keeps painting over nothing to lay
-handles on. It self-heals on the very next render for any reason (a playhead
-move, a selection change), so the visible cost is a dropped frame of handles
-rather than a stuck one. The real fix — a state-backed `ref={setCanvasEl}`
-shared by `CropHandles`, `InlineTextEditorAnchor` and the marquee — is
-**ESCSUITE-160**, filed for exactly it and not taken here.
+from under it** — importing another video, or anything else that empties and
+refills the timeline, unmounts the canvas and remounts a new one in the
+`hasContent && !isLoading` arm. `PreviewPlayer` used to gate `CropHandles` and
+`InlineTextEditorAnchor` on `canvasRef.current` read during render
+(`cropping && canvasRef.current && …`), which sees the value from the
+*previous* commit — React assigns refs after rendering, as part of the commit
+itself — so the render that mounts the new canvas still saw the old, stale
+ref for that one pass and dropped the layer until something else (a playhead
+move, a selection change) happened to trigger a further render
+(ESCSUITE-160). The canvas element is now held in state (`canvasEl`, set by
+the canvas' callback ref alongside `canvasRef.current` for the imperative
+callers — the draw loop, the chrome, the pointer handlers — that still read
+the ref from inside events and effects rather than during render), and both
+layers gate on that state instead: the state update lands in the same commit
+that mounts the new canvas, so there is no dropped frame to self-heal from.
+The marquee selection layer takes no canvas element at all — it gates on
+`marqueeActive && marqueeStart && marqueeCurrent`, which come from pointer
+events already bound to a mounted canvas — so it never had this gap.
 
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
