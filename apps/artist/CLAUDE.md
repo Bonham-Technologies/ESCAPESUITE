@@ -3380,4 +3380,12 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   nothing to show, disagreeing with the editor loading the same file. `MIME_TO_EXTENSION` also
   strips a `;codecs=...` parameter before naming that source's temp file and now knows
   `audio/webm`, so either MIME type still lands on a `.webm` temp file rather than `.bin` or a
-  mismatched extension.
+  mismatched extension, and that lookup now lower-cases the MIME type first, so `Video/WebM`
+  resolves the same way. `loadManifest`'s `ManifestSource` gained the same optional `meta`
+  (ESCSUITE-158, a follow-up from the ESCSUITE-150 review): a manifest had no way to say a
+  referenced file is audio-only, since its `width`/`height`/`duration` fields have no
+  `mediaType` equivalent, so such a source was re-derived as video exactly as a bundle one used
+  to be. Both loaders validate `meta` with the one shared `assertSourceMeta` — an unrecognised
+  `mediaType` or a non-finite/negative `width`/`height`/non-positive `duration` is rejected
+  before Chromium launches — so a malformed `meta` fails identically whichever loader it came
+  through.

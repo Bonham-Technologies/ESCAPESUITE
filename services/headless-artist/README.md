@@ -164,6 +164,14 @@ disk. Nothing is copied and nothing is base64-encoded, so a 40 GB job costs the 
 - **`sources[].name`** — optional display name; defaults to the file's basename.
 - **`sources[].width`, `height`, `duration`** — optional. Probed from the bytes when omitted;
   supplying them saves a probe.
+- **`sources[].meta`** — optional, mirrors a `.veditor` bundle video's own `meta` below
+  (`mediaType`, and `width`/`height`/`duration` as an alternative to the top-level fields
+  above — the top-level ones win when both are given). The one field the top-level fields have
+  no equivalent for is `mediaType`: a manifest source otherwise has no way to say it is
+  audio-only, so a file ESCAPECRAFT typed `video/webm;codecs=vp9,opus` despite having no
+  picture (microphone alone) is re-derived as video from the MIME type and both exporters build
+  a frame source over nothing to show. `{ "id": "src-3", "file": "media/mic.webm", "meta": { "mediaType": "audio" } }`
+  fixes that the same way a bundle's `meta` does.
 
 Two rules are enforced up front, before Chromium starts, because both produce baffling failures
 later otherwise:
@@ -197,7 +205,11 @@ of anything the engine would otherwise probe from the bytes, most importantly `m
 ESCAPECRAFT take recorded with no picture (microphone alone) is still typed
 `video/webm;codecs=vp9,opus`, and `meta.mediaType: "audio"` is the only thing that says
 otherwise. A bundle without `meta` on a source still works exactly as before — the engine probes
-it from the bytes, the same as a manifest source with no `width`/`height`/`duration`.
+it from the bytes, the same as a manifest source with no `width`/`height`/`duration`. `meta`,
+wherever it appears, is validated the same way: an unrecognised `mediaType`, or a `width`,
+`height` or `duration` that isn't a finite number (`duration` must also be positive) is rejected
+before Chromium launches, naming the field (e.g. `bundle video #0 field "meta.duration" must be
+a finite positive number`).
 
 `examples/job-veditor-volume.json` shows the job shape but points at
 `examples/project.veditor`, which the kit does **not** ship — a `.veditor` carries its own media

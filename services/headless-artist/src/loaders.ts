@@ -76,6 +76,45 @@ function assertSafeFileId(id: unknown, context: string): asserts id is string {
 /** The four fields a bundle video must carry as strings before anything is written to disk. */
 const VEDITOR_VIDEO_FIELDS = ['id', 'name', 'mimeType', 'data'] as const
 
+/** `SourceVideo['mediaType']` (`packages/shared/src/types`), spelled out since nothing here imports it. */
+const MEDIA_TYPES = ['video', 'image', 'audio'] as const
+
+/** The two dimension fields `meta` may carry — one check covers both. */
+const META_DIMENSION_FIELDS = ['width', 'height'] as const
+
+/** A width/height a `meta` can be trusted for: `projectManager.ts`'s `isUsableDimension` (ESCSUITE-97). */
+function isUsableDimension(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0
+}
+
+/** A duration a `meta` can be trusted for: `videoProcessor.ts`'s `isUsableDuration`. */
+function isUsableDuration(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+}
+
+/**
+ * Validates an optional `meta` block — a bundle video's or a manifest source's — exactly the
+ * same way, so a malformed one is rejected identically regardless of which loader it came
+ * through. Fields it does not know about (e.g. `frameRate`, `thumbnailUrl`) are forwarded
+ * unchecked, same as before this validation existed.
+ */
+function assertSourceMeta(value: unknown, context: string): asserts value is VeditorVideoMeta {
+  if (!isRecord(value)) {
+    throw new Error(`${context} field "meta" must be an object`)
+  }
+  if (value.mediaType !== undefined && !MEDIA_TYPES.includes(value.mediaType as (typeof MEDIA_TYPES)[number])) {
+    throw new Error(`${context} field "meta.mediaType" must be one of ${MEDIA_TYPES.join(', ')}`)
+  }
+  for (const field of META_DIMENSION_FIELDS) {
+    if (value[field] !== undefined && !isUsableDimension(value[field])) {
+      throw new Error(`${context} field "meta.${field}" must be a finite number >= 0`)
+    }
+  }
+  if (value.duration !== undefined && !isUsableDuration(value.duration)) {
+    throw new Error(`${context} field "meta.duration" must be a finite positive number`)
+  }
+}
+
 /**
  * Validates one `videos[i]` entry. Without this a malformed bundle reaches the write loop as
  * `undefined`s — a `null` entry crashes on the property read, and a missing `mimeType` or
@@ -93,8 +132,8 @@ function assertVeditorVideo(value: unknown, index: number): asserts value is Ved
       throw new Error(`bundle video #${index} field "${field}" must be a string`)
     }
   }
-  if (value.meta !== undefined && !isRecord(value.meta)) {
-    throw new Error(`bundle video #${index} field "meta" must be an object`)
+  if (value.meta !== undefined) {
+    assertSourceMeta(value.meta, `bundle video #${index}`)
   }
 }
 
@@ -240,8 +279,9 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
     for (const video of videos) {
       // Every field was validated above, before mkdtemp — nothing here can be undefined.
       // Strip a `;codecs=...` parameter before the lookup, so "video/webm;codecs=vp9,opus"
-      // still resolves to "webm" rather than falling through to the name or ".bin".
-      const mimeBase = video.mimeType.split(';')[0].trim()
+      // still resolves to "webm" rather than falling through to the name or ".bin", and
+      // lower-case it first so "Video/WebM" does too.
+      const mimeBase = video.mimeType.split(';')[0].trim().toLowerCase()
       const ext = MIME_TO_EXTENSION[mimeBase] ?? extensionOf(video.name) ?? 'bin'
       const destPath = path.join(dir, `${video.id}.${ext}`)
       await writeBase64ToFile(video.data, destPath)
@@ -276,6 +316,14 @@ interface ManifestSource {
   width?: number
   height?: number
   duration?: number
+  /**
+   * Mirrors a bundle video's optional `meta` (ESCSUITE-158): `mediaType`, and `width`/
+   * `height`/`duration` as an alternative to the top-level fields above. Validated by the same
+   * `assertSourceMeta` and forwarded the same way — spread onto the built `SourceVideoInput`
+   * ahead of the top-level fields, so an explicit `width`/`height`/`duration` here still wins
+   * when both are given.
+   */
+  meta?: VeditorVideoMeta
 }
 
 async function resolveProjectRef(
@@ -360,6 +408,9 @@ export async function loadManifest(manifestPath: string): Promise<LoadedJob> {
     const source = entry as unknown as ManifestSource
 
     assertUniqueSourceId(source.id, sourceIds)
+    if (source.meta !== undefined) {
+      assertSourceMeta(source.meta, `manifest source "${source.id}"`)
+    }
 
     const absolutePath = path.resolve(manifestDir, source.file)
     // stat, not access: a directory (or a fifo, or a socket) is readable but is not something
@@ -393,7 +444,11 @@ export async function loadManifest(manifestPath: string): Promise<LoadedJob> {
 
     sourceFiles[source.id] = absolutePath
 
+    // "meta" first so the entry's own top-level width/height/duration -- more specific,
+    // and there since before "meta" existed -- always win, the same order loadBundle applies
+    // to its identical "meta".
     const sourceVideo: SourceVideoInput = {
+      ...source.meta,
       id: source.id,
       name: source.name ?? path.basename(source.file),
       mimeType,
