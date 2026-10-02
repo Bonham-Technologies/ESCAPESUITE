@@ -140,6 +140,7 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - Core modules in `src/core/`: `storage.ts`, `videoProcessor.ts`, `exporter.ts`, `projectManager.ts`, `videoDecodeManager.ts`, `frameSource.ts`
 - Video decode worker in `src/workers/decodeWorker.ts` for background-capable MP4 exports
 - Keyframe animation system in `src/utils/animation.ts`
+- Static per-clip picture properties in `src/core/`: `clipMask.ts` (a circle or rounded mask and its stroke) and `clipCrop.ts` (a crop — four insets as fractions of the source frame). Never keyframed, media clips only, and read by the preview, both exporters, both transition paths and the headless bundle from the same two draw functions; a crop also resizes the clip's rectangle, so the selection box, hit test, marquee and drag seed read it too
 - Audio waveform visualization in `src/utils/waveform.ts`
 - WebCodecs API for encoding/decoding (Chrome/Edge only)
 - Export formats: WebM (VP9+Opus) and MP4 (H.264+AAC)
@@ -1660,6 +1661,31 @@ export ceilings and the render pins are byte-unchanged. The one branch still unc
 `AudioWaveform.tsx` is its pre-existing `if (!ctx)`. **No floor crossed**; artist's floors stay
 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-01 at the end of ESCSUITE-6 (clip crop v1: an
+optional `clip.crop` of four inset fractions, `core/clipCrop.ts`, the renderer's nine-argument
+`drawImage` over `croppedSourceRect`, the preview chrome measuring the cropped picture,
+`parseProject` refusing a malformed crop, and the inspector's "Crop" section): **99.72** / **99.12** /
+**95.26** / 99.65 against the 99.71 / 99.11 / 95.21 / 99.65 the commit this branch lands on
+(`59d321d`) measures — lines and statements up a hundredth, branches up five, functions unmoved.
+Measured in one sitting, the base gives 4,457 / 4,681 branches and this branch 4,507 / 4,731: fifty
+new branches, fifty covered, the same 224 uncovered as before (lines 7,082 / 7,102 → 7,145 / 7,165,
+statements 7,972 / 8,043 → 8,044 / 8,115, functions 1,729 / 1,735 → 1,746 / 1,752, every denominator
+growing by exactly what the numerator did; the uncovered counts — 20 lines, 71 statements, 224
+branches, 6 functions — are identical on both trees, file by file). The fifty are `core/clipCrop.ts`'s
+twenty-three (`isValidCrop`'s shape and range arms, `normaliseCrop`'s all-zero and sub-pixel
+refusals, `croppedSourceRect`'s one-pixel floors, `cropForAspect`'s wider-or-taller choice and its
+degenerate-source guard), `store/projectMigration.ts`'s four (a present-but-malformed crop refused
+with one `reason`, an absent one accepted), `components/ClipEditor/useClipEditorActions.ts`'s twelve
+(`handleCropChange`'s normalise-or-remove write, the sourceless clip that still accepts the all-zero
+write and refuses any inset, and Fit to Canvas reading the cropped drawn size), `CropSection.tsx`'s
+four and `ClipEditor.tsx`'s seven (the section's media-only slot after "Mask & Stroke", the locked
+track's disabled fieldset and header Reset) — each reached from both sides by that module's own
+cases. `core/canvasRenderer.ts` and `components/Preview/previewGeometry.ts` gained one statement
+each and no branch: the nine-argument draw and the cropped size are unconditional, which is the
+design's point — four readers of one pure function cannot disagree. The whole-branch review's one
+fix round (Fit to Canvas fitting the cropped picture, the all-zero write on a sourceless clip) is in
+these numbers. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1667,7 +1693,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.71 | 99.11 | 95.21 | 99.65 |
+| `@escapesuite/artist` | 99.72 | 99.12 | 95.26 | 99.65 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.45 | 99.36 | 98.16 | 98.51 |
 

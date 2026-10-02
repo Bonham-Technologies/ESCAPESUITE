@@ -982,6 +982,63 @@ describe('projectStore remaining behaviours', () => {
     })
   })
 
+  describe('a clip carries its crop through every copy (ESCSUITE-6)', () => {
+    const CROP = { left: 0.25, top: 0.1, right: 0, bottom: 0 }
+
+    beforeEach(() => {
+      resetStoreForTest()
+    })
+
+    it('gives both halves of a split the crop, as their own objects', () => {
+      const clip = addClip('clip1', 0, 4)
+      store().updateClip(clip.id, { crop: { ...CROP } })
+
+      store().splitClip(clip.id, 2)
+
+      const halves = store().project.timeline.clips
+      expect(halves).toHaveLength(2)
+      for (const half of halves) expect(half.crop).toEqual(CROP)
+      // cloneClip is structuredClone, so the two halves do not share one object —
+      // which matters the day either half's crop is edited.
+      expect(halves[0].crop).not.toBe(halves[1].crop)
+    })
+
+    it('gives a duplicate the crop', () => {
+      const clip = addClip('clip1', 0, 4)
+      store().updateClip(clip.id, { crop: { ...CROP } })
+
+      store().duplicateClip(clip.id)
+
+      const copy = store().project.timeline.clips.find((c) => c.id !== clip.id)!
+      expect(copy.crop).toEqual(CROP)
+      expect(copy.crop).not.toBe(store().project.timeline.clips.find((c) => c.id === clip.id)!.crop)
+    })
+
+    it('gives a pasted clone the crop', () => {
+      const clip = addClip('clip1', 0, 4)
+      store().updateClip(clip.id, { crop: { ...CROP } })
+      store().setSelectedClipId(clip.id)
+      store().toggleClipSelection(clip.id)
+      store().copySelectedClips()
+      store().setCurrentTime(6)
+
+      expect(store().pasteClips()).toBe(true)
+
+      const pasted = store().project.timeline.clips.find((c) => c.timelinePosition === 6)!
+      expect(pasted.crop).toEqual(CROP)
+    })
+
+    it('puts the crop back on an undo of a reset', () => {
+      const clip = addClip('clip1', 0, 4)
+      store().updateClip(clip.id, { crop: { ...CROP } })
+      store().updateClip(clip.id, { crop: undefined })
+
+      store().undo()
+
+      expect(store().project.timeline.clips[0].crop).toEqual(CROP)
+    })
+  })
+
   describe('recalculateTimelineDuration', () => {
     it('resyncs the stored duration with the clips', () => {
       addClip('clip1', 0, 4)

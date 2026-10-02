@@ -69,14 +69,23 @@ export function overlayPositionValue(clip: Clip, axis: 'x' | 'y', isOverlay: boo
   return clip.transform[axis];
 }
 
-/** The uniform scale that fits a source video's frame inside the project canvas. */
+/**
+ * The uniform scale that fits the picture a clip actually draws inside the
+ * project canvas.
+ *
+ * `drawnSize` is whatever is on screen at scale 1 — a clip's **cropped**
+ * region (ESCSUITE-6) when it has one, the source video's own dimensions
+ * otherwise — never the uncropped source, so Fit to Canvas on a cropped clip
+ * fills the frame with the picture the user is looking at rather than
+ * reserving room for a part that is no longer drawn.
+ */
 export function fitToCanvasScale(
   resolution: { width: number; height: number },
-  sourceVideo: { width: number; height: number }
+  drawnSize: { width: number; height: number }
 ): number {
   return Math.min(
-    resolution.width / sourceVideo.width,
-    resolution.height / sourceVideo.height
+    resolution.width / drawnSize.width,
+    resolution.height / drawnSize.height
   );
 }
 

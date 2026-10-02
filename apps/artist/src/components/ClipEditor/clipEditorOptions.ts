@@ -1,4 +1,6 @@
-// The fixed option lists the clip inspector's dropdowns are built from.
+// The fixed option lists the clip inspector's dropdowns are built from, plus
+// the Crop section's aspect-preset buttons (`CROP_ASPECT_PRESETS`), which are
+// an action row rather than a value list.
 //
 // Each array's order is the order its <option>s appear in, so it is what the
 // user sees and what tests addressing a select by index resolve to — reordering
@@ -49,6 +51,24 @@ export const CLIP_MASK_KINDS: { value: ClipMaskKind; label: string }[] = [
   { value: 'none', label: 'None' },
   { value: 'circle', label: 'Circle' },
   { value: 'rounded', label: 'Rounded Rectangle' },
+];
+
+/**
+ * Crop → the aspect-ratio presets (ESCSUITE-6).
+ *
+ * Buttons rather than a dropdown, because this is not a stored property with a
+ * current value: a preset is an action that recomputes the four insets, and a
+ * `<select>` showing "1:1" after the user has since dragged an inset would be
+ * lying. `None` is first for the same reason it is first in `CLIP_MASK_KINDS` —
+ * a list of shapes with no way back to "no shape" is a trap — and `aspect: null`
+ * is how it says so.
+ */
+export const CROP_ASPECT_PRESETS: { label: string; aspect: number | null }[] = [
+  { label: 'None', aspect: null },
+  { label: '1:1', aspect: 1 },
+  { label: '16:9', aspect: 16 / 9 },
+  { label: '9:16', aspect: 9 / 16 },
+  { label: '4:3', aspect: 4 / 3 },
 ];
 
 /** Animate In / Animate Out → preset. */

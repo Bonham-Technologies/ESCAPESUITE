@@ -205,6 +205,38 @@ export function createRecordingContext(): RecordingCanvasRenderingContext2D {
   return createContext(document.createElement('canvas'))
 }
 
+/**
+ * The destination box `[x, y, width, height]` of a recorded `drawImage`,
+ * whichever of the overload's three arities the call used.
+ *
+ * Since ESCSUITE-6 every **media** clip is drawn with the nine-argument form
+ * (`drawImage(source, sx, sy, sw, sh, x, y, w, h)`) so the crop can name the
+ * source region, while the thumbnail generator and the offscreen blur
+ * compositing still use the five- and three-argument forms. The destination box
+ * is the last four arguments in every form that has one, so asking for it this
+ * way reads better than `args.slice(5)` and survives the next arity change.
+ *
+ * Throws on a three-argument call (`drawImage(source, dx, dy)`) rather than
+ * silently returning its three arguments padded by one `undefined`: that form
+ * has no destination *box*, only a point, and `args.slice(-4)` would otherwise
+ * hand back a plausible-looking four-element array whose first element isn't
+ * `dx` at all. `canvasRenderer.ts`'s shape-overlay background blur draws on
+ * this exact three-argument form, on the same context a media clip draws to —
+ * a test that pointed `destBox` at it by mistake should fail loudly, not read
+ * a wrong number quietly.
+ */
+export function destBox(args: unknown[]): unknown[] {
+  if (args.length < 5) {
+    throw new Error(`destBox: no destination box in a ${args.length}-argument drawImage`)
+  }
+  return args.slice(-4)
+}
+
+/** The source region `[sx, sy, sw, sh]` of a nine-argument `drawImage`. */
+export function sourceBox(args: unknown[]): unknown[] {
+  return args.slice(1, 5)
+}
+
 let originalGetContext: typeof HTMLCanvasElement.prototype.getContext | null = null
 let originalToBlob: typeof HTMLCanvasElement.prototype.toBlob | null = null
 

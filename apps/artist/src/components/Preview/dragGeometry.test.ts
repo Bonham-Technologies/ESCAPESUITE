@@ -128,6 +128,30 @@ describe('clipsIntersectingMarquee', () => {
       ])
     ).toEqual([])
   })
+
+  it('passes over a strip only the uncropped picture reached (ESCSUITE-6)', () => {
+    // The canvas is laid out at half size, so these client coordinates are
+    // canvas x 760-840. A 400x200 source centred on the canvas covers x 760-1160
+    // and would be swept up; cropped to its right half it covers x 860-1060 and
+    // is not.
+    const source = makeSourceVideo({ width: 400, height: 200 })
+    const strip = { start: { x: 380, y: 250 }, current: { x: 420, y: 290 } }
+
+    expect(
+      clipsIntersectingMarquee(makeCanvas(), strip.start, strip.current, [makeClip({ id: 'c1' })], 0, [source])
+    ).toEqual(['c1'])
+
+    expect(
+      clipsIntersectingMarquee(
+        makeCanvas(),
+        strip.start,
+        strip.current,
+        [makeClip({ id: 'c1', crop: { left: 0.5, top: 0, right: 0, bottom: 0 } })],
+        0,
+        [source]
+      )
+    ).toEqual([])
+  })
 })
 
 describe('textClipAtPoint', () => {

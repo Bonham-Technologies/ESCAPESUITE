@@ -174,6 +174,7 @@ pnpm lint                # Run ESLint
   `thumbnailUrl` is still refreshed from what is actually stored (ESCSUITE-96).
 - `videoDecodeManager.ts`: Main thread API for WebCodecs video decoding via Web Worker
 - `frameSource.ts`: Abstraction layer for frame sources (WebCodecs or HTMLVideoElement fallback)
+- `clipCrop.ts`: a media clip's **crop** (ESCSUITE-6) — four insets, as fractions of the source frame. `croppedSourceRect(w, h, crop?)` is the region to draw and is read by both media draws in `canvasRenderer.ts` **and** by `components/Preview/previewGeometry.ts`, so the picture and the chrome round it can never disagree; it floors the region at one source pixel, because `drawImage` throws `IndexSizeError` on a zero-width source rect and a throw inside a preview frame kills the whole frame. `isValidCrop(value)` is the shape check `parseProject` runs — four finite insets >= 0 leaving something on each axis — and takes no dimensions, because a project is validated before its media is re-linked. `normaliseCrop(crop, w, h)` is what the inspector stores: clamped to 0-90% per edge, `undefined` for an all-zero crop, and a refusal (`{ ok: false }`, write nothing) for anything that would leave less than a source pixel. `cropForAspect(w, h, aspect, crop?)` is the aspect presets, computed against the region the clip **already** shows rather than the whole frame, so presets compose and Reset is the thing that starts over. Static: `crop` is not an `AnimatableProperty` and never passes through `getAnimatedValues`
 
 ### Video Decode Worker (`src/workers/decodeWorker.ts`)
 Web Worker for WebCodecs-based video decoding, enabling full-speed exports in background tabs:
@@ -1259,6 +1260,39 @@ its drawn rectangle. And **the media library's card stays unmasked** (`VideoUplo
 because that thumbnail belongs to the *source* file and one source can back several clips with
 different masks — which is also why the mask could not simply be put there instead.
 
+**A media clip can also carry a crop (ESCSUITE-6), and it is the one static
+property that changes the clip's rectangle.** `core/clipCrop.ts` owns the
+arithmetic; `drawWithMaskAndStroke` takes the source rectangle and issues the
+**nine-argument** `drawImage(source, sx, sy, sw, sh, x, y, w, h)` — the
+five-argument form is gone from `core/clipMask.ts`, unconditionally, because a
+branch there would be a second rule about crops inside the one function meant
+to have no opinion about them. The drawn size is the cropped region times the
+clip's scale, still anchored on its normalised centre, so **cropping shrinks
+the picture in place** rather than stretching the remainder over the old box;
+mask and stroke are computed from that smaller box, so a cropped circle-masked
+clip gets the smaller circle and `clipMask.ts` needed to learn nothing about
+crops for that to be true. The `drawImage` *count* per frame is unchanged,
+which is why the three per-frame ceiling files are byte-identical.
+
+Because a crop *is* the rectangle, `getOverlayBounds`
+(`components/Preview/previewGeometry.ts`) reports the cropped size for a media
+clip — the opposite of the mask's treatment above. One edit covers the
+selection box, the eight handles, the marquee's AABB and a drag's seed
+measurements, because `hitTest.ts`, `selectionOverlay.ts` and `dragGeometry.ts`
+all read that one function; each has a case of its own so that stays a
+contract. **Fit to Canvas reads the crop too** (MINOR 2, final review):
+`handleFitToCanvas` passes `clipEditorModel.ts`'s `fitToCanvasScale` the
+cropped region from `croppedSourceRect`, not the source video's own
+dimensions, so pressing it on a cropped clip fills the frame with the picture
+that is actually drawn rather than reserving room for the part that is no
+longer on screen.
+
+**Two deliberate v1 limits.** The **timeline thumbnail is not cropped** —
+`utils/maskClipPath.ts` is untouched, so a cropped clip's tile still shows the
+whole frame's picture (masked, if it is masked). And there are **no on-canvas
+crop handles**: v1 is inspector-only, and the preview's resize handles still
+change `scaleX`/`scaleY` as they always did. Both are the v2 ticket's.
+
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
 early return, and the JSX that hands each section the handful of props it needs. It holds no
@@ -1278,7 +1312,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `useSliderGesture.ts` | Where one slider gesture starts and stops, and `commit`, which runs one write inside it with the `skipHistory` flag it is owed — a `useGestureHistory` and six listeners, no state. One instance serves the whole panel; see "One drag of a slider is one undo step" below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
-| `clipEditorOptions.ts` | The **five** `{ value, label }` option lists the dropdowns render — transitions, blend modes, clip mask kinds, animation presets, easings (the last re-exported from `utils/easingOptions.ts`) |
+| `clipEditorOptions.ts` | The **five** `{ value, label }` option lists the dropdowns render — transitions, blend modes, clip mask kinds, animation presets, easings (the last re-exported from `utils/easingOptions.ts`) — plus `CROP_ASPECT_PRESETS` (ESCSUITE-6), which is buttons rather than a dropdown because a preset is an action and not a stored value |
 | `CollapsibleSection.tsx` | One titled, collapsible block: its own open/closed flag, seeded from `defaultOpen` at mount and never re-read |
 | `ClipEditorEmptyState.tsx` | The panel's contents when nothing is selected: the prompt plus the five buttons that create an overlay from nothing. `ClipEditor.tsx` supplies the surrounding `div.container` |
 | `ClipEditorHeader.tsx` | The title block — clip type, name, delete button, and the duration/position/track rows underneath |
@@ -1287,6 +1321,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
 | `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
 | `MaskSection.tsx` | "Mask & Stroke": the mask kind over `CLIP_MASK_KINDS`, a corner-radius slider shown for `rounded` only, and the stroke's width and colour — the width labelled in **pixels at the project's resolution**, because what is stored is a fraction of the frame width and a fraction is not a number anyone can act on. Collapsed by default. Media clips only, gated exactly as Blend Mode is. It normalises nothing: "`none` with a radius" and "a width of 0 with a colour" are things a user can express, and turning them into absent fields is `useClipEditorActions`' job |
+| `CropSection.tsx` | "Crop" (ESCSUITE-6): which rectangle of its source frame the clip shows — four rows of slider plus number field, each inset a whole percentage capped at `MAX_CROP_INSET` (90%), five aspect-preset buttons over `CROP_ASPECT_PRESETS` (None, 1:1, 16:9, 9:16, 4:3) and a header Reset. Collapsed by default. Media clips only, gated exactly as Mask & Stroke is and placed **immediately after it**, before Effects — an overlay has no source frame for an inset to be a fraction of, and the condition is byte-identical to its neighbours' so no existing section's positional open/closed slot changes meaning. Like `MaskSection` it normalises nothing: 90% off two opposite edges is something a user can express, and the **one** new handler `handleCropChange` is what decides what gets stored. The **presets are computed here**, from `cropForAspect` — this is the only place holding both the source's shape and the clip's current crop — which is why they are not a second handler, and why "None" and the header Reset make literally the same write: four zeroes, which `normaliseCrop` turns into `crop: undefined`. The four sliders carry the undo gesture; the number fields and the preset buttons keep an entry each — a number field has no gesture listeners, so it reports on every keystroke and typing `45` into an empty one lands two undo entries, same as `TextContentSection`'s font-size field |
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
@@ -1321,7 +1356,10 @@ group's "Animate In" / "Animate Out") the span **became** a `<label>` with the s
 same text and the same position. Nothing else about the DOM moved, for the reason at the bottom
 of this section: `CollapsibleSection` seeds a section's open/closed state positionally, so a
 moved element is a behaviour change. `ClipEditor.module.css`'s `.colorInput span` rule followed
-its five labels and is now `.colorInput label`, so those rows look exactly as they did.
+its five labels and is now `.colorInput label`, so those rows look exactly as they did. Sections added since follow the same rule: Crop's four sliders take the
+visible edge word through `htmlFor`, and the number field beside each one — which has no
+visible label of its own — carries `aria-label="<Edge> crop percent"`, so its eight value
+controls have eight distinct names.
 
 **Two controls may not share a name**, and three rows in the panel would have. Both animation
 groups call theirs "Duration" and "Easing", so those four take `aria-labelledby` naming the
@@ -1381,9 +1419,11 @@ runs, a slider's writes are synchronous — the `input` event calls the handler,
 here "decide at the call" and "decide at the write" are the same moment.
 `useClipEditorActions` calls it once and returns its
 listeners as `sliderGesture`, which `ClipEditor` spreads onto **every slider on the panel** —
-`TransformSection`, `ShapeSection`, `EffectsSection`, `MaskSection`, `AnimationSection` and
-`TransitionSection`; the handlers those sliders reach —
+`TransformSection`, `ShapeSection`, `EffectsSection`, `MaskSection`, `CropSection`,
+`AnimationSection` and `TransitionSection`; the handlers those sliders reach —
 `handleTransformChange`, `handleBlurChange`, `handleMaskChange`, `handleStrokeChange`,
+`handleCropChange` (ESCSUITE-6 — the one handler in this list that can **refuse**: a crop that
+would leave less than one source pixel, or a clip with no source media at all, writes nothing),
 `handleAnimationInDurationChange`, `handleAnimationOutDurationChange`,
 `handleTransitionDurationChange` and, for
 an overlay's Pos X/Y, `handleTextDataChange` / `handleShapeDataChange` — run their write
@@ -2738,6 +2778,13 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   against 150), which is the whole reason for the second point. The case patches the loaded
   fixture rather than the file on disk, which is what keeps the two golden single-clip cases as
   its control: they assert the whole frame is red, which a masked frame cannot be.
+  `verify.chromium.test.ts` makes the same argument for a **crop** (ESCSUITE-6):
+  the fixture clip is patched to show its right half, and the rendered frame
+  comes back with the export's black background in the two 16-pixel columns the
+  uncropped render fills with red, and the fixture's red in the middle. The
+  output raster is unchanged — a crop shrinks the picture inside the frame, it
+  does not resize the frame — and, as with the mask, the two golden single-clip
+  cases are the control, because they assert the **whole** frame is red.
 - `render()` runs the store's `convertLegacyOverlays` on the incoming timeline before anything
   reads it, so a `project.json` carrying the legacy `textOverlays`/`shapeOverlays` arrays
   renders and exports identically with or without the store. A project with neither array is

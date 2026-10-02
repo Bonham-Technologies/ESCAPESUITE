@@ -12,12 +12,14 @@ import {
 } from './canvasRenderer'
 import {
   createRecordingContext,
+  destBox,
+  sourceBox,
   type RecordingCanvasRenderingContext2D,
 } from '../test/doubles/canvas'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { VideoFrameDouble, resetFrameRegistry } from '../test/doubles/webcodecs'
 import { makeClip } from '../test/fixtures/clipFixtures'
-import type { Clip, ClipMask, ClipStroke } from '../store/types'
+import type { Clip, ClipCrop, ClipMask, ClipStroke } from '../store/types'
 import type { DrawableMediaSource, MediaDrawOptions, TransitionModifiers } from './exportTypes'
 
 const W = 1920
@@ -63,7 +65,7 @@ describe('drawClipToCanvas', () => {
   it('draws the source at native pixel size, centred on the animated position', () => {
     draw(frame(640, 360))
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([640, 360, 640, 360])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([640, 360, 640, 360])
     expect(ctx.calls[0].method).toBe('save')
     expect(ctx.calls[ctx.calls.length - 1].method).toBe('restore')
   })
@@ -76,7 +78,7 @@ describe('drawClipToCanvas', () => {
     draw(frame(640, 360), clip)
 
     // 1280 x 180 centred on (960, 540)
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([320, 450, 1280, 180])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([320, 450, 1280, 180])
   })
 
   it('positions the clip from its normalised transform position', () => {
@@ -86,19 +88,19 @@ describe('drawClipToCanvas', () => {
 
     draw(frame(640, 360), clip)
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([480 - 320, 810 - 180, 640, 360])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([480 - 320, 810 - 180, 640, 360])
   })
 
   it('falls back to the canvas size for a source with no dimensions', () => {
     draw(frame(0, 0))
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([0, 0, W, H])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([0, 0, W, H])
   })
 
   it('reads dimensions from a video element', () => {
     draw(loadedVideo(1280, 720))
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([320, 180, 1280, 720])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([320, 180, 1280, 720])
   })
 
   it('maps the clip blend mode onto the canvas composite operation', () => {
@@ -173,7 +175,7 @@ describe('drawClipToCanvas', () => {
   it('offsets the draw position by the transition offset', () => {
     draw(frame(640, 360), makeClip(), 0, { offsetX: -100, offsetY: 50 })
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([540, 410, 640, 360])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([540, 410, 640, 360])
   })
 
   it('records exactly what it always has for a clip with neither mask nor stroke', () => {
@@ -198,13 +200,13 @@ describe('drawImageToCanvasWithModifiers', () => {
   it('draws the image at its natural size, centred', () => {
     draw(loadedImage(800, 600))
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([560, 240, 800, 600])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([560, 240, 800, 600])
   })
 
   it('falls back to the canvas size for an image with no natural size', () => {
     draw(loadedImage(0, 0))
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([0, 0, W, H])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([0, 0, W, H])
   })
 
   it('applies blend mode, opacity, blur and rotation like a video clip', () => {
@@ -239,7 +241,7 @@ describe('drawImageToCanvasWithModifiers', () => {
   it('offsets the draw position by the transition offset', () => {
     draw(loadedImage(800, 600), makeClip(), { offsetX: 40, offsetY: -40 })
 
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([600, 200, 800, 600])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([600, 200, 800, 600])
   })
 
   it('records exactly what it always has for a clip with neither mask nor stroke', () => {
@@ -327,7 +329,7 @@ describe('MediaDrawOptions', () => {
     drawClipToCanvas(asCtx(), frame(640, 360), before, 0, W, H, undefined, options)
     drawClipToCanvas(asCtx(), frame(640, 360), after, 0, W, H, undefined, options)
 
-    return ctx.argsFor('drawImage').map((args) => args[3])
+    return ctx.argsFor('drawImage').map((args) => destBox(args)[2])
   }
 
   it('recomputes the animated values on every draw', () => {
@@ -369,14 +371,14 @@ describe('drawMediaWithFrame', () => {
     const image = loadedImage(800, 600)
 
     expect(drawMediaWithFrame(asCtx(), image, makeClip(), 0, W, H)).toBe(true)
-    expect(ctx.argsFor('drawImage')[0]).toEqual([image, 560, 240, 800, 600])
+    expect(ctx.argsFor('drawImage')[0]).toEqual([image, 0, 0, 800, 600, 560, 240, 800, 600])
   })
 
   it('draws a VideoFrame through the clip path', () => {
     const f = frame(640, 360)
 
     expect(drawMediaWithFrame(asCtx(), f, makeClip(), 0, W, H)).toBe(true)
-    expect(ctx.argsFor('drawImage')[0]).toEqual([f, 640, 360, 640, 360])
+    expect(ctx.argsFor('drawImage')[0]).toEqual([f, 0, 0, 640, 360, 640, 360, 640, 360])
   })
 
   it('passes the transition modifiers through to the frame draw', () => {
@@ -430,7 +432,7 @@ describe('drawClipToCanvas with a mask and a stroke', () => {
     // 640x360 at scale 1, centred on a 1920x1080 canvas: the box is
     // (640, 360)-(1280, 720), so the centre is (960, 540) and the inscribed
     // radius is 360/2 = 180.
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([640, 360, 640, 360])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([640, 360, 640, 360])
     expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 180, 180, 0, 0, Math.PI * 2])
   })
 
@@ -565,7 +567,7 @@ describe('drawImageToCanvasWithModifiers with a mask and a stroke', () => {
 
     // 800x600 centred on 1920x1080: the box is (560, 240)-(1360, 840), centre
     // (960, 540), inscribed radius 600/2 = 300.
-    expect(ctx.argsFor('drawImage')[0].slice(1)).toEqual([560, 240, 800, 600])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([560, 240, 800, 600])
     expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 300, 300, 0, 0, Math.PI * 2])
   })
 
@@ -644,4 +646,108 @@ describe('drawImageToCanvasWithModifiers with a mask and a stroke', () => {
       expect(ctx.argsFor('save').length).toBe(ctx.argsFor('restore').length)
     }
   )
+})
+
+describe('destBox', () => {
+  it('throws rather than return a plausible wrong box for a three-argument drawImage (ESCSUITE-6 review follow-up)', () => {
+    // canvasRenderer.ts's shape-overlay background blur draws exactly this
+    // form — ctx.drawImage(offscreen, 0, 0) — on the same context a media clip
+    // draws to. Without the guard, destBox(['img', 0, 0]) would silently
+    // return ['img', 0, 0, undefined]: a four-element array that looks like a
+    // box but whose first element is the source, not an x coordinate.
+    expect(() => destBox(['img', 0, 0])).toThrow(/3-argument drawImage/)
+  })
+})
+
+// ESCSUITE-6. Written twice, once per draw function, for the same reason the
+// mask cases are: these two are near-duplicates and a crop added to one and not
+// the other would give videos a crop and images none.
+const RIGHT_HALF: ClipCrop = { left: 0.5, top: 0, right: 0, bottom: 0 }
+
+describe('drawClipToCanvas with a crop', () => {
+  const draw = (clip: Clip) => drawClipToCanvas(asCtx(), frame(640, 360), clip, 0, W, H)
+
+  it('takes the cropped region of the source', () => {
+    draw(makeClip({ crop: RIGHT_HALF }))
+
+    // The right half of a 640x360 frame: 320 wide, starting at x 320.
+    expect(sourceBox(ctx.argsFor('drawImage')[0])).toEqual([320, 0, 320, 360])
+  })
+
+  it('shrinks the picture in place rather than stretching it back over the box', () => {
+    draw(makeClip({ crop: RIGHT_HALF }))
+
+    // 320x360 at scale 1, still centred on (960, 540): the box runs
+    // (800, 360)-(1120, 720). A crop that kept the old 640-wide box would be a
+    // zoom, which is a different feature.
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([800, 360, 320, 360])
+  })
+
+  it('scales the cropped region, not the whole frame', () => {
+    draw(
+      makeClip({
+        crop: RIGHT_HALF,
+        transform: { x: 0.5, y: 0.5, scaleX: 2, scaleY: 2, rotation: 0, opacity: 1 },
+      })
+    )
+
+    // 320x360 doubled is 640x720, centred on (960, 540).
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([640, 180, 640, 720])
+  })
+
+  it('inscribes a mask in the cropped box', () => {
+    draw(makeClip({ crop: RIGHT_HALF, mask: CIRCLE }))
+
+    // min(320, 360) / 2 = 160, centred on (960, 540) — not the 180 an uncropped
+    // clip gets from min(640, 360).
+    expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 160, 160, 0, 0, Math.PI * 2])
+  })
+
+  it('rotates about the cropped rectangle’s centre, which the crop never moves (ESCSUITE-6 review follow-up)', () => {
+    // The crop moves the destination box's ORIGIN (constraint 4 of the Task 2
+    // review) but never its centre, so the pivot `ctx.translate` moves to and
+    // back from is unaffected by the crop even though the box it rotates is
+    // smaller. Pinning that the pivot is still (960, 540) — not, say, a corner
+    // of the cropped box — is the property a future change to how x/y are
+    // derived could break silently.
+    draw(
+      makeClip({
+        crop: RIGHT_HALF,
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 90, opacity: 1 },
+      })
+    )
+
+    expect(ctx.argsFor('translate')).toEqual([
+      [960, 540],
+      [-960, -540],
+    ])
+    // The destination box itself is unmoved by the rotation: same 320x360 box
+    // centred on (960, 540) as the unrotated case above.
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([800, 360, 320, 360])
+  })
+})
+
+describe('drawImageToCanvasWithModifiers with a crop', () => {
+  const draw = (clip: Clip) =>
+    drawImageToCanvasWithModifiers(asCtx(), loadedImage(800, 600), clip, 0, W, H)
+
+  it('takes the cropped region of the source', () => {
+    draw(makeClip({ crop: RIGHT_HALF }))
+
+    expect(sourceBox(ctx.argsFor('drawImage')[0])).toEqual([400, 0, 400, 600])
+  })
+
+  it('shrinks the picture in place rather than stretching it back over the box', () => {
+    draw(makeClip({ crop: RIGHT_HALF }))
+
+    // 400x600 centred on (960, 540).
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([760, 240, 400, 600])
+  })
+
+  it('inscribes a mask in the cropped box', () => {
+    draw(makeClip({ crop: RIGHT_HALF, mask: CIRCLE }))
+
+    // min(400, 600) / 2 = 200.
+    expect(ctx.argsFor('ellipse')[0]).toEqual([960, 540, 200, 200, 0, 0, Math.PI * 2])
+  })
 })

@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } fr
 import { drawClipToCanvas, drawTransition, drawTransitionWithFrames } from './canvasRenderer'
 import {
   createRecordingContext,
+  destBox,
   type RecordingCanvasRenderingContext2D,
 } from '../test/doubles/canvas'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
@@ -126,7 +127,7 @@ describe('drawTransition', () => {
 
     expect(draw('slide-up', 0.25)).toBe(true)
     // 800x450 centred at 540 is y=315, offset down by the slide's h * (1 - progress).
-    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([315 + H * 0.75])
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[1])).toEqual([315 + H * 0.75])
     expect(drawnAlphas()).toEqual([1])
   })
 
@@ -285,7 +286,7 @@ describe('drawTransition', () => {
     draw('slide-left', 0.25)
 
     // Native 640x360 centred at 960 is x=640; 800x450 centred is x=560.
-    expect(ctx.argsFor('drawImage').map((a) => a[1])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[0])).toEqual([
       640 - W * 0.25,
       560 + W * 0.75,
     ])
@@ -294,7 +295,7 @@ describe('drawTransition', () => {
   it('slides right: outgoing exits right, incoming enters from the left', () => {
     draw('slide-right', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[1])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[0])).toEqual([
       640 + W * 0.25,
       560 - W * 0.75,
     ])
@@ -303,7 +304,7 @@ describe('drawTransition', () => {
   it('slides up: outgoing exits upward, incoming enters from below', () => {
     draw('slide-up', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[1])).toEqual([
       360 - H * 0.25,
       315 + H * 0.75,
     ])
@@ -312,7 +313,7 @@ describe('drawTransition', () => {
   it('slides down: outgoing exits downward, incoming enters from above', () => {
     draw('slide-down', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[1])).toEqual([
       360 + H * 0.25,
       315 - H * 0.75,
     ])
@@ -382,7 +383,7 @@ describe('drawTransitionWithFrames', () => {
 
   it('slides the incoming frame in from below when the outgoing is missing', () => {
     expect(draw('slide-up', 0.25, [null, inFrame])).toBe(true)
-    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([315 + H * 0.75])
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[1])).toEqual([315 + H * 0.75])
     expect(drawnAlphas()).toEqual([1])
   })
 
@@ -448,7 +449,7 @@ describe('drawTransitionWithFrames', () => {
   it('slides left: outgoing exits left, incoming enters from the right', () => {
     draw('slide-left', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[1])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[0])).toEqual([
       640 - W * 0.25,
       560 + W * 0.75,
     ])
@@ -457,7 +458,7 @@ describe('drawTransitionWithFrames', () => {
   it('slides right: outgoing exits right, incoming enters from the left', () => {
     draw('slide-right', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[1])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[0])).toEqual([
       640 + W * 0.25,
       560 - W * 0.75,
     ])
@@ -466,7 +467,7 @@ describe('drawTransitionWithFrames', () => {
   it('slides up: outgoing exits upward, incoming enters from below', () => {
     draw('slide-up', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[1])).toEqual([
       360 - H * 0.25,
       315 + H * 0.75,
     ])
@@ -475,7 +476,7 @@ describe('drawTransitionWithFrames', () => {
   it('slides down: outgoing exits downward, incoming enters from above', () => {
     draw('slide-down', 0.25)
 
-    expect(ctx.argsFor('drawImage').map((a) => a[2])).toEqual([
+    expect(ctx.argsFor('drawImage').map((a) => destBox(a)[1])).toEqual([
       360 + H * 0.25,
       315 - H * 0.75,
     ])
@@ -694,7 +695,7 @@ describe('a transition owns its sides own entrance and exit (ESCSUITE-139)', () 
       drawTransition(asCtx(), videos, new Map(), keyframed, CURRENT_TIME, W, H)
 
       // 800x450 centred at x = 0.25 * 1920 = 480 is drawn from x = 80.
-      expect(ctx.argsFor('drawImage').map((a) => a[1])).toEqual([640, 80])
+      expect(ctx.argsFor('drawImage').map((a) => destBox(a)[0])).toEqual([640, 80])
       expect(drawnAlphas()).toEqual([0.5, 0.5])
     })
 

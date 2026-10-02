@@ -21,6 +21,7 @@ import { useClipEditorActions } from './useClipEditorActions'
 import { useEditorStore } from '../../store/projectStore'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { DEFAULT_CLIP_MASK_RADIUS } from '../../store/types'
+import { MAX_CROP_INSET } from '../../core/clipCrop'
 import type { Clip, SourceVideo } from '../../store/types'
 
 /** The store actions the hook reaches for, wrapped so their arguments are visible. */
@@ -155,6 +156,7 @@ describe('useClipEditorActions with nothing selected', () => {
       result.current.handleShapeDataChange({ strokeWidth: 2 })
       result.current.handleMaskChange({ kind: 'circle' })
       result.current.handleStrokeChange({ color: '#ffffff', width: 0.004 })
+      result.current.handleCropChange({ left: 0.25, top: 0, right: 0, bottom: 0 })
     })
 
     for (const name of ACTIONS) expect(spies[name]).not.toHaveBeenCalled()
@@ -536,6 +538,36 @@ describe('useClipEditorActions transform', () => {
     // min(1920/3840, 1080/2160) === 0.5
     expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleX: 0.5, scaleY: 0.5 })
     expect(clipNow(clip.id).transform).toMatchObject({ scaleX: 0.5, scaleY: 0.5 })
+  })
+
+  it('fits the cropped region rather than the whole source (MINOR 2, final review)', () => {
+    // A wide, short source so width stays the controlling axis both before and
+    // after the crop, and the arithmetic reads cleanly: uncropped, the picture
+    // is 2000px wide and Fit to Canvas picks 1920/2000 = 0.96; cropped to half
+    // its width, the picture actually drawn is 1000px wide, so the scale that
+    // fits it is exactly double.
+    const wide: SourceVideo = { ...video, id: 'wide', width: 2000, height: 100 }
+    store().addSourceVideo(wide)
+    store().addClipToTimeline(
+      {
+        id: 'wideClip',
+        sourceVideoId: wide.id,
+        name: 'wideClip',
+        startTime: 0,
+        endTime: 2,
+        duration: 2,
+        crop: { left: 0, top: 0, right: 0.5, bottom: 0 },
+      },
+      undefined,
+      0
+    )
+    const clip = select(store().project.timeline.clips.find((c) => c.id === 'wideClip')!)
+    const { result } = mount()
+
+    act(() => result.current.handleFitToCanvas())
+
+    expect(spies.updateClipTransform).toHaveBeenCalledWith(clip.id, { scaleX: 1.92, scaleY: 1.92 })
+    expect(clipNow(clip.id).transform).toMatchObject({ scaleX: 1.92, scaleY: 1.92 })
   })
 
   it('does not fit a clip that has no source video', () => {
@@ -986,5 +1018,156 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     // Derived from the `resolution` selector this hook has always had — no new
     // subscription, which is the rule `ClipEditor.rerender.test.tsx` holds.
     expect(result.current.frameWidth).toBe(store().project.resolution.width)
+  })
+})
+
+// ESCSUITE-6. `CropSection` reports what the user did; this handler decides what
+// gets stored, so the store only ever holds canonical shapes — the same division
+// of labour the mask and stroke handlers above have.
+describe('useClipEditorActions crop (ESCSUITE-6)', () => {
+  // The fixture source is 1920x1080 (test/fixtures/projectStore.ts).
+  const CROP = { left: 0.25, top: 0.1, right: 0, bottom: 0 }
+
+  it('stores the crop the section reported, through the action that already existed', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ ...CROP }))
+
+    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { crop: CROP }, false)
+    expect(clipNow(clip.id).crop).toEqual(CROP)
+  })
+
+  it('removes the crop rather than storing four zeroes', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    act(() => result.current.handleCropChange({ ...CROP }))
+
+    act(() => result.current.handleCropChange({ left: 0, top: 0, right: 0, bottom: 0 }))
+
+    // So a clip that was never cropped and one whose crop was reset are the same
+    // object, and `undefined === none` stays the only rule the renderer, the
+    // geometry and the validator need to know.
+    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { crop: undefined }, false)
+    expect(clipNow(clip.id).crop).toBeUndefined()
+  })
+
+  it('clamps an inset the section somehow reported past the maximum', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ left: 2, top: -1, right: 0, bottom: 0 }))
+
+    expect(clipNow(clip.id).crop).toEqual({
+      left: MAX_CROP_INSET,
+      top: 0,
+      right: 0,
+      bottom: 0,
+    })
+  })
+
+  it('writes nothing for a crop that would leave less than a source pixel', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    act(() => result.current.handleCropChange({ ...CROP }))
+    spies.updateClip.mockClear()
+
+    // Two sliders at their 90% maximum, which is reachable: the handler refuses
+    // rather than silently moving one of them, and the stored crop is untouched.
+    act(() => result.current.handleCropChange({ left: 0.9, top: 0, right: 0.9, bottom: 0 }))
+
+    expect(spies.updateClip).not.toHaveBeenCalled()
+    expect(clipNow(clip.id).crop).toEqual(CROP)
+  })
+
+  it('writes nothing for a clip with no source media', () => {
+    // An overlay never carries a crop: there is no source frame for insets to be
+    // fractions of. The guard is what makes that true rather than documented.
+    textClip()
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ ...CROP }))
+
+    expect(spies.updateClip).not.toHaveBeenCalled()
+  })
+
+  // MINOR 4, final review. A media clip can name a source the library has
+  // lost — a session restored against a cleared store — and `sourceVideo` is
+  // then undefined even though the clip is not an overlay. There are no
+  // dimensions to measure a real inset's one-pixel floor against, but an
+  // all-zero write needs no dimensions at all: it means "no crop", and a
+  // clip whose source is gone should not be stuck with one forever.
+  it('clears a stored crop with an all-zero write even when the source has left the library', () => {
+    store().addClipToTimeline(
+      {
+        id: 'clip1',
+        sourceVideoId: 'gone',
+        name: 'clip1',
+        startTime: 0,
+        endTime: 2,
+        duration: 2,
+        crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+      },
+      undefined,
+      0
+    )
+    const clip = select(store().project.timeline.clips.find((c) => c.id === 'clip1')!)
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ left: 0, top: 0, right: 0, bottom: 0 }))
+
+    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { crop: undefined }, false)
+    expect(clipNow(clip.id).crop).toBeUndefined()
+  })
+
+  it('still refuses a non-zero inset when the source has left the library', () => {
+    store().addClipToTimeline(
+      {
+        id: 'clip1',
+        sourceVideoId: 'gone',
+        name: 'clip1',
+        startTime: 0,
+        endTime: 2,
+        duration: 2,
+        crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+      },
+      undefined,
+      0
+    )
+    const clip = select(store().project.timeline.clips.find((c) => c.id === 'clip1')!)
+    const { result } = mount()
+
+    act(() => result.current.handleCropChange({ left: 0.3, top: 0, right: 0, bottom: 0 }))
+
+    expect(spies.updateClip).not.toHaveBeenCalled()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.2, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('asks the slider gesture what each crop write should do about history', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+
+    act(() => result.current.sliderGesture.onPointerDown())
+    act(() => result.current.handleCropChange({ left: 0.1, top: 0, right: 0, bottom: 0 }))
+    act(() => result.current.handleCropChange({ left: 0.2, top: 0, right: 0, bottom: 0 }))
+    act(() => result.current.sliderGesture.onPointerUp())
+
+    // One drag, one undo entry.
+    expect(spies.updateClip).toHaveBeenNthCalledWith(1, clip.id, { crop: { left: 0.1, top: 0, right: 0, bottom: 0 } }, false)
+    expect(spies.updateClip).toHaveBeenNthCalledWith(2, clip.id, { crop: { left: 0.2, top: 0, right: 0, bottom: 0 } }, true)
+  })
+
+  it('one undo takes the crop off and leaves the mask on', () => {
+    const clip = mediaClip()
+    const { result } = mount()
+    useEditorStore.setState({ history: { past: [], future: [] } })
+
+    act(() => result.current.handleMaskChange({ kind: 'circle' }))
+    act(() => result.current.handleCropChange({ ...CROP }))
+
+    expect(useEditorStore.getState().history.past).toHaveLength(2)
+    act(() => store().undo())
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
   })
 })

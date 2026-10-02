@@ -61,4 +61,17 @@ describe('buildSessionSnapshot', () => {
     expect(restored.mask).toEqual({ kind: 'circle' });
     expect(restored.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 });
   });
+
+  it('carries a clip crop through a snapshot round trip (ESCSUITE-6)', () => {
+    // The snapshot takes `state.project` whole, so this needs no code — and
+    // needs this test, because "needs no code" is exactly the claim that rots.
+    const clip = addClip('clip1', 0);
+    const crop = { left: 0.25, top: 0.1, right: 0, bottom: 0 };
+    store().updateClip(clip.id, { crop });
+
+    const snapshot = buildSessionSnapshot(useEditorStore.getState(), 1);
+
+    const restoredClip = snapshot.project.timeline.clips[0];
+    expect(restoredClip.crop).toEqual(crop);
+  });
 });

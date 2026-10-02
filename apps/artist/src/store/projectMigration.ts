@@ -5,6 +5,7 @@ import type { Clip, Project } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from './types';
 import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
+import { isValidCrop } from '../core/clipCrop';
 
 // Ensure timeline has tracks and overlays arrays (migration helper)
 function ensureTimelineHasTracks(project: Project): Project {
@@ -139,6 +140,11 @@ function isValidResolution(resolution: unknown): resolution is { width: number; 
  * *absent* `resolution` is not rejected: that is exactly what
  * `ensureTimelineHasTracks`'s own migration default (1920x1080, below)
  * already handles, unchanged by this ticket.
+ * A clip's `crop`, if present, must be four finite insets >= 0 leaving
+ * something on each axis (ESCSUITE-6) — `core/clipCrop.ts`'s `isValidCrop`.
+ * An *absent* crop is every clip in every project written before that ticket
+ * and is not checked at all; a malformed one would otherwise reach
+ * `croppedSourceRect` and, via a source rect of the wrong sign, `drawImage`.
  */
 export function parseProject(input: unknown): ParseProjectResult {
   if (!input || typeof input !== 'object') {
@@ -172,7 +178,8 @@ export function parseProject(input: unknown): ParseProjectResult {
 
   const seenClipIds = new Set<string>();
   for (const clip of timeline.clips) {
-    const id = (clip as Partial<Clip> | null)?.id;
+    const candidate = clip as Partial<Clip> | null;
+    const id = candidate?.id;
     if (typeof id !== 'string') {
       return { ok: false, reason: 'A clip is missing an id' };
     }
@@ -180,6 +187,12 @@ export function parseProject(input: unknown): ParseProjectResult {
       return { ok: false, reason: `Duplicate clip id: ${id}` };
     }
     seenClipIds.add(id);
+
+    // ESCSUITE-6. Checked here rather than after migration because migration
+    // never touches `crop` — unlike `trackId`, which it can supply.
+    if (candidate?.crop !== undefined && !isValidCrop(candidate?.crop)) {
+      return { ok: false, reason: `Clip "${id}" has an invalid crop` };
+    }
   }
 
   const migrated = ensureTimelineHasTracks(candidate as Project);

@@ -14,7 +14,7 @@ import {
 } from '../../test/renderPreview'
 import { getVideoBlob } from '../../core/storage'
 import { drawClipToCanvas } from '../../core/canvasRenderer'
-import { createRecordingContext } from '../../test/doubles/canvas'
+import { createRecordingContext, destBox } from '../../test/doubles/canvas'
 import { PreviewPlayer } from './PreviewPlayer'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -56,7 +56,7 @@ describe('PreviewPlayer drawing', () => {
     expect(clear.state.fillStyle).toBe('#000000')
     // Scale 1 means native source pixels, centred on the canvas.
     const [draw] = frame.of('drawImage')
-    expect(draw.args.slice(1)).toEqual([0, 0, 1920, 1080])
+    expect(destBox(draw.args)).toEqual([0, 0, 1920, 1080])
     expect(draw.args[0]).toBe(doubles.media.videos[0])
   })
 
@@ -84,7 +84,7 @@ describe('PreviewPlayer drawing', () => {
     const [draw] = preview.frame().of('drawImage')
     expect(draw.args[0]).toBe(doubles.media.images[0])
     // 800x600 centred on a 1920x1080 canvas.
-    expect(draw.args.slice(1)).toEqual([560, 240, 800, 600])
+    expect(destBox(draw.args)).toEqual([560, 240, 800, 600])
   })
 
   it('never draws an audio clip', async () => {
@@ -106,7 +106,7 @@ describe('PreviewPlayer drawing', () => {
 
     const preview = await renderPreview()
 
-    const widths = preview.frame().argsFor('drawImage').map((args) => args[3])
+    const widths = preview.frame().argsFor('drawImage').map((args) => destBox(args)[2])
     expect(widths).toEqual([1920, 960])
   })
 
@@ -140,7 +140,7 @@ describe('PreviewPlayer drawing', () => {
     ])
     expect(frame.argsFor('rotate')).toEqual([[Math.PI / 2]])
     // scale 2 on a 1920x1080 source, still centred.
-    expect(draw.args.slice(1)).toEqual([-960, -540, 3840, 2160])
+    expect(destBox(draw.args)).toEqual([-960, -540, 3840, 2160])
   })
 
   it('leaves the filter off when the clip has no blur', async () => {

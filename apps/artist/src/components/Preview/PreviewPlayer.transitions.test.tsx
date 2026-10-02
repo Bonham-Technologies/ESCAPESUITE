@@ -11,6 +11,7 @@ import {
   settle,
   type PreviewDoubles,
 } from '../../test/renderPreview'
+import { destBox } from '../../test/doubles/canvas'
 import type { TransitionType } from '../../store/types'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -165,7 +166,7 @@ describe('PreviewPlayer transitions', () => {
     await settle(FRAME_MS)
 
     // offsetX -960 for the outgoing clip, +960 for the incoming one.
-    expect(preview.frame().argsFor('drawImage').map((args) => args[1])).toEqual([-960, 960])
+    expect(preview.frame().argsFor('drawImage').map((args) => destBox(args)[0])).toEqual([-960, 960])
   })
 
   it('offsets both clips vertically for slide-up', async () => {
@@ -177,7 +178,7 @@ describe('PreviewPlayer transitions', () => {
     store().setCurrentTime(1.5)
     await settle(FRAME_MS)
 
-    expect(preview.frame().argsFor('drawImage').map((args) => args[2])).toEqual([-540, 540])
+    expect(preview.frame().argsFor('drawImage').map((args) => destBox(args)[1])).toEqual([-540, 540])
   })
 
   it('slides the other way for slide-right and slide-down', async () => {
@@ -186,14 +187,14 @@ describe('PreviewPlayer transitions', () => {
     preview.clearCalls()
     store().setCurrentTime(1.5)
     await settle(FRAME_MS)
-    expect(preview.frame().argsFor('drawImage').map((args) => args[1])).toEqual([960, -960])
+    expect(preview.frame().argsFor('drawImage').map((args) => destBox(args)[0])).toEqual([960, -960])
 
     // Clear before the edit, not after: the playhead does not move, so the
     // only composite is the one the transition change itself provokes.
     preview.clearCalls()
     store().updateClipTransition('a', { type: 'slide-down' })
     await settle(FRAME_MS)
-    expect(preview.frame().argsFor('drawImage').map((args) => args[2])).toEqual([540, -540])
+    expect(preview.frame().argsFor('drawImage').map((args) => destBox(args)[1])).toEqual([540, -540])
   })
 
   it('draws both clips untouched when the transition type is unknown', async () => {
@@ -241,7 +242,7 @@ describe('PreviewPlayer transitions', () => {
     await settle(FRAME_MS)
 
     // b, drawn at half size, is the incoming clip — not the later c.
-    expect(preview.frame().argsFor('drawImage').map((args) => args[3])).toEqual([1920, 960])
+    expect(preview.frame().argsFor('drawImage').map((args) => destBox(args)[2])).toEqual([1920, 960])
   })
 
   it('takes the top-most of the clips visible on other tracks', async () => {
@@ -261,7 +262,7 @@ describe('PreviewPlayer transitions', () => {
 
     // The clip on the higher of the two remaining tracks wins the transition,
     // and is the half-size one drawn last.
-    expect(last(preview.frame().argsFor('drawImage'))[3]).toBe(960)
+    expect(destBox(last(preview.frame().argsFor('drawImage')))[2]).toBe(960)
   })
 
   it('ignores a transition with no clip to transition into', async () => {

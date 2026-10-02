@@ -16,6 +16,8 @@ import {
 } from './clipMask'
 import {
   createRecordingContext,
+  destBox,
+  sourceBox,
   type RecordingCanvasRenderingContext2D,
 } from '../test/doubles/canvas'
 import type { ClipMask, ClipStroke } from '../store/types'
@@ -295,10 +297,18 @@ describe('drawWithMaskAndStroke', () => {
    */
   const SOURCE = {} as unknown as CanvasImageSource
 
-  const run = (mask: ClipMask | undefined, stroke: ClipStroke | undefined) =>
+  /** The whole of a 640x360 source: what an uncropped clip hands over. */
+  const WHOLE = { sx: 0, sy: 0, sw: 640, sh: 360 } as const
+
+  const run = (
+    mask: ClipMask | undefined,
+    stroke: ClipStroke | undefined,
+    sourceRect: { sx: number; sy: number; sw: number; sh: number } = WHOLE
+  ) =>
     drawWithMaskAndStroke(
       asCtx(),
       SOURCE,
+      sourceRect,
       mask,
       stroke,
       BOX.x,
@@ -319,9 +329,11 @@ describe('drawWithMaskAndStroke', () => {
 
     expect(ctx.calls.map((c) => c.method)).toEqual(['drawImage'])
     // The helper issues the draw itself, so this is also the pin on the
-    // pass-through: the source and the box it was handed, unchanged, in the
-    // five-argument form both callers used before it existed.
-    expect(ctx.argsFor('drawImage')[0]).toEqual([SOURCE, 50, 30, 200, 100])
+    // pass-through: the source, the region and the box it was handed, unchanged.
+    // Nine arguments, always (ESCSUITE-6): the source region first, the
+    // destination box second. An uncropped clip passes its whole frame, which is
+    // the same picture the five-argument form drew.
+    expect(ctx.argsFor('drawImage')[0]).toEqual([SOURCE, 0, 0, 640, 360, 50, 30, 200, 100])
   })
 
   it('clips before the picture and takes no save for a mask alone', () => {
@@ -378,5 +390,65 @@ describe('drawWithMaskAndStroke', () => {
 
     expect(ctx.calls.map((c) => c.method)).toEqual(['drawImage'])
     expect(ctx.argsFor('drawImage')).toHaveLength(1)
+  })
+
+  it('draws the source region it is handed, not the whole frame', () => {
+    // A clip cropped to the right half of a 640x360 source: the region starts
+    // at x 320 and is 320x360. The destination box is the caller's business and
+    // is untouched by this.
+    run(undefined, undefined, { sx: 320, sy: 0, sw: 320, sh: 360 })
+
+    expect(sourceBox(ctx.argsFor('drawImage')[0])).toEqual([320, 0, 320, 360])
+    expect(destBox(ctx.argsFor('drawImage')[0])).toEqual([50, 30, 200, 100])
+  })
+
+  it('masks the destination box, not the source region', () => {
+    // The mask is inscribed in the box the picture lands in — which a crop makes
+    // smaller — so a cropped, circle-masked clip gets the smaller circle. This
+    // function is handed both and has no opinion; the pin is that it reads the
+    // right one.
+    run(CIRCLE, undefined, { sx: 320, sy: 0, sw: 320, sh: 360 })
+
+    // min(200, 100) / 2 = 50, centred on (150, 80) — the destination box.
+    expect(ctx.argsFor('ellipse')[0]).toEqual([150, 80, 50, 50, 0, 0, Math.PI * 2])
+  })
+
+  it('strokes the destination box for a cropped clip too', () => {
+    run(undefined, STROKE, { sx: 320, sy: 0, sw: 320, sh: 360 })
+
+    expect(ctx.calls.map((c) => c.method)).toEqual([
+      'save',
+      'drawImage',
+      'restore',
+      'beginPath',
+      'rect',
+      'stroke',
+    ])
+    expect(ctx.argsFor('rect')[0]).toEqual([50, 30, 200, 100])
+  })
+
+  it('reads the rounded radius as a fraction of the shorter CROPPED side (ESCSUITE-6 review follow-up)', () => {
+    // Unlike every other case in this suite, the destination box here is NOT
+    // the fixture-wide BOX (200x100, min 100) — it is what canvasRenderer.ts
+    // actually hands this function for a clip cropped to the right half of a
+    // 640x360 source at scale 1 (canvasRenderer.clips.test.ts's own crop
+    // fixture): 320x360, min 320. 0.25 x 320 = 80, not the 0.25 x min(640, 360)
+    // = 90 an uncropped clip at the same scale would give — the rounded corner
+    // is a fraction of the box this helper is handed, the same box the circle
+    // case above is inscribed in, not of the source frame's own shape.
+    drawWithMaskAndStroke(
+      asCtx(),
+      SOURCE,
+      { sx: 320, sy: 0, sw: 320, sh: 360 },
+      { kind: 'rounded', radius: 0.25 },
+      undefined,
+      800,
+      360,
+      320,
+      360,
+      1280
+    )
+
+    expect(ctx.argsFor('roundRect')[0]).toEqual([800, 360, 320, 360, 80])
   })
 })

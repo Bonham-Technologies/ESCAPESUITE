@@ -279,6 +279,7 @@ describe('ClipEditor shape overlay', () => {
     expect(screen.queryByRole('button', { name: 'Split' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Blend Mode' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Mask & Stroke' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Crop' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Transition Out' })).not.toBeInTheDocument()
   })
 })

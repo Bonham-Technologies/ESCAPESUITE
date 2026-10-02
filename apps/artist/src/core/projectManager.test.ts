@@ -213,6 +213,23 @@ describe('saveProject', () => {
     const anchor = clickSpy.mock.contexts[0] as HTMLAnchorElement
     expect(anchor.download).toBe('project.veditor')
   })
+
+  it('writes a clip crop into the .veditor (ESCSUITE-6)', async () => {
+    const videoId = uniqueId('crop-save')
+    await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(videoId))
+    const project = createTestProject(videoId)
+    project.timeline.clips[0].crop = { left: 0.25, top: 0.1, right: 0, bottom: 0 }
+
+    await saveProject(project, [sourceVideo(videoId)])
+
+    const written = await capturedProjectFile()
+    expect(written.project.timeline.clips[0].crop).toEqual({
+      left: 0.25,
+      top: 0.1,
+      right: 0,
+      bottom: 0,
+    })
+  })
 })
 
 describe('loadProject', () => {
@@ -462,6 +479,17 @@ describe('loadProject', () => {
     // Self-contained: this test's own row does not linger for later tests in
     // this file (which all share one fake-indexeddb instance) to trip over.
     await deleteVideo(videoId)
+  })
+
+  it('reads a clip crop back out of a .veditor (ESCSUITE-6)', async () => {
+    const videoId = uniqueId('crop-load')
+    const crop = { left: 0.25, top: 0.1, right: 0, bottom: 0 }
+    const project = createTestProject(videoId)
+    project.timeline.clips[0].crop = crop
+
+    const { project: loaded } = await loadProject(veditorFile({ project }, videoId))
+
+    expect(loaded.timeline.clips[0].crop).toEqual(crop)
   })
 })
 

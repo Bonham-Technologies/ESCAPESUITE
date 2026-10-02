@@ -65,6 +65,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_CLIP_MASK_RADIUS } from '../../store/types';
 import type {
   BlendMode,
   Clip,
+  ClipCrop,
   ClipMask,
   ClipStroke,
   TransitionType,
@@ -76,6 +77,7 @@ import type {
   AnimationPresetType,
   EasingType,
 } from '../../store/types';
+import { croppedSourceRect, normaliseCrop } from '../../core/clipCrop';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
@@ -123,6 +125,7 @@ export interface ClipEditorActions {
   handleBlendModeChange: (mode: BlendMode) => void;
   handleMaskChange: (mask: ClipMask) => void;
   handleStrokeChange: (stroke: ClipStroke) => void;
+  handleCropChange: (crop: ClipCrop) => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
   handleTransitionDurationChange: (duration: number) => void;
@@ -310,6 +313,41 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClip, commit]
   );
 
+  // ESCSUITE-6. `CropSection` reports what the user did — four percentages, and
+  // the insets an aspect preset computed — and this decides what gets stored, so
+  // the store only ever holds canonical shapes: insets inside 0-90%, no
+  // all-zero crop, and nothing that would leave less than one source pixel.
+  //
+  // `sourceVideo` is the guard that keeps a crop off an overlay: insets are
+  // fractions of a source frame, and an overlay has none. It is also what the
+  // one-pixel floor is measured against, which is why it is read here rather
+  // than in the section.
+  //
+  // A *media* clip can still have no `sourceVideo` — its source has left the
+  // library (a session restored against a cleared store, say). There are no
+  // dimensions to measure a real inset against, so any non-zero crop is
+  // refused exactly as an overlay's would be (MINOR 4, final review). But an
+  // all-zero write needs no dimensions at all — it means "no crop" — and a
+  // clip in that state should not be stuck with a stored crop forever: Reset
+  // and the "None" preset both report it, so both keep working.
+  const handleCropChange = useCallback(
+    (crop: ClipCrop) => {
+      if (!selectedClip) return;
+      if (!sourceVideo) {
+        if (crop.left !== 0 || crop.top !== 0 || crop.right !== 0 || crop.bottom !== 0) return;
+        commit((skipHistory) => updateClip(selectedClip.id, { crop: undefined }, skipHistory));
+        return;
+      }
+      const decision = normaliseCrop(crop, sourceVideo.width, sourceVideo.height);
+      // Refused: a crop that would leave nothing on an axis is not written at
+      // all, so the slider the user is dragging snaps back to what is stored
+      // rather than to a number nobody asked for.
+      if (!decision.ok) return;
+      commit((skipHistory) => updateClip(selectedClip.id, { crop: decision.crop }, skipHistory));
+    },
+    [selectedClip, sourceVideo, updateClip, commit]
+  );
+
   const handleBlurChange = useCallback(
     (blur: number) => {
       if (!selectedClip) return;
@@ -473,7 +511,11 @@ export function useClipEditorActions(): ClipEditorActions {
 
   const handleFitToCanvas = useCallback(() => {
     if (!selectedClip || !sourceVideo) return;
-    const fitScale = fitToCanvasScale(resolution, sourceVideo);
+    // ESCSUITE-6, MINOR 2 (final review): fit the picture the clip actually
+    // draws, which is the cropped region when it has one — not the whole,
+    // uncropped source.
+    const { sw, sh } = croppedSourceRect(sourceVideo.width, sourceVideo.height, selectedClip.crop);
+    const fitScale = fitToCanvasScale(resolution, { width: sw, height: sh });
     updateClipTransform(selectedClip.id, { scaleX: fitScale, scaleY: fitScale });
   }, [selectedClip, sourceVideo, resolution, updateClipTransform]);
 
@@ -537,6 +579,7 @@ export function useClipEditorActions(): ClipEditorActions {
     handleBlendModeChange,
     handleMaskChange,
     handleStrokeChange,
+    handleCropChange,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
