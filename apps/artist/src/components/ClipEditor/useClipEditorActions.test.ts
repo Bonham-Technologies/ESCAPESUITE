@@ -1088,6 +1088,23 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
       right: 0,
       bottom: 0,
     })
+    // ESCSUITE-171, MINOR 1 (review round 1): the compensating centre is
+    // computed from the **clamped** crop, not from what the section reported.
+    // 90% off a 1920-wide source puts the kept region's centre at 1824, which is
+    // 864 source pixels right of 960 and at scale 1 is +0.45 of the frame.
+    // Handing `cropWriteFor` the raw `{ left: 2, top: -1 }` instead computes the
+    // centre from a region `croppedSourceRect` has floored to one source pixel
+    // and lands at x 2.0002604166666664, y 0 — which every other case on this
+    // branch passes over, because they all report insets `normaliseCrop` leaves
+    // alone.
+    expect(spies.updateClip).toHaveBeenCalledWith(
+      clip.id,
+      {
+        crop: { left: MAX_CROP_INSET, top: 0, right: 0, bottom: 0 },
+        transform: { ...clip.transform, x: 0.95, y: 0.5 },
+      },
+      false
+    )
   })
 
   it('writes nothing for a crop that would leave less than a source pixel', () => {
@@ -1176,18 +1193,24 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     act(() => result.current.handleCropChange({ left: 0.2, top: 0, right: 0, bottom: 0 }))
     act(() => result.current.sliderGesture.onPointerUp())
 
-    // One drag, one undo entry. Asserted off the mock's own calls rather than
-    // with `toHaveBeenNthCalledWith` because the second write's compensating
-    // centre (ESCSUITE-171) is 0.6 only to within a double's last bit — the
-    // history flag is what this case is about.
+    // One drag, one undo entry — and exactly two writes, so a third could not
+    // slip past. Each write's compensating centre (ESCSUITE-171) is rebased from
+    // what the previous one stored, which is why the second is written as
+    // `0.55 + 96 / 1920` rather than 0.6: that telescope is exact, where the
+    // literal 0.6 is a double's last bit away from it.
+    expect(spies.updateClip).toHaveBeenCalledTimes(2)
     const [first, second] = spies.updateClip.mock.calls
+    expect(first[0]).toBe(clip.id)
     expect(first[1]).toEqual({
       crop: { left: 0.1, top: 0, right: 0, bottom: 0 },
-      transform: { ...clip.transform, x: 0.55, y: 0.5 },
+      transform: { ...clip.transform, x: 0.5 + 96 / 1920, y: 0.5 },
     })
     expect(first[2]).toBe(false)
-    expect(second[1].crop).toEqual({ left: 0.2, top: 0, right: 0, bottom: 0 })
-    expect(second[1].transform.x).toBeCloseTo(0.6, 10)
+    expect(second[0]).toBe(clip.id)
+    expect(second[1]).toEqual({
+      crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+      transform: { ...clip.transform, x: 0.55 + 96 / 1920, y: 0.5 },
+    })
     expect(second[2]).toBe(true)
   })
 

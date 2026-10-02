@@ -63,7 +63,7 @@ afterEach(() => {
 const mediaClip = (overrides: Partial<Clip> = {}): Clip =>
   makeClip({ id: 'clip1', duration: 4, ...overrides })
 
-function scene(overrides: Partial<CropOverlayScene> = {}) {
+function scene(overrides: Partial<CropOverlayScene> = {}): CropOverlayScene {
   return {
     clips: [mediaClip()],
     sourceVideos: [source],
