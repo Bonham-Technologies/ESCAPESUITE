@@ -89,6 +89,26 @@ const CIRCLE_INSIDE = { x: 28, y: 20, width: 8, height: 8 }
 const CIRCLE_OUTER_X = 6
 const CIRCLE_OUTER_SAMPLE = 2
 
+/**
+ * The cropped case shows the **right half** of the 64x48 fixture (ESCSUITE-6).
+ *
+ * `croppedSourceRect` makes that region 32x48 starting at x 32, the clip is
+ * drawn at `scaleX: 1` — `core/canvasRenderer.ts` reads scale 1 as the native
+ * pixels *of the cropped region* — and the clip's transform is centred, so the
+ * drawn box is x 16-48 and the full height. A crop therefore shrinks the picture
+ * in place: x 0-16 and x 48-64 are the export's black background, where an
+ * uncropped render puts the fixture's red.
+ *
+ * That is also why this case needs no new ffprobe helper and why the two golden
+ * single-clip cases are its control: they assert the **whole** frame at
+ * r > 200, g < 40, b < 40, which a render with two black columns cannot produce.
+ */
+const CROP_RIGHT_HALF = { left: 0.5, top: 0, right: 0, bottom: 0 }
+/** A block wholly in the left bar: outside the drawn box (x 16-48) by 8px. */
+const CROP_BAR = { x: 2, y: 20, width: 8, height: 8 }
+/** A block wholly inside the drawn box, well clear of both edges. */
+const CROP_INSIDE = { x: 28, y: 20, width: 8, height: 8 }
+
 const FFMPEG = hasFfmpeg()
 if (!FFMPEG) {
   // Visible in CI logs: a silently skipped verification suite looks exactly like a passing one.
@@ -120,6 +140,7 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
   let outDir: string
   let twoClipManifest: string
   let maskedManifest: string
+  let croppedManifest: string
   /** Generated in beforeAll; undefined when ffmpeg could not produce it. */
   let bluePath: string | undefined
 
@@ -150,6 +171,11 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
       const [clip0] = project.timeline.clips
       clip0.mask = { kind: 'circle' }
       clip0.stroke = { color: '#ffffff', width: MASKED_STROKE_WIDTH_FRACTION }
+    })
+
+    croppedManifest = await writeManifestDir('cropped', (project) => {
+      const [clip0] = project.timeline.clips
+      clip0.crop = CROP_RIGHT_HALF
     })
 
     // Negative control for the golden-colour check: a clip that is definitively NOT red.
@@ -393,6 +419,47 @@ describe.skipIf(!FFMPEG)('output verification (needs ffmpeg)', () => {
     expect(outerR).toBeGreaterThan(150)
     expect(outerG).toBeGreaterThan(150)
     expect(outerB).toBeGreaterThan(150)
+  }, RENDER_TIMEOUT_MS)
+
+  it('renders a cropped clip through the real engine (ESCSUITE-6)', async () => {
+    const { outputPath } = await render('verify-cropped', 'mp4', croppedManifest)
+
+    const probed = await probe(outputPath)
+    // The OUTPUT raster is unchanged — a crop shrinks the picture inside the
+    // frame, it does not resize the frame.
+    expect(videoStream(probed).width).toBe(EXPECTED_WIDTH)
+    expect(videoStream(probed).height).toBe(EXPECTED_HEIGHT)
+
+    // The left bar: the uncropped render puts the fixture's red here (the two
+    // golden cases assert the whole frame is red), and the cropped one puts the
+    // export's black background here, because the drawn box is 32 wide and
+    // centred rather than 64 wide.
+    const [barR, barG, barB] = await frameRegionRGB(
+      outputPath,
+      MASKED_FRAME,
+      CROP_BAR.x,
+      CROP_BAR.y,
+      CROP_BAR.width,
+      CROP_BAR.height,
+    )
+    expect(barR).toBeLessThan(60)
+    expect(barG).toBeLessThan(60)
+    expect(barB).toBeLessThan(60)
+
+    // ...and the middle is still the clip. Without this, the assertion above
+    // would pass just as well for a render that drew nothing at all — the same
+    // control the masked case needs and for the same reason.
+    const [insideR, insideG, insideB] = await frameRegionRGB(
+      outputPath,
+      MASKED_FRAME,
+      CROP_INSIDE.x,
+      CROP_INSIDE.y,
+      CROP_INSIDE.width,
+      CROP_INSIDE.height,
+    )
+    expect(insideR).toBeGreaterThan(200)
+    expect(insideG).toBeLessThan(40)
+    expect(insideB).toBeLessThan(40)
   }, RENDER_TIMEOUT_MS)
 
   it('reads red from the red fixture and not from a blue control clip', async () => {
