@@ -13,12 +13,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { CropHandles } from './CropHandles'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
+import { makeClip, makeTransitionInfo } from '../../test/fixtures/clipFixtures'
 import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
 import { setRect } from '../../test/doubles/layout'
 import {
   installResizeObserverDouble,
   type ResizeObserverDouble,
 } from '../../test/doubles/resizeObserver'
+import type { TransitionInfo } from '../../core/exportTypes'
 import type { Clip } from '../../store/types'
 
 let observer: ResizeObserverDouble
@@ -730,5 +732,52 @@ describe('nudging a crop handle from the keyboard', () => {
 
     expect(clipNow(clip.id).crop).toBeUndefined()
     expect(announced()).toBe('')
+  })
+})
+
+describe('the crop frame during a transition (ESCSUITE-147)', () => {
+  // `selectionOverlay.test.ts`' own fixture, over this file's scene: the clip's
+  // last second slides out to the left, so at 3.5s its animation puts its centre
+  // at x 0.25 — the 1920-wide picture's left edge 240 CSS pixels off the left of
+  // a 960px-wide canvas — while the renderer, which suppresses the preset side
+  // the transition has taken over, draws it centred. The handles sit on the
+  // picture, so they have to arrive at the renderer's answer.
+  function mountSliding(transition?: TransitionInfo | null): void {
+    const clip = addClip('clip1', 0, 4)
+    store().updateClipAnimation(clip.id, {
+      out: { type: 'slide-left', duration: 1, easing: 'linear' },
+    })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={3.5}
+        locked={false}
+        transition={transition}
+        onLeave={vi.fn()}
+      />
+    )
+  }
+
+  const frameLeft = (): string =>
+    screen.getByRole('group', { name: 'Crop handles' }).style.left
+
+  it('frames the kept region where the transition draws it', () => {
+    mountSliding(
+      makeTransitionInfo({
+        outgoingClip: makeClip({ id: 'clip1', duration: 4 }),
+        incomingClip: makeClip({ id: 'next', timelinePosition: 4 }),
+      })
+    )
+
+    expect(frameLeft()).toBe('0px')
+  })
+
+  it('frames it at the preset’s own position when no transition owns that side', () => {
+    mountSliding()
+
+    expect(frameLeft()).toBe('-240px')
   })
 })

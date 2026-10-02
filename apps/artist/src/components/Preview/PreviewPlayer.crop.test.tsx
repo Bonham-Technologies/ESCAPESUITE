@@ -134,6 +134,38 @@ describe('crop mode on the preview', () => {
     expect(frameLeft()).toBe('-240px')
   })
 
+  it('derives the transition the chrome and the handles are measured against', async () => {
+    // The ESCSUITE-147 half of the props and arguments the preview computes: the
+    // clip's last second slides out to the left and a fade owns that side, so the
+    // renderer draws it centred and the crop frame has to agree. Nothing else
+    // pins it — `cropOverlay.test.ts` and `CropHandles.test.tsx` are handed a
+    // transition, and so cannot catch the preview failing to derive one.
+    const clip = addClip('clip1', 0, 4)
+    addClip('next', 4, 4)
+    store().updateClipAnimation(clip.id, {
+      out: { type: 'slide-left', duration: 1, easing: 'linear' },
+    })
+    store().setSelectedClipId(clip.id)
+    const preview = await renderPreview()
+    store().setCropClipId(clip.id)
+    const frameLeft = () =>
+      preview.view.getByRole('group', { name: 'Crop handles' }).style.left
+
+    // No transition yet: at 3.5s the preset has the picture — and the frame —
+    // a quarter of the project's width left of centre.
+    store().setCurrentTime(3.5)
+    expect(frameLeft()).toBe('-240px')
+
+    preview.clearCalls()
+    store().updateClipTransition(clip.id, { type: 'fade', duration: 1 })
+
+    expect(frameLeft()).toBe('0px')
+    // The chrome's own translate is the last one of the repaint: the composited
+    // frame goes down first, then the crop dim and its frame on top of it.
+    const translates = preview.argsFor('translate')
+    expect(translates[translates.length - 1]).toEqual([960, 540])
+  })
+
   it('disables the handles it mounts over a locked track', async () => {
     // The `locked={isTrackLocked(...)}` half.
     const clip = addClip('clip1', 0, 4)

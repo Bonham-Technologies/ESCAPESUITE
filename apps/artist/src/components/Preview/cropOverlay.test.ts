@@ -21,7 +21,12 @@ import {
 } from './cropOverlay'
 import { contentBox } from './previewGeometry'
 import { CROP_HANDLES } from '../../core/cropDrag'
-import { makeClip, makeSourceVideo } from '../../test/fixtures/clipFixtures'
+import {
+  makeAnimation,
+  makeClip,
+  makeSourceVideo,
+  makeTransitionInfo,
+} from '../../test/fixtures/clipFixtures'
 import {
   failNextGetContext,
   getCanvasContext,
@@ -328,6 +333,34 @@ describe('drawCropOverlay', () => {
     expect(count('rotate')).toBe(1)
     expect(count('save')).toBe(count('restore'))
     expect(ctx.globalAlpha).toBe(1)
+  })
+})
+
+describe('the crop chrome during a transition (ESCSUITE-147)', () => {
+  // The same fixture `selectionOverlay.test.ts` uses for the selection box: the
+  // clip's last second slides out to the left, so at 3.5s its own animation puts
+  // it at x 0.25 while the renderer — which suppresses the preset side the
+  // transition has taken over — draws it at the base 0.5. Crop mode frames the
+  // picture, so it has to arrive at the renderer's answer the way every other
+  // reader of the geometry now does.
+  const sliding = mediaClip({
+    animation: makeAnimation({ out: { type: 'slide-left', duration: 1, easing: 'linear' } }),
+  })
+  const transition = makeTransitionInfo({
+    outgoingClip: sliding,
+    incomingClip: mediaClip({ id: 'next', timelinePosition: 4 }),
+  })
+
+  it('frames the kept region where the transition draws it', () => {
+    drawCropOverlay(canvas, 3.5, scene({ clips: [sliding] }), element, canvas, 1, { transition })
+
+    expect(ctx.argsFor('translate')).toEqual([[CANVAS_W / 2, CANVAS_H / 2]])
+  })
+
+  it('frames it at the preset’s own position when no transition owns that side', () => {
+    drawCropOverlay(canvas, 3.5, scene({ clips: [sliding] }), element)
+
+    expect(ctx.argsFor('translate')).toEqual([[0.25 * CANVAS_W, CANVAS_H / 2]])
   })
 })
 
