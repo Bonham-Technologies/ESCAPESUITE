@@ -82,6 +82,21 @@ function drag(handle: HTMLButtonElement, dx: number, dy: number, shiftKey = fals
   fireEvent.mouseUp(document)
 }
 
+/**
+ * Let the throttler's animation frame run, so the move it is holding reaches the
+ * store.
+ *
+ * The `drag` helper above never needs this — `mouseup` flushes the pending move
+ * synchronously, so a whole drag is one write. A case that wants SEVERAL writes
+ * inside one drag has to let the frames in between actually fire, which is what
+ * this is for.
+ */
+async function frame(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  })
+}
+
 describe('the crop handle layer', () => {
   it('draws eight handles with eight distinct names, in one named group', () => {
     mount()
@@ -196,6 +211,30 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).transform.y).toBeCloseTo(0.5)
   })
 
+  it('crops from the top, and moves the centre down with it', () => {
+    // The y half of the same arithmetic: 54 CSS pixels is 108 project pixels,
+    // which is a tenth of a 1080-high frame. The kept region is 972 high and its
+    // centre moved 54 project pixels, so the bottom edge of the picture is
+    // exactly where it was — and x is untouched.
+    const { clip, handle } = mount()
+
+    drag(handle('Crop top'), 0, 54)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0, top: 0.1, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).transform.y).toBeCloseTo(0.55)
+    expect(clipNow(clip.id).transform.x).toBe(0.5)
+  })
+
+  it('crops both axes from a corner, and moves the centre on both', () => {
+    const { clip, handle } = mount()
+
+    drag(handle('Crop top left'), 96, 54)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0.1, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).transform.x).toBeCloseTo(0.55)
+    expect(clipNow(clip.id).transform.y).toBeCloseTo(0.55)
+  })
+
   it('reads a rotated clip\'s handles in the clip\'s own frame', () => {
     const clip = addClip('clip1', 0, 4)
     store().updateClipTransform(clip.id, { rotation: 90 })
@@ -261,19 +300,66 @@ describe('the crop handle layer', () => {
     expect(crop.bottom).toBeCloseTo(0.05)
   })
 
-  it('leaves one undo entry for a drag, however many moves it took', () => {
+  it('leaves one undo entry for a drag, however many writes it took', async () => {
+    // Five moves with a frame between each, so five writes actually reach the
+    // store: this is `useGestureHistory`'s mechanism under load — the first
+    // write unskipped and every later one `skipHistory` — and not the "one move,
+    // one write" every other case here produces.
     const { clip, handle } = mount()
     const before = past()
 
     const button = handle('Crop left')
     fireEvent.mouseDown(button, { clientX: 0, clientY: 0 })
+    // 48 CSS pixels a step is 96 project pixels, a twentieth of the 1920-wide
+    // frame — so the fifth write is a quarter of it cropped away.
     for (let step = 1; step <= 5; step++) {
-      fireEvent.mouseMove(document, { clientX: step * 20, clientY: 0 })
+      fireEvent.mouseMove(document, { clientX: step * 48, clientY: 0 })
+      await frame()
+      // The inset as the gesture computes it, so the expectation carries no
+      // rounding of its own: five twentieths, not five times 0.05.
+      const left = (step * 96) / 1920
+      expect(clipNow(clip.id).crop).toEqual({ left, top: 0, right: 0, bottom: 0 })
     }
     fireEvent.mouseUp(document)
 
     expect(past()).toBe(before + 1)
-    expect(clipNow(clip.id).crop).toBeDefined()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.25, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('derives every move from the crop the drag started with, not the one the last move wrote', async () => {
+    // Constraint 8's other headline clause, and the one a stale-prop drag hides:
+    // the component is re-rendered with the clip the FIRST write produced, and
+    // the second move still lands where the pointer is rather than a second
+    // tenth further on. A gesture that rebased on the clip it is editing would
+    // read `left` 0.15 and `transform.x` 0.575 here — the ESCSUITE-110 trim bug,
+    // in a different gesture.
+    const clip = addClip('clip1', 0, 4)
+    const rest = {
+      source: video,
+      canvas: previewCanvas(),
+      projectSize: { width: 1920, height: 1080 },
+      time: 1,
+      locked: false,
+      onLeave: vi.fn(),
+    }
+    const { rerender } = render(<CropHandles clip={clip} {...rest} />)
+    const before = past()
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Crop left' }), { clientX: 0, clientY: 0 })
+    fireEvent.mouseMove(document, { clientX: 48, clientY: 0 })
+    await frame()
+
+    // 48 CSS pixels in: half the eventual crop, and a centre moved half as far.
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.05, top: 0, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).transform.x).toBeCloseTo(0.525)
+    rerender(<CropHandles clip={clipNow(clip.id)} {...rest} />)
+
+    fireEvent.mouseMove(document, { clientX: 96, clientY: 0 })
+    fireEvent.mouseUp(document)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).transform.x).toBeCloseTo(0.55)
+    expect(past()).toBe(before + 1)
   })
 
   it('undoes the drag back to the uncropped clip, at the centre it started from', () => {
@@ -334,6 +420,30 @@ describe('the crop handle layer', () => {
 
     expect(clipNow(clip.id).crop).toBeUndefined()
     expect(past()).toBe(before)
+  })
+
+  it('renders nothing while the preview panel is collapsed to nothing', () => {
+    // A preview whose panel has been dragged shut reports a 0x0 box — the case
+    // ESCSUITE-90's `handleScreenScale` guards — and a content box with no area
+    // is a scale of 0 for the gesture to divide a pointer displacement by, which
+    // is an Infinity delta and a crop slammed to its clamp on the first move.
+    // The layer renders nothing at all instead; every other case here is the
+    // other side of it.
+    const canvas = previewCanvas()
+    setRect(canvas, { left: 0, top: 0, width: 0, height: 0 })
+    render(
+      <CropHandles
+        clip={addClip('clip1', 0, 4)}
+        source={video}
+        canvas={canvas}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
   })
 
   it('renders nothing for a clip whose source it was not handed', () => {
