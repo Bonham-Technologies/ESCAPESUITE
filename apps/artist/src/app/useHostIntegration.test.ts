@@ -171,6 +171,54 @@ describe('inbound messages', () => {
     })
   })
 
+  it('LOAD_PROJECT answers a payload whose clip has an invalid crop with ERROR instead of applying it (ESCSUITE-6)', async () => {
+    await mountIntegration()
+    addClip('clip-1', 0)
+    const hostProject = useEditorStore.getState().project
+    const badProject = {
+      ...hostProject,
+      timeline: {
+        ...hostProject.timeline,
+        clips: hostProject.timeline.clips.map((clip) => ({
+          ...clip,
+          crop: { left: 0.6, top: 0, right: 0.6, bottom: 0 },
+        })),
+      },
+    }
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: badProject })
+
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'ERROR',
+      payload: { message: expect.any(String), code: 'INVALID_PROJECT' },
+    })
+  })
+
+  it('LOAD_PROJECT carries a clip crop into the store intact (ESCSUITE-6)', async () => {
+    await mountIntegration()
+    addClip('clip-1', 0)
+    const hostProject = useEditorStore.getState().project
+    const crop = { left: 0.25, top: 0.1, right: 0, bottom: 0 }
+    const goodProject = {
+      ...hostProject,
+      timeline: {
+        ...hostProject.timeline,
+        clips: hostProject.timeline.clips.map((clip) => ({ ...clip, crop })),
+      },
+    }
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: goodProject })
+
+    expect(deps.setProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeline: expect.objectContaining({
+          clips: expect.arrayContaining([expect.objectContaining({ crop })]),
+        }),
+      })
+    )
+  })
+
   it('GET_STATE answers with the store as it is now, not as it was at mount', async () => {
     await mountIntegration()
     // An edit after the handler was installed — the closed-over copy would miss it.

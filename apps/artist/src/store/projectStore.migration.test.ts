@@ -515,11 +515,13 @@ describe('parseProject (ESCSUITE-102)', () => {
 
   it.each([
     ['a crop that is not an object', 0.5],
+    ['a crop that is null', null],
     ['a crop missing an edge', { left: 0.1, top: 0, right: 0 }],
     ['a crop with a non-numeric edge', { left: '0.1', top: 0, right: 0, bottom: 0 }],
     ['a crop with a NaN edge', { left: Number.NaN, top: 0, right: 0, bottom: 0 }],
     ['a crop with a negative edge', { left: -0.1, top: 0, right: 0, bottom: 0 }],
     ['a crop that leaves no picture', { left: 0.6, top: 0, right: 0.6, bottom: 0 }],
+    ['a crop that over-crops vertically', { left: 0, top: 0.6, right: 0, bottom: 0.6 }],
   ])('rejects %s, naming the clip (ESCSUITE-6)', (_label, badCrop) => {
     const bad = validProject()
     // The cast is the point: this is what JSON.parse hands over, and the type
