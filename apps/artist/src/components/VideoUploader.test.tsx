@@ -1212,16 +1212,21 @@ describe('VideoLibrary', () => {
 
   // ESCSUITE-154: the confirm copy says how many clips go with it, so the
   // single-item Remove reads the same way Clear All's own clause does.
-  it('asks a plain question when nothing on the timeline uses it', () => {
+  //
+  // Each case awaits the removal through to completion (`handleRemoveVideo`
+  // is async, and confirm defaults to true) rather than leaving the click's
+  // promise chain to land during a later test.
+  it('asks a plain question when nothing on the timeline uses it', async () => {
     store().addSourceVideo(videoMeta)
     render(<VideoLibrary />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
     expect(globalThis.confirm).toHaveBeenCalledWith('Remove this video?')
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
-  it('says one clip, singular, when exactly one clip uses it', () => {
+  it('says one clip, singular, when exactly one clip uses it', async () => {
     store().addSourceVideo(videoMeta)
     addClip('clip1', 0, 4)
     render(<VideoLibrary />)
@@ -1231,9 +1236,10 @@ describe('VideoLibrary', () => {
     expect(globalThis.confirm).toHaveBeenCalledWith(
       'Remove this video? This will also remove 1 clip that uses it.'
     )
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
-  it('says how many clips, plural, when more than one clip uses it', () => {
+  it('says how many clips, plural, when more than one clip uses it', async () => {
     store().addSourceVideo(videoMeta)
     addClip('clip1', 0, 4)
     addClip('clip2', 4, 2)
@@ -1244,6 +1250,7 @@ describe('VideoLibrary', () => {
     expect(globalThis.confirm).toHaveBeenCalledWith(
       'Remove this video? This will also remove 2 clips that use it.'
     )
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
   // ESCSUITE-154: the previous behaviour called `removeSourceVideo`
