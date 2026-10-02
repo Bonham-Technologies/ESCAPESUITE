@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
+  DEFAULT_GIF_FPS,
+  DEFAULT_GIF_RESOLUTION,
   EXPORT_NO_WEBCODECS_REASON,
   ExportAbortedError,
   ExportError,
+  GIF_FPS_OPTIONS,
+  GIF_LONG_RANGE_SECONDS,
+  GIF_LONG_RANGE_WARNING,
+  GIF_RESOLUTIONS,
   WEBM_NO_CODEC_REASON,
   blendModeToCanvas,
   calculateTimelineDuration,
@@ -14,10 +20,13 @@ import {
   getQualitySettings,
   getResolution,
   getSourceDimensions,
+  gifFrameRate,
+  isGIFExportSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
   loadImageElement,
   loadVideoElement,
+  resolutionForFormat,
   waitForEncoderBackpressure,
   webMVideoCodecConfigs,
   yieldToMain,
@@ -612,6 +621,22 @@ describe('getResolution', () => {
     expect(getResolution('720p', 1920, 1080, { width: 0, height: 0 }))
       .toEqual({ width: 1280, height: 720 })
   })
+
+  it('scales a GIF preset to 360p, keeping the project\u2019s aspect', () => {
+    // '360p' exists for GIF only (ESCSUITE-34) but is one entry on the shared
+    // resolution union, so `getResolution` answers it the same way it answers
+    // the other three: fixed height, width from the project's aspect, rounded
+    // to even. 16:9 of 360 is 640.
+    expect(getResolution('360p', 1920, 1080)).toEqual({ width: 640, height: 360 })
+    expect(getResolution('360p', 640, 480, { width: 1280, height: 720 }))
+      .toEqual({ width: 640, height: 360 })
+  })
+
+  it('rounds a 360p width up to even', () => {
+    // 1125:1000 x 360 = 405, which is odd, so the width bumps to 406 — the same
+    // round-to-even every other preset goes through.
+    expect(getResolution('360p', 1125, 1000)).toEqual({ width: 406, height: 360 })
+  })
 })
 
 describe('loadVideoElement / loadImageElement', () => {
@@ -682,5 +707,75 @@ describe('calculateTimelineDuration', () => {
       timedClip('c', 't0', 6, 2),
     ]
     expect(calculateTimelineDuration(clips)).toBe(15)
+  })
+})
+
+describe('gifFrameRate', () => {
+  it.each(GIF_FPS_OPTIONS)('passes %s through, the three rates the dialog offers', (fps) => {
+    expect(gifFrameRate(fps)).toBe(fps)
+  })
+
+  it('defaults to 15 when no rate was asked for', () => {
+    // Every caller that predates GIF export leaves `options.fps` undefined.
+    expect(gifFrameRate(undefined)).toBe(DEFAULT_GIF_FPS)
+    expect(DEFAULT_GIF_FPS).toBe(15)
+  })
+
+  it.each([0, 7, 30, -5, 15.5, Number.NaN])('falls back to the default for %s', (fps) => {
+    // A hand-built headless job spec or a stale saved setting can carry
+    // anything. Landing on the default beats encoding a 90-second GIF at 0 fps.
+    expect(gifFrameRate(fps)).toBe(DEFAULT_GIF_FPS)
+  })
+})
+
+describe('resolutionForFormat', () => {
+  it.each(GIF_RESOLUTIONS)('keeps %s when the format is gif', (resolution) => {
+    expect(resolutionForFormat('gif', resolution)).toBe(resolution)
+  })
+
+  it.each(['project', '1080p'] as const)('lands %s on 480p when the format is gif', (resolution) => {
+    // GIF offers exactly 720p/480p/360p, so switching to GIF from a selection
+    // it does not offer has to land somewhere: the spec's default, 480p.
+    expect(resolutionForFormat('gif', resolution)).toBe(DEFAULT_GIF_RESOLUTION)
+    expect(DEFAULT_GIF_RESOLUTION).toBe('480p')
+  })
+
+  it.each(['webm', 'mp4'] as const)('lands 360p on 480p when the format is %s', (format) => {
+    // The mirror: 360p is GIF-only, so switching away from GIF has to move off
+    // it rather than configure a video encoder at a size no preset offers.
+    expect(resolutionForFormat(format, '360p')).toBe('480p')
+  })
+
+  it.each(['project', '1080p', '720p', '480p'] as const)(
+    'leaves %s alone when the format is webm',
+    (resolution) => {
+      expect(resolutionForFormat('webm', resolution)).toBe(resolution)
+    }
+  )
+})
+
+describe('isGIFExportSupported', () => {
+  it('is true with no WebCodecs at all', () => {
+    const restore = removeWebCodecsGlobals()
+
+    // The whole point of the format: `gifenc` is pure JS, so a browser that can
+    // encode neither VP9/VP8 nor H.264 can still export a GIF (ESCSUITE-34).
+    expect(isGIFExportSupported()).toBe(true)
+
+    restore()
+  })
+
+  it('is true with WebCodecs present', () => {
+    expect(isGIFExportSupported()).toBe(true)
+  })
+})
+
+describe('GIF_LONG_RANGE_WARNING', () => {
+  it('names the 30-second threshold it is shown past, and suggests WebM', () => {
+    // A soft warning, never a refusal (spec). The dialog compares the export's
+    // own length against GIF_LONG_RANGE_SECONDS.
+    expect(GIF_LONG_RANGE_SECONDS).toBe(30)
+    expect(GIF_LONG_RANGE_WARNING).toMatch(/30 seconds/)
+    expect(GIF_LONG_RANGE_WARNING).toMatch(/WebM/)
   })
 })
