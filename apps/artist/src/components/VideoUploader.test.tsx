@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
-import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail } from '../core/storage'
+import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail, getVideoBlob } from '../core/storage'
 import * as storageModule from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
@@ -1160,6 +1160,111 @@ describe('VideoLibrary', () => {
     await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
     expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
     expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+  })
+
+  // ESCSUITE-154: Remove deletes the bytes the same way Clear Unused and
+  // Clear All already do (ESCSUITE-149), so it must not be undoable either —
+  // an undo that handed a `SourceVideo` back afterwards would restore a tile
+  // nothing can play, place or export again.
+  it('is not undoable: undo after Remove brings back neither the source nor its bytes', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    const pastLengthBeforeRemove = useEditorStore.getState().history.past.length
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+    // No new undo entry: canUndo() reflects the history exactly as it stood
+    // before the removal.
+    expect(useEditorStore.getState().history.past).toHaveLength(pastLengthBeforeRemove)
+    expect(useEditorStore.getState().canUndo()).toBe(true)
+
+    useEditorStore.getState().undo()
+
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).not.toContain('video1')
+    expect(await getVideoBlob('video1')).toBeUndefined()
+  })
+
+  // The headline case from the ESCSUITE-149 review: a tile with a clip on the
+  // timeline. The clip goes with it, the selection is pruned, and undo
+  // restores neither.
+  it('removing a video with a clip on the timeline removes the clip and prunes the selection, and undo restores neither', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    useEditorStore.getState().setSelectedClipId('clip1')
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+    expect(store().project.timeline.clips).toHaveLength(0)
+    expect(useEditorStore.getState().selectedClipId).toBeNull()
+
+    useEditorStore.getState().undo()
+
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).not.toContain('video1')
+    expect(
+      useEditorStore.getState().project.timeline.clips.some((c) => c.sourceVideoId === 'video1')
+    ).toBe(false)
+  })
+
+  // ESCSUITE-154: the confirm copy says how many clips go with it, so the
+  // single-item Remove reads the same way Clear All's own clause does.
+  it('asks a plain question when nothing on the timeline uses it', () => {
+    store().addSourceVideo(videoMeta)
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith('Remove this video?')
+  })
+
+  it('says one clip, singular, when exactly one clip uses it', () => {
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      'Remove this video? This will also remove 1 clip that uses it.'
+    )
+  })
+
+  it('says how many clips, plural, when more than one clip uses it', () => {
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    addClip('clip2', 4, 2)
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      'Remove this video? This will also remove 2 clips that use it.'
+    )
+  })
+
+  // ESCSUITE-154: the previous behaviour called `removeSourceVideo`
+  // regardless of whether `deleteVideo` actually succeeded. Routed through
+  // `removeSourceVideosPermanently` instead, a failed delete must not drop
+  // the tile from the store — the same shape as Clear Unused and Clear All,
+  // which only ever hand over the ids whose bytes are confirmed gone.
+  it('leaves the tile in place when deleteVideo rejects', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
+    const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(storageModule.deleteVideo).toHaveBeenCalledWith('video1'))
+    expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toContain('video1')
+    removeSourceVideosPermanently.mockRestore()
+    vi.mocked(storageModule.deleteVideo).mockRestore()
   })
 
   // ESCSUITE-117: a source restored by undo has no thumbnailUrl — ESCSUITE-113
