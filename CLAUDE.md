@@ -1755,6 +1755,22 @@ outside-the-clip fallback was deleted rather than tested: its one caller is fed 
 `getClipsAtTime` has already filtered. `drawFrame.perf.test.ts` and every rerender pin are
 byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-148 (the `?loadVideo=` handoff of a
+single-file audio-only take — an audio primary with no companions — pinned end to end, and the one
+real defect those pins found fixed: the media library's lazy thumbnail rebuild no longer asks
+storage for a thumbnail an audio source never had): 99.78 / 99.18 / 95.37 / 99.66, byte-identical on
+every percentage to the 99.78 / 99.18 / 95.37 / 99.66 the commit this branch lands on (`c89cf40`)
+measures. Measured in one sitting, the base gives 4,597 / 4,820 branches and this branch
+4,598 / 4,821: one new branch, covered, the same 223 uncovered as before, and lines, statements and
+functions unmoved at 7,265 / 7,281, 8,166 / 8,233 and 1,768 / 1,774 (the same 16 / 67 / 6 uncovered).
+The one is the `source.mediaType === 'audio'` operand `components/VideoUploader.tsx`'s ESCSUITE-117
+rebuild effect gained in its skip guard, reached with an audio source by the red case and without
+one by the thumbnail-less video case that was already there. The other two pins — the importer's
+single-file audio primary and the store's single-audio-part placement (lowest empty track, default
+transform, no mask or stroke, resolution untouched, one undo entry) — were green on arrival, which the
+ticket anticipated, and add no unit to any denominator. Every perf and rerender pin is byte-identical.
+**No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
