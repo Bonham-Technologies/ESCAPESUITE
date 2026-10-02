@@ -225,6 +225,17 @@ describe('drawSelectionHandles', () => {
     expect(() => drawSelectionHandles(el, 1, selection())).not.toThrow()
     expect(getCanvasContext(el)).toBeUndefined()
   })
+
+  it('draws the box round the cropped picture (ESCSUITE-6)', () => {
+    // The clip shows the right half of a 400x200 source, so its local box is
+    // 200x200 rather than 400x200 — the chrome has to agree with the picture or
+    // the handles sit off the edge of what the user can see.
+    drawSelectionHandles(canvas, 1, selection({
+      clips: [mediaClip({ crop: { left: 0.5, top: 0, right: 0, bottom: 0 } })],
+    }))
+
+    expect(ctx.argsFor('strokeRect')[0]).toEqual([-100, -100, 200, 200])
+  })
 })
 
 describe('drawMultiSelectHandles', () => {

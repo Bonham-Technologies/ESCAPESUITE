@@ -171,6 +171,27 @@ describe('hitTestHandles body hits', () => {
 
     expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [text] }))).toBeNull()
   })
+
+  it('misses a point the crop took out of the picture (ESCSUITE-6)', () => {
+    // The 400x200 source normally covers x 760-1160. Cropped to its right half
+    // the drawn box is 200 wide and still centred, so it covers x 860-1060 — and
+    // x 800 is now bare canvas even though the uncropped clip reached it.
+    const clip = mediaClip({ crop: { left: 0.5, top: 0, right: 0, bottom: 0 } })
+
+    expect(hitAt(800, CENTER_Y, scene({ clips: [clip] }))).toBeNull()
+  })
+
+  it('still reports a move on the body of a cropped clip', () => {
+    // The control: without this the case above would pass just as well for a
+    // clip that had become unhittable altogether.
+    const clip = mediaClip({ crop: { left: 0.5, top: 0, right: 0, bottom: 0 } })
+
+    expect(hitAt(CENTER_X, CENTER_Y, scene({ clips: [clip] }))).toEqual({
+      clipId: 'clip1',
+      clipType: 'video',
+      mode: 'move',
+    })
+  })
 })
 
 describe('hitTestHandles z-order', () => {

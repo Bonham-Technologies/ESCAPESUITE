@@ -333,6 +333,34 @@ describe('getOverlayBounds for media clips', () => {
     })
   })
 
+  it('measures the cropped region, not the whole source (ESCSUITE-6)', () => {
+    // The clip shows the right half of a 400x200 source: 200x200 at scale 1.
+    // The centre does not move — a crop shrinks the picture in place — so the
+    // box the chrome draws and the box the renderer fills are the same box.
+    const clip = makeClip({ crop: { left: 0.5, top: 0, right: 0, bottom: 0 } })
+
+    expect(getOverlayBounds(clip, makeCanvas(), undefined, [source])).toEqual({
+      centerX: 0.5 * CANVAS_W,
+      centerY: 0.5 * CANVAS_H,
+      width: 200,
+      height: 200,
+      rotation: 0,
+    })
+  })
+
+  it('scales the cropped region by the clip transform', () => {
+    const clip = makeClip({
+      crop: { left: 0.25, top: 0.25, right: 0.25, bottom: 0.25 },
+      transform: { x: 0.5, y: 0.5, scaleX: 2, scaleY: 3, rotation: 0, opacity: 1 },
+    })
+
+    // The middle half of 400x200 is 200x100; doubled and tripled, 400x300.
+    expect(getOverlayBounds(clip, makeCanvas(), undefined, [source])).toMatchObject({
+      width: 400,
+      height: 300,
+    })
+  })
+
   it('gives up when the clip’s source media is not loaded', () => {
     expect(getOverlayBounds(makeClip(), makeCanvas(), undefined, [])).toBeNull()
   })
