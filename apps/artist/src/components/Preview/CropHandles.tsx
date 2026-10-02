@@ -18,6 +18,7 @@ import { contentBox, getOverlayBounds } from './previewGeometry';
 import { CROP_HANDLE_MODES, cropFrameBox } from './cropOverlay';
 import { getCursorForMode } from './cursor';
 import { useCropHandleGesture } from './useCropHandleGesture';
+import type { TransitionInfo } from '../../core/exportTypes';
 import type { Clip, SourceVideo } from '../../store/types';
 import type { ProjectSize } from './types';
 import styles from './CropHandles.module.css';
@@ -32,6 +33,13 @@ export interface CropHandlesProps {
   time: number;
   /** The clip's track is locked (ESCSUITE-84): the handles are inert. */
   locked: boolean;
+  /**
+   * The transition active at `time`, as `getActiveTransition` reports it
+   * (ESCSUITE-147) — so the handles sit on the box the renderer draws rather
+   * than on the clip's own Animate Out preset, when a transition has taken that
+   * side over.
+   */
+  transition?: TransitionInfo | null;
   /** Leave crop mode. */
   onLeave: () => void;
 }
@@ -43,6 +51,7 @@ export function CropHandles({
   projectSize,
   time,
   locked,
+  transition,
   onLeave,
 }: CropHandlesProps) {
   // The canvas element's CSS box, followed for as long as crop mode is open.
@@ -82,10 +91,10 @@ export function CropHandles({
   });
 
   // The same `getOverlayBounds` the selection chrome, the hit test, the marquee
-  // and the drag seed read, so the crop frame cannot disagree with the box the
-  // rest of the preview draws — and so it inherits that function's documented
-  // ESCSUITE-147 gap rather than inventing a second geometry.
-  const bounds = getOverlayBounds(clip, canvas, time, [source], projectSize);
+  // and the drag seed read, under the same transition suppression (ESCSUITE-147),
+  // so the crop frame cannot disagree with the box the rest of the preview draws
+  // — or with the picture the handles are laid over.
+  const bounds = getOverlayBounds(clip, canvas, time, [source], projectSize, { transition });
   if (!bounds) return null;
   // A preview whose panel has been dragged shut reports a 0x0 box — the case
   // ESCSUITE-90's `handleScreenScale` guards for the same arithmetic — and a

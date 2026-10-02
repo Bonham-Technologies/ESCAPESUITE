@@ -254,7 +254,12 @@ export function PreviewPlayer() {
         cropScene,
         mediaElementFor(cropping.source),
         canvasDimensions,
-        handleScreenScale(canvas)
+        handleScreenScale(canvas),
+        // From the `time` the chrome is being drawn at, exactly as the selection
+        // chrome below derives its own: the crop frame is the user's picture of
+        // what the crop keeps, so it has to sit on the frame the render loop just
+        // composited (ESCSUITE-147).
+        { transition: getActiveTransition(clips, tracks, time) }
       );
       return;
     }
@@ -437,6 +442,10 @@ export function PreviewPlayer() {
             projectSize={canvasDimensions}
             time={currentTime}
             locked={isTrackLocked(tracks, cropping.clip.trackId)}
+            // Derived here rather than in a memo of its own: `cropping` is the
+            // guard above, so this costs one pass over the clips per render
+            // *while crop mode is open* and nothing at all the rest of the time.
+            transition={getActiveTransition(clips, tracks, currentTime)}
             onLeave={() => setCropClipId(null)}
           />
         )}

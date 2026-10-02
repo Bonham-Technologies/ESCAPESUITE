@@ -941,7 +941,7 @@ inline lives in one module each, all of them pure or hook-shaped; the pure modul
 | `cursor.ts` | The CSS cursor a drag mode advertises |
 | `types.ts` | The shapes the above share (`DragMode`, `OverlayBounds`, `HandleHit`, `PreviewSceneContext`). **Types only** — it is excluded from coverage, so a single runtime value in it would go unmeasured |
 | `InlineTextEditorAnchor.tsx` | Positioning `InlineTextEditor` over the text it edits, through the canvas' object-fit mapping |
-| `CropHandles.tsx` | The eight on-canvas crop handles (ESCSUITE-157), mounted over the canvas only while crop mode is open **and the playhead is on the clip** — the one `visibleCropTarget` answer the chrome gates on, so handles and dim come and go together; the mouse drag and the arrow-key nudges both land through `useCropHandleGesture.ts`. The gesture and the keyboard nudges are documented beside `CropSection.tsx`, further down |
+| `CropHandles.tsx` | The eight on-canvas crop handles (ESCSUITE-157), mounted over the canvas only while crop mode is open **and the playhead is on the clip** — the one `visibleCropTarget` answer the chrome gates on, so handles and dim come and go together; the mouse drag and the arrow-key nudges both land through `useCropHandleGesture.ts`. Positioned off the same `getOverlayBounds` every other reader of a clip's box uses, under the same ESCSUITE-147 transition suppression (its optional `transition` prop). The gesture and the keyboard nudges are documented beside `CropSection.tsx`, further down |
 | `PlaybackControls.tsx` | The transport buttons and their keyboard shortcuts (Space, the arrows, Home, End — bound on `window` here, not in the App cascade); no canvas at all. Takes `modalOpen`, the same gate the App cascade carries, so Space cannot start playback from behind a dialog |
 | `PreviewTimecode.tsx` | The playhead readout `<span>` — the only thing that re-renders on a playback tick (see below) |
 
@@ -1446,6 +1446,26 @@ playhead off the cropped clip therefore unmounts the eight handles rather than
 leaving them live and draggable over an unrelated frame; the latch survives, so
 scrubbing back in returns the mode. Before the final review the chrome carried
 that comparison alone and the layer carried none.
+
+**The crop frame follows the picture through a transition** (ESCSUITE-147's
+suppression, threaded here). Both halves of crop mode's geometry are measured off
+the one `getOverlayBounds` the selection box, the hit test, the marquee and the
+drag seed read, so both take that function's optional `{ transition }`:
+`drawCropOverlay` as a trailing `options` argument after `screenScale`, and
+`CropHandles` as an optional `transition` prop. `PreviewPlayer` derives each with
+`getActiveTransition` — the chrome's inside the chrome callback, from the `time`
+it is drawing at, exactly as the selection chrome's is; the handles' inside the
+`{cropping && …}` mount, from `currentTime`, so it costs one pass over the clips
+per render while crop mode is open and nothing at all the rest of the time.
+Without it, a clip carrying a **geometric** Animate Out preset (`slide-*`,
+`scale-*`, `pop`) inside a transition window drew its crop frame — and laid its
+eight draggable handles — where the preset says the clip is rather than where the
+renderer draws it: halfway through a 1 s `slide-left` out-preset under a `fade`,
+on a 1920-wide project, the picture is at x 960 and the frame was at 480. A crop
+surface is the one place that is unarguable, because the user is deciding which
+part of *that* picture to keep. The transition's own geometry is still not
+applied, which is the same documented v1 limit `getOverlayBounds`' other readers
+carry.
 
 **Mouse and keyboard reach the same write.** Dragging a handle rebases every
 move from the crop and transform the gesture **started** with — never the
@@ -2611,9 +2631,11 @@ transition's alpha belongs to no clip's animation — the same boundary as the g
 below — and the clip arriving is exactly what the user is reaching for.
 
 Also additive: `hitTest.ts` and `selectionOverlay.ts`
-carry it as an optional `transition` field on the `PreviewSceneContext` slice they already take; and
+carry it as an optional `transition` field on the `PreviewSceneContext` slice they already take;
 `dragGeometry.ts`'s `measureDragStart`, `clipsIntersectingMarquee` and `textClipAtPoint` take it as
-a trailing argument. `measureDragStart` passes it to its *second* lookup too — the one that derives
+a trailing argument; and crop mode's two halves (ESCSUITE-157) take it the same way —
+`cropOverlay.ts`'s `drawCropOverlay` as a trailing `options` after `screenScale`, `CropHandles.tsx`
+as an optional `transition` prop. `measureDragStart` passes it to its *second* lookup too — the one that derives
 the seeded scale for an image or video clip — so the seeded position and the seeded scale describe
 one picture. Absent or `null` reads as "no transition here", which is what all of them assumed
 before.
@@ -2623,7 +2645,10 @@ The transition is derived by the two callers that own a scene, with `getActiveTr
 marquee, the double-click and the drag seed cannot disagree, and the memo is `null` and therefore
 referentially stable through an ordinary scrub), and `PreviewPlayer.tsx` derives it inside each of
 the two chrome callbacks from the `time` they are drawing at rather than from the store's playhead —
-the render loop calls them with its own display time. That is one pass over the clips per repaint of
+the render loop calls them with its own display time. (The crop chrome is drawn from the first of
+those two callbacks and takes the same derivation; crop mode's DOM handle layer is the one
+exception to "from the draw time", because it is a React child rather than a canvas pass and so is
+derived from `currentTime` inside its own mount guard.) That is one pass over the clips per repaint of
 the chrome (two, in fact — one per callback — on top of `drawFrame`'s own), and none at all during
 playback, because neither callback is *called* then: `usePreviewRenderLoop`'s scrub effect returns on
 `isPlaying` and its playback effect draws the frame alone. (`selectionOverlay`'s own `isPlaying`
@@ -2634,8 +2659,9 @@ count, and the new `getActiveTransition` call is on the selection-chrome path, w
 `drawFrame.perf.test.ts` does not draw (its scene has no transition under the selected clip either).
 
 Every reader now suppresses: the selection box and the multi-select boxes, the handle
-cascade, the z-order body hit (position *and* opacity), the marquee, the double-click, and the drag
-seed — every one of them through `presetSuppressionFor`. Two readers deliberately do **not**
+cascade, the z-order body hit (position *and* opacity), the marquee, the double-click, the drag
+seed, and — since ESCSUITE-157 — crop mode's dim and its eight handles — every one of them through
+`presetSuppressionFor`. Two readers deliberately do **not**
 suppress. `InlineTextEditorAnchor` asks for a clip's box with no
 `time` at all, so it takes no animation lookup to suppress. And the keyframe panel's graph and track
 (`KeyframeGraph.tsx`, `KeyframeTrack.tsx`) plot both preset sides as authored, because they edit the

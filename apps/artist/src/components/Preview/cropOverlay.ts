@@ -13,7 +13,11 @@
 // ESCSUITE-90 asks of chrome and a DOM element gets for free.
 import { croppedSourceRect } from '../../core/clipCrop';
 import type { CropHandle } from '../../core/cropDrag';
-import { getOverlayBounds, type CanvasContentBox } from './previewGeometry';
+import {
+  getOverlayBounds,
+  type CanvasContentBox,
+  type OverlayBoundsOptions,
+} from './previewGeometry';
 import type { Clip, ClipCrop, SourceVideo } from '../../store/types';
 import type { DragMode, OverlayBounds, ProjectSize } from './types';
 
@@ -178,6 +182,15 @@ export function cropFrameBox(bounds: OverlayBounds, content: CanvasContentBox): 
  * `screenScale` is project pixels per CSS pixel, as every other chrome function
  * here takes it (ESCSUITE-90): it sizes the pen and nothing else. Positions are
  * the clip's own geometry.
+ *
+ * `options` carries the transition active at `time` straight through to
+ * `getOverlayBounds`, so the frame follows the picture rather than the clip's own
+ * Animate Out preset when a transition has taken that side over (ESCSUITE-147).
+ * A parameter rather than a field of {@link CropOverlayScene}, because the scene
+ * is the time-independent half — `PreviewPlayer` memoises it and asks
+ * {@link visibleCropTarget} about a playhead — while the transition is a function
+ * of the time being drawn at, exactly as `selectionOverlay.ts`' caller derives
+ * its own from the `time` it is handed.
  */
 export function drawCropOverlay(
   canvas: HTMLCanvasElement,
@@ -185,7 +198,8 @@ export function drawCropOverlay(
   scene: CropOverlayScene,
   element: CanvasImageSource | undefined,
   project: ProjectSize = canvas,
-  screenScale: number = 1
+  screenScale: number = 1,
+  options?: OverlayBoundsOptions
 ): void {
   const target = visibleCropTarget(scene, time);
   if (!target) return;
@@ -194,7 +208,7 @@ export function drawCropOverlay(
   if (!ctx) return;
 
   const { clip, source } = target;
-  const bounds = getOverlayBounds(clip, canvas, time, scene.sourceVideos, project);
+  const bounds = getOverlayBounds(clip, canvas, time, scene.sourceVideos, project, options);
   if (!bounds) return;
 
   const full = fullSourceBox(bounds, clip.crop, source);

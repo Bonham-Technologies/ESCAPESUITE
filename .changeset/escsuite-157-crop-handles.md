@@ -14,4 +14,6 @@ Shift to keep the shape you already had. The handles are real buttons, so Tab
 reaches them, the arrow keys move one pixel of the source at a time (ten with
 Shift), and every nudge is read out. Escape leaves crop mode, and so does
 selecting another clip. On a locked track you can still look, and the handles
-say so by greying out.
+say so by greying out. The frame sits on the picture even mid-transition,
+where a clip with a slide or pop Animate Out preset is drawn somewhere other
+than its preset says.
