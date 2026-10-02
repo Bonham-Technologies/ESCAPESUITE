@@ -578,7 +578,9 @@ describe('useTrimDrag and the clip next to it (ESCSUITE-161)', () => {
     // clip1 ends at 4s; the pointer is asking for 3s.
     moveTo(3)
 
-    expect(theClip('clip2')).toMatchObject({ timelinePosition: 4, startTime: 2, duration: 2 })
+    // Stopped dead on clip1's end at 4s: two seconds of source revealed
+    // instead of the three the pointer asked for.
+    expect(theClip('clip2')).toMatchObject({ timelinePosition: 4, startTime: 2, duration: 4 })
     expect(drawnAt(3)).toEqual(['clip1'])
   })
 

@@ -37,6 +37,31 @@
 // write, hands it the flag and takes the "already pushed" mark back if the store
 // says the write never happened.
 //
+// **A trim stops at the clip next to it** (ESCSUITE-161). The timeline's rule is
+// that one row never holds two overlapping clips — `getClipsAtTime` returns
+// every clip at an instant, so a row holding two means the preview, both
+// exporters and `core/audioMixer.ts` draw and mix both of them. A drop has been
+// vetoed by `store/timelineSnapping.ts`'s `wouldOverlap` since the beginning
+// and `duplicateClip` walks its row past a collision; a trim wrote whatever the
+// pointer asked for. `clampTrimToNeighbours` now holds the pointer time to the
+// facing edge of the neighbour on the clip's own row before `computeTrimUpdate`
+// ever sees it, so an end trim stops at the next clip's start and a start trim
+// at the previous clip's end.
+//
+// **The clamp lives here and not in `trimClip`**, deliberately, for two
+// reasons. The **ripple** tool is excepted: it lengthens the clip over its
+// neighbours during the drag and pushes them out of the way on release, so the
+// overlap is real and transient and refusing it would break the tool — and
+// which tool is out is something only the gesture knows, never the store. And
+// the store is already not where a trim's geometry is enforced: the source's
+// length and `MIN_CLIP_DURATION` are `computeTrimUpdate`'s rules too, with
+// `trimClip` enforcing only what it owns (the locked row, ESCSUITE-84). It also
+// has exactly one caller — this hook — so a second copy of the rule in the
+// store would buy no defence and cost the ripple tool a flag to turn it off
+// again. The clamp is applied to the **pointer time** rather than to the
+// computed update, which is what keeps ESCSUITE-110's idempotence: a trim that
+// wanders out past the neighbour and back comes home exactly.
+//
 // **One listener pair per gesture, and one measurement.** The per-move store
 // write used to be what re-bound the listeners: `clips` is a fresh array after
 // every `trimClip` write, and it was in the effect's deps. The listeners now go
@@ -49,6 +74,7 @@ import type * as React from 'react';
 import { useCallback, useRef, useState, type RefObject } from 'react';
 import { useDocumentListener } from '../../hooks/useDocumentListener';
 import { useGestureHistory } from '../../hooks/useGestureHistory';
+import { clampTrimToNeighbours } from '../../store/timelineSnapping';
 import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
 import { computeTrimUpdate, pointerTime, type TrimOrigin } from './timelineGeometry';
 import type { TrimState } from './types';
@@ -143,9 +169,17 @@ export function useTrimDrag({
     const area = trackArea.read(container);
     const mouseTime = pointerTime(e.clientX, area.left, container.scrollLeft, pixelsPerSecond);
 
+    // The ripple tool is the one trim allowed to run over its neighbours: the
+    // release shifts them by however much the end moved, so the overlap the
+    // drag makes lasts only as long as the drag.
+    const limitedTime =
+      activeTool === 'ripple'
+        ? mouseTime
+        : clampTrimToNeighbours(clips, clip, trim.edge, trim.origin, mouseTime);
+
     const update = computeTrimUpdate({
       edge: trim.edge,
-      mouseTime,
+      mouseTime: limitedTime,
       clip,
       sourceVideo,
       origin: trim.origin,
