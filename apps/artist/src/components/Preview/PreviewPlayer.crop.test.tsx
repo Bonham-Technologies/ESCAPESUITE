@@ -94,17 +94,44 @@ describe('crop mode on the preview', () => {
     expect(store().selectedClipId).toBe(clip.id)
   })
 
-  // Task 4 replaces this with the live assertion — it is the red step of that
-  // task's own brief, and `CropHandles` is a shell returning null until then.
-  // The body cannot be written here without shipping Task 4's component, and a
-  // task may not leave this package's suite red for the next one, so it is a
-  // todo rather than a failing case:
-  //
-  //   croppingClip(); const preview = await renderPreview()
-  //   getByRole('group',  { name: 'Crop handles' })
-  //   getByRole('button', { name: 'Crop top left' })
-  //   getByRole('button', { name: 'Crop bottom right' })
-  it.todo('mounts eight named handles over the canvas')
+  it('mounts eight named handles over the canvas', async () => {
+    // The props the mount computes — `time={currentTime}` and
+    // `locked={isTrackLocked(...)}` — are only exercised here;
+    // `CropHandles.test.tsx` renders the component directly and so would not
+    // catch a wrong value handed over by the preview.
+    croppingClip()
+    const preview = await renderPreview()
+
+    const group = preview.view.getByRole('group', { name: 'Crop handles' })
+    expect(group.querySelectorAll('button')).toHaveLength(8)
+    expect(preview.view.getByRole('button', { name: 'Crop top left' })).toBeEnabled()
+    expect(preview.view.getByRole('button', { name: 'Crop bottom right' })).toBeEnabled()
+  })
+
+  it('moves the handles with the playhead, onto the box the clip is animated to', async () => {
+    // The `time={currentTime}` half of the same pair: the frame follows the
+    // clip's ANIMATED centre, not its stored one.
+    const clip = croppingClip()
+    store().setClipKeyframe(clip.id, 'x', { time: 0, value: 0.25, easing: 'linear' })
+    store().setClipKeyframe(clip.id, 'x', { time: 2, value: 0.75, easing: 'linear' })
+    const preview = await renderPreview()
+    preview.resize({ width: 960, height: 540 })
+    const frame = () => preview.view.getByRole('group', { name: 'Crop handles' }).style.left
+
+    store().setCurrentTime(0)
+    expect(frame()).toBe('-240px')
+
+    store().setCurrentTime(2)
+    expect(frame()).toBe('240px')
+  })
+
+  it('disables the handles it mounts over a locked track', async () => {
+    const clip = croppingClip()
+    store().updateTrack(clip.trackId, { locked: true })
+    const preview = await renderPreview()
+
+    expect(preview.view.getByRole('button', { name: 'Crop top left' })).toBeDisabled()
+  })
 
   it('dims a video clip from the <video> the preview decoded', async () => {
     croppingClip()

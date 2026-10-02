@@ -1,0 +1,337 @@
+// The crop handle layer: where the eight handles sit, and what dragging one
+// writes (ESCSUITE-157).
+//
+// Rendered on its own over a canvas with a layout box, the way
+// `InlineTextEditorAnchor.test.tsx` renders the inline editor: the store is
+// real, so the assertions are about the clip the drag actually produced.
+//
+// The scene throughout: the default 1920x1080 source and project, a canvas laid
+// out at 960x540 — so one CSS pixel is two project pixels and nothing is
+// letterboxed — and a clip at the default centre and scale, whose kept region
+// is therefore the whole frame and whose frame box is the whole 960x540 box.
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { CropHandles } from './CropHandles'
+import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
+import { installCanvasDouble, uninstallCanvasDouble } from '../../test/doubles/canvas'
+import { setRect } from '../../test/doubles/layout'
+import {
+  installResizeObserverDouble,
+  type ResizeObserverDouble,
+} from '../../test/doubles/resizeObserver'
+import type { Clip } from '../../store/types'
+
+let observer: ResizeObserverDouble
+
+beforeEach(() => {
+  installCanvasDouble()
+  observer = installResizeObserverDouble()
+  resetStoreForTest()
+})
+
+afterEach(() => {
+  cleanup()
+  observer.uninstall()
+  uninstallCanvasDouble()
+})
+
+const clipNow = (id: string): Clip => store().project.timeline.clips.find((c) => c.id === id)!
+
+const past = (): number => store().history.past.length
+
+/** The canvas the handles are positioned over: 1920x1080 project in a 960x540 box. */
+function previewCanvas(): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = 1920
+  canvas.height = 1080
+  setRect(canvas, { left: 0, top: 0, width: 960, height: 540 })
+  return canvas
+}
+
+interface Mounted {
+  clip: Clip
+  onLeave: ReturnType<typeof vi.fn>
+  handle(name: string): HTMLButtonElement
+}
+
+function mount({ locked = false }: { locked?: boolean } = {}): Mounted {
+  const clip = addClip('clip1', 0, 4)
+  const onLeave = vi.fn()
+  render(
+    <CropHandles
+      clip={clip}
+      source={video}
+      canvas={previewCanvas()}
+      projectSize={{ width: 1920, height: 1080 }}
+      time={1}
+      locked={locked}
+      onLeave={onLeave}
+    />
+  )
+  return {
+    clip,
+    onLeave,
+    handle: (name) => screen.getByRole('button', { name }) as HTMLButtonElement,
+  }
+}
+
+/** Drag one handle by a displacement in the canvas element's own CSS pixels. */
+function drag(handle: HTMLButtonElement, dx: number, dy: number, shiftKey = false): void {
+  fireEvent.mouseDown(handle, { clientX: 0, clientY: 0 })
+  fireEvent.mouseMove(document, { clientX: dx, clientY: dy, shiftKey })
+  fireEvent.mouseUp(document)
+}
+
+describe('the crop handle layer', () => {
+  it('draws eight handles with eight distinct names, in one named group', () => {
+    mount()
+
+    const group = screen.getByRole('group', { name: 'Crop handles' })
+    const names = Array.from(group.querySelectorAll('button')).map((b) => b.getAttribute('aria-label'))
+    expect(names).toEqual([
+      'Crop top left',
+      'Crop top',
+      'Crop top right',
+      'Crop left',
+      'Crop right',
+      'Crop bottom left',
+      'Crop bottom',
+      'Crop bottom right',
+    ])
+    expect(new Set(names).size).toBe(8)
+  })
+
+  it('frames the kept region in the element\'s own CSS pixels', () => {
+    mount()
+
+    const frame = screen.getByRole('group', { name: 'Crop handles' })
+    expect(frame.style.left).toBe('0px')
+    expect(frame.style.top).toBe('0px')
+    expect(frame.style.width).toBe('960px')
+    expect(frame.style.height).toBe('540px')
+  })
+
+  it('shrinks the frame onto a cropped clip', () => {
+    // Half the width cropped off the right: 960x1080 of source, drawn at scale 1
+    // and still centred on the frame, so the picture spans project x 480…1440 —
+    // 480 CSS pixels wide starting at 240.
+    const clip = addClip('clip1', 0, 4)
+    store().updateClip(clip.id, { crop: { left: 0, top: 0, right: 0.5, bottom: 0 } })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    const frame = screen.getByRole('group', { name: 'Crop handles' })
+    expect(frame.style.left).toBe('240px')
+    expect(frame.style.width).toBe('480px')
+  })
+
+  it('rotates the frame with the clip', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().updateClipTransform(clip.id, { rotation: 30 })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('group', { name: 'Crop handles' }).style.transform).toBe('rotate(30deg)')
+  })
+
+  it('follows the canvas when the element is resized under it', () => {
+    const canvas = previewCanvas()
+    render(
+      <CropHandles
+        clip={addClip('clip1', 0, 4)}
+        source={video}
+        canvas={canvas}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    setRect(canvas, { left: 0, top: 0, width: 480, height: 270 })
+    observer.emit(canvas, { width: 480, height: 270 })
+
+    expect(screen.getByRole('group', { name: 'Crop handles' }).style.width).toBe('480px')
+  })
+
+  it('crops from the left when the left handle is dragged right', () => {
+    const { clip, handle } = mount()
+
+    // 96 CSS pixels is 192 project pixels, which at scale 1 is 192 source
+    // pixels — a tenth of a 1920-wide frame.
+    drag(handle('Crop left'), 96, 0)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('moves the clip\'s centre so the edges it is not dragging stay still', () => {
+    const { clip, handle } = mount()
+
+    drag(handle('Crop left'), 96, 0)
+
+    // The kept region is 1728 wide and its centre moved 96 project pixels, so
+    // the right edge of the picture is exactly where it was.
+    expect(clipNow(clip.id).transform.x).toBeCloseTo(0.55)
+    expect(clipNow(clip.id).transform.y).toBeCloseTo(0.5)
+  })
+
+  it('reads a rotated clip\'s handles in the clip\'s own frame', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().updateClipTransform(clip.id, { rotation: 90 })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    // Dragging DOWN on a clip rotated 90° is dragging along its own +x.
+    drag(screen.getByRole('button', { name: 'Crop left' }) as HTMLButtonElement, 0, 96)
+
+    // `toBeCloseTo`, not `toEqual`: cos(-90°) is 6.1e-17 rather than 0, so the
+    // inset lands a few ulps off a tenth. The three insets the handle does not
+    // own are untouched and so are exact.
+    const crop = clipNow(clip.id).crop!
+    expect(crop.left).toBeCloseTo(0.1)
+    expect(crop.top).toBe(0)
+    expect(crop.right).toBe(0)
+    expect(crop.bottom).toBe(0)
+  })
+
+  it('writes the crop alone on a clip whose position is keyframed', () => {
+    // A static centre written onto an animated one would fight its keyframes and
+    // lose at playback, so the compensation is skipped and the picture shrinks
+    // about its centre instead (operator ruling, 2026-10-02).
+    const clip = addClip('clip1', 0, 4)
+    store().setClipKeyframe(clip.id, 'x', { time: 0, value: 0.5, easing: 'linear' })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    drag(screen.getByRole('button', { name: 'Crop left' }) as HTMLButtonElement, 96, 0)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).transform.x).toBe(0.5)
+  })
+
+  it('holds the region\'s aspect while Shift is down', () => {
+    const { clip, handle } = mount()
+
+    // The frame is 16:9; cropping 192px off the left leaves 1728x1080, and
+    // holding 16:9 takes the height to 972 — 54px off the top and the bottom.
+    drag(handle('Crop left'), 96, 0, true)
+
+    const crop = clipNow(clip.id).crop!
+    expect(crop.left).toBeCloseTo(0.1)
+    expect(crop.top).toBeCloseTo(0.05)
+    expect(crop.bottom).toBeCloseTo(0.05)
+  })
+
+  it('leaves one undo entry for a drag, however many moves it took', () => {
+    const { clip, handle } = mount()
+    const before = past()
+
+    const button = handle('Crop left')
+    fireEvent.mouseDown(button, { clientX: 0, clientY: 0 })
+    for (let step = 1; step <= 5; step++) {
+      fireEvent.mouseMove(document, { clientX: step * 20, clientY: 0 })
+    }
+    fireEvent.mouseUp(document)
+
+    expect(past()).toBe(before + 1)
+    expect(clipNow(clip.id).crop).toBeDefined()
+  })
+
+  it('undoes the drag back to the uncropped clip, at the centre it started from', () => {
+    const { clip, handle } = mount()
+
+    drag(handle('Crop left'), 96, 0)
+    store().undo()
+
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(clipNow(clip.id).transform.x).toBe(0.5)
+  })
+
+  it('disables every handle on a locked track, and writes nothing', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().updateTrack(clip.trackId, { locked: true })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked
+        onLeave={vi.fn()}
+      />
+    )
+    const before = past()
+
+    drag(screen.getByRole('button', { name: 'Crop left' }) as HTMLButtonElement, 96, 0)
+
+    const group = screen.getByRole('group', { name: 'Crop handles' })
+    for (const button of group.querySelectorAll('button')) expect(button).toBeDisabled()
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(past()).toBe(before)
+  })
+
+  it('clamps a drag past the far edge to the stored maximum', () => {
+    const { clip, handle } = mount()
+
+    // `cropForHandleMove` stops one source pixel short of the opposite edge and
+    // `normaliseCrop` then clamps to MAX_CROP_INSET, so the stored crop is the
+    // clamp rather than the ask — and the handle simply stops moving.
+    drag(handle('Crop left'), 9999, 0)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.9, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('takes its listeners with it when it unmounts mid-drag', () => {
+    const { clip, handle } = mount()
+    fireEvent.mouseDown(handle('Crop left'), { clientX: 0, clientY: 0 })
+
+    cleanup()
+    fireEvent.mouseMove(document, { clientX: 96, clientY: 0 })
+
+    expect(clipNow(clip.id).crop).toBeUndefined()
+  })
+
+  it('leaves crop mode on Escape, and claims the key', () => {
+    const { onLeave, handle } = mount()
+
+    expect(fireEvent.keyDown(handle('Crop left'), { key: 'Escape' })).toBe(false)
+    expect(onLeave).toHaveBeenCalledTimes(1)
+  })
+})
