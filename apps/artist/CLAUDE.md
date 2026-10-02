@@ -1280,7 +1280,12 @@ clip — the opposite of the mask's treatment above. One edit covers the
 selection box, the eight handles, the marquee's AABB and a drag's seed
 measurements, because `hitTest.ts`, `selectionOverlay.ts` and `dragGeometry.ts`
 all read that one function; each has a case of its own so that stays a
-contract.
+contract. **Fit to Canvas reads the crop too** (MINOR 2, final review):
+`handleFitToCanvas` passes `clipEditorModel.ts`'s `fitToCanvasScale` the
+cropped region from `croppedSourceRect`, not the source video's own
+dimensions, so pressing it on a cropped clip fills the frame with the picture
+that is actually drawn rather than reserving room for the part that is no
+longer on screen.
 
 **Two deliberate v1 limits.** The **timeline thumbnail is not cropped** —
 `utils/maskClipPath.ts` is untouched, so a cropped clip's tile still shows the

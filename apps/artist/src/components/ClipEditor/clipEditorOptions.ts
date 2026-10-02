@@ -1,4 +1,6 @@
-// The fixed option lists the clip inspector's dropdowns are built from.
+// The fixed option lists the clip inspector's dropdowns are built from, plus
+// the Crop section's aspect-preset buttons (`CROP_ASPECT_PRESETS`), which are
+// an action row rather than a value list.
 //
 // Each array's order is the order its <option>s appear in, so it is what the
 // user sees and what tests addressing a select by index resolve to — reordering
