@@ -613,22 +613,24 @@ export interface EditorState {
 
   // Actions - Source videos
   addSourceVideo: (video: SourceVideo) => void;
-  removeSourceVideo: (id: string) => void;
   /**
    * Permanently remove a batch of sources whose bytes are already gone from
    * storage — NOT undoable (ESCSUITE-149).
    *
-   * `removeSourceVideo` only ever drops the in-memory reference, so undo can
-   * safely hand it back; a storage clear (Clear Unused / Clear All,
-   * `components/VideoUploader.tsx`) deletes the bytes from IndexedDB itself,
-   * so an undo that restored the `SourceVideo` would restore a tile nothing
-   * can play, place or export again. This records no undo step of its own —
-   * same as `setSourceThumbnail` — and, because the clear can reach back past
-   * edits already on the undo stack, it also scrubs every existing past/future
+   * Every caller that removes a source deletes its bytes from IndexedDB
+   * itself first (`components/VideoUploader.tsx`'s per-item Remove, Clear
+   * Unused and Clear All — ESCSUITE-154), so an undo that restored the
+   * `SourceVideo` would restore a tile nothing can play, place or export
+   * again. This records no undo step of its own — same as
+   * `setSourceThumbnail` — and, because the clear can reach back past edits
+   * already on the undo stack, it also scrubs every existing past/future
    * snapshot so no later undo/redo can resurrect these ids either. One state
-   * write for the whole batch: removes the sources, drops any clip that
-   * referenced one, prunes the clipboard and the selection, and revokes each
-   * removed source's `blob:` thumbnail.
+   * write for the whole batch (a batch of one, for the per-item Remove):
+   * removes the sources, drops any clip that referenced one, prunes the
+   * clipboard and the selection, and revokes each removed source's `blob:`
+   * thumbnail. Unlike the `removeSourceVideo` this replaced, it is not
+   * all-or-nothing on a locked track — it trusts the caller to have already
+   * filtered locked ids out, which every caller does (ESCSUITE-84).
    */
   removeSourceVideosPermanently: (ids: string[]) => void;
   /**

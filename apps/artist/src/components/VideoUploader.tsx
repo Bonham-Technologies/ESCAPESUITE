@@ -91,10 +91,10 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
   // Clear Unused and Clear All both delete bytes from IndexedDB themselves —
-  // a storage clear, not an edit — so neither goes through the undoable
-  // per-id `removeSourceVideo`; both batch the ids whose `deleteVideo`
-  // actually succeeded into one `removeSourceVideosPermanently` call
-  // (ESCSUITE-149).
+  // a storage clear, not an edit — so neither makes an undoable write; both
+  // batch the ids whose `deleteVideo` actually succeeded into one
+  // `removeSourceVideosPermanently` call (ESCSUITE-149) — the per-item
+  // Remove below does the same, a batch of one (ESCSUITE-154).
   const removeSourceVideosPermanently = useEditorStore((state) => state.removeSourceVideosPermanently);
 
   /**
@@ -500,14 +500,32 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   );
 }
 
+interface VideoLibraryProps {
+  /**
+   * Reports a per-item Remove whose `deleteVideo` rejected (ESCSUITE-154
+   * review, MINOR 1) — optional, and the only thing it is used for, unlike
+   * `VideoUploaderProps.showNotification`: a removal's tile staying put with
+   * only a `console.error` behind it is the one failure this component can
+   * have, where `VideoUploader`'s own Clear Unused/Clear All failures are
+   * common enough to make the prop required there. Typed inline for the same
+   * reason as `VideoUploaderProps.showNotification` — this is `components/`,
+   * and nothing here reaches into `app/` even for a type.
+   */
+  showNotification?: (message: string, type: 'error' | 'success' | 'info') => void;
+}
+
 // Video Library component to show uploaded videos
 // Check if media dimensions differ significantly from project resolution
-export function VideoLibrary() {
+export function VideoLibrary({ showNotification }: VideoLibraryProps = {}) {
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addClipToTimeline = useEditorStore((state) => state.addClipToTimeline);
-  const removeSourceVideo = useEditorStore((state) => state.removeSourceVideo);
+  // ESCSUITE-154: Remove deletes the source's bytes itself, the same storage
+  // clear Clear Unused and Clear All already are (ESCSUITE-149), so it goes
+  // through the non-undoable `removeSourceVideosPermanently` rather than an
+  // undoable per-id removal.
+  const removeSourceVideosPermanently = useEditorStore((state) => state.removeSourceVideosPermanently);
   const setSourceThumbnail = useEditorStore((state) => state.setSourceThumbnail);
 
   // The media the store will refuse to remove, because a clip on a locked
@@ -617,16 +635,33 @@ export function VideoLibrary() {
       // locked-track clip uses is refused here, ahead of `deleteVideo` — the
       // disabled button is the visible half of the same rule.
       if (lockedMedia.has(id)) return;
-      if (confirm('Remove this video? This will also remove any clips using it.')) {
+      // ESCSUITE-154: say how many clips go with it, the same way Clear
+      // All's own confirm clause does — rather than always claiming "any
+      // clips" whether or not there are actually any.
+      const affectedClips = clips.filter((c) => c.sourceVideoId === id).length;
+      const message = affectedClips > 0
+        ? `Remove this video? This will also remove ${affectedClips} clip${affectedClips !== 1 ? 's' : ''} that use${affectedClips === 1 ? 's' : ''} it.`
+        : 'Remove this video?';
+      if (confirm(message)) {
+        // ESCSUITE-154: `deleteVideo` deletes the source's bytes from
+        // IndexedDB itself, exactly like Clear Unused and Clear All
+        // (ESCSUITE-149) — so this is a storage clear, not an edit, and the
+        // write that follows it must not be undoable: an undo that handed
+        // the `SourceVideo` back would restore a tile nothing can play,
+        // place or export again. A failed delete leaves the tile in place,
+        // the same way a failed id is left out of Clear Unused/Clear All's
+        // own batch.
         try {
           await deleteVideo(id);
         } catch (e) {
           console.error('Failed to delete video from storage:', e);
+          showNotification?.("Couldn't remove that file from storage.", 'error');
+          return;
         }
-        removeSourceVideo(id);
+        removeSourceVideosPermanently([id]);
       }
     },
-    [lockedMedia, removeSourceVideo]
+    [lockedMedia, clips, removeSourceVideosPermanently, showNotification]
   );
 
   if (sourceVideos.length === 0) {

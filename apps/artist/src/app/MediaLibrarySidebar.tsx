@@ -70,7 +70,7 @@ export function MediaLibrarySidebar({
           </div>
 
           <div className={styles.libraryContainer}>
-            <VideoLibrary />
+            <VideoLibrary showNotification={showNotification} />
           </div>
         </>
       )}

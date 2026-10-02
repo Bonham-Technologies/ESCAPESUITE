@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
-import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail } from '../core/storage'
+import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail, getVideoBlob } from '../core/storage'
 import * as storageModule from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
@@ -112,7 +112,7 @@ describe('VideoUploader', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetStoreForTest()
-    store().removeSourceVideo('video1')
+    store().removeSourceVideosPermanently(['video1'])
     scriptStorage(50 * MB, 500 * MB)
     mockProcessVideoFile.mockResolvedValue(videoMeta)
     mockProcessImageFile.mockResolvedValue(imageMeta)
@@ -1025,7 +1025,7 @@ describe('VideoLibrary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     resetStoreForTest()
-    store().removeSourceVideo('video1')
+    store().removeSourceVideosPermanently(['video1'])
     // The quiet case: nothing stored to rebuild from, so the lazy rebuild
     // (ESCSUITE-117) reads once per thumbnail-less source and sets nothing.
     mockResolveThumbnailUrl.mockReset()
@@ -1126,8 +1126,11 @@ describe('VideoLibrary', () => {
   })
 
   // ESCSUITE-84: removing media takes every clip that uses it, so a clip on a
-  // locked track makes its media un-removable — the store refuses, and the
-  // button says so rather than doing nothing.
+  // locked track makes its media un-removable. This pins the *disabled
+  // button* only — since ESCSUITE-154 deleted the store's own refusal, the
+  // handler's `lockedMedia.has(id)` guard ahead of `deleteVideo` is a
+  // belt-and-braces check behind this button, not a store-level refusal, and
+  // is unreachable from here while the button stays disabled.
   it('refuses to remove media a clip on a locked track uses', async () => {
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
@@ -1140,13 +1143,25 @@ describe('VideoLibrary', () => {
     expect(screen.queryByTitle('Remove media')).not.toBeInTheDocument()
   })
 
-  it('still offers to remove media only unlocked clips use', () => {
+  // ESCSUITE-154 review, MINOR 3: the button being enabled is not the same as
+  // a removal actually landing — this also proves one does, with an
+  // unrelated track locked, now that the deleted `removeSourceVideo`'s own
+  // "still removes a source video only unlocked clips use" no longer exists
+  // to pin that at the store level.
+  it('still offers to remove media only unlocked clips use, and the removal lands with an unrelated track locked', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
     const clip = addClip('clip1', 0, 4)
     store().updateTrack(clip.trackId, { locked: false })
+    const otherTrack = store().addTrack('Other')
+    store().updateTrack(otherTrack.id, { locked: true })
     render(<VideoLibrary />)
 
     expect(screen.getByTitle('Remove media')).toBeEnabled()
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
   it('keeps the video when the confirmation is declined', async () => {
@@ -1160,6 +1175,141 @@ describe('VideoLibrary', () => {
     await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
     expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
     expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+  })
+
+  // ESCSUITE-154: Remove deletes the bytes the same way Clear Unused and
+  // Clear All already do (ESCSUITE-149), so it must not be undoable either —
+  // an undo that handed a `SourceVideo` back afterwards would restore a tile
+  // nothing can play, place or export again.
+  it('is not undoable: undo after Remove brings back neither the source nor its bytes', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    const pastLengthBeforeRemove = useEditorStore.getState().history.past.length
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+    // No new undo entry: canUndo() reflects the history exactly as it stood
+    // before the removal.
+    expect(useEditorStore.getState().history.past).toHaveLength(pastLengthBeforeRemove)
+    expect(useEditorStore.getState().canUndo()).toBe(true)
+
+    useEditorStore.getState().undo()
+
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).not.toContain('video1')
+    expect(await getVideoBlob('video1')).toBeUndefined()
+  })
+
+  // The headline case from the ESCSUITE-149 review: a tile with a clip on the
+  // timeline. The clip goes with it, the selection is pruned, and undo
+  // restores neither.
+  it('removing a video with a clip on the timeline removes the clip and prunes the selection, and undo restores neither', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    useEditorStore.getState().setSelectedClipId('clip1')
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+    expect(store().project.timeline.clips).toHaveLength(0)
+    expect(useEditorStore.getState().selectedClipId).toBeNull()
+
+    useEditorStore.getState().undo()
+
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).not.toContain('video1')
+    expect(
+      useEditorStore.getState().project.timeline.clips.some((c) => c.sourceVideoId === 'video1')
+    ).toBe(false)
+  })
+
+  // ESCSUITE-154: the confirm copy says how many clips go with it, so the
+  // single-item Remove reads the same way Clear All's own clause does.
+  //
+  // Each case awaits the removal through to completion (`handleRemoveVideo`
+  // is async, and confirm defaults to true) rather than leaving the click's
+  // promise chain to land during a later test.
+  it('asks a plain question when nothing on the timeline uses it', async () => {
+    store().addSourceVideo(videoMeta)
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith('Remove this video?')
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+  })
+
+  it('says one clip, singular, when exactly one clip uses it', async () => {
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      'Remove this video? This will also remove 1 clip that uses it.'
+    )
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+  })
+
+  it('says how many clips, plural, when more than one clip uses it', async () => {
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    addClip('clip2', 4, 2)
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    expect(globalThis.confirm).toHaveBeenCalledWith(
+      'Remove this video? This will also remove 2 clips that use it.'
+    )
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+  })
+
+  // ESCSUITE-154: the previous behaviour called `removeSourceVideo`
+  // regardless of whether `deleteVideo` actually succeeded. Routed through
+  // `removeSourceVideosPermanently` instead, a failed delete must not drop
+  // the tile from the store — the same shape as Clear Unused and Clear All,
+  // which only ever hand over the ids whose bytes are confirmed gone.
+  // No `showNotification` prop at all — this is the no-prop arm (ESCSUITE-154
+  // review, MINOR 1): the optional call must not throw when the caller never
+  // passed one.
+  it('leaves the tile in place when deleteVideo rejects', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
+    const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
+    render(<VideoLibrary />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(storageModule.deleteVideo).toHaveBeenCalledWith('video1'))
+    expect(removeSourceVideosPermanently).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toContain('video1')
+    removeSourceVideosPermanently.mockRestore()
+    vi.mocked(storageModule.deleteVideo).mockRestore()
+  })
+
+  // ESCSUITE-154 review, MINOR 1: before this, a failed delete left the tile
+  // in place (good) but told the user nothing beyond a `console.error` — the
+  // natural response is clicking Remove again and failing again in silence.
+  // The other arm (the case above) proves the call is optional; this one
+  // proves it actually fires, with the right message and type, when a caller
+  // does pass it.
+  it('tells the caller when deleteVideo rejects', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
+    const onNotification = vi.fn()
+    render(<VideoLibrary showNotification={onNotification} />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(storageModule.deleteVideo).toHaveBeenCalledWith('video1'))
+    expect(onNotification).toHaveBeenCalledWith("Couldn't remove that file from storage.", 'error')
+    vi.mocked(storageModule.deleteVideo).mockRestore()
   })
 
   // ESCSUITE-117: a source restored by undo has no thumbnailUrl — ESCSUITE-113
@@ -1257,7 +1407,7 @@ describe('VideoLibrary', () => {
       render(<VideoLibrary />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
-      act(() => { store().removeSourceVideo('video1') })
+      act(() => { store().removeSourceVideosPermanently(['video1']) })
       const orphaned = URL.createObjectURL(new Blob(['thumb'], { type: 'image/jpeg' }))
       await land('video1', orphaned)
 

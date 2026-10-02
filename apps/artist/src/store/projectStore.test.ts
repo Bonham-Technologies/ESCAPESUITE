@@ -177,197 +177,6 @@ describe('projectStore integration', () => {
       })
     })
 
-    it('removes a source video', () => {
-      const video: SourceVideo = {
-        id: 'video1',
-        name: 'test.mp4',
-        duration: 10,
-        width: 1920,
-        height: 1080,
-        frameRate: 30,
-        mimeType: 'video/mp4',
-        size: 1000000,
-      }
-
-      useEditorStore.getState().addSourceVideo(video)
-      expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
-
-      useEditorStore.getState().removeSourceVideo('video1')
-      expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
-    })
-
-    // ESCSUITE-113: the removed source's thumbnailUrl is a live
-    // URL.createObjectURL handle, and nothing else was ever going to free it.
-    describe('revoking the removed source\'s thumbnail', () => {
-      beforeEach(() => {
-        vi.mocked(URL.revokeObjectURL).mockClear()
-      })
-
-      it('revokes it exactly once', () => {
-        useEditorStore.getState().addSourceVideo({
-          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:thumb-1',
-        })
-
-        useEditorStore.getState().removeSourceVideo('video1')
-
-        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
-        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:thumb-1')
-      })
-
-      it('does nothing when the removed source has no thumbnail', () => {
-        useEditorStore.getState().addSourceVideo({
-          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000,
-        })
-
-        useEditorStore.getState().removeSourceVideo('video1')
-
-        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-      })
-
-      it('does not touch a non-blob thumbnail URL', () => {
-        useEditorStore.getState().addSourceVideo({
-          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000,
-          thumbnailUrl: 'https://example.com/thumb.jpg',
-        })
-
-        useEditorStore.getState().removeSourceVideo('video1')
-
-        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-      })
-
-      it('leaves a kept source\'s thumbnail alone', () => {
-        useEditorStore.getState().addSourceVideo({
-          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:removed',
-        })
-        useEditorStore.getState().addSourceVideo({
-          id: 'video2', name: 'kept.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:kept',
-        })
-
-        useEditorStore.getState().removeSourceVideo('video1')
-
-        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
-        expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:removed')
-      })
-
-      // Undo/redo never revoke on their own — a source coming back via redo
-      // still needs its URL to work — but a removal's own revoke must not
-      // leave a *later* undo handing that source back a handle nothing can
-      // open (ESCSUITE-113): the history snapshot removeSourceVideo just
-      // pushed is scrubbed of that same dead URL.
-      it('does not revoke again on undo, and undo brings the source back with no thumbnail rather than a dead one', () => {
-        useEditorStore.getState().addSourceVideo({
-          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:thumb-1',
-        })
-        useEditorStore.getState().removeSourceVideo('video1')
-        expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
-        vi.mocked(URL.revokeObjectURL).mockClear()
-
-        useEditorStore.getState().undo()
-
-        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-        const restored = useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')
-        expect(restored).toBeDefined()
-        expect(restored?.thumbnailUrl).toBeUndefined()
-      })
-
-      // An id naming no source is a no-op, not an edit (ESCSUITE-113 review
-      // round 2): nothing to revoke, and nothing else changes either.
-      it('does nothing for an id naming no source', () => {
-        useEditorStore.getState().addSourceVideo({
-          id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-          frameRate: 30, mimeType: 'video/mp4', size: 1000000, thumbnailUrl: 'blob:thumb-1',
-        })
-        const before = useEditorStore.getState()
-
-        useEditorStore.getState().removeSourceVideo('no-such-id')
-
-        const after = useEditorStore.getState()
-        expect(URL.revokeObjectURL).not.toHaveBeenCalled()
-        expect(after.sourceVideos).toBe(before.sourceVideos)
-        expect(after.history.past).toHaveLength(before.history.past.length)
-      })
-    })
-
-    // ESCSUITE-100: a clipboard entry that used to point at this source can
-    // never be pasted back once the source — and every clip that used it — is
-    // gone, so removeSourceVideo drops it the same way removeTrack drops a
-    // clipboard entry for a track it removes.
-    it('drops clipboard entries that reference the source it removes', () => {
-      const removed: SourceVideo = {
-        id: 'removed-video',
-        name: 'removed.mp4',
-        duration: 10,
-        width: 1920,
-        height: 1080,
-        frameRate: 30,
-        mimeType: 'video/mp4',
-        size: 1000000,
-      }
-      useEditorStore.getState().addSourceVideo({
-        id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-        frameRate: 30, mimeType: 'video/mp4', size: 1000000,
-      })
-      useEditorStore.getState().addSourceVideo(removed)
-      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline(
-        { id: 'clip-kept', sourceVideoId: 'video1', name: 'Kept', startTime: 0, endTime: 5, duration: 5 },
-        trackId, 0
-      )
-      useEditorStore.getState().addClipToTimeline(
-        { id: 'clip-removed', sourceVideoId: 'removed-video', name: 'Removed', startTime: 0, endTime: 5, duration: 5 },
-        trackId, 5
-      )
-
-      useEditorStore.getState().toggleClipSelection('clip-kept')
-      useEditorStore.getState().toggleClipSelection('clip-removed')
-      useEditorStore.getState().copySelectedClips()
-      expect(useEditorStore.getState().clipboard).toHaveLength(2)
-
-      useEditorStore.getState().removeSourceVideo('removed-video')
-
-      const clipboard = useEditorStore.getState().clipboard!
-      expect(clipboard).toHaveLength(1)
-      expect(clipboard[0].id).toBe('clip-kept')
-    })
-
-    it('leaves the clipboard untouched when nothing copied used the removed source', () => {
-      const removed: SourceVideo = {
-        id: 'removed-video',
-        name: 'removed.mp4',
-        duration: 10,
-        width: 1920,
-        height: 1080,
-        frameRate: 30,
-        mimeType: 'video/mp4',
-        size: 1000000,
-      }
-      useEditorStore.getState().addSourceVideo({
-        id: 'video1', name: 'test.mp4', duration: 10, width: 1920, height: 1080,
-        frameRate: 30, mimeType: 'video/mp4', size: 1000000,
-      })
-      useEditorStore.getState().addSourceVideo(removed)
-      const trackId = useEditorStore.getState().project.timeline.tracks[0].id
-
-      useEditorStore.getState().addClipToTimeline(
-        { id: 'clip-kept', sourceVideoId: 'video1', name: 'Kept', startTime: 0, endTime: 5, duration: 5 },
-        trackId, 0
-      )
-      useEditorStore.getState().toggleClipSelection('clip-kept')
-      useEditorStore.getState().copySelectedClips()
-      const clipboardBefore = useEditorStore.getState().clipboard
-
-      useEditorStore.getState().removeSourceVideo('removed-video')
-
-      expect(useEditorStore.getState().clipboard).toBe(clipboardBefore)
-    })
-
     // ESCSUITE-117: a source restored by undo carries `thumbnailUrl:
     // undefined` — ESCSUITE-113 scrubbed the dead handle out of the history
     // snapshots (pinned by resetProject's "undo brings the source back with no
@@ -453,10 +262,10 @@ describe('projectStore integration', () => {
       })
     })
 
-    // ESCSUITE-149: a storage clear (Clear Unused / Clear All) deletes the
-    // source's bytes from IndexedDB itself, so it must not be undoable the way
-    // `removeSourceVideo` is — an undo that handed a `SourceVideo` back after
-    // this would restore a tile nothing can play, place or export. Modelled on
+    // ESCSUITE-149: a storage clear (per-item Remove, Clear Unused or Clear
+    // All) deletes the source's bytes from IndexedDB itself, so it must not
+    // be undoable — an undo that handed a `SourceVideo` back after this would
+    // restore a tile nothing can play, place or export. Modelled on
     // ESCSUITE-117's `setSourceThumbnail`: it bypasses `pushToHistory`
     // entirely, and — because the clear can reach back past edits that are
     // already on the undo stack — it also scrubs every existing snapshot
@@ -520,10 +329,10 @@ describe('projectStore integration', () => {
         expect(useEditorStore.getState().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
       })
 
-      // ESCSUITE-149 review, MINOR 3: the clipboard-prune branch mirrors
-      // `removeSourceVideo`'s (ESCSUITE-100), but every other test here
-      // leaves `clipboard` `null`, so only the falsy side of it was ever
-      // reached. These two reach both sides of that condition.
+      // ESCSUITE-149 review, MINOR 3: the clipboard-prune branch is the same
+      // shape as `removeClipFromTimeline`'s (ESCSUITE-100), but every other
+      // test here leaves `clipboard` `null`, so only the falsy side of it was
+      // ever reached. These two reach both sides of that condition.
       it('drops a clipboard entry that references a removed source', () => {
         useEditorStore.getState().addSourceVideo(made('video1'))
         const trackId = useEditorStore.getState().project.timeline.tracks[0].id
@@ -537,9 +346,8 @@ describe('projectStore integration', () => {
 
         useEditorStore.getState().removeSourceVideosPermanently(['video1'])
 
-        // Filtered to empty, same as `removeSourceVideo`'s identically-shaped
-        // prune (ESCSUITE-100) — `pasteClips` already treats `[]` and `null`
-        // as the same "nothing to paste".
+        // Filtered to empty, not dropped to `null` — `pasteClips` already treats
+        // `[]` and `null` as the same "nothing to paste" (ESCSUITE-100).
         expect(useEditorStore.getState().clipboard).toEqual([])
       })
 
@@ -657,19 +465,20 @@ describe('projectStore integration', () => {
       // *live* library (so `removed.length === 0`) used to return early and
       // skip the scrub entirely — the bytes were gone, but an older snapshot
       // still named the source, so undo still handed it back. Reproduces the
-      // review's own probe: removed once through the plain, undoable
-      // `removeSourceVideo` (which pushes a snapshot that still carries it),
-      // then named again by a storage clear that finds nothing left to remove.
+      // review's own probe: `resetProject()` is undoable and empties the
+      // live library, but — unlike this action — it only scrubs thumbnail
+      // handles (`scrubDeadThumbnails`), not the sources themselves, so the
+      // snapshot it pushes still names 'video2' even though the live library
+      // has already lost it.
       it('scrubs an id already gone from the live library out of a history snapshot that still carries it', () => {
         useEditorStore.getState().addSourceVideo(made('video1'))
         useEditorStore.getState().addSourceVideo(made('video2'))
-        useEditorStore.getState().removeSourceVideo('video2')
-        expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+        useEditorStore.getState().resetProject()
+        expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
         const pastLengthBeforeClear = useEditorStore.getState().history.past.length
 
-        // 'video2' is not in the live library — removeSourceVideo already
-        // took it out — but the snapshot removeSourceVideo just pushed still
-        // names it.
+        // 'video2' is not in the live library — resetProject already emptied
+        // it — but the snapshot resetProject just pushed still names it.
         useEditorStore.getState().removeSourceVideosPermanently(['video2'])
 
         expect(useEditorStore.getState().history.past).toHaveLength(pastLengthBeforeClear)
@@ -709,18 +518,6 @@ describe('projectStore integration', () => {
         expect(state.project.timeline.clips.some((c) => c.sourceVideoId === 'video1')).toBe(false)
       })
 
-      // A plain, single-item removal is a different action and must stay
-      // undoable — pin it here so the two paths cannot be confused with one
-      // another.
-      it('does not change what a plain removeSourceVideo does: that stays undoable', () => {
-        useEditorStore.getState().addSourceVideo(made('video1'))
-
-        useEditorStore.getState().removeSourceVideo('video1')
-        expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
-
-        useEditorStore.getState().undo()
-        expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['video1'])
-      })
     })
   })
 

@@ -433,9 +433,10 @@ describe('Multi-Select Store', () => {
     })
 
     // ESCSUITE-100: a clone keeps its clipboard `trackId`, and that track can
-    // be gone by the time paste runs — `removeTrack`/`removeSourceVideo` prune
-    // the clipboard themselves, so the only way to reach this is a project
-    // load that replaced the tracks out from under an existing clipboard.
+    // be gone by the time paste runs —
+    // `removeTrack`/`removeSourceVideosPermanently` prune the clipboard
+    // themselves, so the only way to reach this is a project load that
+    // replaced the tracks out from under an existing clipboard.
     // All-or-nothing, like the lock: refuse, write nothing, no history entry.
     it('pasteClips refuses whole when a clone would land on a track no longer on the timeline', () => {
       const tracks = [

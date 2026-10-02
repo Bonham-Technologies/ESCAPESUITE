@@ -552,7 +552,7 @@ describe('projectStore remaining behaviours', () => {
     })
   })
 
-  describe('removeSourceVideo', () => {
+  describe('removeSourceVideosPermanently', () => {
     it('drops the clips that referenced it and shortens the timeline', () => {
       addClip('clip1', 0, 4)
       const other: SourceVideo = { ...video, id: 'video2' }
@@ -564,7 +564,7 @@ describe('projectStore remaining behaviours', () => {
       )
       expect(store().project.timeline.duration).toBe(12)
 
-      store().removeSourceVideo('video2')
+      store().removeSourceVideosPermanently(['video2'])
 
       expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
       expect(store().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
@@ -1116,28 +1116,19 @@ describe('projectStore remaining behaviours', () => {
       store().shiftClipsAfter(free, 1, 2)
       expect(clipsRef().find((c) => c.id === 'f2')!.timelinePosition).toBe(6)
     })
-    it('refuses to remove a source video a clip on it uses', () => {
-      const before = clipsRef(); const entries = past()
-
-      store().removeSourceVideo(video.id)
-
-      expect(clipsRef()).toBe(before)
-      expect(past()).toBe(entries)
-      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toContain(video.id)
-    })
-    it('still removes a source video only unlocked clips use', () => {
-      store().addSourceVideo({ ...video, id: 'video2' })
-      store().addClipToTimeline(
-        { id: 'f2', sourceVideoId: 'video2', name: 'f2', startTime: 0, endTime: 2, duration: 2 },
-        free,
-        8
-      )
-
-      store().removeSourceVideo('video2')
-
-      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual([video.id])
-      expect(clipsRef().some((c) => c.id === 'f2')).toBe(false)
-    })
+    // ESCSUITE-154: the store-level lock refusal these two tests pinned
+    // belonged to `removeSourceVideo`, deleted when the per-item Remove
+    // button — its only caller — moved to the non-undoable
+    // `removeSourceVideosPermanently`, which trusts its caller to have
+    // already filtered locked ids out. ESCSUITE-84's *protection* is intact —
+    // `VideoUploader.tsx`'s own `lockedMedia.has(id)` guard sits ahead of
+    // `deleteVideo`, and the button is never rendered enabled for a locked
+    // source in the first place — but there is no longer a store-level
+    // refusal for a test here to pin. `VideoUploader.test.tsx`'s "refuses to
+    // remove media a clip on a locked track uses" pins only the *disabled
+    // button*; the component's own guard behind it is a belt-and-braces
+    // check, unreachable while that button is rendered disabled, and has no
+    // executed-refusal pin of its own (ESCSUITE-154 review, MINOR 2).
     it('still edits a clip on an unlocked track while another track is locked', () => {
       store().updateClipBlendMode('f1', 'multiply')
       expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')
@@ -1224,7 +1215,7 @@ describe('projectStore remaining behaviours', () => {
       expect([...store().selectedClipIds]).toEqual(['clip2'])
     })
 
-    it('removeSourceVideo drops the ids of the clips it takes with it', () => {
+    it('removeSourceVideosPermanently drops the ids of the clips it takes with it', () => {
       const other: SourceVideo = { ...video, id: 'video2' }
       store().addSourceVideo(other)
       addClip('clip1', 0, 2)
@@ -1236,7 +1227,7 @@ describe('projectStore remaining behaviours', () => {
       store().toggleClipSelection('clip1')
       store().toggleClipSelection('clip2')
 
-      store().removeSourceVideo('video2')
+      store().removeSourceVideosPermanently(['video2'])
 
       expect(store().selectedClipId).toBeNull()
       expect([...store().selectedClipIds]).toEqual(['clip1'])
