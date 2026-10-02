@@ -206,10 +206,10 @@ ESCAPECRAFT take recorded with no picture (microphone alone) is still typed
 `video/webm;codecs=vp9,opus`, and `meta.mediaType: "audio"` is the only thing that says
 otherwise. A bundle without `meta` on a source still works exactly as before — the engine probes
 it from the bytes, the same as a manifest source with no `width`/`height`/`duration`. `meta`,
-wherever it appears, is validated the same way: an unrecognised `mediaType`, or a `width`,
-`height` or `duration` that isn't a finite number (`duration` must also be positive) is rejected
-before Chromium launches, naming the field (e.g. `bundle video #0 field "meta.duration" must be
-a finite positive number`).
+wherever it appears, is validated the same way: an unrecognised `mediaType`, or a `width` or
+`height` that isn't a finite number `>= 0`, or a `duration` that isn't a finite positive number,
+is rejected before Chromium launches, naming the field (e.g. `bundle video #0 field
+"meta.duration" must be a finite positive number`).
 
 `examples/job-veditor-volume.json` shows the job shape but points at
 `examples/project.veditor`, which the kit does **not** ship — a `.veditor` carries its own media

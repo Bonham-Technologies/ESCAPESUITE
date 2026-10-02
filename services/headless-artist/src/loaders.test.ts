@@ -258,11 +258,11 @@ describe('loadManifest "meta"', () => {
     )
   })
 
-  it('rejects an unusable "meta.width"', async () => {
-    const manifestPath = await writeManifestWithMeta({ width: -5 })
+  it.each(['width', 'height'])('rejects an unusable "meta.%s"', async (field) => {
+    const manifestPath = await writeManifestWithMeta({ [field]: -5 })
 
     await expect(loadManifest(manifestPath)).rejects.toThrow(
-      'manifest source "src-0" field "meta.width" must be a finite number >= 0',
+      `manifest source "src-0" field "meta.${field}" must be a finite number >= 0`,
     )
   })
 
@@ -272,6 +272,34 @@ describe('loadManifest "meta"', () => {
     await expect(loadManifest(manifestPath)).rejects.toThrow(
       'manifest source "src-0" field "meta.duration" must be a finite positive number',
     )
+  })
+
+  it('forwards a valid "meta.duration" into sourceVideos', async () => {
+    // MAJOR 1 (review round 1): the accepting arm of isUsableDuration inside "meta" was never
+    // exercised -- every prior test either omitted duration or passed the rejected 0.
+    const manifestPath = await writeManifestWithMeta({ duration: 2.5 })
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0].duration).toBe(2.5)
+    await job.cleanup()
+  })
+
+  it('applies "meta" width/height/duration when there is no competing top-level value', async () => {
+    // The complementary direction to "still applies the explicit top-level ... over a differing
+    // meta" below: with no top-level width/height/duration at all, meta's own values land.
+    const manifestPath = await writeManifestWithMeta({ mediaType: 'audio', width: 10, height: 20, duration: 3 })
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0]).toEqual({
+      id: 'src-0',
+      name: 'src-0.mp4',
+      mimeType: 'video/mp4',
+      mediaType: 'audio',
+      width: 10,
+      height: 20,
+      duration: 3,
+    })
+    await job.cleanup()
   })
 
   it('still applies the explicit top-level width/height/duration over a differing "meta"', async () => {
@@ -595,6 +623,63 @@ describe('loadBundle video validation', () => {
     const bundlePath = await writeBundle(dir, [video])
 
     await expect(loadBundle(bundlePath, dir)).rejects.toThrow('bundle video #0 field "meta" must be an object')
+  })
+
+  // MAJOR 2 (review round 1): the stricter meta checks (mediaType enum, width/height >= 0,
+  // duration > 0) tightened assertVeditorVideo's old "is it a record" check, but had no
+  // bundle-suite regression coverage of their own -- only the manifest suite exercised
+  // assertSourceMeta's stricter arms, leaving the "bundle video #N" context string for each of
+  // them unverified.
+  it('rejects a "meta.mediaType" that is not video, image or audio', async () => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = { mediaType: 'bogus' }
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+      'bundle video #0 field "meta.mediaType" must be one of video, image, audio',
+    )
+  })
+
+  it.each(['width', 'height'])('rejects an unusable "meta.%s"', async (field) => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = { [field]: -5 }
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+      `bundle video #0 field "meta.${field}" must be a finite number >= 0`,
+    )
+  })
+
+  it('rejects a non-positive "meta.duration"', async () => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = { duration: 0 }
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+      'bundle video #0 field "meta.duration" must be a finite positive number',
+    )
+  })
+
+  it('accepts a "meta" with a valid mediaType, width, height and duration', async () => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = { mediaType: 'audio', width: 0, height: 0, duration: 2.5 }
+    const bundlePath = await writeBundle(dir, [video])
+
+    const job = await loadBundle(bundlePath, dir)
+    try {
+      expect(job.sourceVideos[0]).toMatchObject({
+        mediaType: 'audio',
+        width: 0,
+        height: 0,
+        duration: 2.5,
+      })
+    } finally {
+      await job.cleanup()
+    }
   })
 })
 
