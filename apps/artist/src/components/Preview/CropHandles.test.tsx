@@ -492,3 +492,151 @@ describe('the crop handle layer', () => {
     expect(onLeave).not.toHaveBeenCalled()
   })
 })
+
+describe('nudging a crop handle from the keyboard', () => {
+  /** What the live region is saying, with the re-read mark taken off. */
+  const announced = (): string =>
+    (screen.getByRole('status').textContent ?? '').replace(/​$/, '')
+
+  it('crops one source pixel per arrow press, in the direction the arrow points', () => {
+    const { clip, handle } = mount()
+
+    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowRight' })
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 1 / 1920, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('crops ten with Shift', () => {
+    const { clip, handle } = mount()
+
+    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowRight', shiftKey: true })
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 10 / 1920, top: 0, right: 0, bottom: 0 })
+  })
+
+  it('moves the handle back out again, towards the frame\'s edge', () => {
+    const { clip, handle } = mount()
+    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowRight', shiftKey: true })
+
+    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowLeft' })
+
+    // Two divisions by 1920 and a subtraction do not land on 9/1920 exactly.
+    expect(clipNow(clip.id).crop!.left).toBeCloseTo(9 / 1920, 6)
+  })
+
+  it('nudges both of a corner\'s insets', () => {
+    const { clip, handle } = mount()
+
+    fireEvent.keyDown(handle('Crop top left'), { key: 'ArrowRight', shiftKey: true })
+    fireEvent.keyDown(handle('Crop top left'), { key: 'ArrowDown', shiftKey: true })
+
+    expect(clipNow(clip.id).crop).toEqual({
+      left: 10 / 1920,
+      top: 10 / 1080,
+      right: 0,
+      bottom: 0,
+    })
+  })
+
+  it('swallows an arrow the handle has no inset for, and does nothing with it', () => {
+    // The playhead must not step out from under a user whose focus is on a crop
+    // handle, so the key is claimed; there is simply nothing for it to move.
+    const { clip, handle } = mount()
+
+    expect(fireEvent.keyDown(handle('Crop left'), { key: 'ArrowUp' })).toBe(false)
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(announced()).toBe('')
+  })
+
+  it('writes nothing when the nudge is already at the edge it came from', () => {
+    const { clip, handle } = mount()
+    const before = past()
+
+    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowLeft' })
+
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(past()).toBe(before)
+  })
+
+  it('leaves one undo entry per press, and one for a held key', () => {
+    const { handle } = mount()
+    const button = handle('Crop left')
+    const before = past()
+
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    fireEvent.keyDown(button, { key: 'ArrowRight', repeat: true })
+    fireEvent.keyDown(button, { key: 'ArrowRight', repeat: true })
+    fireEvent.keyUp(button, { key: 'ArrowRight' })
+
+    expect(past()).toBe(before + 1)
+  })
+
+  it('starts a fresh entry for the next press', () => {
+    const { handle } = mount()
+    const button = handle('Crop left')
+    const before = past()
+
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    fireEvent.keyUp(button, { key: 'ArrowRight' })
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    fireEvent.keyUp(button, { key: 'ArrowRight' })
+
+    expect(past()).toBe(before + 2)
+  })
+
+  it('announces the stored crop in source pixels', () => {
+    // Percentages would read a one-pixel nudge of a 1920-wide source as "0%".
+    const { handle } = mount()
+
+    fireEvent.keyDown(handle('Crop left'), { key: 'ArrowRight' })
+
+    expect(announced()).toBe('Crop left: left 1 px')
+  })
+
+  it('announces both of a corner\'s insets', () => {
+    const { handle } = mount()
+
+    fireEvent.keyDown(handle('Crop top left'), { key: 'ArrowRight', shiftKey: true })
+
+    expect(announced()).toBe('Crop top left: left 10 px, top 0 px')
+  })
+
+  it('says the same thing twice audibly', () => {
+    // An aria-atomic region whose text does not change is not re-read, which is
+    // exactly the case a user repeating one nudge is in.
+    const { handle } = mount()
+    const button = handle('Crop left')
+
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+    const first = screen.getByRole('status').textContent
+    fireEvent.keyDown(button, { key: 'ArrowLeft' })
+    fireEvent.keyDown(button, { key: 'ArrowRight' })
+
+    expect(screen.getByRole('status').textContent).not.toBe(first)
+    expect(announced()).toBe('Crop left: left 1 px')
+  })
+
+  it('announces nothing when the store refuses the write', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().updateTrack(clip.trackId, { locked: true })
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={video}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    // `locked={false}` with a locked track is the row-locked-mid-gesture case:
+    // the button is live, the store refuses, and the live region must not claim
+    // an edit that did not happen.
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Crop left' }), { key: 'ArrowRight' })
+
+    expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(announced()).toBe('')
+  })
+})
