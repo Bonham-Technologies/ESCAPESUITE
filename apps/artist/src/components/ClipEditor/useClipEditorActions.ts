@@ -78,6 +78,7 @@ import type {
   EasingType,
 } from '../../store/types';
 import { croppedSourceRect, cropUpdateFor } from '../../core/clipCrop';
+import { cropCompensatesCentre, cropWriteFor } from '../../core/cropDrag';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
@@ -323,19 +324,52 @@ export function useClipEditorActions(): ClipEditorActions {
     [selectedClip, updateClip, commit]
   );
 
-  // The decision is `core/clipCrop.ts`'s `cropUpdateFor` (ESCSUITE-157), shared
-  // with the preview's crop handles so the two surfaces cannot disagree about
-  // what the store may hold. `null` means write nothing — two opposite sliders
-  // at their 90% maximum ask for exactly that — and the slider the user is
-  // dragging snaps back to the stored value rather than to one nobody asked for.
+  // Every crop write in the app goes through the same two functions
+  // (ESCSUITE-171). `core/clipCrop.ts`'s `cropUpdateFor` (ESCSUITE-157) is the
+  // decision about what the store may *hold*: `null` means write nothing — two
+  // opposite sliders at their 90% maximum ask for exactly that — and the slider
+  // the user is dragging snaps back to the stored value rather than to one
+  // nobody asked for. `core/cropDrag.ts`'s `cropWriteFor` is the decision about
+  // where the picture then *sits*: cropping shrinks the drawn picture about the
+  // clip's centre (ESCSUITE-6), so a crop written on its own moves BOTH edges of
+  // the axis, and the compensating centre is what keeps the edges this write is
+  // not changing where they are. The on-canvas handles have done that since
+  // ESCSUITE-157; the sliders, the number fields, the aspect presets and
+  // Reset/"None" used to write `{ crop }` alone, which is why the same inset
+  // reached from the two surfaces repositioned the clip differently and why a
+  // Reset after a handle drag left the drag's compensating centre behind for
+  // good.
+  //
+  // The start is the clip's CURRENT crop and transform, because each inspector
+  // write is its own gesture: unlike a drag — which rebases every move from the
+  // press, or it compounds (ESCSUITE-110's trap) — a slider's `onChange` and a
+  // preset's click each see what the previous one actually stored. `selectedClip`
+  // is already subscribed, so reading its transform here adds no store
+  // subscription to the inspector (`ClipEditor.rerender.test.tsx` holds that
+  // line).
+  //
+  // With no source frame there is nothing to measure a centre against, so the
+  // crop goes alone — which is only ever reached by the all-zero "clear the
+  // crop" write, the one thing `cropUpdateFor` allows a clip whose source has
+  // left the media library.
   const handleCropChange = useCallback(
     (crop: ClipCrop) => {
       if (!selectedClip) return;
-      const update = cropUpdateFor(crop, sourceVideo ?? undefined);
+      const source = sourceVideo ?? undefined;
+      const update = cropUpdateFor(crop, source);
       if (!update) return;
-      commit((skipHistory) => updateClip(selectedClip.id, update, skipHistory));
+      const payload = source
+        ? cropWriteFor(
+            { crop: selectedClip.crop, transform: selectedClip.transform },
+            update.crop,
+            source,
+            resolution,
+            cropCompensatesCentre(selectedClip.animation)
+          )
+        : update;
+      commit((skipHistory) => updateClip(selectedClip.id, payload, skipHistory));
     },
-    [selectedClip, sourceVideo, updateClip, commit]
+    [selectedClip, sourceVideo, resolution, updateClip, commit]
   );
 
   // Crop mode is a latch (`store/uiSlice.ts`): it is "on" only while it names

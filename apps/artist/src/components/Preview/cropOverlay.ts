@@ -18,13 +18,22 @@ import {
   type CanvasContentBox,
   type OverlayBoundsOptions,
 } from './previewGeometry';
-import type { Clip, ClipCrop, SourceVideo } from '../../store/types';
+import type { Clip, ClipCrop, SourceVideo, Track } from '../../store/types';
 import type { DragMode, OverlayBounds, ProjectSize } from './types';
 
 /** Everything crop mode's chrome reads out of the editor store. */
 export interface CropOverlayScene {
   clips: Clip[];
   sourceVideos: SourceVideo[];
+  /**
+   * The timeline's tracks, so {@link cropTarget} can ask the question the
+   * renderer asks before drawing a clip at all (ESCSUITE-171).
+   *
+   * `PreviewPlayer` already subscribes to them — it reads them for
+   * `isTrackLocked` and `getActiveTransition` — so this costs the scene memo one
+   * more dependency and nothing else.
+   */
+  tracks: Track[];
   /** The latch: the clip crop mode was opened on, or null. */
   cropClipId: string | null;
   selectedClipId: string | null;
@@ -83,16 +92,26 @@ export const CROP_HANDLE_MODES: Record<CropHandle, DragMode> = {
  * An overlay needs no condition of its own: it carries `sourceVideoId: ''` and
  * fails the source lookup.
  *
+ * **The clip's track has to be showing it** (ESCSUITE-171). `getClipsAtTime`
+ * (`store/clipQueries.ts`) skips a clip whose track is missing or not `visible`,
+ * so the frame draws nothing for it; without the same test here the chrome drew
+ * a dim ghost of a hidden clip and the eight handles stayed live over it. The
+ * condition is written the way that query writes it — no track, no picture — so
+ * the two cannot drift.
+ *
  * Callers want {@link visibleCropTarget} below, which adds the clip's own time
  * window. This half is separate only because the window needs the clip this one
  * resolves.
  */
 export function cropTarget(scene: CropOverlayScene): CropTarget | null {
-  const { clips, sourceVideos, cropClipId, selectedClipId, isPlaying } = scene;
+  const { clips, sourceVideos, tracks, cropClipId, selectedClipId, isPlaying } = scene;
   if (!cropClipId || cropClipId !== selectedClipId || isPlaying) return null;
 
   const clip = clips.find((c) => c.id === cropClipId);
   if (!clip) return null;
+
+  const track = tracks.find((t) => t.id === clip.trackId);
+  if (!track || !track.visible) return null;
 
   const source = sourceVideos.find((s) => s.id === clip.sourceVideoId);
   if (!source) return null;
@@ -105,7 +124,8 @@ export function cropTarget(scene: CropOverlayScene): CropTarget | null {
  *
  * The **one** definition, read by the chrome below and by `PreviewPlayer` for
  * whether to mount the eight DOM handles — so neither can show crop mode for a
- * frame the other is not showing it for. Before this existed the chrome carried
+ * frame the other is not showing it for, and (through `cropTarget`) neither
+ * shows it for a frame the renderer is not drawing at all. Before this existed the chrome carried
  * the time comparison on its own and the handle layer carried none, which left
  * eight live, draggable buttons over an unrelated frame once the playhead
  * scrubbed off the cropped clip.

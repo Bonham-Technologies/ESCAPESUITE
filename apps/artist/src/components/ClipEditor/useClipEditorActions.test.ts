@@ -1042,7 +1042,16 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
 
     act(() => result.current.handleCropChange({ ...CROP }))
 
-    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { crop: CROP }, false)
+    // ESCSUITE-171: the write carries the compensating centre the on-canvas
+    // handles have always written, so the edges this crop is not moving stay
+    // where they are. 25% off the left of a 1920-wide source and 10% off the top
+    // of a 1080-tall one move the kept region's centre 240 and 54 source pixels,
+    // which at scale 1 in a 1920x1080 project is 0.125 and 0.05 of the frame.
+    expect(spies.updateClip).toHaveBeenCalledWith(
+      clip.id,
+      { crop: CROP, transform: { ...clip.transform, x: 0.625, y: 0.55 } },
+      false
+    )
     expect(clipNow(clip.id).crop).toEqual(CROP)
   })
 
@@ -1056,7 +1065,14 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     // So a clip that was never cropped and one whose crop was reset are the same
     // object, and `undefined === none` stays the only rule the renderer, the
     // geometry and the validator need to know.
-    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { crop: undefined }, false)
+    expect(spies.updateClip).toHaveBeenLastCalledWith(
+      clip.id,
+      // And the centre comes back with it (ESCSUITE-171): Reset puts the picture
+      // back where it started rather than leaving the previous write's
+      // compensation behind.
+      { crop: undefined, transform: { ...clip.transform, x: 0.5, y: 0.5 } },
+      false
+    )
     expect(clipNow(clip.id).crop).toBeUndefined()
   })
 
@@ -1160,9 +1176,19 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     act(() => result.current.handleCropChange({ left: 0.2, top: 0, right: 0, bottom: 0 }))
     act(() => result.current.sliderGesture.onPointerUp())
 
-    // One drag, one undo entry.
-    expect(spies.updateClip).toHaveBeenNthCalledWith(1, clip.id, { crop: { left: 0.1, top: 0, right: 0, bottom: 0 } }, false)
-    expect(spies.updateClip).toHaveBeenNthCalledWith(2, clip.id, { crop: { left: 0.2, top: 0, right: 0, bottom: 0 } }, true)
+    // One drag, one undo entry. Asserted off the mock's own calls rather than
+    // with `toHaveBeenNthCalledWith` because the second write's compensating
+    // centre (ESCSUITE-171) is 0.6 only to within a double's last bit — the
+    // history flag is what this case is about.
+    const [first, second] = spies.updateClip.mock.calls
+    expect(first[1]).toEqual({
+      crop: { left: 0.1, top: 0, right: 0, bottom: 0 },
+      transform: { ...clip.transform, x: 0.55, y: 0.5 },
+    })
+    expect(first[2]).toBe(false)
+    expect(second[1].crop).toEqual({ left: 0.2, top: 0, right: 0, bottom: 0 })
+    expect(second[1].transform.x).toBeCloseTo(0.6, 10)
+    expect(second[2]).toBe(true)
   })
 
   it('one undo takes the crop off and leaves the mask on', () => {

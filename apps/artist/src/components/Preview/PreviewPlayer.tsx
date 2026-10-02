@@ -132,14 +132,17 @@ export function PreviewPlayer() {
   // gates three things — the chrome below, the canvas' own pointer handlers, and
   // the DOM handle layer — and all three ask it once, here.
   //
+  // `tracks` is in it because a clip on a hidden track takes no picture in the
+  // frame either (ESCSUITE-171), and this component already subscribes to them.
+  //
   // Taking `currentTime` means this value's identity changes on every scrub tick
   // *while crop mode is open* (it stays a stable `null` the rest of the time, so
   // nothing downstream of it churns when the mode is off). The cost is bounded by
   // the mode being open, the same argument `CropHandles`' own ResizeObserver
   // makes.
   const cropScene = useMemo<cropOverlay.CropOverlayScene>(
-    () => ({ clips, sourceVideos, cropClipId, selectedClipId, isPlaying }),
-    [clips, sourceVideos, cropClipId, selectedClipId, isPlaying]
+    () => ({ clips, sourceVideos, tracks, cropClipId, selectedClipId, isPlaying }),
+    [clips, sourceVideos, tracks, cropClipId, selectedClipId, isPlaying]
   );
   const cropping = useMemo(
     () => cropOverlay.visibleCropTarget(cropScene, currentTime),
