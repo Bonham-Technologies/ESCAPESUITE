@@ -143,7 +143,8 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - Static per-clip picture properties in `src/core/`: `clipMask.ts` (a circle or rounded mask and its stroke) and `clipCrop.ts` (a crop — four insets as fractions of the source frame). Never keyframed, media clips only, and read by the preview, both exporters, both transition paths and the headless bundle from the same two draw functions; a crop also resizes the clip's rectangle, so the selection box, hit test, marquee and drag seed read it too
 - Audio waveform visualization in `src/utils/waveform.ts`
 - WebCodecs API for encoding/decoding (Chrome/Edge only)
-- Export formats: WebM (VP9+Opus) and MP4 (H.264+AAC)
+- Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
+  audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
 
 ### Data Flow
@@ -171,8 +172,11 @@ Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) �
 the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
-  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm', name: string }` after a
-  successful export (`name` is the download filename; not sent on failure or cancellation).
+  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string }`
+  after a successful export (`name` is the download filename; not sent on failure or
+  cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
+  a new value of a field it already reads, and needs no change unless it wants to treat a GIF
+  differently.
   Inbound `LOAD_VIDEO` (`{ url }`) fetches that URL the same way `?video=` does, so it is bound by
   the same `connect-src` — a URL the page's policy refuses gets an `ERROR` reply naming the origin
   and the policy (`code: 'LOAD_ERROR'`) instead of a generic failure. See "URL params (ARTIST)"

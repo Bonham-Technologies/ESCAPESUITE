@@ -69,7 +69,8 @@ creation tools that run entirely in the browser. The suite consists of:
 - Clip masks (circle or rounded rectangle) and clip borders, drawn identically in the preview, in
   every export and by the headless renderer
 - 11 transition types
-- WebM (VP9+Opus) and MP4 (H.264+AAC) export with codec fallbacks
+- WebM (VP9+Opus) and MP4 (H.264+AAC) export with codec fallbacks, plus GIF export that needs no
+  WebCodecs at all
 - Project save/load
 - Audio waveform visualization with extreme zoom support
 - Per-clip thumbnails on the timeline, clipped to that clip's own mask

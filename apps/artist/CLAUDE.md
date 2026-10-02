@@ -2200,8 +2200,9 @@ aspect differs from the project's, the project rect is fitted inside the raster,
 leftover is black bar. The clear is the *whole raster expressed in project coordinates* rather
 than the project rect, so one fill paints the picture's ground and its bars together. A
 resolution preset no longer produces that case beyond sub-pixel rounding, because `getResolution`
-derives a preset's width from the **project's** aspect: preset height is fixed (1080/720/480),
-width is round-to-even(height x project aspect), and `'project'` stays exact. It used to take the
+derives a preset's width from the **project's** aspect: preset height is fixed (1080/720/480, and
+since ESCSUITE-34 also 360 — which only the GIF format offers, see "GIF Export"), width is
+round-to-even(height x project aspect), and `'project'` stays exact. It used to take the
 aspect from `getBaseDimensions` — the bottom clip's source — so a 16:9 project whose bottom clip
 was 4:3 exported 960x720 for "720p". Only a caller with no project resolution at all falls back
 to the source aspect, the same fallback `'project'` itself takes — and that fallback is used by
@@ -2861,6 +2862,12 @@ outcome, not on the double.
   `globals.ts` (take a global away, the way a browser without that API looks) and `layout.ts`
   (`setRect`/`setRects` — jsdom performs no layout, so every `getBoundingClientRect()` is
   all-zero until a test gives an element a box).
+  `./gifEncoder` is the one *application* module that is mocked by name rather than a browser
+  boundary (ESCSUITE-34): `exportGIF.test.ts` and `exportGIF.perf.test.ts` count `addFrame` calls
+  through it, because the canvas double's `getImageData` answers a 1x1 frame whatever size it is
+  asked for and the real quantiser would be reading past the end of it. The real `gifenc` is run
+  by `core/gifEncoder.test.ts`, which is the only place it needs to be — so "tests never mock the
+  module under test" still holds: the module under test there *is* the wrapper.
 - **`src/test/fixtures/`** — shared data and the store reset. `projectStore.ts` exports
   `store()`, `addClip()` and **`resetStoreForTest()`**, which puts the module-singleton store
   back to a freshly loaded editor holding one source video (`resetProject()` alone leaves
