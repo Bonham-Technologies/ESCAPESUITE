@@ -1922,6 +1922,22 @@ wait's cancellation adds statements and functions and no decision, like the read
 ESCSUITE-156. The four export and preview ceiling files and every rerender pin are byte-identical.
 **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-160 (the preview's DOM layers — the crop
+handles and the inline text editor — gate on the canvas element held in state rather than a ref read
+during render, so a canvas remount under an open crop mode no longer drops them for a pass):
+99.80 / 99.23 / 95.53 / 99.67, byte-identical on every percentage to the 99.80 / 99.23 / 95.53 /
+99.67 the branch was cut from and measured against (`7dc92b7`; ESCSUITE-159 lands between them and
+moves the exporters only). Measured in one sitting, the base gives 4,729 / 4,950 branches and this
+branch the same 4,729 / 4,950: the change adds no decision at all — lines 7,498 / 7,513 →
+7,502 / 7,517 and statements 8,435 / 8,500 → 8,439 / 8,504 (the `useState`, the callback ref that
+sets both the state and `canvasRef.current`, and the two JSX gates reading the state) and functions
+1,821 / 1,827 → 1,822 / 1,828 (the callback ref), every one covered, and the same 15 / 65 / 221 / 6
+uncovered. The two red cases — the crop handles absent for the render after a canvas remount, and
+the inline editor lingering over a detached canvas during unmount — reach the gates' null side on the
+first render and their element side on every later one. `MarqueeSelection` carries no canvas gate
+and is untouched. Every perf and rerender pin is byte-identical: the state changes on mount and
+unmount only. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
