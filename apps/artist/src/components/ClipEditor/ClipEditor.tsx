@@ -6,6 +6,7 @@ import { ShapeSection } from './ShapeSection';
 import { TransformSection } from './TransformSection';
 import { BlendModeSection } from './BlendModeSection';
 import { MaskSection } from './MaskSection';
+import { CropSection } from './CropSection';
 import { EffectsSection } from './EffectsSection';
 import { AnimationSection } from './AnimationSection';
 import { TransitionSection } from './TransitionSection';
@@ -38,6 +39,7 @@ export function ClipEditor() {
     handleBlendModeChange,
     handleMaskChange,
     handleStrokeChange,
+    handleCropChange,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,
@@ -141,6 +143,23 @@ export function ClipEditor() {
           frameWidth={frameWidth}
           onMaskChange={handleMaskChange}
           onStrokeChange={handleStrokeChange}
+          sliderGesture={sliderGesture}
+          disabled={trackLocked}
+        />
+      )}
+
+      {/* Crop section — media clips only (ESCSUITE-6). Gated exactly as Mask &
+          Stroke is, and placed immediately after it: an overlay has no source
+          frame for an inset to be a fraction of. A new slot whose condition is
+          byte-identical to its neighbours' adds the same slot for every clip
+          shape, so no existing section's positional open/closed state changes
+          meaning — see CollapsibleSection's doc comment for why that matters. */}
+      {!isAudio && !isOverlay && (
+        <CropSection
+          crop={selectedClip.crop}
+          sourceWidth={sourceVideo?.width ?? 0}
+          sourceHeight={sourceVideo?.height ?? 0}
+          onCropChange={handleCropChange}
           sliderGesture={sliderGesture}
           disabled={trackLocked}
         />

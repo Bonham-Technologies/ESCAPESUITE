@@ -589,6 +589,26 @@
   align-items: center;
 }
 
+/*
+ * Crop -> the aspect-ratio preset row (ESCSUITE-6).
+ *
+ * The buttons are `.styleButton`s, the same affordance the text section's
+ * bold/italic pair uses, with their fixed 28px square relaxed: "16:9" is four
+ * characters, not one, so the width comes from the label.
+ */
+.cropPresets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.cropPresets .styleButton {
+  width: auto;
+  min-width: 28px;
+  padding: 0 8px;
+  font-weight: normal;
+}
+
 .numberInput {
   width: 60px;
   min-width: 48px;

@@ -1287,6 +1287,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `TransformSection.tsx` | "Transform": position, then — media clips only — scale with its aspect-ratio lock, Fit to Canvas and Reset, and opacity last |
 | `BlendModeSection.tsx` | "Blend Mode": one dropdown over `BLEND_MODES`, collapsed by default |
 | `MaskSection.tsx` | "Mask & Stroke": the mask kind over `CLIP_MASK_KINDS`, a corner-radius slider shown for `rounded` only, and the stroke's width and colour — the width labelled in **pixels at the project's resolution**, because what is stored is a fraction of the frame width and a fraction is not a number anyone can act on. Collapsed by default. Media clips only, gated exactly as Blend Mode is. It normalises nothing: "`none` with a radius" and "a width of 0 with a colour" are things a user can express, and turning them into absent fields is `useClipEditorActions`' job |
+| `CropSection.tsx` | "Crop" (ESCSUITE-6): which rectangle of its source frame the clip shows — four rows of slider plus number field, each inset a whole percentage capped at `MAX_CROP_INSET` (90%), five aspect-preset buttons over `CROP_ASPECT_PRESETS` (None, 1:1, 16:9, 9:16, 4:3) and a header Reset. Collapsed by default. Media clips only, gated exactly as Mask & Stroke is and placed **immediately after it**, before Effects — an overlay has no source frame for an inset to be a fraction of, and the condition is byte-identical to its neighbours' so no existing section's positional open/closed slot changes meaning. Like `MaskSection` it normalises nothing: 90% off two opposite edges is something a user can express, and the **one** new handler `handleCropChange` is what decides what gets stored. The **presets are computed here**, from `cropForAspect` — this is the only place holding both the source's shape and the clip's current crop — which is why they are not a second handler, and why "None" and the header Reset make literally the same write: four zeroes, which `normaliseCrop` turns into `crop: undefined`. The four sliders carry the undo gesture; the number fields and the preset buttons keep an entry each |
 | `EffectsSection.tsx` | "Effects": one blur slider, collapsed by default |
 | `AnimationSection.tsx` | "Animation": the Animate In and Animate Out groups (each hiding its duration and easing until a preset is chosen), the "Active" badge, and the button that opens the keyframe panel with its keyframe count |
 | `TransitionSection.tsx` | "Transition Out": which transition ends the clip and, for anything but `none`, how long it takes. Collapsed by default |
@@ -1321,7 +1322,10 @@ group's "Animate In" / "Animate Out") the span **became** a `<label>` with the s
 same text and the same position. Nothing else about the DOM moved, for the reason at the bottom
 of this section: `CollapsibleSection` seeds a section's open/closed state positionally, so a
 moved element is a behaviour change. `ClipEditor.module.css`'s `.colorInput span` rule followed
-its five labels and is now `.colorInput label`, so those rows look exactly as they did.
+its five labels and is now `.colorInput label`, so those rows look exactly as they did. Sections added since follow the same rule: Crop's four sliders take the
+visible edge word through `htmlFor`, and the number field beside each one — which has no
+visible label of its own — carries `aria-label="<Edge> crop percent"`, so its eight value
+controls have eight distinct names.
 
 **Two controls may not share a name**, and three rows in the panel would have. Both animation
 groups call theirs "Duration" and "Easing", so those four take `aria-labelledby` naming the

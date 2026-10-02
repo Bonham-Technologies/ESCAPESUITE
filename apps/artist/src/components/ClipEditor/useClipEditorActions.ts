@@ -65,6 +65,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_CLIP_MASK_RADIUS } from '../../store/types';
 import type {
   BlendMode,
   Clip,
+  ClipCrop,
   ClipMask,
   ClipStroke,
   TransitionType,
@@ -76,6 +77,7 @@ import type {
   AnimationPresetType,
   EasingType,
 } from '../../store/types';
+import { normaliseCrop } from '../../core/clipCrop';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
@@ -123,6 +125,7 @@ export interface ClipEditorActions {
   handleBlendModeChange: (mode: BlendMode) => void;
   handleMaskChange: (mask: ClipMask) => void;
   handleStrokeChange: (stroke: ClipStroke) => void;
+  handleCropChange: (crop: ClipCrop) => void;
   handleBlurChange: (blur: number) => void;
   handleTransitionTypeChange: (type: TransitionType) => void;
   handleTransitionDurationChange: (duration: number) => void;
@@ -308,6 +311,28 @@ export function useClipEditorActions(): ClipEditorActions {
       );
     },
     [selectedClip, updateClip, commit]
+  );
+
+  // ESCSUITE-6. `CropSection` reports what the user did — four percentages, and
+  // the insets an aspect preset computed — and this decides what gets stored, so
+  // the store only ever holds canonical shapes: insets inside 0-90%, no
+  // all-zero crop, and nothing that would leave less than one source pixel.
+  //
+  // `sourceVideo` is the guard that keeps a crop off an overlay: insets are
+  // fractions of a source frame, and an overlay has none. It is also what the
+  // one-pixel floor is measured against, which is why it is read here rather
+  // than in the section.
+  const handleCropChange = useCallback(
+    (crop: ClipCrop) => {
+      if (!selectedClip || !sourceVideo) return;
+      const decision = normaliseCrop(crop, sourceVideo.width, sourceVideo.height);
+      // Refused: a crop that would leave nothing on an axis is not written at
+      // all, so the slider the user is dragging snaps back to what is stored
+      // rather than to a number nobody asked for.
+      if (!decision.ok) return;
+      commit((skipHistory) => updateClip(selectedClip.id, { crop: decision.crop }, skipHistory));
+    },
+    [selectedClip, sourceVideo, updateClip, commit]
   );
 
   const handleBlurChange = useCallback(
@@ -537,6 +562,7 @@ export function useClipEditorActions(): ClipEditorActions {
     handleBlendModeChange,
     handleMaskChange,
     handleStrokeChange,
+    handleCropChange,
     handleBlurChange,
     handleTransitionTypeChange,
     handleTransitionDurationChange,

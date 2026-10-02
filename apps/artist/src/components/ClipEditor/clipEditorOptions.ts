@@ -51,6 +51,24 @@ export const CLIP_MASK_KINDS: { value: ClipMaskKind; label: string }[] = [
   { value: 'rounded', label: 'Rounded Rectangle' },
 ];
 
+/**
+ * Crop → the aspect-ratio presets (ESCSUITE-6).
+ *
+ * Buttons rather than a dropdown, because this is not a stored property with a
+ * current value: a preset is an action that recomputes the four insets, and a
+ * `<select>` showing "1:1" after the user has since dragged an inset would be
+ * lying. `None` is first for the same reason it is first in `CLIP_MASK_KINDS` —
+ * a list of shapes with no way back to "no shape" is a trap — and `aspect: null`
+ * is how it says so.
+ */
+export const CROP_ASPECT_PRESETS: { label: string; aspect: number | null }[] = [
+  { label: 'None', aspect: null },
+  { label: '1:1', aspect: 1 },
+  { label: '16:9', aspect: 16 / 9 },
+  { label: '9:16', aspect: 9 / 16 },
+  { label: '4:3', aspect: 4 / 3 },
+];
+
 /** Animate In / Animate Out → preset. */
 export const ANIMATION_PRESETS: { value: AnimationPresetType; label: string }[] = [
   { value: 'none', label: 'None' },
