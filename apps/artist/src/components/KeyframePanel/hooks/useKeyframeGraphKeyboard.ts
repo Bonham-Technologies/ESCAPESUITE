@@ -69,7 +69,25 @@ export function keyframeOptionId(property: AnimatableProperty, index: number): s
 
 // Appended to alternate announcements so two identical ones in a row are two
 // different strings; see the live region's comment in the hook below.
-const ANNOUNCE_MARK = '\u200B';
+export const ANNOUNCE_MARK = '\u200B';
+
+/**
+ * Write a message into a live region's state, alternating the mark so two
+ * textually identical announcements in a row are two different strings \u2014 an
+ * `aria-atomic` region whose text does not change is not re-read, which is
+ * exactly the case a user repeating one edit (or, in `useKeyframeDrag.ts`,
+ * one refused drop) lands in. Exported so that hook can share this exact
+ * mechanism rather than hand-rolling a third copy beside this one and
+ * `Preview/useCropHandleGesture.ts`'s (ESCSUITE-163/167 review round 1,
+ * MAJOR 1) \u2014 the two keyframe-time refusals in this file and that hook are
+ * meant to "read identically wherever the user meets them", mark included.
+ */
+export function announceWithMark(
+  setMessage: Dispatch<SetStateAction<string>>,
+  text: string
+): void {
+  setMessage(prev => (prev.slice(-1) === ANNOUNCE_MARK ? text : text + ANNOUNCE_MARK));
+}
 
 // What the live region says when an edit key is pressed on a clip whose track
 // is locked (ESCSUITE-88). The same words the editor's global shortcuts toast,
@@ -176,7 +194,7 @@ export function useKeyframeGraphKeyboard({
   // plays, and this way no render allocates a string.
   const [nudgeMessage, setNudgeMessage] = useState('');
   const announce = useCallback((text: string) => {
-    setNudgeMessage(prev => (prev.slice(-1) === ANNOUNCE_MARK ? text : text + ANNOUNCE_MARK));
+    announceWithMark(setNudgeMessage, text);
   }, []);
 
   // The active descendant, resolved back to a position in the sorted array.

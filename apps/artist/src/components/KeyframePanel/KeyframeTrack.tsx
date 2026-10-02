@@ -26,6 +26,13 @@ interface KeyframeTrackProps {
   onSelect: () => void;
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
+  /**
+   * Told the raw text of a refused diamond drop (ESCSUITE-167 / M6), or `''`
+   * once a drop lands. `KeyframePanel` is the one live region every row
+   * shares — only one diamond on one row can ever be dragging at a time
+   * (review round 1, MINOR 6) — not one `role="status"` per row.
+   */
+  onAnnounce: (text: string) => void;
 }
 
 const PROPERTY_LABELS: Record<AnimatableProperty, string> = {
@@ -53,6 +60,7 @@ export function KeyframeTrack({
   onSelect,
   onKeyframeMoved,
   onAddKeyframe,
+  onAnnounce,
 }: KeyframeTrackProps) {
   // Note: _clipId is used by parent for identification but not needed in this component
   // Get all keyframes for this property (including preset-generated ones)
@@ -98,11 +106,12 @@ export function KeyframeTrack({
     onKeyframeMoved(prop, originalTime, newTime);
   }, [onKeyframeMoved]);
 
-  const { dragState, startDrag, trackRef, announcement } = useKeyframeDrag(
+  const { dragState, startDrag, trackRef } = useKeyframeDrag(
     clipDuration,
     playheadTime,
     allKeyframeTimes,
-    handleKeyframeMoved
+    handleKeyframeMoved,
+    onAnnounce
   );
 
   // Handle double-click on track to add keyframe
@@ -193,14 +202,6 @@ export function KeyframeTrack({
       <div className={styles.value}>
         {formatValue(currentValue)}
       </div>
-
-      {/* Always rendered, never conditional (as the graph's own live region
-          is): a screen reader needs the element to exist before its content
-          changes in order to announce the change. Says why a drop onto an
-          occupied time was refused (ESCSUITE-167 / M6). */}
-      <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
-        {announcement}
-      </span>
     </div>
   );
 }

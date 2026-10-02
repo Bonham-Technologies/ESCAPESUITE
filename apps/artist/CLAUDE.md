@@ -835,12 +835,33 @@ Clips support animated properties via keyframes:
   keyframe already sits there; `handleMouseUp` additionally refuses outright — leaving the
   keyframe at its original time, pushing nothing — if the final position still lands within
   epsilon of an occupied time (a pixel-exact coincidence could reach that without ever snapping),
-  announced through a visually-hidden `role="status"` live region in `KeyframeTrack.tsx` using the
-  **same string** `nudgeTime` uses (`occupiedTimeMessage`, exported from
-  `useKeyframeGraphKeyboard.ts`), so the two refusals read identically. The listener pair is also
-  bound once per gesture rather than rebuilt on every pointer move — the same fix the five
-  timeline gesture hooks already had — pinned exactly (2 adds, 2 removes) by the new
-  `KeyframePanel/keyframeGestures.perf.test.ts`.
+  reported through the **same string** `nudgeTime` uses (`occupiedTimeMessage`, exported from
+  `useKeyframeGraphKeyboard.ts`), so the two refusals read identically wherever the user meets
+  them. The occupied-times list is computed once, on `startDrag`, into a ref rather than
+  recomputed (and reallocated) on every pointer move (review round 1, MINOR 2), and the listener
+  pair is likewise bound once per gesture rather than rebuilt per move — the same fix the five
+  timeline gesture hooks already had — both pinned exactly by
+  `KeyframePanel/keyframeGestures.perf.test.ts` (2 listener adds / 2 removes; one `.filter()` call
+  for the whole gesture). The hook has no live region of its own: it reports the raw refusal text
+  (or `''` once a drop lands, clearing a stale refusal — review round 1, NIT 8) to an `onAnnounce`
+  callback, and `KeyframePanel` is the one `role="status"` every property row shares — only one
+  diamond on one row can ever be dragging at a time, so eight per-row regions would carry a
+  message only one of them could ever produce (review round 1, MINOR 6) — alternating it with the
+  same `announceWithMark` helper `useKeyframeGraphKeyboard.ts`'s own `announce` now calls, rather
+  than a third hand-rolled copy of the zero-width-space mechanism (review round 1, MAJOR 1): a
+  second, textually identical refusal is audible, not silent.
+
+  **Known remaining hole, tracked as ESCSUITE-179**: the graph's own point drag
+  (`KeyframeGraph.tsx`'s `handleMouseUp`) has no occupancy check of its own, and
+  `moveClipKeyframe` still deletes whatever sits within `KEYFRAME_TIME_EPSILON` of a pixel-exact
+  landing there — the graph does not snap, so it takes an exact coincidence rather than an
+  approach, but the window is a sizeable fraction of a pixel on a short clip, not a vanishing one.
+  ESCSUITE-163 / M1 makes the damage *recoverable* (the move and value writes are one undo entry
+  now), which is why this is not urgent, but it is a real gap: dragging a point in the graph onto
+  a neighbour's time still destroys it in silence. The fix shape differs from the diamond row's —
+  the graph has no snap list to prune, and its live region and `useGestureHistory` gesture are
+  already open at the point of refusal — and wants its own red test, which is why it is a
+  follow-up rather than folded into this ticket.
 - **A track's double-click adds at the curve's value, not the clip's static default
   (ESCSUITE-167 / m3)**. `KeyframeTrack.tsx`'s double-click used to call `onAddKeyframe` with no
   value, which fell back to `clip.transform[property]` (or `effects.blur` / `1` for volume) —
