@@ -147,6 +147,52 @@ describe('importTake', () => {
     expect(take.missingParts).toBe(0)
   })
 
+  // ESCSUITE-148: a microphone-only take (ESCSUITE-143) stores its PRIMARY as
+  // audio, with no companions — unlike the ESCSUITE-14 case above, where the
+  // audio part is a mic/system companion of a video primary. The same single-
+  // file path as "asks storage for nothing extra" above, but the one part IS
+  // the audio.
+  it('imports a single-file audio-only take as its one audio part', async () => {
+    const audioPrimary = {
+      blob: new Blob(['mic'], { type: 'audio/webm' }),
+      metadata: {
+        ...sampleVideo,
+        id: 'mic-only',
+        name: 'Microphone recording',
+        width: 0,
+        height: 0,
+        frameRate: 0,
+        mediaType: 'audio' as const,
+        hasAudio: true,
+      },
+    }
+
+    const take = await importTake(audioPrimary, addSourceVideo)
+
+    // No takeId, so nothing about siblings is asked at all — the same rule as
+    // any other single-file take.
+    expect(getAllVideoMetadata).not.toHaveBeenCalled()
+    expect(added).toEqual([
+      expect.objectContaining({ id: 'mic-only', mediaType: 'audio', width: 0, height: 0 }),
+    ])
+    expect(take.missingParts).toBe(0)
+    expect(take.alreadyInLibrary).toBe(false)
+    // "No picture", carried onto the one clip part there is, the same as it
+    // would be for a mic COMPANION — a reader should not need to know whether
+    // the audio it is placing is a take's primary or one of its siblings.
+    expect(take.clipParts).toEqual([
+      {
+        sourceVideoId: 'mic-only',
+        name: 'Microphone recording',
+        duration: sampleVideo.duration,
+        startOffset: 0,
+        width: 0,
+        height: 0,
+        mediaType: 'audio',
+      },
+    ])
+  })
+
   it('adds every part of a take and hands the placement to the webcam half', async () => {
     const take = await importTake(primary, addSourceVideo)
 
