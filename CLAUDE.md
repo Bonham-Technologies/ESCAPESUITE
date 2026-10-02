@@ -1952,6 +1952,28 @@ the review's extra case (a property emptied by deletion is a first-time property
 both operands of the new gate from both sides, beside the first-write seed that was already pinned.
 Every perf and rerender pin is byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-161 and ESCSUITE-162 (a trim stops at the clip
+next to it on the same row, and a paste at the playhead moves to the first free span instead of stacking on a
+clip already there): 99.80 / **99.24** / **95.54** / 99.67 against the 99.80 / 99.23 / 95.53 / 99.67 the commit
+this branch lands on (`46c2b76`) measures — statements and branches each up a hundredth, lines and functions
+unmoved. Measured in one sitting, the base gives 4,733 / 4,954 branches and this branch 4,766 / 4,988:
+thirty-four new branches, thirty-three covered, and the uncovered column 221 → 222 — the one is not this
+ticket's. Every file the branch touches measures 100 on all four: `store/timelineSnapping.ts` 32 → 60 branches
+(`clampTrimToNeighbours`'s per-edge neighbour choice, `firstFreeGroupStart`'s sorted-span sweep, and the
+`OVERLAP_EPSILON` in `wouldOverlap` — a clamped butt-up writes `p + ((s + (L - p)) - s)`, which is not `L` in
+8% of random triples and lands a float bit inside the neighbour, worst observed 3.55e-15 s, so the strict
+predicate refused every group drag of two butted clips until the epsilon), `components/Timeline/useTrimDrag.ts`
+20 → 26 (the clamp applied to the pointer time, the ripple exception narrowed to the end edge — a ripple start
+trim moves nothing on release — and the `changesClip` gate that writes once while the pointer is held past the
+neighbour), and `store/selectionSlice.ts`'s `pasteClips` relocation, which adds statements and no decision.
+The extra uncovered branch is in `components/Preview/drawFrame.ts`, a file and a test suite this branch does
+not touch: the `|| 0` fallback in the z-order sort comparator's `a.track?.index || 0` read 61 / 68 on the base
+run and 60 / 68 here, one hit against none, the same Istanbul drift ESCSUITE-91 and ESCSUITE-113 recorded, and
+it is not counted against the ticket. Lines 7,519 / 7,534 → 7,548 / 7,563, statements 8,455 / 8,520 →
+8,491 / 8,556 and functions 1,824 / 1,830 → 1,830 / 1,836 each grew by exactly what their numerators did (the
+same 15 / 65 / 6 uncovered). The seven perf/rerender pins and `perfScene.ts` are byte-identical. **No floor
+crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1959,7 +1981,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.23 | 95.53 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.24 | 95.54 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 
