@@ -1015,6 +1015,20 @@ Clips support animated properties via keyframes:
   selection when the store actually removed the keyframe — the shape `nudgeValue` and `nudgeTime`
   already had.
 
+  **The graph's own point drag refuses an occupied time too** (ESCSUITE-179). `moveClipKeyframe`
+  deletes whatever already sits within `KEYFRAME_TIME_EPSILON` of the time it is told to move a
+  keyframe to, so `KeyframeGraph.tsx`'s `handleMouseUp` — the mouse drag on a point in the graph,
+  not the diamond on a `KeyframeTrack` row — now checks first: a drop that would land there is
+  refused outright, the keyframe stays at its original time, nothing is written (its value write is
+  refused right along with it, since it was headed for the time the drag never actually reached),
+  and the graph's one live region says why through `occupiedTimeMessage` (now exported from
+  `hooks/useKeyframeGraphKeyboard.ts`, alongside `nudgeTime`'s own identical refusal) — reached
+  through `announce`, which the hook now returns beside `nudgeMessage` so both refusals alternate
+  through the same `aria-live` region rather than a second one the test suite's
+  `getByRole('status')` could no longer resolve unambiguously. `keyframes` here is every handle the
+  graph draws, presets included, so landing on one of those is refused too — the store would merge
+  the two all the same.
+
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
 `drawFrame` that sizes the raster and delegates. Everything it used to do
@@ -2321,6 +2335,23 @@ read-only) and returns there — no `gestureHistory.begin()`, no drag state, not
 window — and `getCursor` reads `not-allowed` over it, in the hover branch and in the `dragState`
 branch, the latter for a row locked *mid-gesture*. Marquee selection on empty canvas is
 untouched.
+
+**A clip on a hidden track takes no chrome, no hit and no cursor either** (ESCSUITE-178) — a
+different rule from a locked track's, not the same one. A locked clip is still drawn and still
+picked, just inert; a hidden clip is not in the picture at all, the same `!track || !track.visible`
+question `store/clipQueries.ts`'s `getClipsAtTime` asks before compositing a clip. `selectionOverlay.ts`'s
+`drawSelectionHandles` and `drawMultiSelectHandles` now ask it of the selected clip's own track (and,
+for the dashed multi-select boxes, each extra clip's) before drawing anything; `hitTest.ts`'s
+`hitHandlesOnClip` — the cascade both of `hitTestHandles`' passes feed the *selected* clip through,
+with no z-order filtering of its own — asks it too, so a hidden clip's handles are not live even
+though nothing else on the canvas would catch the click either (the second, all-clips pass was
+already safe, since it goes through `getClipsAtTime`). `dragGeometry.ts`'s `clipsIntersectingMarquee`
+gained the same test for the same reason: unlike the hit test it does not route through
+`getClipsAtTime` at all — it needs every candidate's drawn *box*, not just whether one exists — so a
+marquee swept over a hidden clip used to pick it up regardless. The **selection itself** is
+untouched either way: a clip already selected when its track is hidden stays selected (nothing
+forces it off), and showing the track again brings its chrome straight back — there is nothing to
+restore, since nothing about the selection ever changed.
 
 The **track header** (`TrackHeader.tsx`): the delete button is `disabled`,
 `title="Unlock the track to delete it"`. `useAppKeyboardShortcuts.ts` does the same on-demand
