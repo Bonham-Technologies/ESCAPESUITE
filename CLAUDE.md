@@ -2432,9 +2432,9 @@ floors stay 100 / 100 / 100 / 100.
 budget that settles from its own SIGKILL timer, so a hung delivery — a grandchild holding the stderr pipe
 included — no longer holds a worker slot or the drain; the server sets `requestTimeout` and `headersTimeout`,
 and `close()` answers a body that never finished arriving with 408 and destroys it instead of waiting):
-**99.50** / **99.42** / **98.36** / **98.62** against the 99.47 / 99.38 / 98.27 / 98.57 that `main` at `eeffcaaf`
-measures in the same sitting — every figure up, with the uncovered column unmoved: lines 764 / 768 → 810 / 814,
-statements 814 / 819 → 863 / 868, branches 513 / 522 → 541 / 550 and functions 138 / 140 → 143 / 145, every
+**99.51** / **99.42** / **98.36** / **98.62** against the 99.47 / 99.38 / 98.27 / 98.57 that `main` at `eeffcaaf`
+measures in the same sitting — every figure up, with the uncovered column unmoved: lines 764 / 768 → 813 / 817,
+statements 814 / 819 → 865 / 870, branches 513 / 522 → 541 / 550 and functions 138 / 140 → 143 / 145, every
 denominator growing by exactly what the numerator did (the same 4 / 5 / 9 / 2 uncovered, in the same places —
 `cli.ts`'s two `isDirectRun` lines and `serve.ts`'s limiter sync-throw catch and post-listen socket-error handler,
 which `vitest.config.ts`'s ledger names). The twenty-eight new branches are `src/timeouts.ts`'s shared
@@ -2450,7 +2450,13 @@ first version carried an unreachable `else` around the teardown's 408 (deleted: 
 helper, which carries the covered guard) and because rewriting the one drain test that used to finish sending
 its body after `close()` began had silently retired the only reacher of `createLimiter`'s `if (closed)` guard
 (now exported and covered directly by a shutdown-then-run case); a compound `'error'` condition in `readBody`
-whose false side nothing could produce was simplified away rather than tested. The hunter's five probes that
+whose false side nothing could produce was simplified away rather than tested. A second round reversed one of the
+first round's own corrections: it had claimed Node's `requestTimeout` and `headersTimeout` do not bound a request body
+after dispatch, where the re-review measured that they bound the whole request but are enforced on a sweep whose
+period is `connectionsCheckingInterval` (30 s by default), so the server now passes `5_000` for it as a named constant
+(a statement pinned through the `createServer` spy, no branch) and the five passages say so; the SIGKILL-escalation
+test proves the child died through a pid file rather than trusting the timer, and the grandchild case reaps its
+`sleep` the same way. The hunter's five probes that
 asserted the defects would now be red; `renderDriver.ts` is untouched and the Chromium parity cases did not run.
 **No floor crossed**; the kit's floors stay 99 / 99 / 98 / 98.
 
@@ -2463,7 +2469,7 @@ never above what the suite actually achieves:
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.52 | 91.54 | 100.00 |
-| `@escapesuite/headless-artist` | 99.50 | 99.42 | 98.36 | 98.62 |
+| `@escapesuite/headless-artist` | 99.51 | 99.42 | 98.36 | 98.62 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
