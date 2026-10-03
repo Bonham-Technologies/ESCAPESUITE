@@ -1,11 +1,44 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
+import type { ReadStream } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { Readable } from 'node:stream'
 import { getSink } from './sinks'
 import { splitPrefix, keyFor } from './s3'
 import type { VerificationManifest } from './manifest'
+
+/**
+ * `createReadStream`'s fd-open is scheduled asynchronously and can settle at an arbitrary
+ * later point no matter what reads the stream (or doesn't) -- the whole shape of ESCSUITE-186.
+ * Reproducing *that* deterministically by racing real disk I/O against real cleanup is not
+ * reliable (it depends on which the OS happens to schedule first; see report-186.md's 0/20
+ * local reproductions). Capturing the real stream `deliver()` creates lets a test fire its
+ * `'error'` event on demand -- the same event the real fd-open would eventually emit on
+ * failure -- without needing the race to actually land. Every other `node:fs` export passes
+ * through untouched, so the rest of this file's real-filesystem tests are unaffected.
+ */
+const fsControl = vi.hoisted(() => ({ lastReadStream: undefined as ReadStream | undefined }))
+
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  return {
+    ...actual,
+    createReadStream: (...args: Parameters<typeof actual.createReadStream>) => {
+      const stream = actual.createReadStream(...args)
+      fsControl.lastReadStream = stream
+      return stream
+    },
+  }
+})
+
+// A function boundary, rather than a direct `fsControl.lastReadStream = undefined` in each
+// test, so TypeScript's control-flow narrowing doesn't treat every later read of the property
+// within that test as statically `undefined` (it cannot see across the `vi.mock` factory's own
+// assignment into the same property).
+function resetCapturedReadStream(): void {
+  fsControl.lastReadStream = undefined
+}
 
 const cleanupPaths: string[] = []
 
@@ -201,6 +234,89 @@ describe('s3Sink deliver (injected client)', () => {
       outputLocation: 's3://bucket/job-1.webm',
       manifestLocation: 's3://bucket/job-1.manifest.json',
     })
+  })
+})
+
+describe('deliver() stream-error hardening (ESCSUITE-186)', () => {
+  // These two guard the production-side half of ESCSUITE-186: run.ts's own `finally`
+  // unconditionally removes the job's work directory (which holds outputPath) right after
+  // `deliver()` settles, win or lose. A client that rejects or resolves `send()` without ever
+  // reading `Body` leaves `createReadStream`'s asynchronously-scheduled fd open free to land
+  // after that removal -- and with nothing listening for the stream's own 'error' event, that
+  // surfaces as an uncaught exception (a process crash in `serve` mode), not the `{ ok: false }`
+  // result runJob's "never throws" contract promises. The injected-client doubles above drain
+  // the body the way a real upload does, which is why they alone wouldn't have caught this.
+
+  it('surfaces a client rejection as the sink error, not an uncaught exception, when the body is never read', async () => {
+    const { s3Sink } = await import('./s3')
+    const dir = await makeTempDir()
+    const outputPath = path.join(dir, 'render-output.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+    resetCapturedReadStream()
+
+    const uncaught: unknown[] = []
+    const onUncaught = (err: unknown) => uncaught.push(err)
+    process.on('uncaughtException', onUncaught)
+
+    try {
+      const client = {
+        // Rejects before ever touching `input.Body` -- a validation failure, or an
+        // embedder-supplied client that fails fast, per s3.ts's own doc comment on what a
+        // `client` parameter is for.
+        async send(): Promise<unknown> {
+          throw new Error('client rejected before reading the body')
+        },
+      }
+      const sink = await s3Sink({ prefix: 'bucket/renders' }, client)
+
+      await expect(
+        sink.deliver('job-1', outputPath, fakeManifest({ jobId: 'job-1' })),
+      ).rejects.toThrow('client rejected before reading the body')
+
+      const body = fsControl.lastReadStream
+      expect(body).toBeDefined()
+
+      // Mirrors run.ts's unconditional `finally`: the work directory (containing outputPath)
+      // is gone the instant deliver() settles, whether it succeeded or not.
+      await fs.rm(dir, { recursive: true, force: true })
+
+      // Racing the real, asynchronously-scheduled fd open against real cleanup isn't
+      // reliable (see the comment on fsControl above) -- fire the failure this stream's own
+      // deferred open would eventually emit on its own, deterministically, standing in for
+      // whatever later tick it would otherwise land on.
+      body?.emit('error', Object.assign(new Error('ENOENT: simulated, post-cleanup'), { code: 'ENOENT' }))
+      // Let that event's listeners (or, pre-fix, its absence) actually run.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(uncaught).toEqual([])
+    } finally {
+      process.off('uncaughtException', onUncaught)
+    }
+  })
+
+  it('destroys the body stream when the client resolves without ever reading it', async () => {
+    const { s3Sink } = await import('./s3')
+    const dir = await makeTempDir()
+    const outputPath = path.join(dir, 'render-output.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+
+    let capturedBody: Readable | undefined
+    const client = {
+      // Resolves without ever reading `Body` -- the same shape a stub/embedder double that
+      // merely records the command (rather than draining it) produces.
+      async send(command: unknown): Promise<unknown> {
+        const { input } = command as RecordedCommand
+        if (input.Body instanceof Readable) capturedBody = input.Body
+        return {}
+      },
+    }
+    const sink = await s3Sink({ prefix: 'bucket/renders' }, client)
+    await sink.deliver('job-1', outputPath, fakeManifest({ jobId: 'job-1' }))
+
+    expect(capturedBody).toBeDefined()
+    // Released as soon as send() settles, rather than left open for whatever runs next (a
+    // caller's own cleanup, in production) to race.
+    expect(capturedBody?.destroyed).toBe(true)
   })
 })
 
