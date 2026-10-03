@@ -197,4 +197,30 @@ describe('parseHostOrigin', () => {
 
     expect(warn).not.toHaveBeenCalled()
   })
+
+  // ESCSUITE-199: a host that interpolated an undefined variable into its
+  // iframe URL produces exactly this shape — present key, no usable value —
+  // and the doc comment above promises a warning for every unusable value,
+  // not only one `new URL()` throws on. The `!value` short-circuit used to
+  // treat "present but empty" the same as "absent" and return null with no
+  // warning at all, leaving a misconfigured host silent.
+  it('warns for a present-but-empty hostOrigin value', () => {
+    expect(parseHostOrigin('?hostOrigin=')).toBeNull()
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('hostOrigin')
+  })
+
+  it('warns for a valueless hostOrigin key', () => {
+    expect(parseHostOrigin('?hostOrigin')).toBeNull()
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0][0]).toContain('hostOrigin')
+  })
+
+  it('does not warn when the parameter is absent entirely', () => {
+    parseHostOrigin('?title=Demo')
+
+    expect(warn).not.toHaveBeenCalled()
+  })
 })
