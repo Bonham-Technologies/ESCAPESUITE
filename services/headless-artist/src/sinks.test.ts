@@ -34,6 +34,46 @@ async function makeOutputFile(dir: string, bytes: Buffer, name = 'render-output.
   return filePath
 }
 
+/** `kill -0` — true while the pid is still alive (any signal would do; 0 sends none). */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Polls until `check` stops throwing, so a death check never depends on a fixed delay. */
+async function waitFor(check: () => void, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      check()
+      return
+    } catch (err) {
+      if (Date.now() > deadline) throw err
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+}
+
+/** Reads a pid a stubborn-child script wrote via `config.env.PID_FILE`, retrying briefly in
+ * case the write hasn't landed on disk yet by the time the caller looks for it. */
+async function readPidFile(pidFile: string): Promise<number> {
+  let lastErr: unknown
+  const deadline = Date.now() + 2000
+  for (;;) {
+    try {
+      return Number((await fs.readFile(pidFile, 'utf8')).trim())
+    } catch (err) {
+      lastErr = err
+      if (Date.now() > deadline) throw lastErr
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+}
+
 function fakeManifest(overrides: Partial<VerificationManifest> = {}): VerificationManifest {
   return {
     jobId: 'job-abc',
@@ -513,6 +553,7 @@ describe('command sink delivery timeout', () => {
     const srcDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
     const manifest = fakeManifest({ jobId: 'job-cmd-stubborn' })
+    const pidFile = path.join(srcDir, 'pid')
 
     // A generous timeoutMs (well past the freshly-spawned process's own startup) so the
     // SIGTERM handler is registered before the signal arrives — otherwise the child dies to
@@ -520,24 +561,37 @@ describe('command sink delivery timeout', () => {
     // finding 7: 500 ms still lost that race on a loaded runner often enough to flake.
     const timeoutMs = 2000
     const script = `
+      require('fs').writeFileSync(process.env.PID_FILE, String(process.pid))
       process.on('SIGTERM', () => {})
       setInterval(() => {}, 1000)
     `
     const sink = await getSink('command', {
       command: process.execPath,
       args: ['-e', script],
+      env: { PID_FILE: pidFile },
       timeoutMs,
     })
 
-    const startedAt = Date.now()
-    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-      `command sink timed out after ${timeoutMs} ms`,
-    )
-    // SIGTERM alone never ends this child, so settling here at all means the SIGKILL
-    // escalation fired — roughly two seconds after the SIGTERM, per its own grace period.
-    const elapsed = Date.now() - startedAt
-    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs + 1800)
-    expect(elapsed).toBeLessThan(timeoutMs + 5000)
+    let pid: number | undefined
+    try {
+      const startedAt = Date.now()
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        `command sink timed out after ${timeoutMs} ms`,
+      )
+      // The rejection now fires from the escalation timer itself, right after the SIGKILL call
+      // — so settling proves only that the *timer* fired, not that the signal landed. Read the
+      // pid the child wrote at startup and wait for it to actually be gone (re-review N2).
+      const elapsed = Date.now() - startedAt
+      expect(elapsed).toBeGreaterThanOrEqual(timeoutMs + 1800)
+      expect(elapsed).toBeLessThan(timeoutMs + 5000)
+
+      pid = await readPidFile(pidFile)
+      await waitFor(() => expect(isAlive(pid as number)).toBe(false))
+    } finally {
+      // A survivor would otherwise run setInterval forever; this is the net under the pin
+      // above, not a substitute for it.
+      if (pid !== undefined && isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
   }, 10_000)
 
   // Review finding 1: the budget rejected only from child.on('close'), which waits for the
@@ -549,23 +603,36 @@ describe('command sink delivery timeout', () => {
     const srcDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
     const manifest = fakeManifest({ jobId: 'job-cmd-grandchild' })
+    const pidFile = path.join(srcDir, 'grandchild-pid')
 
     const sink = await getSink('command', {
       command: '/bin/sh',
-      // The direct child backgrounds a grandchild that inherits its stderr pipe, then exits
-      // itself — 'close' on the direct child cannot fire until the grandchild also exits,
-      // 6 seconds from now.
-      args: ['-c', 'sh -c "sleep 6" & exit 0'],
+      // The direct child backgrounds a grandchild that inherits its stderr pipe, writes the
+      // grandchild's own pid (not the direct child's) via $! so the test can reap it, then
+      // exits itself — 'close' on the direct child cannot fire until the grandchild also
+      // exits, 6 seconds from now. The 6 s is load-bearing for red-first (re-review: it must
+      // clear timeoutMs + the kill grace period by a wide margin, or the pre-fix code would
+      // settle on 'close' inside the assertion window and this case would pass on the bug) and
+      // is kept as-is; only the grandchild's own lingering is cleaned up, in the finally below.
+      args: ['-c', 'sh -c "sleep 6" & echo $! > "$PID_FILE"; exit 0'],
+      env: { PID_FILE: pidFile },
       timeoutMs: 300,
     })
 
-    const startedAt = Date.now()
-    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-      'command sink timed out after 300 ms',
-    )
-    // The bound is timeoutMs + COMMAND_KILL_GRACE_MS (2 s), regardless of whether 'close' ever
-    // fires — well short of the 6 s grandchild sleep.
-    expect(Date.now() - startedAt).toBeLessThan(2500)
+    let pid: number | undefined
+    try {
+      const startedAt = Date.now()
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        'command sink timed out after 300 ms',
+      )
+      // The bound is timeoutMs + COMMAND_KILL_GRACE_MS (2 s), regardless of whether 'close' ever
+      // fires — well short of the 6 s grandchild sleep.
+      expect(Date.now() - startedAt).toBeLessThan(2500)
+
+      pid = await readPidFile(pidFile)
+    } finally {
+      if (pid !== undefined && isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
   }, 10_000)
 })
 
