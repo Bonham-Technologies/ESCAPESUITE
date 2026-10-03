@@ -483,7 +483,7 @@ Reusable video player with full playback controls:
   browser synthesises on keyup. So a Space keydown is left alone when its target is something
   Space operates — `button`, `[role="button"]`, `a[href]`, `select`, or anything
   `isContentEditable` (one selector string plus the editable check, so it carries one branch
-  rather than six) — and stays the player's own play/pause everywhere else: the dialog body, the
+  rather than five) — and stays the player's own play/pause everywhere else: the dialog body, the
   video, the progress bar, and a keydown whose target is not an element at all. `input` and
   `textarea` are not in the selector: the older typing guard in front of it already returns for
   those on *every* key, so they can never reach this check. **Only Space is gated this way**: K,
