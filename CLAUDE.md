@@ -2163,13 +2163,44 @@ same four pre-existing arms uncovered). The seven perf/rerender pins, `keyframeG
 refusal is one comparison at release. The refuse-and-snap-back shape both keyframe drags share is
 ESCSUITE-183. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/craft` and `@escapesuite/shared` were re-measured 2026-10-02 for ESCSUITE-176 (sweep 4's
+seven verified ESCAPECRAFT minors: every cancel path clears the captured preview frame — a cancel that lands
+mid-grab discards it and a new take never inherits the previous one's; `?hostOrigin=` is normalised to its
+`http:`/`https:` origin and an unparseable value makes "Upload to host" refuse with a notice instead of posting
+the bytes to `'*'`; the Record button reads the separate-tracks headroom flag when that mode would run; a
+byteless conversion raises `RECORDING_UNAVAILABLE` and re-reads the storage headroom; the playback dialog's
+volume slider has a name and stays in the DOM; the progress-bar drag's listeners are removed on unmount; the
+webcam-overlay buttons carry `aria-pressed` inside labelled groups). Craft: 100.00 / 99.52 / **97.75** / 100.00
+against the 100.00 / 99.52 / 97.74 / 100.00 that `main` at `cc950559` (the ESCSUITE-174 squash) measures in
+the same sitting — branches up a hundredth, the other three unmoved at exactly 100, 99.52 and 100: the base
+gives 1,342 / 1,373 branches and this branch 1,350 / 1,381, eight new branches, eight covered, the same 31
+uncovered (lines 2,337 → 2,359, statements 2,490 / 2,502 → 2,517 / 2,529, functions 448 → 450; the same 12
+statements uncovered, in the same four files). The eight are `utils/recordReadiness.ts`'s six (17 → 23: the
+`separateTracks && screenEnabled && webcamEnabled` gate and the headroom read behind it, each operand reached
+from both sides by the on / off / webcam-off / screen-off / room / no-room cases), `hooks/useRecordingController.ts`'s
+two (124 / 128 → 126 / 130: the post-await `cancelledRef` check that discards a frame grabbed for a take already
+thrown away, reached by the deferred-grab case against the ordinary stop; the file's four pre-existing uncovered
+arms untouched) and `components/RecordingsList/RecordingsListPanel.tsx`'s two (14 → 16: the `'refused'` arm of
+the upload result raising `UPLOAD_NO_HOST_ORIGIN`, against `'posted'` and `'missing'`); `components/VideoPlayer/VideoPlayer.tsx`
+went 93 / 101 → 91 / 99 because the volume slider is always mounted now and its conditional render went, with
+the same eight pre-existing arms uncovered. Shared: 100.00 / 98.54 / **90.97** / 100.00 against
+100.00 / 98.54 / 90.78 / 100.00 — branches up nineteen hundredths, the other three unmoved: 128 / 141 →
+131 / 144, three new branches, three covered, the same 13 uncovered (lines 256 → 258, statements 270 / 274 →
+271 / 275 with the same 4 uncovered, functions 69 on both). The three are `parseHostOrigin`'s `url.origin !==
+'null'` guard and the `http:` / `https:` protocol pair in `config/index.ts` (17 / 19 → 20 / 22), each reached from
+both sides by the trailing-slash, path, `data:` URL, `ws://` and garbage cases — on a package whose floors leave
+no headroom, which is why every arm has a case of its own. The `App.*rerender*` pins and every `*.perf.test.ts`
+are byte-identical. Outside vitest's measurement: `apps/e2e/tests/integration/host-embedding.spec.ts`, with its
+new no-`hostOrigin` refusal case, run in Chromium: 6 / 6. **No floor crossed**; craft's floors stay
+100 / 99 / 97 / 100 and shared's 100 / 98 / 90 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.52 | 97.74 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.52 | 97.75 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.25 | 95.64 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
