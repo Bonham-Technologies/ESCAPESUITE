@@ -4,9 +4,9 @@ import { ExportDialog } from './ExportDialog'
 import { ExportAbortedError, ExportError } from '../../core/exporter'
 import {
   EXPORT_NO_VIDEO_CODEC_REASON,
-  MP4_EXPORTED_WITHOUT_AUDIO,
-  MP4_NO_AUDIO_NOTE,
   MP4_NO_CODEC_REASON,
+  exportedWithoutSoundReason,
+  noAudioNote,
 } from '../../core/exportTypes'
 import { installWebCodecsDoubles } from '../../test/doubles/webcodecs'
 import { useEditorStore } from '../../store/projectStore'
@@ -25,7 +25,7 @@ const { mockExportToWebM, mockExportToMP4, mockExportToGIF, mockIsMP4ExportSuppo
   // ESCSUITE-175: a real asynchronous probe answering two questions, the shape
   // WebM's has had since ESCSUITE-22/29.
   mockIsMP4ExportSupported: vi.fn(() => Promise.resolve({ video: true, audio: true })),
-  mockIsWebMExportSupported: vi.fn(() => Promise.resolve(true)),
+  mockIsWebMExportSupported: vi.fn(() => Promise.resolve({ video: true, audio: true })),
 }))
 
 vi.mock('../../core/exporter', async (importOriginal) => ({
@@ -88,6 +88,30 @@ const advancedExport = () => {
 }
 const gifRadio = () => screen.getByRole('radio', { name: /gif/i })
 const fpsSelect = () => screen.getByLabelText(/frames per second/i)
+/**
+ * Replace the default media clip with one whose source is an image, so the
+ * timeline has nothing that could carry sound.
+ */
+const useImageOnlyTimeline = () => {
+  store().removeClipFromTimeline('clip1')
+  store().addSourceVideo({
+    id: 'image1',
+    name: 'still.png',
+    duration: 5,
+    width: 640,
+    height: 360,
+    frameRate: 0,
+    mimeType: 'image/png',
+    size: 100,
+    mediaType: 'image',
+  })
+  store().addClipToTimeline(
+    { id: 'imageClip', sourceVideoId: 'image1', name: 'imageClip', startTime: 0, endTime: 5, duration: 5 },
+    undefined,
+    0
+  )
+}
+
 /** Open Advanced options and choose GIF. */
 const chooseGif = () => {
   fireEvent.click(advancedToggle())
@@ -148,7 +172,7 @@ describe('ExportDialog', () => {
     mockIsMP4ExportSupported.mockReset()
     mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: true })
     mockIsWebMExportSupported.mockReset()
-    mockIsWebMExportSupported.mockResolvedValue(true)
+    mockIsWebMExportSupported.mockResolvedValue({ video: true, audio: true })
     mockGetSetting.mockResolvedValue(undefined)
 
     resetStoreForTest()
@@ -322,7 +346,7 @@ describe('ExportDialog', () => {
     })
 
     it('disables WebM with its own reason when only MP4 can be exported, leaving MP4 reachable', async () => {
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
 
@@ -346,7 +370,7 @@ describe('ExportDialog', () => {
 
     it('disables both formats with one sentence, in the main body, when neither can be exported', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
 
@@ -366,7 +390,7 @@ describe('ExportDialog', () => {
     // export.
     it('disables the Advanced download button too, with the same sentence, when neither format can be exported', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
       fireEvent.click(advancedToggle())
@@ -396,7 +420,7 @@ describe('ExportDialog', () => {
     // to warn before any click.
     it('disables the Advanced button for a restored MP4 setting when neither format can be exported', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
@@ -475,7 +499,7 @@ describe('ExportDialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
 
-      expect(screen.getByText(MP4_NO_AUDIO_NOTE)).toBeInTheDocument()
+      expect(screen.getByText(noAudioNote('mp4'))).toBeInTheDocument()
       // Still offered: a silent MP4 is a legitimate thing to want, and the
       // note says what the trade is.
       expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
@@ -489,13 +513,13 @@ describe('ExportDialog', () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
-      expect(screen.getByText(MP4_NO_AUDIO_NOTE)).toBeInTheDocument()
+      expect(screen.getByText(noAudioNote('mp4'))).toBeInTheDocument()
 
       chooseGif()
 
       // Two sentences about sound, one of which is about a format that is not
       // being exported, is one too many.
-      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('mp4'))).not.toBeInTheDocument()
       expect(
         screen.getByText(/GIF export needs this tab visible and has no sound/)
       ).toBeInTheDocument()
@@ -505,7 +529,53 @@ describe('ExportDialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
 
-      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('mp4'))).not.toBeInTheDocument()
+    })
+
+    // ESCSUITE-175 fix round: WebM gets the same up-front note MP4 does, for the
+    // same reason — a browser with VP9 and no Opus encoder exports a silent
+    // WebM, and WebM is the dialog's *default* format.
+    it('says WebM will have no sound, up front, when this browser has no Opus encoder', async () => {
+      mockIsWebMExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.getByText(noAudioNote('webm'))).toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('mp4'))).not.toBeInTheDocument()
+      // Still offered — it is the primary button.
+      expect(primaryExport()).toBeEnabled()
+    })
+
+    it('says nothing about WebM sound when this browser can encode Opus', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.queryByText(noAudioNote('webm'))).not.toBeInTheDocument()
+    })
+
+    // A browser with no AudioEncoder at all: both notes appear, and neither
+    // claims the other format keeps the sound, because neither does.
+    it('drops the way-out clause from both notes when no format has sound', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      mockIsWebMExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.getByText(noAudioNote('mp4', false))).toBeInTheDocument()
+      expect(screen.getByText(noAudioNote('webm', false))).toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('mp4'))).not.toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('webm'))).not.toBeInTheDocument()
+    })
+
+    it('keeps no silent-format note at all while GIF is selected', async () => {
+      mockIsWebMExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      expect(screen.getByText(noAudioNote('webm'))).toBeInTheDocument()
+
+      chooseGif()
+
+      expect(screen.queryByText(noAudioNote('webm'))).not.toBeInTheDocument()
     })
 
     it('says neither video format can be encoded when WebCodecs is present but its codecs are not', async () => {
@@ -515,7 +585,7 @@ describe('ExportDialog', () => {
       const codecs = installWebCodecsDoubles()
       try {
         mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
-        mockIsWebMExportSupported.mockResolvedValue(false)
+        mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
         render(<ExportDialog isOpen={true} onClose={onClose} />)
         await settle()
 
@@ -559,12 +629,12 @@ describe('ExportDialog', () => {
       rerender(<ExportDialog isOpen={false} onClose={onClose} />)
       rerender(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
-      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('mp4'))).not.toBeInTheDocument()
 
       resolveStale({ video: false, audio: false })
       await settle()
 
-      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+      expect(screen.queryByText(noAudioNote('mp4'))).not.toBeInTheDocument()
       expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
     })
 
@@ -573,9 +643,9 @@ describe('ExportDialog', () => {
     // started by an earlier open can still overwrite a later one's answer
     // once it finally resolves.
     it('does not let a stale probe from an earlier open overwrite a later one', async () => {
-      let resolveStale!: (supported: boolean) => void
+      let resolveStale!: (support: { video: boolean; audio: boolean }) => void
       mockIsWebMExportSupported.mockReturnValueOnce(
-        new Promise<boolean>((resolve) => {
+        new Promise<{ video: boolean; audio: boolean }>((resolve) => {
           resolveStale = resolve
         })
       )
@@ -591,7 +661,7 @@ describe('ExportDialog', () => {
 
       // The stale first probe now resolves false. It must not undo the
       // current (correct) answer.
-      resolveStale(false)
+      resolveStale({ video: false, audio: true })
       await settle()
 
       expect(primaryExport()).toBeEnabled()
@@ -862,10 +932,78 @@ describe('ExportDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
 
       await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
-      expect(screen.getByText(MP4_EXPORTED_WITHOUT_AUDIO)).toBeInTheDocument()
+      expect(screen.getByText(exportedWithoutSoundReason('mp4'))).toBeInTheDocument()
       expect(mockSendMessage).toHaveBeenCalledWith({
         type: 'EXPORT_COMPLETE',
         payload: { blob: bytes, format: 'mp4', name: 'Test Project.mp4', audio: false },
+      })
+    })
+
+    // ESCSUITE-175 fix round, MAJOR 1: the sentence asserts a *loss*, so a
+    // project that had no sound to lose must not see it. The predicate is the
+    // audio mixer's own skip clause minus the per-blob decode, so a timeline of
+    // images (or one whose every track is muted) is known to be silent without
+    // the dialog decoding anything.
+    it('says nothing when the project had no sound to lose', async () => {
+      mockExportToMP4.mockResolvedValue(exported(new Blob(['mp4'], { type: 'video/mp4' }), false))
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      useImageOnlyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.queryByText(exportedWithoutSoundReason('mp4'))).not.toBeInTheDocument()
+    })
+
+    it('says nothing when every track that could carry sound is muted', async () => {
+      mockExportToMP4.mockResolvedValue(exported(new Blob(['mp4'], { type: 'video/mp4' }), false))
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      for (const track of store().project.timeline.tracks) {
+        store().updateTrack(track.id, { muted: true })
+      }
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.queryByText(exportedWithoutSoundReason('mp4'))).not.toBeInTheDocument()
+    })
+
+    // The up-front note is *not* gated the same way (ruling 2): "will have no
+    // sound" is a true and harmless thing to say about a silent project, and
+    // the note is rendered before the dialog knows which range will be exported.
+    it('still shows the up-front note for a project with no sound in it', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      useImageOnlyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.getByText(noAudioNote('mp4'))).toBeInTheDocument()
+    })
+
+    // ESCSUITE-175 fix round: the WebM half, with the codec its own sentence names.
+    it('says the WebM came out silent, naming Opus', async () => {
+      const bytes = new Blob(['webm'], { type: 'video/webm' })
+      mockExportToWebM.mockResolvedValue(exported(bytes, false))
+      mockIsWebMExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      fireEvent.click(primaryExport())
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.getByText(exportedWithoutSoundReason('webm'))).toBeInTheDocument()
+      expect(screen.queryByText(exportedWithoutSoundReason('mp4'))).not.toBeInTheDocument()
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: 'EXPORT_COMPLETE',
+        payload: { blob: bytes, format: 'webm', name: 'Test Project.webm', audio: false },
       })
     })
 
@@ -878,7 +1016,7 @@ describe('ExportDialog', () => {
       fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
 
       await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
-      expect(screen.queryByText(MP4_EXPORTED_WITHOUT_AUDIO)).not.toBeInTheDocument()
+      expect(screen.queryByText(exportedWithoutSoundReason('mp4'))).not.toBeInTheDocument()
     })
 
     // A GIF result always carries `audio: false` — the container has nowhere to
@@ -893,7 +1031,7 @@ describe('ExportDialog', () => {
       fireEvent.click(advancedExport())
 
       await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
-      expect(screen.queryByText(MP4_EXPORTED_WITHOUT_AUDIO)).not.toBeInTheDocument()
+      expect(screen.queryByText(exportedWithoutSoundReason('mp4'))).not.toBeInTheDocument()
       expect(mockSendMessage.mock.calls[0][0].payload.audio).toBe(false)
     })
 
@@ -1441,7 +1579,7 @@ describe('ExportDialog', () => {
     // failing with WebM also unsupported, and used to still hand back a
     // recovery button that could not work either.
     it('disables the WebM retry on the MP4 failure screen when WebM is also unsupported', async () => {
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       mockExportToMP4.mockRejectedValue(new Error('Encoder unavailable'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
@@ -1765,7 +1903,7 @@ describe('ExportDialog', () => {
 
     it('leaves GIF enabled, and says so, when the browser has no WebCodecs', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await waitFor(() => expect(primaryExport()).toBeDisabled())
       await settle()
@@ -1790,7 +1928,7 @@ describe('ExportDialog', () => {
 
     it('exports GIF in a browser with no WebCodecs', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
-      mockIsWebMExportSupported.mockResolvedValue(false)
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await waitFor(() => expect(primaryExport()).toBeDisabled())
       await settle()

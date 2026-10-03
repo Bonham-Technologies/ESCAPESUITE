@@ -46,7 +46,7 @@ describe('export support probes', () => {
     const webcodecs = installWebCodecsDoubles()
     restores.push(() => webcodecs.uninstall())
 
-    await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+    await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
   })
 
   it.each(['VideoEncoder', 'VideoFrame'])(
@@ -57,7 +57,7 @@ describe('export support probes', () => {
       restores.push(removeGlobal(missing))
 
       await expect(isMP4ExportSupported(1920, 1080)).resolves.toMatchObject({ video: false })
-      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toMatchObject({ video: false })
     }
   )
 
@@ -70,7 +70,7 @@ describe('export support probes', () => {
     restores.push(removeGlobal('VideoDecoder'))
 
     await expect(isMP4ExportSupported(1920, 1080)).resolves.toMatchObject({ video: false })
-    await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+    await expect(isWebMExportSupported(1920, 1080)).resolves.toMatchObject({ video: true })
   })
 })
 
