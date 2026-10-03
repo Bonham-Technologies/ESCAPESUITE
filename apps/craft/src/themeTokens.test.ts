@@ -40,6 +40,27 @@ function colourTokens(tokens: Map<string, string>): string[] {
     .sort()
 }
 
+/** WCAG 2 relative luminance of a `#rrggbb` colour. */
+function relativeLuminance(hex: string): number {
+  const channel = (c: number) => {
+    const s = c / 255
+    return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
+  }
+  const n = hex.replace('#', '')
+  const r = channel(parseInt(n.slice(0, 2), 16))
+  const g = channel(parseInt(n.slice(2, 4), 16))
+  const b = channel(parseInt(n.slice(4, 6), 16))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** WCAG 2 contrast ratio between two `#rrggbb` colours. */
+function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a)
+  const lb = relativeLuminance(b)
+  const [lighter, darker] = la > lb ? [la, lb] : [lb, la]
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
 describe('ESCAPECRAFT theme tokens', () => {
   it('gives the light theme its own value for every colour the dark one defines', () => {
     const dark = colourTokens(tokensIn(':root'))
@@ -60,6 +81,25 @@ describe('ESCAPECRAFT theme tokens', () => {
       expect(tokens.get('--error'), `${selector} --error`).toBeTruthy()
       expect(tokens.get('--error-text'), `${selector} --error-text`).toBeTruthy()
       expect(tokens.get('--error-text')).not.toBe(tokens.get('--error'))
+    }
+  })
+
+  // ESCSUITE-177 (m8): the light palette's --text-muted was 3.74:1 on
+  // --bg-secondary — under WCAG AA — which only showed up as an axe failure
+  // in Firefox (the suite's Chromium run never happened to mark the row that
+  // colour applies to as unavailable). Pinned numerically, in both palettes,
+  // so a future edit to either token cannot reopen it silently.
+  it('keeps --text-muted at AA contrast against --bg-secondary in both palettes', () => {
+    for (const selector of [':root', ':root[data-theme="light"]']) {
+      const tokens = tokensIn(selector)
+      const textMuted = tokens.get('--text-muted')
+      const bgSecondary = tokens.get('--bg-secondary')
+      expect(textMuted, `${selector} --text-muted`).toBeTruthy()
+      expect(bgSecondary, `${selector} --bg-secondary`).toBeTruthy()
+      expect(
+        contrastRatio(textMuted as string, bgSecondary as string),
+        `${selector} --text-muted vs --bg-secondary`
+      ).toBeGreaterThanOrEqual(4.5)
     }
   })
 })
