@@ -32,14 +32,14 @@ const DEFAULT_MAX_QUEUE = 64
 const RETRY_AFTER_SECONDS = 5
 
 /**
- * How long the request line and headers may take to arrive before Node tears the connection
- * down itself with its own 408 — measured on Node 26.7, this (like HEADERS_TIMEOUT_MS) only
- * guards the time *up to* dispatching a request to this server's listener; once the headers
- * have parsed, as they already have by the time readBody is ever called, neither one bounds
- * how long the body itself may then take (close()'s own teardown is what does, during a
- * shutdown — see readBody). A job spec is a few hundred bytes; this is generous for receiving
- * it and nowhere near Node's own 300 s default, which would otherwise let a silent client hold
- * a connection for five minutes before even reaching this listener.
+ * How long the *whole* request — request line, headers and body — may take to arrive before
+ * Node tears the connection down itself with its own 408. Measured on Node 26.7 against its own
+ * docs ("receiving the entire request from the client"): this bounds the body too, not just the
+ * time up to dispatching a request to this server's listener — a silent or trickling client is
+ * disconnected whether it never finished its headers or never finished its body. A job spec is
+ * a few hundred bytes; this is generous for receiving one and nowhere near Node's own 300 s
+ * default. See CONNECTIONS_CHECKING_INTERVAL_MS for the granularity this is actually enforced
+ * at, and `close()` for the tighter, immediate bound a shutdown adds on top of this.
  */
 export const REQUEST_TIMEOUT_MS = 30_000
 
@@ -49,6 +49,18 @@ export const REQUEST_TIMEOUT_MS = 30_000
  * sends its headers in one write; Node's own default is 60 s.
  */
 export const HEADERS_TIMEOUT_MS = 10_000
+
+/**
+ * Both timeouts above are not watched continuously — Node samples every connection against
+ * them on a periodic sweep, `connectionsCheckingInterval`, whose **default is 30 s**. So the
+ * effective bound on a slow or stalled request is the configured timeout plus up to one sweep
+ * period: at the default interval, REQUEST_TIMEOUT_MS's documented 30 s is really "the next
+ * sweep at or after 30 s", i.e. up to 60 s, and HEADERS_TIMEOUT_MS's 10 s window becomes a 30 s
+ * one in practice (measured: a request stuck at 30 s/10 s with the default interval answers 408
+ * at 30014 ms, not 10 s). Set well below both timeouts so 10 s and 30 s are honoured to within
+ * five seconds instead of thirty.
+ */
+export const CONNECTIONS_CHECKING_INTERVAL_MS = 5_000
 
 export interface ServeOptions {
   /** TCP port to bind. `0` picks a free one; read the real port back off the handle. */
@@ -233,15 +245,16 @@ export function createLimiter(concurrency: number, maxQueue: number): Limiter {
  *
  * Returns `undefined` when the body was too big — see DRAIN_FACTOR for why that is not simply
  * an immediate socket teardown — and `BODY_GONE` when it was going to fit but never finished
- * arriving at all: `close()` force-ending a request still parked here during shutdown, or the
- * client dropping the connection. (Measured on Node 26.7: `requestTimeout`/`headersTimeout`
- * only guard the time *up to* dispatching a request to this listener — once headers have
- * parsed, as they already have by the time this is called, neither one bounds how long the
- * body itself may then take, so close()'s own teardown is the only thing that does outside a
- * client simply giving up.) Either way this is not the same failure as "too big" and must not
- * be answered the same way.
+ * arriving at all: `close()` force-ending a request still parked here during shutdown (the
+ * *immediate* bound during a shutdown, not the only one), Node's own `requestTimeout` tearing
+ * the whole request down — body included, on its periodic sweep, see
+ * CONNECTIONS_CHECKING_INTERVAL_MS — or the client simply dropping the connection. Either way
+ * this is not the same failure as "too big" and must not be answered the same way.
  */
-function readBody(req: http.IncomingMessage): Promise<string | undefined | typeof BODY_GONE> {
+function readBody(
+  req: http.IncomingMessage,
+  log: (line: string) => void,
+): Promise<string | undefined | typeof BODY_GONE> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = []
     let size = 0
@@ -265,8 +278,13 @@ function readBody(req: http.IncomingMessage): Promise<string | undefined | typeo
     // Any failure reading the body before it finishes — overwhelmingly a connection reset,
     // which is how Node reports a client giving up mid-body on this object, before 'close'
     // ever fires — is gone, not broken: it settles the same way the close()-triggered and
-    // oversized-body cases do, never as a stream error to log and fail the request over.
-    req.on('error', () => resolve(BODY_GONE))
+    // oversized-body cases do, never as a stream error to log and fail the request over. Logged
+    // here, rather than left silent, so a garbage body and a plain disconnect are not both
+    // indistinguishable "POST /render 499" lines in the access log.
+    req.on('error', (err) => {
+      log(`request body error: ${messageOf(err)}`)
+      resolve(BODY_GONE)
+    })
     // 'close' fires after a normal 'end' too, but by then the promise has already settled and
     // this is a no-op. `req.complete` is Node's own record of whether 'end' actually happened —
     // false here means the body was destroyed before it finished, for any reason, and the
@@ -280,9 +298,9 @@ function readBody(req: http.IncomingMessage): Promise<string | undefined | typeo
 /**
  * Distinguishes "the body was never going to finish" from "the body was too big" — both of
  * which `readBody` used to collapse into a single `undefined`. A request that settles with
- * this is already dead (its response was ended by `close()`'s teardown, or the client itself
- * gave up) and must not be sent another response at all, let alone the size-specific 413 an
- * oversized body gets.
+ * this is already dead (its response was ended by `close()`'s teardown, by Node's own
+ * `requestTimeout` tearing the whole request down, or the client itself gave up) and must not
+ * be sent another response at all, let alone the size-specific 413 an oversized body gets.
  */
 export const BODY_GONE = Symbol('body-gone')
 
@@ -347,7 +365,7 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     bodiesInFlight.add(inFlight)
     let raw: string | undefined | typeof BODY_GONE
     try {
-      raw = await readBody(req)
+      raw = await readBody(req, log)
     } finally {
       bodiesInFlight.delete(inFlight)
     }
@@ -485,35 +503,41 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     return 404
   }
 
-  const server = http.createServer((req, res) => {
-    const startedAt = Date.now()
-    openRequests++
-    const method = req.method ?? 'GET'
-    // A request target URL is too malformed to parse is the client's problem, not a reason to
-    // throw out of the request listener — which would be an uncaught exception, i.e. the whole
-    // server gone. Left unparsed it simply matches no route and gets a 404.
-    let pathname: string
-    try {
-      pathname = new URL(req.url ?? '/', 'http://localhost').pathname
-    } catch {
-      pathname = req.url ?? '/'
-    }
+  const server = http.createServer(
+    // Node option, no code of our own: samples every connection against requestTimeout and
+    // headersTimeout this often instead of Node's own 30 s default — see
+    // CONNECTIONS_CHECKING_INTERVAL_MS.
+    { connectionsCheckingInterval: CONNECTIONS_CHECKING_INTERVAL_MS },
+    (req, res) => {
+      const startedAt = Date.now()
+      openRequests++
+      const method = req.method ?? 'GET'
+      // A request target URL is too malformed to parse is the client's problem, not a reason to
+      // throw out of the request listener — which would be an uncaught exception, i.e. the whole
+      // server gone. Left unparsed it simply matches no route and gets a 404.
+      let pathname: string
+      try {
+        pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+      } catch {
+        pathname = req.url ?? '/'
+      }
 
-    void route(req, res, pathname)
-      .catch((err: unknown) => {
-        // Nothing a handler can do may take the process down: a render server that dies on one
-        // bad request takes every other in-flight job with it.
-        log(`error: ${method} ${pathname}: ${messageOf(err)}`)
-        send(res, 500, { error: messageOf(err) })
-        return 500
-      })
-      .then((status) => {
-        log(`${method} ${pathname} ${status} ${Date.now() - startedAt}ms`)
-      })
-      .finally(requestDone)
-      // Last line of defence: even a throwing `log` must not become an unhandled rejection.
-      .catch(() => {})
-  })
+      void route(req, res, pathname)
+        .catch((err: unknown) => {
+          // Nothing a handler can do may take the process down: a render server that dies on one
+          // bad request takes every other in-flight job with it.
+          log(`error: ${method} ${pathname}: ${messageOf(err)}`)
+          send(res, 500, { error: messageOf(err) })
+          return 500
+        })
+        .then((status) => {
+          log(`${method} ${pathname} ${status} ${Date.now() - startedAt}ms`)
+        })
+        .finally(requestDone)
+        // Last line of defence: even a throwing `log` must not become an unhandled rejection.
+        .catch(() => {})
+    },
+  )
 
   // Node's own defaults (300 s / 60 s) would let a silent or trickling client hold a
   // connection for minutes; a job spec is a few hundred bytes and has no business taking that

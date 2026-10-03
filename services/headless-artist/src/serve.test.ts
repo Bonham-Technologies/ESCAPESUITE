@@ -1,7 +1,13 @@
 import http from 'node:http'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createLimiter, HEADERS_TIMEOUT_MS, REQUEST_TIMEOUT_MS, startServer } from './serve'
+import {
+  CONNECTIONS_CHECKING_INTERVAL_MS,
+  createLimiter,
+  HEADERS_TIMEOUT_MS,
+  REQUEST_TIMEOUT_MS,
+  startServer,
+} from './serve'
 import type { ServeOptions, ServeHandle } from './serve'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
@@ -474,6 +480,20 @@ describe('request and headers timeouts', () => {
     expect(created.headersTimeout).toBe(HEADERS_TIMEOUT_MS)
     expect(REQUEST_TIMEOUT_MS).toBeLessThan(300_000)
     expect(HEADERS_TIMEOUT_MS).toBeLessThan(60_000)
+  })
+
+  // Re-review N1: both timeouts above are enforced on a periodic sweep
+  // (connectionsCheckingInterval), whose Node default is 30 s — far coarser than either
+  // configured timeout, so without this option 30 s/10 s are honoured only to the nearest
+  // 30 s. A statement, not a branch: this just pins what was passed to http.createServer.
+  it('passes connectionsCheckingInterval, well short of Node default, to http.createServer', async () => {
+    const spy = vi.spyOn(http, 'createServer')
+    await start()
+    const options = spy.mock.calls[0]?.[0] as http.ServerOptions
+    spy.mockRestore()
+
+    expect(options.connectionsCheckingInterval).toBe(CONNECTIONS_CHECKING_INTERVAL_MS)
+    expect(CONNECTIONS_CHECKING_INTERVAL_MS).toBeLessThan(30_000)
   })
 })
 
