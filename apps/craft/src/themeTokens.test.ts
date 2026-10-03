@@ -40,17 +40,23 @@ function colourTokens(tokens: Map<string, string>): string[] {
     .sort()
 }
 
-/** WCAG 2 relative luminance of a `#rrggbb` colour. */
-function relativeLuminance(hex: string): number {
+/** WCAG 2 relative luminance of an `[r, g, b]` triple (0-255 each). */
+function relativeLuminanceRgb([r, g, b]: [number, number, number]): number {
   const channel = (c: number) => {
     const s = c / 255
     return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4
   }
+  return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+}
+
+/** WCAG 2 relative luminance of a `#rrggbb` colour. */
+function relativeLuminance(hex: string): number {
   const n = hex.replace('#', '')
-  const r = channel(parseInt(n.slice(0, 2), 16))
-  const g = channel(parseInt(n.slice(2, 4), 16))
-  const b = channel(parseInt(n.slice(4, 6), 16))
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  return relativeLuminanceRgb([
+    parseInt(n.slice(0, 2), 16),
+    parseInt(n.slice(2, 4), 16),
+    parseInt(n.slice(4, 6), 16),
+  ])
 }
 
 /** WCAG 2 contrast ratio between two `#rrggbb` colours. */
@@ -58,6 +64,35 @@ function contrastRatio(a: string, b: string): number {
   const la = relativeLuminance(a)
   const lb = relativeLuminance(b)
   const [lighter, darker] = la > lb ? [la, lb] : [lb, la]
+  return (lighter + 0.05) / (darker + 0.05)
+}
+
+/**
+ * Parse a `#rrggbb` or `rgba(r, g, b, a)` CSS colour, composited over pure
+ * black — which is what VideoPlayer's error overlay (`rgba(0,0,0,0.8)` over
+ * a hard-coded `#000`) actually is, in both themes.
+ */
+function parseColorOnBlack(value: string): [number, number, number] {
+  const rgbaMatch = value.match(
+    /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/
+  )
+  if (rgbaMatch) {
+    const [, r, g, b, a] = rgbaMatch
+    const alpha = a !== undefined ? Number(a) : 1
+    return [Number(r) * alpha, Number(g) * alpha, Number(b) * alpha]
+  }
+  const hex = value.replace('#', '').trim()
+  return [
+    parseInt(hex.slice(0, 2), 16),
+    parseInt(hex.slice(2, 4), 16),
+    parseInt(hex.slice(4, 6), 16),
+  ]
+}
+
+/** Contrast ratio of a `#rrggbb`/`rgba(...)` colour against pure black. */
+function contrastOnBlack(value: string): number {
+  const lighter = relativeLuminanceRgb(parseColorOnBlack(value))
+  const darker = 0 // pure black's relative luminance
   return (lighter + 0.05) / (darker + 0.05)
 }
 
@@ -101,5 +136,34 @@ describe('ESCAPECRAFT theme tokens', () => {
         `${selector} --text-muted vs --bg-secondary`
       ).toBeGreaterThanOrEqual(4.5)
     }
+  })
+
+  // ESCSUITE-177 review MEDIUM 2: VideoPlayer's error overlay sits on
+  // rgba(0,0,0,0.8) over a hard-coded #000 — black regardless of theme — so
+  // darkening --text-muted for the sidebar (above) silently traded a light-
+  // theme sidebar failure for a light-theme *overlay* failure the sidebar
+  // pin cannot see (--text-muted went from 5.23:1 to 4.00:1 on black).
+  // .errorHint and .errorOverlay now carry their own on-dark colours instead
+  // of reading --text-muted/--text-secondary, pinned here against pure
+  // black directly from the stylesheet so neither can regress to a theme
+  // token silently.
+  it('keeps the VideoPlayer error overlay at AA contrast on its own black background', () => {
+    const playerCss = readFileSync(
+      join(process.cwd(), 'src/components/VideoPlayer/VideoPlayer.module.css'),
+      'utf8'
+    )
+
+    const colorIn = (selector: string): string => {
+      const start = playerCss.indexOf(`${selector} {`)
+      expect(start, `no \`${selector}\` block in VideoPlayer.module.css`).toBeGreaterThan(-1)
+      const end = playerCss.indexOf('\n}', start)
+      const block = playerCss.slice(start, end)
+      const match = block.match(/(?<!-)color:\s*([^;]+);/)
+      expect(match, `no \`color\` declaration in \`${selector}\``).toBeTruthy()
+      return (match as RegExpMatchArray)[1].trim()
+    }
+
+    expect(contrastOnBlack(colorIn('.errorOverlay'))).toBeGreaterThanOrEqual(4.5)
+    expect(contrastOnBlack(colorIn('.errorHint'))).toBeGreaterThanOrEqual(4.5)
   })
 })

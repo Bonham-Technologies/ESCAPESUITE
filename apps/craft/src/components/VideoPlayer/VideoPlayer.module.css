@@ -45,7 +45,13 @@
   filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.5));
 }
 
-/* Error overlay */
+/* Error overlay. ESCSUITE-177 review MEDIUM 2: this sits on
+   rgba(0,0,0,0.8) over .videoWrapper's hard-coded #000 — black in both
+   themes, regardless of `data-theme` — so it gets explicit on-dark colours
+   rather than theme tokens. `var(--text-secondary)` and `var(--text-muted)`
+   are tuned against `--bg-secondary` (the sidebar), and the light theme's
+   values measure 2.79:1 and 4.00:1 respectively against this black surface
+   — both under WCAG AA. */
 .errorOverlay {
   position: absolute;
   inset: 0;
@@ -54,7 +60,7 @@
   align-items: center;
   justify-content: center;
   background-color: rgba(0, 0, 0, 0.8);
-  color: var(--text-secondary, #94a3b8);
+  color: rgba(255, 255, 255, 0.82);
   text-align: center;
   padding: 2rem;
 }
@@ -75,7 +81,8 @@
 
 .errorHint {
   font-size: 0.875rem;
-  color: var(--text-muted, #64748b);
+  /* 14.14:1 on the overlay's black — see the comment on .errorOverlay above. */
+  color: #cbd5e1;
   margin-top: 0.5rem;
 }
 

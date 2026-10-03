@@ -94,7 +94,16 @@
      AA — which is what an unavailable source row's label (.sourceToggle
      .sourceUnavailable .sourceLabel) and the unmet-system-audio meter label
      render in. Darkened until it clears 4.5:1 with headroom (4.90:1 here),
-     same pattern as --error-text above. */
+     same pattern as --error-text above.
+     This is a *sidebar* muted colour, tuned against --bg-secondary — all
+     three consumers above live inside .sidebar. Darkening it moved the
+     ratio against pure black (VideoPlayer's error overlay, which is black
+     in both themes) from 5.23:1 to 4.00:1, under AA — that surface is not
+     themed and must not read this token; see VideoPlayer.module.css's
+     .errorOverlay/.errorHint for the explicit on-dark colours it uses
+     instead. (On the other two sidebar backgrounds no current consumer
+     sits on: 4.43:1 on --bg-tertiary, 4.07:1 on --bg-hover — both still AA,
+     but with little headroom left.) */
   --text-muted: #606d80;
 
   /* Keep ESCAPECRAFT's red/pink accent in light mode */
