@@ -2302,6 +2302,20 @@ machine-contention flake that passes alone); `errors/permissions.spec.ts` was re
 and is 9 passed / 2 skipped on the bound-prototype one. **No floor crossed**; craft's floors stay
 100 / 99 / 97 / 100.
 
+`@escapesuite/headless-artist` was re-measured 2026-10-03 for ESCSUITE-186 (the s3-sink unit tests drain the
+`Readable` body the sink hands each `PutObject` command before resolving, the way a real upload reads it, so
+the sink's lazily opened `createReadStream` can no longer race the test's own temp-directory cleanup — the
+`ENOENT` on `render-output.webm` that turned `main`'s CI red on a tree that had just passed twice, surfacing
+as an uncaught exception on a later tick because an unconsumed stream had no `error` listener):
+99.47 / 99.38 / 98.27 / 98.56, byte-identical to the 99.47 / 99.38 / 98.27 / 98.56 that `main` at `cb37d7b`
+measures in the same sitting — lines 760 / 764, statements 810 / 815, branches 513 / 522 and functions
+137 / 139 on both trees, the same 4 / 5 / 9 / 2 uncovered, and no per-file difference at all. The change is
+two test files (`s3.test.ts`, `s3.sdk.test.ts`) and touches no `src`, which is why there is no changeset;
+each affected case now also pins `body.readableEnded` so the drain is asserted rather than assumed. The race
+could not be reproduced on a quiet machine (twenty runs clean before and after), so the fix rests on the
+sink's stream usage read against the non-consuming doubles and Node's documented asynchronous open.
+**No floor crossed**; the kit's floors stay 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
