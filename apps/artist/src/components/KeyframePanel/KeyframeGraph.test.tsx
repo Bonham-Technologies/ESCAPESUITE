@@ -727,6 +727,27 @@ describe('KeyframeGraph', () => {
         expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
         expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(2.998, 6)
       })
+
+      // Review round 1, MINOR 2: a left overshoot clamps to time 0 (the same
+      // clamp 'clamps a drag that leaves the plot area' pins at the clip's
+      // END, now that the start is occupied), which lands inside the
+      // t=0 keyframe's own epsilon window and is refused the same way a
+      // pixel-exact collision would be — pinning this is what keeps the
+      // lower `Math.max(0, …)` clamp itself under a mutant's reach, since
+      // nothing else in the suite drags past the left edge any more.
+      it('refuses a left overshoot that clamps into the start keyframe', () => {
+        const { container, onKeyframeMoved } = renderGraph('opacity')
+        measureGraph(container)
+
+        fireEvent.mouseDown(points(container)[2], { altKey: true }) // the t=3 keyframe
+        fireEvent.mouseMove(window, { clientX: -400, clientY: yForUnitValue(0.5) })
+        fireEvent.mouseUp(window)
+
+        expect(onKeyframeMoved).not.toHaveBeenCalled()
+        expect(screen.getByRole('status')).toHaveTextContent(
+          'Opacity keyframe not moved: another keyframe is at 0.00 seconds'
+        )
+      })
     })
   })
 })

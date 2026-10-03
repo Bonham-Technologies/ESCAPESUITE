@@ -392,6 +392,26 @@ describe('drawMultiSelectHandles', () => {
 
     expect(ctx.argsFor('strokeRect')).toEqual([[-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2]])
   })
+
+  // Review round 1, NIT 4: the single-select twin of this already has a
+  // "track is gone" case (`drawSelectionHandles`' `tracks: []` test above);
+  // this is its multi-select pair, so the `!track` operand is reached false
+  // (the visible sibling) and true (the one whose track is simply absent)
+  // in both describes, not just one.
+  it('skips a clip whose track is gone but keeps drawing its visible sibling', () => {
+    const second = mediaClip({ id: 'clip2', trackId: 'gone' })
+
+    drawMultiSelectHandles(
+      canvas,
+      1,
+      multiSelection({
+        clips: [mediaClip(), second],
+        tracks: [makeTrack()],
+      })
+    )
+
+    expect(ctx.argsFor('strokeRect')).toEqual([[-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2]])
+  })
 })
 
 // ESCSUITE-90: the chrome is a constant size on screen, so every constant that
