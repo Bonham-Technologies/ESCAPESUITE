@@ -134,19 +134,39 @@ export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Pr
       const outputKey = keyFor(keyPrefix, `${jobId}.${ext}`)
       const manifestKey = keyFor(keyPrefix, `${jobId}.manifest.json`)
 
-      await s3.send(
-        putObject({
-          Bucket: bucket,
-          Key: outputKey,
-          // The SDK needs a length up front for a stream body — read it from disk rather
-          // than buffering the whole file in memory.
-          Body: createReadStream(outputPath),
-          ContentLength: stat.size,
-          // Without this the SDK defaults to application/octet-stream, so anything serving the
-          // object straight from the bucket (a signed URL, a CDN) downloads it instead of playing it.
-          ContentType: FORMAT_TO_MIME[manifest.format],
-        }),
-      )
+      const body = createReadStream(outputPath)
+      // Node schedules this stream's fd-open asynchronously, on a later tick, whether or not
+      // anything ever reads from it. Without a listener here, a `send()` that rejects or
+      // resolves before draining `Body` — a validation failure, a network failure before the
+      // SDK starts piping it, or an embedder-supplied client per this function's own doc
+      // comment — leaves that open free to fail *after* the caller has already moved on
+      // (run.ts's `finally` removes the job's work directory, which `outputPath` lives in, the
+      // instant `deliver()` settles either way). With nothing listening, that failure is an
+      // uncaught exception — a process crash in `serve` mode — rather than the `{ ok: false }`
+      // result `runJob` promises (ESCSUITE-186). A real read failure during an actual upload
+      // still reaches the caller normally: the SDK's own listener (added when it pipes the
+      // body) sees the event too, and this harmless no-op doesn't suppress `send()`'s rejection.
+      body.on('error', () => {})
+      try {
+        await s3.send(
+          putObject({
+            Bucket: bucket,
+            Key: outputKey,
+            // The SDK needs a length up front for a stream body — read it from disk rather
+            // than buffering the whole file in memory.
+            Body: body,
+            ContentLength: stat.size,
+            // Without this the SDK defaults to application/octet-stream, so anything serving the
+            // object straight from the bucket (a signed URL, a CDN) downloads it instead of playing it.
+            ContentType: FORMAT_TO_MIME[manifest.format],
+          }),
+        )
+      } finally {
+        // Release the handle as soon as send() settles, win or lose, rather than leaving it
+        // open for a caller's own cleanup (or anything else) to race. A no-op if the SDK
+        // already consumed the stream to completion.
+        body.destroy()
+      }
 
       const manifestBody = Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
       await s3.send(
