@@ -116,16 +116,37 @@ function warn(message) {
 }
 
 /**
- * Parse one benchmark result's raw JSON text, returning `null` (with a
- * warning) rather than throwing if it fails to parse.
+ * Parse one benchmark result's raw JSON text.
+ *
+ * Returns `null` (with a warning, never a throw) both when `raw` fails to
+ * parse and when it parses to something that is not a plausible benchmark
+ * object — a bare string, number, boolean, `null`, or array. Every real
+ * result is a `{ name: string, runs: number, ... }` object (see
+ * `PerfBenchmark` in `apps/e2e/utils/perf.ts`); without this shape guard, a
+ * malformed-but-parseable result (e.g. a kit report that failed mid-write and
+ * landed as `null` or a bare number) would reach {@link mergeBenchmarks} and
+ * then {@link toMarkdown}'s `key in benchmark` check below, which throws a
+ * `TypeError` for any primitive right-hand side — turning one bad file into a
+ * crash of the whole report rather than one skipped row.
  */
 export function parseBenchmarkResult(raw, label) {
+  let value
   try {
-    return JSON.parse(raw)
+    value = JSON.parse(raw)
   } catch (error) {
     warn(`skipping ${label} — ${error.message}`)
     return null
   }
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    typeof value.name !== 'string'
+  ) {
+    warn(`skipping ${label} — not a benchmark result (expected an object with a "name" string)`)
+    return null
+  }
+  return value
 }
 
 /**
