@@ -752,4 +752,31 @@ describe('PreviewPlayer keyframe-mode drags', () => {
     const written = clipOf(shape.id).animation!.keyframes!.x!.find((k) => k.time === 2)!
     expect(written.value).toBeCloseTo(0.6, 5)
   })
+
+  // ESCSUITE-168 (U2): the gesture seeds `keyframeTime` from `currentTime -
+  // clip.timelinePosition` with no clamp. The drag can only *start* while the
+  // playhead sits inside the clip (hitTestHandles' own bounds check), but
+  // nothing stops the playhead moving outside it mid-gesture — so a write made
+  // after that lands at a negative time. Ruling: refuse the write rather than
+  // clamp it, the one case this hook does not already clamp.
+  it('refuses a keyframe write once the playhead has moved outside the clip mid-drag', async () => {
+    const trackId = store().project.timeline.tracks[0].id
+    addClip('clip1', 2, 4, trackId)
+    store().setSelectedClipId('clip1')
+    store().setKeyframePanelOpen(true)
+    store().setCurrentTime(3) // inside the clip — needed to pick up the handle
+
+    const preview = await renderPreview()
+    fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
+    await settle()
+
+    store().setCurrentTime(0) // the playhead is now before the clip starts
+    fireEvent.mouseMove(window, preview.at(1344, 540))
+    await settle(FRAME_MS)
+    fireEvent.mouseUp(window)
+    await settle(FRAME_MS)
+
+    const xKeyframes = clipOf('clip1').animation?.keyframes?.x ?? []
+    expect(xKeyframes.some((kf) => kf.time < 0)).toBe(false)
+  })
 })

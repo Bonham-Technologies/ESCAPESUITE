@@ -303,4 +303,23 @@ describe('useTimelineMarquee selecting', () => {
 
     expect(bound()).toBe(0)
   })
+
+  // ESCSUITE-168 (U1): a release outside the track container fires no click on
+  // it, so `useTimelineSeek`'s handler — the only thing that used to clear the
+  // flag — never runs for this gesture. Left set, it would swallow the user's
+  // next, unrelated click on bare track. The fix consumes the very next click
+  // anywhere, the moment it happens, rather than waiting for one that lands on
+  // the container.
+  it('clears the flag on the next click even when the release landed outside the track area', () => {
+    const { result } = mountMarquee()
+    startMarquee(result)
+    move(300, 30)
+
+    release()
+    expect(marqueeJustFinished.current).toBe(true)
+
+    document.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(marqueeJustFinished.current).toBe(false)
+  })
 })

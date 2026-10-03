@@ -158,7 +158,7 @@ describe('useTrackHeaderActions deleting', () => {
     act(() => result.current.handleDeleteTrack(middle))
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'Delete track with 2 clip(s)? This cannot be undone.'
+      'Delete track with 2 clip(s)? Ctrl+Z will bring it back.'
     )
     expect(removeTrack).toHaveBeenCalledWith(middle)
   })

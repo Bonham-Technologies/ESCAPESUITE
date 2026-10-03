@@ -358,7 +358,7 @@ describe('Timeline track headers', () => {
 
     await user.click(screen.getAllByTitle('Delete track')[0])
 
-    expect(confirmSpy).toHaveBeenCalledWith('Delete track with 1 clip(s)? This cannot be undone.')
+    expect(confirmSpy).toHaveBeenCalledWith('Delete track with 1 clip(s)? Ctrl+Z will bring it back.')
     expect(store().project.timeline.tracks).toHaveLength(1)
   })
 
