@@ -247,7 +247,11 @@ describe('KeyframeTrack', () => {
     // into (KeyframePanel.test.tsx pins the shared alternation) — so this
     // checks the raw text the row hands up through `onAnnounce` instead of
     // querying a `role="status"` here.
-    it('refuses a drop that lands exactly on another keyframe, and says why', () => {
+    //
+    // ESCSUITE-183: a drop aimed exactly at another keyframe used to be
+    // refused outright on release; `handleMouseMove` now clamps it to just
+    // past the neighbour instead, so it lands.
+    it('clamps a drop aimed exactly at another keyframe to just past it, instead of refusing', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
       const { container, onKeyframeMoved, onAnnounce } = renderTrack('opacity', { playheadTime: 0 })
       measureTrack(container)
@@ -259,10 +263,12 @@ describe('KeyframeTrack', () => {
       fireEvent.mouseMove(window, { clientX: 300 }) // exactly 2s
       fireEvent.mouseUp(window)
 
-      expect(onKeyframeMoved).not.toHaveBeenCalled()
-      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith(
-        'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
-      )
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(onKeyframeMoved.mock.calls[0][0]).toBe('opacity')
+      expect(onKeyframeMoved.mock.calls[0][1]).toBe(1)
+      expect(onKeyframeMoved.mock.calls[0][2]).toBeGreaterThan(2)
+      expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(2, 2)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
     it('reports nothing when the keyframe is released where it started', () => {

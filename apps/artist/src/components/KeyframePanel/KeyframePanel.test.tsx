@@ -292,13 +292,15 @@ describe('KeyframePanel', () => {
     })
   })
 
-  // Review round 1, MAJOR 1 + MINOR 6: every property row's diamond drag
-  // shares ONE live region, owned by the panel, so this is where the
-  // re-read alternation that makes a second identical refusal audible is
-  // actually exercised end to end — `useKeyframeDrag.test.ts` only proves
-  // the hook forwards the same raw text twice; it has no live region of its
-  // own to alternate.
-  describe('a diamond row drag refuses an occupied drop (ESCSUITE-167 / M6)', () => {
+  // Review round 1, MAJOR 1 + MINOR 6 gave every property row's diamond drag
+  // ONE shared live region, owned by the panel — originally exercised here by
+  // dragging a diamond onto a neighbour twice, to prove a second identical
+  // refusal re-reads audibly (the alternating zero-width mark). ESCSUITE-183's
+  // clamp means a mouse drag can no longer reach that refusal at all (the
+  // point stops at the neighbour's epsilon window instead of landing on it
+  // and bouncing back), so these two cases now prove the opposite: the clamp
+  // lands the drop, through the same shared region, with nothing to announce.
+  describe('a diamond row drag clamps away from an occupied neighbour (ESCSUITE-167/179, superseded by 183)', () => {
     const diamondsIn = (label: string) =>
       Array.from(trackFor(label).querySelectorAll<HTMLElement>(`.${trackStyles.diamond}`))
 
@@ -308,7 +310,7 @@ describe('KeyframePanel', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
     })
 
-    it('announces the same refusal twice with two different live-region strings', () => {
+    it('lands a drop aimed exactly at a neighbour, through the shared live region, with nothing to announce', () => {
       render(<KeyframePanel />)
       measureTrackArea('Opacity')
       // Keyframes sit at 0, 1 and 2 seconds; drag the one at 1s onto the one
@@ -318,40 +320,36 @@ describe('KeyframePanel', () => {
       fireEvent.mouseDown(custom, { clientX: 200 })
       fireEvent.mouseMove(window, { clientX: 300 })
       fireEvent.mouseUp(window)
-      const first = screen.getByRole('status').textContent
 
-      fireEvent.mouseDown(custom, { clientX: 200 })
-      fireEvent.mouseMove(window, { clientX: 300 })
-      fireEvent.mouseUp(window)
-      const second = screen.getByRole('status').textContent
-
-      // Two different strings (the mark alternates) that read the same once
-      // it is stripped off.
-      expect(second).not.toBe(first)
-      expect((second ?? '').replace(/\u200B$/, '')).toBe((first ?? '').replace(/\u200B$/, ''))
-      expect((first ?? '').replace(/\u200B$/, '')).toBe(
-        'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
-      )
-      // Neither refusal moved the keyframe.
-      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 1, 2])
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      // All three keyframes survive — the dragged one lands just past 2s
+      // rather than destroying the neighbour sitting on it.
+      const times = keyframesOf('opacity')!.map((kf) => kf.time)
+      expect(times).toHaveLength(3)
+      expect(times.some((t) => t > 2 && t < 2.01)).toBe(true)
     })
 
-    it('clears the live region once a later drop in the same row lands', () => {
+    it('lands a drop aimed at the same neighbour from the other side too, never announcing a refusal', () => {
+      // A fourth keyframe above the neighbour, so this case can approach it
+      // from above rather than reusing the first case's own moved point —
+      // the diamonds re-sort by time after a landed drag, so a DOM reference
+      // captured before one no longer names the same keyframe after it.
+      store().setClipKeyframe('clip1', 'opacity', { time: 3, value: 0.4, easing: 'linear' })
       render(<KeyframePanel />)
       measureTrackArea('Opacity')
-      const custom = diamondsIn('Opacity')[1]
+      // Keyframes sit at 0, 1, 2 and 3 seconds; drag the one at 3s down
+      // toward the one at 2s, stopping fractionally short of it (299.95px is
+      // 1.9995s — inside the 2s neighbour's epsilon window, from below).
+      const custom = diamondsIn('Opacity')[3]
 
-      fireEvent.mouseDown(custom, { clientX: 200 })
-      fireEvent.mouseMove(window, { clientX: 300 }) // exactly 2s — refused
-      fireEvent.mouseUp(window)
-      expect(screen.getByRole('status').textContent).not.toBe('')
-
-      fireEvent.mouseDown(custom, { clientX: 200 })
-      fireEvent.mouseMove(window, { clientX: 400 }) // 3s — lands
+      fireEvent.mouseDown(custom, { clientX: 400 })
+      fireEvent.mouseMove(window, { clientX: 299.95 })
       fireEvent.mouseUp(window)
 
-      expect(screen.getByRole('status')).toHaveTextContent('')
-      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 2, 3])
+      expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      const times = keyframesOf('opacity')!.map((kf) => kf.time)
+      expect(times).toHaveLength(4)
+      expect(times.some((t) => t < 2 && t > 1.99)).toBe(true)
     })
   })
 
