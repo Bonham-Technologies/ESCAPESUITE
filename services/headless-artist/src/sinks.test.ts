@@ -516,8 +516,9 @@ describe('command sink delivery timeout', () => {
 
     // A generous timeoutMs (well past the freshly-spawned process's own startup) so the
     // SIGTERM handler is registered before the signal arrives — otherwise the child dies to
-    // the ordinary default action instead of ever getting the chance to ignore it.
-    const timeoutMs = 500
+    // the ordinary default action instead of ever getting the chance to ignore it. Review
+    // finding 7: 500 ms still lost that race on a loaded runner often enough to flake.
+    const timeoutMs = 2000
     const script = `
       process.on('SIGTERM', () => {})
       setInterval(() => {}, 1000)

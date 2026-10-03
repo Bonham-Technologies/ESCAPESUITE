@@ -190,13 +190,20 @@ function createCommandSink(config: CommandConfig): OutputSink {
 
         // The delivery's own budget — HEADLESS_TIMEOUT_MS only covers the render, so without
         // this a command that never exits would hold the worker slot forever. SIGTERM first,
-        // then SIGKILL after a grace period for a child that ignores it.
+        // then SIGKILL after a grace period for a child that ignores it. The rejection fires
+        // from the escalation timer itself, right after the SIGKILL, rather than waiting on
+        // 'close' — 'close' waits for the stdio pipes, not the child, so a direct child that
+        // backgrounds a grandchild inheriting the stderr pipe and then exits would otherwise
+        // never emit it, leaving deliver() unsettled long after both timers have fired.
         let timedOut = false
         let killTimer: NodeJS.Timeout | undefined
         const timeoutTimer = setTimeout(() => {
           timedOut = true
           child.kill('SIGTERM')
-          killTimer = setTimeout(() => child.kill('SIGKILL'), COMMAND_KILL_GRACE_MS)
+          killTimer = setTimeout(() => {
+            child.kill('SIGKILL')
+            reject(new Error(`command sink timed out after ${config.timeoutMs} ms`))
+          }, COMMAND_KILL_GRACE_MS)
         }, config.timeoutMs)
         const clearTimers = (): void => {
           clearTimeout(timeoutTimer)
@@ -213,6 +220,10 @@ function createCommandSink(config: CommandConfig): OutputSink {
         child.on('close', (code, signal) => {
           clearTimers()
           if (timedOut) {
+            // Already rejected from the escalation timer above (or will be, if the child's own
+            // pipes close before the kill timer fires) — a second reject on a settled promise
+            // is a no-op. Kept so a child that dies in the same instant the timer fires still
+            // reports a timeout rather than falling through to the exit-code branch below.
             reject(new Error(`command sink timed out after ${config.timeoutMs} ms`))
             return
           }

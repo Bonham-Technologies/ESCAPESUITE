@@ -268,8 +268,17 @@ discarded** — log as much as you like, there is no output buffer to overflow.
 the webhook sink's) is this delivery's own budget, separate from `HEADLESS_TIMEOUT_MS` (which
 only covers the render). A command that outruns it is sent `SIGTERM`, then `SIGKILL` two
 seconds later if it is still alive, and the job fails with `command sink timed out after <n> ms`
-— the same message shape the webhook sink's timeout uses. Without this a delivery command that
-never exits held the worker slot forever, since `HEADLESS_TIMEOUT_MS` does not reach delivery.
+— the same message shape the webhook sink's timeout uses, and the rejection fires on that
+schedule regardless of whether the child has actually exited by then. Without this a delivery
+command that never exits held the worker slot forever, since `HEADLESS_TIMEOUT_MS` does not
+reach delivery.
+
+**Only the direct child is signalled.** A command that backgrounds work of its own — forking a
+grandchild and exiting itself — leaves that grandchild running; killing a whole process tree
+needs a wrapper that kills its own process group, or `detached` plus a group kill, which is a
+follow-up, not what this does today. The scratch directory is removed as soon as the job fails
+(the same cleanup every failure gets), so a surviving grandchild loses the file it was reading
+or writing out from under it.
 
 **In `serve` this sink is off by default.** A `POST /render` body chooses its own sink, so
 over HTTP this one is "run the program I name, as you" — see
