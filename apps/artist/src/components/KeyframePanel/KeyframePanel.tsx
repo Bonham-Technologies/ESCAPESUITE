@@ -7,7 +7,6 @@ import { useDraggablePanel } from './hooks/useDraggablePanel';
 import { KeyframeTrack } from './KeyframeTrack';
 import { KeyframeGraph } from './KeyframeGraph';
 import { ClipPreview } from './ClipPreview';
-import { announceWithMark } from './hooks/useKeyframeGraphKeyboard';
 import styles from './KeyframePanel.module.css';
 
 // Visual properties - transforms and effects
@@ -224,20 +223,18 @@ export function KeyframePanel() {
   // The one live region every property row's diamond drag shares
   // (ESCSUITE-167 / M6, review round 1 MINOR 6): only one diamond on one row
   // can ever be dragging at a time, so eight per-row regions would carry a
-  // message only one of them could ever produce. `''` (a landed drop,
-  // useKeyframeDrag.ts's own NIT-8 clear) is written straight through — an
-  // empty region has nothing for the alternation mark to help re-read —
-  // and anything else goes through the same `announceWithMark` this panel's
-  // graph keyboard uses, so two identical refusals in a row are still two
-  // different strings.
+  // message only one of them could ever produce.
+  //
+  // Since ESCSUITE-183 the only thing a diamond drag reports is `''` — a
+  // landed drop, with nothing to say — because the clamp makes every landing a
+  // legal one and there is no refusal left for the row to raise. The setter
+  // therefore goes straight to the row, with no alternating mark on the way:
+  // an empty region has nothing for the mark to help a screen reader re-read,
+  // and the occupied-time refusal that needed it is now the graph keyboard's
+  // alone, announced through the graph's own region (`announceWithMark`, in
+  // `hooks/useKeyframeGraphKeyboard.ts`, beside the `nudgeTime` that raises
+  // it).
   const [keyframeDragMessage, setKeyframeDragMessage] = useState('');
-  const handleKeyframeDragAnnounce = useCallback((text: string) => {
-    if (text === '') {
-      setKeyframeDragMessage('');
-      return;
-    }
-    announceWithMark(setKeyframeDragMessage, text);
-  }, []);
 
   if (!isOpen) return null;
 
@@ -342,7 +339,7 @@ export function KeyframePanel() {
                   locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
                   onAddKeyframe={handleAddKeyframe}
-                  onAnnounce={handleKeyframeDragAnnounce}
+                  onAnnounce={setKeyframeDragMessage}
                 />
               ))}
             </div>
@@ -369,7 +366,7 @@ export function KeyframePanel() {
                       locked={trackLocked}
                       onKeyframeMoved={handleKeyframeMoved}
                       onAddKeyframe={handleAddKeyframe}
-                      onAnnounce={handleKeyframeDragAnnounce}
+                      onAnnounce={setKeyframeDragMessage}
                     />
                   ))}
                 </div>
@@ -384,7 +381,7 @@ export function KeyframePanel() {
             {/* Always rendered, never conditional: a live region has to exist
                 before its content changes for a screen reader to announce the
                 change. Shared by every property row's diamond drag — see
-                handleKeyframeDragAnnounce above. */}
+                keyframeDragMessage above. */}
             <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
               {keyframeDragMessage}
             </span>

@@ -134,20 +134,36 @@ describe('clampToLegalTime', () => {
     expect(clampToLegalTime(0.0007, 0, covering, 0, 0.0015)).toBeNull()
   })
 
+  // The whole point of the module, swept rather than sampled: every landing it
+  // hands back is inside the clip and clear of every occupied time by at least
+  // one epsilon, from four different approach directions. Collected and
+  // asserted once rather than per step: 5,001 pointer positions x 4 previous
+  // positions is 20,004 clamps, and an `expect` per occupied time inside the
+  // loop timed out at 5 s under a parallel run.
   it('keeps every landing at least one epsilon from every occupied time', () => {
     const occupied = [0, 1, 1.0015, 5, 10]
     const built = occupiedWindows(occupied)
-    for (let time = 0; time <= 10; time += 0.0004) {
+    const violations: { time: number; previous: number; landing: number }[] = []
+    let landings = 0
+
+    for (let step = 0; step <= 5000; step += 1) {
+      const time = (step / 5000) * 10
       for (const previous of [0, 1.0005, 5, 10]) {
         const landing = clampToLegalTime(time, previous, built, 0, 10)
         if (landing === null) continue
-        expect(landing).toBeGreaterThanOrEqual(0)
-        expect(landing).toBeLessThanOrEqual(10)
-        for (const t of occupied) {
-          expect(Math.abs(landing - t)).toBeGreaterThanOrEqual(KEYFRAME_TIME_EPSILON)
-        }
+        landings += 1
+        const illegal =
+          landing < 0 ||
+          landing > 10 ||
+          occupied.some((t) => Math.abs(landing - t) < KEYFRAME_TIME_EPSILON)
+        if (illegal) violations.push({ time, previous, landing })
       }
     }
+
+    expect(violations).toEqual([])
+    // …and it did hand back landings, rather than refusing everything and
+    // passing the sweep by doing nothing.
+    expect(landings).toBeGreaterThan(20000)
   })
 
   it('reads an empty window list as "every time is legal"', () => {

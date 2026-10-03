@@ -31,38 +31,43 @@
 // neighbour, or onto the playhead where one sits, silently destroyed it.
 // Occupied times are excluded from the snap candidates (the playhead stays a
 // target unless a keyframe already sits on it), and `handleMouseMove` now
-// clamps `newTime` *before* the snap check runs — approaching from the left
-// stops at `occupied - EPSILON`, from the right at `occupied + EPSILON` —
-// rather than letting the diamond follow the pointer into the forbidden zone
-// and refusing the drop on release, the shape ESCSUITE-88 ruled against for
-// a locked track's own drag. The playhead snap still runs after the clamp,
-// so it can still pull the (already-clamped) point the rest of the way onto
-// the playhead when that is within the snap threshold. `handleMouseUp`'s own
-// occupied check is kept as a backstop rather than deleted — it is the same
-// test `nudgeTime` makes for the keyboard's different entry point, and this
-// hook's own tests show it is no longer reachable by a mouse drag now that
-// the clamp runs on every move first. The occupied-times list itself is
-// computed once, on `startDrag`, into `occupiedTimesRef` (review round 1,
-// MINOR 2) rather than on every pointer move: the keyframe array cannot
-// change mid-drag (nothing writes to the store between mousedown and
-// mouseup), so recomputing — and reallocating — it per move bought nothing.
+// clamps `newTime` *before* the snap check runs, through
+// `utils/keyframeClamp.ts` — the same two functions the graph's own point drag
+// calls, so the numeric decision cannot be right in one drag and wrong in the
+// other (review of ESCSUITE-183, finding 3). The point stops at the edge of
+// the forbidden window on the side the pointer approached from, rather than
+// following the pointer into the zone and having the drop refused on release:
+// the shape ESCSUITE-88 ruled against for a locked track's own drag. A move
+// the clamp cannot place at all — a cluster whose merged window covers the
+// whole clip — is ignored, the diamond staying where it is, so there is no
+// landing left for a release-time check to refuse and the old one was
+// deleted rather than kept unreachable. The playhead snap still runs after
+// the clamp, and only onto a playhead the same windows say is legal, so it
+// cannot undo the clamp's work. The occupied windows themselves are built
+// once, on `startDrag`, into `occupiedWindowsRef` (review round 1, MINOR 2)
+// rather than on every pointer move: the keyframe array cannot change
+// mid-drag (nothing writes to the store between mousedown and mouseup), so
+// recomputing — and reallocating — them per move bought nothing, and
+// `clampToLegalTime` itself allocates nothing at all.
 //
-// **The refusal's text is forwarded, not displayed** (review round 1, MAJOR 1
-// + MINOR 6). This hook has no live region of its own: it reports the raw
-// message to the `onAnnounce` callback it is handed, and clears it (`''`) the
-// moment a drop actually lands, so a stale refusal from an earlier attempt in
-// the same row does not linger once the user succeeds. `KeyframePanel` is the
-// one that owns the displayed state and the alternation that makes a second,
-// textually identical refusal audible — `announceWithMark`, shared with
-// `useKeyframeGraphKeyboard.ts`'s own `announce` rather than a third
-// hand-rolled copy of the same mechanism. The text itself still comes from
-// `occupiedTimeMessage`, so the two refusals — this drag's and the graph
-// keyboard's `nudgeTime` — read identically wherever the user meets them.
+// **What it reports is forwarded, not displayed** (review round 1, MAJOR 1
+// + MINOR 6). This hook has no live region of its own: it reports to the
+// `onAnnounce` callback it is handed, and since ESCSUITE-183 the only thing it
+// has to say is `''` — nothing — the moment a drop lands, because a mouse drag
+// can no longer produce a refusal to announce. `KeyframePanel` owns the one
+// `role="status"` every property row's drag shares (only one diamond on one
+// row can ever be dragging at a time), and the occupied-time refusal itself is
+// now the keyboard's alone: `nudgeTime` has no pointer position to clamp, so
+// it still refuses and still says so.
 import { useState, useCallback, useRef } from 'react';
 import type { Keyframe, AnimatableProperty } from '../../../store/types';
 import { KEYFRAME_TIME_EPSILON } from '../../../utils/animation';
+import {
+  clampToLegalTime,
+  occupiedWindows,
+  type OccupiedWindow,
+} from '../../../utils/keyframeClamp';
 import { useWindowListener } from '../../../hooks/useDocumentListener';
-import { occupiedTimeMessage } from './useKeyframeGraphKeyboard';
 
 interface DragState {
   isDragging: boolean;
@@ -73,20 +78,6 @@ interface DragState {
 }
 
 const SNAP_THRESHOLD_PX = 5;
-
-/**
- * A hair past `KEYFRAME_TIME_EPSILON` itself, so the clamped landing clears
- * the backstop's own `< KEYFRAME_TIME_EPSILON` check with room to spare.
- * `occupiedTime ± KEYFRAME_TIME_EPSILON` lands exactly on the window's edge
- * in exact arithmetic, but floating point does not always agree — e.g.
- * `Math.abs(3 - (3 + 0.001))` comes back `0.0009999999999998899`, which IS
- * `< 0.001`, so the exact boundary occasionally reads as still-occupied and
- * the backstop (correctly, on its own terms) refuses a landing the clamp
- * meant to allow. Nine orders of magnitude below the epsilon it rides on, so
- * it never changes which times are "near" one another, including in the
- * handful of tests that pin an exact clamped value with `toBeCloseTo`.
- */
-const CLAMP_MARGIN = 1e-9;
 
 const IDLE_DRAG_STATE: DragState = {
   isDragging: false,
@@ -102,17 +93,21 @@ export function useKeyframeDrag(
   allKeyframeTimes: number[],
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void,
   /**
-   * Told the raw refusal text (`occupiedTimeMessage`'s own string, no mark),
-   * or `''` once a drop lands — see the file header. The caller (ultimately
-   * `KeyframePanel`) owns the live region and the re-read alternation.
+   * Told `''` — "nothing to report" — once a drop lands. Since ESCSUITE-183 a
+   * mouse drag has nothing else it can say: the clamp makes every landing a
+   * legal one, so the refusal this used to carry is gone. The caller
+   * (ultimately `KeyframePanel`) owns the live region it writes into.
    */
   onAnnounce: (text: string) => void
 ) {
   const [dragState, setDragState] = useState<DragState>(IDLE_DRAG_STATE);
   /** The live gesture, written synchronously so the handlers never read a frame-old value. */
   const dragRef = useRef<DragState>(dragState);
-  /** Every occupied time but the one being dragged, snapshotted once per gesture. */
-  const occupiedTimesRef = useRef<number[]>([]);
+  /**
+   * The forbidden windows around every occupied time but the one being
+   * dragged, built once per gesture (see the file header).
+   */
+  const occupiedWindowsRef = useRef<readonly OccupiedWindow[]>([]);
 
   const trackRef = useRef<HTMLDivElement | null>(null);
 
@@ -132,8 +127,8 @@ export function useKeyframeDrag(
       currentTime: keyframe.time,
     };
     dragRef.current = next;
-    occupiedTimesRef.current = allKeyframeTimes.filter(
-      t => Math.abs(t - keyframe.time) >= KEYFRAME_TIME_EPSILON
+    occupiedWindowsRef.current = occupiedWindows(
+      allKeyframeTimes.filter(t => Math.abs(t - keyframe.time) >= KEYFRAME_TIME_EPSILON)
     );
     setDragState(next);
   }, [allKeyframeTimes]);
@@ -146,18 +141,22 @@ export function useKeyframeDrag(
   const findSnapTime = (time: number, trackWidth: number): number | null => {
     const pixelThreshold = SNAP_THRESHOLD_PX;
     const timeThreshold = (pixelThreshold / trackWidth) * clipDuration;
-    const occupied = occupiedTimesRef.current;
 
-    // Snap to the playhead, unless a keyframe already sits there: that would
-    // be indistinguishable from snapping onto the keyframe itself.
-    const playheadOccupied = occupied.some(t => Math.abs(t - playheadTime) < KEYFRAME_TIME_EPSILON);
-    if (!playheadOccupied && Math.abs(time - playheadTime) < timeThreshold) {
+    // Snap to the playhead, unless it sits inside a forbidden window: snapping
+    // there would be indistinguishable from snapping onto the keyframe that
+    // makes it forbidden, and would undo the clamp that just ran. Asked of the
+    // same windows the clamp uses rather than of a second, differently-worded
+    // test of the same thing — a time the clamp leaves alone is a legal one.
+    const playheadIsLegal =
+      clampToLegalTime(playheadTime, playheadTime, occupiedWindowsRef.current, 0, clipDuration)
+        === playheadTime;
+    if (playheadIsLegal && Math.abs(time - playheadTime) < timeThreshold) {
       return playheadTime;
     }
 
     // Other keyframes are deliberately not snap targets (ESCSUITE-167 / M6):
-    // snapping onto one is exactly the destructive case `handleMouseUp` below
-    // refuses outright.
+    // snapping onto one is exactly the destructive case the clamp above exists
+    // to make unreachable.
 
     return null;
   };
@@ -169,20 +168,21 @@ export function useKeyframeDrag(
 
     const rect = track.getBoundingClientRect();
     const relativeX = e.clientX - rect.left;
-    let newTime = pixelsToTime(relativeX, rect.width);
+    const pointerTime = pixelsToTime(relativeX, rect.width);
 
-    // Clamp away from every neighbour's epsilon window before the snap check
-    // runs (ESCSUITE-183): one pass over the once-per-gesture occupied list,
-    // no allocation. Re-clamped to the clip bounds afterwards — a neighbour
-    // sitting right at an edge could otherwise push the point just past it.
-    for (const occupiedTime of occupiedTimesRef.current) {
-      if (Math.abs(newTime - occupiedTime) < KEYFRAME_TIME_EPSILON) {
-        newTime = newTime < occupiedTime
-          ? occupiedTime - KEYFRAME_TIME_EPSILON - CLAMP_MARGIN
-          : occupiedTime + KEYFRAME_TIME_EPSILON + CLAMP_MARGIN;
-      }
-    }
-    newTime = Math.max(0, Math.min(newTime, clipDuration));
+    // Where the pointer is allowed to put the diamond (ESCSUITE-183), decided
+    // against the once-per-gesture windows and the clip's own bounds together,
+    // with the gesture's previous position saying which way it is travelling.
+    // `null` means this clip has no legal time at all: ignore the move rather
+    // than show the point somewhere it cannot be dropped.
+    let newTime = clampToLegalTime(
+      pointerTime,
+      drag.currentTime,
+      occupiedWindowsRef.current,
+      0,
+      clipDuration
+    );
+    if (newTime === null) return;
 
     const snapTime = findSnapTime(newTime, rect.width);
     if (snapTime !== null) {
@@ -196,26 +196,19 @@ export function useKeyframeDrag(
 
   const handleMouseUp = () => {
     const drag = dragRef.current;
-    if (drag.property) {
-      const occupied = occupiedTimesRef.current;
-      const landsOnOccupied = occupied.some(t => Math.abs(t - drag.currentTime) < KEYFRAME_TIME_EPSILON);
-
-      if (landsOnOccupied) {
-        // Backstop, not the common case (ESCSUITE-183): `handleMouseMove`'s
-        // clamp keeps `currentTime` out of every occupied window on every
-        // move, so a mouse drag should never actually reach here — this
-        // hook's own tests confirm it. Kept anyway as the same rule the
-        // keyboard's `nudgeTime` enforces for its own, different entry point
-        // (a key repeat can still ask for an occupied time directly, with no
-        // pointer position to clamp). The keyframe stays where it was,
-        // nothing is pushed to the undo stack, and the live region says why.
-        onAnnounce(occupiedTimeMessage(drag.property, drag.currentTime));
-      } else if (drag.currentTime !== drag.originalTime) {
-        onKeyframeMoved(drag.property, drag.originalTime, drag.currentTime);
-        // A landed move clears whatever refusal an earlier attempt in this
-        // gesture's row left behind.
-        onAnnounce('');
-      }
+    // No occupied check here (ESCSUITE-183): `handleMouseMove`'s clamp only
+    // ever writes a legal time, and ignores the move outright when there is
+    // none, so `currentTime` cannot be inside a forbidden window by the time
+    // the mouse comes up. The release-time refusal this used to carry had no
+    // reachable caller left and was deleted rather than kept and tested
+    // through a path nothing can take; the occupied-time refusal lives on in
+    // `useKeyframeGraphKeyboard.ts`'s `nudgeTime`, whose entry point has no
+    // pointer position to clamp.
+    if (drag.property && drag.currentTime !== drag.originalTime) {
+      onKeyframeMoved(drag.property, drag.originalTime, drag.currentTime);
+      // A landed drop has nothing to report — since ESCSUITE-183 that is the
+      // only thing this hook reports.
+      onAnnounce('');
     }
 
     dragRef.current = IDLE_DRAG_STATE;
