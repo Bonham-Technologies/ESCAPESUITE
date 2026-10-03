@@ -42,13 +42,14 @@ export const editorUrl = (params?: Record<string, string>): string => {
 // The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json;
 // self-hosted builds must set their own.
 //
-// The value need not be a bare origin: anything `new URL(v)` can parse is
-// accepted and normalised down to its `.origin` (ESCSUITE-176) — a trailing
-// slash or a path included, since a host is as likely to build this from
-// `location.href` or a routed URL as to type a bare origin by hand. Only a
-// value `new URL()` cannot parse at all is ignored, with one warning per page
-// load so a misconfigured host is noticed but a repeated call cannot flood
-// the console.
+// The value need not be a bare origin: any http:/https: value `new URL(v)`
+// can parse is accepted and normalised down to its `.origin` (ESCSUITE-176) —
+// a trailing slash or a path included, since a host is as likely to build
+// this from `location.href` or a routed URL as to type a bare origin by
+// hand. Only a value `new URL()` cannot parse at all, one with an opaque
+// origin, or one on any scheme other than `http:`/`https:`, is ignored, with
+// one warning per page load so a misconfigured host is noticed but a
+// repeated call cannot flood the console.
 let hostOriginWarned = false
 
 export const parseHostOrigin = (
