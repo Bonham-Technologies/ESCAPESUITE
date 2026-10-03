@@ -659,14 +659,30 @@ export function useRecordingController({
             webcamEnabled,
             overlayPlacement,
             hasVideoSource,
-          }).then(() => {
-            setState('idle');
           }).catch((err) => {
             // The save hook rejects rather than swallowing: without this the
             // take would land back at 'idle' looking exactly like one that
-            // had been stored.
+            // had been stored. Said whatever the app is doing by now — the
+            // user's recording really is not in the library, and that is worth
+            // telling them even if they have moved on to another take. Only
+            // the *state* write below belongs to one take alone.
             console.error('Failed to save recording:', err);
             setNotice(SAVE_FAILED);
+          }).then(() => {
+            // The completion carries the identity of the take it saved
+            // (ESCSUITE-174), the same `me` the five callbacks above carry.
+            // A save is a container repair, a metadata probe, a thumbnail
+            // decode and two IndexedDB writes — seconds on a multi-MB take —
+            // and this write used to land in whatever the store held whenever
+            // it settled. Anything that took the app out of 'saving' in that
+            // window left Record live, and this 'idle' then landed on the take
+            // started after it: recording, with the store saying idle, so no
+            // Stop and no Cancel, and a Record click that would reassign
+            // `recorderRef.current` over a recorder nobody could dispose. Once
+            // the ref has moved on — a newer take's recorder, or null after a
+            // cancel or the unmount teardown — this take is not the app's any
+            // more, and whatever moved it has already set the state it wanted.
+            if (recorderRef.current !== me) return;
             setState('idle');
           }).finally(() => {
             // Either way the library has changed size — re-read the headroom

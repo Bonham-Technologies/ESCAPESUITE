@@ -74,7 +74,18 @@ export function useKeyboardShortcuts({
         case 'escape':
           if (state === 'countdown') {
             cancelCountdown();
-          } else if (state !== 'idle') {
+          } else if (state !== 'idle' && state !== 'saving') {
+            // 'saving' is excluded for the same reason as 'idle': there is
+            // nothing left to cancel (ESCSUITE-174). The take has already
+            // stopped and only the write to storage remains, and the save does
+            // not read `cancelledRef` — so a cancel here could not call the
+            // write off, it could only put the app back to 'idle' behind it:
+            // the sidebar unlocked mid-write, and Record live again, with the
+            // finished save's own 'idle' then landing on whatever take was
+            // started in the meantime. Same posture the Record button takes in
+            // 'preparing'/'saving' (ESCSUITE-106). 'preparing' stays
+            // cancellable: there, the capture request is still outstanding and
+            // the attempt token makes the cancel stick (ESCSUITE-93/109).
             handleCancelRecording();
           }
           break;
