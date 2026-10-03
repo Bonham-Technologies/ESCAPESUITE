@@ -330,6 +330,14 @@ themes** (`?theme=dark` / `?theme=light`, the shared theme module's own URL over
 counterpart in the light block. Add a colour to one palette and you are made to add it to the
 other.
 
+A second contrast failure (ESCSUITE-177) surfaced the same way, in Firefox only: the light
+theme's `--text-muted` — an unavailable source row's label and the "no system audio" meter
+label — was 3.74:1 on `--bg-secondary`, under AA. Chromium's run of the same test never
+happened to mark the row that colour applies to as unavailable, so only a cross-browser sweep
+caught it; the fix (`#606d80`, 4.90:1) and a numeric pin in `src/themeTokens.test.ts` are the
+same shape as `--error-text`'s. The lesson generalises: a palette token can fail AA in one
+theme only, and a single-theme or single-browser axe run can miss it either way.
+
 `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` proves the round trip in a real
 browser: open Help from the keyboard, Tab six times without leaving it, Escape, focus back on
 the Help button.
