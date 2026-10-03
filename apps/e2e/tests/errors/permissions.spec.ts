@@ -7,7 +7,7 @@ import {
   mockDeviceNotFound,
   mockDeviceInUse,
 } from '../../utils/error-mocks'
-import { mockMediaDevices } from '../../utils/media-mocks'
+import { mockMediaDevices, mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Camera Permission Denied', () => {
@@ -76,37 +76,75 @@ test.describe('Camera Permission Denied', () => {
 
 test.describe('Microphone Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
-    await mockMediaDevices(page)
+    // `mockSyntheticMedia` gives Screen a real, working `getDisplayMedia` (and
+    // installs the device list itself, same as `mockMediaDevices` — ESCSUITE-177).
+    // The plain device-list mock alone lets the source toggles light up but
+    // leaves Screen capture pointed at the browser's own `getDisplayMedia`,
+    // which headless Chromium has nothing to pick a source from and never
+    // settles. `mockMicrophonePermissionDenied` layers on top of that and
+    // only touches `getUserMedia`'s audio branch, so Screen is unaffected.
+    await mockSyntheticMedia(page)
     await mockMicrophonePermissionDenied(page)
+    await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
-  // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
-  // Nothing is shown when a microphone cannot be opened. The microphone is on
-  // by default, so this click switches it off — the default-on case the issue
-  // calls out. This test matched no buttons until the source toggles gained
-  // accessible names, so it had never actually run.
-  test.fixme('shows error UI when microphone denied', async ({ page }) => {
-    const micToggle = page
-      .getByRole('button', { name: /mic|audio|microphone/i })
-      .or(page.locator('[data-testid="mic-toggle"]'))
-      .first()
+  // FIXME(ux): needs denied-device feedback for the toggle-time gap — tracked
+  // in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289. Nothing
+  // is shown when the microphone is switched ON before a take: the toggle is
+  // a pure config flip (`App.tsx`'s `toggleSource`) with no probe of its own,
+  // so a refused prompt is only discovered at Start. A take STARTED with a
+  // closed microphone is no longer this gap — ESCSUITE-184 gave that path the
+  // notice the real case below proves.
+  test.fixme('shows error UI when the microphone is toggled on with a refused prompt', async ({ page }) => {
+    const micToggle = page.getByRole('button', { name: 'Microphone' })
+    await expect(micToggle).toBeEnabled()
 
-    const isVisible = await micToggle.isVisible().catch(() => false)
+    // Default-on, so this turns it off, then on again — the toggle the gap
+    // is about.
+    await micToggle.click()
+    await micToggle.click()
+    await page.waitForTimeout(500)
 
-    if (isVisible) {
-      await micToggle.click()
-      await page.waitForTimeout(500)
+    await expect(page.getByText(/denied|permission|blocked/i).first()).toBeVisible()
+  })
 
-      // Should indicate error or disabled state
-      const isDisabled = await micToggle.isDisabled().catch(() => false)
-      const ariaDisabled = await micToggle.getAttribute('aria-disabled')
-      const errorMessage = page.getByText(/denied|permission|blocked/i).first()
-      const errorVisible = await errorMessage.isVisible().catch(() => false)
+  // ESCSUITE-184, proved in a real browser (ESCSUITE-187). Screen and
+  // Microphone are both on by default (`recorderStore`'s initial config), so
+  // starting a take exercises the mic's refusal without touching any toggle.
+  test('shows the microphone-unavailable notice and still records when the mic is refused', async ({
+    page,
+    browserName,
+  }) => {
+    // ESCSUITE-177: same WebKit Blob-in-IndexedDB gap as the other real
+    // recording specs — this test needs the take saved at the end.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+    test.setTimeout(120_000)
 
-      expect(errorVisible || isDisabled || ariaDisabled === 'true').toBe(true)
-    }
+    // Capability detection is async; Start acquires no stream if clicked
+    // before it finishes.
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+
+    await expect(
+      page.getByText('The microphone could not be opened — recording without it.')
+    ).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible()
+
+    await page.waitForTimeout(2000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+    await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toBeVisible({
+      timeout: 30_000,
+    })
   })
 
   test('screen recording still works without mic', async ({ page }) => {
