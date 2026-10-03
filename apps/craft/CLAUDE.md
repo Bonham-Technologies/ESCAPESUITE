@@ -99,7 +99,7 @@ selector contract above.
 | `App.tsx` | The composition: the per-field store selectors, `recorderTypeRef` / `capturedThumbnailRef`, `showHelpModal`, `isRecordingActive`, `sidebarLocked` (`isRecordingActive \|\| state === 'preparing' \|\| state === 'saving'` — wider than `isRecordingActive`, which also arms the transport bar's stop/cancel button, ESCSUITE-106, so neither `'preparing'` nor `'saving'` may make that button claim it can stop or cancel a take that has no recorder yet or has already finished; ESCSUITE-104). `'preparing'` is in `sidebarLocked` because `CapturedTake` is captured after `acquireStreams()` resolves, still mid-`'preparing'` — a toggle flipped before that snapshot would look live for a take it will never describe. `SourceTogglesPanel` also gets `showMeters={isRecordingActive}`, narrower than `sidebarLocked`: the audio meters draw live levels the store never resets between takes, so gating them on the wider lock would leave them on screen, frozen, for the whole time a finished take is saving. `toggleSource`, `modalOpen` (`showHelpModal \|\| playbackUrl !== null`), the hook calls in their fixed order, and the header/sidebar/content/dialog JSX |
 | `utils/recordingFormat.ts` | `formatDuration` (`MM:SS`, floor-truncated) and `safeFileName` — pure string formatting shared by the duration labels, the library rows and the download handler |
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
-| `utils/notices.ts` | The app's whole vocabulary of notices — fifteen strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
+| `utils/notices.ts` | The app's whole vocabulary of notices — sixteen strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
 | `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace` + `hasSeparateTracksSpace` (ESCSUITE-176: asked only when the config would actually run the mode — both sources on and the toggle on — reusing `SEPARATE_TRACKS_NO_SPACE_REASON` from `separateTracksReadiness.ts` rather than a reason of its own). Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
 | `utils/separateTracksReadiness.ts` | `separateTracksBlockedReason` — whether "Record webcam as a separate track" may be switched on, and the sentence the toggle says when it may not. Pure, over two booleans: what the browser can do (`canRecordSeparateTracks()`) and whether there is room for two tracks (`hasSeparateTracksSpace`). The browser's answer wins when both are false, because nobody can act on "not enough storage" in Safari. Owns both reasons, beside their gate for the same reason `NO_STORAGE_SPACE` is |
@@ -138,7 +138,8 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`,
 `CAPTURE_UNANSWERED`, `START_FAILED`, `LIBRARY_UNREADABLE`, `DETECTION_FAILED`,
-`NO_SYSTEM_AUDIO`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`, `UPLOAD_NO_HOST_ORIGIN`,
+`NO_SYSTEM_AUDIO`, `MIC_UNAVAILABLE`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
+`UPLOAD_NO_HOST_ORIGIN`,
 `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED`,
 `RECORDING_UNAVAILABLE` and
 `mp4ConversionFailed()` —
@@ -192,6 +193,15 @@ Two related rules follow from it:
   still describes the take just finished until the *next* one starts. `useRecordingSave`
   reads it there (ESCSUITE-62) so a take whose tick box was cleared is stored as having no
   audio, rather than as a silent recording with an M4A button.
+- **`MIC_UNAVAILABLE`** is the third: the microphone the take asked for could not be opened and the
+  take went ahead anyway (ESCSUITE-184 — see "A microphone that cannot be opened does not cost
+  the take" under "Recorder lifecycle"). One sentence for every way the request failed, because there is one
+  channel and the fact the user can act on is the same — the recording now being made has no
+  microphone in it; the console carries which error it was. It is raised **after**
+  `NO_SYSTEM_AUDIO` in `handleStartRecording`, so it wins the single channel when both are true:
+  the system-audio line is a nudge about a tick box the user can tick next time and the greyed
+  System meter carries its own weaker wording for the rest of the take, while this names a source
+  that is simply gone.
 
 **`RECORDING_UNAVAILABLE`** covers three more paths through the same channel, on any row —
 companion or primary. `useRecordingLibrary`'s `handlePlayRecording` and `handleDownload` each
@@ -465,6 +475,20 @@ Reusable video player with full playback controls:
   `window`; the shared `useDialogBehaviour` binds Escape and Tab on `document` in the capture
   phase, so while the playback dialog is open the dialog's Escape runs first and the player's
   does not
+- **Space belongs to the focused control, not the player** (ESCSUITE-185). Space is how the
+  platform presses whatever has focus, and the listener used to `preventDefault()` it for
+  everything that was not an `<input>` or a `<textarea>` — so Space on the playback dialog's
+  close button, which is *where focus starts* (`useDialogBehaviour`), toggled playback instead of
+  closing the dialog. `preventDefault()` is the mechanism: it is what suppresses the click the
+  browser synthesises on keyup. So a Space keydown is left alone when its target is something
+  Space operates — `button`, `[role="button"]`, `a[href]`, `select`, or anything
+  `isContentEditable` (one selector string plus the editable check, so it carries one branch
+  rather than five) — and stays the player's own play/pause everywhere else: the dialog body, the
+  video, the progress bar, and a keydown whose target is not an element at all. `input` and
+  `textarea` are not in the selector: the older typing guard in front of it already returns for
+  those on *every* key, so they can never reach this check. **Only Space is gated this way**: K,
+  the arrows and M have no competing meaning on a button, so they stay the player's wherever
+  focus sits
 - **The progress-bar drag's two `document` listeners are removed on unmount, not only on their
   own mouseup** (ESCSUITE-176): a parent-driven close, a `?loadVideo` navigation or HMR can all
   skip the mouseup that used to be the only thing that removed them, leaving both listeners live
@@ -914,14 +938,68 @@ on to, and the `refreshStorageSpace()` in the `finally`, because the write happe
 save settles, seconds later — and every path that *does* move it off `me` has already written a
 state (both cancels, the unmount teardown, the recorder's own `onError`, the start path's catch).
 **A stop that disposed the recorder would have to write `'idle'` itself**, or this guard would
-strand every ordinary save in `'saving'`. That matters because `'saving'` now has **no
-user-reachable exit at all** — the Record button is disabled there, the Cancel button is not
-rendered, and Escape is inert — so the save promise settling is the only way out, and unlike the
-capture request (`CAPTURE_TIMEOUT_MS`, ESCSUITE-109/116) the save path has no deadline of its own
-yet: `extractVideoMetadata` carries its own timeout, but `generateThumbnail` has an `onerror` and
-none, so a `<video>` that neither loads nor errors would park the save, and now the app, for the
-life of the tab. Narrow, and tracked as **ESCSUITE-180** ("the save gets a deadline, the way the
-capture request has one").
+strand every ordinary save in `'saving'`. That matters because `'saving'` has **no user-reachable
+exit at all** — the Record button is disabled there, the Cancel button is not rendered, and
+Escape is inert — so the save promise settling is the only way out, and **the one thing on that
+path that could never settle now has a deadline** (ESCSUITE-180).
+
+`core/thumbnailGenerator.ts`'s `generateThumbnail` had an `onerror` and no clock, so a `<video>`
+that neither loads nor errors — a container Chromium's demuxer will not commit to, a decoder that
+never reports — parked the save, and with it the app, for the life of the tab. Both probes on the
+save path now race **`THUMBNAIL_TIMEOUT_MS`** (5 s, exported from that module): the number
+`extractVideoMetadata` has waited since it was written, named so `generateThumbnail` shares it
+rather than carrying a second one. Same shape as `CAPTURE_TIMEOUT_MS` (ESCSUITE-109/116) and for
+the same reason — nothing here can be aborted, so a clock is the only way out — but far shorter,
+because nothing is waiting on a *person*: a decode either starts within a second or two or it is
+not going to. On expiry the probe rejects through the same cleanup its `onerror` arm uses (object
+URL revoked, element back to NETWORK_EMPTY, and the frame request `onloadeddata` queued cancelled,
+so an abandoned probe cannot be followed by a `captureFrame()` that draws a frame for it — a
+`toBlob` callback already in flight when the deadline fires instead finds the promise settled and
+its own cleanup a harmless no-op), and the caller lands on the **placeholder** — the arm
+ESCSUITE-107 already built for a thumbnail that cannot be had. So a save never waits for a frame
+that is not coming: it finishes with the placeholder tile and returns to `'idle'`.
+
+**Deliberately not a deadline on the whole save.** The two IndexedDB writes that follow have no
+safe abandon point — giving up partway through `storeVideo` would leave a take half in the library,
+which is exactly the failure ESCSUITE-107 was about — so the deadline stops at the last thing on
+that path that can be dropped harmlessly.
+
+**A microphone that cannot be opened does not cost the take** (ESCSUITE-184). `acquireStreams`
+(`hooks/useMediaStreams.ts`) asks for the three sources in order — screen, webcam, microphone —
+and used to release everything it held and rethrow on *any* failure, so a user who had already
+picked the window they wanted to share lost it the moment `requestMicrophone()` rejected, with
+`CAPTURE_REFUSED`/`START_FAILED` and nothing recorded. The microphone's request now sits in its
+own try/catch, and the catch cannot tell *why* it failed — the prompt was refused, the device is
+already in use by another app, it was unplugged between the capability check and the request —
+so it treats every rejection the same way: the screen and webcam captures are kept, the take
+proceeds without sound, and the result carries `micUnavailable: true` so the controller can raise
+`MIC_UNAVAILABLE` through the one notice channel.
+
+The reasoning for why this is the *only* optional source: a take with no sound is a take — the
+ESCSUITE-14 companion shape with the mic part simply absent, which every consumer already reads,
+because a machine with no microphone has produced exactly that since ESCSUITE-70. A refused
+**screen** capture still fails the take (there is nothing to record), and so does a refused
+**webcam** in a PiP take, because the overlay is what the user explicitly asked for. The one
+exception to the exception: a **microphone-only** take whose microphone could not be opened has
+nothing left either, so `!screen && !webcam` rethrows and that take fails exactly as it did
+before.
+
+Three details follow from the shape:
+
+- **`AcquisitionResult` is a wider type than `AcquiredStreams`**, which is what `onPartial`
+  still reports. The deadline release (ESCSUITE-116) reads the latest `onPartial` report and has
+  no use for `micUnavailable`, so the reporter's shape is unchanged — and the microphone stage is
+  still reported whether or not it produced a stream, because a screen capture that landed before
+  an unavailable microphone must be in the report the expiry releases.
+- **The controller cannot work this out for itself.** `mic: null` with the toggle on is *also*
+  what a machine with no microphone looks like, and `useRecordingController` has no
+  `capabilities` to tell the two apart — hence the flag rather than an inference.
+- **Nothing else needed changing.** `micAcquired` is already "the toggle AND a track on the
+  stream that came back" (ESCSUITE-70), so an unavailable microphone is `false` there by
+  construction: `expectedCompanions` counts no mic part, both recorders' audio wiring is guarded
+  on `micStream &&`, and the `CapturedTake` the save path is handed describes a recording with no
+  microphone — so the library's M4A gate, the MP4 conversion and the ARTIST handoff all see the
+  take as it was actually recorded.
 
 **A capture request the browser never answers gets a deadline.** `getDisplayMedia` and
 `getUserMedia` take no `AbortController`, so a picker or a permission prompt left on screen — or a
@@ -1984,9 +2062,11 @@ land on the take started after it: see "The save's completion carries the same i
 Refusing to claim an action it cannot perform is the same posture the Record button takes in
 `'preparing'`/`'saving'` (ESCSUITE-106). `'preparing'` stays cancellable: the capture request is
 still outstanding there, and the attempt token is what makes the cancel stick (ESCSUITE-93/109).
-The trade-off, named rather than hidden: `'saving'` now has no user-reachable exit at all, and the
-save path has no deadline of its own yet — see the end of "The save's completion carries the same
-identity" under "Recorder lifecycle", and ESCSUITE-180.
+The trade-off, named rather than hidden: `'saving'` has no user-reachable exit at all, so the save
+promise settling is the only way out — which is why the one thing on that path that could never
+settle, the thumbnail probe, now has a deadline of its own (`THUMBNAIL_TIMEOUT_MS`,
+ESCSUITE-180). See the end of "The save's completion carries the same identity" under "Recorder
+lifecycle".
 
 | Key | Action | Fires in |
 |-----|--------|----------|

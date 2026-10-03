@@ -1,6 +1,36 @@
 import { useRef, useState, useEffect, useCallback } from 'react';
 import styles from './VideoPlayer.module.css';
 
+/**
+ * Everything the platform activates with Space, as a selector.
+ *
+ * One string rather than a chain of checks so it carries no branch of its own.
+ * `input` and `textarea` are not in it: the typing guard in front of this
+ * check already returns for those on every key, so they can never reach it —
+ * an operand no caller can exercise, left out rather than tested.
+ */
+const SPACE_ACTIVATES = 'button, [role="button"], a[href], select';
+
+/**
+ * Whether Space belongs to whatever has focus rather than to the player
+ * (ESCSUITE-185).
+ *
+ * Space is the browser's own activation key for a focused control, and the
+ * player claimed it for play/pause everywhere except an `<input>` or a
+ * `<textarea>` — so Space on the playback dialog's close button, which is
+ * where focus starts, toggled playback instead of closing the dialog. The
+ * mechanism is `preventDefault()`: it is what suppresses the click the
+ * platform synthesises on keyup, so the fix is to leave the keydown alone
+ * when the target is something Space operates.
+ *
+ * Space stays the player's own shortcut everywhere else: the dialog body, the
+ * video, the progress bar, and a keydown whose target is not an element at all.
+ */
+function spaceBelongsToTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || target.matches(SPACE_ACTIVATES));
+}
+
 interface VideoPlayerProps {
   src: string;
   title?: string;
@@ -224,6 +254,14 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't handle if user is typing in an input
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      // Space is the only key here with a competing meaning: it is how the
+      // platform presses whatever has focus (ESCSUITE-185). K, the arrows and
+      // M mean nothing to a button, so they stay the player's wherever focus
+      // sits.
+      if (e.key === ' ' && spaceBelongsToTarget(e.target)) {
         return;
       }
 

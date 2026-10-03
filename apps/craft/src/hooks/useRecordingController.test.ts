@@ -69,16 +69,27 @@ vi.mock('../core/storage', async (importOriginal) => ({
   hasSpaceForRecording,
 }))
 
+/** The three captures one attempt can produce, as doubles. */
 interface AcquiredDoubles {
   screen: MediaStream | null
   webcam: MediaStream | null
   mic: MediaStream | null
 }
 
+/**
+ * What `acquireStreams` resolves with: the captures, plus whether the
+ * microphone request failed and the take went ahead without it
+ * (ESCSUITE-184). `onPartial` still reports the three captures alone, so the
+ * ESCSUITE-116 helpers below keep taking `AcquiredDoubles`.
+ */
+interface AcquisitionDoubles extends AcquiredDoubles {
+  micUnavailable: boolean
+}
+
 interface Harness {
   deps: RecordingControllerDeps
   /** What acquireStreams hands back — the streams the take is built from. */
-  streams: AcquiredDoubles
+  streams: AcquisitionDoubles
   acquireStreams: ReturnType<typeof vi.fn>
   stopAllStreams: ReturnType<typeof vi.fn>
   saveRecording: ReturnType<typeof vi.fn>
@@ -129,8 +140,10 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
 }
 
 /** Build the controller's inputs, with the capture side as plain doubles. */
-function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquiredDoubles>): Harness {
-  const streams: AcquiredDoubles = { screen: screenStream(), webcam: null, mic: null, ...acquired }
+function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquisitionDoubles>): Harness {
+  const streams: AcquisitionDoubles = {
+    screen: screenStream(), webcam: null, mic: null, micUnavailable: false, ...acquired,
+  }
   const acquireStreams = vi.fn(async () => streams)
   const stopAllStreams = vi.fn()
   const saveRecording = vi.fn(async () => {})
@@ -174,7 +187,7 @@ function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<A
   }
 }
 
-function mountController(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquiredDoubles>) {
+function mountController(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquisitionDoubles>) {
   resetStore(config)
   harness = makeHarness(config, acquired)
   return renderHook(() => useRecordingController(harness.deps))
@@ -316,6 +329,55 @@ describe('useRecordingController notices', () => {
     await startTake(result)
 
     expect(useRecorderStore.getState().systemAudioShared).toBe(true)
+  })
+
+  // ESCSUITE-184. `acquireStreams` no longer throws away a granted screen
+  // capture over a refused microphone, so the take starts — and the one thing
+  // the user cannot otherwise tell is whether their recording has sound in it.
+  it('says the microphone was refused, and records the take anyway', async () => {
+    const { result } = mountController(
+      { microphoneEnabled: true, countdownSeconds: 0 },
+      { mic: null, micUnavailable: true }
+    )
+
+    await startTake(result)
+
+    expect(state()).toBe('recording')
+    expect(useRecorderStore.getState().notice).toBe(
+      'The microphone could not be opened — recording without it.'
+    )
+  })
+
+  // There is exactly one notice channel, so when a take misses the share
+  // dialog's system-audio tick box *and* has its microphone refused, one of
+  // the two sentences has to win. The microphone does: the system-audio hint
+  // is a nudge about a box to tick next time, and the greyed System meter
+  // carries its own weaker wording for the rest of the take, while a refused
+  // microphone is a source the user asked for that is gone from a recording
+  // which — new since ESCSUITE-184 — went ahead regardless.
+  it('lets the microphone refusal win the channel over the system-audio hint', async () => {
+    const { result } = mountController(
+      { microphoneEnabled: true, systemAudioEnabled: true, countdownSeconds: 0 },
+      { mic: null, micUnavailable: true }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(false)
+    expect(useRecorderStore.getState().notice).toBe(
+      'The microphone could not be opened — recording without it.'
+    )
+  })
+
+  it('says nothing about the microphone when the prompt was answered', async () => {
+    const { result } = mountController(
+      { microphoneEnabled: true, countdownSeconds: 0 },
+      { mic: micStreamWithTrack() }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().notice).toBeNull()
   })
 })
 
@@ -1205,7 +1267,7 @@ describe('useRecordingController what the take captured', () => {
    */
   async function capturedAudioOf(
     config: Partial<RecordingConfig>,
-    acquired?: Partial<AcquiredDoubles>
+    acquired?: Partial<AcquisitionDoubles>
   ): Promise<CapturedTake> {
     const { result } = mountController({ countdownSeconds: 0, ...config }, acquired)
     await startTake(result)
@@ -1241,6 +1303,17 @@ describe('useRecordingController what the take captured', () => {
   it('says none for a microphone stream with no track in it', async () => {
     expect(
       await capturedAudioOf({ microphoneEnabled: true }, { mic: createStreamDouble([]) })
+    ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
+  })
+
+  // ESCSUITE-184. The prompt was refused, the screen capture was kept and the
+  // take went ahead — so the stored take must describe a recording with no
+  // microphone in it, exactly as the no-device case above does. `micAcquired`
+  // is what the library's M4A gate, the companion count and the handoff all
+  // read.
+  it('says none when the microphone prompt was refused', async () => {
+    expect(
+      await capturedAudioOf({ microphoneEnabled: true }, { mic: null, micUnavailable: true })
     ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
   })
 
@@ -1872,10 +1945,12 @@ describe('useRecordingController teardown', () => {
     // its own everything was released by the cancel that superseded it.
     describe('when a newer take is already being set up', () => {
       /** A capture of its own per request, so the store can be read back. */
-      function acquirePerAttempt(): AcquiredDoubles[] {
-        const acquired: AcquiredDoubles[] = []
+      function acquirePerAttempt(): AcquisitionDoubles[] {
+        const acquired: AcquisitionDoubles[] = []
         harness.acquireStreams.mockImplementation(async () => {
-          const streams: AcquiredDoubles = { screen: screenStream(), webcam: null, mic: null }
+          const streams: AcquisitionDoubles = {
+            screen: screenStream(), webcam: null, mic: null, micUnavailable: false,
+          }
           acquired.push(streams)
           return streams
         })
@@ -2078,13 +2153,14 @@ describe('useRecordingController teardown', () => {
          * One held-open request per call, each with captures of its own, so a
          * test can say *which* attempt's tracks were stopped.
          */
-        function queuedAcquires(): Array<{ streams: AcquiredDoubles; release: () => void }> {
-          const requests: Array<{ streams: AcquiredDoubles; release: () => void }> = []
+        function queuedAcquires(): Array<{ streams: AcquisitionDoubles; release: () => void }> {
+          const requests: Array<{ streams: AcquisitionDoubles; release: () => void }> = []
           harness.acquireStreams.mockImplementation(() => {
-            const streams: AcquiredDoubles = {
+            const streams: AcquisitionDoubles = {
               screen: screenStream(),
               webcam: webcamStream(),
               mic: micStreamWithTrack(),
+              micUnavailable: false,
             }
             let release!: () => void
             const gate = new Promise<void>(resolve => { release = resolve })

@@ -167,6 +167,31 @@ describe('PlaybackDialog keyboard and focus', () => {
     expect(document.activeElement).toBe(last)
   })
 
+  // ESCSUITE-185. Focus starts on the close button, and Space is how a
+  // keyboard user presses a focused button. The player's window listener used
+  // to `preventDefault()` it and toggle playback instead, so the one control
+  // the dialog puts focus on could not be operated with the key the platform
+  // gives it — the browser synthesises the click on keyup only if the keydown
+  // was left cancellable.
+  it('lets Space press the close button focus starts on', async () => {
+    const user = userEvent.setup()
+    const { onClose, container } = renderDialog()
+    const close = screen.getByRole('button', { name: 'Close playback' })
+    expect(document.activeElement).toBe(close)
+
+    const seen: KeyboardEvent[] = []
+    const record = (event: Event) => { seen.push(event as KeyboardEvent) }
+    window.addEventListener('keydown', record)
+    await user.keyboard(' ')
+    window.removeEventListener('keydown', record)
+
+    expect(seen).toHaveLength(1)
+    expect(seen[0].defaultPrevented).toBe(false)
+    expect(onClose).toHaveBeenCalledTimes(1)
+    // And playback is untouched: the video is still where it was.
+    expect((container.querySelector('video') as HTMLVideoElement).currentTime).toBe(0)
+  })
+
   it('leaves the player its own keys', () => {
     const playerShortcut = vi.fn()
     window.addEventListener('keydown', playerShortcut)

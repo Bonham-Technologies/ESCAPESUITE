@@ -3,8 +3,36 @@
 import { THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT, THUMBNAIL_QUALITY, THUMBNAIL_TYPE } from '../utils/previewThumbnail';
 
 /**
+ * How long either probe in this module waits for a `<video>` to say something
+ * before it gives up (ESCSUITE-180).
+ *
+ * The same shape as `CAPTURE_TIMEOUT_MS` in `useRecordingController.ts` and
+ * for the same reason — nothing here can be aborted, so a clock is the only
+ * way out — but far shorter, because nothing is waiting on a *person*: a
+ * decode either starts within a second or two or it is not going to. Both
+ * probes run on the save path, and since ESCSUITE-174 `'saving'` has no
+ * user-reachable exit at all (Record disabled, Cancel not rendered, Escape
+ * inert), so a probe that never settles parks the app for the life of the tab.
+ * `extractVideoMetadata` has waited 5 s since it was written; naming the
+ * number here is what lets `generateThumbnail` share it rather than carry a
+ * second one.
+ *
+ * It is deliberately NOT a deadline on the whole save: the two IndexedDB
+ * writes that follow have no safe abandon point — giving up partway through
+ * `storeVideo` would leave a take half in the library — so the deadline stops
+ * at the last thing on that path that can be dropped harmlessly.
+ */
+export const THUMBNAIL_TIMEOUT_MS = 5_000;
+
+/**
  * Generate a thumbnail from a video blob.
  * Captures the first available frame (WebM from MediaRecorder often can't seek).
+ *
+ * Rejects if the element has not produced a frame within
+ * `THUMBNAIL_TIMEOUT_MS`. The caller's fallback is the same one a failed
+ * decode already takes — `useRecordingSave` lands on the placeholder — so the
+ * save proceeds with no decoded frame rather than waiting for one that is not
+ * coming.
  */
 export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
   return new Promise((resolve, reject) => {
@@ -25,7 +53,24 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
     video.muted = true;
     video.preload = 'metadata';
 
+    // The frame request `onloadeddata` queues, so cleanup can call it off. A
+    // handle of 0 is never issued by `requestAnimationFrame`, and cancelling
+    // it is a no-op — so this needs no guard, and the deadline cannot be
+    // followed by a captureFrame() that draws a frame for a probe it already
+    // gave up on. A `canvas.toBlob` callback already in flight when the
+    // deadline fires is a narrower case: it still runs, finds the promise
+    // settled, and its own `cleanup()` is then a harmless no-op (revoking an
+    // already-revoked URL, `load()` on an src-less element).
+    let frameHandle = 0;
+
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('Timed out loading video for thumbnail'));
+    }, THUMBNAIL_TIMEOUT_MS);
+
     const cleanup = () => {
+      clearTimeout(timeout);
+      cancelAnimationFrame(frameHandle);
       // Detach BEFORE emptying src. Chromium answers an empty `src` with an
       // `error` event at the element, so a handler still attached here calls
       // cleanup() again, which empties src again — an error loop that never
@@ -69,7 +114,7 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
     // Use loadeddata instead of loadedmetadata for better compatibility
     video.onloadeddata = () => {
       // Give the video a moment to render the first frame
-      requestAnimationFrame(() => {
+      frameHandle = requestAnimationFrame(() => {
         captureFrame();
       });
     };
@@ -100,11 +145,13 @@ export async function extractVideoMetadata(
   };
 
   return new Promise((resolve) => {
-    // Set a timeout in case the video never loads
+    // Set a timeout in case the video never loads. The same number
+    // `generateThumbnail` now waits — one deadline for the save path's two
+    // probes (ESCSUITE-180).
     const timeout = setTimeout(() => {
       cleanup();
       resolve(defaults);
-    }, 5000);
+    }, THUMBNAIL_TIMEOUT_MS);
 
     const video = document.createElement('video');
     const blobUrl = URL.createObjectURL(videoBlob);

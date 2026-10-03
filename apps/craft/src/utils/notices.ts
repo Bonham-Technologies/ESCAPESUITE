@@ -40,6 +40,31 @@ export const NO_SYSTEM_AUDIO =
   "System audio was not shared — tick 'Share system audio' in the browser dialog."
 
 /**
+ * Said when the microphone the take asked for could not be opened — the prompt
+ * was refused, the device is in use, it was unplugged between the capability
+ * check and the request — and the take went ahead without it (ESCSUITE-184).
+ *
+ * The microphone is the one source whose refusal does not cost the take: a
+ * recording with no sound is still a recording, the ESCSUITE-14 companion
+ * shape with the mic part simply absent, and a user who has already chosen the
+ * window they wanted to share must not lose it to a prompt they said no to. A
+ * refused screen capture still fails the take — there would be nothing to
+ * record — and so does a refused webcam in a PiP take, because the overlay is
+ * what the user explicitly asked for.
+ *
+ * One sentence for every way the request failed, because there is one channel
+ * and the fact the user can act on is the same: the recording they are now
+ * making has no microphone in it. The console carries which error it was.
+ *
+ * It wins the channel over `NO_SYSTEM_AUDIO` when both are true: that one is a
+ * nudge about a tick box, and the greyed System meter carries its own weaker
+ * wording for the rest of the take, while this names a source that is gone
+ * from a take which went ahead regardless.
+ */
+export const MIC_UNAVAILABLE =
+  'The microphone could not be opened — recording without it.'
+
+/**
  * Said after a conversion that ran in a browser with no AAC encoder. The codec
  * probe says the same thing before it, under the library
  * (`MP4_NO_AUDIO_REASON` in `core/converter.ts`), so the user is told twice:
