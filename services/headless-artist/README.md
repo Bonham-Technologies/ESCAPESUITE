@@ -661,13 +661,13 @@ API moves job specs, never media.
 
 The listener sets Node's own `requestTimeout` (**30 s**) and `headersTimeout` (**10 s**), well
 short of Node's defaults (300 s and 60 s) — a job spec is a few hundred bytes and has no
-business taking that long to arrive. A client that sends its request line or headers too slowly
-is disconnected by Node itself rather than held open for minutes. **Neither one bounds the body**
-once a request has been dispatched to this server's handler, which happens as soon as the
-headers finish parsing — measured on Node 26.7, both timeouts answer only "did the request even
-reach the listener in time", not "is it still arriving". A client that sends complete headers
-and then withholds the body is, outside of a shutdown, held open with no timeout of this kit's
-or Node's own; a shutdown in progress tears such a request down immediately regardless — see
+business taking that long to arrive. **`requestTimeout` bounds the whole request, body
+included** (per Node's own docs, "receiving the entire request from the client"), not just the
+request line and headers; `headersTimeout` is the tighter window for the headers alone. Both are
+checked on a periodic sweep rather than watched continuously —
+`connectionsCheckingInterval` (**5 s** here; Node's own default is 30 s) — so the effective bound
+on a stalled request is the configured timeout plus up to one sweep period. A shutdown in
+progress tears such a request down immediately instead of waiting for the next sweep — see
 [Shutdown](#shutdown).
 
 | Status | When | Body |
@@ -678,7 +678,7 @@ or Node's own; a shutdown in progress tears such a request down immediately rega
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
 | `408` | The request's body had not finished arriving when a shutdown began. Nothing was queued. | `{"error": "request body did not finish arriving before shutdown"}` |
-| `408` | Independently of shutdown: the request line or headers took longer than `requestTimeout`/`headersTimeout` to arrive — before this server's handler ever saw it. This is **Node's own** answer, written raw to the socket rather than through this server's JSON responses. | None at all — exactly `HTTP/1.1 408 Request Timeout` plus `Connection: close`, no body. |
+| `408` | Independently of shutdown: the request line, the headers, **or the body** took longer than `requestTimeout`/`headersTimeout` to arrive, caught on the next `connectionsCheckingInterval` sweep. This is **Node's own** answer, written raw to the socket rather than through this server's JSON responses. | None at all — exactly `HTTP/1.1 408 Request Timeout` plus `Connection: close`, no body. |
 | `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
 | `415` | `content-type` was not `application/json`. | `{"error": "…"}` |
 | `429` | The queue is full. Carries `Retry-After: 5`. Nothing was queued — resend it, or send it somewhere less busy. | `{"error": "render queue is full (64 queued)"}` |
@@ -860,13 +860,13 @@ something this ticket adds. Size `terminationGracePeriodSeconds` (or your orches
 equivalent) against the sum you can actually bound, or a `SIGKILL` will land in the middle of an
 encode or a delivery and leave the scratch directory behind.
 
-Step 2's new half is there so a client that never finishes sending cannot hold the drain open
-indefinitely — nothing used to bound that wait at all, and nothing still does outside of a
-shutdown: the server's `requestTimeout` (**30 s**) and `headersTimeout` (**10 s**) bound how long
-the request line and headers may take to arrive, well under Node's defaults of 300 s and 60 s,
-but neither one reaches a request's **body** once it has been dispatched to the handler — see
-[`POST /render`](#post-render). A client that completes its headers and then withholds the body
-is held open indefinitely until it either finishes, gives up on its own, or a shutdown begins.
+Step 2's new half is there so a client that never finishes sending cannot hold **this** drain
+open indefinitely — nothing used to bound that wait at all. The server's own `requestTimeout`
+(**30 s**) and `headersTimeout` (**10 s**) bound the request line, the headers *and* the body,
+well under Node's defaults of 300 s and 60 s, but only on a periodic sweep
+(`connectionsCheckingInterval`, **5 s** here) — see [`POST /render`](#post-render). So outside a
+shutdown a stalled request is still disconnected, just not as promptly as during one: `close()`'s
+teardown is the *immediate* bound once a shutdown begins, not the only bound there is.
 
 A **second** stop signal during the drain exits immediately with `130`, matching what
 Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you expect. It
