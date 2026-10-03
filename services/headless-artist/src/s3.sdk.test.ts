@@ -27,11 +27,31 @@ const sdk = vi.hoisted(() => {
     readonly name = 'PutObject'
     constructor(readonly input: Record<string, unknown>) {}
   }
+  /**
+   * Fully reads a stream body the way a real upload would. `deliver()` hands `Body` a
+   * `createReadStream(outputPath)` whose underlying file descriptor opens asynchronously, on
+   * a later tick, regardless of whether anything ever reads from it; a mock `send()` that
+   * records the command without draining the stream lets that open race the test's own
+   * `afterEach`, which removes the temp directory as soon as the test function returns.
+   * Losing that race surfaces as an ENOENT with nothing listening for the stream's `error`
+   * event -- an uncaught exception on an unrelated later tick, misattributed to whatever test
+   * is running when it fires (ESCSUITE-186). Duck-typed (rather than `instanceof Readable`)
+   * because this factory runs hoisted above this file's own imports.
+   */
+  async function drainBody(body: unknown): Promise<void> {
+    if (body && typeof (body as AsyncIterable<unknown>)[Symbol.asyncIterator] === 'function') {
+      for await (const chunk of body as AsyncIterable<unknown>) {
+        void chunk // consumed for the side effect only
+      }
+    }
+  }
+
   class S3Client {
     constructor(config: Record<string, unknown>) {
       state.clientConfigs.push(config)
     }
     async send(command: { name: string; input: Record<string, unknown> }): Promise<unknown> {
+      await drainBody(command.input?.Body)
       state.commands.push({ name: command.name, input: command.input })
       return command.name === 'GetObject' ? { Body: state.body } : {}
     }
@@ -65,6 +85,15 @@ async function makeTempDir(): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-artist-s3-sdk-test-'))
   cleanupPaths.push(dir)
   return dir
+}
+
+/** See the identically-named helper inside the `vi.hoisted` factory above for why this drains. */
+async function drainBody(body: unknown): Promise<void> {
+  if (body instanceof Readable) {
+    for await (const chunk of body) {
+      void chunk // consumed for the side effect only
+    }
+  }
 }
 
 function fakeManifest(overrides: Partial<VerificationManifest> = {}): VerificationManifest {
@@ -102,6 +131,10 @@ describe('s3Sink object metadata', () => {
       ContentType: 'video/mp4',
       ContentLength: 9,
     })
+    // Fully read by the time deliver() resolves (ESCSUITE-186) -- an unconsumed stream's file
+    // descriptor opens on a later tick that this test's own afterEach (which removes the temp
+    // dir) would otherwise be racing.
+    expect((video.input.Body as Readable).readableEnded).toBe(true)
     expect(manifest.input).toMatchObject({ ContentType: 'application/json' })
   })
 
@@ -114,6 +147,7 @@ describe('s3Sink object metadata', () => {
     const sent: unknown[] = []
     const sink = await s3Sink({ prefix: 'bucket/renders' }, {
       async send(command: unknown) {
+        await drainBody((command as { input: Record<string, unknown> }).input.Body)
         sent.push(command)
         return {}
       },
@@ -124,6 +158,9 @@ describe('s3Sink object metadata', () => {
     // The injected client is the whole transport: the optional dependency is never reached.
     expect(sdk.state.clientConfigs).toEqual([])
     expect(sdk.state.commands).toEqual([])
+    const [video] = sent as { input: Record<string, unknown> }[]
+    // Fully read by the time deliver() resolves (ESCSUITE-186) -- see drainBody's comment.
+    expect((video.input.Body as Readable).readableEnded).toBe(true)
   })
 
   it('sets video/webm for a webm render', async () => {
@@ -139,6 +176,8 @@ describe('s3Sink object metadata', () => {
       Key: 'job-s3.webm',
       ContentType: 'video/webm',
     })
+    // Fully read by the time deliver() resolves (ESCSUITE-186) -- see drainBody's comment.
+    expect((sdk.state.commands[0].input.Body as Readable).readableEnded).toBe(true)
   })
 })
 

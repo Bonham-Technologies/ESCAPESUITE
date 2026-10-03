@@ -103,11 +103,32 @@ interface RecordedCommand {
   input: Record<string, unknown>
 }
 
+/**
+ * Fully reads a `Readable` body the way a real upload would. `deliver()` hands `Body` a
+ * `createReadStream(outputPath)` whose underlying file descriptor is opened asynchronously,
+ * on a later tick, regardless of whether anything ever reads from it; a double that records
+ * the command without draining the stream lets that open race the test's own `afterEach`,
+ * which removes the temp directory as soon as the test function returns. Losing that race
+ * surfaces as an ENOENT with nothing listening for the stream's `error` event -- an uncaught
+ * exception on an unrelated later tick, misattributed to whatever test is running when it
+ * fires (ESCSUITE-186). Draining here forces the open-and-read to finish before `send()`
+ * resolves, so the file is never touched after the test (and its cleanup) is done with it.
+ */
+async function drain(body: unknown): Promise<void> {
+  if (body instanceof Readable) {
+    for await (const chunk of body) {
+      void chunk // consumed for the side effect only
+    }
+  }
+}
+
 function stubClient(): { commands: RecordedCommand[]; send(command: unknown): Promise<unknown> } {
   const commands: RecordedCommand[] = []
   return {
     commands,
     async send(command: unknown) {
+      const { input } = command as RecordedCommand
+      await drain(input.Body)
       commands.push(command as RecordedCommand)
       return {}
     },
@@ -137,6 +158,10 @@ describe('s3Sink deliver (injected client)', () => {
     })
     // Streamed off disk rather than buffered: a render is far too big to hold in memory.
     expect(video.input.Body).toBeInstanceOf(Readable)
+    // Fully read by the time deliver() resolves (ESCSUITE-186) -- an unconsumed stream's file
+    // descriptor opens on a later tick that this test's own afterEach (which removes the temp
+    // dir) would otherwise be racing.
+    expect((video.input.Body as Readable).readableEnded).toBe(true)
 
     expect(manifest.name).toBe('PutObject')
     expect(manifest.input).toMatchObject({
@@ -170,6 +195,7 @@ describe('s3Sink deliver (injected client)', () => {
       ContentType: 'video/webm',
       ContentLength: 4,
     })
+    expect((client.commands[0].input.Body as Readable).readableEnded).toBe(true)
     expect(client.commands[1].input).toMatchObject({ Key: 'job-1.manifest.json' })
     expect(result).toEqual({
       outputLocation: 's3://bucket/job-1.webm',
