@@ -50,7 +50,7 @@ export interface AcquiredStreams {
  * the controller has no `capabilities` to tell the two apart.
  */
 export interface AcquisitionResult extends AcquiredStreams {
-  micRefused: boolean;
+  micUnavailable: boolean;
 }
 
 export interface MediaStreams {
@@ -159,7 +159,7 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
     let screen: MediaStream | null = null;
     let webcam: MediaStream | null = null;
     let mic: MediaStream | null = null;
-    let micRefused = false;
+    let micUnavailable = false;
 
     try {
       // Get screen capture if enabled
@@ -194,7 +194,7 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
           // way it always did, with the start path's own notice.
           if (!screen && !webcam) throw error;
           console.warn('Microphone could not be opened — recording without it:', error);
-          micRefused = true;
+          micUnavailable = true;
         }
         // Reported whether or not it produced a stream: the deadline release
         // reads `onPartial`'s latest report (ESCSUITE-116), and a screen
@@ -203,7 +203,7 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
         onPartial?.({ screen, webcam, mic });
       }
 
-      return { screen, webcam, mic, micRefused };
+      return { screen, webcam, mic, micUnavailable };
     } catch (error) {
       // Clean up any acquired streams on error
       stopStream(screen);

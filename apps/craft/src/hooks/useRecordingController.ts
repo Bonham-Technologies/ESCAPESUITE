@@ -33,7 +33,7 @@ import { hasSystemAudio, stopStream } from '../core/permissions';
 import {
   CAPTURE_REFUSED,
   CAPTURE_UNANSWERED,
-  MIC_REFUSED,
+  MIC_UNAVAILABLE,
   NO_SYSTEM_AUDIO,
   SAVE_FAILED,
   START_FAILED,
@@ -529,8 +529,8 @@ export function useRecordingController({
       // being made. The *reason* it could not be opened is a console detail —
       // `acquireStreams` logs it — because there is nothing the user can do
       // differently about a refusal, a device in use or a device unplugged.
-      if (acquired.micRefused) {
-        setNotice(MIC_REFUSED);
+      if (acquired.micUnavailable) {
+        setNotice(MIC_UNAVAILABLE);
       }
 
       // Which take this is, decided once and handed to everything below: the

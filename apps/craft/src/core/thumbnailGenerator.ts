@@ -56,7 +56,11 @@ export async function generateThumbnail(videoBlob: Blob): Promise<Blob> {
     // The frame request `onloadeddata` queues, so cleanup can call it off. A
     // handle of 0 is never issued by `requestAnimationFrame`, and cancelling
     // it is a no-op — so this needs no guard, and the deadline cannot be
-    // followed by a captureFrame() that cleans up a second time.
+    // followed by a captureFrame() that draws a frame for a probe it already
+    // gave up on. A `canvas.toBlob` callback already in flight when the
+    // deadline fires is a narrower case: it still runs, finds the promise
+    // settled, and its own `cleanup()` is then a harmless no-op (revoking an
+    // already-revoked URL, `load()` on an src-less element).
     let frameHandle = 0;
 
     const timeout = setTimeout(() => {

@@ -4,11 +4,12 @@ import styles from './VideoPlayer.module.css';
 /**
  * Everything the platform activates with Space, as a selector.
  *
- * One string rather than a chain of checks so it carries no branch of its own,
- * and it lists `input`/`textarea` for completeness even though the typing guard
- * in front of it already returns for those on every key.
+ * One string rather than a chain of checks so it carries no branch of its own.
+ * `input` and `textarea` are not in it: the typing guard in front of this
+ * check already returns for those on every key, so they can never reach it —
+ * an operand no caller can exercise, left out rather than tested.
  */
-const SPACE_ACTIVATES = 'button, [role="button"], a[href], select, input, textarea';
+const SPACE_ACTIVATES = 'button, [role="button"], a[href], select';
 
 /**
  * Whether Space belongs to whatever has focus rather than to the player

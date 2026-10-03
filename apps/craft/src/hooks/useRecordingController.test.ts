@@ -83,7 +83,7 @@ interface AcquiredDoubles {
  * ESCSUITE-116 helpers below keep taking `AcquiredDoubles`.
  */
 interface AcquisitionDoubles extends AcquiredDoubles {
-  micRefused: boolean
+  micUnavailable: boolean
 }
 
 interface Harness {
@@ -142,7 +142,7 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
 /** Build the controller's inputs, with the capture side as plain doubles. */
 function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquisitionDoubles>): Harness {
   const streams: AcquisitionDoubles = {
-    screen: screenStream(), webcam: null, mic: null, micRefused: false, ...acquired,
+    screen: screenStream(), webcam: null, mic: null, micUnavailable: false, ...acquired,
   }
   const acquireStreams = vi.fn(async () => streams)
   const stopAllStreams = vi.fn()
@@ -337,14 +337,14 @@ describe('useRecordingController notices', () => {
   it('says the microphone was refused, and records the take anyway', async () => {
     const { result } = mountController(
       { microphoneEnabled: true, countdownSeconds: 0 },
-      { mic: null, micRefused: true }
+      { mic: null, micUnavailable: true }
     )
 
     await startTake(result)
 
     expect(state()).toBe('recording')
     expect(useRecorderStore.getState().notice).toBe(
-      'Microphone access was refused — recording without it.'
+      'The microphone could not be opened — recording without it.'
     )
   })
 
@@ -358,14 +358,14 @@ describe('useRecordingController notices', () => {
   it('lets the microphone refusal win the channel over the system-audio hint', async () => {
     const { result } = mountController(
       { microphoneEnabled: true, systemAudioEnabled: true, countdownSeconds: 0 },
-      { mic: null, micRefused: true }
+      { mic: null, micUnavailable: true }
     )
 
     await startTake(result)
 
     expect(useRecorderStore.getState().systemAudioShared).toBe(false)
     expect(useRecorderStore.getState().notice).toBe(
-      'Microphone access was refused — recording without it.'
+      'The microphone could not be opened — recording without it.'
     )
   })
 
@@ -1313,7 +1313,7 @@ describe('useRecordingController what the take captured', () => {
   // read.
   it('says none when the microphone prompt was refused', async () => {
     expect(
-      await capturedAudioOf({ microphoneEnabled: true }, { mic: null, micRefused: true })
+      await capturedAudioOf({ microphoneEnabled: true }, { mic: null, micUnavailable: true })
     ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
   })
 
@@ -1949,7 +1949,7 @@ describe('useRecordingController teardown', () => {
         const acquired: AcquisitionDoubles[] = []
         harness.acquireStreams.mockImplementation(async () => {
           const streams: AcquisitionDoubles = {
-            screen: screenStream(), webcam: null, mic: null, micRefused: false,
+            screen: screenStream(), webcam: null, mic: null, micUnavailable: false,
           }
           acquired.push(streams)
           return streams
@@ -2160,7 +2160,7 @@ describe('useRecordingController teardown', () => {
               screen: screenStream(),
               webcam: webcamStream(),
               mic: micStreamWithTrack(),
-              micRefused: false,
+              micUnavailable: false,
             }
             let release!: () => void
             const gate = new Promise<void>(resolve => { release = resolve })

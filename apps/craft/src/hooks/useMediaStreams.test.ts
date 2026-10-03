@@ -68,7 +68,7 @@ describe('useMediaStreams acquiring', () => {
 
     expect(permissionsOverrides.requestScreenCapture).toHaveBeenCalledWith(true)
     expect(permissionsOverrides.requestWebcam).not.toHaveBeenCalled()
-    expect(acquired).toEqual({ screen, webcam: null, mic, micRefused: false })
+    expect(acquired).toEqual({ screen, webcam: null, mic, micUnavailable: false })
   })
 
   it('skips a source the environment cannot provide', async () => {
@@ -83,7 +83,7 @@ describe('useMediaStreams acquiring', () => {
 
     expect(permissionsOverrides.requestScreenCapture).not.toHaveBeenCalled()
     expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled()
-    expect(acquired).toEqual({ screen: null, webcam, mic: null, micRefused: false })
+    expect(acquired).toEqual({ screen: null, webcam, mic: null, micUnavailable: false })
   })
 
   it('releases what it already got when a later source fails, and rethrows', async () => {
@@ -117,7 +117,7 @@ describe('useMediaStreams acquiring', () => {
     )
     const acquired = await result.current.acquireStreams()
 
-    expect(acquired).toEqual({ screen, webcam: null, mic: null, micRefused: true })
+    expect(acquired).toEqual({ screen, webcam: null, mic: null, micUnavailable: true })
     expect(screenTrack.stop).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(
       'Microphone could not be opened — recording without it:',
@@ -138,8 +138,24 @@ describe('useMediaStreams acquiring', () => {
     )
     const acquired = await result.current.acquireStreams()
 
-    expect(acquired.micRefused).toBe(true)
+    expect(acquired.micUnavailable).toBe(true)
     expect(screenTrack.stop).not.toHaveBeenCalled()
+    expect(webcamTrack.stop).not.toHaveBeenCalled()
+  })
+
+  it('keeps a webcam-only take when the microphone cannot be opened', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const webcamTrack = createTrackDouble('video', { id: 'webcam' })
+    const webcam = streamWith(webcamTrack)
+    permissionsOverrides.requestWebcam.mockResolvedValue(webcam)
+    permissionsOverrides.requestMicrophone.mockRejectedValue(new Error('Microphone permission denied'))
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: false, webcamEnabled: true, microphoneEnabled: true })
+    )
+    const acquired = await result.current.acquireStreams()
+
+    expect(acquired).toEqual({ screen: null, webcam, mic: null, micUnavailable: true })
     expect(webcamTrack.stop).not.toHaveBeenCalled()
   })
 
@@ -187,7 +203,7 @@ describe('useMediaStreams acquiring', () => {
     const onPartial = vi.fn()
     const acquired = await result.current.acquireStreams(onPartial)
 
-    expect(acquired).toEqual({ screen, webcam, mic, micRefused: false })
+    expect(acquired).toEqual({ screen, webcam, mic, micUnavailable: false })
     expect(onPartial).toHaveBeenNthCalledWith(1, { screen, webcam: null, mic: null })
     expect(onPartial).toHaveBeenNthCalledWith(2, { screen, webcam, mic: null })
     expect(onPartial).toHaveBeenNthCalledWith(3, { screen, webcam, mic })

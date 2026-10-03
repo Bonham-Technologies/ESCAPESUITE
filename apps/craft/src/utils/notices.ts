@@ -61,8 +61,8 @@ export const NO_SYSTEM_AUDIO =
  * wording for the rest of the take, while this names a source that is gone
  * from a take which went ahead regardless.
  */
-export const MIC_REFUSED =
-  'Microphone access was refused — recording without it.'
+export const MIC_UNAVAILABLE =
+  'The microphone could not be opened — recording without it.'
 
 /**
  * Said after a conversion that ran in a browser with no AAC encoder. The codec
