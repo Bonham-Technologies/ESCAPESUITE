@@ -322,11 +322,13 @@ describe('KeyframePanel', () => {
       fireEvent.mouseUp(window)
 
       expect(screen.getByRole('status')).toBeEmptyDOMElement()
-      // All three keyframes survive — the dragged one lands just past 2s
-      // rather than destroying the neighbour sitting on it.
+      // All three keyframes survive — the dragged one stops just SHORT of 2s,
+      // the side it approached from, rather than destroying the neighbour
+      // sitting there or being thrown past it (review of ESCSUITE-183,
+      // finding 2).
       const times = keyframesOf('opacity')!.map((kf) => kf.time)
       expect(times).toHaveLength(3)
-      expect(times.some((t) => t > 2 && t < 2.01)).toBe(true)
+      expect(times.some((t) => t < 2 && t > 1.99)).toBe(true)
     })
 
     it('lands a drop aimed at the same neighbour from the other side too, never announcing a refusal', () => {
@@ -337,9 +339,10 @@ describe('KeyframePanel', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 3, value: 0.4, easing: 'linear' })
       render(<KeyframePanel />)
       measureTrackArea('Opacity')
-      // Keyframes sit at 0, 1, 2 and 3 seconds; drag the one at 3s down
-      // toward the one at 2s, stopping fractionally short of it (299.95px is
-      // 1.9995s — inside the 2s neighbour's epsilon window, from below).
+      // Keyframes sit at 0, 1, 2 and 3 seconds; drag the one at 3s down past
+      // the one at 2s and fractionally into its window (299.95px is 1.9995s).
+      // The pointer came from above, so the point stops at the window's upper
+      // edge rather than carrying on through to the other side.
       const custom = diamondsIn('Opacity')[3]
 
       fireEvent.mouseDown(custom, { clientX: 400 })
@@ -349,7 +352,7 @@ describe('KeyframePanel', () => {
       expect(screen.getByRole('status')).toBeEmptyDOMElement()
       const times = keyframesOf('opacity')!.map((kf) => kf.time)
       expect(times).toHaveLength(4)
-      expect(times.some((t) => t < 2 && t > 1.99)).toBe(true)
+      expect(times.some((t) => t > 2 && t < 2.01)).toBe(true)
     })
   })
 
@@ -392,6 +395,39 @@ describe('KeyframePanel', () => {
       expect(store().history.past).toHaveLength(historyBefore + 1)
 
       // One undo restores BOTH halves of the drag, not just the value.
+      store().undo()
+      expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0.5, easing: 'linear' })
+    })
+
+    // ESCSUITE-183, review finding 9: the combination the clamp newly makes
+    // reachable — a time the clamp decided AND a value, in one gesture — had no
+    // store-level pin. Before the clamp this drop was refused outright on
+    // release, so neither half was written at all; now both land, and they must
+    // land as ONE undo entry (ESCSUITE-163 / M1's rule, which the refusal used
+    // to keep this case out of).
+    it('makes a CLAMPED diagonal drag a single undo entry too, restoring both halves', () => {
+      // A neighbour at 3s for the drag to be clamped by.
+      store().setClipKeyframe('clip1', 'opacity', { time: 3, value: 0.8, easing: 'linear' })
+      render(<KeyframePanel />)
+      measureGraph()
+      const historyBefore = store().history.past.length
+
+      // Aimed exactly at the 3s neighbour, from the left, with the value
+      // changing too: the time clamps to the window's near edge, the value
+      // lands where the pointer put it.
+      fireEvent.mouseDown(graphPoints()[1])
+      fireEvent.mouseMove(window, { clientX: 50 + 100 * 3, clientY: 20 + (1 - 0.2) * 150 })
+      fireEvent.mouseUp(window)
+
+      const moved = keyframesOf('opacity')![1]
+      expect(moved.time).toBeLessThan(3)
+      expect(moved.time).toBeCloseTo(3, 2)
+      expect(moved.value).toBeCloseTo(0.2, 6)
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+      // All three keyframes are still there — the neighbour was not destroyed.
+      expect(keyframesOf('opacity')).toHaveLength(3)
+
+      // One undo puts back the time AND the value, not just one of them.
       store().undo()
       expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0.5, easing: 'linear' })
     })

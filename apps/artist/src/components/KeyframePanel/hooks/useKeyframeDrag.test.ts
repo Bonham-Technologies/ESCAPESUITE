@@ -40,12 +40,14 @@ function releaseMouse() {
   })
 }
 
-function render(options: { playheadTime?: number; allKeyframeTimes?: number[] } = {}) {
+function render(
+  options: { playheadTime?: number; allKeyframeTimes?: number[]; clipDuration?: number } = {}
+) {
   const onKeyframeMoved = vi.fn()
   const onAnnounce = vi.fn()
   const hook = renderHook(() =>
     useKeyframeDrag(
-      CLIP_DURATION,
+      options.clipDuration ?? CLIP_DURATION,
       options.playheadTime ?? -1,
       options.allKeyframeTimes ?? [],
       onKeyframeMoved,
@@ -206,6 +208,21 @@ describe('useKeyframeDrag', () => {
 
       expect(result.current.dragState.currentTime).toBeCloseTo(5.04, 6)
     })
+
+    // ESCSUITE-183: the snap runs AFTER the clamp and reads the same merged
+    // windows the clamp does, so it cannot undo the clamp's work by pulling an
+    // already-legal point onto a playhead that is itself inside a forbidden
+    // window — including the window two clustered keyframes share, where the
+    // playhead sits between them and "near a keyframe" is not the same question
+    // as "within epsilon of one".
+    it("does not snap to a playhead sitting inside a merged cluster's window", () => {
+      const { result } = render({ playheadTime: 5.0007, allKeyframeTimes: [5, 5.0015] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 247) // 4.94s — within the 0.1s snap threshold of the playhead
+
+      expect(result.current.dragState.currentTime).toBeCloseTo(4.94, 6)
+    })
   })
 
   // ESCSUITE-183: a drop within KEYFRAME_TIME_EPSILON of another keyframe
@@ -232,11 +249,18 @@ describe('useKeyframeDrag', () => {
       expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
+    // "From the right" is the direction the POINTER travelled, not which side
+    // of the neighbour the raw time happens to fall on (review of ESCSUITE-183,
+    // finding 2): the gesture has to actually be above the neighbour's window
+    // before it comes back down into it, which takes two moves. A single jump
+    // from 0 to 5.0005 approached from the LEFT and stops short — see the tie
+    // case below.
     it('clamps a drop approaching a neighbour from the right, to just past it', () => {
       const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 250.025) // raw 5.0005s — inside the 5s neighbour's window, from above
+      moveMouse(TRACK_LEFT + 255) // 5.1s — clear of the neighbour, above it
+      moveMouse(TRACK_LEFT + 250.025) // raw 5.0005s — back down into the window, from above
       expect(result.current.dragState.currentTime).toBeCloseTo(5.001, 6)
       releaseMouse()
 
@@ -246,24 +270,91 @@ describe('useKeyframeDrag', () => {
       expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
+    // The side is decided by the direction of travel, so a pointer that lands
+    // bit-exactly on its neighbour having come from the left stops SHORT of it
+    // rather than being thrown to its far side and swapping the two keyframes'
+    // order (review of ESCSUITE-183, finding 2 — the old `newTime <
+    // occupiedTime` test sent an exact tie right, whichever way the drag was
+    // going).
+    it('stops short of a neighbour a drag from the left lands exactly on', () => {
+      const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250) // exactly 5s, the neighbour's own time
+      releaseMouse()
+
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      const [, , landedTime] = onKeyframeMoved.mock.calls[0]
+      expect(landedTime).toBeLessThan(5)
+      expect(landedTime).toBeCloseTo(4.999, 6)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
+    })
+
     // `occupiedTime + KEYFRAME_TIME_EPSILON` does not always land a distance
     // of exactly `KEYFRAME_TIME_EPSILON` away in floating point — at a
     // neighbour of 3, `Math.abs(3 - (3 + 0.001))` comes back
-    // `0.0009999999999998899`, which IS `< 0.001`, so `handleMouseUp`'s own
-    // occupied check would (correctly, on its own terms) refuse the landing
-    // the clamp meant to allow. `CLAMP_MARGIN` is what keeps this neighbour
+    // `0.0009999999999998899`, which IS `< 0.001`, so anything asking the
+    // strict "is this time occupied" question would refuse the landing the
+    // clamp meant to allow. `CLAMP_MARGIN` is what keeps this neighbour
     // specifically from regressing.
     it('clamps to a landing that survives floating-point rounding, at a neighbour where the bare epsilon would not', () => {
       const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [3] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 150.025) // raw 3.0005s — inside the 3s neighbour's window, from above
+      moveMouse(TRACK_LEFT + 160) // 3.2s — above the neighbour's window
+      moveMouse(TRACK_LEFT + 150.025) // raw 3.0005s — back down into it, from above
       releaseMouse()
 
       expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
       const [, , landedTime] = onKeyframeMoved.mock.calls[0]
       expect(landedTime).toBeCloseTo(3.001, 6)
+      expect(Math.abs(landedTime - 3)).toBeGreaterThanOrEqual(0.001)
       expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
+    })
+
+    // The configuration the first fix round reopened the whole bug in (review
+    // of ESCSUITE-183, finding 1): the old clamp chose its side first and
+    // clamped to the clip's bounds afterwards, so a neighbour at the clip's
+    // own end — which every Animate Out = fade clip has, since
+    // `generateOutPresetKeyframes` puts an opacity handle at exactly
+    // `clipDuration` — was pushed past the end and pulled straight back onto
+    // the neighbour, where the release refused the drop and the diamond
+    // snapped back. The bounds are part of the side choice now, so it goes
+    // left.
+    it("stops just inside the clip when the neighbour sits at the clip's own end", () => {
+      const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [2, CLIP_DURATION] })
+
+      act(() => result.current.startDrag('opacity', keyframe(2), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + TRACK_WIDTH + 400) // off the right of the track: raw 10s, the neighbour's own time
+      releaseMouse()
+
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      const [, , landedTime] = onKeyframeMoved.mock.calls[0]
+      expect(landedTime).toBeLessThan(CLIP_DURATION)
+      expect(landedTime).toBeCloseTo(9.999, 6)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
+    })
+
+    // Two keyframes closer together than twice the epsilon leave nowhere legal
+    // between them, and on a clip this short the merged window covers the whole
+    // of it — so there is no time the drag could write. The move is ignored
+    // outright: the diamond does not move, nothing is committed, and nothing is
+    // announced (the release-time refusal that used to catch this was deleted
+    // with the rest of the backstop, because the clamp never hands out an
+    // illegal landing for it to catch).
+    it('ignores a move when the clip offers no legal time at all', () => {
+      const { result, onKeyframeMoved, onAnnounce } = render({
+        clipDuration: 0.0015,
+        allKeyframeTimes: [0, 0.001],
+      })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 400) // 0.0012s — inside the neighbour's window, as is every other time here
+      expect(result.current.dragState.currentTime).toBe(0)
+      releaseMouse()
+
+      expect(onKeyframeMoved).not.toHaveBeenCalled()
+      expect(onAnnounce).not.toHaveBeenCalled()
     })
 
     it('clamps two separate gestures toward the same neighbour independently, one from each side', () => {
