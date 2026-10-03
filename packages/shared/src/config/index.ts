@@ -62,7 +62,9 @@ export const parseHostOrigin = (
 ): string | null => {
   const params = new URLSearchParams(search)
   if (!params.has('hostOrigin')) return null
-  const value = params.get('hostOrigin') ?? ''
+  // `has()` was just true, so `get()` cannot return null here; the assertion
+  // says so to the type checker without a fallback no caller can reach.
+  const value = params.get('hostOrigin')!
 
   try {
     const url = new URL(value)
