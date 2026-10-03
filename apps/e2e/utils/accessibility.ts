@@ -10,6 +10,14 @@ export interface AxeViolation {
   impact: 'minor' | 'moderate' | 'serious' | 'critical'
   description: string
   nodes: number
+  /**
+   * The first offending node's selector and markup, so a CI failure names a
+   * place to look instead of only a count (ESCSUITE-177 n2: a Firefox-only
+   * colour-contrast violation was otherwise unidentifiable from the report).
+   * Undefined only when axe reports a violation with zero nodes, which does
+   * not happen in practice but keeps this honest about `v.nodes[0]`.
+   */
+  firstNode?: { target: string[]; html: string }
   help: string
   helpUrl: string
 }
@@ -62,6 +70,9 @@ export async function runAxeCheck(
       impact: v.impact as AxeViolation['impact'],
       description: v.description,
       nodes: v.nodes.length,
+      firstNode: v.nodes[0]
+        ? { target: v.nodes[0].target as string[], html: v.nodes[0].html }
+        : undefined,
       help: v.help,
       helpUrl: v.helpUrl,
     })),
@@ -89,7 +100,10 @@ export async function assertNoA11yViolations(
 
   if (criticalViolations.length > 0) {
     const violationSummary = criticalViolations
-      .map((v) => `- [${v.impact}] ${v.id}: ${v.description} (${v.nodes} elements)`)
+      .map((v) => {
+        const selector = v.firstNode ? ` — ${v.firstNode.target.join(' ')}` : ''
+        return `- [${v.impact}] ${v.id}: ${v.description} (${v.nodes} elements)${selector}`
+      })
       .join('\n')
 
     throw new Error(
