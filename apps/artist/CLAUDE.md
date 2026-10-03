@@ -851,17 +851,8 @@ Clips support animated properties via keyframes:
   than a third hand-rolled copy of the zero-width-space mechanism (review round 1, MAJOR 1): a
   second, textually identical refusal is audible, not silent.
 
-  **Known remaining hole, tracked as ESCSUITE-179**: the graph's own point drag
-  (`KeyframeGraph.tsx`'s `handleMouseUp`) has no occupancy check of its own, and
-  `moveClipKeyframe` still deletes whatever sits within `KEYFRAME_TIME_EPSILON` of a pixel-exact
-  landing there — the graph does not snap, so it takes an exact coincidence rather than an
-  approach, but the window is a sizeable fraction of a pixel on a short clip, not a vanishing one.
-  ESCSUITE-163 / M1 makes the damage *recoverable* (the move and value writes are one undo entry
-  now), which is why this is not urgent, but it is a real gap: dragging a point in the graph onto
-  a neighbour's time still destroys it in silence. The fix shape differs from the diamond row's —
-  the graph has no snap list to prune, and its live region and `useGestureHistory` gesture are
-  already open at the point of refusal — and wants its own red test, which is why it is a
-  follow-up rather than folded into this ticket.
+  The graph's own point drag makes the identical refusal — see "The graph's own point drag
+  refuses an occupied time too" (ESCSUITE-179) below.
 - **A track's double-click adds at the curve's value, not the clip's static default
   (ESCSUITE-167 / m3)**. `KeyframeTrack.tsx`'s double-click used to call `onAddKeyframe` with no
   value, which fell back to `clip.transform[property]` (or `effects.blur` / `1` for volume) —
@@ -1603,31 +1594,40 @@ leaving them live and draggable over an unrelated frame; the latch survives, so
 scrubbing back in returns the mode. Before the final review the chrome carried
 that comparison alone and the layer carried none.
 
-**And they come and go with the picture, not just with the playhead**
-(ESCSUITE-171). `CropOverlayScene` carries the timeline's `tracks` and
-`cropTarget` refuses a clip whose track is missing or not `visible` — the same
-question `getClipsAtTime` (`store/clipQueries.ts`) asks before the renderer draws
-a clip at all, written the same way so the two cannot drift. Hiding the cropped
-clip's track used to leave the chrome dimming a ghost of a frame the renderer was
-skipping, with eight live, draggable handles over it; now the chrome and the
-handles go with it, and showing the track again brings the mode back — hiding a
-track is a view toggle, and the latch survives it exactly as it survives a scrub.
-`PreviewPlayer` already subscribed to `tracks` (it reads them for `isTrackLocked`
-and `getActiveTransition`), so the scene memo gained one dependency and nothing
-else.
+**And they come and go with the picture, not just with the playhead** — one
+rule, asked in two places (ESCSUITE-171, ESCSUITE-178). `CropOverlayScene`
+carries the timeline's `tracks` and `cropTarget` refuses a clip whose track is
+missing or not `visible`; `selectionOverlay.ts`'s `drawSelectionHandles` /
+`drawMultiSelectHandles`, `hitTest.ts`'s `hitHandlesOnClip` (the cascade both of
+`hitTestHandles`' passes feed the *selected* clip through directly, with no
+z-order filtering of its own — the actual gap, since the second, all-clips pass
+already went through `getClipsAtTime` and was already safe) and
+`dragGeometry.ts`'s `clipsIntersectingMarquee` (which never routed through
+`getClipsAtTime` at all — it needs each candidate's drawn *box*, which that
+helper does not compute, so it gained its own `tracks` parameter) all ask the
+identical `!track || !track.visible` question `getClipsAtTime`
+(`store/clipQueries.ts`) asks before the renderer draws a clip at all — written
+the same way everywhere, so none of them can drift apart. Hiding a clip's track
+used to leave crop mode's chrome dimming a ghost of a frame the renderer was
+skipping, with eight live, draggable handles over it, and left the *ordinary*
+selection box and its live resize handles untouched entirely elsewhere — a
+hidden clip stayed fully grabbable everywhere crop mode was not open on it.
+Both are fixed the same way now: hiding a track takes the chrome, the live
+handles and the marquee's reach with it, exactly as the clip's own picture
+already disappears, and showing the track again brings all of it straight
+back — hiding a track is a view toggle, and both crop mode's latch and an
+ordinary selection survive it exactly as they survive a scrub; the selection
+itself never changes; there is nothing to restore, since nothing about *it*
+ever did. `PreviewPlayer` already subscribed to `tracks` for every scene that
+needs it (it reads them for `isTrackLocked` and `getActiveTransition` too), so
+none of the scene memos gained more than one dependency.
 
-Two deliberate non-changes there. **"Crop on canvas" is not disabled for a hidden
-track**, unlike the `sourceWidth === 0` case it now shares a refusal with
+One deliberate non-change remains. **"Crop on canvas" is not disabled for a
+hidden track**, unlike the `sourceWidth === 0` case it shares a refusal with
 (`CropSection.tsx`): hiding a track is a reversible view toggle, so a pressed
 toggle with no chrome behind it is the **scrub** precedent — already accepted,
 and one click of the track's eye brings the mode back — where a source that has
-left the media library is not coming back and the toggle says so. And **the
-selection chrome's own hidden-track behaviour is unchanged**: with `cropTarget`
-now null, `drawSelectionHandles` falls through to `selectionOverlay.ts`, which
-has no visibility test of its own, so hiding the track swaps the dim ghost for a
-selection box with live resize handles. That is pre-existing for any selected
-clip on a hidden track — crop mode was merely masking it — and is tracked
-separately as ESCSUITE-178; not all preview chrome follows the picture yet.
+left the media library is not coming back and the toggle says so.
 
 **The crop frame follows the picture through a transition** (ESCSUITE-147's
 suppression, threaded here). Both halves of crop mode's geometry are measured off
@@ -2344,21 +2344,11 @@ branch, the latter for a row locked *mid-gesture*. Marquee selection on empty ca
 untouched.
 
 **A clip on a hidden track takes no chrome, no hit and no cursor either** (ESCSUITE-178) — a
-different rule from a locked track's, not the same one. A locked clip is still drawn and still
-picked, just inert; a hidden clip is not in the picture at all, the same `!track || !track.visible`
-question `store/clipQueries.ts`'s `getClipsAtTime` asks before compositing a clip. `selectionOverlay.ts`'s
-`drawSelectionHandles` and `drawMultiSelectHandles` now ask it of the selected clip's own track (and,
-for the dashed multi-select boxes, each extra clip's) before drawing anything; `hitTest.ts`'s
-`hitHandlesOnClip` — the cascade both of `hitTestHandles`' passes feed the *selected* clip through,
-with no z-order filtering of its own — asks it too, so a hidden clip's handles are not live even
-though nothing else on the canvas would catch the click either (the second, all-clips pass was
-already safe, since it goes through `getClipsAtTime`). `dragGeometry.ts`'s `clipsIntersectingMarquee`
-gained the same test for the same reason: unlike the hit test it does not route through
-`getClipsAtTime` at all — it needs every candidate's drawn *box*, not just whether one exists — so a
-marquee swept over a hidden clip used to pick it up regardless. The **selection itself** is
-untouched either way: a clip already selected when its track is hidden stays selected (nothing
-forces it off), and showing the track again brings its chrome straight back — there is nothing to
-restore, since nothing about the selection ever changed.
+different rule from a locked track's, not the same one: a locked clip is still drawn and still
+picked, just inert, where a hidden clip is not in the picture at all. See "And they come and go
+with the picture, not just with the playhead", earlier in this section (crop mode's own
+`cropTarget`), for the one rule it shares with `selectionOverlay.ts`, `hitTest.ts` and
+`dragGeometry.ts`'s marquee.
 
 The **track header** (`TrackHeader.tsx`): the delete button is `disabled`,
 `title="Unlock the track to delete it"`. `useAppKeyboardShortcuts.ts` does the same on-demand
