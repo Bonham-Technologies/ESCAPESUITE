@@ -104,45 +104,40 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
   })
 
   test('can tab through recording controls', async ({ page }) => {
-    // First verify there are focusable elements on the page
+    // The idle recorder always has focusable chrome (the source toggles,
+    // Start recording, Help) — assert that rather than skip past what would
+    // otherwise be an empty page.
     const focusableCount = await page.evaluate(() => {
       const focusable = document.querySelectorAll(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       )
       return focusable.length
     })
-
-    // Skip focus order check if no focusable elements (can happen in headless CI)
-    if (focusableCount === 0) {
-      // Page loaded but no focusable elements - pass with note
-      expect(true).toBe(true)
-      return
-    }
-
-    // Click on body first to ensure focus is in document
-    await page.click('body')
-    await checkFocusOrder(page)
-
-    // In headless mode, focus behavior can vary - just verify page is functional
     expect(focusableCount).toBeGreaterThan(0)
+
+    await page.click('body')
+    const focusOrder = await checkFocusOrder(page)
+    expect(focusOrder.length).toBeGreaterThan(0)
   })
 
   test('Enter toggles recording buttons', async ({ page }) => {
-    const recordButton = page
-      .getByRole('button', { name: /record|start/i })
-      .or(page.locator('[data-testid="record-button"]'))
+    // Enter is the browser's own activation key for a focused `<button>` —
+    // the same native behaviour `Space toggles toggle switches` below
+    // asserts for Space, here for the other activation key. The first
+    // `[aria-pressed]` match is the Screen toggle (`SourceToggles.tsx`).
+    const toggle = page
+      .locator('[role="switch"]')
+      .or(page.locator('[aria-pressed]'))
       .first()
 
-    const isVisible = await recordButton.isVisible().catch(() => false)
+    await expect(toggle).toBeVisible()
+    const initialState = await toggle.getAttribute('aria-pressed')
+    expect(initialState).not.toBeNull()
 
-    if (isVisible) {
-      await recordButton.focus()
-      await page.keyboard.press('Enter')
+    await toggle.focus()
+    await page.keyboard.press('Enter')
 
-      // Should respond without crashing
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
+    await expect(toggle).toHaveAttribute('aria-pressed', initialState === 'true' ? 'false' : 'true')
   })
 
   test('Space toggles toggle switches', async ({ page }) => {
@@ -167,60 +162,69 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
     await expect(toggle).toHaveAttribute('aria-pressed', initialState === 'true' ? 'false' : 'true')
   })
 
-  test('Escape cancels recording selection', async ({ page }) => {
-    // Click on source selector if visible
-    const sourceSelector = page
-      .getByRole('button', { name: /screen|window|select/i })
-      .first()
+  test('Escape cancels the countdown', async ({ page }) => {
+    // CRAFT has no source-selection popover for Escape to close — there is
+    // nothing behind "Screen"/"Webcam" but a plain toggle button. What
+    // Escape really cancels here, in every state but idle, is the live take
+    // (ESCSUITE-106/174): the 3-2-1 countdown reaches the real
+    // `onCancel` the record button's own "Cancel countdown" label takes.
+    //
+    // The describe's own `beforeEach` uses the inert `mockGetUserMedia`
+    // stream (no real tracks), which every other test here is fine with —
+    // but assigning it to the preview `<video>`'s `srcObject` throws
+    // (`TypeError: ... not of type MediaStream`), and with no error
+    // boundary around it that crashes the whole app before the countdown
+    // ever shows. Re-navigating with `mockSyntheticMedia`'s real
+    // canvas-backed stream avoids that crash.
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await waitForAppReady(page, 'craft')
 
-    const isVisible = await sourceSelector.isVisible().catch(() => false)
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    if (isVisible) {
-      await sourceSelector.click()
-      await page.waitForTimeout(300)
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Cancel countdown' })).toBeVisible({
+      timeout: 10_000,
+    })
 
-      await page.keyboard.press('Escape')
-      await page.waitForTimeout(100)
+    await page.keyboard.press('Escape')
 
-      // Page should still be functional
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   })
 
   test('webcam toggle responds to keyboard', async ({ page }) => {
-    const webcamToggle = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .or(page.locator('[data-testid="webcam-toggle"]'))
-      .first()
+    const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
+    await expect(webcamToggle).toBeVisible()
+    const initialState = await webcamToggle.getAttribute('aria-pressed')
+    expect(initialState).not.toBeNull()
 
-    const isVisible = await webcamToggle.isVisible().catch(() => false)
+    await webcamToggle.focus()
+    await page.keyboard.press('Enter')
 
-    if (isVisible) {
-      await webcamToggle.focus()
-      await page.keyboard.press('Enter')
-
-      // Should respond without crashing
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
+    await expect(webcamToggle).toHaveAttribute(
+      'aria-pressed',
+      initialState === 'true' ? 'false' : 'true'
+    )
   })
 
   test('microphone toggle responds to keyboard', async ({ page }) => {
-    const micToggle = page
-      .getByRole('button', { name: /mic|audio|microphone/i })
-      .or(page.locator('[data-testid="mic-toggle"]'))
-      .first()
+    const micToggle = page.getByRole('button', { name: 'Microphone' })
+    await expect(micToggle).toBeVisible()
+    const initialState = await micToggle.getAttribute('aria-pressed')
+    expect(initialState).not.toBeNull()
 
-    const isVisible = await micToggle.isVisible().catch(() => false)
+    await micToggle.focus()
+    await page.keyboard.press('Enter')
 
-    if (isVisible) {
-      await micToggle.focus()
-      await page.keyboard.press('Enter')
-
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
+    await expect(micToggle).toHaveAttribute(
+      'aria-pressed',
+      initialState === 'true' ? 'false' : 'true'
+    )
   })
 
   test('the help dialog opens, traps Tab and gives focus back on Escape', async ({ page }) => {
@@ -485,55 +489,53 @@ test.describe('VideoPlayer Keyboard Shortcuts', () => {
   })
 
   test('M key toggles mute', async ({ page }) => {
-    const videoPlayer = page
-      .locator('[data-testid="video-player"]')
-      .or(page.locator('video'))
-      .first()
+    test.setTimeout(120_000)
+    await recordAndOpenPlayback(page)
 
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
+    // `VideoPlayer.tsx`'s keydown handler is window-level, not tied to focus
+    // on the video element itself.
+    const video = page.locator('video')
+    expect(await video.evaluate((el) => (el as HTMLVideoElement).muted)).toBe(false)
+    await expect(page.getByTitle('Mute (M)')).toBeVisible()
 
-    if (isVisible) {
-      await videoPlayer.focus()
-      await page.keyboard.press('m')
+    await page.keyboard.press('m')
 
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
+    expect(await video.evaluate((el) => (el as HTMLVideoElement).muted)).toBe(true)
+    await expect(page.getByTitle('Unmute (M)')).toBeVisible()
+
+    await page.keyboard.press('m')
+    expect(await video.evaluate((el) => (el as HTMLVideoElement).muted)).toBe(false)
   })
 
-  test('F key toggles fullscreen', async ({ page }) => {
-    const videoPlayer = page
-      .locator('[data-testid="video-player"]')
-      .or(page.locator('video'))
-      .first()
-
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await videoPlayer.focus()
-      // Note: Fullscreen may not work in test environment
-      await page.keyboard.press('f')
-
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
-  })
+  // ESCSUITE-201: ESCAPECRAFT's VideoPlayer has no fullscreen feature at all
+  // — no button, no 'f' key handler, nothing in `VideoPlayer.tsx`'s keydown
+  // switch names it. "F key toggles fullscreen" had no feature to find and
+  // is deleted rather than kept as a placeholder for one that does not exist.
 
   test('Arrow keys seek video', async ({ page }) => {
-    const videoPlayer = page
-      .locator('[data-testid="video-player"]')
-      .or(page.locator('video'))
-      .first()
+    test.setTimeout(120_000)
+    await recordAndOpenPlayback(page)
 
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await videoPlayer.focus()
-      await page.keyboard.press('ArrowRight')
-      await page.keyboard.press('ArrowLeft')
-
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
+    // Pause first — a playing video's currentTime keeps advancing on its
+    // own, which would make a 5s `skip` hard to tell apart from ordinary
+    // playback.
+    const transportToggle = page.getByTitle(/^(Play|Pause) \(Space\)$/)
+    if ((await transportToggle.getAttribute('title')) === 'Pause (Space)') {
+      await transportToggle.click()
     }
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+
+    const video = page.locator('video')
+    const before = await video.evaluate((el) => (el as HTMLVideoElement).currentTime)
+
+    // The real take is only a couple of seconds long, so a +5s skip clamps
+    // to its end (`seekTo`'s own clamp) rather than landing exactly at +5.
+    await page.keyboard.press('ArrowRight')
+    const afterRight = await video.evaluate((el) => (el as HTMLVideoElement).currentTime)
+    expect(afterRight).toBeGreaterThan(before)
+
+    await page.keyboard.press('ArrowLeft')
+    const afterLeft = await video.evaluate((el) => (el as HTMLVideoElement).currentTime)
+    expect(afterLeft).toBeLessThan(afterRight)
   })
 })
