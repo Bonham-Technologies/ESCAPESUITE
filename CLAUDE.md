@@ -1991,6 +1991,23 @@ it ends the gesture — the review's one MAJOR, a blurred drag otherwise leaving
 unscoped) and `app/useAppKeyboardShortcuts.ts`'s two (`cropClipId === selectedClipId`), each reached from both
 sides by the Shift-mid-drag, blur-mid-drag, keyboard-only, pointer-then-blur-then-nudge and the three
 latch-state (null, live, inert) cases against the ordinary gestures that were already there. The seven
+
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-171 (every crop write — the inspector's sliders
+and aspect presets as well as the preview's handles — goes through `cropWriteFor` with its compensating
+centre, so the inspector's Reset no longer leaves a handle-dragged picture displaced; and crop mode refuses a
+clip on a hidden track, chrome and handles both): 99.80 / 99.23 / **95.54** / 99.67 against the
+99.80 / 99.23 / 95.53 / 99.67 the commit this branch was rebased onto (`46c2b76`) measures — branches up a
+hundredth, the other three unmoved. Measured in one sitting, the base gives 4,733 / 4,954 branches and this
+branch 4,739 / 4,960: six new branches, six covered, the same 221 uncovered as before (lines 7,519 / 7,534 →
+7,523 / 7,538, statements 8,455 / 8,520 → 8,461 / 8,526, functions 1,824 / 1,830 → 1,825 / 1,831, every
+denominator growing by exactly what the numerator did; the same 15 / 65 / 6 uncovered). The six are
+`components/Preview/cropOverlay.ts`'s four — `cropTarget`'s `!track` and `!track.visible` operands, the
+byte-for-byte shape `store/clipQueries.ts` uses, reached with the track hidden, shown again and absent — and
+`components/ClipEditor/useClipEditorActions.ts`'s two, `handleCropChange`'s keyframed-or-not choice through
+`cropCompensatesCentre`, reached by the keyframed placement (crop alone) against the static one (crop plus
+the compensating transform, pinned from the clamped crop against a mutant that compensated from the raw
+one). Three `handleCropChange` expectations changed because the write legitimately carries a `transform`
+now; `ClipEditor.rerender.test.tsx` is byte-identical with no new inspector subscription, and the seven
 perf/rerender pins and `perfScene.ts` are byte-identical. **No floor crossed**; artist's floors stay
 99 / 99 / 95 / 99.
 
@@ -2001,7 +2018,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.23 | 95.55 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.23 | 95.54 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 

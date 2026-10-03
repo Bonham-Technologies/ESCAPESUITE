@@ -346,6 +346,33 @@ describe('crop mode on the preview', () => {
     expect(preview.view.getByRole('group', { name: 'Crop handles' })).toBeInTheDocument()
   })
 
+  it('draws and mounts nothing over a clip on a hidden track, and brings both back', async () => {
+    // ESCSUITE-171. The frame draws nothing for a clip whose track is hidden
+    // (`getClipsAtTime`), so crop mode's chrome and its eight live handles must
+    // go with it rather than leaving a dim ghost the user can still drag.
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    const preview = await renderPreview()
+    store().setCropClipId(clip.id)
+    const handles = () => preview.view.queryByRole('group', { name: 'Crop handles' })
+
+    expect(handles()).toBeInTheDocument()
+
+    preview.clearCalls()
+    store().updateTrack(clip.trackId, { visible: false })
+    store().setCurrentTime(1)
+
+    expect(handles()).not.toBeInTheDocument()
+    expect(preview.calls('clip')).toHaveLength(0)
+
+    // And back: hiding a track is a view toggle, so showing it again returns
+    // crop mode rather than silently dropping the latch.
+    store().updateTrack(clip.trackId, { visible: true })
+
+    expect(handles()).toBeInTheDocument()
+    expect(preview.calls('clip').length).toBeGreaterThan(0)
+  })
+
   it('draws and mounts nothing during playback', async () => {
     croppingClip()
     const preview = await renderPreview()

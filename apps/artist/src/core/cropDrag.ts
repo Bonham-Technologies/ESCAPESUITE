@@ -7,7 +7,18 @@
 // media clip of every frame, and none of this is.
 //
 // Pure: numbers in, numbers out. No clip, no store, no canvas, no pointer
-// event. The hook that drives it is `components/Preview/useCropHandleGesture.ts`.
+// event. The hook that drives the gesture half is
+// `components/Preview/useCropHandleGesture.ts`.
+//
+// The last three functions here are NOT gesture-only, despite the file's name
+// (ESCSUITE-171): `cropCentreFor`, `cropCompensatesCentre` and `cropWriteFor`
+// decide where a crop leaves the picture, and **every** crop write in the app
+// goes through them — the eight on-canvas handles through that hook, and the
+// inspector's sliders, number fields, aspect presets and Reset through
+// `components/ClipEditor/useClipEditorActions.ts`' `handleCropChange`. They stay
+// here rather than moving to `clipCrop.ts` for that module's own stated reason:
+// it is read by the renderer on every media clip of every frame, and none of
+// this is.
 import type { AnimatableProperty, ClipAnimation, ClipCrop, ClipTransform } from '../store/types';
 import { croppedSourceRect } from './clipCrop';
 

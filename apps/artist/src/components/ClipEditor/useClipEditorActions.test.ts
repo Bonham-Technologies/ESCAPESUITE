@@ -21,7 +21,15 @@ import { useClipEditorActions } from './useClipEditorActions'
 import { useEditorStore } from '../../store/projectStore'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { DEFAULT_CLIP_MASK_RADIUS } from '../../store/types'
-import { MAX_CROP_INSET } from '../../core/clipCrop'
+import { MAX_CROP_INSET, cropUpdateFor } from '../../core/clipCrop'
+import {
+  cropCompensatesCentre,
+  cropForHandleMove,
+  cropWriteFor,
+  sourceDelta,
+  type CropHandle,
+} from '../../core/cropDrag'
+import { getOverlayBounds } from '../Preview/previewGeometry'
 import type { Clip, SourceVideo } from '../../store/types'
 
 /** The store actions the hook reaches for, wrapped so their arguments are visible. */
@@ -1034,7 +1042,16 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
 
     act(() => result.current.handleCropChange({ ...CROP }))
 
-    expect(spies.updateClip).toHaveBeenCalledWith(clip.id, { crop: CROP }, false)
+    // ESCSUITE-171: the write carries the compensating centre the on-canvas
+    // handles have always written, so the edges this crop is not moving stay
+    // where they are. 25% off the left of a 1920-wide source and 10% off the top
+    // of a 1080-tall one move the kept region's centre 240 and 54 source pixels,
+    // which at scale 1 in a 1920x1080 project is 0.125 and 0.05 of the frame.
+    expect(spies.updateClip).toHaveBeenCalledWith(
+      clip.id,
+      { crop: CROP, transform: { ...clip.transform, x: 0.625, y: 0.55 } },
+      false
+    )
     expect(clipNow(clip.id).crop).toEqual(CROP)
   })
 
@@ -1048,7 +1065,14 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     // So a clip that was never cropped and one whose crop was reset are the same
     // object, and `undefined === none` stays the only rule the renderer, the
     // geometry and the validator need to know.
-    expect(spies.updateClip).toHaveBeenLastCalledWith(clip.id, { crop: undefined }, false)
+    expect(spies.updateClip).toHaveBeenLastCalledWith(
+      clip.id,
+      // And the centre comes back with it (ESCSUITE-171): Reset puts the picture
+      // back where it started rather than leaving the previous write's
+      // compensation behind.
+      { crop: undefined, transform: { ...clip.transform, x: 0.5, y: 0.5 } },
+      false
+    )
     expect(clipNow(clip.id).crop).toBeUndefined()
   })
 
@@ -1064,6 +1088,23 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
       right: 0,
       bottom: 0,
     })
+    // ESCSUITE-171, MINOR 1 (review round 1): the compensating centre is
+    // computed from the **clamped** crop, not from what the section reported.
+    // 90% off a 1920-wide source puts the kept region's centre at 1824, which is
+    // 864 source pixels right of 960 and at scale 1 is +0.45 of the frame.
+    // Handing `cropWriteFor` the raw `{ left: 2, top: -1 }` instead computes the
+    // centre from a region `croppedSourceRect` has floored to one source pixel
+    // and lands at x 2.0002604166666664, y 0 — which every other case on this
+    // branch passes over, because they all report insets `normaliseCrop` leaves
+    // alone.
+    expect(spies.updateClip).toHaveBeenCalledWith(
+      clip.id,
+      {
+        crop: { left: MAX_CROP_INSET, top: 0, right: 0, bottom: 0 },
+        transform: { ...clip.transform, x: 0.95, y: 0.5 },
+      },
+      false
+    )
   })
 
   it('writes nothing for a crop that would leave less than a source pixel', () => {
@@ -1152,9 +1193,25 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     act(() => result.current.handleCropChange({ left: 0.2, top: 0, right: 0, bottom: 0 }))
     act(() => result.current.sliderGesture.onPointerUp())
 
-    // One drag, one undo entry.
-    expect(spies.updateClip).toHaveBeenNthCalledWith(1, clip.id, { crop: { left: 0.1, top: 0, right: 0, bottom: 0 } }, false)
-    expect(spies.updateClip).toHaveBeenNthCalledWith(2, clip.id, { crop: { left: 0.2, top: 0, right: 0, bottom: 0 } }, true)
+    // One drag, one undo entry — and exactly two writes, so a third could not
+    // slip past. Each write's compensating centre (ESCSUITE-171) is rebased from
+    // what the previous one stored, which is why the second is written as
+    // `0.55 + 96 / 1920` rather than 0.6: that telescope is exact, where the
+    // literal 0.6 is a double's last bit away from it.
+    expect(spies.updateClip).toHaveBeenCalledTimes(2)
+    const [first, second] = spies.updateClip.mock.calls
+    expect(first[0]).toBe(clip.id)
+    expect(first[1]).toEqual({
+      crop: { left: 0.1, top: 0, right: 0, bottom: 0 },
+      transform: { ...clip.transform, x: 0.5 + 96 / 1920, y: 0.5 },
+    })
+    expect(first[2]).toBe(false)
+    expect(second[0]).toBe(clip.id)
+    expect(second[1]).toEqual({
+      crop: { left: 0.2, top: 0, right: 0, bottom: 0 },
+      transform: { ...clip.transform, x: 0.55 + 96 / 1920, y: 0.5 },
+    })
+    expect(second[2]).toBe(true)
   })
 
   it('one undo takes the crop off and leaves the mask on', () => {
@@ -1169,6 +1226,172 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     act(() => store().undo())
     expect(clipNow(clip.id).crop).toBeUndefined()
     expect(clipNow(clip.id).mask).toEqual({ kind: 'circle' })
+  })
+
+  // ESCSUITE-171. The inspector used to write `{ crop }` and nothing else while
+  // the on-canvas handles wrote `{ crop, transform }` through `cropWriteFor` —
+  // so the same inset reached from the two surfaces put the picture in two
+  // different places, and the Crop section's Reset left a handle drag's
+  // compensating centre behind for good. All four writers (the sliders, the
+  // number fields, the presets and Reset/None) now go through the one
+  // `cropWriteFor` the handles use, rebased from the clip's CURRENT crop and
+  // transform — each inspector write is its own gesture.
+  //
+  // Measured through `getOverlayBounds`, which is the one box the renderer, the
+  // selection chrome, the hit test and the marquee all read: a 400x200 source at
+  // scale 1 in the 1920x1080 project sits at 760...1160 across.
+  describe('keeps the edges it is not changing where they are (ESCSUITE-171)', () => {
+    const SMALL: SourceVideo = { ...video, id: 'small', width: 400, height: 200 }
+    const PROJECT = { width: 1920, height: 1080 }
+
+    /** A clip on the 400x200 source, selected. */
+    function smallClip(): Clip {
+      store().addSourceVideo(SMALL)
+      store().addClipToTimeline(
+        { id: 'small1', sourceVideoId: SMALL.id, name: 'small1', startTime: 0, endTime: 2, duration: 2 },
+        undefined,
+        0
+      )
+      return select(store().project.timeline.clips.find((c) => c.id === 'small1')!)
+    }
+
+    let canvas: HTMLCanvasElement
+
+    beforeEach(() => {
+      canvas = document.createElement('canvas')
+      canvas.width = PROJECT.width
+      canvas.height = PROJECT.height
+    })
+
+    /** Where the drawn picture's left and right edges are, in project pixels. */
+    function edges(id: string): [number, number] {
+      const bounds = getOverlayBounds(
+        clipNow(id),
+        canvas,
+        0,
+        useEditorStore.getState().sourceVideos,
+        PROJECT
+      )!
+      return [bounds.centerX - bounds.width / 2, bounds.centerX + bounds.width / 2]
+    }
+
+    /**
+     * One crop-handle drag, written exactly as `useCropHandleGesture` writes it:
+     * the gesture's own arithmetic, `cropUpdateFor`, then `cropWriteFor`. The
+     * drag path is not what this ticket changes — it is the path the inspector
+     * now has to agree with.
+     */
+    function dragHandle(id: string, handle: CropHandle, delta: { x: number; y: number }): void {
+      const live = clipNow(id)
+      const next = cropForHandleMove(
+        live.crop,
+        handle,
+        sourceDelta(delta, live.transform),
+        SMALL
+      )
+      const update = cropUpdateFor(next, SMALL)!
+      store().updateClip(
+        id,
+        cropWriteFor(
+          { crop: live.crop, transform: live.transform },
+          update.crop,
+          SMALL,
+          PROJECT,
+          cropCompensatesCentre(live.animation)
+        )
+      )
+    }
+
+    it('puts the picture back where it started when Reset follows a handle crop', () => {
+      const clip = smallClip()
+      const { result } = mount()
+      expect(edges(clip.id)).toEqual([760, 1160])
+
+      // The `w` handle pulled 100 project pixels to the right: the left edge
+      // follows the pointer and the right edge stays put.
+      dragHandle(clip.id, 'w', { x: 100, y: 0 })
+      const dragged = edges(clip.id)
+      expect(dragged[0]).toBeCloseTo(860, 6)
+      expect(dragged[1]).toBeCloseTo(1160, 6)
+
+      // The Crop section's header Reset, and its "None" preset, both report
+      // four zeroes.
+      act(() => result.current.handleCropChange({ left: 0, top: 0, right: 0, bottom: 0 }))
+
+      const [left, right] = edges(clip.id)
+      expect(left).toBeCloseTo(760, 6)
+      expect(right).toBeCloseTo(1160, 6)
+    })
+
+    it('pins the opposite edge when a slider crops one side', () => {
+      const clip = smallClip()
+      const { result } = mount()
+
+      act(() => result.current.handleCropChange({ left: 0.25, top: 0, right: 0, bottom: 0 }))
+
+      const [left, right] = edges(clip.id)
+      expect(right).toBeCloseTo(1160, 6)
+      expect(left).toBeCloseTo(860, 6)
+    })
+
+    it('pins the top when a slider crops the bottom', () => {
+      // The other axis, and the other sign: `cropCentreFor` moves y as well as x.
+      const clip = smallClip()
+      const { result } = mount()
+      const top = () => {
+        const bounds = getOverlayBounds(
+          clipNow(clip.id),
+          canvas,
+          0,
+          useEditorStore.getState().sourceVideos,
+          PROJECT
+        )!
+        return bounds.centerY - bounds.height / 2
+      }
+      expect(top()).toBe(440)
+
+      act(() => result.current.handleCropChange({ left: 0, top: 0, right: 0, bottom: 0.25 }))
+
+      expect(top()).toBeCloseTo(440, 6)
+    })
+
+    it('carries the rest of the transform across untouched', () => {
+      // `cropWriteFor` is handed the whole transform rather than a patch, so
+      // opacity, rotation and scaleLocked come across unchanged and the write
+      // stays one `updateClip`.
+      const clip = smallClip()
+      store().updateClipTransform(clip.id, { rotation: 0, opacity: 0.5, scaleLocked: false })
+      spies.updateClip.mockClear()
+      const { result } = mount()
+
+      act(() => result.current.handleCropChange({ left: 0.25, top: 0, right: 0, bottom: 0 }))
+
+      const transform = clipNow(clip.id).transform
+      expect(transform.opacity).toBe(0.5)
+      expect(transform.scaleLocked).toBe(false)
+      expect(transform.scaleX).toBe(1)
+      // 50 source pixels of centre displacement, over the project's width.
+      expect(transform.x).toBeCloseTo(0.5 + 50 / PROJECT.width, 10)
+    })
+
+    it('writes the crop alone on a clip whose placement is keyframed', () => {
+      // `cropCompensatesCentre`'s false arm, which the handles already honour: a
+      // static centre on an animated one fights the keyframes and loses at
+      // playback, so the inspector writes the crop by itself exactly as a drag
+      // does on such a clip (operator ruling, 2026-10-02).
+      const clip = smallClip()
+      store().setClipKeyframe(clip.id, 'x', { time: 0, value: 0.25, easing: 'linear' })
+      spies.updateClip.mockClear()
+      const { result } = mount()
+
+      act(() => result.current.handleCropChange({ left: 0.25, top: 0, right: 0, bottom: 0 }))
+
+      expect(spies.updateClip).toHaveBeenCalledWith(
+        clip.id,
+        { crop: { left: 0.25, top: 0, right: 0, bottom: 0 } },
+        false
+      )
+    })
   })
 
   it('opens crop mode on the selected clip', () => {
