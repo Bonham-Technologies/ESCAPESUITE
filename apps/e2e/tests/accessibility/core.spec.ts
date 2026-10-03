@@ -82,6 +82,12 @@ test.describe('ESCAPECRAFT Accessibility', () => {
   })
 
   test('recording UI passes axe-core audit', async ({ page }) => {
+    // ESCSUITE-201 K-7: an axe audit is a pure negative, satisfied by a page
+    // with nothing in it. Prove the idle recorder shell actually rendered
+    // before trusting zero violations — the live-take and dialog audits
+    // below cover the states this one does not reach.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+
     const results = await runAxeCheck(page)
 
     const seriousViolations = results.violations.filter(
@@ -95,6 +101,7 @@ test.describe('ESCAPECRAFT Accessibility', () => {
     // Check that buttons have accessible names
     const buttons = page.getByRole('button')
     const count = await buttons.count()
+    expect(count).toBeGreaterThan(0)
 
     for (let i = 0; i < count; i++) {
       const button = buttons.nth(i)
@@ -121,8 +128,9 @@ test.describe('ESCAPECRAFT Accessibility', () => {
     const toggles = page.locator('[role="switch"], [aria-pressed], [aria-checked]')
     const count = await toggles.count()
 
-    // Should have some toggles (webcam, mic, etc.)
-    expect(count).toBeGreaterThanOrEqual(0)
+    // The four source toggles (Screen/Webcam/Microphone/System Audio) are
+    // always present.
+    expect(count).toBeGreaterThan(0)
 
     for (let i = 0; i < count; i++) {
       const toggle = toggles.nth(i)
@@ -991,12 +999,50 @@ test.describe('Color Contrast', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
+    // A page with nothing rendered reports zero contrast violations too —
+    // prove the real recorder shell was there to audit.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],
     })
 
     const contrastViolations = results.violations.filter((v) => v.id === 'color-contrast')
     expect(contrastViolations).toHaveLength(0)
+  })
+
+  // Beside the idle-shell check above: the take-in-progress state draws the
+  // app's one red text (the "Recording" label and the running timer, see
+  // `ESCAPECRAFT Dialog and Recording Accessibility`'s own take-in-progress
+  // audits above), which a colour token tuned for the idle shell alone could
+  // still fail.
+  test('ESCAPECRAFT has adequate color contrast during a live take', async ({ page }) => {
+    test.setTimeout(60_000)
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await waitForAppReady(page, 'craft')
+
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+
+    const results = await runAxeCheck(page, {
+      includeTags: ['wcag2aa'],
+    })
+
+    const contrastViolations = results.violations.filter((v) => v.id === 'color-contrast')
+    expect(contrastViolations).toHaveLength(0)
+
+    await page.getByRole('button', { name: 'Stop recording' }).click()
   })
 
   test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
