@@ -352,6 +352,13 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    // ESCSUITE-172: an id that names no clip is nothing to do — the same
+    // "nothing to do" refusal removeClipFromTimeline (ESCSUITE-115) already
+    // gives, generalised here: the `map` below would match nothing and the
+    // `set` would still run, stamping `modified` and pushing an undo entry for
+    // an edit that touched nothing. The crop handle gesture's unmount-mid-drag
+    // flush is the real caller that reaches this (`useCropHandleGesture.ts`).
+    if (!clips.some((c) => c.id === clipId)) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map((clip) => {
@@ -434,6 +441,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   ) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map((clip) => {
@@ -564,6 +572,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
     if (isTrackLocked(tracks, trackId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip =>
@@ -597,6 +606,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip =>
@@ -623,6 +633,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   updateClipTransform: (clipId: string, transformUpdates: Partial<ClipTransform>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -674,6 +685,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   updateClipEffects: (clipId: string, effectsUpdates: Partial<ClipEffects>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -707,6 +719,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   updateClipTransition: (clipId: string, transitionUpdates: Partial<Transition>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -743,6 +756,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   updateClipAnimation: (clipId: string, animationUpdates: Partial<ClipAnimation>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {

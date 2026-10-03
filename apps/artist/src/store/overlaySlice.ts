@@ -162,6 +162,10 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    // ESCSUITE-172: the same map-and-set shape as updateClip — an id that
+    // names no clip matches nothing in the `map` below, and the `set` would
+    // still run.
+    if (!clips.some((c) => c.id === clipId)) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -192,6 +196,7 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {

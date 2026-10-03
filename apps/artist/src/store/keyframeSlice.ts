@@ -40,6 +40,10 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    // ESCSUITE-172: the same map-and-set shape as updateClip — an id that
+    // names no clip matches nothing in the `map` below, and the `set` would
+    // still run.
+    if (!clips.some((c) => c.id === clipId)) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -189,6 +193,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     // ESCSUITE-163 / m2: false, with nothing written and no undo entry pushed,
     // for an unknown clip, a property the clip has no keyframes on, or an
