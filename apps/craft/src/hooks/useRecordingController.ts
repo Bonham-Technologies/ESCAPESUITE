@@ -682,6 +682,14 @@ export function useRecordingController({
             // the ref has moved on — a newer take's recorder, or null after a
             // cancel or the unmount teardown — this take is not the app's any
             // more, and whatever moved it has already set the state it wanted.
+            //
+            // The invariant this rests on: an ordinary save still passes,
+            // because neither `handleStopRecording` nor this `onStop` disposes
+            // the recorder — the ref still points at `me` seconds later when
+            // the save settles — and every path that DOES move it off `me`
+            // writes a state on the way past. A stop that disposed the recorder
+            // would have to write `'idle'` itself, or this guard would strand
+            // every ordinary save in `'saving'`, which has no other way out.
             if (recorderRef.current !== me) return;
             setState('idle');
           }).finally(() => {

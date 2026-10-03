@@ -1014,7 +1014,8 @@ describe('useRecordingController callback identity (ESCSUITE-118)', () => {
 // held whenever it settled — a save takes a container repair, a metadata probe,
 // a thumbnail decode and two IndexedDB writes, which on a multi-MB take and a
 // slow disk is seconds. Anything that took the app out of 'saving' in that
-// window (Escape used to; the cancel handler still does) left Record live, and
+// window (Escape used to; the handler itself still would, which is how this
+// suite reaches it — no control in the UI calls it in 'saving') left Record live, and
 // the finished save's own 'idle' then landed on the take started after it:
 // recording, with the store saying idle — no Stop, no Cancel, and a Record
 // click that would reassign `recorderRef.current` over a recorder nobody could
@@ -1048,9 +1049,9 @@ describe('useRecordingController a save that completes (ESCSUITE-174)', () => {
 
   /**
    * Stop take A into a save that is still running, cancel out of 'saving'
-   * through the handler Escape *used* to reach — the point being that this
-   * clobber is not Escape's alone — and start take B. Hands back both
-   * recorders and the save's settle.
+   * through the handler Escape *used* to reach — the point being that the
+   * clobber is a property of the completion rather than of the key — and start
+   * take B. Hands back both recorders and the save's settle.
    */
   async function stopIntoHeldSaveThenStartAnother(result: { current: RecordingController }) {
     const settle = heldSave()
