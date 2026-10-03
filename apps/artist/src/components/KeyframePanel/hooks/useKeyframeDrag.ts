@@ -74,6 +74,20 @@ interface DragState {
 
 const SNAP_THRESHOLD_PX = 5;
 
+/**
+ * A hair past `KEYFRAME_TIME_EPSILON` itself, so the clamped landing clears
+ * the backstop's own `< KEYFRAME_TIME_EPSILON` check with room to spare.
+ * `occupiedTime ± KEYFRAME_TIME_EPSILON` lands exactly on the window's edge
+ * in exact arithmetic, but floating point does not always agree — e.g.
+ * `Math.abs(3 - (3 + 0.001))` comes back `0.0009999999999998899`, which IS
+ * `< 0.001`, so the exact boundary occasionally reads as still-occupied and
+ * the backstop (correctly, on its own terms) refuses a landing the clamp
+ * meant to allow. Nine orders of magnitude below the epsilon it rides on, so
+ * it never changes which times are "near" one another, including in the
+ * handful of tests that pin an exact clamped value with `toBeCloseTo`.
+ */
+const CLAMP_MARGIN = 1e-9;
+
 const IDLE_DRAG_STATE: DragState = {
   isDragging: false,
   keyframe: null,
@@ -164,8 +178,8 @@ export function useKeyframeDrag(
     for (const occupiedTime of occupiedTimesRef.current) {
       if (Math.abs(newTime - occupiedTime) < KEYFRAME_TIME_EPSILON) {
         newTime = newTime < occupiedTime
-          ? occupiedTime - KEYFRAME_TIME_EPSILON
-          : occupiedTime + KEYFRAME_TIME_EPSILON;
+          ? occupiedTime - KEYFRAME_TIME_EPSILON - CLAMP_MARGIN
+          : occupiedTime + KEYFRAME_TIME_EPSILON + CLAMP_MARGIN;
       }
     }
     newTime = Math.max(0, Math.min(newTime, clipDuration));
