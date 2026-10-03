@@ -1,7 +1,7 @@
 import http from 'node:http'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HEADERS_TIMEOUT_MS, REQUEST_TIMEOUT_MS, startServer } from './serve'
+import { createLimiter, HEADERS_TIMEOUT_MS, REQUEST_TIMEOUT_MS, startServer } from './serve'
 import type { ServeOptions, ServeHandle } from './serve'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
@@ -185,6 +185,24 @@ afterEach(async () => {
     if (server) await server.close()
   }
   vi.restoreAllMocks()
+})
+
+// Review finding 3: the rewritten drain test (close() tears down a half-sent body itself,
+// rather than letting it reach the limiter after shutdown) took away the only path through the
+// server that ever reached createLimiter.run's own `if (closed)` guard — the limiter's own
+// documented contract, not just route()'s closing-503 check ahead of it. Exercised directly here
+// instead, alongside the queue tests below that already drive the false side.
+describe('createLimiter', () => {
+  it('rejects run() with the shutdown error after shutdown(), enqueuing nothing', async () => {
+    const limiter = createLimiter(1, 10)
+    limiter.shutdown()
+
+    const limited = limiter.run(async () => 'done')
+
+    await expect(limited.promise).rejects.toThrow('server shutting down')
+    expect(limiter.queued).toBe(0)
+    expect(limiter.inFlight).toBe(0)
+  })
 })
 
 describe('GET /healthz', () => {
