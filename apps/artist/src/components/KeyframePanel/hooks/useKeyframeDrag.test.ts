@@ -208,57 +208,64 @@ describe('useKeyframeDrag', () => {
     })
   })
 
-  describe('refusing an occupied drop (ESCSUITE-167 / M6)', () => {
-    it('refuses a drop that would land on another keyframe, and says why', () => {
+  // ESCSUITE-183: a drop within KEYFRAME_TIME_EPSILON of another keyframe
+  // used to be refused outright on release — the diamond followed the
+  // pointer into the forbidden zone and snapped back, the shape ESCSUITE-88
+  // ruled against for a locked track's own drag. `handleMouseMove` now
+  // clamps `currentTime` on every move so the point can never enter a
+  // neighbour's epsilon window at all; these cases supersede (without
+  // deleting) the 167/M6 refusal tests above, which this clamp makes land
+  // instead of refuse.
+  describe('clamping away from an occupied neighbour (ESCSUITE-183, supersedes 167/M6\'s refuse-and-snap-back)', () => {
+    it('clamps a drop approaching a neighbour from the left, to just short of it', () => {
       const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 250) // exactly 5s, occupied by the keyframe at 5
+      moveMouse(TRACK_LEFT + 249.975) // raw 4.9995s — inside the 5s neighbour's window, from below
+      expect(result.current.dragState.currentTime).toBeCloseTo(4.999, 6)
       releaseMouse()
 
-      expect(onKeyframeMoved).not.toHaveBeenCalled()
-      // The hook forwards the raw text — no re-read mark. `KeyframePanel`,
-      // which owns the live region this is ultimately displayed in, is the
-      // one that alternates it (review round 1, MAJOR 1 + MINOR 6); that
-      // alternation is pinned at the panel level in KeyframePanel.test.tsx.
-      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith(
-        'Opacity keyframe not moved: another keyframe is at 5.00 seconds'
-      )
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      const [, , landedTime] = onKeyframeMoved.mock.calls[0]
+      expect(landedTime).toBeCloseTo(4.999, 6)
+      // The hook forwards '' once a drop actually lands — no refusal text.
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
-    it('forwards the identical text for two consecutive refusals — this hook does no deduplication of its own', () => {
-      const { result, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
-
-      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 250)
-      releaseMouse()
-      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 250)
-      releaseMouse()
-
-      expect(onAnnounce).toHaveBeenCalledTimes(2)
-      expect(onAnnounce.mock.calls[0][0]).toBe(onAnnounce.mock.calls[1][0])
-    })
-
-    it('clears a stale refusal once a later drop in the same row lands', () => {
+    it('clamps a drop approaching a neighbour from the right, to just past it', () => {
       const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 250) // exactly 5s — refused
-      releaseMouse()
-      expect(onAnnounce).toHaveBeenLastCalledWith(
-        'Opacity keyframe not moved: another keyframe is at 5.00 seconds'
-      )
-
-      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 300) // 6s — nowhere near a keyframe, lands
+      moveMouse(TRACK_LEFT + 250.025) // raw 5.0005s — inside the 5s neighbour's window, from above
+      expect(result.current.dragState.currentTime).toBeCloseTo(5.001, 6)
       releaseMouse()
 
-      expect(onKeyframeMoved).toHaveBeenCalledExactlyOnceWith('opacity', 0, 6)
-      expect(onAnnounce).toHaveBeenLastCalledWith('')
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      const [, , landedTime] = onKeyframeMoved.mock.calls[0]
+      expect(landedTime).toBeCloseTo(5.001, 6)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
-    it('leaves the keyframe at its original time when the drop is refused', () => {
+    it('clamps two consecutive drags toward the same neighbour independently', () => {
+      const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 249.975) // 4.9995s, clamps to 4.999
+      releaseMouse()
+      act(() => result.current.startDrag('opacity', keyframe(4.999), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 249.975) // still 4.9995s raw, still clamps to 4.999 (no move)
+      releaseMouse()
+
+      // The second gesture lands exactly where it started, so it reports no
+      // move at all — the clamp recomputes its occupied list fresh each
+      // `startDrag`, which is what makes landing at 4.999 safe a second time.
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(onAnnounce).not.toHaveBeenCalledWith(
+        expect.stringContaining('another keyframe')
+      )
+    })
+
+    it('leaves the dragState idle once a clamped drop lands', () => {
       const { result } = render({ allKeyframeTimes: [1, 5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
@@ -274,7 +281,7 @@ describe('useKeyframeDrag', () => {
       })
     })
 
-    it('does not refuse a drop near, but not within epsilon of, a keyframe', () => {
+    it('does not clamp a drop near, but not within epsilon of, a keyframe', () => {
       const { result, onKeyframeMoved } = render({ allKeyframeTimes: [1, 5.5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
@@ -282,6 +289,23 @@ describe('useKeyframeDrag', () => {
       releaseMouse()
 
       expect(onKeyframeMoved).toHaveBeenCalledExactlyOnceWith('opacity', 0, 5)
+    })
+
+    // The release-time refusal in `handleMouseUp` is kept as a backstop (the
+    // same rule the keyboard's `nudgeTime` enforces for its own entry point)
+    // but should now be unreachable by a mouse drag, since the clamp above
+    // runs on every move first. Landing exactly on a neighbour used to be
+    // the refusal's own trigger case; it now lands clamped instead.
+    it('never announces the occupied-neighbour refusal from a mouse drag', () => {
+      const { result, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250) // exactly 5s — used to be refused outright
+      releaseMouse()
+
+      for (const call of onAnnounce.mock.calls) {
+        expect(call[0]).not.toContain('another keyframe is at')
+      }
     })
   })
 
