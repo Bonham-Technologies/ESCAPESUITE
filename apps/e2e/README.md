@@ -46,7 +46,9 @@ is part of the root `pnpm lint` and CI's `lint-and-typecheck` job.
 `playwright*.config.ts` files under `strict`, so a type error in a spec that no
 one selected still fails the build. It is part of the root `pnpm -r run
 typecheck` and CI's `lint-and-typecheck` job. The `.mjs` scripts are not in it —
-they are plain JavaScript and `pnpm test:scripts` covers the one with logic.
+they are plain JavaScript, and `pnpm test:scripts` covers the three with logic:
+`profile-top.mjs` (the `.cpuprofile` fold), `serve-dist.mjs` (the production-layout
+server's rewrite matching) and `perf-report.mjs` (the benchmark merge).
 
 ## Test Structure
 
