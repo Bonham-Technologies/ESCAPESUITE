@@ -18,6 +18,15 @@ test.describe('Camera Permission Denied', () => {
     await mockCameraPermissionDenied(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
+
+    // ESCSUITE-177 review MAJOR 1: a real assertion that the mock actually
+    // installed, not just that the app rendered *something*. Denying the
+    // camera must not take Screen down with it — if `mockCameraPermissionDenied`
+    // had replaced `navigator.mediaDevices` with an object spread (which
+    // carries none of the platform's own methods, camera denial included),
+    // every source would read as unavailable and this button would be
+    // disabled.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
@@ -117,6 +126,15 @@ test.describe('Screen Share Permission Denied', () => {
     await mockScreenShareDenied(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
+
+    // ESCSUITE-177 review MAJOR 1: denying screen share alone must not take
+    // Webcam/Microphone down with it — that was the symptom of the broken
+    // object-spread layer (it replaced `navigator.mediaDevices` with just
+    // `{ getDisplayMedia }`, which reads as neither API existing for the
+    // other two sources).
+    await expect(page.getByRole('button', { name: 'Screen' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Webcam' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Microphone' })).toBeEnabled()
   })
 
   test('shows error UI when screen share denied', async ({ page }) => {

@@ -6,32 +6,70 @@ import { Page } from '@playwright/test'
 
 /**
  * Every init script below that wants to override a `navigator.mediaDevices`
- * method replaces the **whole** `mediaDevices` property, spread over
- * whatever is already there, rather than assigning one method on it
- * (`navigator.mediaDevices.foo = fn`) — because the assignment form is
- * silently lost on WebKit by the time the page's own scripts run
- * (ESCSUITE-177, findings-177.md's "Test-harness gaps" section 2).
- * `Navigator.prototype.mediaDevices` is a getter with no setter there; the
- * getter's returned instance *looks* mutable from inside the same script
- * (reading the property back shows the override, and the assignment does
- * not throw), but the override does not survive to a later script in the
- * same document — confirmed by probing Playwright's WebKit 26.6: an
- * `addInitScript` that does nothing but
- * `navigator.mediaDevices.getDisplayMedia = fn` reads back as the native
- * function once the page's own script asks, even though a sibling
- * `window.__probe = ...` write in the very same script survives.
- * `Object.defineProperty(navigator, 'mediaDevices', { value: {...} })` does
- * survive, because it replaces the getter outright instead of mutating what
- * it returns. Chromium and Firefox tolerate either form, so this one shape
- * is used everywhere rather than carrying two code paths.
+ * method replaces the **whole** `mediaDevices` property rather than
+ * assigning one method on it (`navigator.mediaDevices.foo = fn`) — in the
+ * committed specs that used the assignment form, the override was
+ * demonstrably not in effect by the time the app called it (the WebKit
+ * recording specs failed with the browser's own `NotAllowedError`, which only
+ * fires from the native `getUserMedia`). A minimal repro of the bare
+ * assignment on a fresh page does not reproduce a dropped override on any of
+ * the three engines, so the precise mechanism is not established — but
+ * `Object.defineProperty(navigator, 'mediaDevices', { value: {...} })` is
+ * strictly more robust regardless (it replaces the property outright instead
+ * of relying on whatever `navigator.mediaDevices` happens to return being
+ * mutable), so that is the form used everywhere here (ESCSUITE-177).
  *
- * Spreading `navigator.mediaDevices` (rather than passing a bare object
- * literal) is what lets `mockGetUserMedia`/`mockSyntheticMedia`'s own
- * override layer on top of `mockMediaDevices`'s `enumerateDevices` instead
- * of erasing it: `addInitScript` calls run in registration order against
- * the same document, so by the time the second one runs, the first one's
- * replacement object is what `navigator.mediaDevices` already reads back.
+ * `{ ...navigator.mediaDevices, ...overrides }` is **not** that: `MediaDevices`'
+ * own methods live on `MediaDevices.prototype`, and object spread copies only
+ * *own enumerable* properties, of which a fresh `navigator.mediaDevices` has
+ * none — `Object.keys({ ...navigator.mediaDevices })` is `[]` on all three
+ * engines. Every override below therefore goes through
+ * `window.__layerMediaDevices(overrides)`, installed once per document by
+ * `installMediaDevicesLayer()` (idempotent — a second call's init script sees
+ * the helper already there and does nothing), which *walks the prototype
+ * chain* binding each native method to the original object before layering
+ * `overrides` on top:
+ *
+ *     for (let o = native; o && o !== Object.prototype; o = getPrototypeOf(o))
+ *       for (const key of getOwnPropertyNames(o)) layered[key] = bind(native[key])
+ *
+ * `Object.create(native)` is not a substitute — a native method invoked with
+ * `this` bound to a derived object throws "Illegal invocation". Binding is
+ * also why every override layers onto whatever is already there instead of
+ * erasing it: `mockGetUserMedia`/`mockSyntheticMedia`'s `getUserMedia`/
+ * `getDisplayMedia` land on top of `mockMediaDevices`'s `enumerateDevices`,
+ * and `error-mocks.ts`'s wrappers land on top of a real, callable
+ * `getUserMedia` to fall back to.
  */
+export async function installMediaDevicesLayer(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __layerMediaDevices?: (overrides: Record<string, unknown>) => void
+    }
+    if (w.__layerMediaDevices) return
+
+    w.__layerMediaDevices = (overrides: Record<string, unknown>) => {
+      const native = navigator.mediaDevices as unknown as Record<string, unknown>
+      const layered: Record<string, unknown> = {}
+      for (
+        let proto: object | null = native;
+        proto && proto !== Object.prototype;
+        proto = Object.getPrototypeOf(proto)
+      ) {
+        for (const key of Object.getOwnPropertyNames(proto)) {
+          if (key === 'constructor' || key in layered) continue
+          const value = native[key]
+          layered[key] =
+            typeof value === 'function'
+              ? (value as (...args: unknown[]) => unknown).bind(native)
+              : value
+        }
+      }
+      Object.assign(layered, overrides)
+      Object.defineProperty(navigator, 'mediaDevices', { value: layered, configurable: true })
+    }
+  })
+}
 
 /**
  * Report a camera and a microphone from `enumerateDevices`.
@@ -51,6 +89,7 @@ import { Page } from '@playwright/test'
  * Must be called BEFORE navigating.
  */
 export async function mockMediaDevices(page: Page) {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
     const enumerateDevices = async () =>
       [
@@ -59,10 +98,8 @@ export async function mockMediaDevices(page: Page) {
         { deviceId: 'mock-speaker', kind: 'audiooutput', label: 'Mock Speaker', groupId: 'mock' },
       ].map((device) => ({ ...device, toJSON: () => device })) as MediaDeviceInfo[]
 
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: { ...navigator.mediaDevices, enumerateDevices },
-      configurable: true,
-    })
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ enumerateDevices })
   })
 }
 
@@ -88,10 +125,8 @@ export async function mockGetUserMedia(page: Page) {
     const getUserMedia = async () => mockStream as unknown as MediaStream
     const getDisplayMedia = async () => mockStream as unknown as MediaStream
 
-    Object.defineProperty(navigator, 'mediaDevices', {
-      value: { ...navigator.mediaDevices, getUserMedia, getDisplayMedia },
-      configurable: true,
-    })
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia, getDisplayMedia })
   })
 }
 
@@ -263,10 +298,8 @@ export async function mockSyntheticMedia(
         return new MediaStream(tracks)
       }
 
-      Object.defineProperty(navigator, 'mediaDevices', {
-        value: { ...navigator.mediaDevices, getDisplayMedia, getUserMedia },
-        configurable: true,
-      })
+      ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+        .__layerMediaDevices({ getDisplayMedia, getUserMedia })
     },
     { width, height, painter }
   )

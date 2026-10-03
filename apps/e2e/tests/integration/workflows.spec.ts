@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import {
+  mockGetUserMedia,
+  mockMediaRecorder,
+  grantMediaPermissions,
+  installMediaDevicesLayer,
+} from '../../utils/media-mocks'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -9,10 +14,12 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
 
     // Start in ESCAPECRAFT
     const craftPage = await context.newPage()
+    // Mock media APIs through the shared layering helper (ESCSUITE-177; see
+    // media-mocks.ts's module comment) rather than assigning one method on
+    // `navigator.mediaDevices` or spreading it, neither of which carries the
+    // platform's other methods forward.
+    await installMediaDevicesLayer(craftPage)
     await craftPage.addInitScript(() => {
-      // Mock media APIs. Replaces the whole `mediaDevices` property rather
-      // than assigning one method on it — the assignment form is silently
-      // lost on WebKit (ESCSUITE-177; see media-mocks.ts's mockMediaDevices).
       const getUserMedia = async () =>
         ({
           getTracks: () => [],
@@ -23,10 +30,8 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
           active: true,
         }) as unknown as MediaStream
 
-      Object.defineProperty(navigator, 'mediaDevices', {
-        value: { ...navigator.mediaDevices, getUserMedia },
-        configurable: true,
-      })
+      ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+        .__layerMediaDevices({ getUserMedia })
     })
 
     await craftPage.goto('http://localhost:5174')
