@@ -2393,6 +2393,35 @@ per gesture for the graph, none per move, red at 11 when rebuilt per move — wi
 byte-identical, and the other six `*.perf.test.ts` files, the three rerender pins and `perfScene.ts` are
 byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/shared` and `@escapesuite/plan` were re-measured 2026-10-03 for ESCSUITE-194, 197, 199 and 200
+(the combined-build script's entry guard survives a checkout path with a space and its layout check reads each
+emitted HTML for the scripts, stylesheets and worker chunk it references; `perf.yml` pins its Node version, the
+unreachable `ci-status` branch, a dead workflow comment, four unused shared root exports and the redundant
+`turbo.json` `build.env` are gone, the shared package's `build` task declares no outputs so `pnpm build` stops
+warning, and `standalone-release.yml`'s PR comment is awaited; `parseHostOrigin` warns once for a present-but-empty
+`?hostOrigin=` the way it does for every other unusable value; the GitHub Pages `CNAME` and the unreferenced
+`og-image.png` are deleted from the hub). **Shared**: 100.00 / 98.52 / **91.54** / 100.00 against the
+100.00 / 98.54 / 90.97 / 100.00 that `main` at `eeffcaaf` measures in the same sitting — branches up more than
+half a percent, statements down two hundredths, lines and functions still exactly 100. The base gives 131 / 144
+branches and this branch 130 / 142: the denominator fell by two and the uncovered column by one (13 → 12), because
+`packages/shared/src/index.ts`'s four exports — `ESCAPE_SUITE_VERSION`, `SHARED_DB_NAME`, `isBrowser` and
+`isProduction`, with no importer anywhere in the monorepo — went out with the one uncovered arm `isProduction`
+carried, and `config/index.ts` kept its 20 / 22: the `params.has('hostOrigin')` gate replaced the old `if (!value)`
+short-circuit one decision for one, reached from both sides by the absent, `?hostOrigin=` and bare `?hostOrigin`
+cases. The review's one finding was coverage, not behaviour: the first version read the value as
+`params.get('hostOrigin') ?? ''`, whose `null` side no caller can reach once `has()` is true, and the measurement
+showed it as the file's one new uncovered arm (20 / 22 → 21 / 24); it became a non-null assertion, and the file is
+back to its two pre-existing uncovered arms. Statements 271 / 275 → 268 / 272 and lines 258 → 255 are the deleted
+exports, the same 4 statements uncovered as before. **Branches cross a whole percent, so shared's branches floor
+goes 90 → 91** in `packages/shared/vitest.config.ts` and `scripts/coverage-report.mjs`; its floors are now
+100 / 98 / 91 / 100. The table row below had read 90.78 since ESCSUITE-176's paragraph recorded 90.97 without
+updating it, and is corrected. **Plan**: 100.00 / 100.00 / 100.00 / 100.00 on both trees — lines 73, statements
+74, branches 19, functions 23, every one covered — because the change there is two deleted public files and a
+corrected comment, none of which the measurement counts; the production-layout pin that neither path is served as
+itself any more (`apps/e2e/tests/production/plan-artefacts.spec.ts`) is outside vitest's measurement and was run
+once against `pnpm build:deploy`: 11 / 11 with the rest of that project. **No floor crossed downward**; plan's
+floors stay 100 / 100 / 100 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2401,7 +2430,7 @@ never above what the suite actually achieves:
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
-| `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
+| `@escapesuite/shared` | 100.00 | 98.52 | 91.54 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.57 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down

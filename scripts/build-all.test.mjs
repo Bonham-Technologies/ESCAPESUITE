@@ -16,12 +16,16 @@
  *   pnpm test:scripts
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 
 import { checkAppDist, isNonEmptyFile, verifyDistLayout } from './build-all.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const tmpDirs = [];
 function makeTmpDir() {
@@ -128,4 +132,107 @@ test('verifyDistLayout: reports every missing output when the whole dist is empt
   const dir = makeTmpDir();
   const missing = verifyDistLayout(dir);
   assert.equal(missing.length, 4);
+});
+
+/**
+ * ESCSUITE-194 follow-up (hunt I verification pass): the four-HTML check
+ * above passes for a `dist/` whose HTML survived but whose JS did not — a
+ * `turbo build` cache hit restores `outputs: ["dist/**"]` wholesale, but a
+ * narrowed glob, a moved task, or a plan build-target change could one day
+ * leave `dist/index.html` referencing a `/assets/index-<hash>.js` that was
+ * never copied, or `dist/artist/index.html` referencing a
+ * `decodeWorker-<hash>.js` chunk that is not beside it. `verifyDistLayout`
+ * now also scans each present entry HTML for its own same-origin
+ * script/stylesheet/worker references and checks those actually exist —
+ * scanning the HTML rather than hard-coding a filename pattern is what keeps
+ * this from going stale as the bundler's hashed output names change.
+ */
+test('verifyDistLayout: reports a hub asset referenced by index.html but missing from dist/assets', () => {
+  const dir = makeTmpDir();
+  makeCompleteDist(dir);
+  writeFileSync(
+    join(dir, 'index.html'),
+    '<html><head><link rel="stylesheet" crossorigin href="/assets/index-ABC123.css"></head>' +
+      '<body><script type="module" crossorigin src="/assets/index-ABC123.js"></script></body></html>'
+  );
+  // Deliberately absent: dist/assets/index-ABC123.js and dist/assets/index-ABC123.css
+  const missing = verifyDistLayout(dir);
+  assert.ok(missing.includes(join(dir, 'assets', 'index-ABC123.js')));
+  assert.ok(missing.includes(join(dir, 'assets', 'index-ABC123.css')));
+});
+
+test('verifyDistLayout: control — passes when the referenced hub assets are present', () => {
+  const dir = makeTmpDir();
+  makeCompleteDist(dir);
+  writeFileSync(
+    join(dir, 'index.html'),
+    '<html><head><link rel="stylesheet" crossorigin href="/assets/index-ABC123.css"></head>' +
+      '<body><script type="module" crossorigin src="/assets/index-ABC123.js"></script></body></html>'
+  );
+  mkdirSync(join(dir, 'assets'), { recursive: true });
+  writeFileSync(join(dir, 'assets', 'index-ABC123.js'), 'console.log(1)');
+  writeFileSync(join(dir, 'assets', 'index-ABC123.css'), 'body{}');
+  assert.deepEqual(verifyDistLayout(dir), []);
+});
+
+test('verifyDistLayout: reports the ARTIST decode worker chunk when artist/index.html references it but it is not on disk', () => {
+  const dir = makeTmpDir();
+  makeCompleteDist(dir);
+  writeFileSync(
+    join(dir, 'artist', 'index.html'),
+    '<html><script>new Worker(new URL(`decodeWorker-XYZ789.js`,import.meta.url))</script></html>'
+  );
+  // Deliberately absent: dist/artist/decodeWorker-XYZ789.js
+  const missing = verifyDistLayout(dir);
+  assert.ok(missing.includes(join(dir, 'artist', 'decodeWorker-XYZ789.js')));
+});
+
+test('verifyDistLayout: control — passes when the referenced ARTIST decode worker chunk is present', () => {
+  const dir = makeTmpDir();
+  makeCompleteDist(dir);
+  writeFileSync(
+    join(dir, 'artist', 'index.html'),
+    '<html><script>new Worker(new URL(`decodeWorker-XYZ789.js`,import.meta.url))</script></html>'
+  );
+  writeFileSync(join(dir, 'artist', 'decodeWorker-XYZ789.js'), 'self.onmessage=()=>{}');
+  assert.deepEqual(verifyDistLayout(dir), []);
+});
+
+/**
+ * `main()` is only meant to run when this file is executed directly, not when
+ * its helpers are imported for testing. The guard used to compare
+ * `import.meta.url` (which percent-encodes the path) against `process.argv[1]`
+ * (which does not) — so a checkout under a path containing a space (or any
+ * other character a URL encodes) made the guard false, and the script printed
+ * nothing and exited 0 having built nothing. These two cases run the real
+ * file as a subprocess, once from a plain directory and once from a directory
+ * whose name contains a space, and assert both reach the first line `main()`
+ * prints — `pnpm turbo build` has nothing to build here (no package.json), so
+ * both runs fail loudly after that line, which is the point: they ran at all.
+ */
+function runEntryGuardFrom(dirName) {
+  const base = mkdtempSync(join(tmpdir(), 'build-all-entry-'));
+  const scripts = join(base, dirName, 'scripts');
+  mkdirSync(scripts, { recursive: true });
+  cpSync(join(here, 'build-all.mjs'), join(scripts, 'build-all.mjs'));
+  try {
+    return execFileSync(process.execPath, [join(scripts, 'build-all.mjs')], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    // A real run reaches `pnpm turbo build` and fails (no package.json here),
+    // which is the point: it RAN.
+    return `${err.stdout ?? ''}${err.stderr ?? ''}`;
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+}
+
+test('entry guard: build-all.mjs runs when invoked from a path with no space (control)', () => {
+  assert.match(runEntryGuardFrom('plain'), /Building ESCAPE Suite for production/);
+});
+
+test('entry guard: build-all.mjs runs when invoked from a path containing a space', () => {
+  assert.match(runEntryGuardFrom('with space'), /Building ESCAPE Suite for production/);
 });

@@ -49,14 +49,22 @@ export const editorUrl = (params?: Record<string, string>): string => {
 // hand. Only a value `new URL()` cannot parse at all, one with an opaque
 // origin, or one on any scheme other than `http:`/`https:`, is ignored, with
 // one warning per page load so a misconfigured host is noticed but a
-// repeated call cannot flood the console.
+// repeated call cannot flood the console. The parameter being absent
+// entirely is the one case that stays silent — "no host named itself" is not
+// a misconfiguration — so `?hostOrigin=` and bare `?hostOrigin` (a host that
+// interpolated an `undefined` variable into its iframe URL, most likely)
+// warn just like any other unusable value rather than being treated as
+// absent (ESCSUITE-199).
 let hostOriginWarned = false
 
 export const parseHostOrigin = (
   search: string = typeof window !== 'undefined' ? window.location.search : ''
 ): string | null => {
-  const value = new URLSearchParams(search).get('hostOrigin')
-  if (!value) return null
+  const params = new URLSearchParams(search)
+  if (!params.has('hostOrigin')) return null
+  // `has()` was just true, so `get()` cannot return null here; the assertion
+  // says so to the type checker without a fallback no caller can reach.
+  const value = params.get('hostOrigin')!
 
   try {
     const url = new URL(value)

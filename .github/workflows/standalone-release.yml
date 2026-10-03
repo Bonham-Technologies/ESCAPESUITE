@@ -208,7 +208,7 @@ jobs:
               '_✅ Built after CI passed_'
             ].join('\n');
 
-            github.rest.issues.createComment({
+            await github.rest.issues.createComment({
               issue_number: parseInt(prNumber),
               owner: context.repo.owner,
               repo: context.repo.repo,

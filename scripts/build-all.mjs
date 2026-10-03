@@ -19,12 +19,27 @@
  * 0 total"), so a rename, a package split, or a task moved in `turbo.json`
  * would otherwise leave this script assembling (and reporting success for) a
  * `dist/` with an empty `craft/` or `artist/`. The checks below turn a
- * missing or empty app output into a fatal error instead.
+ * missing or empty app output into a fatal error instead — and, since
+ * ESCSUITE-194's verification pass, also catch a `dist/` whose entry HTML
+ * survived but whose referenced JS/CSS/worker chunks (`assets/*.js`,
+ * `assets/*.css`, ARTIST's `decodeWorker-*.js`) did not: `verifyDistLayout`
+ * scans each present entry HTML for its own same-origin references and
+ * checks those exist too, rather than trusting four non-empty HTML files
+ * alone.
  */
 
 import { execSync } from 'child_process';
-import { cpSync, mkdirSync, rmSync, existsSync, copyFileSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import {
+  cpSync,
+  mkdirSync,
+  rmSync,
+  existsSync,
+  copyFileSync,
+  statSync,
+  realpathSync,
+  readFileSync,
+} from 'fs';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -52,25 +67,116 @@ export function checkAppDist(appDistDir, requiredFile = 'index.html') {
 }
 
 /**
+ * Local JS/CSS asset paths an entry HTML references by an absolute,
+ * root-relative `src="/…"` or `href="/…"` — the shape Vite emits for a build
+ * that is not single-filed (ESCAPEPLAN's hub, the only one of the three with
+ * a separate `assets/` directory). Resolved against `distDir` itself, since
+ * the path is already root-relative.
+ */
+function absoluteAssetRefs(html) {
+  const refs = new Set();
+  for (const match of html.matchAll(/(?:src|href)="(\/[^"]+?\.(?:js|css))"/g)) {
+    refs.add(match[1]);
+  }
+  return [...refs];
+}
+
+/**
+ * Bare `decodeWorker-<hash>.js` filenames embedded inside an entry HTML's
+ * inlined JS as a `new URL('decodeWorker-<hash>.js', import.meta.url)`
+ * string — the hosted ESCAPEARTIST build's background-tab MP4 export
+ * worker, the one file `apps/artist/singleFileBuild.js` leaves as an
+ * ordinary fetchable chunk beside `index.html` rather than inlining (see the
+ * root CLAUDE.md's "Single-file Builds" note). Resolved against the HTML
+ * file's own directory, since that is where Vite emits it.
+ */
+function workerChunkRefs(html) {
+  const refs = new Set();
+  for (const match of html.matchAll(/\bdecodeWorker-[A-Za-z0-9]+\.js\b/g)) {
+    refs.add(match[0]);
+  }
+  return [...refs];
+}
+
+/**
+ * Every local script/stylesheet/worker chunk `htmlPath` itself references,
+ * that is missing or empty on disk. A `turbo build` cache hit restores
+ * `outputs: ["dist/**"]` wholesale, so this is latent rather than observed —
+ * but a narrowed output glob, a moved task, or a changed build target could
+ * leave an entry HTML's hashed references pointing at nothing, and the
+ * four-file check above would not notice: the HTML itself is present and
+ * non-empty, the JS it needs is simply gone. Scanning the emitted HTML for
+ * its own references, rather than hard-coding a filename pattern, is what
+ * keeps this from going stale as the bundler's hashed output names change
+ * between builds.
+ */
+function missingReferencedAssets(distDir, htmlPath) {
+  const html = readFileSync(htmlPath, 'utf8');
+  const missing = [];
+  for (const ref of absoluteAssetRefs(html)) {
+    const candidate = join(distDir, ref);
+    if (!isNonEmptyFile(candidate)) missing.push(candidate);
+  }
+  for (const ref of workerChunkRefs(html)) {
+    const candidate = join(dirname(htmlPath), ref);
+    if (!isNonEmptyFile(candidate)) missing.push(candidate);
+  }
+  return missing;
+}
+
+/**
  * Verifies the combined `dist/` this script assembles has the fixed shape
  * `vercel.json`'s `outputDirectory` promises: a plan root page, its 404
- * fallback, and one `index.html` each for craft and artist. Returns the
- * list of required paths that are missing or empty — an empty array means
- * every postcondition holds.
+ * fallback, and one `index.html` each for craft and artist — and that each
+ * of those entry HTML files that IS present actually has the JS/CSS/worker
+ * chunks it references. Returns the list of required or referenced paths
+ * that are missing or empty — an empty array means every postcondition
+ * holds.
  */
 export function verifyDistLayout(distDir) {
-  const required = [
+  const entryHtmlPaths = [
     join(distDir, 'index.html'),
     join(distDir, '404.html'),
     join(distDir, 'craft', 'index.html'),
     join(distDir, 'artist', 'index.html'),
   ];
-  return required.filter((path) => !isNonEmptyFile(path));
+  const missing = entryHtmlPaths.filter((path) => !isNonEmptyFile(path));
+
+  for (const htmlPath of entryHtmlPaths) {
+    if (isNonEmptyFile(htmlPath)) {
+      missing.push(...missingReferencedAssets(distDir, htmlPath));
+    }
+  }
+
+  return missing;
+}
+
+/**
+ * True when this file was executed, false when a test imported it.
+ *
+ * `import.meta.url` is already realpath'd, so argv[1] has to be too — otherwise
+ * a checkout under a path containing a space (or any other character a URL
+ * encodes) would compare unequal (the old guard's bug: `import.meta.url`
+ * percent-encodes the path while `process.argv[1]` does not) and the script
+ * would exit 0 having built nothing. When realpath itself fails (an unreadable
+ * parent directory, a container mount that refuses it) the lexical comparison
+ * is still right for the unsymlinked case, and a wrong `false` here is the
+ * worst outcome available: a build that silently publishes nothing.
+ */
+export function isDirectRun(entry = process.argv[1]) {
+  if (entry === undefined) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  const resolved = resolve(entry);
+  try {
+    return realpathSync(resolved) === modulePath;
+  } catch {
+    return resolved === modulePath;
+  }
 }
 
 // Only run the build when this file is executed directly (not when its
 // helpers are imported for testing).
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectRun()) {
   main();
 }
 
