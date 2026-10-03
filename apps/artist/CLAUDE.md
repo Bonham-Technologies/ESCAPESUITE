@@ -833,36 +833,69 @@ Clips support animated properties via keyframes:
   target, so a drag that snapped onto a neighbour, or onto the playhead where one sat, silently
   destroyed it. The exact case `useKeyframeGraphKeyboard.ts`'s `nudgeTime` already refused on
   purpose for the keyboard. Other keyframes' times are no longer snap candidates at all, and the
-  playhead stays one only when no keyframe already sits there. `handleMouseMove` clamps
-  `currentTime` away from every neighbour's epsilon window on every move, before that snap check
-  runs — approaching from the left stops at `neighbour - EPSILON`, from the right at
-  `neighbour + EPSILON` — rather than letting the diamond follow the pointer into the forbidden
-  zone and refusing the drop on release: ESCSUITE-88 ruled against exactly that shape for a locked
-  track's own drag, and this is the identical "follows the pointer, then snaps back" bug for a
-  different reason. `handleMouseUp`'s own occupied check is kept as a **backstop** rather than
-  deleted — the same rule `nudgeTime` enforces for its own, different entry point (a key repeat has
-  no pointer position to clamp) — but the hook's own tests confirm it is no longer reachable by a
-  mouse drag now that the clamp runs first. A small margin (`CLAMP_MARGIN`, `1e-9`) sits on top of
-  the epsilon in the clamped landing itself: `occupiedTime ± KEYFRAME_TIME_EPSILON` lands exactly
-  on the window's edge in exact arithmetic, but floating point does not always agree (e.g.
-  `Math.abs(3 - (3 + 0.001))` comes back `0.0009999999999998899`, which IS less than `0.001`), so
-  without the margin the backstop could occasionally refuse a landing the clamp meant to allow. The
-  occupied-times list is computed once, on `startDrag`, into a ref rather than recomputed (and
-  reallocated) on every pointer move (review round 1, MINOR 2), and the listener pair is likewise
-  bound once per gesture rather than rebuilt per move — the same fix the five timeline gesture
-  hooks already had — both pinned exactly by `KeyframePanel/keyframeGestures.perf.test.ts` (2
-  listener adds / 2 removes; the clamp is one more pass over the same per-gesture list, no
-  allocation, so this file needed no new case). The hook has no live region of its own: it reports
-  the raw refusal text (or `''` once a drop lands, clearing a stale refusal — review round 1, NIT
-  8) to an `onAnnounce` callback, and `KeyframePanel` is the one `role="status"` every property row
-  shares — only one diamond on one row can ever be dragging at a time, so eight per-row regions
-  would carry a message only one of them could ever produce (review round 1, MINOR 6) —
-  alternating it with the same `announceWithMark` helper `useKeyframeGraphKeyboard.ts`'s own
-  `announce` now calls, rather than a third hand-rolled copy of the zero-width-space mechanism
-  (review round 1, MAJOR 1): a second, textually identical refusal is audible, not silent.
+  playhead stays one only when it is a legal time itself — asked of the same windows the clamp
+  uses, so the snap cannot undo the clamp that just ran. `handleMouseMove` clamps `currentTime`
+  away from every neighbour's forbidden window on every move, before that snap check runs, rather
+  than letting the diamond follow the pointer into the zone and refusing the drop on release:
+  ESCSUITE-88 ruled against exactly that shape for a locked track's own drag, and this is the
+  identical "follows the pointer, then snaps back" bug for a different reason.
 
-  The graph's own point drag makes the identical clamp — see "The graph's own point drag refuses
-  an occupied time too" (ESCSUITE-179 / 183) below.
+  **The landing is always legal, or the move is ignored** — there is no release-time backstop any
+  more. The arithmetic lives in `utils/keyframeClamp.ts`, called by this drag and by the graph's
+  own point drag, so the decision cannot be right in one and wrong in the other (it was
+  duplicated byte-for-byte in both and had to be fixed twice; review of ESCSUITE-183, finding 3).
+  `occupiedWindows` brackets each occupied time with `± (KEYFRAME_TIME_EPSILON + CLAMP_MARGIN)`
+  and `clampToLegalTime` answers where one pointer position lands. Three things that decides are
+  worth naming:
+  - **The side is the side the pointer came from**, not which side of the neighbour the raw time
+    fell on: a drag from the left that lands bit-exactly on its neighbour stops **short** of it
+    rather than being thrown past it and swapping the two keyframes' order. The gesture's previous
+    position is what says which way it is travelling. A pointer that jumps clean **over** a
+    neighbour in one move is not clamped at all — crossing one is a legitimate reorder, and only
+    the window itself is forbidden.
+  - **At the clip's own bounds the other edge wins.** A neighbour at `clipDuration` — which every
+    clip with Animate Out = fade has, `generateOutPresetKeyframes` putting an opacity handle at
+    exactly `clipDuration` — pushes the point **left**, just inside the clip, rather than past the
+    end. (Choosing the side first and clamping to the bounds afterwards put it straight back onto
+    the neighbour, which is how the first version of this fix reopened the whole bug in its
+    commonest configuration.)
+  - **Two keyframes closer than twice the epsilon are one window**, because nothing can legally
+    land between them, and a pointer aimed into the gap comes back out the side it went in by.
+    When such a merged window covers the whole clip there is **no legal time at all**, and the
+    move is ignored outright: the diamond stays where it is, nothing is written, nothing is said.
+  - **The occupied list is the gesture's own snapshot**, taken on `startDrag`. A keyframe added or
+    removed by some other path mid-gesture — an undo from the keyboard, a preset toggled — is not
+    seen until the next gesture. Accepted limit (review of ESCSUITE-183, finding 6): it is what
+    makes every reader of the list provably agree, and nothing but another input device can change
+    the keyframes while a drag is live.
+
+  A small margin (`CLAMP_MARGIN`, `1e-9`, private to `utils/keyframeClamp.ts`) sits on top of the
+  epsilon in the window's own edges: `occupiedTime ± KEYFRAME_TIME_EPSILON` lands exactly on the
+  edge in exact arithmetic, but floating point does not always agree (e.g.
+  `Math.abs(3 - (3 + 0.001))` comes back `0.0009999999999998899`, which IS less than `0.001`), so
+  without it a landing the clamp meant to allow can still read as occupied to anything asking the
+  strict `< KEYFRAME_TIME_EPSILON` question — `moveClipKeyframe` itself among them. The windows
+  are built once, on `startDrag`, rather than recomputed (and reallocated) on every pointer move
+  (review round 1, MINOR 2), and the listener pair is likewise bound once per gesture rather than
+  rebuilt per move — the same fix the five timeline gesture hooks already had — all pinned exactly
+  by `KeyframePanel/keyframeGestures.perf.test.ts` (2 listener adds / 2 removes, one `.filter()`
+  per gesture, and since ESCSUITE-183 one `occupiedWindows` build per gesture for the graph's drag
+  as well; `clampToLegalTime` itself allocates nothing per move).
+
+  The hook has no live region of its own, and since ESCSUITE-183 nothing to put in one: it reports
+  `''` to its `onAnnounce` callback once a drop lands, and that is all it can ever say, because a
+  mouse drag has no illegal landing left to refuse. `KeyframePanel` still owns the one
+  `role="status"` every property row shares — only one diamond on one row can ever be dragging at
+  a time, so eight per-row regions would carry a message only one of them could ever produce
+  (review round 1, MINOR 6) — and the setter now goes straight to the row, the alternating
+  zero-width mark having nothing left to help a screen reader re-read. The occupied-time refusal
+  itself survives where it is still reachable: `nudgeTime`, for a keyboard that has no pointer
+  position to clamp, through the graph's own region and `announceWithMark` (module-local again,
+  beside the `nudgeTime` that raises it).
+
+  The graph's own point drag makes the identical clamp, through the identical helper — see "The
+  graph's own point drag cannot be dragged into an occupied neighbour's window either"
+  (ESCSUITE-179 / 183) below.
 - **A track's double-click adds at the curve's value, not the clip's static default
   (ESCSUITE-167 / m3)**. `KeyframeTrack.tsx`'s double-click used to call `onAddKeyframe` with no
   value, which fell back to `clip.transform[property]` (or `effects.blur` / `1` for volume) —
@@ -1023,29 +1056,27 @@ Clips support animated properties via keyframes:
   pointer there and refuse the drop on release — the exact "follows the pointer, then snaps back"
   shape ESCSUITE-88 ruled against for the lock, and unlike a trim, which (since ESCSUITE-161) stops
   dead at its neighbour rather than overshooting and bouncing back, this drag could not know it was
-  heading for an occupied time until the drop. It can now: the effect's own `handleMouseMove`
-  clamps `newTime` against a per-gesture `occupiedTimesRef` — `handleKeyframeMouseDown`'s own
-  snapshot of `keyframes`, taken once per gesture the same way `useKeyframeDrag.ts`'s diamond drag
-  already did, so the clamp costs one more pass over an array that already existed rather than a
-  recompute per pointer frame — stopping at `neighbour - EPSILON` approaching from the left and
-  `neighbour + EPSILON` from the right, before the point can ever enter the forbidden window.
-  `handleMouseUp` still checks the landed time as a **backstop** rather than deleting the check —
-  the identical rule `nudgeTime` enforces for the keyboard's different entry point — and refuses
-  outright, leaving the keyframe at its original time with nothing written (its value write refused
-  right along with it, since it was headed for a time the drag never actually reached), with the
-  graph's one live region saying why through `occupiedTimeMessage` (exported from
-  `hooks/useKeyframeGraphKeyboard.ts`, alongside `nudgeTime`'s own identical refusal) — reached
-  through `announce`, which the hook returns beside `nudgeMessage` so both refusals alternate
-  through the same `aria-live` region rather than a second one the test suite's
-  `getByRole('status')` could no longer resolve unambiguously — but this file's own tests confirm
-  the backstop is no longer reachable by a mouse drag now that the clamp runs on every move first.
-  `keyframes` here is every handle the graph draws, presets included, so a clamp (and, still, the
-  backstop) treats landing near a preset's handle the same way — for a different reason: the store
-  deletes nothing there (a preset is regenerated from `animation.in` / `out`, never stored as a
-  keyframe), but `getAllKeyframesForProperty` merges two handles within the same epsilon and the
-  custom one wins, so the preset's handle would simply vanish behind it. The same `CLAMP_MARGIN`
-  (`1e-9`) `useKeyframeDrag.ts` carries sits on top of the epsilon here too, for the identical
-  floating-point reason — see that file's doc comment.
+  heading for an occupied time until the drop. It can now: the effect's own `handleMouseMove` runs
+  the pointer's time through **the same `utils/keyframeClamp.ts` the diamond row drag calls**
+  (`occupiedWindows` once in `handleKeyframeMouseDown`, `clampToLegalTime` per move), so the two
+  drags cannot disagree about where a point may land — the rules, the bounds behaviour, the
+  exact-tie behaviour, the merged cluster and the snapshot limit are all the diamond paragraph's
+  above, and are documented there rather than twice. `keyframes` here is every handle the graph
+  draws, presets included, so the clamp treats a preset's handle as off limits too — for a
+  different reason: the store deletes nothing there (a preset is regenerated from
+  `animation.in` / `out`, never stored as a keyframe), but `getAllKeyframesForProperty` merges two
+  handles within the same epsilon and the custom one wins, so the preset's handle would simply
+  vanish behind it.
+
+  `handleMouseUp` no longer checks the landed time at all. With the clamp running on every move the
+  release-time refusal (ESCSUITE-179's own) had no reachable caller left, and it read the **live**
+  `keyframes` memo where the clamp read the gesture's snapshot, so the two could disagree about a
+  keyframe that arrived mid-gesture; it was deleted rather than kept and tested through a path
+  nothing can take (review of ESCSUITE-183, findings 4 and 6), and `keyframes` and `announce` left
+  the drag effect's dependency list with it. The graph's live region stays, for the keyboard:
+  `nudgeTime` is the one entry point with no pointer position to clamp, and it still refuses an
+  occupied time and still says so through `nudgeMessage`. What a mouse drag writes is a legal
+  landing, or — when the clip offers none — nothing at all.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin
