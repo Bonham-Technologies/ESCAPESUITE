@@ -246,20 +246,39 @@ describe('useKeyframeDrag', () => {
       expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
-    it('clamps two consecutive drags toward the same neighbour independently', () => {
+    // `occupiedTime + KEYFRAME_TIME_EPSILON` does not always land a distance
+    // of exactly `KEYFRAME_TIME_EPSILON` away in floating point — at a
+    // neighbour of 3, `Math.abs(3 - (3 + 0.001))` comes back
+    // `0.0009999999999998899`, which IS `< 0.001`, so `handleMouseUp`'s own
+    // occupied check would (correctly, on its own terms) refuse the landing
+    // the clamp meant to allow. `CLAMP_MARGIN` is what keeps this neighbour
+    // specifically from regressing.
+    it('clamps to a landing that survives floating-point rounding, at a neighbour where the bare epsilon would not', () => {
+      const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [3] })
+
+      act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 150.025) // raw 3.0005s — inside the 3s neighbour's window, from above
+      releaseMouse()
+
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      const [, , landedTime] = onKeyframeMoved.mock.calls[0]
+      expect(landedTime).toBeCloseTo(3.001, 6)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
+    })
+
+    it('clamps two separate gestures toward the same neighbour independently, one from each side', () => {
       const { result, onKeyframeMoved, onAnnounce } = render({ allKeyframeTimes: [1, 5, 9] })
 
       act(() => result.current.startDrag('opacity', keyframe(0), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 249.975) // 4.9995s, clamps to 4.999
+      moveMouse(TRACK_LEFT + 249.975) // 4.9995s — clamps from below
       releaseMouse()
-      act(() => result.current.startDrag('opacity', keyframe(4.999), mouseDownEvent()))
-      moveMouse(TRACK_LEFT + 249.975) // still 4.9995s raw, still clamps to 4.999 (no move)
+      act(() => result.current.startDrag('opacity', keyframe(9), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250.025) // 5.0005s — clamps from above
       releaseMouse()
 
-      // The second gesture lands exactly where it started, so it reports no
-      // move at all — the clamp recomputes its occupied list fresh each
-      // `startDrag`, which is what makes landing at 4.999 safe a second time.
-      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(2)
+      expect(onKeyframeMoved.mock.calls[0][2]).toBeLessThan(5)
+      expect(onKeyframeMoved.mock.calls[1][2]).toBeGreaterThan(5)
       expect(onAnnounce).not.toHaveBeenCalledWith(
         expect.stringContaining('another keyframe')
       )
