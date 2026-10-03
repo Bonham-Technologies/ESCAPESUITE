@@ -899,6 +899,45 @@ describe('nudging a crop handle from the keyboard', () => {
     expect(clipNow(clip.id).crop).toBeUndefined()
     expect(announced()).toBe('')
   })
+
+  it('writes nothing for a source with no dimensions (round 3 / ESCSUITE-173)', () => {
+    // `cropUpdateFor`'s OTHER refusal arm, now the only reachable one: since
+    // the aspect-lock clamp (ruling 2026-10-02) no handle move can ask
+    // `normaliseCrop` for a crop that leaves less than a source pixel, so the
+    // one remaining way in is a source with no dimensions at all — a stored
+    // 0x0 row (ESCSUITE-97's audio-only / unreadable-metadata shape). Against
+    // a 0-width, 0-height source, `normaliseCrop`'s "leaves a pixel" check
+    // divides by zero and refuses ANY non-empty crop outright.
+    //
+    // The clip already carries a crop from before its source lost its
+    // dimensions. Nudging `n` (which owns only `top`) sets `top` to 0 — a
+    // dimension of 0 collapses `clampMoved`'s own ceiling to 0 regardless of
+    // direction — which is a real change from the stored 0.2, so the nudge
+    // reaches the write rather than being swallowed by `cropsEqual`'s
+    // "nothing moved" short-circuit first; `left` carries over untouched, so
+    // the crop handed to `cropUpdateFor` is non-empty and is the refusal
+    // this pins, not the "already all zero" early return.
+    const clip = addClip('clip1', 0, 4)
+    store().updateClip(clip.id, { crop: { left: 0.3, top: 0.2, right: 0, bottom: 0 } })
+    const before = past()
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={{ ...video, width: 0, height: 0 }}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Crop top' }), { key: 'ArrowUp' })
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.3, top: 0.2, right: 0, bottom: 0 })
+    expect(past()).toBe(before)
+    expect(announced()).toBe('')
+  })
 })
 
 describe('the crop frame during a transition (ESCSUITE-147)', () => {
