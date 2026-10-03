@@ -152,13 +152,20 @@ export async function checkKeyboardNavigation(
 /**
  * Validate focus order matches expected sequence
  * @param page - Playwright Page object
+ * @param key - The key combination that advances focus (default `'Tab'`).
+ *   WebKit's default "Tab to links" preference is off (the native macOS
+ *   behaviour Playwright's WebKit inherits), so a plain Tab only visits form
+ *   controls there and never reaches a link-only region such as a nav bar;
+ *   the real-Safari equivalent for "tab to everything, links included" is
+ *   `'Alt+Tab'`, which a caller auditing a links-only region should pass on
+ *   WebKit instead of changing what every other caller presses.
  */
-export async function checkFocusOrder(page: Page): Promise<string[]> {
+export async function checkFocusOrder(page: Page, key = 'Tab'): Promise<string[]> {
   const focusOrder: string[] = []
 
   // Tab through the page and record focus order
   for (let i = 0; i < 50; i++) {
-    await page.keyboard.press('Tab')
+    await page.keyboard.press(key)
 
     const focusedElement = await page.evaluate(() => {
       const el = document.activeElement

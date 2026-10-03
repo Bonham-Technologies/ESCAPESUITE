@@ -15,6 +15,7 @@ import {
   checkLinkText,
 } from '../../utils/accessibility'
 import { ARTIST_URL, seedTextClip } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * The same one-second fixture the integration and perf suites import — the
@@ -29,7 +30,7 @@ const ARTIST_FIXTURE_MP4 = resolvePath(
 test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('landing page passes axe-core audit', async ({ page }) => {
@@ -77,7 +78,7 @@ test.describe('ESCAPECRAFT Accessibility', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('recording UI passes axe-core audit', async ({ page }) => {
@@ -168,7 +169,7 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     await page.getByRole('button', { name: /help - recording tips/i }).click()
     await expect(page.getByRole('dialog', { name: 'Recording Tips' })).toBeVisible()
@@ -176,13 +177,22 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
     expect(await seriousViolations(page)).toHaveLength(0)
   })
 
-  test('playback dialog passes axe-core audit', async ({ page }) => {
+  test('playback dialog passes axe-core audit', async ({ page, browserName }) => {
     test.setTimeout(120_000)
+    // ESCSUITE-177: a saved take is required before there is anything to
+    // play back, and Playwright's WebKit cannot store a Blob in IndexedDB at
+    // all on this platform (confirmed with a bare `objectStore.put(blob,
+    // key)`, no app code involved — `UnknownError: Error preparing Blob/File
+    // data to be stored in object store`).
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
 
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
     await waitForCapabilities(page)
 
     // A take has to exist before there is anything to play back.
@@ -213,13 +223,20 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
    */
   test('the library with a finished take passes axe-core audit, rows and conversion included', async ({
     page,
+    browserName,
   }) => {
     test.setTimeout(120_000)
+    // ESCSUITE-177: same WebKit Blob-in-IndexedDB gap as the playback dialog
+    // audit above — this test needs the recorded take saved too.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
 
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
     await waitForCapabilities(page)
 
     await page.getByRole('button', { name: 'Start recording' }).click()
@@ -278,7 +295,7 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
       await mockSyntheticMedia(page)
       await grantMediaPermissions(page)
       await page.goto(`http://localhost:5174/?theme=${theme}`)
-      await page.waitForLoadState('networkidle')
+      await waitForAppReady(page, 'craft')
       // applyTheme sets data-theme for light and *removes* it for dark, so the
       // two assertions are not symmetrical.
       if (theme === 'light') {
@@ -305,7 +322,7 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
 test.describe('ESCAPEARTIST Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('editor UI passes axe-core audit', async ({ page }) => {
@@ -384,10 +401,20 @@ test.describe('ESCAPEARTIST Accessibility', () => {
    * dropdowns that hide rows behind a choice are given one, so the conditional
    * rows are audited too.
    */
-  test("the clip inspector's controls have associated labels", async ({ page }) => {
+  test("the clip inspector's controls have associated labels", async ({ page, browserName }) => {
     // A real media import, then three axe passes over a panel of twenty-odd
     // controls.
     test.setTimeout(180_000)
+    // ESCSUITE-177: the "a media clip" step below imports a real file, which
+    // stores its bytes in IndexedDB — and Playwright's WebKit cannot store a
+    // Blob there at all on this platform (confirmed with a bare
+    // `objectStore.put(blob, key)`, no app code involved —
+    // `UnknownError: Error preparing Blob/File data to be stored in object
+    // store`).
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
 
     /**
      * Open every section that is currently closed.
@@ -450,7 +477,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     // `?suppressRestore=1` so an autosaved session from an earlier test in this
     // worker cannot put a dialog in front of the panel.
     await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     await test.step('a media clip', async () => {
       await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
@@ -703,7 +730,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
       })
     })
     await page.reload()
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const prompt = page.getByRole('dialog', { name: 'Resume Previous Session?' })
     await expect(prompt).toBeVisible()
@@ -798,7 +825,7 @@ test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
    */
   async function pulseAnimationName(targetPage: Page): Promise<string> {
     await targetPage.goto(`${ARTIST_URL}/?suppressRestore=1`)
-    await targetPage.waitForLoadState('networkidle')
+    await waitForAppReady(targetPage, 'artist')
 
     const progressFillClass = await targetPage.evaluate(() => {
       for (const sheet of Array.from(document.styleSheets)) {
@@ -861,9 +888,21 @@ test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
 
   test('no library text is smaller than 11px, and the media-type badge stays inside its thumbnail (ESCSUITE-4)', async ({
     page,
+    browserName,
   }) => {
+    // ESCSUITE-177: this test imports a real file (the inline 1x1 PNG
+    // below), which stores its bytes in IndexedDB — and Playwright's WebKit
+    // cannot store a Blob there at all on this platform (confirmed with a
+    // bare `objectStore.put(blob, key)`, no app code involved —
+    // `UnknownError: Error preparing Blob/File data to be stored in object
+    // store`).
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // A 1x1 PNG, inline rather than a fixture file: `processImageFile` needs
     // real, decodable image bytes (`<img>`'s `onload` has to fire), and an
@@ -922,7 +961,7 @@ test.describe('ESCAPEARTIST Media Library Motion and Type Scale', () => {
 test.describe('Color Contrast', () => {
   test('ESCAPEPLAN has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],
@@ -936,7 +975,7 @@ test.describe('Color Contrast', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],
@@ -948,7 +987,7 @@ test.describe('Color Contrast', () => {
 
   test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],

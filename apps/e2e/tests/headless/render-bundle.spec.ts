@@ -13,6 +13,20 @@ const FIX = resolve(__dirname, '../../fixtures/headless')
 // once — two workers building into the same dist-headless/ concurrently would race.
 test.describe.configure({ mode: 'serial' })
 
+// ESCSUITE-177: every test here seeds at least one source, which stores its
+// Blob in IndexedDB — and Playwright's WebKit cannot store a Blob there at
+// all on this platform, confirmed with a bare `objectStore.put(blob, key)`
+// from no app code: `UnknownError: Error preparing Blob/File data to be
+// stored in object store`. Skipping the whole file rather than one test:
+// with `mode: 'serial'` the first failure stops every test after it anyway
+// (observed here as "5 did not run"), and the headless bundle is a Chromium
+// target regardless (its own render service runs it there), so this is not
+// a loss of coverage.
+test.skip(
+  ({ browserName }) => browserName === 'webkit',
+  'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+)
+
 // Build the headless single-file bundle so the file:// loads below resolve.
 // CI runs the e2e suite without a separate headless build step, so build here
 // (fast: a no-UI Vite single-file build) to keep this spec self-contained.

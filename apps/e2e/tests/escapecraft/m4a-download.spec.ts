@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { canConvertToMp4, canEncodeAac } from '../../utils/webcodecs'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * ESCAPECRAFT downloads a recording's audio as M4A, converted in the page.
@@ -30,7 +31,7 @@ const CRAFT_URL = 'http://localhost:5174'
 /** Record one take, with or without the microphone, and wait for its row. */
 async function record(page: Page, options: { microphone: boolean }): Promise<void> {
   await page.goto(CRAFT_URL)
-  await page.waitForLoadState('networkidle')
+  await waitForAppReady(page, 'craft')
 
   // Capability detection is async; the source toggles stay disabled until it
   // finishes and a take started before then acquires no stream.
@@ -58,7 +59,18 @@ async function record(page: Page, options: { microphone: boolean }): Promise<voi
 }
 
 test.describe('ESCAPECRAFT M4A download', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, browserName }) => {
+    // ESCSUITE-177: Playwright's WebKit cannot store a Blob in IndexedDB at
+    // all on this platform — confirmed with a bare `objectStore.put(blob,
+    // key)` with no app code involved, which fails
+    // `UnknownError: Error preparing Blob/File data to be stored in object
+    // store`. Every test here calls `record()`, which needs the take saved
+    // before it returns, so there is nothing downstream of this skip to run.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
   })

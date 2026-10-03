@@ -2,23 +2,31 @@ import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { checkFocusOrder } from '../../utils/accessibility'
 import { seedTextClip } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
-  test('can tab through navigation links', async ({ page }) => {
+  test('can tab through navigation links', async ({ page, browserName }) => {
     const nav = page.locator('nav, header').first()
     const isVisible = await nav.isVisible().catch(() => false)
 
     if (isVisible) {
+      // ESCSUITE-177: WebKit's default "Tab to links" preference is off (the
+      // native macOS behaviour Playwright's WebKit inherits), so a plain Tab
+      // never reaches a link — the nav bar here is nothing but links. The
+      // real-Safari equivalent for "tab to everything" is Option+Tab
+      // (Alt+Tab in Playwright's key names).
+      const advance = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+
       // Focus the document
-      await page.keyboard.press('Tab')
+      await page.keyboard.press(advance)
 
       // Tab through and verify focus moves
-      const focusOrder = await checkFocusOrder(page)
+      const focusOrder = await checkFocusOrder(page, advance)
       expect(focusOrder.length).toBeGreaterThan(0)
     }
   })
@@ -95,7 +103,7 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('can tab through recording controls', async ({ page }) => {
@@ -241,7 +249,7 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
 test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('can tab through toolbar', async ({ page }) => {
@@ -357,7 +365,7 @@ test.describe('VideoPlayer Keyboard Shortcuts', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('Space toggles play/pause in VideoPlayer', async ({ page }) => {

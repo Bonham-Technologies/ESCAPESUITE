@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { canConvertToMp4 } from '../../utils/webcodecs'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * ESCAPECRAFT downloads a recording as MP4, converted in the page.
@@ -25,11 +26,22 @@ import { canConvertToMp4 } from '../../utils/webcodecs'
 const CRAFT_URL = 'http://localhost:5174'
 
 test.describe('ESCAPECRAFT MP4 download', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, browserName }) => {
+    // ESCSUITE-177: Playwright's WebKit cannot store a Blob in IndexedDB at
+    // all on this platform — confirmed with a bare `objectStore.put(blob,
+    // key)` with no app code involved, which fails
+    // `UnknownError: Error preparing Blob/File data to be stored in object
+    // store`. Every test here needs the recorded take saved before it can do
+    // anything else, so there is nothing downstream of this skip to run.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Capability detection is async; the source toggles stay disabled until it
     // finishes and a take started before then acquires no stream.
