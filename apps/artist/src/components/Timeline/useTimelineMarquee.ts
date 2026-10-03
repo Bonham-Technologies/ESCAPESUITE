@@ -166,6 +166,22 @@ export function useTimelineMarquee({
       }
 
       marqueeJustFinishedRef.current = true;
+      // The terminal click of this gesture fires wherever the release landed —
+      // not necessarily inside the track container, which is the only thing
+      // `useTimelineSeek`'s handler clears the flag from. A release outside it
+      // (over the header column, the ruler, anywhere) means no click ever
+      // reaches that handler for this gesture, and the flag would sit set
+      // until the user's next, unrelated click on bare track swallows it
+      // (ESCSUITE-168). A one-shot document listener catches that terminal
+      // click no matter where it lands and clears the flag there instead —
+      // consuming it as this gesture's own click rather than a future one.
+      document.addEventListener(
+        'click',
+        () => {
+          marqueeJustFinishedRef.current = false;
+        },
+        { once: true }
+      );
     } else {
       // No drag - let handleTrackClick handle the deselect + seek
     }

@@ -78,7 +78,7 @@ export function useTrackHeaderActions({
 
     const trackClips = clips.filter(c => c.trackId === trackId);
     if (trackClips.length > 0) {
-      if (!confirm(`Delete track with ${trackClips.length} clip(s)? This cannot be undone.`)) {
+      if (!confirm(`Delete track with ${trackClips.length} clip(s)? Ctrl+Z will bring it back.`)) {
         return;
       }
     }

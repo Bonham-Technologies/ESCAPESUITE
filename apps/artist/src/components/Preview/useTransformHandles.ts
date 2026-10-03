@@ -323,10 +323,19 @@ export function useTransformHandles({
 
     // Calculate keyframe time (relative to clip start)
     const keyframeTime = clip ? currentTime - clip.timelinePosition : 0;
+    // A drag can only START while the playhead sits inside the clip
+    // (hitTestHandles' own bounds check gates the handle that begins it), but
+    // nothing stops the playhead moving outside it mid-gesture — a transition
+    // or a keyboard seek the pointer does not own. Every other add path clamps
+    // to [0, duration] (ESCSUITE-88's `addAtPlayhead`, `useKeyframeDrag`'s
+    // `pixelsToTime`); a drag instead refuses the write outright once the
+    // playhead has left the clip, rather than writing a keyframe at a time
+    // nothing on the clip's own timeline can be scrubbed to (ESCSUITE-168).
+    const keyframeTimeInRange = clip ? keyframeTime >= 0 && keyframeTime <= clip.duration : false;
 
     // Helper to create keyframe or update overlay
     const applyChange = (property: 'x' | 'y' | 'rotation' | 'scaleX' | 'scaleY', value: number) => {
-      if (isKeyframeMode && clip) {
+      if (isKeyframeMode && clip && keyframeTimeInRange) {
         gestureHistory.commit((skipHistory) => setClipKeyframe(clip.id, property, {
           time: keyframeTime,
           value,

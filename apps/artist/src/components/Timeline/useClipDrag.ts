@@ -153,6 +153,17 @@ export function useClipDrag({
   const dragRef = useRef<DragState | null>(null);
   /** The snap targets, taken once on mousedown. */
   const snapPointsRef = useRef<number[]>([]);
+  /**
+   * Where the pointer grabbed the clip, in seconds into it — taken once on
+   * mousedown, like the snap points, but re-read into pixels at the *current*
+   * `pixelsPerSecond` on every move. `+`/`-` changes the zoom with no pointer
+   * of its own, so a zoom step mid-drag is a render this hook sees without a
+   * mousemove to go with it; caching the grab offset in pixels (as `dragState`
+   * does, for `TimelineTrack` to draw from) would leave it describing the OLD
+   * zoom's pixel grid, and the next move would subtract a now-wrong distance
+   * from a cursor position that moved zero pixels of its own (ESCSUITE-168).
+   */
+  const offsetSecondsRef = useRef(0);
   const trackArea = useTrackAreaCache();
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -171,8 +182,12 @@ export function useClipDrag({
     // Calculate new timeline position
     // Kept as the original two-step expression: `pointerTime` would sum the
     // same terms in a different order, and the extraction promised identical
-    // floating-point results.
-    const x = e.clientX - area.left + container.scrollLeft - drag.offsetX;
+    // floating-point results. The grab offset is re-derived from the current
+    // zoom here — one read, no allocation — rather than taken from
+    // `drag.offsetX`, which is fixed in pixels at whatever zoom the gesture
+    // started at (ESCSUITE-168).
+    const offsetXNow = offsetSecondsRef.current * pixelsPerSecond;
+    const x = e.clientX - area.left + container.scrollLeft - offsetXNow;
     let newPosition = pixelsToTime(x, pixelsPerSecond);
     newPosition = Math.max(0, newPosition);
 
@@ -354,9 +369,13 @@ export function useClipDrag({
 
       // Everything the moves will need, taken once: where the track area and
       // its rows are, and what the drag may snap to. Neither can change while
-      // the drag runs, which is why neither is re-taken per frame.
+      // the drag runs, which is why neither is re-taken per frame. The grab
+      // offset is taken once too, but as a time — the pixel distance above is
+      // only valid at this zoom, and `handleMouseMove` re-derives its own
+      // pixel figure from it at whatever zoom is current on each move.
       trackArea.begin(trackContainerRef.current, true);
       snapPointsRef.current = getSnapPoints(clips, clip.id);
+      offsetSecondsRef.current = pixelsToTime(offsetX, pixelsPerSecond);
 
       const initial: DragState = {
         clipId: clip.id,
@@ -380,6 +399,7 @@ export function useClipDrag({
       clips,
       trackArea,
       trackContainerRef,
+      pixelsPerSecond,
     ]
   );
 
