@@ -31,6 +31,21 @@ const DEFAULT_MAX_QUEUE = 64
 /** How long a client is told to wait before re-POSTing a job the queue had no room for. */
 const RETRY_AFTER_SECONDS = 5
 
+/**
+ * How long a whole request — headers plus body — may take once it starts arriving, before
+ * Node tears the connection down itself with its own 408. A job spec is a few hundred bytes;
+ * this is generous for that and nowhere near Node's own 300 s default, which would otherwise
+ * let a silent or trickling client hold a connection for five minutes doing nothing.
+ */
+export const REQUEST_TIMEOUT_MS = 30_000
+
+/**
+ * How long the request line and headers alone may take to arrive — the classic slowloris
+ * window. Shorter than REQUEST_TIMEOUT_MS (Node requires it), because a well-formed client
+ * sends its headers in one write; Node's own default is 60 s.
+ */
+export const HEADERS_TIMEOUT_MS = 10_000
+
 export interface ServeOptions {
   /** TCP port to bind. `0` picks a free one; read the real port back off the handle. */
   port: number
@@ -234,6 +249,11 @@ function readBody(req: http.IncomingMessage): Promise<string | undefined> {
     })
     req.on('end', () => resolve(over ? undefined : Buffer.concat(chunks).toString('utf8')))
     req.on('error', reject)
+    // A request destroyed before its body finished arriving — most commonly close() force-
+    // ending one still parked here during shutdown (see `bodiesInFlight` below) — settles the
+    // same way an oversized body does: no body, nothing to parse. 'close' also fires after a
+    // normal 'end', but by then the promise has already settled and this is a no-op.
+    req.on('close', () => resolve(undefined))
   })
 }
 
@@ -273,6 +293,11 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     if (openRequests === 0 && onIdle) onIdle()
   }
 
+  // Requests currently waiting on readBody — dispatched, but not yet parsed, so neither the
+  // limiter nor a route handler knows about them. Nothing bounds how long a client can
+  // withhold the rest of a body, so close() singles these out rather than waiting on them.
+  const bodiesInFlight = new Set<{ req: http.IncomingMessage; res: http.ServerResponse }>()
+
   const send = (res: http.ServerResponse, status: number, body: unknown): void => {
     if (res.writableEnded || res.headersSent || res.destroyed) return
     const headers: Record<string, string> = { ...JSON_HEADERS }
@@ -289,7 +314,19 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
       return 415
     }
 
-    const raw = await readBody(req)
+    const inFlight = { req, res }
+    bodiesInFlight.add(inFlight)
+    let raw: string | undefined
+    try {
+      raw = await readBody(req)
+    } finally {
+      bodiesInFlight.delete(inFlight)
+    }
+
+    // close() already answered this one (see bodiesInFlight) while its body was still
+    // arriving; nothing left to do.
+    if (res.writableEnded) return res.statusCode
+
     if (raw === undefined) {
       send(res, 413, { error: `job spec must be at most ${MAX_BODY_BYTES} bytes` })
       return 413
@@ -444,6 +481,12 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
       .catch(() => {})
   })
 
+  // Node's own defaults (300 s / 60 s) would let a silent or trickling client hold a
+  // connection for minutes; a job spec is a few hundred bytes and has no business taking that
+  // long to arrive at all.
+  server.requestTimeout = REQUEST_TIMEOUT_MS
+  server.headersTimeout = HEADERS_TIMEOUT_MS
+
   await new Promise<void>((resolve, reject) => {
     const onError = (err: unknown): void => reject(err)
     server.once('error', onError)
@@ -467,6 +510,21 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     // Connections parked between requests would otherwise keep the server open forever.
     server.closeIdleConnections()
     limiter.shutdown()
+
+    // A request whose body has not finished arriving cannot be waited on: nothing queued it,
+    // and nothing bounds how long a client can withhold the rest. Each one is force-ended here
+    // instead of kept alive until it either finishes or times out on its own — 408 while the
+    // response can still carry one, otherwise just the connection going away. Not awaited one
+    // by one; readBody's own 'close' listener settles it either way, which still lets the
+    // openRequests wait below reach zero.
+    for (const { req, res } of bodiesInFlight) {
+      if (!res.headersSent && !res.writableEnded) {
+        res.writeHead(408, JSON_HEADERS)
+        res.end(JSON.stringify({ error: 'request body did not finish arriving before shutdown' }) + '\n')
+      }
+      req.destroy()
+    }
+
     if (openRequests > 0) {
       await new Promise<void>((resolve) => {
         onIdle = resolve
