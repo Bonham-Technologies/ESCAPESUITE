@@ -514,6 +514,10 @@ describe('command sink delivery timeout', () => {
     const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
     const manifest = fakeManifest({ jobId: 'job-cmd-stubborn' })
 
+    // A generous timeoutMs (well past the freshly-spawned process's own startup) so the
+    // SIGTERM handler is registered before the signal arrives — otherwise the child dies to
+    // the ordinary default action instead of ever getting the chance to ignore it.
+    const timeoutMs = 500
     const script = `
       process.on('SIGTERM', () => {})
       setInterval(() => {}, 1000)
@@ -521,18 +525,18 @@ describe('command sink delivery timeout', () => {
     const sink = await getSink('command', {
       command: process.execPath,
       args: ['-e', script],
-      timeoutMs: 100,
+      timeoutMs,
     })
 
     const startedAt = Date.now()
     await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-      'command sink timed out after 100 ms',
+      `command sink timed out after ${timeoutMs} ms`,
     )
     // SIGTERM alone never ends this child, so settling here at all means the SIGKILL
     // escalation fired — roughly two seconds after the SIGTERM, per its own grace period.
     const elapsed = Date.now() - startedAt
-    expect(elapsed).toBeGreaterThanOrEqual(1900)
-    expect(elapsed).toBeLessThan(4000)
+    expect(elapsed).toBeGreaterThanOrEqual(timeoutMs + 1800)
+    expect(elapsed).toBeLessThan(timeoutMs + 5000)
   }, 10_000)
 
 })

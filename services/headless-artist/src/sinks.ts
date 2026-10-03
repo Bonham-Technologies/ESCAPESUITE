@@ -98,7 +98,15 @@ interface CommandConfig {
   command: string
   args: string[]
   env: Record<string, string>
+  timeoutMs: number
 }
+
+/**
+ * Delivery budget when `config.timeoutMs` is not given. `HEADLESS_TIMEOUT_MS` bounds only the
+ * render phase, so without one of these a delivery command that never exits would hold the
+ * worker slot forever.
+ */
+const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000
 
 function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
   const command = requireString(config, 'command', 'command')
@@ -120,8 +128,26 @@ function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
     throw new Error('command sink config.env values must be strings')
   }
 
-  return { command, args, env: env as Record<string, string> }
+  const rawTimeout = config.timeoutMs
+  if (
+    rawTimeout !== undefined &&
+    (typeof rawTimeout !== 'number' || !Number.isInteger(rawTimeout) || rawTimeout <= 0)
+  ) {
+    throw new Error('command sink requires config.timeoutMs (positive integer) when provided')
+  }
+  // Same 32-bit timer bound as the webhook sink's — see MAX_TIMEOUT_MS.
+  if (typeof rawTimeout === 'number' && rawTimeout > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `command sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
+  }
+  const timeoutMs = (rawTimeout as number | undefined) ?? DEFAULT_COMMAND_TIMEOUT_MS
+
+  return { command, args, env: env as Record<string, string>, timeoutMs }
 }
+
+/** How long a child is given to exit after SIGTERM before SIGKILL follows. */
+const COMMAND_KILL_GRACE_MS = 2000
 
 /** Last ~20 lines of stderr, for a useful failure message without dumping megabytes. */
 function tailLines(text: string, count: number): string {
@@ -162,13 +188,34 @@ function createCommandSink(config: CommandConfig): OutputSink {
           stderr = (stderr + chunk).slice(-STDERR_TAIL_CHARS)
         })
 
+        // The delivery's own budget — HEADLESS_TIMEOUT_MS only covers the render, so without
+        // this a command that never exits would hold the worker slot forever. SIGTERM first,
+        // then SIGKILL after a grace period for a child that ignores it.
+        let timedOut = false
+        let killTimer: NodeJS.Timeout | undefined
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true
+          child.kill('SIGTERM')
+          killTimer = setTimeout(() => child.kill('SIGKILL'), COMMAND_KILL_GRACE_MS)
+        }, config.timeoutMs)
+        const clearTimers = (): void => {
+          clearTimeout(timeoutTimer)
+          if (killTimer !== undefined) clearTimeout(killTimer)
+        }
+
         child.on('error', (err) => {
+          clearTimers()
           const why =
             (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'command not found' : err.message
           reject(new Error(`command sink "${config.command}" could not be run: ${why}`, { cause: err }))
         })
 
         child.on('close', (code, signal) => {
+          clearTimers()
+          if (timedOut) {
+            reject(new Error(`command sink timed out after ${config.timeoutMs} ms`))
+            return
+          }
           if (code === 0) {
             resolve()
             return
