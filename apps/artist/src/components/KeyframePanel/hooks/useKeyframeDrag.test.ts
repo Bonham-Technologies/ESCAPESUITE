@@ -323,6 +323,24 @@ describe('useKeyframeDrag', () => {
       expect(onKeyframeMoved).not.toHaveBeenCalled()
     })
 
+    it('commits once when two mouseups land before React re-renders', () => {
+      // The window pair is unbound by a re-render, so a second mouseup in the
+      // same batch still reaches the handler — with the ref already idle. It
+      // must neither commit again nor announce anything.
+      const { result, onKeyframeMoved, onAnnounce } = render()
+
+      act(() => result.current.startDrag('scaleX', keyframe(2), mouseDownEvent()))
+      moveMouse(TRACK_LEFT + 250)
+      act(() => {
+        window.dispatchEvent(new MouseEvent('mouseup'))
+        window.dispatchEvent(new MouseEvent('mouseup'))
+      })
+
+      expect(onKeyframeMoved).toHaveBeenCalledExactlyOnceWith('scaleX', 2, 5)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
+      expect(result.current.dragState.isDragging).toBe(false)
+    })
+
     it('stops tracking the mouse after the drag ends', () => {
       const { result } = render()
 
