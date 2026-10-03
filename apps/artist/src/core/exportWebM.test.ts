@@ -8,7 +8,7 @@
 // mixer.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToWebM } from './exportWebM'
-import { ExportAbortedError, ExportError } from './exportTypes'
+import { ExportAbortedError, ExportError, noAudioNote, type ExportResult } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
@@ -88,7 +88,7 @@ function run({
   signal,
   projectResolution,
   onProgress = vi.fn(),
-}: RunOptions = {}): Promise<Blob> {
+}: RunOptions = {}): Promise<ExportResult> {
   return exportToWebM(
     clips,
     sources,
@@ -155,11 +155,15 @@ describe('exportToWebM preconditions', () => {
 })
 
 describe('exportToWebM muxing', () => {
-  it('produces a WebM blob carrying the muxed bytes', async () => {
-    const blob = await run()
+  it('produces a WebM blob carrying the muxed bytes, and keeps the sound', async () => {
+    const { blob, audio } = await run()
 
     expect(blob.type).toBe('video/webm')
     expect(blob.size).toBe(128)
+    // ESCSUITE-175: `audio` reports whether the project's sound was *dropped*.
+    // This browser has an Opus encoder, so nothing was — whether or not the
+    // timeline had any sound in it.
+    expect(audio).toBe(true)
   })
 
   it('muxes a WebM with one VP9 video track', async () => {
@@ -1089,27 +1093,48 @@ describe('exportToWebM codec selection', () => {
 })
 
 describe('exportToWebM audio codec selection', () => {
-  it('drops the audio when Opus is not supported', async () => {
+  // ESCSUITE-175 fix round: these two arms used to drop the soundtrack behind a
+  // console.warn and still report `audio: true` — the same defect this ticket
+  // fixed on the MP4 side, left in place on WebM's. They now say so through
+  // `onProgress` and carry it out in the result.
+  it('says so, and reports it in the result, when Opus is not supported', async () => {
     mixAudio.mockResolvedValue(audioFor(0.2))
     webcodecs.audio.answer = () => false
+    const progress: ExportProgress[] = []
 
-    await run()
+    const { audio } = await run({ onProgress: (p) => progress.push(p) })
 
-    expect(warns).toHaveBeenCalledWith('Opus not supported, exporting without audio')
+    expect(progress.map((p) => p.message)).toContain(noAudioNote('webm'))
+    expect(audio).toBe(false)
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
     expect(webcodecs.audioEncoders).toHaveLength(0)
+    expect(warns).not.toHaveBeenCalledWith('Opus not supported, exporting without audio')
   })
 
-  it('drops the audio when the Opus support probe throws', async () => {
+  it('says the same thing when the Opus support probe throws', async () => {
     mixAudio.mockResolvedValue(audioFor(0.2))
     webcodecs.audio.answer = () => Promise.reject(new Error('probe blew up'))
+    const progress: ExportProgress[] = []
 
-    await run()
+    const { audio } = await run({ onProgress: (p) => progress.push(p) })
 
-    expect(warns).toHaveBeenCalledWith(
-      'Failed to check Opus support, exporting without audio:',
-      expect.objectContaining({ message: 'probe blew up' })
-    )
+    expect(progress.map((p) => p.message)).toContain(noAudioNote('webm'))
+    expect(audio).toBe(false)
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
+    expect(warns).not.toHaveBeenCalledWith(
+      'Failed to check Opus support, exporting without audio:',
+      expect.anything()
+    )
+  })
+
+  it('says nothing, and keeps reporting audio: true, when Opus is supported', async () => {
+    mixAudio.mockResolvedValue(audioFor(0.2))
+    const progress: ExportProgress[] = []
+
+    const { audio } = await run({ onProgress: (p) => progress.push(p) })
+
+    expect(progress.map((p) => p.message)).not.toContain(noAudioNote('webm'))
+    expect(audio).toBe(true)
+    expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video', 'audio'])
   })
 })

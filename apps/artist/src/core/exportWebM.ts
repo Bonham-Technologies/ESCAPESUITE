@@ -10,7 +10,7 @@ import {
   EncodedPacket,
 } from 'mediabunny';
 import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
-import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
+import type { ExportResult, MediaDrawOptions, ProgressCallback } from './exportTypes';
 import { projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
@@ -22,6 +22,11 @@ import {
   webMVideoCodecConfigs,
   waitForEncoderBackpressure,
   hasWebMEncodeGlobals,
+  EXPORT_AUDIO_CHANNELS,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  isAudioCodecSupported,
+  noAudioNote,
+  opusEncoderConfig,
   // Shared with exportMP4.ts, which re-exports it for existing callers — both
   // exporters import it from its actual home so neither depends on the other
   // (ESCSUITE-152 moved it here; ESCSUITE-29 Mechanism 1 is why this file
@@ -49,7 +54,7 @@ export async function exportToWebM(
   tracks?: Track[],
   signal?: AbortSignal,
   projectResolution?: { width: number; height: number }
-): Promise<Blob> {
+): Promise<ExportResult> {
   // WebM never decodes through WebCodecs (this exporter seeks
   // HTMLVideoElements directly), so only VideoEncoder/VideoFrame need to
   // exist — unlike `isMP4ExportSupported()`, which also needs VideoDecoder.
@@ -98,7 +103,7 @@ export async function exportToWebM(
 
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
-  const sampleRate = 48000;
+  const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
 
   // Probe VP9, falling back to VP8, at the real output size and bitrate —
   // before loading any media or constructing any encoder (ESCSUITE-29
@@ -156,7 +161,10 @@ export async function exportToWebM(
 
   // Slice audio to the selected time range
   // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
-  const audioChannels = 2;
+  const audioChannels = EXPORT_AUDIO_CHANNELS;
+  // Set only by the Opus probe below, and read only by the result: the one
+  // thing the caller cannot work out for itself (ESCSUITE-175 fix round).
+  let audioDropped = false;
   let audioData = fullAudioData && options.timeRange ? (() => {
     const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
     const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
@@ -214,27 +222,21 @@ export async function exportToWebM(
 
     // Opus, probed independently of video — a browser with no Opus encoder
     // still gets a working, silent WebM, the same way exportMP4.ts drops audio
-    // when AAC is unsupported rather than refusing the whole export.
+    // when AAC is unsupported rather than refusing the whole export. And, since
+    // ESCSUITE-175's fix round, it **says so**: this used to drop the whole
+    // soundtrack behind a `console.warn` and still report `audio: true`, which
+    // is the exact defect that ticket fixed on the MP4 side.
+    const opusConfig = opusEncoderConfig(sampleRate, EXPORT_AUDIO_CHANNELS, audioBitrate);
     let audioSource: EncodedAudioPacketSource | null = null;
     if (audioData) {
-      const opusConfig = {
-        codec: 'opus',
-        sampleRate,
-        numberOfChannels: 2,
-        bitrate: audioBitrate,
-      };
-      try {
-        const support = await AudioEncoder.isConfigSupported(opusConfig);
-        if (!support.supported) {
-          console.warn('Opus not supported, exporting without audio');
-          audioData = null;
-        } else {
-          audioSource = new EncodedAudioPacketSource('opus');
-          output.addAudioTrack(audioSource);
-        }
-      } catch (e) {
-        console.warn('Failed to check Opus support, exporting without audio:', e);
+      if (await isAudioCodecSupported(opusConfig)) {
+        audioSource = new EncodedAudioPacketSource('opus');
+        output.addAudioTrack(audioSource);
+      } else {
+        audioDropped = true;
         audioData = null;
+        log('codec', 'No Opus encoder: exporting without audio');
+        onProgress({ phase: 'encoding', progress: 15, message: noAudioNote('webm') });
       }
     }
 
@@ -276,12 +278,7 @@ export async function exportToWebM(
 
       openEncoders.push(audioEncoder);
 
-      await audioEncoder.configure({
-        codec: 'opus',
-        sampleRate,
-        numberOfChannels: 2,
-        bitrate: audioBitrate,
-      });
+      await audioEncoder.configure(opusConfig);
     }
 
     onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
@@ -456,7 +453,10 @@ export async function exportToWebM(
     if (!buffer) {
       throw new Error('Export failed: no data was written to buffer');
     }
-    return new Blob([buffer], { type: 'video/webm' });
+    // `audio` is false exactly when the Opus probe above refused: this browser
+    // cannot carry sound in a WebM. Whether this project *had* any is the
+    // dialog's question, not the exporter's — see `ExportResult`.
+    return { blob: new Blob([buffer], { type: 'video/webm' }), audio: !audioDropped };
   } catch (error) {
     // Clean up resources on error. The release is the same one the success path
     // made and runs at most once: the two paths are not exclusive — the

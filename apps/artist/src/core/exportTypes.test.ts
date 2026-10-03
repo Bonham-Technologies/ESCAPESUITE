@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   DEFAULT_GIF_FPS,
   DEFAULT_GIF_RESOLUTION,
+  EXPORT_NO_VIDEO_CODEC_REASON,
   EXPORT_NO_WEBCODECS_REASON,
   GIF_ALWAYS_AVAILABLE_NOTE,
   ExportAbortedError,
@@ -10,7 +11,10 @@ import {
   GIF_LONG_RANGE_SECONDS,
   GIF_LONG_RANGE_WARNING,
   GIF_RESOLUTIONS,
+  MP4_NO_CODEC_REASON,
   WEBM_NO_CODEC_REASON,
+  aacEncoderConfig,
+  audioCodecName,
   blendModeToCanvas,
   calculateTimelineDuration,
   checkAborted,
@@ -23,8 +27,14 @@ import {
   getSourceDimensions,
   gifFrameDelayMs,
   gifFrameRate,
+  exportedWithoutSoundReason,
+  hasMP4EncodeGlobals,
+  isAudioCodecSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
+  mp4VideoCodecConfigs,
+  noAudioNote,
+  opusEncoderConfig,
   loadImageElement,
   loadVideoElement,
   presetSuppressionFor,
@@ -330,8 +340,9 @@ describe('export support probes', () => {
   it('report supported when the three WebCodecs globals exist', async () => {
     const codecs = installWebCodecsDoubles()
     try {
-      expect(isMP4ExportSupported()).toBe(true)
-      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+      expect(hasMP4EncodeGlobals()).toBe(true)
+      await expect(isMP4ExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
     } finally {
       codecs.uninstall()
     }
@@ -340,8 +351,9 @@ describe('export support probes', () => {
   it('report unsupported when WebCodecs is absent', async () => {
     const restore = removeWebCodecsGlobals()
     try {
-      expect(isMP4ExportSupported()).toBe(false)
-      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
+      expect(hasMP4EncodeGlobals()).toBe(false)
+      await expect(isMP4ExportSupported(1920, 1080)).resolves.toEqual({ video: false, audio: false })
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: false, audio: false })
     } finally {
       restore()
     }
@@ -428,7 +440,7 @@ describe('isWebMExportSupported', () => {
     const codecs = installWebCodecsDoubles()
     try {
       codecs.encoder.answer = (c) => c.codec === 'vp8'
-      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
     } finally {
       codecs.uninstall()
     }
@@ -438,7 +450,180 @@ describe('isWebMExportSupported', () => {
     const codecs = installWebCodecsDoubles()
     try {
       codecs.encoder.answer = () => false
-      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: false, audio: true })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  // ESCSUITE-175 fix round: WebM's probe answers the same two questions MP4's
+  // does, for the same reason — a browser with VP9 and no Opus encoder exports
+  // a WebM with no sound in it, and the dialog can only say so if something
+  // asked.
+  it('answers audio: false when VP9 works but Opus does not', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.audio.answer = () => false
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: false })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('probes Opus at the one codec WebM writes', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      await isWebMExportSupported(1920, 1080)
+      expect(codecs.audio.configs[0]).toMatchObject({ codec: 'opus' })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+})
+
+describe('mp4VideoCodecConfigs', () => {
+  // The ladder exportMP4.ts used to build inline. Lifted into exportTypes.ts
+  // (ESCSUITE-175) so the dialog's up-front probe and the exporter's own
+  // `configure()` cannot ask different questions, the same reason
+  // `webMVideoCodecConfigs` exists.
+  it('walks quality to compatibility, hardware-preferred first, at the requested size', () => {
+    const configs = mp4VideoCodecConfigs(1280, 720, 5_000_000, 30)
+
+    expect(configs).toHaveLength(10)
+    expect(configs.map((c) => c.codec)).toEqual([
+      'avc1.640028',
+      'avc1.4d0028',
+      'avc1.42001f',
+      'avc1.640033',
+      'avc1.4d0033',
+      'avc1.640028',
+      'avc1.4d0028',
+      'avc1.42001f',
+      'avc1.640033',
+      'avc1.4d0033',
+    ])
+    expect(configs.slice(0, 5).every((c) => c.hardwareAcceleration === 'prefer-hardware')).toBe(true)
+    expect(configs.slice(5).every((c) => c.hardwareAcceleration === 'no-preference')).toBe(true)
+    expect(configs[0]).toEqual({
+      codec: 'avc1.640028',
+      width: 1280,
+      height: 720,
+      bitrate: 5_000_000,
+      framerate: 30,
+      latencyMode: 'quality',
+      hardwareAcceleration: 'prefer-hardware',
+    })
+  })
+})
+
+describe('audio encoder configs / isAudioCodecSupported', () => {
+  it('describes AAC-LC at the given rate, channel count and bitrate', () => {
+    expect(aacEncoderConfig(48000, 2, 192_000)).toEqual({
+      codec: 'mp4a.40.2',
+      sampleRate: 48000,
+      numberOfChannels: 2,
+      bitrate: 192_000,
+    })
+  })
+
+  it('describes Opus the same way, for WebM', () => {
+    expect(opusEncoderConfig(48000, 2, 192_000)).toEqual({
+      codec: 'opus',
+      sampleRate: 48000,
+      numberOfChannels: 2,
+      bitrate: 192_000,
+    })
+  })
+
+  it('answers true when the browser can configure it', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      await expect(isAudioCodecSupported(aacEncoderConfig(48000, 2, 192_000))).resolves.toBe(true)
+      expect(codecs.audio.configs[0]).toMatchObject({ codec: 'mp4a.40.2' })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('answers false when the browser refuses it', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.audio.answer = () => false
+      await expect(isAudioCodecSupported(aacEncoderConfig(48000, 2, 192_000))).resolves.toBe(false)
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('answers false when the probe itself throws', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.audio.answer = () => Promise.reject(new Error('probe blew up'))
+      await expect(isAudioCodecSupported(aacEncoderConfig(48000, 2, 192_000))).resolves.toBe(false)
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('answers false when there is no AudioEncoder at all', async () => {
+    const previous = (globalThis as { AudioEncoder?: unknown }).AudioEncoder
+    Reflect.deleteProperty(globalThis as object, 'AudioEncoder')
+    try {
+      await expect(isAudioCodecSupported(aacEncoderConfig(48000, 2, 192_000))).resolves.toBe(false)
+    } finally {
+      ;(globalThis as { AudioEncoder?: unknown }).AudioEncoder = previous
+    }
+  })
+
+  it('names each video format\u2019s audio codec', () => {
+    expect(audioCodecName('mp4')).toBe('AAC')
+    expect(audioCodecName('webm')).toBe('Opus')
+  })
+})
+
+describe('isMP4ExportSupported', () => {
+  // ESCSUITE-175: this used to be a synchronous read of which globals exist,
+  // so a browser with WebCodecs but no H.264 encoder read "MP4 available" and
+  // a browser with no AAC encoder (Firefox 155, measured 2026-10-02) exported
+  // a silent file with only a console.warn to show for it. It is now the same
+  // shape of real probe WebM's has had since ESCSUITE-22/29, and it answers
+  // the two questions separately because the two failures are different: no
+  // H.264 means no MP4 at all, no AAC means an MP4 with no sound.
+  it('falls down the H.264 ladder, and still answers video: true', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) => c.codec === 'avc1.42001f'
+      await expect(isMP4ExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('answers video: false when no H.264 profile can be configured', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = () => false
+      await expect(isMP4ExportSupported(1920, 1080)).resolves.toEqual({ video: false, audio: true })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('answers audio: false when H.264 works but AAC does not — the Firefox 155 case', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.audio.answer = () => false
+      await expect(isMP4ExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: false })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('probes at the size it is given', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      await isMP4ExportSupported(854, 480)
+      expect(codecs.encoder.configs[0]).toMatchObject({ width: 854, height: 480 })
     } finally {
       codecs.uninstall()
     }
@@ -454,6 +639,49 @@ describe('export reason sentences', () => {
 
   it('names the two browsers that can export, for the no-WebM-codec case', () => {
     expect(WEBM_NO_CODEC_REASON).toBe('This browser cannot encode WebM video — Chrome or Edge can.')
+  })
+
+  it('says MP4 is out and names what is left, for the no-H.264 case', () => {
+    expect(MP4_NO_CODEC_REASON).toBe(
+      'This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.'
+    )
+  })
+
+  it('covers the case where WebCodecs is present but neither video codec is', () => {
+    expect(EXPORT_NO_VIDEO_CODEC_REASON).toBe(
+      'This browser cannot encode WebM video or MP4 video — Chrome or Edge can.'
+    )
+  })
+
+  it('warns before the export, per format, naming the other format as the way out', () => {
+    expect(noAudioNote('mp4')).toBe(
+      'MP4 export in this browser will have no sound (no AAC encoder). WebM keeps the audio.'
+    )
+    expect(noAudioNote('webm')).toBe(
+      'WebM export in this browser will have no sound (no Opus encoder). MP4 keeps the audio.'
+    )
+  })
+
+  // A browser with no AudioEncoder at all makes both formats silent, and then
+  // "the other one keeps the audio" is false on both sides — the same trap
+  // EXPORT_NO_VIDEO_CODEC_REASON exists for on the video side. The clause is
+  // dropped rather than a sixth sentence invented.
+  it('drops the way-out clause when the other format is silent too', () => {
+    expect(noAudioNote('mp4', false)).toBe(
+      'MP4 export in this browser will have no sound (no AAC encoder).'
+    )
+    expect(noAudioNote('webm', false)).toBe(
+      'WebM export in this browser will have no sound (no Opus encoder).'
+    )
+  })
+
+  it('reports after the export, naming the codec the browser lacked', () => {
+    expect(exportedWithoutSoundReason('mp4')).toBe(
+      'Exported without sound — this browser has no AAC encoder.'
+    )
+    expect(exportedWithoutSoundReason('webm')).toBe(
+      'Exported without sound — this browser has no Opus encoder.'
+    )
   })
 })
 

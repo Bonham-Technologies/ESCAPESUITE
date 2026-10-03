@@ -6,7 +6,12 @@
 // container, and the audio mixer, whose own behaviour is covered next door.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToMP4, ExportError } from './exportMP4'
-import { ExportAbortedError } from './exportTypes'
+import {
+  ExportAbortedError,
+  MP4_NO_CODEC_REASON,
+  noAudioNote,
+  type ExportResult,
+} from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
@@ -88,7 +93,7 @@ function run({
   signal,
   projectResolution,
   onProgress = vi.fn(),
-}: RunOptions = {}): Promise<Blob> {
+}: RunOptions = {}): Promise<ExportResult> {
   return exportToMP4(
     clips,
     sources,
@@ -157,11 +162,15 @@ describe('exportToMP4 preconditions', () => {
 })
 
 describe('exportToMP4 muxing', () => {
-  it('produces an MP4 blob carrying the muxed bytes', async () => {
-    const blob = await run()
+  it('produces an MP4 blob carrying the muxed bytes, and says the sound survived', async () => {
+    const { blob, audio } = await run()
 
     expect(blob.type).toBe('video/mp4')
     expect(blob.size).toBe(128)
+    // ESCSUITE-175: `audio` says whether the project's sound was *dropped*, so
+    // an export in a browser with an AAC encoder reports true whether or not
+    // the timeline had any sound in it — nothing was lost.
+    expect(audio).toBe(true)
   })
 
   it('muxes an in-memory fast-start MP4 with one AVC video track', async () => {
@@ -291,13 +300,24 @@ describe('exportToMP4 codec selection', () => {
     expect(webcodecs.videoEncoders[0].configs[0]).toMatchObject({ codec: 'avc1.4d0028' })
   })
 
-  it('gives up when no H.264 profile is supported at all', async () => {
+  // ESCSUITE-175: the ladder is walked *before* the timeline's audio is mixed,
+  // the media loaded and the muxer started — it used to be consulted after all
+  // three, so a browser with no H.264 encoder paid for the whole export and
+  // then threw. The sentence is the dialog's own `MP4_NO_CODEC_REASON`, so the
+  // refusal reads the same before the click and after it.
+  it('gives up when no H.264 profile is supported at all, before doing any of the work', async () => {
     webcodecs.encoder.answer = () => false
+    mixAudio.mockResolvedValue(audioFor(0.2))
 
-    await expect(run()).rejects.toThrow(
-      'No supported H.264 codec found. MP4 export requires H.264 support.'
-    )
+    const error = await run().catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as Error).message).toBe(MP4_NO_CODEC_REASON)
     expect(webcodecs.encoder.configs).toHaveLength(10) // 5 profiles x 2 acceleration modes
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(media.videos).toHaveLength(0)
+    expect(getMediabunnyState().callLog).toEqual([])
+    expect(webcodecs.videoEncoders).toHaveLength(0)
   })
 
   it('encodes at the requested resolution and quality bitrate', async () => {
@@ -308,6 +328,24 @@ describe('exportToMP4 codec selection', () => {
       height: 720,
       bitrate: 10_000_000,
     })
+  })
+
+  // The other half of the probe-first contract (ESCSUITE-175): on the happy
+  // path too, both codecs are asked about before a single sample is mixed or a
+  // single media file read.
+  it('asks both codecs before the mixer or the loader runs', async () => {
+    let configsAtMixTime = -1
+    let aacProbesAtMixTime = -1
+    mixAudio.mockImplementation(async () => {
+      configsAtMixTime = webcodecs.encoder.configs.length
+      aacProbesAtMixTime = webcodecs.audio.configs.length
+      return null
+    })
+
+    await run()
+
+    expect(configsAtMixTime).toBe(1)
+    expect(aacProbesAtMixTime).toBe(1)
   })
 
   it('encodes at the project resolution when asked for it', async () => {
@@ -322,11 +360,15 @@ describe('exportToMP4 codec selection', () => {
 
 describe('exportToMP4 audio', () => {
   it('exports without an audio track when the mixer found no audio', async () => {
-    await run()
+    const { audio } = await run()
 
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
-    expect(webcodecs.audio.configs).toHaveLength(0)
+    // The AAC probe runs once up front regardless (ESCSUITE-175) — it is what
+    // decides whether to mix at all — but no encoder is built for a silent
+    // timeline, and nothing was dropped, so `audio` is true.
+    expect(webcodecs.audio.configs).toHaveLength(1)
     expect(webcodecs.audioEncoders).toHaveLength(0)
+    expect(audio).toBe(true)
   })
 
   it('adds an AAC track and encodes the mix in one-second chunks', async () => {
@@ -376,28 +418,45 @@ describe('exportToMP4 audio', () => {
     expect(webcodecs.audio.configs[0]).toMatchObject({ bitrate: 128_000 })
   })
 
-  it('drops the audio when AAC is not supported', async () => {
+  // ESCSUITE-175: this used to set `audioData = null` behind a console.warn and
+  // run on to "Export complete!", handing back a silent file with no visible
+  // trace. The probe is up front now, it says so through `onProgress`, the
+  // result carries `audio: false`, and the mix is never paid for at all.
+  it('says so, and skips the mix entirely, when AAC is not supported', async () => {
     mixAudio.mockResolvedValue(audioFor(0.2))
     webcodecs.audio.answer = () => false
+    const progress: ExportProgress[] = []
 
-    await run()
+    const { audio } = await run({ onProgress: (p) => progress.push(p) })
 
-    expect(warns).toHaveBeenCalledWith('AAC not supported, exporting without audio')
+    expect(progress.map((p) => p.message)).toContain(noAudioNote('mp4'))
+    expect(audio).toBe(false)
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
     expect(webcodecs.audioEncoders).toHaveLength(0)
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(warns).not.toHaveBeenCalledWith('AAC not supported, exporting without audio')
   })
 
-  it('drops the audio when the AAC support probe throws', async () => {
+  it('says the same thing when the AAC support probe throws', async () => {
     mixAudio.mockResolvedValue(audioFor(0.2))
     webcodecs.audio.answer = () => Promise.reject(new Error('probe blew up'))
+    const progress: ExportProgress[] = []
 
-    await run()
+    const { audio } = await run({ onProgress: (p) => progress.push(p) })
 
-    expect(warns).toHaveBeenCalledWith(
-      'Failed to check AAC support, exporting without audio:',
-      expect.objectContaining({ message: 'probe blew up' })
-    )
+    expect(progress.map((p) => p.message)).toContain(noAudioNote('mp4'))
+    expect(audio).toBe(false)
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
+    expect(mixAudio).not.toHaveBeenCalled()
+  })
+
+  it('still reports audio: true for an export that carried its sound', async () => {
+    mixAudio.mockResolvedValue(audioFor(0.2))
+
+    const { audio } = await run()
+
+    expect(audio).toBe(true)
+    expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video', 'audio'])
   })
 
   it('mixes the whole timeline even when only part of it is exported', async () => {

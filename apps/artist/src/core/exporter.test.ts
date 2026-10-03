@@ -35,18 +35,18 @@ afterEach(() => {
 })
 
 describe('export support probes', () => {
-  it('reports MP4 export as supported when all three WebCodecs APIs exist', () => {
+  it('reports MP4 export as supported when all three WebCodecs APIs exist', async () => {
     const webcodecs = installWebCodecsDoubles()
     restores.push(() => webcodecs.uninstall())
 
-    expect(isMP4ExportSupported()).toBe(true)
+    await expect(isMP4ExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
   })
 
   it('reports WebM export as supported when it can configure VP9', async () => {
     const webcodecs = installWebCodecsDoubles()
     restores.push(() => webcodecs.uninstall())
 
-    await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+    await expect(isWebMExportSupported(1920, 1080)).resolves.toEqual({ video: true, audio: true })
   })
 
   it.each(['VideoEncoder', 'VideoFrame'])(
@@ -56,8 +56,8 @@ describe('export support probes', () => {
       restores.push(() => webcodecs.uninstall())
       restores.push(removeGlobal(missing))
 
-      expect(isMP4ExportSupported()).toBe(false)
-      await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(false)
+      await expect(isMP4ExportSupported(1920, 1080)).resolves.toMatchObject({ video: false })
+      await expect(isWebMExportSupported(1920, 1080)).resolves.toMatchObject({ video: false })
     }
   )
 
@@ -69,8 +69,8 @@ describe('export support probes', () => {
     restores.push(() => webcodecs.uninstall())
     restores.push(removeGlobal('VideoDecoder'))
 
-    expect(isMP4ExportSupported()).toBe(false)
-    await expect(isWebMExportSupported(1920, 1080)).resolves.toBe(true)
+    await expect(isMP4ExportSupported(1920, 1080)).resolves.toMatchObject({ video: false })
+    await expect(isWebMExportSupported(1920, 1080)).resolves.toMatchObject({ video: true })
   })
 })
 

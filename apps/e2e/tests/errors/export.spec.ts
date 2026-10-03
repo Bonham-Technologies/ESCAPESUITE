@@ -126,19 +126,27 @@ test.describe('Codec Not Supported', () => {
   // ESCSUITE-22/29: WebCodecs exists here, but every isConfigSupported() call
   // answers false — the exact shape of browser the old naive check (global
   // existence only) could not tell apart from a working one, and the one the
-  // probe this ticket added exists to catch. The dialog's own `isMP4ExportSupported()`
-  // is a global-existence check only (unchanged by this ticket), so MP4 still
-  // reads "available" here even though it would fail the same way at export
-  // time — WebM's own real probe is what is under test.
-  test('says WebM cannot be encoded instead of offering a button that would fail', async ({ page }) => {
+  // probes exist to catch. Since ESCSUITE-175 MP4 has a real probe too, so this
+  // browser now refuses *both* video formats before any click, and the dialog
+  // says which of the two causes it is: WebCodecs is present here, so the
+  // "needs WebCodecs" sentence would be a lie and
+  // EXPORT_NO_VIDEO_CODEC_REASON is shown instead. GIF is still offered.
+  test('says neither video format can be encoded instead of offering buttons that would fail', async ({ page }) => {
     await seedTextClip(page)
     await openExportDialog(page)
 
     await expect(page.getByRole('button', { name: 'Download WebM' }).first()).toBeDisabled()
-    await expect(page.getByText(/This browser cannot encode WebM video/)).toBeVisible()
+    await expect(page.getByRole('alert')).toHaveText(
+      'This browser cannot encode WebM video or MP4 video — Chrome or Edge can. ' +
+        'GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.'
+    )
 
     await openExportAdvancedOptions(page)
     await expect(page.getByRole('radio', { name: /WebM/ })).toBeDisabled()
+    // ESCSUITE-175: before this, MP4 read "available" here and failed the same
+    // way the instant it was clicked.
+    await expect(page.getByRole('radio', { name: /MP4/ })).toBeDisabled()
+    await expect(page.getByRole('radio', { name: /GIF/ })).toBeEnabled()
   })
 })
 

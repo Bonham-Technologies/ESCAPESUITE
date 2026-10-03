@@ -98,7 +98,9 @@ async function render(
   // the fallback for an unrecognised value, which is what it has always been.
   const format: RenderMeta['format'] =
     options.format === 'webm' ? 'webm' : options.format === 'gif' ? 'gif' : 'mp4'
-  const blob = format === 'webm'
+  // The exporters hand back `{ blob, audio }` since ESCSUITE-175; the kit's
+  // manifest describes the bytes, so only the blob is read here.
+  const { blob } = format === 'webm'
     ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
     : format === 'gif'
       ? await exportToGIF(clips, sourceVideos, options, progress, tracks, undefined, resolution)

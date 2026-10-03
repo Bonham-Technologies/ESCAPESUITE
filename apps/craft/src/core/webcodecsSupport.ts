@@ -26,9 +26,11 @@ export function isWebCodecsRecordingSupported(): boolean {
  * from a track processor and has **no** `<video>`+canvas fallback. The primary
  * pipeline keeps its fallback because a take must record *something*; a second
  * hidden `<video>` and a second capture canvas is a cost the opt-in mode does
- * not need to pay, and every browser with WebCodecs shipped the track processor
- * alongside it. Firefox and Safari have neither, so the toggle is disabled
- * there with the reason said out loud (`utils/separateTracksReadiness.ts`).
+ * not need to pay. Firefox and Safari *do* have WebCodecs now (Firefox 155 and
+ * WebKit 26.6 both expose `VideoEncoder`, measured 2026-10-02 — see
+ * ESCSUITE-175) but neither ships `MediaStreamTrackProcessor`, so it is that
+ * second requirement, not WebCodecs, that disables the toggle there, with the
+ * reason said out loud (`utils/separateTracksReadiness.ts`).
  */
 export function canRecordSeparateTracks(): boolean {
   return isWebCodecsRecordingSupported() && 'MediaStreamTrackProcessor' in globalThis;

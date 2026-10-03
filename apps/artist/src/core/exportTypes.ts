@@ -219,9 +219,29 @@ export const blendModeToCanvas: Record<BlendMode, GlobalCompositeOperation> = {
 };
 
 /**
- * Check if WebCodecs export is supported
+ * Whether the three WebCodecs globals the MP4 pipeline needs exist —
+ * `VideoEncoder` to encode, `VideoFrame` to hand it frames, and `VideoDecoder`
+ * because MP4 (unlike WebM) decodes its sources through WebCodecs.
+ *
+ * A globals read, nothing more: it says whether there is an API to ask, not
+ * whether that API can encode anything. This used to be the whole of
+ * `isMP4ExportSupported()`, and the gap was the defect ESCSUITE-175 fixed — a
+ * browser with WebCodecs and no H.264 encoder read "MP4 available" and only
+ * found out mid-export, and a browser with no AAC encoder (Firefox 155,
+ * measured 2026-10-02) exported a silent file. The real probe is below; this is
+ * kept for the two callers that genuinely only need "is the API here at all":
+ * `exportToMP4`'s own door guard, and `isMP4ExportSupported`'s short-circuit.
+ *
+ * `ExportDialog` also reads it, for one narrow question: when *neither* video
+ * format can be exported, is that because WebCodecs is missing
+ * ({@link EXPORT_NO_WEBCODECS_REASON}) or because it is present and cannot
+ * configure either codec ({@link EXPORT_NO_VIDEO_CODEC_REASON})? Every
+ * combination that reaches that question is answered correctly by this
+ * predicate, because the only global it reads that WebM does not need is
+ * `VideoDecoder`, and a browser missing *only* `VideoDecoder` still exports
+ * WebM — so the "neither" branch is never reached there.
  */
-export function isMP4ExportSupported(): boolean {
+export function hasMP4EncodeGlobals(): boolean {
   return (
     typeof VideoEncoder !== 'undefined' &&
     typeof VideoDecoder !== 'undefined' &&
@@ -299,15 +319,29 @@ export function webMVideoCodecConfigs(
 }
 
 /**
- * A representative bitrate/framerate for the export dialog's up-front probe.
+ * A representative bitrate/framerate for the export dialog's up-front probes.
  * The dialog asks before the user has chosen a quality setting — `quality`
  * only scales bitrate, never which codecs exist — so one fixed, reasonable
- * figure is enough to answer "can this browser encode WebM at all", the same
- * reasoning CRAFT's own `probeMP4Support()` documents for probing at a
- * representative size instead of the take's own.
+ * figure is enough to answer "can this browser encode this format at all", the
+ * same reasoning CRAFT's own `probeMP4Support()` documents for probing at a
+ * representative size instead of the take's own. Shared by both video probes
+ * (ESCSUITE-175) so neither can drift from the other.
  */
-const WEBM_PROBE_BITRATE = 5_000_000;
-const WEBM_PROBE_FRAMERATE = 30;
+const EXPORT_PROBE_BITRATE = 5_000_000;
+const EXPORT_PROBE_FRAMERATE = 30;
+
+/**
+ * The audio bitrate the dialog's audio probes ask about: the `'medium'` quality
+ * setting's, because the probe runs before any quality is chosen and — as with
+ * the video bitrate above — the answer is about the codec, not the rate.
+ */
+const AUDIO_PROBE_BITRATE = 192_000;
+
+/** The sample rate every exporter mixes at, and every probe asks about. */
+export const EXPORT_AUDIO_SAMPLE_RATE = 48000;
+
+/** Stereo, in both the exporters' mixes and their probes. */
+export const EXPORT_AUDIO_CHANNELS = 2;
 
 /**
  * Shown in the export dialog when neither WebM nor MP4 can be exported at
@@ -327,6 +361,89 @@ export const WEBM_NO_CODEC_REASON =
   'This browser cannot encode WebM video — Chrome or Edge can.';
 
 /**
+ * Shown in the export dialog when `VideoEncoder` exists but this browser can
+ * configure no H.264 profile at any of {@link mp4VideoCodecConfigs}' ten
+ * candidates — MP4's half of {@link WEBM_NO_CODEC_REASON} (ESCSUITE-175). It
+ * names what is *left*, because the two formats that need no H.264 are both
+ * still there; that second sentence is only true while WebM is available, which
+ * is why the dialog shows this reason only when it is, and
+ * {@link EXPORT_NO_VIDEO_CODEC_REASON} when it is not.
+ */
+export const MP4_NO_CODEC_REASON =
+  'This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.';
+
+/**
+ * Shown when WebCodecs is present and neither video format can be encoded — so
+ * {@link EXPORT_NO_WEBCODECS_REASON} would be a lie and the two per-format
+ * reasons would each contradict the other's "but this one works" clause
+ * (ESCSUITE-175). `GIF_ALWAYS_AVAILABLE_NOTE` still follows it: `gifenc` needs
+ * no encoder at all.
+ */
+export const EXPORT_NO_VIDEO_CODEC_REASON =
+  'This browser cannot encode WebM video or MP4 video — Chrome or Edge can.';
+
+/**
+ * The two video formats, and for each: how it is written, the audio codec it
+ * carries, and the other one to point a user at.
+ *
+ * GIF is deliberately absent. Its result always reports `audio: false` because
+ * the container has nowhere to put sound, and every sentence below blames a
+ * missing encoder — which would be the wrong explanation for a format that
+ * never had an audio track to begin with. Keying the sentences off this table
+ * is what makes that impossible to get wrong: there is no `gif` entry to read.
+ */
+const VIDEO_FORMAT_AUDIO = {
+  mp4: { label: 'MP4', codec: 'AAC', alternative: 'WebM' },
+  webm: { label: 'WebM', codec: 'Opus', alternative: 'MP4' },
+} as const;
+
+/** A format that carries sound — MP4 or WebM, never GIF. */
+export type VideoExportFormat = keyof typeof VIDEO_FORMAT_AUDIO;
+
+/** The audio codec a format's exporter writes: `'AAC'` or `'Opus'`. */
+export function audioCodecName(format: VideoExportFormat): string {
+  return VIDEO_FORMAT_AUDIO[format].codec;
+}
+
+/**
+ * Shown under the format controls *before* an export, and reported by the
+ * exporter through its own `onProgress` channel once it is running, when this
+ * browser can encode the format's picture but not its sound — H.264 without AAC
+ * (Firefox 155, measured 2026-10-02), or VP9/VP8 without Opus.
+ *
+ * The format stays offered: a silent MP4 or WebM is a legitimate thing to want,
+ * and the one thing the user must not have is a file that turns out silent with
+ * no warning — which is exactly what happened before ESCSUITE-175, behind a
+ * `console.warn`, on both sides. {@link exportedWithoutSoundReason} is the same
+ * fact said afterwards.
+ *
+ * `alternativeKeepsAudio` drops the second sentence. A browser with no
+ * `AudioEncoder` at all makes *both* formats silent, and then "WebM keeps the
+ * audio" and "MP4 keeps the audio" are each false — the audio-side twin of the
+ * trap {@link EXPORT_NO_VIDEO_CODEC_REASON} exists for. The clause is dropped
+ * rather than a further sentence invented. An exporter that is already running
+ * leaves it at the default: it has not probed the other format, and the
+ * suggestion is the actionable one for the browser this is about.
+ */
+export function noAudioNote(format: VideoExportFormat, alternativeKeepsAudio = true): string {
+  const { label, codec, alternative } = VIDEO_FORMAT_AUDIO[format];
+  const note = `${label} export in this browser will have no sound (no ${codec} encoder).`;
+  return alternativeKeepsAudio ? `${note} ${alternative} keeps the audio.` : note;
+}
+
+/**
+ * Shown on the dialog's completion screen when an export's result carries
+ * `audio: false` — {@link noAudioNote}'s after-the-fact form, naming the codec
+ * this browser turned out not to have.
+ *
+ * It asserts a **loss**, so the dialog also requires the project to have had
+ * sound in it: see `projectHasAudio` in `ExportDialog.tsx`.
+ */
+export function exportedWithoutSoundReason(format: VideoExportFormat): string {
+  return `Exported without sound — this browser has no ${audioCodecName(format)} encoder.`;
+}
+
+/**
  * Whether the two WebCodecs globals WebM encoding needs — `VideoEncoder` and
  * `VideoFrame`, not `VideoDecoder`, since WebM never decodes through
  * WebCodecs (`exportWebM.ts` seeks `HTMLVideoElement`s directly) — both
@@ -340,13 +457,17 @@ export function hasWebMEncodeGlobals(): boolean {
 }
 
 /**
- * Check if WebM export via WebCodecs is supported.
+ * Check whether WebM export is possible, and whether it will have sound — the
+ * exact shape {@link isMP4ExportSupported} answers, and since ESCSUITE-175 the
+ * exact set of questions too.
  *
- * Unlike `isMP4ExportSupported()` this is a real probe, not a boolean read of
- * which globals exist (ESCSUITE-22/29: it used to be
- * `return isMP4ExportSupported();`, which answered "yes" for any browser with
- * WebCodecs even when that browser's `VideoEncoder` cannot configure VP9 *or*
- * VP8 — the export would then fail opaquely partway through).
+ * It has been a real probe rather than a read of which globals exist since
+ * ESCSUITE-22/29 (it used to be `return isMP4ExportSupported();`, which
+ * answered "yes" for any browser with WebCodecs even when that browser's
+ * `VideoEncoder` cannot configure VP9 *or* VP8 — the export would then fail
+ * opaquely partway through). What ESCSUITE-175 added is `audio`: `exportToWebM`
+ * drops the soundtrack when Opus cannot be configured, and before this nothing
+ * asked that question early enough for the dialog to say so.
  *
  * `width`/`height` should be the size the export will actually configure the
  * encoder at — which, once a resolution preset is chosen, is
@@ -358,14 +479,176 @@ export function hasWebMEncodeGlobals(): boolean {
  * have worked). This function itself takes whatever size it is given; it has
  * no opinion on which one that should be.
  */
-export async function isWebMExportSupported(width: number, height: number): Promise<boolean> {
+export async function isWebMExportSupported(
+  width: number,
+  height: number
+): Promise<ExportFormatSupport> {
   if (!hasWebMEncodeGlobals()) {
-    return false;
+    return { video: false, audio: false };
   }
   const found = await findSupportedVideoConfig(
-    webMVideoCodecConfigs(width, height, WEBM_PROBE_BITRATE, WEBM_PROBE_FRAMERATE)
+    webMVideoCodecConfigs(width, height, EXPORT_PROBE_BITRATE, EXPORT_PROBE_FRAMERATE)
   );
-  return found !== null;
+  const audio = await isAudioCodecSupported(
+    opusEncoderConfig(EXPORT_AUDIO_SAMPLE_RATE, EXPORT_AUDIO_CHANNELS, AUDIO_PROBE_BITRATE)
+  );
+  return { video: found !== null, audio };
+}
+
+/**
+ * The H.264 ladder, quality first and compatibility last, walked twice: once
+ * asking for hardware acceleration (a GPU encode where there is one) and once
+ * with no preference, which is what lets software encoding answer on a headless
+ * or CI box with no GPU. Levels 4.0 come before 5.1 so a 1080p export keeps the
+ * more compatible level; `isConfigSupported` refuses Level 4.0 above 1920x1080,
+ * which is what makes the 5.1 entries reachable for a 1440p or 4K raster.
+ *
+ * Lifted out of `exportMP4.ts` by ESCSUITE-175, for the same reason
+ * {@link webMVideoCodecConfigs} exists: the dialog's up-front probe and the
+ * exporter's own `configure()` must ask one question, not two that can drift.
+ */
+export function mp4VideoCodecConfigs(
+  width: number,
+  height: number,
+  videoBitrate: number,
+  frameRate: number
+): VideoEncoderConfig[] {
+  const codecs = [
+    'avc1.640028', // High Profile Level 4.0 - best quality (up to 1080p30)
+    'avc1.4d0028', // Main Profile Level 4.0 - good compatibility
+    'avc1.42001f', // Baseline Profile Level 3.1 - maximum compatibility
+    'avc1.640033', // High Profile Level 5.1 - 1440p and 4K
+    'avc1.4d0033', // Main Profile Level 5.1
+  ];
+  const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
+  const configs: VideoEncoderConfig[] = [];
+  for (const hardwareAcceleration of hwModes) {
+    for (const codec of codecs) {
+      configs.push({
+        codec,
+        width,
+        height,
+        bitrate: videoBitrate,
+        framerate: frameRate,
+        latencyMode: 'quality',
+        hardwareAcceleration,
+      });
+    }
+  }
+  return configs;
+}
+
+/** AAC-LC, the one audio codec the MP4 exporter writes. */
+export function aacEncoderConfig(
+  sampleRate: number,
+  numberOfChannels: number,
+  bitrate: number
+): AudioEncoderConfig {
+  return { codec: 'mp4a.40.2', sampleRate, numberOfChannels, bitrate };
+}
+
+/** Opus, the one audio codec the WebM exporter writes. */
+export function opusEncoderConfig(
+  sampleRate: number,
+  numberOfChannels: number,
+  bitrate: number
+): AudioEncoderConfig {
+  return { codec: 'opus', sampleRate, numberOfChannels, bitrate };
+}
+
+/**
+ * Whether this browser's `AudioEncoder` can configure the given config — AAC
+ * for MP4, Opus for WebM; one implementation, because the question and every
+ * way of failing to answer it are the same.
+ *
+ * `false` rather than a throw for every way of not knowing — no `AudioEncoder`
+ * at all, a refusal, or a probe that rejects — because the caller's next move
+ * is the same in all three: export without sound, and say so.
+ */
+export async function isAudioCodecSupported(config: AudioEncoderConfig): Promise<boolean> {
+  if (typeof AudioEncoder === 'undefined') {
+    return false;
+  }
+  try {
+    const support = await AudioEncoder.isConfigSupported(config);
+    return support.supported === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What a video export can actually do in this browser: `video` is whether any
+ * of the format's picture codecs can be configured at the output size, `audio`
+ * whether its audio codec can.
+ *
+ * Two booleans because the two failures are different in kind. No picture codec
+ * means no export in that format at all — the dialog refuses it. No audio codec
+ * means a file with no sound in it — the dialog keeps offering the format and
+ * says what the trade is. One shape for both formats, so the dialog reads them
+ * the same way.
+ */
+export interface ExportFormatSupport {
+  video: boolean;
+  audio: boolean;
+}
+
+/**
+ * Check whether MP4 export is possible, and whether it will have sound.
+ *
+ * Until ESCSUITE-175 this was {@link hasMP4EncodeGlobals} under this name — a
+ * read of which globals exist, which answered "yes" for any browser with
+ * WebCodecs whether or not its `VideoEncoder` could configure H.264 and whether
+ * or not it had an AAC encoder at all. It is now the same shape of real probe
+ * `isWebMExportSupported` has had since ESCSUITE-22/29: it asks the browser,
+ * through the same {@link findSupportedVideoConfig} ladder walker and the same
+ * {@link mp4VideoCodecConfigs} list `exportToMP4` configures from.
+ *
+ * `width`/`height` should be the size the export will actually configure the
+ * encoder at — `getResolution(preset, …)`'s answer, not the raw project
+ * resolution — for the reason `isWebMExportSupported` documents: a project whose
+ * native size this browser cannot configure should not read as unsupported when
+ * a smaller preset would have worked.
+ */
+export async function isMP4ExportSupported(
+  width: number,
+  height: number
+): Promise<ExportFormatSupport> {
+  if (!hasMP4EncodeGlobals()) {
+    return { video: false, audio: false };
+  }
+  const found = await findSupportedVideoConfig(
+    mp4VideoCodecConfigs(width, height, EXPORT_PROBE_BITRATE, EXPORT_PROBE_FRAMERATE)
+  );
+  const audio = await isAudioCodecSupported(
+    aacEncoderConfig(EXPORT_AUDIO_SAMPLE_RATE, EXPORT_AUDIO_CHANNELS, AUDIO_PROBE_BITRATE)
+  );
+  return { video: found !== null, audio };
+}
+
+/**
+ * What an export hands back: the bytes, and whether this browser was able to
+ * carry the project's sound (ESCSUITE-175).
+ *
+ * `audio: false` means the sound **could not be carried** — an MP4 in a browser
+ * with no AAC encoder, a WebM in one with no Opus encoder, and every GIF, whose
+ * container has nowhere to put it. It is a statement about the *pipeline*, not
+ * about this project: an export of a silent timeline in a no-AAC browser still
+ * reports `false`, because the exporter cannot know whether there was anything
+ * to lose without doing the decode this ticket removed.
+ *
+ * So `audio: false` alone does not mean sound was lost, and the dialog does not
+ * treat it that way: its completion sentence also requires the project to have
+ * had something that could carry sound (`projectHasAudio` in
+ * `ExportDialog.tsx`). A host reading `EXPORT_COMPLETE.audio` should read it the
+ * same way — "this file has no audio track", not "your audio was dropped".
+ *
+ * One field across all three formats so the dialog reads it the same way
+ * whichever ran.
+ */
+export interface ExportResult {
+  blob: Blob;
+  audio: boolean;
 }
 
 /**

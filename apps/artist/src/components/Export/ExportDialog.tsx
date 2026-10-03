@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import {
@@ -6,14 +6,20 @@ import {
   exportToMP4,
   exportToGIF,
   estimateGifBytes,
+  hasMP4EncodeGlobals,
   isMP4ExportSupported,
   isWebMExportSupported,
   ExportAbortedError,
   ExportError,
+  EXPORT_NO_VIDEO_CODEC_REASON,
   EXPORT_NO_WEBCODECS_REASON,
+  MP4_NO_CODEC_REASON,
   WEBM_NO_CODEC_REASON,
   GIF_ALWAYS_AVAILABLE_NOTE,
+  exportedWithoutSoundReason,
+  noAudioNote,
 } from '../../core/exporter';
+import type { ExportFormatSupport, ExportResult, VideoExportFormat } from '../../core/exporter';
 import {
   getResolution,
   gifFrameRate,
@@ -100,6 +106,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // already this dialog's own default/fallback format.
   const [offerMp4Fallback, setOfferMp4Fallback] = useState(false);
   const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
+  // The completion screen's "exported without sound" sentence, or null. Built
+  // from the finished export's own result rather than from the probe — the file
+  // that was just handed over is the authority on what is in it — and only for
+  // a run that actually lost something: see where it is set (ESCSUITE-175).
+  const [exportedWithoutSound, setExportedWithoutSound] = useState<string | null>(null);
 
   // The export currently in flight, if any — the only thing Cancel, ×, and
   // Escape can actually abort. Cleared both by a run's own `finally` (once
@@ -116,16 +127,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // makes it look current to itself again later.
   const latestExportRef = useRef<AbortController | null>(null);
 
-  const mp4Supported = isMP4ExportSupported();
-
-  // WebM's own support is a real codec probe (ESCSUITE-22/29) rather than a
-  // boolean read of which globals exist, so — unlike `mp4Supported` above —
-  // it cannot be answered synchronously at render time. Optimistic `true`
-  // until the probe resolves: a user in Chrome/Edge (by far the common case)
-  // never sees the primary button flash disabled-then-enabled, and a user
-  // the probe does disable sees it happen within one effect tick of the
-  // dialog opening, well before they could have clicked anything.
-  const [webmSupported, setWebmSupported] = useState(true);
+  // Both formats' support is a real codec probe (ESCSUITE-22/29 for WebM,
+  // ESCSUITE-175 for MP4) rather than a boolean read of which globals exist, so
+  // neither can be answered synchronously at render time. Optimistic until the
+  // probes resolve: a user in Chrome/Edge (by far the common case) never sees a
+  // button flash disabled-then-enabled or a note flash in and out, and a user a
+  // probe does disable sees it happen within one effect tick of the dialog
+  // opening, well before they could have clicked anything.
+  const [webmSupport, setWebmSupport] = useState<ExportFormatSupport>({ video: true, audio: true });
+  const [mp4Support, setMp4Support] = useState<ExportFormatSupport>({ video: true, audio: true });
+  const webmSupported = webmSupport.video;
+  const mp4Supported = mp4Support.video;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -149,8 +161,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       probeResolution.height,
       probeResolution
     );
-    isWebMExportSupported(width, height).then((supported) => {
-      if (!cancelled) setWebmSupported(supported);
+    isWebMExportSupported(width, height).then((support) => {
+      if (!cancelled) setWebmSupport(support);
+    });
+    // One effect, one `cancelled` flag, two probes: they key on exactly the same
+    // inputs (is the dialog open, the project's size, the chosen preset), so
+    // splitting them would mean two effects with identical dependency lists and
+    // two stale-answer guards to keep in step.
+    isMP4ExportSupported(width, height).then((support) => {
+      if (!cancelled) setMp4Support(support);
     });
     return () => {
       cancelled = true;
@@ -169,15 +188,80 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // moment a format that needs no WebCodecs existed.
   const noVideoFormatSupported = !mp4Supported && !webmSupported;
 
+  // When *neither* video format can be encoded there is one reason, not two:
+  // each format's own sentence names the other as the way out, and with both
+  // gone both halves would be lies. Which of the two it is depends on whether
+  // WebCodecs is here at all (ESCSUITE-175) — before MP4 had a real probe this
+  // state could only mean the globals were missing, so it said so unconditionally
+  // and would now be wrong for a browser that has WebCodecs and no usable codec.
+  const bothVideoFormatsBlockedReason = !noVideoFormatSupported
+    ? null
+    : hasMP4EncodeGlobals()
+      ? EXPORT_NO_VIDEO_CODEC_REASON
+      : EXPORT_NO_WEBCODECS_REASON;
+
   // Why the WebM-flavoured buttons (primary + advanced) are disabled, or
   // null when WebM is offered. Mirrors `separateTracksBlockedReason` in
   // ESCAPECRAFT: the browser's answer either way, worded for what WebM
   // specifically needs — VP9/VP8 — distinct from "no WebCodecs at all".
   const webmBlockedReason = webmSupported
     ? null
-    : noVideoFormatSupported
-      ? EXPORT_NO_WEBCODECS_REASON
-      : WEBM_NO_CODEC_REASON;
+    : bothVideoFormatsBlockedReason ?? WEBM_NO_CODEC_REASON;
+
+  // The same question for MP4, which ESCSUITE-175 gave an answer to for the
+  // first time: `isMP4ExportSupported` used to read globals only, so a browser
+  // with WebCodecs and no H.264 encoder had nothing to show up front and found
+  // out mid-export.
+  const mp4BlockedReason = mp4Supported
+    ? null
+    : bothVideoFormatsBlockedReason ?? MP4_NO_CODEC_REASON;
+
+  // Whether this project has anything that could carry sound: a clip whose
+  // track is present, visible and unmuted, whose source is not an image. That
+  // is `core/audioMixer.ts`'s own skip clause minus the per-blob
+  // `decodeAudioData` — which is the one part the dialog cannot afford, and the
+  // whole reason the exporter can no longer answer this question itself
+  // (ESCSUITE-175 probes AAC *before* mixing, precisely so a browser with no
+  // AAC encoder never pays for the mix).
+  //
+  // Approximate in exactly one direction, and deliberately so: a **video file
+  // with no audio track in it** still counts as "could carry sound", so the
+  // completion sentence can appear where strictly nothing was lost. That is the
+  // conservative error — it over-reports rather than staying silent about a real
+  // loss — and making it exact would mean decoding every source, the cost this
+  // ticket removed. What it does rule out is the cases that are *knowably*
+  // silent: an image-only or overlay-only timeline, and one whose every track is
+  // muted or hidden.
+  const projectHasAudio = useMemo(
+    () =>
+      clips.some((clip) => {
+        const track = tracks.find((t) => t.id === clip.trackId);
+        if (!track || track.muted || !track.visible) return false;
+        const source = sourceVideos.find((v) => v.id === clip.sourceVideoId);
+        return source !== undefined && source.mediaType !== 'image';
+      }),
+    [clips, tracks, sourceVideos]
+  );
+
+  // A format whose picture this browser can encode but whose sound it cannot:
+  // H.264 without AAC (Firefox 155, measured 2026-10-02), or VP9/VP8 without
+  // Opus. The format stays offered and this says what the trade is. Not shown
+  // for GIF, which has its own "no sound" line, and not shown for a format that
+  // is refused outright — there is no silent export to warn about then.
+  //
+  // Each note names the *other* format as the way out only when that one really
+  // would keep the sound: a browser with no `AudioEncoder` at all reaches this
+  // with both formats silent, and two notes each pointing at the other would
+  // each be wrong (the audio-side twin of `EXPORT_NO_VIDEO_CODEC_REASON`).
+  const silentFormatNotes = ((): string[] => {
+    if (advancedOptions.format === 'gif') return [];
+    const notes: string[] = [];
+    const isSilent = (s: ExportFormatSupport) => s.video && !s.audio;
+    const keepsAudio = (s: ExportFormatSupport) => s.video && s.audio;
+    if (isSilent(mp4Support)) notes.push(noAudioNote('mp4', keepsAudio(webmSupport)));
+    if (isSilent(webmSupport)) notes.push(noAudioNote('webm', keepsAudio(mp4Support)));
+    return notes;
+  })();
 
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review
@@ -248,6 +332,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     setError(null);
     setOfferMp4Fallback(false);
     setMp4FailedError(null);
+    setExportedWithoutSound(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
     // Create new AbortController for this export. Cancelling one export and
@@ -290,19 +375,20 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         if (isCurrentRun()) setProgress(p);
       };
 
-      let blob: Blob;
+      let result: ExportResult;
       let extension: string;
 
       if (format === 'gif') {
-        blob = await exportToGIF(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToGIF(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'gif';
       } else if (format === 'mp4') {
-        blob = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'mp4';
       } else {
-        blob = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'webm';
       }
+      const blob = result.blob;
 
       // A superseded run must neither download nor notify a host: both are
       // user/host-visible side effects that belong only to the export the
@@ -326,7 +412,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         try {
           sendMessage({
             type: 'EXPORT_COMPLETE',
-            payload: { blob, format: extension, name: fileName },
+            // `audio` is additive (ESCSUITE-175): a host that only reads the
+            // three fields it has always read is unaffected, and one that wants
+            // to know whether the file it was handed has sound in it can.
+            payload: { blob, format: extension, name: fileName, audio: result.audio },
           });
         } catch (hostError) {
           console.error('Failed to notify host of completed export:', hostError);
@@ -342,6 +431,18 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       analytics.exportCompleted(extension as 'webm' | 'mp4' | 'gif', totalDuration);
 
       if (isCurrentRun()) {
+        // Three conditions, because the sentence asserts a *loss*: the format
+        // has to be one that carries sound at all (GIF never does, and blaming
+        // its container on a missing encoder would be wrong), the browser has
+        // to have failed to carry it, and the project has to have had something
+        // to carry.
+        const soundFormat: VideoExportFormat | null =
+          format === 'mp4' || format === 'webm' ? format : null;
+        setExportedWithoutSound(
+          soundFormat && !result.audio && projectHasAudio
+            ? exportedWithoutSoundReason(soundFormat)
+            : null
+        );
         setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
         // Close dialog after a delay
@@ -399,7 +500,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         abortControllerRef.current = null;
       }
     }
-  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, timeRange]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -418,6 +519,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // time it opens.
     setError(null);
     setOfferMp4Fallback(false);
+    setExportedWithoutSound(null);
     onClose();
   }, [onClose]);
 
@@ -498,6 +600,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   Estimated size: ~{formatFileSize(progress.estimatedBytes)}
                 </span>
               )}
+              {/* The after-the-fact half of `noAudioNote` (ESCSUITE-175): the
+                  file is already downloaded by the time this renders, so it
+                  reports rather than warns — but it reports, which is the whole
+                  point. Before this, a silent MP4 (or WebM) arrived with nothing
+                  but a console.warn behind it. */}
+              {progress.phase === 'complete' && exportedWithoutSound && (
+                <span className={styles.summary} role="status">
+                  {exportedWithoutSound}
+                </span>
+              )}
             </div>
           ) : (
             <>
@@ -506,7 +618,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   dialog's only other "not supported" notice, MP4's, lived
                   there, which is exactly what let an unusable WebM button
                   through unremarked — ESCSUITE-22). */}
-              {noVideoFormatSupported && (
+              {bothVideoFormatsBlockedReason && (
                 <div className={styles.error} role="alert">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <circle cx="12" cy="12" r="10" />
@@ -514,8 +626,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     <line x1="9" y1="9" x2="15" y2="15" />
                   </svg>
                   {/* Since ESCSUITE-34 this is no longer a dead end: the second
-                      sentence names the one export that needs no WebCodecs. */}
-                  {EXPORT_NO_WEBCODECS_REASON} {GIF_ALWAYS_AVAILABLE_NOTE}
+                      sentence names the one export that needs no WebCodecs.
+                      Since ESCSUITE-175 the first sentence is whichever of the
+                      two causes actually applies — WebCodecs missing, or present
+                      with no usable video codec. */}
+                  {bothVideoFormatsBlockedReason} {GIF_ALWAYS_AVAILABLE_NOTE}
                 </div>
               )}
 
@@ -585,6 +700,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 </div>
               )}
 
+              {/* The MP4-side mirror (ESCSUITE-175). `MP4_NO_CODEC_REASON` names
+                  WebM and GIF as what is left, which is only true in this
+                  branch — the both-blocked case is the alert above. */}
+              {!noVideoFormatSupported && mp4BlockedReason && (
+                <div className={styles.summary} role="status">
+                  {mp4BlockedReason}
+                </div>
+              )}
+
               {/* MP4 decodes through WebCodecs (in a worker) when the decode worker
                   starts successfully; WebM always drives an HTMLVideoElement from
                   rAF, which the browser throttles once the tab is hidden — and so
@@ -600,6 +724,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   MP4 exports keep encoding in a background tab when the decoder is available. WebM needs this tab visible.
                 </div>
               )}
+
+              {/* Said here, in the main body, rather than behind the Advanced
+                  disclosure where the format is chosen: the point is that it is
+                  read before the choice, not after it (ESCSUITE-175). One row
+                  per silent format — normally at most one, two only in a browser
+                  with no audio encoder at all. */}
+              {silentFormatNotes.map((note) => (
+                <div className={styles.summary} role="status" key={note}>
+                  {note}
+                </div>
+              ))}
 
               {/* The two things a GIF surprises people with, said once. */}
               {advancedOptions.format === 'gif' && (

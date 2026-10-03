@@ -15,7 +15,7 @@
 // is exercised by `gifEncoder.test.ts`, which is the only place it needs to be.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToGIF, estimateGifBytes } from './exportGIF'
-import { ExportAbortedError, ExportError } from './exportTypes'
+import { ExportAbortedError, ExportError, type ExportResult } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
@@ -116,7 +116,7 @@ function run({
   signal,
   projectResolution = { width: 640, height: 360 },
   onProgress = vi.fn(),
-}: RunOptions = {}): Promise<Blob> {
+}: RunOptions = {}): Promise<ExportResult> {
   return exportToGIF(
     clips,
     sources,
@@ -227,7 +227,7 @@ describe('exportToGIF preconditions', () => {
     // configured. The two video exporters both refuse outright here.
     const restore = removeWebCodecsGlobals()
 
-    const blob = await run()
+    const { blob } = await run()
 
     expect(blob.type).toBe('image/gif')
     expect(frames()).toHaveLength(15)
@@ -245,12 +245,15 @@ describe('exportToGIF preconditions', () => {
 })
 
 describe('exportToGIF frames', () => {
-  it('produces an image/gif blob carrying the encoder’s bytes', async () => {
-    const blob = await run()
+  it('produces an image/gif blob carrying the encoder’s bytes, and reports no sound', async () => {
+    const { blob, audio } = await run()
 
     expect(blob.type).toBe('image/gif')
     expect(blob.size).toBe(15 * BYTES_PER_FRAME)
     expect(writer().finishes).toBe(1)
+    // ESCSUITE-175: the one format whose result always says the sound was
+    // dropped, because the container has nowhere to put it.
+    expect(audio).toBe(false)
   })
 
   it('writes one frame per output frame at the default 15 fps', async () => {
@@ -364,7 +367,7 @@ describe('exportToGIF frames', () => {
     // it, so a drawn frame is what proves the *synthesised* track is the one the
     // composer composited against, rather than merely that the fallback
     // expression evaluated.
-    const blob = await exportToGIF(
+    const { blob } = await exportToGIF(
       [makeClip({ trackId: 'default', duration: 0.2, endTime: 0.2 })],
       [makeSourceVideo({ width: 640, height: 360 })],
       makeExportOptions({ format: 'gif', resolution: 'project' }),
@@ -437,7 +440,7 @@ describe('exportToGIF frames', () => {
     // formats export happily.
     await storeVideo('audio1', new Blob([new Uint8Array(8)], { type: 'audio/mp4' }), makeSourceVideo({ id: 'audio1' }))
 
-    const blob = await run({
+    const { blob } = await run({
       clips: [makeClip({ sourceVideoId: 'audio1', duration: 0.3, endTime: 0.3 })],
       sources: [makeSourceVideo({ id: 'audio1', mediaType: 'audio', width: 0, height: 0 })],
       options: { fps: 10 },

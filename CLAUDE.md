@@ -142,7 +142,12 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - Keyframe animation system in `src/utils/animation.ts`
 - Static per-clip picture properties in `src/core/`: `clipMask.ts` (a circle or rounded mask and its stroke) and `clipCrop.ts` (a crop — four insets as fractions of the source frame, set from the inspector or, since ESCSUITE-157, by dragging eight handles in the preview's crop mode). Never keyframed, media clips only, and read by the preview, both exporters, both transition paths and the headless bundle from the same two draw functions; a crop also resizes the clip's rectangle, so the selection box, hit test, marquee and drag seed read it too
 - Audio waveform visualization in `src/utils/waveform.ts`
-- WebCodecs API for encoding/decoding (Chrome/Edge only)
+- WebCodecs API for encoding/decoding. No longer Chrome/Edge only: Firefox 155 and WebKit 26.6
+  both expose `VideoEncoder`, and both encode H.264, VP9 and VP8 — but Firefox has **no AAC
+  encoder**, so an MP4 exported there has no sound (ESCSUITE-175 made the dialog and the
+  exporter say so, before and after, instead of handing back a silent file; a browser with no
+  Opus encoder gets the same treatment for WebM). Measured 2026-10-02; see the Key Constraints
+  bullet below
 - Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
   audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
@@ -172,11 +177,20 @@ Both tools detect embedding with `isEmbedded()` (`packages/shared/src/config`) �
 the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
-  init, and `EXPORT_COMPLETE` with `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string }`
+  init, and `EXPORT_COMPLETE` with
+  `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string, audio?: boolean }`
   after a successful export (`name` is the download filename; not sent on failure or
   cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
   a new value of a field it already reads, and needs no change unless it wants to treat a GIF
-  differently.
+  differently. `audio` is additive too (ESCSUITE-175) and says whether the file carries an audio
+  track: `false` for every GIF (no audio track in the container), for an MP4 exported in a browser
+  with no AAC encoder (Firefox 155 today) and for a WebM exported in one with no Opus encoder;
+  `true` otherwise. Read it as "this file has no audio track", **not** as "the project's sound was
+  dropped" — a silent project exported in a no-AAC browser also reports `false`, because the
+  exporter does not decode the sources and cannot tell the two apart (the editor's own completion
+  notice pairs the field with its own "did this project have any sound" check before claiming a
+  loss). A host that ignores the field is unaffected; a host that reads it should treat a missing
+  field as `true`, which is how every message sent before the ticket behaved.
   Inbound `LOAD_VIDEO` (`{ url }`) fetches that URL the same way `?video=` does, so it is bound by
   the same `connect-src` — a URL the page's policy refuses gets an `ERROR` reply naming the origin
   and the policy (`code: 'LOAD_ERROR'`) instead of a generic failure. See "URL params (ARTIST)"
@@ -2080,6 +2094,35 @@ clobber cases on both the success and the failure path; the file's four pre-exis
 untouched. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
 craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-175 (MP4 gets the real probe WebM has had since
+ESCSUITE-22 — H.264 at the selected output size and AAC — and WebM's probe learns to ask about Opus; the dialog
+refuses a format whose video codec is missing, offers one whose audio codec is missing with an up-front
+per-format note, and says after the export that the sound was lost only for a project that had sound to lose;
+both element-and-WebCodecs exporters probe before mixing audio, loading media or starting the muxer, report a
+dropped codec through their progress stream instead of a `console.warn`, and return an `ExportResult` whose
+`audio` flag the dialog, the headless kit and the host's `EXPORT_COMPLETE` message read):
+99.80 / 99.24 / **95.61** / 99.67 against 99.80 / 99.24 / 95.57 / 99.67 on the commit this branch was rebased
+onto (`8d4c20e`, the ESCSUITE-171 squash) — branches up four hundredths, the other three unmoved. The base is
+the composite ESCSUITE-172's paragraph describes, extended by the ESCSUITE-171 tree (three trees measured in
+this sitting on disjoint files): 4,788 / 5,010 branches, and this branch 4,839 / 5,061 — fifty-one new
+branches, fifty-one covered, the same 222 uncovered (lines 7,573 / 7,588 → 7,624 / 7,639, statements
+8,524 / 8,589 → 8,584 / 8,649, functions 1,837 / 1,843 → 1,854 / 1,860, every denominator growing by exactly
+what the numerator did; the same 15 / 65 / 6 uncovered). The fifty-one are `components/Export/ExportDialog.tsx`'s
+forty-two (169 / 170 → 211 / 212: the three-state MP4 gate and its WebM twin, `projectHasAudio` — a clip whose
+track is present, visible and unmuted and whose source is not an image, the audio mixer's own skip clause
+without the decode — gating the completion sentence, the per-format up-front notes with the way-out clause
+dropped when the other format is silent too, the stale-probe guard on the preset change; the file's one
+pre-existing uncovered arm untouched), `core/exportTypes.ts`'s seven (120 / 124 → 127 / 131: the
+`{ video, audio }` probes for both formats through one `isAudioCodecSupported` and the `VIDEO_FORMAT_AUDIO`
+table, `noAudioNote` and `exportedWithoutSoundReason`; the same four pre-existing arms uncovered) and
+`core/exportMP4.ts`'s two (124 / 141 → 126 / 143: the up-front H.264 refusal before any work and the AAC
+report, with the same seventeen pre-existing arms uncovered — the file's lines fell 255 → 248 because the
+late probe and both `console.warn`s went). `core/exportWebM.ts` gained no branch: the two Opus failure arms
+collapsed into one `audioDropped` flag the probe sets, read once at the return. The two export ceiling files
+are byte-identical — nothing per frame moved — as are the other five pins and `perfScene.ts`. One Playwright
+pin changed (`apps/e2e/tests/errors/export.spec.ts`'s codec-not-supported case) and was run in Chromium:
+11 / 11. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2087,7 +2130,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.74 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.24 | 95.58 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.24 | 95.61 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 
@@ -2133,13 +2176,22 @@ never above what the suite actually achieves:
 
 ## Key Constraints
 
-- WebCodecs API (ESCAPEARTIST exports) only works in Chrome/Edge today, and even there MP4 and
-  WebM can diverge: `isMP4ExportSupported()` only checks that the three WebCodecs globals exist,
-  while `isWebMExportSupported()` (ESCSUITE-22/29) is a real, asynchronous probe of whether this
-  browser's `VideoEncoder` can actually configure VP9 or VP8 — so a browser can offer one format
-  and not the other, and the export dialog says so (and, when neither is possible, says that too,
-  up front) rather than offering a button that fails the instant it is clicked. See
-  `apps/artist/CLAUDE.md`'s "Export Dialog Browser Support"
+- WebCodecs (ESCAPEARTIST exports) is no longer Chrome/Edge only, and which *codecs* a browser
+  that has it can actually encode varies — measured 2026-10-02 on the Playwright 1.63 browsers,
+  on a secure origin (`about:blank` is not one and reports no WebCodecs at all): Chromium 153 and
+  WebKit 26.6 have `VideoEncoder` with H.264, VP9, VP8 **and** AAC; **Firefox 155 has all three
+  video codecs and no AAC encoder**. So both `isMP4ExportSupported(width, height)` and
+  `isWebMExportSupported(width, height)` are real asynchronous probes of what this browser can
+  configure at the output size, and both answer two questions, `{ video, audio }`, because the two
+  failures differ in kind: no picture codec means no export in that format at all, while no audio
+  codec (AAC for MP4, Opus for WebM) means a file with no sound in it.
+  A browser can therefore offer one format and not the other, or offer MP4 knowing it will be
+  silent, and the export dialog says which before the click and what happened after it, rather
+  than offering a button that fails the instant it is clicked (ESCSUITE-22/29 gave WebM its video
+  probe; ESCSUITE-175 gave MP4 the same and gave both the audio half — it also moved the H.264
+  ladder and the AAC probe ahead of mixing the audio and loading the media, so a refusal costs
+  nothing). See `apps/artist/CLAUDE.md`'s
+  "Export Dialog Browser Support"
 - MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
   end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; composited PiP takes,
   audio-only takes and any browser without WebCodecs all reach that path, but a composited PiP

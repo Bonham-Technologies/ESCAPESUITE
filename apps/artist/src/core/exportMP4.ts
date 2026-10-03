@@ -19,7 +19,7 @@ import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback, ExportLog
 import { openOutputFrame, projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
-  isMP4ExportSupported,
+  hasMP4EncodeGlobals,
   getQualitySettings,
   getResolution, getBaseDimensions,
   loadImageElement,
@@ -27,9 +27,17 @@ import {
   calculateTimelineDuration,
   getActiveTransition,
   findSupportedVideoConfig,
+  mp4VideoCodecConfigs,
+  aacEncoderConfig,
+  isAudioCodecSupported,
   waitForEncoderBackpressure,
   ExportError,
+  EXPORT_AUDIO_CHANNELS,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  noAudioNote,
+  MP4_NO_CODEC_REASON,
 } from './exportTypes';
+import type { ExportResult } from './exportTypes';
 import {
   drawMediaWithFrame,
   drawTransitionWithFrames,
@@ -56,7 +64,15 @@ export { ExportError } from './exportTypes';
 
 /**
  * Export timeline to MP4 using WebCodecs + Mediabunny
- * Frame-by-frame encoding with H.264 video and AAC audio
+ * Frame-by-frame encoding with H.264 video and AAC audio.
+ *
+ * Both codecs are asked about **before** any of the work (ESCSUITE-175): the
+ * H.264 ladder used to be walked only after the whole timeline's audio had been
+ * mixed, every source loaded and the muxer started, and the AAC probe sat even
+ * later, where a refusal dropped the soundtrack behind a `console.warn` and the
+ * export still reported "Export complete!". Now a missing H.264 refuses up front
+ * with the dialog's own sentence, and a missing AAC is reported through
+ * `onProgress` and carried out in the result's `audio: false`.
  */
 export async function exportToMP4(
   clips: Clip[],
@@ -66,8 +82,8 @@ export async function exportToMP4(
   tracks?: Track[],
   signal?: AbortSignal,
   projectResolution?: { width: number; height: number }
-): Promise<Blob> {
-  if (!isMP4ExportSupported()) {
+): Promise<ExportResult> {
+  if (!hasMP4EncodeGlobals()) {
     throw new Error('MP4 export requires WebCodecs API (Chrome/Edge)');
   }
 
@@ -110,7 +126,43 @@ export async function exportToMP4(
 
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
-  const sampleRate = 48000;
+  const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
+
+  // Ask both codecs before spending anything (ESCSUITE-175). The ladder walker
+  // and the candidate list are the ones the export dialog's own up-front probe
+  // uses, at this export's real bitrate and frame rate, so the answer here and
+  // the answer the user was shown cannot differ on which codecs exist.
+  const foundVideoConfig = await findSupportedVideoConfig(
+    mp4VideoCodecConfigs(width, height, videoBitrate, frameRate)
+  );
+  if (!foundVideoConfig) {
+    log('codec', 'No supported H.264 configuration at any profile or acceleration mode');
+    // The dialog's own sentence, so a refusal reads the same before the click
+    // and after it — and an `ExportError`, so it carries the trail and reaches
+    // the dialog's diagnosed-codec-failure path rather than its generic one.
+    throw new ExportError(MP4_NO_CODEC_REASON, exportLog);
+  }
+
+  // Log the candidate we asked about, not `found.config` — the browser's own
+  // normalised answer is not guaranteed to echo it (review round 1, NIT 3),
+  // and the candidate is what this ladder actually chose.
+  const { config: videoConfig, candidate: videoCandidate } = foundVideoConfig;
+  log(
+    'codec',
+    `Selected H.264 codec: ${videoCandidate.codec} hw=${videoCandidate.hardwareAcceleration} (${width}x${height} @ ${videoBitrate}bps)`
+  );
+  console.log(`[MP4 Export] Using H.264 codec: ${videoCandidate.codec} (${videoCandidate.hardwareAcceleration})`);
+
+  // And the audio codec, before the mix rather than after it. A browser with no
+  // AAC encoder cannot carry this project's sound however long we spend mixing
+  // it, so the mix is skipped outright and the user is told now — not left to
+  // discover a silent file.
+  const aacConfig = aacEncoderConfig(sampleRate, EXPORT_AUDIO_CHANNELS, audioBitrate);
+  const aacSupported = await isAudioCodecSupported(aacConfig);
+  if (!aacSupported) {
+    log('codec', 'No AAC encoder: exporting without audio');
+    onProgress({ phase: 'preparing', progress: 1, message: noAudioNote('mp4') });
+  }
 
   // The space every draw call below is in, as against the raster they land on —
   // see `core/outputTransform`. A caller with no project resolution (only the
@@ -133,20 +185,24 @@ export async function exportToMP4(
   const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
-  // Extract and mix audio first, on the main thread
+  // Extract and mix audio first, on the main thread — but only when there is an
+  // encoder that could carry it.
   // Note: we extract the full timeline audio, then slice it later
-  onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
+  let fullAudioData: Float32Array | null = null;
+  if (aacSupported) {
+    onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
-  log('audio', 'Starting audio extraction');
-  const fullAudioData: Float32Array | null = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
-    onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
-  });
-  log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
+    log('audio', 'Starting audio extraction');
+    fullAudioData = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
+      onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
+    });
+    log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
+  }
 
   // Slice audio to the selected time range
   // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
-  const audioChannels = 2;
-  let audioData: Float32Array | null = fullAudioData && options.timeRange ? (() => {
+  const audioChannels = EXPORT_AUDIO_CHANNELS;
+  const audioData: Float32Array | null = fullAudioData && options.timeRange ? (() => {
     const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
     const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
     return fullAudioData.slice(startSample, endSample);
@@ -231,86 +287,16 @@ export async function exportToMP4(
   const videoSource = new EncodedVideoPacketSource('avc');
   output.addVideoTrack(videoSource, { frameRate });
 
-  // Create audio packet source if we have audio
+  // Create audio packet source if we have audio. AAC was probed before the mix
+  // ran (above), so reaching here with audio data means the encoder exists.
   let audioSource: EncodedAudioPacketSource | null = null;
   if (audioData) {
-    // Check if AAC is supported with the requested bitrate
-    const aacConfig = {
-      codec: 'mp4a.40.2', // AAC-LC
-      sampleRate,
-      numberOfChannels: 2,
-      bitrate: audioBitrate, // Use quality-based bitrate (128k/192k/256k)
-    };
-
-    try {
-      const support = await AudioEncoder.isConfigSupported(aacConfig);
-      if (!support.supported) {
-        console.warn('AAC not supported, exporting without audio');
-        audioData = null;
-      } else {
-        audioSource = new EncodedAudioPacketSource('aac');
-        output.addAudioTrack(audioSource);
-      }
-    } catch (e) {
-      console.warn('Failed to check AAC support, exporting without audio:', e);
-      audioData = null;
-    }
+    audioSource = new EncodedAudioPacketSource('aac');
+    output.addAudioTrack(audioSource);
   }
 
   // Start the output
   await output.start();
-
-  // H.264 codec profiles to try, in order of preference (quality -> compatibility).
-  // We try two passes: prefer-hardware first (GPU acceleration), then no-preference
-  // (allows software encoding). The second pass ensures the headless / CI path works
-  // even without a GPU (e.g. Playwright Chromium, Docker).
-  const h264Codecs = [
-    'avc1.640028', // High Profile Level 4.0 - best quality (up to 1080p30)
-    'avc1.4d0028', // Main Profile Level 4.0 - good compatibility
-    'avc1.42001f', // Baseline Profile Level 3.1 - maximum compatibility
-    // Level 4.0 caps at 1920x1080; isConfigSupported rejects it for larger frames.
-    // Level 5.1 covers 1440p and 4K. Listed last so 1080p keeps the more compatible level.
-    'avc1.640033', // High Profile Level 5.1
-    'avc1.4d0033', // Main Profile Level 5.1
-  ];
-
-  // Find a supported H.264 codec configuration. Two passes flattened into one
-  // candidate list, in order: prefer-hardware first (GPU acceleration), then
-  // no-preference (allows software encoding) — the second pass ensures the
-  // headless / CI path works even without a GPU (e.g. Playwright Chromium,
-  // Docker). `findSupportedVideoConfig` (exportTypes.ts) is the shared ladder
-  // walker the WebM exporter's VP9/VP8 probe also uses (ESCSUITE-29).
-  const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
-  const h264Configs: VideoEncoderConfig[] = [];
-  for (const hwMode of hwModes) {
-    for (const codec of h264Codecs) {
-      h264Configs.push({
-        codec,
-        width,
-        height,
-        bitrate: videoBitrate,
-        framerate: frameRate,
-        latencyMode: 'quality',
-        hardwareAcceleration: hwMode,
-      });
-    }
-  }
-
-  const foundVideoConfig = await findSupportedVideoConfig(h264Configs);
-
-  if (!foundVideoConfig) {
-    throw new Error('No supported H.264 codec found. MP4 export requires H.264 support.');
-  }
-
-  // Log the candidate we asked about, not `found.config` — the browser's own
-  // normalised answer is not guaranteed to echo it (review round 1, NIT 3),
-  // and the candidate is what this ladder actually chose.
-  const { config: videoConfig, candidate: videoCandidate } = foundVideoConfig;
-  log(
-    'codec',
-    `Selected H.264 codec: ${videoCandidate.codec} hw=${videoCandidate.hardwareAcceleration} (${width}x${height} @ ${videoBitrate}bps)`
-  );
-  console.log(`[MP4 Export] Using H.264 codec: ${videoCandidate.codec} (${videoCandidate.hardwareAcceleration})`);
 
   // Create video encoder with error tracking
   let videoEncoderError: Error | null = null;
@@ -330,13 +316,6 @@ export async function exportToMP4(
   let audioEncoder: AudioEncoder | null = null;
   let audioEncoderError: Error | null = null;
   if (audioData && audioSource) {
-    const aacConfig = {
-      codec: 'mp4a.40.2', // AAC-LC
-      sampleRate,
-      numberOfChannels: 2,
-      bitrate: audioBitrate, // Use quality-based bitrate
-    };
-
     audioEncoder = new AudioEncoder({
       output: async (chunk, meta) => {
         await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
@@ -698,7 +677,12 @@ export async function exportToMP4(
     if (!buffer) {
       throw new Error('Export failed: no data was written to buffer');
     }
-    return new Blob([buffer], { type: 'video/mp4' });
+    // `audio` reports whether this browser could carry sound at all, which here
+    // is exactly "was there an AAC encoder". Whether this project *had* any is a
+    // question the exporter deliberately cannot answer — knowing would mean
+    // decoding, which is the cost the probe-first ordering removed — so the
+    // dialog pairs this with its own `projectHasAudio` before claiming a loss.
+    return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported };
   } catch (error) {
     // Clean up resources on error
     await cleanup();

@@ -20,12 +20,22 @@ export { gifFrameDelayMs } from './exportTypes';
 
 // Public API - capability checks
 export {
+  hasMP4EncodeGlobals,
   isMP4ExportSupported,
   isWebMExportSupported,
+  EXPORT_NO_VIDEO_CODEC_REASON,
   EXPORT_NO_WEBCODECS_REASON,
+  MP4_NO_CODEC_REASON,
   WEBM_NO_CODEC_REASON,
   GIF_ALWAYS_AVAILABLE_NOTE,
+  audioCodecName,
+  exportedWithoutSoundReason,
+  noAudioNote,
 } from './exportTypes';
+export type { ExportFormatSupport, VideoExportFormat } from './exportTypes';
+
+// Public API - what an export hands back
+export type { ExportResult } from './exportTypes';
 
 // Public API - error classes
 export { ExportAbortedError, ExportError } from './exportTypes';
