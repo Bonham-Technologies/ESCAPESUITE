@@ -1154,16 +1154,21 @@ A keyframe-mode drag can only **start** while the playhead sits inside the clip 
 `hitHandlesOnClip`'s own `currentTime < clip.timelinePosition || currentTime >= clipEnd` check
 gates the handle that begins it — but nothing stops the playhead moving outside the clip
 *mid*-gesture, since `currentTime` is read from the store fresh on every move rather than frozen
-at mousedown. `handleMouseMove`'s `applyChange` refuses the write outright once
-`currentTime - clip.timelinePosition` falls outside `[0, clip.duration]`, rather than writing a
-keyframe at a time nothing on the clip's own timeline can be scrubbed back to (ESCSUITE-168).
+at mousedown: pressing Space mid-drag walks it off either end, since only `handleMouseDown`
+guards on `isPlaying`, not `handleMouseMove`. `handleMouseMove`'s `applyChange` refuses the write
+outright once `currentTime - clip.timelinePosition` falls outside `[0, clip.duration]` — both
+ends, past the clip's start and past its end alike, each with its own test — rather than writing
+a keyframe at a time nothing on the clip's own timeline can be scrubbed back to (ESCSUITE-168).
 This is the one keyframe-time computation in the app that refuses rather than clamps — every
 other add path clamps to the clip's edge instead (`useKeyframeGraphKeyboard.ts`'s
 `addAtPlayhead`, `useKeyframeDrag.ts`'s `pixelsToTime`) — because those paths derive their time
 from the keyframe panel's own geometry (the playhead relative to the clip, a pixel inside the
 graph), which has nowhere further out to go; a drag's `currentTime` can leave the clip by any
 amount, and clamping it to the nearest edge would write a keyframe at a time the user's pointer
-was never near.
+was never near. The refusal is silent on purpose, not an oversight: the chrome the drag is
+moving is gated on the same bounds (`selectionOverlay.ts` draws no box or handles, and the clip
+itself is not drawn, at a time it does not span), so by the time a write is refused there is
+nothing left on screen for a notice to explain, and nothing freezes.
 
 No `suppressPreset` outside a transition is not the same as "a hit test is never inside one" —
 the preview does draw transitions, and the pointer works during them. The renderer suppresses
@@ -1339,8 +1344,25 @@ bare track would find it still set and be silently swallowed (ESCSUITE-168). The
 one-shot `document.addEventListener('click', …, { once: true })`, armed the moment the flag is
 set, that clears it on the very next click wherever it lands — consuming the gesture's own
 terminal click (whichever element it happens to fire on) instead of waiting for one that may
-never reach the container at all. `timelineGestures.perf.test.ts` asserts the counts
-exactly: 2 listeners, 1 `getSnapPoints`, one pass over the track rows, per gesture. Three of the
+never reach the container at all. It has to be **bubble**-phase and on `document`, not capture or
+`window`: React 19 delegates at the root container (`createRoot(#root)`,
+`packages/shared/src/bootstrap/index.tsx`), which sits *below* `document` in the tree, so a
+bubble-phase `document` listener fires *after* React's handlers — on the gesture's own terminal
+click, `handleTrackClick` still runs first, sees the flag set, stands down and clears it itself,
+and the one-shot fires second as a no-op (`Timeline.editing.test.tsx`'s "does not deselect on the
+click that ends a marquee" is the case that holds this ordering). Capture phase, or `window`
+instead of `document`, would fire the clear *before* React's own handler and silently
+reintroduce the bug the flag exists to prevent. The listener is held in a ref and given back in
+a mount-scoped cleanup if the timeline unmounts before the next click ever arrives (a project
+load, an undo back past "no clips") — the only other place it could otherwise outlive. And a
+flag left set by a gesture whose terminal click never fires **at all** (its mousedown target
+removed from the tree before the mouseup — a real browser then dispatches no click for it) is
+cleared a second way: `handleTrackMouseDown` clears it unconditionally at the start of every new
+gesture, since by then the previous one's click has either already landed or never will.
+`timelineGestures.perf.test.ts`'s `isGestureEvent` filters to `'mousemove' | 'mouseup'`, so the
+one-shot `click` listener is invisible to both halves of the count it asserts — `2 listeners, 1
+getSnapPoints, one pass over the track rows, per gesture` counts the mousemove/mouseup pair
+alone, not every `document` listener this hook binds. Three of the
 five hooks used to re-bind per pointer frame — 42 adds and 42 removes over a 20-move gesture —
 and `usePlayheadDrag` and `useInOutDrag` never did; their 2/2 is pinned exactly too, so a
 refactor cannot drop them into the churn. `useDragListeners` (the other export of
@@ -1373,7 +1395,7 @@ component.
 | `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
 | `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime` |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point started the gesture. Which point it is currently *writing* can change mid-gesture (ESCSUITE-165): dragging the in handle past the out point flips the gesture to the out handle, writing both points explicitly in the one move that crosses, so `playbackSlice.ts`'s own swap-on-cross invariant — correct for a direct write from outside a gesture — never fires mid-drag and the region never collapses to one mousemove's width. The stationary point is read live (off the same `inPoint`/`outPoint` refs the hook mirrors every render) at the instant of each crossing, not snapshotted once at mousedown, so a write to it from outside the gesture — the keyboard's I/O shortcuts, the Toolbar's in/out buttons, both of which call `setInPoint`/`setOutPoint` directly — is what a crossing sees rather than something it silently discards |
-| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame. A drop that changed both the row and the time writes twice there, and the second write carries `skipHistory` so the whole drag is one undo step (ESCSUITE-79, below). A drop by a **multi-selection** is the other branch of that same commit: one `moveSelectedClips` carrying both deltas, all-or-nothing (ESCSUITE-80, below). The grab point (where the pointer took hold of the clip) is also taken once on mousedown, but as a TIME — `pixelsPerSecond` can change mid-drag (`+`/`-` zoom needs no pointer of its own), and a pixel distance measured at the old zoom would describe the wrong grab point once the pixel grid underneath it has changed. `handleMouseMove` re-derives the pixel offset from the grabbed time and the *current* `pixelsPerSecond` on every move — one multiplication, no allocation — rather than reading the stale `dragState.offsetX` a caller would otherwise cache (ESCSUITE-168); `dragState.offsetX` itself is unchanged, since nothing outside this hook reads it |
+| `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame. A drop that changed both the row and the time writes twice there, and the second write carries `skipHistory` so the whole drag is one undo step (ESCSUITE-79, below). A drop by a **multi-selection** is the other branch of that same commit: one `moveSelectedClips` carrying both deltas, all-or-nothing (ESCSUITE-80, below). The grab point (where the pointer took hold of the clip) is also taken once on mousedown, but as a TIME — `pixelsPerSecond` can change mid-drag (`+`/`-` zoom needs no pointer of its own), and a pixel distance measured at the old zoom would describe the wrong grab point once the pixel grid underneath it has changed. `handleMouseMove` re-derives the pixel offset from the grabbed time and the *current* `pixelsPerSecond` on every move (`timeToPixels`, the twin of the `pixelsToTime` the rest of the file already uses), rather than from `dragState.offsetX`, which stays fixed in pixels at whatever zoom the gesture started at (ESCSUITE-168). `offsetX` itself is kept on `DragState` unchanged — and is read by nothing at all now, inside this hook or out; the grab point the moves actually use, `offsetSecondsRef`, lives beside `snapPointsRef` instead |
 | `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it. The per-move write makes `clips` a fresh array every frame, which is exactly why the listeners hang off `trimState` and not off the clips |
 | `useTimelineMarquee.ts` | Rubber-band selection: the drag threshold that tells a marquee from a click, the hit test over rows and time, and the `marqueeJustFinished` flag that keeps the closing click from seeking — cleared by the next `click` anywhere, through a one-shot `document` listener armed the moment the flag is set, rather than only by a click that happens to land on the track container (ESCSUITE-168, see "One listener pair..." above). The rows are still walked on the release only — once per gesture, never per frame |
 | `useTrackHeaderActions.ts` | What the header buttons do: raising and lowering a track (with the reversal between display order and the store's bottom-up indices) and deleting one, asking first if it still holds clips — "Ctrl+Z will bring it back", not "this cannot be undone" (ESCSUITE-168): `removeTrack` pushes an undo entry like every other edit, so the old wording scared the user off a reversible action |

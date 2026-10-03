@@ -26,7 +26,7 @@
 // area is measured once on mousedown; the rows are still walked only on the
 // mouseup that selects, which is where they always were.
 import type * as React from 'react';
-import { useCallback, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useDocumentListener } from '../../hooks/useDocumentListener';
 import type { Clip } from '../../store/types';
 import {
@@ -102,6 +102,13 @@ export function useTimelineMarquee({
   const startRef = useRef<MarqueePoint | null>(null);
   const currentRef = useRef<MarqueePoint | null>(null);
   const trackArea = useTrackAreaCache();
+  /**
+   * The one-shot `document` click listener armed below, while it is still
+   * pending — null once it has fired (it clears itself) or been given back.
+   * Held in a ref rather than let dangle so the unmount effect below can
+   * remove it if the timeline goes away before the next click arrives.
+   */
+  const clearOnClickRef = useRef<(() => void) | null>(null);
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!trackContainerRef.current) return;
@@ -175,13 +182,14 @@ export function useTimelineMarquee({
       // (ESCSUITE-168). A one-shot document listener catches that terminal
       // click no matter where it lands and clears the flag there instead —
       // consuming it as this gesture's own click rather than a future one.
-      document.addEventListener(
-        'click',
-        () => {
-          marqueeJustFinishedRef.current = false;
-        },
-        { once: true }
-      );
+      // Held in `clearOnClickRef` so the unmount effect below can give it back
+      // if the timeline goes away before that click ever arrives.
+      const clearOnClick = () => {
+        marqueeJustFinishedRef.current = false;
+        clearOnClickRef.current = null;
+      };
+      clearOnClickRef.current = clearOnClick;
+      document.addEventListener('click', clearOnClick, { once: true });
     } else {
       // No drag - let handleTrackClick handle the deselect + seek
     }
@@ -196,9 +204,32 @@ export function useTimelineMarquee({
   useDocumentListener('mousemove', handleMouseMove, tlMarqueeStart !== null);
   useDocumentListener('mouseup', handleMouseUp, tlMarqueeStart !== null);
 
+  // Give back the one-shot click listener above if the timeline unmounts
+  // before the next click ever arrives — a project load that empties the
+  // timeline, or an undo back past "no clips", mid-gesture. A no-op on every
+  // other unmount, since nothing is armed then.
+  useEffect(() => {
+    return () => {
+      if (clearOnClickRef.current) {
+        document.removeEventListener('click', clearOnClickRef.current);
+        clearOnClickRef.current = null;
+      }
+    };
+  }, []);
+
   // Handle mousedown on track area to start marquee selection
   const handleTrackMouseDown = useCallback(
     (e: React.MouseEvent) => {
+      // A terminal click that never fires at all — its mousedown target
+      // removed from the tree before the mouseup, which a real browser then
+      // dispatches no click for — would otherwise leave `marqueeJustFinished`
+      // set forever: the one-shot listener above never sees a click to clear
+      // it on, and the flag would swallow the next real one. By the time
+      // another mousedown starts a new gesture, this gesture's own click has
+      // either already fired or never will, so it is always safe to clear a
+      // leftover flag here too (ESCSUITE-168 review, NIT 7).
+      marqueeJustFinishedRef.current = false;
+
       if (!trackContainerRef.current || isDraggingPlayhead || dragState) return;
       const container = trackContainerRef.current;
 
@@ -218,7 +249,7 @@ export function useTimelineMarquee({
       setTlMarqueeStart(start);
       setTlMarqueeCurrent(null);
     },
-    [isDraggingPlayhead, dragState, trackArea, trackContainerRef]
+    [isDraggingPlayhead, dragState, trackArea, trackContainerRef, marqueeJustFinishedRef]
   );
 
   return {

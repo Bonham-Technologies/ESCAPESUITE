@@ -73,7 +73,7 @@ import {
   wouldOverlap,
 } from '../../store/timelineSnapping';
 import type { Clip, ToolType, Track } from '../../store/types';
-import { pixelsToTime } from '../../utils/timeUtils';
+import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
 import { getSplitOffset, pointerTime, snapDragPosition } from './timelineGeometry';
 import type { DragState } from './types';
 import { useTrackAreaCache } from './useTrackAreaCache';
@@ -158,10 +158,12 @@ export function useClipDrag({
    * mousedown, like the snap points, but re-read into pixels at the *current*
    * `pixelsPerSecond` on every move. `+`/`-` changes the zoom with no pointer
    * of its own, so a zoom step mid-drag is a render this hook sees without a
-   * mousemove to go with it; caching the grab offset in pixels (as `dragState`
-   * does, for `TimelineTrack` to draw from) would leave it describing the OLD
-   * zoom's pixel grid, and the next move would subtract a now-wrong distance
-   * from a cursor position that moved zero pixels of its own (ESCSUITE-168).
+   * mousemove to go with it; `dragState.offsetX` is still kept, in pixels, at
+   * whatever zoom the gesture started at — nothing outside this hook reads
+   * it, and nothing inside it either, now — so caching the grab point there
+   * instead of here would leave the only copy describing the OLD zoom's pixel
+   * grid, and the next move would subtract a now-wrong distance from a cursor
+   * position that moved zero pixels of its own (ESCSUITE-168).
    */
   const offsetSecondsRef = useRef(0);
   const trackArea = useTrackAreaCache();
@@ -186,7 +188,7 @@ export function useClipDrag({
     // zoom here — one read, no allocation — rather than taken from
     // `drag.offsetX`, which is fixed in pixels at whatever zoom the gesture
     // started at (ESCSUITE-168).
-    const offsetXNow = offsetSecondsRef.current * pixelsPerSecond;
+    const offsetXNow = timeToPixels(offsetSecondsRef.current, pixelsPerSecond);
     const x = e.clientX - area.left + container.scrollLeft - offsetXNow;
     let newPosition = pixelsToTime(x, pixelsPerSecond);
     newPosition = Math.max(0, newPosition);
