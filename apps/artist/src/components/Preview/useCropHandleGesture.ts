@@ -264,6 +264,9 @@ export function useCropHandleGesture({
       if (!live) return;
 
       const distance = e.shiftKey ? CROP_NUDGE.coarse : CROP_NUDGE.fine;
+      // No `keepAspect` here: Shift means the coarse step on the keyboard,
+      // not the aspect lock, which is a mouse-drag-only question
+      // (`cropRegionAspect` is read once, at the press).
       const next = cropForHandleMove(
         live.crop,
         handle,

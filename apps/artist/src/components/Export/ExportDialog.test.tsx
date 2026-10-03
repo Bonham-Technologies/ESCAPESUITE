@@ -1901,6 +1901,65 @@ describe('ExportDialog', () => {
       expect(screen.getByText(/GIF export needs this tab visible and has no sound/)).toBeInTheDocument()
     })
 
+    it('still says WebM needs the tab visible when the browser has no MP4 support (ESCSUITE-173)', async () => {
+      // WebM drives the same `elementFrames.ts` rAF readiness poll GIF does —
+      // the browser throttles it once the tab is hidden — but the note used to
+      // be bundled with MP4's own "keeps encoding in a background tab"
+      // sentence and hidden entirely whenever `mp4Supported` was false, taking
+      // the equally-true WebM fact down with it.
+      //
+      // Both probes are async since ESCSUITE-175 and `mp4Supported` starts
+      // optimistically `true`, so the note is not there until the probe
+      // actually resolves `video: false` — `waitFor` rather than a bare
+      // `getByText` right after render.
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      await waitFor(() => expect(screen.getByText(/WebM needs this tab visible/)).toBeInTheDocument())
+
+      // The third operand's false side (rereview MINOR a / ESCSUITE-173):
+      // `effectiveAdvancedFormat === 'webm'` must actually gate the note off
+      // when GIF is selected instead, with MP4 unsupported but WebM itself
+      // still fine — the old gate's only reacher for this side selected
+      // 'mp4' (the fallback case below), whose effective format is now
+      // 'webm' too, so nothing was left covering a GIF selection here.
+      chooseGif()
+      expect(screen.queryByText(/WebM needs this tab visible/)).not.toBeInTheDocument()
+    })
+
+    it('still says it for a restored MP4 preference the browser cannot honour (MEDIUM 3 / ESCSUITE-173)', async () => {
+      // `advancedOptions.format` stays the SAVED 'mp4' here (ESCSUITE-22's own
+      // "falls back to WebM when MP4 is chosen" case) — the dialog's own
+      // `effectiveAdvancedFormat` is what actually exports, and is 'webm'.
+      // Gating the note on the selected format rather than the effective one
+      // missed exactly this case.
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
+      mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      // Wait for the restored setting to actually land — `advancedOptions`
+      // starts at the default 'webm', so checking the note right away would
+      // pass before the race this test is about even runs.
+      await waitFor(() => expect(screen.getByRole('radio', { name: /mp4/i })).toBeChecked())
+
+      // And wait for the (also async, ESCSUITE-175) MP4 probe to actually
+      // resolve `video: false`, same reasoning as the case above.
+      await waitFor(() => expect(screen.getByText(/WebM needs this tab visible/)).toBeInTheDocument())
+    })
+
+    it('says nothing about WebM when neither video format is supported (MEDIUM 3 / ESCSUITE-173)', async () => {
+      // `advancedOptions.format` defaults to 'webm', so gating on the selected
+      // format alone showed the WebM tab-visibility note right beside the
+      // "Exporting needs WebCodecs" alert — advertising a requirement of a
+      // format the dialog has just disabled.
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
+      mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await waitFor(() => expect(primaryExport()).toBeDisabled())
+
+      expect(screen.queryByText(/WebM needs this tab visible/)).not.toBeInTheDocument()
+    })
+
     it('leaves GIF enabled, and says so, when the browser has no WebCodecs', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })

@@ -531,6 +531,49 @@ describe('parseProject (ESCSUITE-102)', () => {
     expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid crop' })
   })
 
+  describe('transform validation (ESCSUITE-173)', () => {
+    it('accepts a clip carrying a valid transform', () => {
+      expect(parseProject(validProject()).ok).toBe(true)
+    })
+
+    it('accepts a clip with no transform at all', () => {
+      const noTransform = validProject()
+      delete (noTransform.timeline.clips[0] as Partial<typeof noTransform.timeline.clips[0]>).transform
+
+      expect(parseProject(noTransform).ok).toBe(true)
+    })
+
+    it.each([
+      ['a transform that is not an object', 0.5],
+      ['a transform that is null', null],
+      ['a transform missing scaleY', { x: 0.5, y: 0.5, scaleX: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a non-numeric scaleX', { x: 0.5, y: 0.5, scaleX: '1', scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a NaN scaleX', { x: 0.5, y: 0.5, scaleX: NaN, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with scaleX of zero', { x: 0.5, y: 0.5, scaleX: 0, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a negative scaleY', { x: 0.5, y: 0.5, scaleX: 1, scaleY: -1, rotation: 0, opacity: 1 }],
+      ['a transform with a non-finite rotation', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: Infinity, opacity: 1 }],
+      ['a transform with a non-numeric x', { x: '0.5', y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a NaN y', { x: 0.5, y: NaN, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a null rotation', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: null, opacity: 1 }],
+      ['a transform with a non-finite opacity', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: Infinity }],
+      // Rereview NIT: the earlier four rows left `Number.isFinite(x)`,
+      // `typeof y === 'number'` and `Number.isFinite(scaleY)`'s false sides
+      // unreached (the `scaleX: NaN` row above hits `Number.isFinite(scaleX)`
+      // instead, and `scaleY: -1` fails on `> 0`, not finiteness).
+      ['a transform with a non-finite x', { x: Infinity, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a non-numeric y', { x: 0.5, y: 'a', scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a non-finite scaleY', { x: 0.5, y: 0.5, scaleX: 1, scaleY: NaN, rotation: 0, opacity: 1 }],
+    ])('rejects %s, naming the clip (ESCSUITE-173)', (_label, badTransform) => {
+      const bad = validProject()
+      // The cast is the point: this is what JSON.parse hands over, and the
+      // type checker is not what stops a `scaleX: 0` reaching
+      // `cropDrag.ts`'s `sourceDelta`, which divides by it.
+      bad.timeline.clips[0].transform = badTransform as never
+
+      expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid transform' })
+    })
+  })
+
   describe('resolution validation (ESCSUITE-152)', () => {
     it.each([
       ['null', null],

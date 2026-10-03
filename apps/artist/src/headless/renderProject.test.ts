@@ -32,7 +32,7 @@ const legacyText = (): TextOverlay => ({
 const baseInput = (): RenderInput => ({
   project: {
     id: 'p', name: 'n', resolution: { width: 64, height: 48 },
-    timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0' }], textOverlays: [], shapeOverlays: [], duration: 1 },
+    timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0', trackId: 't0' }], textOverlays: [], shapeOverlays: [], duration: 1 },
   } as unknown as RenderInput['project'],
   sourceVideos: [{ id: 's0', name: 's.mp4', mimeType: 'video/mp4', width: 1920, height: 1080 } as RenderInput['sourceVideos'][number]],
   sourceBlobs: { s0: new Uint8Array([1]).buffer },
@@ -172,8 +172,50 @@ describe('renderProject', () => {
 
   it('ignores overlay clips during validation', async () => {
     const input = baseInput()
-    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({ id: 'txt', sourceVideoId: '', overlayType: 'text', timelinePosition: 0, duration: 1 })
+    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({ id: 'txt', sourceVideoId: '', overlayType: 'text', timelinePosition: 0, duration: 1, trackId: 't0' })
     await expect(renderProject(input)).resolves.toBeTruthy()
+  })
+
+  it('rejects a malformed crop through parseProject instead of silently dropping the clip (ESCSUITE-173)', async () => {
+    // Before this, `validateInput` checked sources only: a crop of the wrong
+    // shape reached `croppedSourceRect` as NaN and the clip was quietly
+    // omitted from an unattended render rather than failing the job.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).crop = {
+      left: -1, top: 0, right: 0, bottom: 0,
+    }
+    await expect(renderProject(input)).rejects.toThrow(/invalid crop/i)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('rejects a project with a duplicate clip id instead of rendering whichever one won (ESCSUITE-173)', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({
+      id: 'c0', sourceVideoId: 's0', trackId: 't0',
+    })
+    await expect(renderProject(input)).rejects.toThrow(/duplicate clip id/i)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('does not adopt the migration\'s 1920x1080 default for a project with no resolution of its own (MAJOR 1 / ESCSUITE-173)', async () => {
+    // `parseProject`'s migration (`ensureTimelineHasTracks`) fills a MISSING
+    // `resolution` in with 1920x1080 — the editor's own default. The headless
+    // path never ran that migration before this ticket, and a resolution-less
+    // job instead fell back to `getResolution('project', …)`'s OTHER path:
+    // the source's own native size — the documented kit contract. A 640x480
+    // source makes the two outcomes unmistakable (1920x1080 is also this
+    // fixture's OTHER plausible-looking number, so it would not bite).
+    const input = baseInput()
+    delete (input.project as Partial<typeof input.project>).resolution
+    input.sourceVideos[0].width = 640
+    input.sourceVideos[0].height = 480
+
+    const res = await renderProject(input)
+
+    const passedResolution = (exportToMP4.mock.calls[0] as unknown[])[6]
+    expect(passedResolution).toBeUndefined()
+    expect(res.meta.width).toBe(640)
+    expect(res.meta.height).toBe(480)
   })
 
   it('renders a legacy text overlay instead of dropping it from the export', async () => {

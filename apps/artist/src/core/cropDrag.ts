@@ -20,7 +20,7 @@
 // it is read by the renderer on every media clip of every frame, and none of
 // this is.
 import type { AnimatableProperty, ClipAnimation, ClipCrop, ClipTransform } from '../store/types';
-import { croppedSourceRect } from './clipCrop';
+import { MAX_CROP_INSET, croppedSourceRect } from './clipCrop';
 
 /** One of the eight handles, by compass point. */
 export type CropHandle = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
@@ -93,6 +93,21 @@ const HANDLE_EDGES: Record<CropHandle, { x?: 'left' | 'right'; y?: 'top' | 'bott
 };
 
 /**
+ * The floor this function divides a scale by.
+ *
+ * Not the UI's own 0.1 — `useTransformHandles.ts`'s fifteen `Math.max(0.1, …)`
+ * sites and `TransformSection.tsx`'s three `min={0.1}` range inputs — which a
+ * drag or a number field can never get past. `updateClipTransform` itself
+ * applies no floor at all, so a `.veditor`, a host `LOAD_PROJECT` payload or a
+ * headless job spec could still carry a `scaleX`/`scaleY` of 0, negative, or
+ * `NaN` (ESCSUITE-173; `parseProject` now refuses all three too, but this
+ * function is not the validator and does not trust a project that reached it
+ * anyway). The value only has to keep the division finite, not match any UI
+ * limit.
+ */
+const MIN_SCALE = 0.001;
+
+/**
  * A displacement on the canvas, in the clip's own unrotated frame and in SOURCE
  * pixels.
  *
@@ -103,19 +118,24 @@ const HANDLE_EDGES: Record<CropHandle, { x?: 'left' | 'right'; y?: 'top' | 'bott
  * fast as the pointer moves.
  *
  * `delta` is in PROJECT pixels — the caller divides the pointer's client
- * displacement by the content box' scale first. A clip at scale 0 yields a
- * non-finite inset, which `normaliseCrop`'s own clamp reads as no inset; no
- * guard is coded for a scale no caller can produce (`updateClipTransform`
- * floors every scale at 0.1).
+ * displacement by the content box' scale first. The scale is floored at
+ * {@link MIN_SCALE} before dividing — a corrupt `scaleX`/`scaleY` of 0,
+ * negative, or `NaN` all yield a large-but-finite inset rather than
+ * `Infinity`/`NaN` (`Math.max(NaN, MIN_SCALE)` is itself `NaN`, so the
+ * finiteness is checked explicitly rather than left to `Math.max` alone).
  */
 export function sourceDelta(
   delta: { x: number; y: number },
   transform: Pick<CropGestureTransform, 'scaleX' | 'scaleY' | 'rotation'>
 ): { x: number; y: number } {
   const rad = (-transform.rotation * Math.PI) / 180;
+  const floored = (scale: number): number =>
+    Number.isFinite(scale) && scale > 0 ? scale : MIN_SCALE;
+  const scaleX = floored(transform.scaleX);
+  const scaleY = floored(transform.scaleY);
   return {
-    x: (delta.x * Math.cos(rad) - delta.y * Math.sin(rad)) / transform.scaleX,
-    y: (delta.x * Math.sin(rad) + delta.y * Math.cos(rad)) / transform.scaleY,
+    x: (delta.x * Math.cos(rad) - delta.y * Math.sin(rad)) / scaleX,
+    y: (delta.x * Math.sin(rad) + delta.y * Math.cos(rad)) / scaleY,
   };
 }
 
@@ -182,18 +202,46 @@ export function cropForHandleMove(
 
 /**
  * The same insets, with the dependent axis rewritten so the kept region has the
- * given aspect.
+ * given aspect — and, since every step below is exact arithmetic rather than
+ * an independent per-edge clamp, with every inset held at or under
+ * `MAX_CROP_INSET` (ruling 2026-10-02, superseding an interim same-day ruling
+ * that refused the move instead; ESCSUITE-173).
  *
- * Which axis is dependent follows the handle: a left/right handle or a corner
- * sets the width and the height follows; a top/bottom handle sets the height
- * and the width follows. Where the handle owns an edge on the dependent axis
- * (a corner) the whole adjustment lands on that edge, so the edge the corner is
- * diagonally opposite stays where it was; where it does not, the region keeps
- * its own centre on that axis and the change is split between the two edges.
+ * Which axis is INDEPENDENT (set directly from `delta`, already in `crop`
+ * going in) and which is DEPENDENT (derived from it, to hold the aspect)
+ * follows the handle: a left/right handle or a corner sets the width and the
+ * height follows; a top/bottom handle sets the height and the width follows.
+ * Where the handle owns an edge on the dependent axis (a corner) the whole
+ * adjustment lands on that edge, so the edge the corner is diagonally
+ * opposite stays where it was; where it does not (a side handle), the region
+ * keeps its own centre on that axis and the change is split between its two
+ * edges.
  *
- * The result can ask for a region with no pixel in it — an aspect-locked drag
- * derives rather than clamps — which `cropUpdateFor` refuses, so the drag
- * simply stops.
+ * The cap: `clampMoved` above bounds a PLAIN move's independent inset only at
+ * the one-source-pixel limit (`axisLimit`), which is LOOSER than
+ * `MAX_CROP_INSET` — a plain `w` drag past 90% does produce an inset over
+ * 0.9, and is still correctly CLAMPED to 0.9 by `normaliseCrop`'s per-edge
+ * clamp later, because with no ratio to hold, the clamped value is still the
+ * shape the user asked for (just stopped at the wall). Under a RATIO,
+ * though, that same per-edge clamp would land the independent and dependent
+ * insets at DIFFERENT distances from the limit, breaking the very ratio
+ * Shift is holding (NIT 8) — so before deriving the dependent edge(s) here,
+ * the region's independent dimension (width for the x-driven handles,
+ * height for `n`/`s`) is widened
+ * to the LARGEST of: the one the pointer actually asked for, the one that
+ * keeps the independent inset itself at the limit, and the one that keeps
+ * every dependent inset at the limit — i.e. the smallest region that still
+ * satisfies every constraint, so the handle slides to the limit and holds
+ * there, the same way an unlocked handle already does at its own
+ * single-edge limit, rather than breaking the lock or refusing the move. A
+ * request already inside every limit leaves this a no-op: the "largest of"
+ * picks the pointer's own (unwidened) value.
+ *
+ * Can still fall short of the aspect on a source too small or an aspect too
+ * extreme for ANY region to satisfy every cap at once (the pathological
+ * case `clampMoved`'s own narrow-source guard exists for, one level up) —
+ * `Math.max(0, …)` on the independent inset is the floor for that, same as
+ * every other defensive floor in this file.
  */
 function withAspect(
   crop: ClipCrop,
@@ -201,31 +249,68 @@ function withAspect(
   source: SourceSize,
   aspect: number
 ): ClipCrop {
-  const region = croppedSourceRect(source.width, source.height, crop);
   const edges = HANDLE_EDGES[handle];
 
   if (edges.x) {
-    const height = region.sw / aspect;
+    const independent = edges.x === 'left' ? crop.left : crop.right;
+    const oppositeX = edges.x === 'left' ? crop.right : crop.left;
+    const desiredWidth = source.width * (1 - independent - oppositeX);
+    const minFromIndependent = source.width * (1 - MAX_CROP_INSET - oppositeX);
+
+    let minFromDependent: number;
     if (edges.y === 'top') {
-      return { ...crop, top: Math.max(0, 1 - crop.bottom - height / source.height) };
+      minFromDependent = aspect * source.height * (1 - crop.bottom - MAX_CROP_INSET);
+    } else if (edges.y === 'bottom') {
+      minFromDependent = aspect * source.height * (1 - crop.top - MAX_CROP_INSET);
+    } else {
+      const centreY = crop.top * source.height + (source.height * (1 - crop.top - crop.bottom)) / 2;
+      const minFromTop = aspect * 2 * (centreY - MAX_CROP_INSET * source.height);
+      const minFromBottom = aspect * 2 * ((1 - MAX_CROP_INSET) * source.height - centreY);
+      minFromDependent = Math.max(minFromTop, minFromBottom);
+    }
+
+    const width = Math.max(desiredWidth, minFromIndependent, minFromDependent);
+    const nextIndependent = Math.max(0, 1 - oppositeX - width / source.width);
+    const capped: ClipCrop =
+      edges.x === 'left' ? { ...crop, left: nextIndependent } : { ...crop, right: nextIndependent };
+
+    const height = width / aspect;
+    if (edges.y === 'top') {
+      return { ...capped, top: Math.max(0, 1 - capped.bottom - height / source.height) };
     }
     if (edges.y === 'bottom') {
-      return { ...crop, bottom: Math.max(0, 1 - crop.top - height / source.height) };
+      return { ...capped, bottom: Math.max(0, 1 - capped.top - height / source.height) };
     }
-    const centre = region.sy + region.sh / 2;
+    const centre = capped.top * source.height + (source.height * (1 - capped.top - capped.bottom)) / 2;
     return {
-      ...crop,
+      ...capped,
       top: Math.max(0, (centre - height / 2) / source.height),
       bottom: Math.max(0, 1 - (centre + height / 2) / source.height),
     };
   }
 
-  const width = region.sh * aspect;
-  const centre = region.sx + region.sw / 2;
+  // `n`/`s`: the symmetric case, axes swapped. Neither owns an x edge, so the
+  // dependent pair is always the split-around-centre form — there is no
+  // corner-shaped "one edge absorbs it" variant on this side.
+  const independent = edges.y === 'top' ? crop.top : crop.bottom;
+  const oppositeY = edges.y === 'top' ? crop.bottom : crop.top;
+  const desiredHeight = source.height * (1 - independent - oppositeY);
+  const minFromIndependent = source.height * (1 - MAX_CROP_INSET - oppositeY);
+  const centreX = crop.left * source.width + (source.width * (1 - crop.left - crop.right)) / 2;
+  const minFromLeft = (2 * (centreX - MAX_CROP_INSET * source.width)) / aspect;
+  const minFromRight = (2 * ((1 - MAX_CROP_INSET) * source.width - centreX)) / aspect;
+  const minFromDependent = Math.max(minFromLeft, minFromRight);
+
+  const height = Math.max(desiredHeight, minFromIndependent, minFromDependent);
+  const nextIndependent = Math.max(0, 1 - oppositeY - height / source.height);
+  const capped: ClipCrop =
+    edges.y === 'top' ? { ...crop, top: nextIndependent } : { ...crop, bottom: nextIndependent };
+
+  const width = height * aspect;
   return {
-    ...crop,
-    left: Math.max(0, (centre - width / 2) / source.width),
-    right: Math.max(0, 1 - (centre + width / 2) / source.width),
+    ...capped,
+    left: Math.max(0, (centreX - width / 2) / source.width),
+    right: Math.max(0, 1 - (centreX + width / 2) / source.width),
   };
 }
 

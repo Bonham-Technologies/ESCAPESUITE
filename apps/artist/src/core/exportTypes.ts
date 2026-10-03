@@ -925,6 +925,19 @@ export const GIF_ALWAYS_AVAILABLE_NOTE =
   'GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway.';
 
 /**
+ * The one fact WebM and GIF share: both drive `core/elementFrames.ts`'s
+ * `requestAnimationFrame` readiness poll — WebM seeking an `HTMLVideoElement`,
+ * GIF reading the canvas — which the browser throttles once the tab is
+ * hidden. MP4 is the exception, decoding through a Web Worker when one starts
+ * (ESCSUITE-153), so it keeps encoding in the background. One constant so the
+ * export dialog's WebM and GIF notices say the same thing and cannot drift
+ * apart (ESCSUITE-173: the WebM half of this used to be bundled with MP4's
+ * own background-tab sentence and disappeared whenever MP4 was unsupported,
+ * taking the equally-true WebM fact down with it).
+ */
+export const TAB_VISIBLE_NOTE = 'needs this tab visible';
+
+/**
  * Load a video blob and create an HTMLVideoElement
  */
 export async function loadVideoElement(blob: Blob): Promise<HTMLVideoElement> {

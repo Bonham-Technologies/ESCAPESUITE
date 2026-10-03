@@ -77,6 +77,28 @@ describe('sourceDelta', () => {
     expect(local.x).toBeCloseTo(40)
     expect(local.y).toBeCloseTo(0)
   })
+
+  it('floors a corrupt zero scale instead of dividing by it (ESCSUITE-173)', () => {
+    // `updateClipTransform` applies no floor at all — the UI's 0.1 lives in
+    // `useTransformHandles.ts` and `TransformSection.tsx`, which a drag can
+    // never get past, but a `.veditor`, a host `LOAD_PROJECT` payload or a
+    // headless job spec could carry `scaleX: 0` before `parseProject` checked
+    // transforms. Finite output, not NaN/Infinity, is the whole guarantee.
+    const result = sourceDelta({ x: 40, y: 40 }, transform({ scaleX: 0, scaleY: 0 }))
+
+    expect(Number.isFinite(result.x)).toBe(true)
+    expect(Number.isFinite(result.y)).toBe(true)
+  })
+
+  it('floors a NaN scale too (MINOR 5 / ESCSUITE-173)', () => {
+    // `Math.max(NaN, MIN_SCALE)` is `NaN` — the floor has to check finiteness
+    // itself rather than lean on `Math.max`, or it is not the complete
+    // backstop its own comment claims.
+    const result = sourceDelta({ x: 40, y: 40 }, transform({ scaleX: NaN, scaleY: NaN }))
+
+    expect(Number.isFinite(result.x)).toBe(true)
+    expect(Number.isFinite(result.y)).toBe(true)
+  })
 })
 
 describe('cropForHandleMove', () => {
@@ -189,8 +211,64 @@ describe('cropForHandleMove', () => {
       })
     })
 
+    it('does the same for the mirror handle, s — the false side of withAspect\'s edges.y === \'top\' ternaries (rereview MINOR b / ESCSUITE-173)', () => {
+      // The exact mirror of the `n` case above: 50% off the bottom leaves
+      // 400x100 at (0,0); held at 1:1 that is 100x100, centred on the
+      // region's centre (200, 50) — 150px off each side.
+      expect(cropForHandleMove(undefined, 's', { x: 0, y: -100 }, SOURCE, 1)).toEqual({
+        left: 0.375,
+        top: 0,
+        right: 0.375,
+        bottom: 0.5,
+      })
+    })
+
     it('leaves a region that already has the aspect alone', () => {
       expect(cropForHandleMove(undefined, 'e', { x: 0, y: 0 }, SOURCE, 2)).toEqual(crop())
+    })
+
+    it('slides the nw handle to MAX_CROP_INSET on both insets, ratio intact, instead of landing a clamp that breaks it (ruling 2026-10-02, ESCSUITE-173)', () => {
+      // At this source's own native 2:1 aspect, `nw` scales `left` and `top`
+      // together: asking for 95% left (380 of 400 source px) would derive a
+      // `top` of 0.95 too — past MAX_CROP_INSET. `normaliseCrop`'s own clamp
+      // would land only `top` at 0.9 (leaving `left` at 0.95, since it clamps
+      // each inset independently) and break the ratio the lock is holding
+      // (NIT 8). The handle instead slides to exactly 0.9 on BOTH insets —
+      // the limit, with the aspect held, the same way an unlocked handle
+      // already slides to its own single-edge limit.
+      expect(cropForHandleMove(undefined, 'nw', { x: 380, y: 0 }, SOURCE, 2)).toEqual({
+        left: 0.9, top: 0.9, right: 0, bottom: 0,
+      })
+    })
+
+    it('does the same for the mirror corner, se', () => {
+      expect(cropForHandleMove(undefined, 'se', { x: -380, y: 0 }, SOURCE, 2)).toEqual({
+        left: 0, top: 0, right: 0.9, bottom: 0.9,
+      })
+    })
+
+    it('clamps the s handle the same way, at this source\'s own native aspect (rereview MINOR b / ESCSUITE-173)', () => {
+      // The `n`/`s` branch's over-limit case: at this source's native 2:1
+      // aspect, `s` scales `bottom` and the split `left`/`right` together.
+      // Asking for 95% off the bottom derives a height that would put `left`
+      // and `right` both at 0.45 — comfortably inside the limit — but the
+      // INDEPENDENT inset itself (`bottom`) is the one that binds here and
+      // slides to exactly 0.9, holding the aspect on the two derived edges.
+      const result = cropForHandleMove(undefined, 's', { x: 0, y: -380 }, SOURCE, 2)
+      expect(result.bottom).toBe(0.9)
+      expect(result.top).toBe(0)
+      expect(result.left).toBeCloseTo(0.45)
+      expect(result.right).toBeCloseTo(0.45)
+    })
+
+    it('a further move back inside the limit lands normally — the cap is per-move, not sticky', () => {
+      // Once `delta` asks for less than the limit again, the result is the
+      // ordinary unclamped one: the cap comes from re-deriving each move from
+      // the gesture's start crop (ESCSUITE-110's rule), not from any state the
+      // previous, clamped move left behind.
+      expect(cropForHandleMove(undefined, 'nw', { x: 100, y: 0 }, SOURCE, 2)).toEqual({
+        left: 0.25, top: 0.25, right: 0, bottom: 0,
+      })
     })
   })
 })

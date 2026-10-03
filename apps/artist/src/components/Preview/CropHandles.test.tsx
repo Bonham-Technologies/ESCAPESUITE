@@ -470,19 +470,101 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).crop).toEqual({ left: 0.9, top: 0, right: 0, bottom: 0 })
   })
 
-  it('writes nothing for an aspect-locked drag that would leave no pixel', () => {
-    // The other side of `cropUpdateFor`'s refusal: an aspect-locked drag
-    // DERIVES the dependent axis rather than clamping it, so Shift-dragging the
-    // left handle to the far edge asks for a 1px-wide, 0.6px-high region —
-    // `normaliseCrop` refuses it, and the gesture simply writes nothing rather
-    // than storing a region the renderer could not read.
+  it('clamps along the locked ratio to MAX_CROP_INSET rather than leaving no pixel (ruling 2026-10-02, ESCSUITE-173)', () => {
+    // An aspect-locked drag DERIVES the dependent axis rather than clamping
+    // it independently. Shift-dragging the left handle to the far edge asks
+    // for a 1px-wide region, which at this clip's own 16:9 aspect derives a
+    // top/bottom split past MAX_CROP_INSET on both sides — the handle slides
+    // to exactly 0.9/0.45/0/0.45 instead (the largest region at this aspect
+    // that keeps every inset at or under the limit), rather than leaving no
+    // pixel or breaking the ratio.
     const { clip, handle } = mount()
     const before = past()
 
     drag(handle('Crop left'), 9999, 0, true)
 
-    expect(clipNow(clip.id).crop).toBeUndefined()
-    expect(past()).toBe(before)
+    const crop = clipNow(clip.id).crop!
+    expect(crop.left).toBeCloseTo(0.9)
+    expect(crop.top).toBeCloseTo(0.45)
+    expect(crop.right).toBe(0)
+    expect(crop.bottom).toBeCloseTo(0.45)
+    expect(past()).toBe(before + 1)
+  })
+
+  it('slides to MAX_CROP_INSET past the limit, and a move back inside lands normally, in one undo entry (MINOR 6 / ESCSUITE-173)', async () => {
+    // 16:9 is this clip's own uncropped aspect, so Shift-dragging its NW
+    // corner scales top and left together: moving the left inset to 50%
+    // (960 of 1920 source px, 480 CSS px at this canvas' 0.5 scale) moves top
+    // to 50% too, well inside MAX_CROP_INSET (0.9).
+    const { clip, handle } = mount()
+    const before = past()
+    const button = handle('Crop top left')
+
+    fireEvent.mouseDown(button, { clientX: 0, clientY: 0 })
+    fireEvent.mouseMove(document, { clientX: 480, clientY: 0, shiftKey: true })
+    await frame()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.5, top: 0.5, right: 0, bottom: 0 })
+
+    // Continuing the SAME drag to 95% derives a top of 0.95 — which
+    // `normaliseCrop`'s own clamp would have landed independently at 0.9,
+    // leaving `left` at 0.95 and breaking the ratio. The handle instead
+    // slides to exactly 0.9 on BOTH insets — the limit, ratio intact.
+    fireEvent.mouseMove(document, { clientX: 912, clientY: 0, shiftKey: true })
+    await frame()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.9, top: 0.9, right: 0, bottom: 0 })
+
+    // Moving back inside the limit lands the ordinary, unclamped value — the
+    // cap is re-derived from the gesture's start crop on every move
+    // (ESCSUITE-110's rule), not a sticky state the clamped move left behind.
+    fireEvent.mouseMove(document, { clientX: 600, clientY: 0, shiftKey: true })
+    await frame()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.625, top: 0.625, right: 0, bottom: 0 })
+
+    fireEvent.mouseUp(document)
+
+    // One undo entry for the whole gesture, however many writes the three
+    // moves made.
+    expect(past()).toBe(before + 1)
+  })
+
+  it('keeps a drag\'s listeners live when it renders null mid-drag — only a true unmount takes them (UNVERIFIED 4 / ESCSUITE-173)', () => {
+    // `CropHandles` can return null WITHOUT unmounting: the preview panel
+    // collapsing under an open drag reports a 0x0 canvas box, which the
+    // component's OWN `content.scaleX <= 0` guard reads below `useCropHandleGesture`,
+    // so the hook — and its two `document` listeners — stays mounted and
+    // running; only a real unmount (the sibling test above) takes
+    // `endDragRef`'s cleanup with it. This pins that a render returning null
+    // does not: the drag that was already open keeps working.
+    const canvas = previewCanvas()
+    const clip = addClip('clip1', 0, 4)
+    render(
+      <CropHandles
+        clip={clip}
+        source={video}
+        canvas={canvas}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+    const before = past()
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Crop left' }), { clientX: 0, clientY: 0 })
+
+    setRect(canvas, { left: 0, top: 0, width: 0, height: 0 })
+    act(() => observer.emit(canvas, { width: 0, height: 0 }))
+    expect(screen.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
+
+    // The move and release the open drag is waiting for still land the write
+    // and close the history entry, exactly as an ordinary drag would — the
+    // `onMove`/`onUp` closures captured the content scale from the press, not
+    // from this later, handle-less render.
+    fireEvent.mouseMove(document, { clientX: 96, clientY: 0 })
+    fireEvent.mouseUp(document)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0, right: 0, bottom: 0 })
+    expect(past()).toBe(before + 1)
   })
 
   it('renders nothing while the preview panel is collapsed to nothing', () => {
@@ -815,6 +897,45 @@ describe('nudging a crop handle from the keyboard', () => {
     fireEvent.keyDown(screen.getByRole('button', { name: 'Crop left' }), { key: 'ArrowRight' })
 
     expect(clipNow(clip.id).crop).toBeUndefined()
+    expect(announced()).toBe('')
+  })
+
+  it('writes nothing for a source with no dimensions (round 3 / ESCSUITE-173)', () => {
+    // `cropUpdateFor`'s OTHER refusal arm, now the only reachable one: since
+    // the aspect-lock clamp (ruling 2026-10-02) no handle move can ask
+    // `normaliseCrop` for a crop that leaves less than a source pixel, so the
+    // one remaining way in is a source with no dimensions at all — a stored
+    // 0x0 row (ESCSUITE-97's audio-only / unreadable-metadata shape). Against
+    // a 0-width, 0-height source, `normaliseCrop`'s "leaves a pixel" check
+    // divides by zero and refuses ANY non-empty crop outright.
+    //
+    // The clip already carries a crop from before its source lost its
+    // dimensions. Nudging `n` (which owns only `top`) sets `top` to 0 — a
+    // dimension of 0 collapses `clampMoved`'s own ceiling to 0 regardless of
+    // direction — which is a real change from the stored 0.2, so the nudge
+    // reaches the write rather than being swallowed by `cropsEqual`'s
+    // "nothing moved" short-circuit first; `left` carries over untouched, so
+    // the crop handed to `cropUpdateFor` is non-empty and is the refusal
+    // this pins, not the "already all zero" early return.
+    const clip = addClip('clip1', 0, 4)
+    store().updateClip(clip.id, { crop: { left: 0.3, top: 0.2, right: 0, bottom: 0 } })
+    const before = past()
+    render(
+      <CropHandles
+        clip={clipNow(clip.id)}
+        source={{ ...video, width: 0, height: 0 }}
+        canvas={previewCanvas()}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Crop top' }), { key: 'ArrowUp' })
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.3, top: 0.2, right: 0, bottom: 0 })
+    expect(past()).toBe(before)
     expect(announced()).toBe('')
   })
 })

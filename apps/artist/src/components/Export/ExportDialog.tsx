@@ -29,6 +29,7 @@ import {
   GIF_RESOLUTIONS,
   GIF_LONG_RANGE_SECONDS,
   GIF_LONG_RANGE_WARNING,
+  TAB_VISIBLE_NOTE,
 } from '../../core/exportTypes';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
@@ -721,7 +722,24 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   GIF has none (ESCSUITE-34). */}
               {mp4Supported && advancedOptions.format !== 'gif' && (
                 <div className={styles.summary}>
-                  MP4 exports keep encoding in a background tab when the decoder is available. WebM needs this tab visible.
+                  MP4 exports keep encoding in a background tab when the decoder is available. WebM {TAB_VISIBLE_NOTE}.
+                </div>
+              )}
+
+              {/* The WebM half of the note above, said on its own when MP4
+                  is not even an option to compare against (ESCSUITE-173): the
+                  fact is just as true, and used to disappear along with the
+                  MP4 half whenever `mp4Supported` was false. Gated on the
+                  EFFECTIVE format (the same one `advancedBlockedReason`
+                  reads above), not the selected one: a restored `{format:
+                  'mp4'}` setting in a now-MP4-less browser still exports as
+                  WebM (ESCSUITE-22's fallback) and needs the note just as
+                  much, and `webmSupported` keeps it off when WebM itself is
+                  the one thing that cannot run (`noVideoFormatSupported`'s
+                  own alert is the dialog's answer there, not this note). */}
+              {!mp4Supported && webmSupported && effectiveAdvancedFormat === 'webm' && (
+                <div className={styles.summary}>
+                  WebM {TAB_VISIBLE_NOTE}.
                 </div>
               )}
 
@@ -739,7 +757,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               {/* The two things a GIF surprises people with, said once. */}
               {advancedOptions.format === 'gif' && (
                 <div className={styles.summary}>
-                  GIF export needs this tab visible and has no sound.
+                  GIF export {TAB_VISIBLE_NOTE} and has no sound.
                 </div>
               )}
 
