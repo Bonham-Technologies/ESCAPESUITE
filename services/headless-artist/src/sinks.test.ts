@@ -6,6 +6,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { getSink } from './sinks'
 import type { VerificationManifest } from './manifest'
+import { MAX_TIMEOUT_MS } from './timeouts'
 
 const cleanupPaths: string[] = []
 const cleanupServers: http.Server[] = []
@@ -532,6 +533,37 @@ describe('webhook sink', () => {
     await expect(getSink('webhook', { url: 'http://x/', timeoutMs: '10' })).rejects.toThrow(
       /webhook sink requires config\.timeoutMs \(positive integer\) when provided/,
     )
+  })
+
+  // ESCSUITE-188 (hunt J-1): timeoutMs had no upper bound, so a value past what setTimeout can
+  // represent overflowed to a ~1 ms timeout (aborting the delivery instantly) or, past 2^32-1,
+  // threw ERR_OUT_OF_RANGE from inside deliver. Both must now be refused at validation time,
+  // before any request is sent.
+  describe('config.timeoutMs upper bound', () => {
+    it('refuses a timeoutMs above 2^31-1, naming the bound, rather than overflowing to ~1 ms', async () => {
+      await expect(getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: 2_147_483_648 })).rejects.toThrow(
+        `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
+
+    it('refuses a timeoutMs above 2^32-1 the same way, rather than throwing ERR_OUT_OF_RANGE from inside deliver', async () => {
+      await expect(getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: 2 ** 40 })).rejects.toThrow(
+        `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
+
+    it('accepts exactly the bound, 2^31-1', async () => {
+      const sink = await getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: MAX_TIMEOUT_MS })
+      expect(sink).toBeDefined()
+    })
+
+    it('refuses one past the bound', async () => {
+      await expect(
+        getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: MAX_TIMEOUT_MS + 1 }),
+      ).rejects.toThrow(
+        `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
   })
 
   it('gives up on a server that accepts the request and never responds', async () => {
