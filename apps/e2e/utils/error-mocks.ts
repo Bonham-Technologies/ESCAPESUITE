@@ -63,6 +63,12 @@ export async function mockAPIError(
 
 /**
  * Mock permission denied for camera
+ *
+ * Replaces the whole `navigator.mediaDevices` property, spread over what is
+ * already there, rather than assigning one method on it — a plain
+ * `navigator.mediaDevices.getUserMedia = fn` is silently lost on WebKit by
+ * the time the page's own scripts run (ESCSUITE-177, see the comment above
+ * `mockMediaDevices` in `media-mocks.ts` for how that was confirmed).
  */
 export async function mockCameraPermissionDenied(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -70,12 +76,17 @@ export async function mockCameraPermissionDenied(page: Page): Promise<void> {
       navigator.mediaDevices
     )
 
-    navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const getUserMedia: typeof navigator.mediaDevices.getUserMedia = async (constraints) => {
       if (constraints?.video) {
         throw new DOMException('Permission denied', 'NotAllowedError')
       }
       return originalGetUserMedia(constraints)
     }
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getUserMedia },
+      configurable: true,
+    })
   })
 }
 
@@ -88,12 +99,17 @@ export async function mockMicrophonePermissionDenied(page: Page): Promise<void> 
       navigator.mediaDevices
     )
 
-    navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const getUserMedia: typeof navigator.mediaDevices.getUserMedia = async (constraints) => {
       if (constraints?.audio) {
         throw new DOMException('Permission denied', 'NotAllowedError')
       }
       return originalGetUserMedia(constraints)
     }
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getUserMedia },
+      configurable: true,
+    })
   })
 }
 
@@ -102,9 +118,14 @@ export async function mockMicrophonePermissionDenied(page: Page): Promise<void> 
  */
 export async function mockScreenShareDenied(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    navigator.mediaDevices.getDisplayMedia = async () => {
+    const getDisplayMedia = async () => {
       throw new DOMException('Permission denied', 'NotAllowedError')
     }
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getDisplayMedia },
+      configurable: true,
+    })
   })
 }
 
@@ -113,17 +134,22 @@ export async function mockScreenShareDenied(page: Page): Promise<void> {
  */
 export async function mockAllMediaPermissionsDenied(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
+    const getUserMedia = async () => {
       throw new DOMException('Permission denied', 'NotAllowedError')
     }
 
-    navigator.mediaDevices.getDisplayMedia = async () => {
+    const getDisplayMedia = async () => {
       throw new DOMException('Permission denied', 'NotAllowedError')
     }
 
-    navigator.mediaDevices.enumerateDevices = async () => {
-      return []
+    const enumerateDevices = async () => {
+      return [] as MediaDeviceInfo[]
     }
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getUserMedia, getDisplayMedia, enumerateDevices },
+      configurable: true,
+    })
   })
 }
 
@@ -132,9 +158,14 @@ export async function mockAllMediaPermissionsDenied(page: Page): Promise<void> {
  */
 export async function mockDeviceNotFound(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
+    const getUserMedia = async () => {
       throw new DOMException('Requested device not found', 'NotFoundError')
     }
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getUserMedia },
+      configurable: true,
+    })
   })
 }
 
@@ -143,9 +174,14 @@ export async function mockDeviceNotFound(page: Page): Promise<void> {
  */
 export async function mockDeviceInUse(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
+    const getUserMedia = async () => {
       throw new DOMException('Could not start video source', 'NotReadableError')
     }
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getUserMedia },
+      configurable: true,
+    })
   })
 }
 

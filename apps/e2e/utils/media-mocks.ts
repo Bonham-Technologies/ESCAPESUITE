@@ -5,6 +5,35 @@ import { Page } from '@playwright/test'
  */
 
 /**
+ * Every init script below that wants to override a `navigator.mediaDevices`
+ * method replaces the **whole** `mediaDevices` property, spread over
+ * whatever is already there, rather than assigning one method on it
+ * (`navigator.mediaDevices.foo = fn`) — because the assignment form is
+ * silently lost on WebKit by the time the page's own scripts run
+ * (ESCSUITE-177, findings-177.md's "Test-harness gaps" section 2).
+ * `Navigator.prototype.mediaDevices` is a getter with no setter there; the
+ * getter's returned instance *looks* mutable from inside the same script
+ * (reading the property back shows the override, and the assignment does
+ * not throw), but the override does not survive to a later script in the
+ * same document — confirmed by probing Playwright's WebKit 26.6: an
+ * `addInitScript` that does nothing but
+ * `navigator.mediaDevices.getDisplayMedia = fn` reads back as the native
+ * function once the page's own script asks, even though a sibling
+ * `window.__probe = ...` write in the very same script survives.
+ * `Object.defineProperty(navigator, 'mediaDevices', { value: {...} })` does
+ * survive, because it replaces the getter outright instead of mutating what
+ * it returns. Chromium and Firefox tolerate either form, so this one shape
+ * is used everywhere rather than carrying two code paths.
+ *
+ * Spreading `navigator.mediaDevices` (rather than passing a bare object
+ * literal) is what lets `mockGetUserMedia`/`mockSyntheticMedia`'s own
+ * override layer on top of `mockMediaDevices`'s `enumerateDevices` instead
+ * of erasing it: `addInitScript` calls run in registration order against
+ * the same document, so by the time the second one runs, the first one's
+ * replacement object is what `navigator.mediaDevices` already reads back.
+ */
+
+/**
  * Report a camera and a microphone from `enumerateDevices`.
  *
  * ESCAPECRAFT's capability detection (`apps/craft/src/core/permissions.ts`)
@@ -23,12 +52,17 @@ import { Page } from '@playwright/test'
  */
 export async function mockMediaDevices(page: Page) {
   await page.addInitScript(() => {
-    navigator.mediaDevices.enumerateDevices = async () =>
+    const enumerateDevices = async () =>
       [
         { deviceId: 'mock-camera', kind: 'videoinput', label: 'Mock Camera', groupId: 'mock' },
         { deviceId: 'mock-mic', kind: 'audioinput', label: 'Mock Microphone', groupId: 'mock' },
         { deviceId: 'mock-speaker', kind: 'audiooutput', label: 'Mock Speaker', groupId: 'mock' },
       ].map((device) => ({ ...device, toJSON: () => device })) as MediaDeviceInfo[]
+
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, enumerateDevices },
+      configurable: true,
+    })
   })
 }
 
@@ -51,11 +85,13 @@ export async function mockGetUserMedia(page: Page) {
       active: true,
     }
 
-    // Override getUserMedia
-    navigator.mediaDevices.getUserMedia = async () => mockStream as unknown as MediaStream
+    const getUserMedia = async () => mockStream as unknown as MediaStream
+    const getDisplayMedia = async () => mockStream as unknown as MediaStream
 
-    // Override getDisplayMedia for screen capture
-    navigator.mediaDevices.getDisplayMedia = async () => mockStream as unknown as MediaStream
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { ...navigator.mediaDevices, getUserMedia, getDisplayMedia },
+      configurable: true,
+    })
   })
 }
 
@@ -214,22 +250,23 @@ export async function mockSyntheticMedia(
         return destination.stream.getAudioTracks()[0]
       }
 
-      navigator.mediaDevices.getDisplayMedia = async (
-        constraints?: DisplayMediaStreamOptions
-      ) => {
+      const getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
         const stream = new MediaStream([makeVideoTrack()])
         if (constraints?.audio) stream.addTrack(makeAudioTrack())
         return stream
       }
 
-      navigator.mediaDevices.getUserMedia = async (
-        constraints?: MediaStreamConstraints
-      ) => {
+      const getUserMedia = async (constraints?: MediaStreamConstraints) => {
         const tracks: MediaStreamTrack[] = []
         if (constraints?.video) tracks.push(makeVideoTrack())
         if (constraints?.audio) tracks.push(makeAudioTrack())
         return new MediaStream(tracks)
       }
+
+      Object.defineProperty(navigator, 'mediaDevices', {
+        value: { ...navigator.mediaDevices, getDisplayMedia, getUserMedia },
+        configurable: true,
+      })
     },
     { width, height, painter }
   )
