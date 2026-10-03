@@ -68,7 +68,7 @@ describe('useMediaStreams acquiring', () => {
 
     expect(permissionsOverrides.requestScreenCapture).toHaveBeenCalledWith(true)
     expect(permissionsOverrides.requestWebcam).not.toHaveBeenCalled()
-    expect(acquired).toEqual({ screen, webcam: null, mic })
+    expect(acquired).toEqual({ screen, webcam: null, mic, micRefused: false })
   })
 
   it('skips a source the environment cannot provide', async () => {
@@ -83,7 +83,7 @@ describe('useMediaStreams acquiring', () => {
 
     expect(permissionsOverrides.requestScreenCapture).not.toHaveBeenCalled()
     expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled()
-    expect(acquired).toEqual({ screen: null, webcam, mic: null })
+    expect(acquired).toEqual({ screen: null, webcam, mic: null, micRefused: false })
   })
 
   it('releases what it already got when a later source fails, and rethrows', async () => {
@@ -96,6 +96,81 @@ describe('useMediaStreams acquiring', () => {
     await expect(result.current.acquireStreams()).rejects.toThrow('Camera in use')
     expect(screenTrack.stop).toHaveBeenCalledTimes(1)
     expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-184. The microphone is the one source whose refusal does not cost
+  // the take: a take without sound is still a take — the ESCSUITE-14 companion
+  // shape with the mic part simply absent — and a user who has already picked
+  // the window they want to share must not lose it to a prompt they said no
+  // to. Everything else still fails the take: a refused screen capture leaves
+  // nothing to record, and a refused webcam in a PiP take is the overlay the
+  // user explicitly asked for.
+  it('keeps a granted screen capture when the microphone prompt is refused', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const screenTrack = createTrackDouble('video', { id: 'screen' })
+    const screen = streamWith(screenTrack)
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screen)
+    permissionsOverrides.requestMicrophone.mockRejectedValue(new Error('Microphone permission denied'))
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: true, webcamEnabled: false, microphoneEnabled: true })
+    )
+    const acquired = await result.current.acquireStreams()
+
+    expect(acquired).toEqual({ screen, webcam: null, mic: null, micRefused: true })
+    expect(screenTrack.stop).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(
+      'Microphone could not be opened — recording without it:',
+      expect.any(Error)
+    )
+  })
+
+  it('keeps the webcam as well, so a PiP take survives a refused microphone', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const screenTrack = createTrackDouble('video', { id: 'screen' })
+    const webcamTrack = createTrackDouble('video', { id: 'webcam' })
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(streamWith(screenTrack))
+    permissionsOverrides.requestWebcam.mockResolvedValue(streamWith(webcamTrack))
+    permissionsOverrides.requestMicrophone.mockRejectedValue(new Error('Microphone permission denied'))
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: true, webcamEnabled: true, microphoneEnabled: true })
+    )
+    const acquired = await result.current.acquireStreams()
+
+    expect(acquired.micRefused).toBe(true)
+    expect(screenTrack.stop).not.toHaveBeenCalled()
+    expect(webcamTrack.stop).not.toHaveBeenCalled()
+  })
+
+  it('still fails a microphone-only take whose prompt is refused — nothing is left to record', async () => {
+    permissionsOverrides.requestMicrophone.mockRejectedValue(new Error('Microphone permission denied'))
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: false, webcamEnabled: false, microphoneEnabled: true })
+    )
+
+    await expect(result.current.acquireStreams()).rejects.toThrow('Microphone permission denied')
+  })
+
+  it('reports the microphone stage even when it was refused', async () => {
+    // The deadline release (ESCSUITE-116) reads `onPartial`'s latest report,
+    // so the stage has to be reported whether it produced a stream or not —
+    // otherwise a screen capture that landed before a refused microphone would
+    // not be in the report the expiry releases.
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const screen = streamWith(createTrackDouble('video', { id: 'screen' }))
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screen)
+    permissionsOverrides.requestMicrophone.mockRejectedValue(new Error('Microphone permission denied'))
+
+    const { result } = mountStreams(
+      deps({ screenEnabled: true, webcamEnabled: false, microphoneEnabled: true })
+    )
+    const onPartial = vi.fn()
+    await result.current.acquireStreams(onPartial)
+
+    expect(onPartial).toHaveBeenCalledTimes(2)
+    expect(onPartial).toHaveBeenNthCalledWith(2, { screen, webcam: null, mic: null })
   })
 
   it('reports what has arrived after each stage, so a caller can stop it early (ESCSUITE-116)', async () => {
@@ -112,7 +187,7 @@ describe('useMediaStreams acquiring', () => {
     const onPartial = vi.fn()
     const acquired = await result.current.acquireStreams(onPartial)
 
-    expect(acquired).toEqual({ screen, webcam, mic })
+    expect(acquired).toEqual({ screen, webcam, mic, micRefused: false })
     expect(onPartial).toHaveBeenNthCalledWith(1, { screen, webcam: null, mic: null })
     expect(onPartial).toHaveBeenNthCalledWith(2, { screen, webcam, mic: null })
     expect(onPartial).toHaveBeenNthCalledWith(3, { screen, webcam, mic })

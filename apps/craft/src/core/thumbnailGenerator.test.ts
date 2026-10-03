@@ -8,6 +8,14 @@ import {
 } from '../test/doubles/video'
 import { getLastCanvasContext, resetCanvasContextDouble } from '../test/doubles/canvas'
 
+/**
+ * How long a probe in this module is given before it is abandoned — this
+ * file's own copy of the source's `THUMBNAIL_TIMEOUT_MS`, not an import of it
+ * (ESCSUITE-180). Both probes share it: `extractVideoMetadata`'s timeout was
+ * 5 s before the constant existed and is unchanged by naming it.
+ */
+const DEADLINE_MS = 5_000
+
 describe('thumbnailGenerator', () => {
   beforeEach(() => {
     installVideoElementDouble()
@@ -104,6 +112,59 @@ describe('thumbnailGenerator', () => {
       // keeps the resource it already loaded and never reaches NETWORK_EMPTY,
       // and every other test in this file still passes.
       expect(vi.mocked(video.element.load)).toHaveBeenCalledTimes(2)
+    })
+
+    it('gives up on a probe that never settles, so a save cannot park on it', async () => {
+      // ESCSUITE-180. Since ESCSUITE-174, `'saving'` has no user-reachable
+      // exit at all — Record is disabled there, Cancel is not rendered and
+      // Escape is inert — so the save promise settling is the only way out.
+      // This function had an `onerror` and no clock, so a <video> that neither
+      // loads nor errors (a container Chromium's demuxer will not commit to,
+      // a decoder that never reports) parked the save, and with it the app,
+      // for the life of the tab. `extractVideoMetadata` below has carried a
+      // deadline since it was written; this is its twin.
+      //
+      // DEADLINE_MS is deliberately this file's own copy of the source's
+      // `THUMBNAIL_TIMEOUT_MS` rather than an import of it, the way
+      // `useRecordingSave.test.ts` keeps its own `captured()` beside the
+      // hook's `NOTHING_CAPTURED`: what is pinned here is that a probe is
+      // abandoned within a few seconds, not whatever number the source
+      // happens to hold today.
+      vi.useFakeTimers()
+      const promise = generateThumbnail(new Blob(['source-video']))
+      const video = getLastVideoDouble()!
+
+      await vi.advanceTimersByTimeAsync(DEADLINE_MS)
+
+      await expect(promise).rejects.toThrow('Timed out loading video for thumbnail')
+      // The same release the error and draw-failure arms do: the object URL is
+      // revoked and the element is taken back to NETWORK_EMPTY, so a probe
+      // that was abandoned leaks neither.
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url')
+      expect(video.element.getAttribute('src')).toBeNull()
+      expect(vi.mocked(video.element.load)).toHaveBeenCalledTimes(2)
+    })
+
+    it('does not reject after the deadline once the frame was captured', async () => {
+      // The other side of the clock: a probe that answered in time keeps its
+      // blob, and the timer it no longer needs is cleared rather than left to
+      // fire behind a settled promise — one deadline, one clearTimeout, and
+      // one revoke.
+      vi.useFakeTimers()
+      const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout')
+      const promise = generateThumbnail(new Blob(['source-video']))
+      const video = getLastVideoDouble()!
+      video.setMetadata({ videoWidth: 1280, videoHeight: 720 })
+
+      video.fireLoadedData()
+      await vi.advanceTimersByTimeAsync(32)
+      const result = await promise
+
+      await vi.advanceTimersByTimeAsync(DEADLINE_MS)
+
+      expect(result).toBeInstanceOf(Blob)
+      expect(clearTimeoutSpy).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBe(1)
     })
 
     it('rejects when the canvas produces no blob', async () => {

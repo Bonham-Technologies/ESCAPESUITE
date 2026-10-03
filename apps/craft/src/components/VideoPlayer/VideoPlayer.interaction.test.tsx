@@ -618,6 +618,123 @@ describe('VideoPlayer keyboard shortcuts', () => {
     expect(player.video.currentTime).toBe(0);
   });
 
+  // ESCSUITE-185. Space is the browser's own activation key for a focused
+  // button, and the player's window listener used to swallow it for everything
+  // that was not an <input> or a <textarea> — so Space on the playback
+  // dialog's Close button toggled playback instead of closing the dialog. The
+  // mechanism is `preventDefault()`: it is what suppresses the click the
+  // platform would otherwise synthesise on keyup, so the pin is that the
+  // keydown is left cancellable as well as that playback is untouched.
+  it('leaves Space to a focused button, so the control it belongs to can act', () => {
+    const player = mountPlayer()
+    player.load(200)
+    const transport = document.querySelector('[class*="controlButton"]') as HTMLButtonElement
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+
+    act(() => {
+      transport.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(player.play).not.toHaveBeenCalled()
+    expect(player.pause).not.toHaveBeenCalled()
+  })
+
+  it('leaves Space to a focused element the author made a button', () => {
+    const player = mountPlayer()
+    player.load(200)
+    // A host page's own control inside the dialog: not a <button>, but
+    // announced and operated as one, so the platform's Space activation is
+    // the author's to handle.
+    const roleButton = document.createElement('div')
+    roleButton.setAttribute('role', 'button')
+    document.body.appendChild(roleButton)
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+
+    act(() => {
+      roleButton.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(player.play).not.toHaveBeenCalled()
+    roleButton.remove()
+  })
+
+  it('leaves Space to a focused contenteditable region', () => {
+    const player = mountPlayer()
+    player.load(200)
+    const editable = document.createElement('div')
+    editable.contentEditable = 'true'
+    // jsdom does not derive isContentEditable from the attribute.
+    Object.defineProperty(editable, 'isContentEditable', { value: true, configurable: true })
+    document.body.appendChild(editable)
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+
+    act(() => {
+      editable.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(player.play).not.toHaveBeenCalled()
+    editable.remove()
+  })
+
+  it('still takes Space when focus is on the dialog body', () => {
+    // The other side: nothing interactive has focus, so Space is the player's
+    // play/pause shortcut and it claims the key.
+    const player = mountPlayer()
+    player.load(200)
+    const body = document.querySelector('[class*="playerContainer"]') as HTMLElement
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+
+    act(() => {
+      body.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(player.play).toHaveBeenCalledTimes(1)
+  })
+
+  it('still takes Space when focus is on the video itself', () => {
+    const player = mountPlayer()
+    player.load(200)
+    const event = new KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true })
+
+    act(() => {
+      player.video.dispatchEvent(event)
+    })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(player.play).toHaveBeenCalledTimes(1)
+  })
+
+  it('still takes Space for a keydown with no element target at all', () => {
+    // `window` is not an element, so there is nothing whose activation Space
+    // could belong to — the player keeps it.
+    const player = mountPlayer()
+    player.load(200)
+
+    act(() => {
+      fireEvent.keyDown(window, { key: ' ' })
+    })
+
+    expect(player.play).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps every other shortcut on a focused button', () => {
+    // Only Space is the platform's activation key. K, the arrows and M have no
+    // competing meaning on a button, so the player keeps them wherever focus is.
+    const player = mountPlayer()
+    player.load(200)
+    const transport = document.querySelector('[class*="controlButton"]') as HTMLButtonElement
+
+    act(() => {
+      fireEvent.keyDown(transport, { key: 'k' })
+    })
+
+    expect(player.play).toHaveBeenCalledTimes(1)
+  })
+
   it('ignores keystrokes coming from a textarea', () => {
     const player = mountPlayer();
     player.load(200);

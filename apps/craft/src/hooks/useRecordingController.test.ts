@@ -73,6 +73,12 @@ interface AcquiredDoubles {
   screen: MediaStream | null
   webcam: MediaStream | null
   mic: MediaStream | null
+  /**
+   * Whether the microphone request failed and the take went ahead without it
+   * (ESCSUITE-184). `acquireStreams` answers this; the controller only reads
+   * it, to raise the one notice that says so.
+   */
+  micRefused: boolean
 }
 
 interface Harness {
@@ -130,7 +136,9 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
 
 /** Build the controller's inputs, with the capture side as plain doubles. */
 function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquiredDoubles>): Harness {
-  const streams: AcquiredDoubles = { screen: screenStream(), webcam: null, mic: null, ...acquired }
+  const streams: AcquiredDoubles = {
+    screen: screenStream(), webcam: null, mic: null, micRefused: false, ...acquired,
+  }
   const acquireStreams = vi.fn(async () => streams)
   const stopAllStreams = vi.fn()
   const saveRecording = vi.fn(async () => {})
@@ -316,6 +324,55 @@ describe('useRecordingController notices', () => {
     await startTake(result)
 
     expect(useRecorderStore.getState().systemAudioShared).toBe(true)
+  })
+
+  // ESCSUITE-184. `acquireStreams` no longer throws away a granted screen
+  // capture over a refused microphone, so the take starts — and the one thing
+  // the user cannot otherwise tell is whether their recording has sound in it.
+  it('says the microphone was refused, and records the take anyway', async () => {
+    const { result } = mountController(
+      { microphoneEnabled: true, countdownSeconds: 0 },
+      { mic: null, micRefused: true }
+    )
+
+    await startTake(result)
+
+    expect(state()).toBe('recording')
+    expect(useRecorderStore.getState().notice).toBe(
+      'Microphone access was refused — recording without it.'
+    )
+  })
+
+  // There is exactly one notice channel, so when a take misses the share
+  // dialog's system-audio tick box *and* has its microphone refused, one of
+  // the two sentences has to win. The microphone does: the system-audio hint
+  // is a nudge about a box to tick next time, and the greyed System meter
+  // carries its own weaker wording for the rest of the take, while a refused
+  // microphone is a source the user asked for that is gone from a recording
+  // which — new since ESCSUITE-184 — went ahead regardless.
+  it('lets the microphone refusal win the channel over the system-audio hint', async () => {
+    const { result } = mountController(
+      { microphoneEnabled: true, systemAudioEnabled: true, countdownSeconds: 0 },
+      { mic: null, micRefused: true }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().systemAudioShared).toBe(false)
+    expect(useRecorderStore.getState().notice).toBe(
+      'Microphone access was refused — recording without it.'
+    )
+  })
+
+  it('says nothing about the microphone when the prompt was answered', async () => {
+    const { result } = mountController(
+      { microphoneEnabled: true, countdownSeconds: 0 },
+      { mic: micStreamWithTrack() }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().notice).toBeNull()
   })
 })
 
@@ -1241,6 +1298,17 @@ describe('useRecordingController what the take captured', () => {
   it('says none for a microphone stream with no track in it', async () => {
     expect(
       await capturedAudioOf({ microphoneEnabled: true }, { mic: createStreamDouble([]) })
+    ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
+  })
+
+  // ESCSUITE-184. The prompt was refused, the screen capture was kept and the
+  // take went ahead — so the stored take must describe a recording with no
+  // microphone in it, exactly as the no-device case above does. `micAcquired`
+  // is what the library's M4A gate, the companion count and the handoff all
+  // read.
+  it('says none when the microphone prompt was refused', async () => {
+    expect(
+      await capturedAudioOf({ microphoneEnabled: true }, { mic: null, micRefused: true })
     ).toEqual({ micAcquired: false, separateTracks: false, ...CAPTURED_DEFAULTS })
   })
 
