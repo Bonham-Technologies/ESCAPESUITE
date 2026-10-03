@@ -165,12 +165,19 @@ export function measureDragStart(
  * `transition` is the one active at `currentTime`, so the rectangle sweeps the
  * boxes the viewer can see rather than the ones a suppressed preset would put
  * elsewhere (ESCSUITE-147).
+ *
+ * A clip on a hidden track takes no picture in the frame (ESCSUITE-178), so a
+ * marquee cannot sweep it up either — the same `!track || !track.visible`
+ * question `getClipsAtTime` asks before drawing a clip at all, asked here
+ * rather than through that helper because this loop also needs every clip's
+ * *box*, which `getClipsAtTime` does not compute.
  */
 export function clipsIntersectingMarquee(
   canvas: HTMLCanvasElement,
   start: { x: number; y: number },
   current: { x: number; y: number },
   clips: Clip[],
+  tracks: Track[],
   currentTime: number,
   sourceVideos: SourceVideo[],
   project: ProjectSize = canvas,
@@ -190,9 +197,14 @@ export function clipsIntersectingMarquee(
   const mRight = (normRight - content.offsetX) / content.width;
   const mBottom = (normBottom - content.offsetY) / content.height;
 
+  const trackMap = new Map(tracks.map(t => [t.id, t]));
+
   // Find overlay clips whose bounding boxes intersect the marquee
   const intersecting: string[] = [];
   for (const clip of clips) {
+    const track = trackMap.get(clip.trackId);
+    if (!track || !track.visible) continue;
+
     // Only check clips visible at current time
     const clipEnd = clip.timelinePosition + clip.duration;
     if (currentTime < clip.timelinePosition || currentTime >= clipEnd) continue;

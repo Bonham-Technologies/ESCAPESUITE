@@ -578,7 +578,7 @@ export function useTransformHandles({
         const canvas = canvasRef.current;
 
         const intersecting = clipsIntersectingMarquee(
-          canvas, marqueeStart, marqueeCurrent!, clips, currentTime, sourceVideos,
+          canvas, marqueeStart, marqueeCurrent!, clips, tracks, currentTime, sourceVideos,
           projectSize, activeTransition
         );
 
@@ -622,7 +622,7 @@ export function useTransformHandles({
     // invariant local to it, for whatever writes this hook grows next.
     gestureHistory.end();
     setDragState(null);
-  }, [dragState, clips, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize, gestureHistory, activeTransition]);
+  }, [dragState, clips, tracks, throttledTextUpdate, throttledShapeUpdate, throttledTransformUpdate, marqueeStart, marqueeActive, marqueeCurrent, currentTime, sourceVideos, selectedClipIds, selectClipsInRange, clearMultiSelection, setSelectedClipId, canvasRef, projectSize, gestureHistory, activeTransition]);
 
   const handleMouseLeave = useCallback(() => {
     // Don't cancel drag when mouse leaves canvas — window listeners handle it

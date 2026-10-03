@@ -1,6 +1,6 @@
 import { useCallback, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type SetStateAction } from 'react';
 import type { AnimatableProperty, EasingType, Keyframe } from '../../../store/types';
-import { interpolateKeyframes } from '../../../utils/animation';
+import { interpolateKeyframes, KEYFRAME_TIME_EPSILON } from '../../../utils/animation';
 import { EASING_TYPES } from '../../../utils/easingOptions';
 
 // The name each property is announced by. Deliberately a copy of the labels
@@ -102,10 +102,11 @@ function nudgeAnnouncement(property: AnimatableProperty, value: number, time: nu
 /**
  * What the live region says when a move would land within
  * `KEYFRAME_TIME_EPSILON` of a time another keyframe already occupies —
- * `moveClipKeyframe` deletes whatever is there, so both refusals that can
- * reach this situation say it the same way: this keyboard's own `nudgeTime`
- * below, and the diamond-row pointer drag in `useKeyframeDrag.ts`
- * (ESCSUITE-167 / M6).
+ * `moveClipKeyframe` deletes whatever is there, so every refusal that can
+ * reach this situation says it the same way: this keyboard's own `nudgeTime`
+ * below, the diamond-row pointer drag in `useKeyframeDrag.ts` (ESCSUITE-167 /
+ * M6), and the graph's own point drag in `KeyframeGraph.tsx`'s
+ * `handleMouseUp` (ESCSUITE-179).
  */
 export function occupiedTimeMessage(property: AnimatableProperty, time: number): string {
   return `${PROPERTY_LABELS[property]} keyframe not moved: another keyframe is at ${time.toFixed(2)} seconds`;
@@ -272,7 +273,8 @@ export function useKeyframeGraphKeyboard({
     // `keyframes` is every handle on the graph, presets included: landing on a
     // preset is refused too, because the store would merge the two all the same.
     const occupied = keyframes.some(kf =>
-      Math.abs(kf.time - selectedKeyframe.time) >= 0.001 && Math.abs(kf.time - newTime) < 0.001
+      Math.abs(kf.time - selectedKeyframe.time) >= KEYFRAME_TIME_EPSILON &&
+      Math.abs(kf.time - newTime) < KEYFRAME_TIME_EPSILON
     );
     if (occupied) {
       announce(occupiedTimeMessage(property, newTime));
@@ -419,5 +421,19 @@ export function useKeyframeGraphKeyboard({
     property,
   ]);
 
-  return { activeIndex, activeId, setActiveTime, nudgeMessage, onKeyDown: handleKeyDown };
+  return {
+    activeIndex,
+    activeId,
+    setActiveTime,
+    nudgeMessage,
+    onKeyDown: handleKeyDown,
+    /**
+     * The one alternating live-region setter, shared out so `KeyframeGraph`'s
+     * own pointer drag (`handleMouseUp`) can post its occupied-time refusal
+     * (ESCSUITE-179) through the exact same `nudgeMessage` region this hook
+     * renders, instead of a second `role="status"` element the test suite's
+     * `getByRole('status')` could no longer resolve unambiguously.
+     */
+    announce,
+  };
 }
