@@ -20,7 +20,7 @@
 // it is read by the renderer on every media clip of every frame, and none of
 // this is.
 import type { AnimatableProperty, ClipAnimation, ClipCrop, ClipTransform } from '../store/types';
-import { croppedSourceRect } from './clipCrop';
+import { MAX_CROP_INSET, croppedSourceRect } from './clipCrop';
 
 /** One of the eight handles, by compass point. */
 export type CropHandle = 'nw' | 'n' | 'ne' | 'w' | 'e' | 'sw' | 's' | 'se';
@@ -93,6 +93,20 @@ const HANDLE_EDGES: Record<CropHandle, { x?: 'left' | 'right'; y?: 'top' | 'bott
 };
 
 /**
+ * The floor this function divides a scale by.
+ *
+ * Not the UI's own 0.1 — `useTransformHandles.ts`'s fifteen `Math.max(0.1, …)`
+ * sites and `TransformSection.tsx`'s three `min={0.1}` range inputs — which a
+ * drag or a number field can never get past. `updateClipTransform` itself
+ * applies no floor at all, so a `.veditor`, a host `LOAD_PROJECT` payload or a
+ * headless job spec could still carry a `scaleX`/`scaleY` of 0 (ESCSUITE-173;
+ * `parseProject` now refuses one of those too, but this function is not the
+ * validator and does not trust a project that reached it anyway). The value
+ * only has to keep the division finite, not match any UI limit.
+ */
+const MIN_SCALE = 0.001;
+
+/**
  * A displacement on the canvas, in the clip's own unrotated frame and in SOURCE
  * pixels.
  *
@@ -103,19 +117,20 @@ const HANDLE_EDGES: Record<CropHandle, { x?: 'left' | 'right'; y?: 'top' | 'bott
  * fast as the pointer moves.
  *
  * `delta` is in PROJECT pixels — the caller divides the pointer's client
- * displacement by the content box' scale first. A clip at scale 0 yields a
- * non-finite inset, which `normaliseCrop`'s own clamp reads as no inset; no
- * guard is coded for a scale no caller can produce (`updateClipTransform`
- * floors every scale at 0.1).
+ * displacement by the content box' scale first. The scale is floored at
+ * {@link MIN_SCALE} before dividing, so a corrupt `scaleX`/`scaleY` of 0 (or
+ * negative) yields a large-but-finite inset rather than `Infinity`/`NaN`.
  */
 export function sourceDelta(
   delta: { x: number; y: number },
   transform: Pick<CropGestureTransform, 'scaleX' | 'scaleY' | 'rotation'>
 ): { x: number; y: number } {
   const rad = (-transform.rotation * Math.PI) / 180;
+  const scaleX = Math.max(transform.scaleX, MIN_SCALE);
+  const scaleY = Math.max(transform.scaleY, MIN_SCALE);
   return {
-    x: (delta.x * Math.cos(rad) - delta.y * Math.sin(rad)) / transform.scaleX,
-    y: (delta.x * Math.sin(rad) + delta.y * Math.cos(rad)) / transform.scaleY,
+    x: (delta.x * Math.cos(rad) - delta.y * Math.sin(rad)) / scaleX,
+    y: (delta.x * Math.sin(rad) + delta.y * Math.cos(rad)) / scaleY,
   };
 }
 
@@ -136,9 +151,22 @@ function clampMoved(moved: number, opposite: number, dimension: number): number 
   return Math.min(Math.max(moved, 0), Math.max(0, axisLimit(dimension) - opposite));
 }
 
+/** Does any inset exceed {@link MAX_CROP_INSET}? Four finite, non-negative
+ * insets reach here, so this is the one question `normaliseCrop`'s own
+ * `clampInset` would otherwise answer silently, by moving the value. */
+function exceedsMaxInset(crop: ClipCrop): boolean {
+  return (
+    crop.left > MAX_CROP_INSET ||
+    crop.top > MAX_CROP_INSET ||
+    crop.right > MAX_CROP_INSET ||
+    crop.bottom > MAX_CROP_INSET
+  );
+}
+
 /**
  * The insets `handle` produces, having been moved `delta` source pixels from
- * the crop the gesture **started** with.
+ * the crop the gesture **started** with — or `undefined` to refuse the move
+ * outright (only possible with `keepAspect`; see below).
  *
  * Always from the start, never from the clip's current crop: a drag writes on
  * every move, and rebasing each move from the previous one's output compounds
@@ -149,14 +177,44 @@ function clampMoved(moved: number, opposite: number, dimension: number): number 
  * the ratio is — {@link cropRegionAspect} at the press, which is the active
  * preset's ratio whenever a preset was the last thing applied, since
  * `CROP_ASPECT_PRESETS` stores insets and remembers nothing.
+ *
+ * An aspect-locked derivation can ask for an inset past `MAX_CROP_INSET`
+ * (0.9) — unlike the plain move above, which `clampMoved` already keeps
+ * inside it — and `normaliseCrop`'s own clamp would land a DIFFERENT value
+ * than the one asked for, breaking the very ratio Shift is holding (NIT 8 /
+ * ESCSUITE-173, operator ruling 2026-10-02). Refusing the move here instead —
+ * returning `undefined` rather than the clamp — is what lets the caller keep
+ * the crop at its last valid value and leave the drag open, exactly as the
+ * "no pixel left" refusal in {@link withAspect}'s own doc comment already
+ * does for a more extreme version of the same derivation. Never happens
+ * without `keepAspect`: a plain move's own clamp already stays inside
+ * `MAX_CROP_INSET`.
  */
+// Two overloads rather than one `keepAspect?: number` signature: a caller
+// that never passes `keepAspect` (the keyboard nudge) can never get the
+// refusal back, and should not have to narrow `ClipCrop | undefined` for a
+// case its own call shape rules out. A caller that DOES pass it (a drag,
+// where Shift may or may not be held) gets the honest union either way.
+export function cropForHandleMove(
+  start: ClipCrop | undefined,
+  handle: CropHandle,
+  delta: { x: number; y: number },
+  source: SourceSize
+): ClipCrop;
+export function cropForHandleMove(
+  start: ClipCrop | undefined,
+  handle: CropHandle,
+  delta: { x: number; y: number },
+  source: SourceSize,
+  keepAspect: number | undefined
+): ClipCrop | undefined;
 export function cropForHandleMove(
   start: ClipCrop | undefined,
   handle: CropHandle,
   delta: { x: number; y: number },
   source: SourceSize,
   keepAspect?: number
-): ClipCrop {
+): ClipCrop | undefined {
   const base = start ?? NO_CROP_INSETS;
   const edges = HANDLE_EDGES[handle];
   const next: ClipCrop = { ...base };
@@ -177,7 +235,8 @@ export function cropForHandleMove(
   }
 
   if (keepAspect === undefined) return next;
-  return withAspect(next, handle, source, keepAspect);
+  const aspected = withAspect(next, handle, source, keepAspect);
+  return exceedsMaxInset(aspected) ? undefined : aspected;
 }
 
 /**
@@ -193,7 +252,9 @@ export function cropForHandleMove(
  *
  * The result can ask for a region with no pixel in it — an aspect-locked drag
  * derives rather than clamps — which `cropUpdateFor` refuses, so the drag
- * simply stops.
+ * simply stops. A less extreme derivation can still exceed `MAX_CROP_INSET`
+ * without losing its last pixel; {@link cropForHandleMove}, this function's
+ * one caller, is what catches that case and refuses the move too.
  */
 function withAspect(
   crop: ClipCrop,

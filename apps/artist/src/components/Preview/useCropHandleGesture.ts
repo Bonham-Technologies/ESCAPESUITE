@@ -209,6 +209,11 @@ export function useCropHandleGesture({
           source,
           move.shiftKey ? start.aspect : undefined
         );
+        // Only an aspect-locked move can come back refused (NIT 8 /
+        // ESCSUITE-173): skip this frame rather than landing a clamp that
+        // breaks the lock. The listeners stay bound — the drag stays open —
+        // so a less extreme move can still land.
+        if (!next) return;
         throttled.scheduleUpdate((pending) => write(pending.crop, pending.start), {
           crop: next,
           start,
@@ -264,6 +269,11 @@ export function useCropHandleGesture({
       if (!live) return;
 
       const distance = e.shiftKey ? CROP_NUDGE.coarse : CROP_NUDGE.fine;
+      // `cropForHandleMove` can refuse a move only under `keepAspect`
+      // (ESCSUITE-173) — Shift means the coarse step here, not the aspect
+      // lock, which is a mouse-drag-only question (`cropRegionAspect` is read
+      // once, at the press). This call omits it, so its own overload
+      // guarantees a concrete `ClipCrop` rather than the refusable union.
       const next = cropForHandleMove(
         live.crop,
         handle,

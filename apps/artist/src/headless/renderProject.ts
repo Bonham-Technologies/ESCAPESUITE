@@ -7,7 +7,7 @@ import {
   gifFrameDelayMs,
   gifFrameRate,
 } from '../core/exportTypes'
-import { convertLegacyOverlays } from '../store/legacyOverlays'
+import { parseProject } from '../store/projectMigration'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, RenderMeta, RenderResult, SourceVideoInput } from './types'
 import type { ExportOptions, Project } from '../store/types'
@@ -77,10 +77,21 @@ async function render(
   request: RenderRequest,
   onProgress?: (p: number) => void,
 ): Promise<{ blob: Blob; meta: RenderMeta }> {
-  // Legacy overlay arrays are input-only: fold them into clips before anything
-  // reads the timeline, so a headless render includes them exactly as the editor
-  // does (the store runs the same conversion on every load).
-  const project: Project = { ...request.project, timeline: convertLegacyOverlays(request.project.timeline) }
+  // `parseProject` is the editor's own door for an unvalidated project (a
+  // dropped `.veditor`, a host `LOAD_PROJECT` payload) — shape checks (clip
+  // ids, trackIds, resolution, crop, transform) BEFORE `ensureTimelineHasTracks`'s
+  // migration, which is also what folds legacy overlay arrays into ordinary
+  // clips, so a headless render includes them exactly as the editor does.
+  // Before this, only `validateInput` below ran, which checks sources against
+  // `project.timeline.clips` and nothing about the project's own shape — a
+  // malformed `crop` reached `croppedSourceRect` as NaN and the clip silently
+  // vanished from an unattended render instead of failing the job
+  // (ESCSUITE-173).
+  const parsed = parseProject(request.project)
+  if (!parsed.ok) {
+    throw new Error(`Invalid project: ${parsed.reason}`)
+  }
+  const project: Project = parsed.project
   validateInput({ ...request, project })
   const options: ExportOptions = { resolution: 'project', ...request.options }
   // The seeded list is the completed one (probed width/height/duration); the

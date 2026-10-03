@@ -1,7 +1,7 @@
 // Migration of a loaded project onto the current timeline shape: resolution,
 // tracks, overlay arrays, and the legacy overlays that fold into clips.
 
-import type { Clip, Project } from './types';
+import type { Clip, ClipTransform, Project } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from './types';
 import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
@@ -112,6 +112,29 @@ function isValidResolution(resolution: unknown): resolution is { width: number; 
 }
 
 /**
+ * A `ClipTransform` of the shape `parseProject` is willing to trust: six
+ * finite numbers, with `scaleX`/`scaleY` strictly positive. A scale of zero
+ * (or negative, or `NaN`) is not something the inspector's range inputs or
+ * the resize handles can ever produce — both floor at 0.1 — but nothing
+ * stopped a `.veditor` file, a host `LOAD_PROJECT` payload or a headless job
+ * spec from carrying one, and `core/cropDrag.ts`'s `sourceDelta` divides by
+ * it (ESCSUITE-173). `scaleLocked`, if present, is a UI preference and not
+ * checked here.
+ */
+function isValidTransform(transform: unknown): transform is ClipTransform {
+  if (!transform || typeof transform !== 'object') return false;
+  const { x, y, scaleX, scaleY, rotation, opacity } = transform as Partial<ClipTransform>;
+  return (
+    typeof x === 'number' && Number.isFinite(x) &&
+    typeof y === 'number' && Number.isFinite(y) &&
+    typeof scaleX === 'number' && Number.isFinite(scaleX) && scaleX > 0 &&
+    typeof scaleY === 'number' && Number.isFinite(scaleY) && scaleY > 0 &&
+    typeof rotation === 'number' && Number.isFinite(rotation) &&
+    typeof opacity === 'number' && Number.isFinite(opacity)
+  );
+}
+
+/**
  * Validate a project shape before anything downstream touches it, and only
  * then run the existing migration on it.
  *
@@ -145,6 +168,14 @@ function isValidResolution(resolution: unknown): resolution is { width: number; 
  * An *absent* crop is every clip in every project written before that ticket
  * and is not checked at all; a malformed one would otherwise reach
  * `croppedSourceRect` and, via a source rect of the wrong sign, `drawImage`.
+ * A clip's `transform`, if present, must be six finite numbers with a
+ * `scaleX`/`scaleY` strictly greater than zero (ESCSUITE-173) — neither the
+ * inspector's range inputs nor the resize handles can ever produce a scale
+ * that small (both floor at 0.1), but nothing short of this check stopped a
+ * `.veditor`, a host payload or a headless job spec from carrying one, and
+ * `core/cropDrag.ts`'s `sourceDelta` divides by it. An *absent* transform is
+ * left untouched, to whatever default the caller (the migration below, or a
+ * headless render) supplies.
  */
 export function parseProject(input: unknown): ParseProjectResult {
   if (!input || typeof input !== 'object') {
@@ -192,6 +223,16 @@ export function parseProject(input: unknown): ParseProjectResult {
     // never touches `crop` — unlike `trackId`, which it can supply.
     if (candidate?.crop !== undefined && !isValidCrop(candidate?.crop)) {
       return { ok: false, reason: `Clip "${id}" has an invalid crop` };
+    }
+
+    // ESCSUITE-173. Checked here, against the RAW input, for the same reason
+    // as `crop`: the migration branch that runs when `tracks` already exists
+    // leaves a clip's `transform` untouched (only the trackless-migration
+    // branch supplies a default, and only when the field is falsy — an
+    // invalid non-empty object would survive it), so an invalid transform is
+    // not something migration can be trusted to repair.
+    if (candidate?.transform !== undefined && !isValidTransform(candidate?.transform)) {
+      return { ok: false, reason: `Clip "${id}" has an invalid transform` };
     }
   }
 

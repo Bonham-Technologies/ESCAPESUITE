@@ -845,8 +845,13 @@ Rules of thumb:
 - **`gif` is the other exception, and it does scale with duration.** The GIF format has no
   streaming muxer, so the encoder accumulates the entire output in one growing buffer and then
   copies it once, into the `Blob` handed back — peak page memory is roughly **twice the finished
-  GIF** and grows with duration x frame size. (It was three times until the encoder stopped
-  `slice`ing its buffer on the way out; `finish()` returns a view over it instead.) A 1080p GIF of a two-minute
+  GIF** through the file path the kit uses (`renderDriver.ts` always calls `__renderProjectToFile`,
+  which streams the `Blob` out as a browser download) and grows with duration x frame size. (It
+  was three times until the encoder stopped `slice`ing its buffer on the way out; `finish()`
+  returns a view over it instead.) The editor's own base64 entry point, `__renderProject`, costs
+  more again — it additionally builds a `binary` string and a `btoa` result on top of that buffer —
+  but no path in this kit reaches it; the figure above describes only what `serve`/`render`
+  actually drive. A 1080p GIF of a two-minute
   timeline is a multi-gigabyte file and needs several times that in RAM; keep GIF jobs short and
   small, which is what the resolution and `fps` limits are for.
 - **Disk**: the scratch directory holds one complete output for the duration of the job, plus

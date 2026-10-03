@@ -204,9 +204,15 @@ makes a locked row's refusal cost nothing: the entry stays owed.
   bottom right". They sit in a `role="group"` named "Crop handles". No duplicate names, which
   `ClipEditor.a11y.test.tsx`'s rule asks of every control and a test of this layer asserts
   directly.
-- **Arrow keys nudge the focused handle by one source pixel; Shift+arrow by ten** — the handle
-  moves the way the arrow points, through the same `cropForHandleMove` a drag uses, with the
-  delta in source pixels instead of a converted pointer displacement. A focused handle claims
+- **Arrow keys nudge the focused handle by one source pixel; Shift+arrow by ten** — through the
+  same `cropForHandleMove` a drag uses, but with the delta handed over directly in source pixels,
+  in the clip's own LOCAL (unrotated) frame, rather than a pointer displacement converted through
+  `sourceDelta`'s `R(-θ)` first. Each handle owns fixed insets in that frame, so on an unrotated
+  clip the handle moves the way the arrow points; on a rotated one the arrow follows the clip's
+  own axes rather than the screen's (ArrowRight on a clip rotated 90° moves the handle down the
+  screen, not right) — the same asymmetry a drag's `sourceDelta` step exists to remove, which the
+  nudge does not apply (ESCSUITE-173 correction: an earlier version of this line claimed the
+  nudge moves "the way the arrow points" unconditionally). A focused handle claims
   all four arrows (preventDefault + stopPropagation), the rule
   `useKeyframeGraphKeyboard.ts` states for a focused listbox: an arrow the handle does not own —
   ArrowUp on the `w` handle — is swallowed and does nothing, rather than stepping the playhead
