@@ -31,6 +31,9 @@ let containerRef: { current: HTMLDivElement | null }
 let rulerRef: { current: HTMLDivElement | null }
 let setInPoint: MockInstance
 let setOutPoint: MockInstance
+/** The store's current in/out points at the moment a drag is grabbed. */
+let currentInPoint: number | null
+let currentOutPoint: number | null
 
 beforeEach(() => {
   resetStoreForTest()
@@ -48,6 +51,8 @@ beforeEach(() => {
   const state = useEditorStore.getState()
   setInPoint = vi.fn(state.setInPoint)
   setOutPoint = vi.fn(state.setOutPoint)
+  currentInPoint = null
+  currentOutPoint = null
 })
 
 afterEach(() => {
@@ -62,6 +67,8 @@ const deps = (): InOutDragDeps => ({
   rulerRef,
   pixelsPerSecond: PPS,
   timelineDuration: DURATION,
+  inPoint: currentInPoint,
+  outPoint: currentOutPoint,
   setInPoint: setInPoint as unknown as (time: number) => void,
   setOutPoint: setOutPoint as unknown as (time: number) => void,
 })
@@ -101,6 +108,20 @@ const release = () =>
 const points = () => {
   const state = useEditorStore.getState()
   return { inPoint: state.inPoint, outPoint: state.outPoint }
+}
+
+/**
+ * Put both the real store and the deps the hook will read at the values a
+ * crossing test starts from — through the store's own (unmocked) setters, so
+ * this setup never shows up in the `setInPoint`/`setOutPoint` spies the tests
+ * assert on.
+ */
+const seedPoints = (inPt: number, outPt: number) => {
+  const state = useEditorStore.getState()
+  state.setInPoint(inPt)
+  state.setOutPoint(outPt)
+  currentInPoint = inPt
+  currentOutPoint = outPt
 }
 
 describe('useInOutDrag starting a drag', () => {
@@ -233,5 +254,93 @@ describe('useInOutDrag following the pointer', () => {
 
     expect(setOutPoint).toHaveBeenCalledTimes(1)
     expect(points().outPoint).toBe(7)
+  })
+})
+
+// ESCSUITE-165: dragging the in handle past the out point (or the out handle
+// past the in point) used to leave the store's own swap-on-cross invariant
+// (`store/playbackSlice.ts`) firing on every single mousemove past the
+// crossing — the region collapsed to whatever one mousemove was wide,
+// chasing the pointer, instead of spanning from the stationary point to it.
+// The hook now does the ordering itself: on crossing, the gesture flips to
+// dragging the other point (held in a ref) and writes both points in the one
+// move that crosses, so the store's swap never fires mid-gesture.
+describe('useInOutDrag crossing the other point', () => {
+  it('flips to dragging the out point once the in handle crosses it, and the region keeps the stationary point', () => {
+    seedPoints(2, 5)
+    const { result } = mountDrag()
+    grab(result, 'in')
+
+    moveTo(6)
+    expect(points()).toEqual({ inPoint: 5, outPoint: 6 })
+
+    moveTo(7)
+    expect(points()).toEqual({ inPoint: 5, outPoint: 7 })
+
+    moveTo(8)
+    expect(points()).toEqual({ inPoint: 5, outPoint: 8 })
+  })
+
+  it('mirrors it for the out handle crossing the in point', () => {
+    seedPoints(2, 5)
+    const { result } = mountDrag()
+    grab(result, 'out')
+
+    moveTo(1)
+    expect(points()).toEqual({ inPoint: 1, outPoint: 2 })
+
+    moveTo(0.5)
+    expect(points()).toEqual({ inPoint: 0.5, outPoint: 2 })
+  })
+
+  it('leaves the stationary point untouched when the drag never crosses it', () => {
+    seedPoints(2, 5)
+    const { result } = mountDrag()
+    grab(result, 'in')
+
+    moveTo(3)
+
+    expect(setOutPoint).not.toHaveBeenCalled()
+    expect(points()).toEqual({ inPoint: 3, outPoint: 5 })
+  })
+
+  it('can cross back and forth within one gesture', () => {
+    seedPoints(2, 5)
+    const { result } = mountDrag()
+    grab(result, 'in')
+
+    moveTo(6) // crosses: now dragging out
+    expect(points()).toEqual({ inPoint: 5, outPoint: 6 })
+
+    moveTo(4) // crosses back: now dragging in again
+    expect(points()).toEqual({ inPoint: 4, outPoint: 5 })
+  })
+
+  // Round 1 review, finding 3: the stationary point used to be snapshotted
+  // once at mousedown and never re-read, so a write to it from OUTSIDE this
+  // gesture — the keyboard's I/O shortcuts, the Toolbar's in/out buttons,
+  // both of which call setInPoint/setOutPoint directly — was silently
+  // discarded the instant the drag crossed. `inPoint`/`outPoint` are already
+  // mirrored into refs every render, so the fix reads those refs live at the
+  // crossing instead of keeping a separate snapshot. In production
+  // Timeline's own `inPoint`/`outPoint` selectors re-render this hook on any
+  // such write; this test's `deps()` is a static object, so the `rerender()`
+  // stands in for that subscription the way a prop change would.
+  it('reads the stationary point live at the crossing, not a value snapshotted at mousedown', () => {
+    seedPoints(2, 5)
+    const { result, rerender } = mountDrag()
+    grab(result, 'in')
+
+    moveTo(3) // under the out point as grabbed — no crossing yet
+
+    // Something outside this hook moves the out point directly while the
+    // mouse is still down.
+    act(() => { useEditorStore.getState().setOutPoint(9) })
+    currentOutPoint = 9
+    rerender()
+
+    moveTo(10) // crosses the NEW out point (9), not the 5 the gesture grabbed with
+
+    expect(points()).toEqual({ inPoint: 9, outPoint: 10 })
   })
 })

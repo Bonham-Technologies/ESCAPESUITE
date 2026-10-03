@@ -2011,6 +2011,31 @@ now; `ClipEditor.rerender.test.tsx` is byte-identical with no new inspector subs
 perf/rerender pins and `perfScene.ts` are byte-identical. **No floor crossed**; artist's floors stay
 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-164 and ESCSUITE-165 (opening a `.veditor`
+file clears the undo history once its sources have landed, the parity a session restore and New Project
+already had, instead of leaving 2 + N entries whose first undo stranded the loaded project with a half-empty
+library; and the in/out drag orders its own crossing, so dragging the in handle past the out point spans the
+region from the stationary point to the pointer instead of collapsing it to one move's width):
+99.80 / **99.25** / **95.57** / 99.67 against the 99.80 / 99.24 / 95.54 / 99.67 the commit this branch was
+rebased onto (`599d505`, the ESCSUITE-161 / 162 squash) measures — statements up a hundredth, branches up
+three, lines and functions unmoved. Measured in one sitting, the base gives 4,766 / 4,988 branches and this
+branch 4,775 / 4,996: eight new branches, nine more covered, so the uncovered column falls 222 → 221 — the
+one pre-existing arm newly reached is `store/historySlice.ts`'s `clearHistory` (2 / 4 → 3 / 4), which the
+file-load path now calls and no test had driven through the real store before (lines 7,548 / 7,563 →
+7,566 / 7,581 with the same 15 uncovered, statements 8,491 / 8,556 → 8,510 / 8,574 with 65 → 64, functions
+1,830 / 1,836 on both). The eight new branches are all `components/Timeline/useInOutDrag.ts`'s (10 → 18):
+which point the gesture holds, the crossing test on each side, the explicit two-point write at the crossing
+and the flip of the dragged point for the rest of the gesture — each reached from both sides by the
+in-past-out and out-past-in cases, the non-crossing drag that leaves the other point untouched, the
+cross-and-cross-back case, and the review's case that changes the stationary point from the store between
+two moves and then crosses (the hook reads the live value at the crossing, not a value captured at
+mousedown). The review's first version had made the hook's `inPoint` / `outPoint` deps optional so a perf
+test's cast would compile; the cast compiles with them required, so the `?? null` arms were deleted rather
+than tested and `timelineGestures.perf.test.ts` is byte-identical. `app/useProjectActions.ts` gained one
+statement — the `clearHistory()` call after the last source — and no decision; the three failure paths each
+pin that it is never reached. The seven perf/rerender pins and `perfScene.ts` are byte-identical. **No floor
+crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2018,7 +2043,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.23 | 95.54 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.25 | 95.57 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 
