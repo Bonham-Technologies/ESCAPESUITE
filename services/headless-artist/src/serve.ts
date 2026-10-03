@@ -225,9 +225,12 @@ function createLimiter(concurrency: number, maxQueue: number): Limiter {
  * Reads the request body, capped at `MAX_BODY_BYTES`.
  *
  * Returns `undefined` when the body was too big — see DRAIN_FACTOR for why that is not simply
- * an immediate socket teardown.
+ * an immediate socket teardown — and `BODY_GONE` when it was going to fit but never finished
+ * arriving at all: `close()` force-ending a request still parked here during shutdown, Node's
+ * own `requestTimeout`/`headersTimeout`, or the client simply dropping the connection. Those are
+ * not the same failure as "too big" and must not be answered the same way.
  */
-function readBody(req: http.IncomingMessage): Promise<string | undefined> {
+function readBody(req: http.IncomingMessage): Promise<string | undefined | typeof BODY_GONE> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
@@ -248,14 +251,36 @@ function readBody(req: http.IncomingMessage): Promise<string | undefined> {
       chunks.push(chunk)
     })
     req.on('end', () => resolve(over ? undefined : Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-    // A request destroyed before its body finished arriving — most commonly close() force-
-    // ending one still parked here during shutdown (see `bodiesInFlight` below) — settles the
-    // same way an oversized body does: no body, nothing to parse. 'close' also fires after a
-    // normal 'end', but by then the promise has already settled and this is a no-op.
-    req.on('close', () => resolve(undefined))
+    req.on('error', (err) => {
+      // A client that resets the connection mid-body surfaces here as an 'error' (Node's own
+      // "aborted", ECONNRESET) before 'close' ever fires — gone, not broken, so it settles the
+      // same way the close()-triggered and oversized-body cases do rather than rejecting into
+      // a 500. Any other error (a malformed encoding, say) is a genuine stream failure and
+      // still rejects.
+      if (!req.complete && (err as NodeJS.ErrnoException).code === 'ECONNRESET') {
+        resolve(BODY_GONE)
+        return
+      }
+      reject(err)
+    })
+    // 'close' fires after a normal 'end' too, but by then the promise has already settled and
+    // this is a no-op. `req.complete` is Node's own record of whether 'end' actually happened —
+    // false here means the body was destroyed before it finished, for any reason, and the
+    // oversized-body path above has already settled its own cases before 'close' can.
+    req.on('close', () => {
+      if (!req.complete) resolve(BODY_GONE)
+    })
   })
 }
+
+/**
+ * Distinguishes "the body was never going to finish" from "the body was too big" — both of
+ * which `readBody` used to collapse into a single `undefined`. A request that settles with
+ * this is already dead (its response was ended by `close()`'s teardown, by Node's own
+ * `requestTimeout`/`headersTimeout`, or by the client itself giving up) and must not be sent
+ * another response at all, let alone the size-specific 413 an oversized body gets.
+ */
+export const BODY_GONE = Symbol('body-gone')
 
 function isJsonRequest(req: http.IncomingMessage): boolean {
   const type = req.headers['content-type']
@@ -316,16 +341,21 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
 
     const inFlight = { req, res }
     bodiesInFlight.add(inFlight)
-    let raw: string | undefined
+    let raw: string | undefined | typeof BODY_GONE
     try {
       raw = await readBody(req)
     } finally {
       bodiesInFlight.delete(inFlight)
     }
 
-    // close() already answered this one (see bodiesInFlight) while its body was still
-    // arriving; nothing left to do.
-    if (res.writableEnded) return res.statusCode
+    if (raw === BODY_GONE) {
+      // Either close() already answered this one (see bodiesInFlight) while its body was
+      // still arriving — writableEnded is true, and its real status is worth logging — or the
+      // body is simply gone with nothing ever sent (the client disconnected, or Node's own
+      // requestTimeout/headersTimeout got there first): 499 mirrors how an abandoned queued
+      // job is logged below, rather than a stray, misleading 413.
+      return res.writableEnded ? res.statusCode : 499
+    }
 
     if (raw === undefined) {
       send(res, 413, { error: `job spec must be at most ${MAX_BODY_BYTES} bytes` })
