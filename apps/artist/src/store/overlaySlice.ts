@@ -163,9 +163,11 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
     // ESCSUITE-172: the same map-and-set shape as updateClip — an id that
-    // names no clip matches nothing in the `map` below, and the `set` would
-    // still run.
-    if (!clips.some((c) => c.id === clipId)) return false;
+    // names no clip, OR a real clip that is not a text overlay, matches
+    // nothing in the `map` below (it bypasses on exactly this condition), and
+    // the `set` would still run. Fix round 1: the guard has to mirror the
+    // `map`'s own bypass, not just check the id exists.
+    if (!clips.some((c) => c.id === clipId && c.overlayType === 'text')) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -196,7 +198,9 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
-    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
+    // ESCSUITE-172 (fix round 1): matches the `map`'s own bypass below — id
+    // AND overlayType — not existence alone.
+    if (!clips.some((c) => c.id === clipId && c.overlayType === 'shape')) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {

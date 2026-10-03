@@ -2175,19 +2175,35 @@ nothing written) for an unknown id — the "nothing to do" `rippleDeleteClip` al
 `useAppKeyboardShortcuts`'s Delete key follows the return the same way it already follows
 `deleteSelectedClips`'s: a refusal toasts nothing, because there is nothing to announce.
 
-ESCSUITE-172 found the same "nothing to do" gap in eleven of the thirteen actions above:
+ESCSUITE-172 found the same "nothing to do" gap in twelve of the thirteen actions above:
 `updateClip`, `trimClip`, `moveClipToTrack`, `setClipTimelinePosition`, `updateClipTransform`,
 `updateClipEffects`, `updateClipTransition`, `updateClipAnimation`, `setClipKeyframe`,
 `moveClipKeyframe`, `updateTextOverlayData` and `updateShapeOverlayData` all guarded the lock but
 not the id — an id naming no clip matched nothing in the `map` body, yet the `set` still ran,
-stamping `modified` and pushing an undo entry for an edit that touched nothing. Each now carries
+stamping `modified` and pushing an undo entry for an edit that touched nothing. Each carries
 `if (!clips.some((c) => c.id === clipId)) return false;` beside its lock guard, the same shape
-`removeClipFromTimeline` already used. `removeClipKeyframe` needed nothing — ESCSUITE-101's
-`hasMatch` check already answers `false` for a clip the `find` doesn't locate. The real caller
-that reaches this: `Preview/useCropHandleGesture.ts`'s unmount-mid-drag teardown flushes a pending
-crop write after its clip has left the timeline some other way, with the handles still mounted;
-`updateClip`'s refusal is what keeps that flush from spending an undo entry on nothing, and
-`CropHandles.test.tsx` pins it directly rather than relying on the store test alone.
+`removeClipFromTimeline` already used — except the two overlay actions, whose guard matches their
+own `map`'s bypass (id **and** `overlayType`) rather than id alone, since a real clip of the
+*wrong* overlay type — a shape clip's id handed to `updateTextOverlayData`, say — is just as much
+a no-op as an unknown id:
+`if (!clips.some((c) => c.id === clipId && c.overlayType === 'text')) return false;` (and
+`'shape'` for its sibling). `removeClipKeyframe` needed nothing — ESCSUITE-101's `hasMatch` check
+already answers `false` for a clip the `find` doesn't locate.
+
+A review round found the same defect in two more places, neither one of "the thirteen actions
+above" because both used to return `void`: `updateClipBlendMode`, whose one caller
+(`useClipEditorActions.ts`'s `handleBlendModeChange`) is a plain callback rather than a gesture and
+needed no change when its return type gained the ESCSUITE-87 boolean alongside the same guard; and
+`clearClipKeyframes`, which — unlike every sibling above, `splitClip`/`duplicateClip` included —
+carried no existence guard of *any* kind. It now refuses for the same two reasons
+`removeClipKeyframe` does: an unknown clip, or a clip that exists but carries no animation at all.
+`clearClipKeyframes` has no production caller today, so this closes a latent gap rather than a live
+bug.
+
+The real caller that reaches the live bug: `Preview/useCropHandleGesture.ts`'s unmount-mid-drag
+teardown flushes a pending crop write after its clip has left the timeline some other way, with the
+handles still mounted; `updateClip`'s refusal is what keeps that flush from spending an undo entry
+on nothing, and `CropHandles.test.tsx` pins it directly rather than relying on the store test alone.
 
 `hooks/useGestureHistory.ts` is the one mechanism that does. `createGestureHistory()` (and the
 `useGestureHistory()` that holds one per component) is `begin` / `resume` / `end` / `commit`,

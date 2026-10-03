@@ -660,24 +660,36 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     return true;
   },
 
-  updateClipBlendMode: (clipId: string, blendMode: BlendMode) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip =>
-      clip.id === clipId ? { ...clip, blendMode } : clip
-    );
+  // `=> boolean` since fix round 1 of ESCSUITE-172: the same map-and-set shape
+  // as updateClipTransform and the rest — an id that names no clip matched
+  // nothing in the `map` below, but the `set` ran anyway. Its one caller
+  // (`useClipEditorActions.ts`'s handleBlendModeChange) is a plain callback,
+  // not a gesture threading `skipHistory`, so it needs no change.
+  updateClipBlendMode: (clipId: string, blendMode: BlendMode) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip =>
+        clip.id === clipId ? { ...clip, blendMode } : clip
+      );
+
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+          },
         },
-      },
-      history: pushToHistory(state),
-    };
-  }),
+        history: pushToHistory(state),
+      };
+    });
+
+    return true;
+  },
 
   // `skipHistory` as on `updateClipTransform` and `updateClip` (ESCSUITE-75):
   // the Effects section's blur slider steps in halves from 0 to 50, so a full
