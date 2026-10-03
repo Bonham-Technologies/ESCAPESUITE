@@ -13,7 +13,7 @@ import userEvent from '@testing-library/user-event'
 import { RecordingsListPanel } from './RecordingsListPanel'
 import { useRecorderStore } from '../../store/recorderStore'
 import { uploadToHost } from '../../utils/uploadToHost'
-import { UPLOAD_UNAVAILABLE } from '../../utils/notices'
+import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices'
 import { converterModule, resetAppDoubles } from '../../test/appDoubles'
 import type { ConversionProgressLike } from '../../test/appDoubles'
 import { storeVideo } from '../../core/storage'
@@ -197,6 +197,20 @@ describe('RecordingsListPanel upload to host', () => {
     await user.click(screen.getByRole('button', { name: 'Upload Take Seven to host' }))
 
     expect(useRecorderStore.getState().notice).toBe(UPLOAD_UNAVAILABLE)
+  })
+
+  // ESCSUITE-176. `uploadToHost` never broadcasts a recording's bytes to '*'
+  // — without a hostOrigin it can parse, it posts nothing and says so with
+  // 'refused', which is a different fact from the blob being gone.
+  it('says so through the one notice channel when there is no valid hostOrigin to send to', async () => {
+    const user = userEvent.setup()
+    isEmbedded.mockReturnValue(true)
+    uploadToHostMock.mockResolvedValue('refused')
+    renderPanel()
+
+    await user.click(screen.getByRole('button', { name: 'Upload Take Seven to host' }))
+
+    expect(useRecorderStore.getState().notice).toBe(UPLOAD_NO_HOST_ORIGIN)
   })
 
   it('hands the host the part it clicked, named', async () => {

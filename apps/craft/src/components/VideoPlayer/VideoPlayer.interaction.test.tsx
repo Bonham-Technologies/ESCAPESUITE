@@ -314,26 +314,32 @@ describe('VideoPlayer progress bar', () => {
 });
 
 describe('VideoPlayer volume', () => {
+  // ESCSUITE-176 (probe m5): the slider stays mounted whether the pointer has
+  // ever hovered the control or not — only its CSS visibility (hover /
+  // focus-within, in VideoPlayer.module.css, not exercised by jsdom) is
+  // conditional — so axe-core and a keyboard user tabbing to it can both
+  // reach it. Before this it mounted only on `onMouseEnter`.
   function showSlider(): HTMLInputElement {
+    const container = document.querySelector('[class*="volumeContainer"]') as HTMLElement;
+    return container.querySelector('input[type="range"]') as HTMLInputElement;
+  }
+
+  it('keeps the slider in the DOM regardless of hover, and names it for a screen reader', () => {
+    mountPlayer();
+
+    const slider = showSlider();
+    expect(slider).toBeTruthy();
+    expect(slider).toHaveAccessibleName(/volume/i);
+
     const container = document.querySelector('[class*="volumeContainer"]') as HTMLElement;
     act(() => {
       fireEvent.mouseEnter(container);
     });
-    return container.querySelector('input[type="range"]') as HTMLInputElement;
-  }
-
-  it('reveals the slider on hover and hides it again on leave', () => {
-    mountPlayer();
-    expect(document.querySelector('input[type="range"]')).toBeNull();
-
-    const slider = showSlider();
-    expect(slider).toBeTruthy();
-
-    const container = document.querySelector('[class*="volumeContainer"]') as HTMLElement;
+    expect(showSlider()).toBe(slider);
     act(() => {
       fireEvent.mouseLeave(container);
     });
-    expect(document.querySelector('input[type="range"]')).toBeNull();
+    expect(showSlider()).toBe(slider);
   });
 
   it('applies a new volume to the element and switches to the low-volume icon', () => {

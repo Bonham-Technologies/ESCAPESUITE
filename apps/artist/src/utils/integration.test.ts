@@ -339,10 +339,24 @@ describe('integration', () => {
       expect(parseUrlParams().hostOrigin).toBe('https://host.example')
     })
 
-    it('returns null for an invalid hostOrigin', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    // ESCSUITE-176: `parseHostOrigin` (`@escapesuite/shared/config`) now
+    // normalises any value `new URL()` can parse down to its origin — a
+    // trailing slash or a path included — rather than rejecting anything but
+    // a bare origin. See that package's own tests for the normalisation
+    // itself; this just proves ARTIST reads the normalised value through.
+    it('normalises a hostOrigin that carries a path down to its origin', () => {
       Object.defineProperty(window, 'location', {
         value: { search: `?hostOrigin=${encodeURIComponent('https://host.example/app')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().hostOrigin).toBe('https://host.example')
+    })
+
+    it('returns null for a hostOrigin that cannot be parsed at all', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      Object.defineProperty(window, 'location', {
+        value: { search: `?hostOrigin=${encodeURIComponent('not a url')}` },
         writable: true,
       })
 

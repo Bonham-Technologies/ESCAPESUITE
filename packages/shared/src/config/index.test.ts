@@ -145,9 +145,26 @@ describe('parseHostOrigin', () => {
     )
   })
 
-  it('rejects a value that is more than an origin', () => {
-    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2Fapp')).toBeNull()
-    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2F')).toBeNull()
+  // ESCSUITE-176 (probe m4): a host is as likely to build this parameter from
+  // `location.href` or a routed URL as to type a bare origin, so a trailing
+  // slash or a path is normalised down to the origin rather than silently
+  // degrading the embed's postMessage traffic to '*'.
+  it('normalises a value that carries a path down to its origin', () => {
+    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2Fapp')).toBe(
+      'https://host.example'
+    )
+  })
+
+  it('normalises a value with a trailing slash down to its origin', () => {
+    expect(parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2F')).toBe(
+      'https://host.example'
+    )
+  })
+
+  it('does not warn for a value that merely carries a path', () => {
+    parseHostOrigin('?hostOrigin=https%3A%2F%2Fhost.example%2Fapp')
+
+    expect(warn).not.toHaveBeenCalled()
   })
 
   it('rejects a value that is not a URL at all', () => {

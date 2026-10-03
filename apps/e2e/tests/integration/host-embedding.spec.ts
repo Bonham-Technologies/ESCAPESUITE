@@ -506,7 +506,11 @@ test.describe('Host embedding contract', () => {
     await openHostPage(page, CRAFT_ORIGIN)
     const recordingId = await seedCraftRecording(page, 'Seeded Recording')
 
-    const frame = await embed(page, '/')
+    // `UPLOAD_RECORDING` carries bytes, so `uploadToHost()` refuses to post it
+    // at all without a `hostOrigin` it can parse (ESCSUITE-176) — the host
+    // page here is served from CRAFT's own origin (see the file doc comment),
+    // so that is what it names itself as.
+    const frame = await embed(page, `/?hostOrigin=${encodeURIComponent(CRAFT_ORIGIN)}`)
     // The button exists only because this CRAFT is framed — standalone CRAFT
     // never draws it (RecordingsListPanel.test.tsx pins that half).
     const upload = frame.getByRole('button', { name: 'Upload Seeded Recording to host' })
@@ -529,7 +533,9 @@ test.describe('Host embedding contract', () => {
     await openHostPage(page, CRAFT_ORIGIN)
     const take = await seedCraftTake(page, 'Seeded Take')
 
-    const frame = await embed(page, '/')
+    // See the comment on the single-file upload test above: a bytes-carrying
+    // `UPLOAD_RECORDING` needs a parseable `hostOrigin` or nothing is posted.
+    const frame = await embed(page, `/?hostOrigin=${encodeURIComponent(CRAFT_ORIGIN)}`)
     const uploadTake = frame.getByRole('button', { name: 'Upload Seeded Take to host' })
     await expect(uploadTake).toBeVisible({ timeout: 30_000 })
 
