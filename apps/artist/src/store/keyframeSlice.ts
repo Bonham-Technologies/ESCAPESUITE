@@ -40,6 +40,10 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    // ESCSUITE-172: the same map-and-set shape as updateClip — an id that
+    // names no clip matches nothing in the `map` below, and the `set` would
+    // still run.
+    if (!clips.some((c) => c.id === clipId)) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
@@ -189,6 +193,7 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
 
     // ESCSUITE-163 / m2: false, with nothing written and no undo entry pushed,
     // for an unknown clip, a property the clip has no keyframes on, or an
@@ -253,47 +258,63 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
     return true;
   },
 
-  clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => set((state) => {
-    if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
-    const newClips = state.project.timeline.clips.map(clip => {
-      if (clip.id !== clipId) return clip;
-      const currentAnimation = clip.animation;
-      if (!currentAnimation) return clip;
+  // `=> boolean` since fix round 1 of ESCSUITE-172: this had no existence
+  // check at all — not even splitClip/duplicateClip's `if (!clip) return
+  // state` — so an unknown clip id, or a clip with no animation, still
+  // matched nothing in the `map` below while the `set` ran anyway. It now
+  // refuses for the same two reasons removeClipKeyframe does (ESCSUITE-101):
+  // there is nothing to clear either way. No production caller exists today
+  // (it is reachable only from a test or a future UI wire-up), so this adds
+  // no behaviour change for any live code path.
+  clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => {
+    const { clips, tracks } = get().project.timeline;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+    const targetClip = clips.find((c) => c.id === clipId);
+    if (!targetClip?.animation) return false; // ESCSUITE-172
 
-      if (property) {
-        // Clear specific property
-        const { [property]: _, ...remainingKeyframes } = currentAnimation.keyframes;
-        return {
-          ...clip,
-          animation: {
-            ...currentAnimation,
-            keyframes: remainingKeyframes,
+    set((state) => {
+      const newClips = state.project.timeline.clips.map(clip => {
+        if (clip.id !== clipId) return clip;
+        const currentAnimation = clip.animation;
+        if (!currentAnimation) return clip;
+
+        if (property) {
+          // Clear specific property
+          const { [property]: _, ...remainingKeyframes } = currentAnimation.keyframes;
+          return {
+            ...clip,
+            animation: {
+              ...currentAnimation,
+              keyframes: remainingKeyframes,
+            },
+          };
+        } else {
+          // Clear all keyframes
+          return {
+            ...clip,
+            animation: {
+              ...currentAnimation,
+              keyframes: {},
+            },
+          };
+        }
+      });
+
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
           },
-        };
-      } else {
-        // Clear all keyframes
-        return {
-          ...clip,
-          animation: {
-            ...currentAnimation,
-            keyframes: {},
-          },
-        };
-      }
+        },
+        history: pushToHistory(state),
+      };
     });
 
-    return {
-      project: {
-        ...state.project,
-        modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: newClips,
-        },
-      },
-      history: pushToHistory(state),
-    };
-  }),
+    return true;
+  },
 
   // Keyframe panel actions
   setKeyframePanelOpen: (open: boolean) => set((state) => ({

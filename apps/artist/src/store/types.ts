@@ -705,8 +705,23 @@ export interface EditorState {
    * `KEYFRAME_TIME_EPSILON` of the given time; and `removeClipFromTimeline`
    * (ESCSUITE-115) refuses for an id that names no clip, the same "nothing to
    * do" `rippleDeleteClip` already recognised (`if (!clipToDelete) return
-   * state`) without a way to say so. All of them still mean exactly what
-   * `false` means above: no state changed, no undo entry pushed.
+   * state`) without a way to say so. ESCSUITE-172 gave the same "unknown id"
+   * refusal to every other action in this file, `keyframeSlice.ts` and
+   * `overlaySlice.ts` that maps over `clips` looking for one `clipId` and
+   * answers `boolean`: an id matching nothing used to run the `set` anyway,
+   * stamping `modified` and pushing an undo entry for an edit that touched
+   * nothing — the gap the crop handle gesture's unmount-mid-drag flush reaches
+   * for real, writing against a clip that has just been deleted.
+   * `updateTextOverlayData`/`updateShapeOverlayData` guard on id **and**
+   * `overlayType` together, mirroring their own `map`'s bypass, since a real
+   * clip of the wrong overlay type is the same no-op as an unknown id. A fix
+   * round widened this to two actions that used to return `void`:
+   * `updateClipBlendMode` (its one caller is not a gesture and needed no
+   * change) and `clearClipKeyframes`, which refuses for an unknown clip or one
+   * with no animation at all — `removeClipKeyframe`'s own two non-lock
+   * reasons, applied here because this action had no existence guard
+   * whatsoever before. All of them still mean exactly what `false` means
+   * above: no state changed, no undo entry pushed.
    *
    * A caller that passes `skipHistory: true` to a *later* write of the same
    * gesture MUST look at it. `skipHistory` says "an earlier write of this
@@ -747,14 +762,14 @@ export interface EditorState {
   moveClipToTrack: (clipId: string, trackId: string) => boolean;
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => boolean;
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => boolean;
-  updateClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
+  updateClipBlendMode: (clipId: string, blendMode: BlendMode) => boolean;
   updateClipEffects: (clipId: string, effects: Partial<ClipEffects>, skipHistory?: boolean) => boolean;
   updateClipTransition: (clipId: string, transition: Partial<Transition>, skipHistory?: boolean) => boolean;
   updateClipAnimation: (clipId: string, animation: Partial<ClipAnimation>, skipHistory?: boolean) => boolean;
   setClipKeyframe: (clipId: string, property: AnimatableProperty, keyframe: Keyframe, skipHistory?: boolean) => boolean;
   removeClipKeyframe: (clipId: string, property: AnimatableProperty, time: number) => boolean;
   moveClipKeyframe: (clipId: string, property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => boolean;
-  clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => void;
+  clearClipKeyframes: (clipId: string, property?: AnimatableProperty) => boolean;
   duplicateClip: (clipId: string) => void;
 
   // Actions - Overlay Clips

@@ -1105,7 +1105,7 @@ describe('projectStore remaining behaviours', () => {
     it('refuses to move a clip on it to another track', () => reportsRefusal(() => store().moveClipToTrack('h1', free)))
     it('refuses to move a clip onto it from another track', () => reportsRefusal(() => store().moveClipToTrack('f1', held)))
     it('refuses to transform a clip on it', () => reportsRefusal(() => store().updateClipTransform('h1', { x: 0.2 })))
-    it('refuses to change the blend mode of a clip on it', () => refuses(() => store().updateClipBlendMode('h1', 'multiply')))
+    it('refuses to change the blend mode of a clip on it', () => reportsRefusal(() => store().updateClipBlendMode('h1', 'multiply')))
     it('refuses to change the effects of a clip on it', () => reportsRefusal(() => store().updateClipEffects('h1', { blur: 3 })))
     it('refuses to change the transition of a clip on it', () => reportsRefusal(() => store().updateClipTransition('h1', { duration: 1 })))
     it('refuses to change the animation of a clip on it', () => reportsRefusal(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
@@ -1133,6 +1133,44 @@ describe('projectStore remaining behaviours', () => {
       store().updateClipBlendMode('f1', 'multiply')
       expect(clipsRef().find((c) => c.id === 'f1')!.blendMode).toBe('multiply')
     })
+  })
+
+  // ESCSUITE-172: `updateClip` and its map-and-set siblings used to match
+  // nothing against an id that names no clip and still run the `set` — a new
+  // `modified` stamp and an undo entry for an edit that touched nothing. The
+  // crop handle gesture reaches this for real: an unmount mid-drag flushes its
+  // pending write after the clip it was dragging has been deleted
+  // (`CropHandles.test.tsx`'s own pin). Each case here is the same shape
+  // `removeClipFromTimeline` (ESCSUITE-115) already fixed: `false` back, and
+  // nothing written.
+  describe('an id that names no clip (ESCSUITE-172)', () => {
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      addClip('clip1', 0, 2)
+    })
+
+    /** Assert the call answered false and wrote nothing: same clips array, no history entry. */
+    const refusesFalse = (act: () => boolean) => {
+      const before = clipsRef(); const entries = past()
+      expect(act()).toBe(false)
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses updateClip', () => refusesFalse(() => store().updateClip('nope', { endTime: 1 })))
+    it('refuses trimClip', () => refusesFalse(() =>
+      store().trimClip('nope', 'end', { endTime: 1 }, { startTime: 0, endTime: 2, timelinePosition: 0 })))
+    it('refuses moveClipToTrack', () => refusesFalse(() =>
+      store().moveClipToTrack('nope', store().project.timeline.tracks[0].id)))
+    it('refuses setClipTimelinePosition', () => refusesFalse(() => store().setClipTimelinePosition('nope', 8)))
+    it('refuses updateClipTransform', () => refusesFalse(() => store().updateClipTransform('nope', { x: 0.2 })))
+    it('refuses updateClipEffects', () => refusesFalse(() => store().updateClipEffects('nope', { blur: 3 })))
+    it('refuses updateClipTransition', () => refusesFalse(() => store().updateClipTransition('nope', { duration: 1 })))
+    it('refuses updateClipAnimation', () => refusesFalse(() =>
+      store().updateClipAnimation('nope', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
+    it('refuses updateClipBlendMode', () => refusesFalse(() => store().updateClipBlendMode('nope', 'multiply')))
   })
 
   // ESCSUITE-101. Every action here removes a clip from the timeline some way
