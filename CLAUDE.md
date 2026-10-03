@@ -2194,6 +2194,32 @@ are byte-identical. Outside vitest's measurement: `apps/e2e/tests/integration/ho
 new no-`hostOrigin` refusal case, run in Chromium: 6 / 6. **No floor crossed**; craft's floors stay
 100 / 99 / 97 / 100 and shared's 100 / 98 / 90 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-172 (`updateClip` and twelve map-and-set siblings
+refuse an id that names no clip — in front of the `set`, with the ESCSUITE-87 `false` and no undo entry — so
+the crop gesture's unmount-mid-drag flush against a deleted clip spends nothing; `updateClipBlendMode` and
+`clearClipKeyframes` gain the boolean return to carry it; the two overlay-data writers refuse a real clip of
+the wrong type): 99.80 / 99.24 / **95.59** / 99.67 against 99.80 / 99.24 / 95.56 / 99.67 on the commit this
+branch was rebased onto (`51b2acd`, the ESCSUITE-169 / 170 squash) — branches up three hundredths, the other
+three unmoved. The base figure is a composite: `51b2acd` is the ESCSUITE-161 / 162 tree plus the
+ESCSUITE-169 / 170 tree, both measured in this sitting (4,766 / 4,988 and +16 / +16 branches, on disjoint
+files — this branch's own per-file delta against the first lists exactly the second's three files and this
+ticket's three slices, nothing else), so the base reads 4,782 / 5,004 branches and this branch
+4,814 / 5,036: thirty-two new branches, thirty-two covered, the same 222 uncovered (lines 7,569 / 7,584 →
+7,588 / 7,603, statements 8,518 / 8,583 → 8,565 / 8,630, functions 1,836 / 1,842 → 1,850 / 1,856, every
+denominator growing by exactly what the numerator did; the same 15 / 65 / 6 uncovered). The thirty-two are
+`store/clipSlice.ts`'s eighteen (141 / 143 → 159 / 161 — the existence guard on `updateClip`, `trimClip`,
+`moveClipToTrack`, `setClipTimelinePosition`, `updateClipTransform`, `updateClipEffects`,
+`updateClipTransition`, `updateClipAnimation` and `updateClipBlendMode`, each reached by its own refusal case
+against the success cases that were already there; the file's two pre-existing uncovered arms untouched),
+`store/keyframeSlice.ts`'s six (63 / 74 → 69 / 80 — `setClipKeyframe`, `moveClipKeyframe` and
+`clearClipKeyframes`, the last refusing both an unknown clip and a clip with no animation, as
+`removeClipKeyframe` does; the same eleven pre-existing arms uncovered) and `store/overlaySlice.ts`'s eight
+(50 → 58 — the id-and-type guard on `updateTextOverlayData` and `updateShapeOverlayData`, reached by the
+unknown-id and wrong-type refusals). `components/Preview/useCropHandleGesture.ts` gained no branch: the
+store's refusal propagates through `useGestureHistory.commit`'s return, pinned by the CropHandles
+unmount-mid-drag case. The seven perf/rerender pins and `perfScene.ts` are byte-identical. **No floor
+crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2201,7 +2227,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.75 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.25 | 95.64 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.24 | 95.59 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 
