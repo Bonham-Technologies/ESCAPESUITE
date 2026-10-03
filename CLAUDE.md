@@ -2094,6 +2094,35 @@ clobber cases on both the success and the failure path; the file's four pre-exis
 untouched. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
 craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-175 (MP4 gets the real probe WebM has had since
+ESCSUITE-22 — H.264 at the selected output size and AAC — and WebM's probe learns to ask about Opus; the dialog
+refuses a format whose video codec is missing, offers one whose audio codec is missing with an up-front
+per-format note, and says after the export that the sound was lost only for a project that had sound to lose;
+both element-and-WebCodecs exporters probe before mixing audio, loading media or starting the muxer, report a
+dropped codec through their progress stream instead of a `console.warn`, and return an `ExportResult` whose
+`audio` flag the dialog, the headless kit and the host's `EXPORT_COMPLETE` message read):
+99.80 / 99.24 / **95.61** / 99.67 against 99.80 / 99.24 / 95.57 / 99.67 on the commit this branch was rebased
+onto (`8d4c20e`, the ESCSUITE-171 squash) — branches up four hundredths, the other three unmoved. The base is
+the composite ESCSUITE-172's paragraph describes, extended by the ESCSUITE-171 tree (three trees measured in
+this sitting on disjoint files): 4,788 / 5,010 branches, and this branch 4,839 / 5,061 — fifty-one new
+branches, fifty-one covered, the same 222 uncovered (lines 7,573 / 7,588 → 7,624 / 7,639, statements
+8,524 / 8,589 → 8,584 / 8,649, functions 1,837 / 1,843 → 1,854 / 1,860, every denominator growing by exactly
+what the numerator did; the same 15 / 65 / 6 uncovered). The fifty-one are `components/Export/ExportDialog.tsx`'s
+forty-two (169 / 170 → 211 / 212: the three-state MP4 gate and its WebM twin, `projectHasAudio` — a clip whose
+track is present, visible and unmuted and whose source is not an image, the audio mixer's own skip clause
+without the decode — gating the completion sentence, the per-format up-front notes with the way-out clause
+dropped when the other format is silent too, the stale-probe guard on the preset change; the file's one
+pre-existing uncovered arm untouched), `core/exportTypes.ts`'s seven (120 / 124 → 127 / 131: the
+`{ video, audio }` probes for both formats through one `isAudioCodecSupported` and the `VIDEO_FORMAT_AUDIO`
+table, `noAudioNote` and `exportedWithoutSoundReason`; the same four pre-existing arms uncovered) and
+`core/exportMP4.ts`'s two (124 / 141 → 126 / 143: the up-front H.264 refusal before any work and the AAC
+report, with the same seventeen pre-existing arms uncovered — the file's lines fell 255 → 248 because the
+late probe and both `console.warn`s went). `core/exportWebM.ts` gained no branch: the two Opus failure arms
+collapsed into one `audioDropped` flag the probe sets, read once at the return. The two export ceiling files
+are byte-identical — nothing per frame moved — as are the other five pins and `perfScene.ts`. One Playwright
+pin changed (`apps/e2e/tests/errors/export.spec.ts`'s codec-not-supported case) and was run in Chromium:
+11 / 11. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2101,7 +2130,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.74 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.24 | 95.58 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.24 | 95.61 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 
