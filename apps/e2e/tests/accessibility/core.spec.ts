@@ -321,7 +321,14 @@ test.describe('ESCAPECRAFT Dialog and Recording Accessibility', () => {
 
 test.describe('ESCAPEARTIST Accessibility', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('http://localhost:5175')
+    // ESCSUITE-177 review "Races" 2: waitForAppReady resolves at React's
+    // first commit (attachment), which can land before ARTIST's
+    // asynchronous getSessionState() has decided whether to raise the
+    // "Resume Previous Session?" prompt — exactly the hazard
+    // `?suppressRestore=1` exists to rule out below, in the one test in
+    // this file ("the clip inspector's controls have associated labels")
+    // that already uses it for the same reason.
+    await page.goto('http://localhost:5175?suppressRestore=1')
     await waitForAppReady(page, 'artist')
   })
 
@@ -686,8 +693,15 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   test('session restore prompt passes axe-core audit', async ({ page }) => {
     // The prompt is only offered for a session that holds at least one source
     // video (`app/useSessionRestore.ts`), and it is read on mount — so write one
-    // straight into the `settings` store the app keeps it in and reload. The
-    // first navigation in `beforeEach` is what created the database.
+    // straight into the `settings` store the app keeps it in and reload.
+    //
+    // This is the one test in the describe that *wants* the prompt, so it
+    // overrides `beforeEach`'s `?suppressRestore=1` with a plain navigation
+    // first — `reload()` below re-requests whatever URL the page is
+    // currently on, and the whole point here is that URL must not carry
+    // `?suppressRestore=1` when it does.
+    await page.goto('http://localhost:5175')
+    await waitForAppReady(page, 'artist')
     await page.evaluate(async () => {
       const session = {
         project: {

@@ -281,15 +281,62 @@ test.describe('Project Session', () => {
   })
 
   test('session restore prompt appears when applicable', async ({ page }) => {
-    // This would appear if there's a previous session
-    const restorePrompt = page
-      .getByText(/restore|recover|previous|session/i)
-      .or(page.getByRole('dialog', { name: /restore|session/i }))
-      .first()
+    // ESCSUITE-177 review "Races" 3: a one-shot `isVisible()` right after
+    // navigation was always racy, and with `waitForAppReady` now resolving
+    // at React's first commit instead of `networkidle`, it would reliably
+    // observe `false` and the test would pass vacuously no matter what the
+    // app does. Made deterministic the way
+    // `accessibility/core.spec.ts`'s "session restore prompt passes
+    // axe-core audit" does: the prompt is only offered for a session that
+    // holds at least one source video (`app/useSessionRestore.ts`), and it
+    // is read on mount, so write one straight into the `settings` store the
+    // app keeps it in and reload.
+    await page.evaluate(async () => {
+      const session = {
+        project: {
+          id: 'seeded',
+          name: 'Seeded Session',
+          width: 1280,
+          height: 720,
+          frameRate: 30,
+          duration: 0,
+          created: 0,
+          modified: 0,
+          timeline: { clips: [], tracks: [], duration: 0 },
+        },
+        sourceVideos: [
+          {
+            id: 'video1',
+            name: 'video1.mp4',
+            duration: 10,
+            width: 1280,
+            height: 720,
+            frameRate: 30,
+            mimeType: 'video/mp4',
+            size: 1000,
+          },
+        ],
+        currentTime: 0,
+        selectedClipId: null,
+        zoom: 1,
+        timestamp: Date.now(),
+      }
+      await new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open('video-editor-db')
+        request.onerror = () => reject(new Error('Failed to open database'))
+        request.onsuccess = () => {
+          const tx = request.result.transaction('settings', 'readwrite')
+          tx.objectStore('settings').put(session, 'current-session')
+          tx.oncomplete = () => resolve()
+          tx.onerror = () => reject(new Error('Failed to seed session'))
+        }
+      })
+    })
+    await page.reload()
+    await waitForAppReady(page, 'artist')
 
-    const isVisible = await restorePrompt.isVisible().catch(() => false)
-    // May or may not be visible depending on session state
-    expect(typeof isVisible).toBe('boolean')
+    const restorePrompt = page.getByRole('dialog', { name: 'Resume Previous Session?' })
+    await expect(restorePrompt).toBeVisible()
   })
 
   test('new project can be started', async ({ page }) => {
