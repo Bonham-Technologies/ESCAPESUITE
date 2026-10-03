@@ -779,4 +779,35 @@ describe('PreviewPlayer keyframe-mode drags', () => {
     const xKeyframes = clipOf('clip1').animation?.keyframes?.x ?? []
     expect(xKeyframes.some((kf) => kf.time < 0)).toBe(false)
   })
+
+  // The mirror case (ESCSUITE-168 review, MAJOR 1): the first case above only
+  // ever evaluates `keyframeTime >= 0`, leaving `keyframeTime <= clip.duration`
+  // asserted by nothing — and the past-the-end side is the ordinary way to
+  // reach this at all, since `handleMouseMove` carries no `isPlaying` guard
+  // (only `handleMouseDown` does): press a handle, press Space, and the
+  // playhead walks off the end of the clip while the drag is still live.
+  it('refuses a keyframe write once the playhead has moved past the clip’s end mid-drag', async () => {
+    const trackId = store().project.timeline.tracks[0].id
+    addClip('clip1', 2, 4, trackId)
+    store().setSelectedClipId('clip1')
+    store().setKeyframePanelOpen(true)
+    store().setCurrentTime(3) // inside the clip — needed to pick up the handle
+
+    const preview = await renderPreview()
+    fireEvent.mouseDown(preview.canvas, preview.at(960, 540))
+    await settle()
+
+    const beforeMove = clipOf('clip1').animation?.keyframes?.x
+    store().setCurrentTime(10) // well past the clip's end (it runs 2s-6s)
+    fireEvent.mouseMove(window, preview.at(1344, 540))
+    await settle(FRAME_MS)
+    fireEvent.mouseUp(window)
+    await settle(FRAME_MS)
+
+    const xKeyframes = clipOf('clip1').animation?.keyframes?.x
+    expect(xKeyframes?.some((kf) => kf.time > 4)).toBeFalsy()
+    // Not just "no keyframe past the end" — nothing was written at all, so a
+    // future clamp-instead-of-refuse could not pass this by landing at 4.
+    expect(xKeyframes).toEqual(beforeMove)
+  })
 })

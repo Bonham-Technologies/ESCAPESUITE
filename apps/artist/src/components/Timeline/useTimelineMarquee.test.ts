@@ -309,8 +309,11 @@ describe('useTimelineMarquee selecting', () => {
   // flag — never runs for this gesture. Left set, it would swallow the user's
   // next, unrelated click on bare track. The fix consumes the very next click
   // anywhere, the moment it happens, rather than waiting for one that lands on
-  // the container.
-  it('clears the flag on the next click even when the release landed outside the track area', () => {
+  // the container. (jsdom cannot synthesise a click from a mouseup the way a
+  // real browser would, so this releases on `document` and never dispatches a
+  // click on the container at all — as close as a unit test gets to "the
+  // release landed outside it" (ESCSUITE-168 review, NIT 7).)
+  it('clears the flag on the next click anywhere, not only on one that lands on the track container', () => {
     const { result } = mountMarquee()
     startMarquee(result)
     move(300, 30)
@@ -319,6 +322,53 @@ describe('useTimelineMarquee selecting', () => {
     expect(marqueeJustFinished.current).toBe(true)
 
     document.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(marqueeJustFinished.current).toBe(false)
+  })
+
+  // ESCSUITE-168 review, MINOR 3: the one-shot `click` listener armed above has
+  // no cleanup of its own. If the timeline unmounts between the release and
+  // the next click (a project load that empties it, an undo back past "no
+  // clips"), the listener used to outlive the component and later write into
+  // an orphaned ref.
+  it('gives back the pending one-shot click listener if the timeline unmounts before the next click', () => {
+    const { result, unmount } = mountMarquee()
+    startMarquee(result)
+    move(300, 30)
+    release()
+    expect(marqueeJustFinished.current).toBe(true)
+
+    unmount()
+
+    expect(removeListener.mock.calls.some((call) => call[0] === 'click')).toBe(true)
+  })
+
+  // The other arm of that same cleanup: a timeline that unmounts with nothing
+  // armed (no marquee ever completed) asks for no removal at all — every other
+  // unmount case in this file is exactly that, so this just names it.
+  it('asks for no click-listener removal when nothing was ever armed', () => {
+    const { unmount } = mountMarquee()
+
+    unmount()
+
+    expect(removeListener.mock.calls.some((call) => call[0] === 'click')).toBe(false)
+  })
+
+  // ESCSUITE-168 review, NIT 7: the one-shot listener closes the common case,
+  // but a gesture whose terminal click never fires at all — its mousedown
+  // target removed from the tree before the mouseup, which a real browser then
+  // dispatches no click for — would still leave the flag set, and the user's
+  // next real click would still be swallowed, since `handleTrackClick` reads
+  // the flag before the (never-fired) one-shot could clear it. By the time
+  // another mousedown starts a new gesture, this gesture's own click has
+  // either already fired or never will, so it is always safe to clear a
+  // leftover flag there too.
+  it('clears a leftover flag at the start of the next gesture, in case the previous terminal click never fired', () => {
+    const { result } = mountMarquee()
+    // Simulates the residual: a flag left set with no click ever following it.
+    marqueeJustFinished.current = true
+
+    startMarquee(result)
 
     expect(marqueeJustFinished.current).toBe(false)
   })
