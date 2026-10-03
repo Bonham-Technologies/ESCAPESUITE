@@ -69,22 +69,27 @@ vi.mock('../core/storage', async (importOriginal) => ({
   hasSpaceForRecording,
 }))
 
+/** The three captures one attempt can produce, as doubles. */
 interface AcquiredDoubles {
   screen: MediaStream | null
   webcam: MediaStream | null
   mic: MediaStream | null
-  /**
-   * Whether the microphone request failed and the take went ahead without it
-   * (ESCSUITE-184). `acquireStreams` answers this; the controller only reads
-   * it, to raise the one notice that says so.
-   */
+}
+
+/**
+ * What `acquireStreams` resolves with: the captures, plus whether the
+ * microphone request failed and the take went ahead without it
+ * (ESCSUITE-184). `onPartial` still reports the three captures alone, so the
+ * ESCSUITE-116 helpers below keep taking `AcquiredDoubles`.
+ */
+interface AcquisitionDoubles extends AcquiredDoubles {
   micRefused: boolean
 }
 
 interface Harness {
   deps: RecordingControllerDeps
   /** What acquireStreams hands back — the streams the take is built from. */
-  streams: AcquiredDoubles
+  streams: AcquisitionDoubles
   acquireStreams: ReturnType<typeof vi.fn>
   stopAllStreams: ReturnType<typeof vi.fn>
   saveRecording: ReturnType<typeof vi.fn>
@@ -135,8 +140,8 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
 }
 
 /** Build the controller's inputs, with the capture side as plain doubles. */
-function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquiredDoubles>): Harness {
-  const streams: AcquiredDoubles = {
+function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquisitionDoubles>): Harness {
+  const streams: AcquisitionDoubles = {
     screen: screenStream(), webcam: null, mic: null, micRefused: false, ...acquired,
   }
   const acquireStreams = vi.fn(async () => streams)
@@ -182,7 +187,7 @@ function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<A
   }
 }
 
-function mountController(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquiredDoubles>) {
+function mountController(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquisitionDoubles>) {
   resetStore(config)
   harness = makeHarness(config, acquired)
   return renderHook(() => useRecordingController(harness.deps))
@@ -1262,7 +1267,7 @@ describe('useRecordingController what the take captured', () => {
    */
   async function capturedAudioOf(
     config: Partial<RecordingConfig>,
-    acquired?: Partial<AcquiredDoubles>
+    acquired?: Partial<AcquisitionDoubles>
   ): Promise<CapturedTake> {
     const { result } = mountController({ countdownSeconds: 0, ...config }, acquired)
     await startTake(result)
@@ -1940,10 +1945,12 @@ describe('useRecordingController teardown', () => {
     // its own everything was released by the cancel that superseded it.
     describe('when a newer take is already being set up', () => {
       /** A capture of its own per request, so the store can be read back. */
-      function acquirePerAttempt(): AcquiredDoubles[] {
-        const acquired: AcquiredDoubles[] = []
+      function acquirePerAttempt(): AcquisitionDoubles[] {
+        const acquired: AcquisitionDoubles[] = []
         harness.acquireStreams.mockImplementation(async () => {
-          const streams: AcquiredDoubles = { screen: screenStream(), webcam: null, mic: null }
+          const streams: AcquisitionDoubles = {
+            screen: screenStream(), webcam: null, mic: null, micRefused: false,
+          }
           acquired.push(streams)
           return streams
         })
@@ -2146,13 +2153,14 @@ describe('useRecordingController teardown', () => {
          * One held-open request per call, each with captures of its own, so a
          * test can say *which* attempt's tracks were stopped.
          */
-        function queuedAcquires(): Array<{ streams: AcquiredDoubles; release: () => void }> {
-          const requests: Array<{ streams: AcquiredDoubles; release: () => void }> = []
+        function queuedAcquires(): Array<{ streams: AcquisitionDoubles; release: () => void }> {
+          const requests: Array<{ streams: AcquisitionDoubles; release: () => void }> = []
           harness.acquireStreams.mockImplementation(() => {
-            const streams: AcquiredDoubles = {
+            const streams: AcquisitionDoubles = {
               screen: screenStream(),
               webcam: webcamStream(),
               mic: micStreamWithTrack(),
+              micRefused: false,
             }
             let release!: () => void
             const gate = new Promise<void>(resolve => { release = resolve })

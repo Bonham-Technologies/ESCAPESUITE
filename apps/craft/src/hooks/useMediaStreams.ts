@@ -36,6 +36,23 @@ export interface AcquiredStreams {
   mic: MediaStream | null;
 }
 
+/**
+ * What one acquisition attempt produced: the captures, plus whether the
+ * microphone request failed and the take is going ahead without it
+ * (ESCSUITE-184).
+ *
+ * Separate from `AcquiredStreams` on purpose — `onPartial` reports captures
+ * for the deadline to release (ESCSUITE-116) and has no use for this, so the
+ * reporter's shape stays exactly what it was.
+ *
+ * The controller cannot work this out for itself: `mic: null` with the toggle
+ * on is *also* what a machine with no microphone looks like (ESCSUITE-70), and
+ * the controller has no `capabilities` to tell the two apart.
+ */
+export interface AcquisitionResult extends AcquiredStreams {
+  micRefused: boolean;
+}
+
 export interface MediaStreams {
   /** The stream the preview mirrors: a raw capture, or the compositor's output. */
   previewStream: MediaStream | null;
@@ -62,8 +79,11 @@ export interface MediaStreams {
    * caller racing this against a deadline can stop what the browser has
    * already handed over instead of waiting for the whole request to settle
    * (ESCSUITE-116).
+   *
+   * The microphone is the one exception to "releases what it got if one
+   * fails": see the catch around its request below (ESCSUITE-184).
    */
-  acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquiredStreams>;
+  acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquisitionResult>;
 }
 
 export function useMediaStreams({ config, capabilities, setStreams }: MediaStreamsDeps): MediaStreams {
@@ -135,10 +155,11 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
   // Acquire streams based on config
   const acquireStreams = useCallback(async (
     onPartial?: (partial: AcquiredStreams) => void
-  ): Promise<AcquiredStreams> => {
+  ): Promise<AcquisitionResult> => {
     let screen: MediaStream | null = null;
     let webcam: MediaStream | null = null;
     let mic: MediaStream | null = null;
+    let micRefused = false;
 
     try {
       // Get screen capture if enabled
@@ -155,11 +176,34 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
 
       // Get microphone if enabled (separate from webcam)
       if (config.microphoneEnabled && capabilities.microphone) {
-        mic = await requestMicrophone();
+        try {
+          mic = await requestMicrophone();
+        } catch (error) {
+          // ESCSUITE-184: the microphone is the one source whose refusal does
+          // not cost the take. It is asked for last, so by the time this
+          // throws the user has already answered the share picker and, in a
+          // PiP take, the camera prompt — and releasing those over a prompt
+          // they said no to meant picking the same window again to record
+          // silently, which is what they were going to do anyway. A take with
+          // no sound is a take: the ESCSUITE-14 companion shape with the mic
+          // part absent, which every consumer already reads (a machine with no
+          // microphone has produced exactly this since ESCSUITE-70).
+          //
+          // Unless there is nothing else: a microphone-only take whose prompt
+          // is refused has nothing left to record, so that one still fails the
+          // way it always did, with the start path's own notice.
+          if (!screen && !webcam) throw error;
+          console.warn('Microphone could not be opened — recording without it:', error);
+          micRefused = true;
+        }
+        // Reported whether or not it produced a stream: the deadline release
+        // reads `onPartial`'s latest report (ESCSUITE-116), and a screen
+        // capture that landed before a refused microphone still has to be in
+        // it.
         onPartial?.({ screen, webcam, mic });
       }
 
-      return { screen, webcam, mic };
+      return { screen, webcam, mic, micRefused };
     } catch (error) {
       // Clean up any acquired streams on error
       stopStream(screen);

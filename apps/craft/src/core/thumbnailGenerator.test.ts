@@ -131,12 +131,19 @@ describe('thumbnailGenerator', () => {
       // abandoned within a few seconds, not whatever number the source
       // happens to hold today.
       vi.useFakeTimers()
-      const promise = generateThumbnail(new Blob(['source-video']))
+      // The rejection is attached *before* the clock is advanced: the deadline
+      // fires synchronously inside advanceTimersByTimeAsync, so a handler
+      // added afterwards would be one that arrived too late — an unhandled
+      // rejection, which vitest reports as an error beside a passing test.
+      const settled = generateThumbnail(new Blob(['source-video'])).then(
+        () => null,
+        (error: Error) => error
+      )
       const video = getLastVideoDouble()!
 
       await vi.advanceTimersByTimeAsync(DEADLINE_MS)
 
-      await expect(promise).rejects.toThrow('Timed out loading video for thumbnail')
+      expect(await settled).toMatchObject({ message: 'Timed out loading video for thumbnail' })
       // The same release the error and draw-failure arms do: the object URL is
       // revoked and the element is taken back to NETWORK_EMPTY, so a probe
       // that was abandoned leaks neither.

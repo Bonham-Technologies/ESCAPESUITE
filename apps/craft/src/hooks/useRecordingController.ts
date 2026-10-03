@@ -33,6 +33,7 @@ import { hasSystemAudio, stopStream } from '../core/permissions';
 import {
   CAPTURE_REFUSED,
   CAPTURE_UNANSWERED,
+  MIC_REFUSED,
   NO_SYSTEM_AUDIO,
   SAVE_FAILED,
   START_FAILED,
@@ -43,7 +44,7 @@ import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
 import { useRecorderStore } from '../store/recorderStore';
 import type { AudioLevels, RecordingConfig, RecordingState } from '../store/types';
-import type { AcquiredStreams } from './useMediaStreams';
+import type { AcquiredStreams, AcquisitionResult } from './useMediaStreams';
 import type { SaveRecording } from './useRecordingSave';
 
 export interface RecordingControllerDeps {
@@ -54,7 +55,7 @@ export interface RecordingControllerDeps {
   setAudioLevels: (levels: AudioLevels) => void;
   setStreams: (screen: MediaStream | null, webcam: MediaStream | null) => void;
   /** From useMediaStreams: the capture, the release, and the handles both use. */
-  acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquiredStreams>;
+  acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquisitionResult>;
   stopAllStreams: () => void;
   stopAllStreamsRef: RefObject<() => void>;
   compositorRef: RefObject<Compositor | null>;
@@ -517,6 +518,19 @@ export function useRecordingController({
       // capture that came back without it means the tick box was missed.
       if (!systemAudioShared && screen !== null) {
         setNotice(NO_SYSTEM_AUDIO);
+      }
+
+      // The microphone was asked for and could not be opened, and the take is
+      // going ahead anyway (ESCSUITE-184). Said after the system-audio notice
+      // above, so it wins the one channel when both are true: that one is a
+      // nudge about a tick box the user can tick next time, and the greyed
+      // System meter carries its own weaker wording for the rest of the take,
+      // while this names a source that is simply gone from the recording now
+      // being made. The *reason* it could not be opened is a console detail —
+      // `acquireStreams` logs it — because there is nothing the user can do
+      // differently about a refusal, a device in use or a device unplugged.
+      if (acquired.micRefused) {
+        setNotice(MIC_REFUSED);
       }
 
       // Which take this is, decided once and handed to everything below: the
