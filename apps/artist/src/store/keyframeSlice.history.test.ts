@@ -230,4 +230,26 @@ describe('keyframe actions and the undo stack', () => {
       expect(past()).toBe(1)
     })
   })
+
+  // ESCSUITE-172: `setClipKeyframe` is the same map-and-set shape as the two
+  // actions above, and an id that names no clip used to match nothing in the
+  // `map` while the `set` ran anyway — a stamped `modified` and an undo entry
+  // for an edit that touched nothing. (`moveClipKeyframe`'s unknown-id refusal
+  // is pinned in the ESCSUITE-163 block above.)
+  describe('setClipKeyframe with an unknown clip id (ESCSUITE-172)', () => {
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      clearHistoryAndModified()
+    })
+
+    it('refuses, writes nothing and pushes no undo entry', () => {
+      const before = clipsRef(); const entries = past()
+      expect(store().setClipKeyframe('no-such-clip', 'opacity', { time: 1, value: 0.5, easing: 'linear' })).toBe(false)
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    })
+  })
+
 })

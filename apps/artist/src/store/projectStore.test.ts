@@ -923,6 +923,29 @@ describe('projectStore integration', () => {
         expect(useEditorStore.getState().project.timeline.tracks).toHaveLength(2)
       })
     })
+
+    // ESCSUITE-172: the same map-and-set shape as updateClip and the rest — an
+    // id that names no clip used to match nothing in the `map` while the `set`
+    // ran anyway, stamping `modified` and pushing an undo entry for an edit
+    // that touched nothing.
+    describe('an id that names no clip (ESCSUITE-172)', () => {
+      const past = () => useEditorStore.getState().history.past.length
+      const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+      /** Assert the call answered false and wrote nothing: same clips array, no history entry. */
+      const refusesFalse = (act: () => boolean) => {
+        const before = clipsRef(); const entries = past()
+        expect(act()).toBe(false)
+        expect(clipsRef()).toBe(before)
+        expect(past()).toBe(entries)
+      }
+
+      it('refuses updateTextOverlayData', () => refusesFalse(() =>
+        useEditorStore.getState().updateTextOverlayData('nope', { text: 'Bye' })))
+
+      it('refuses updateShapeOverlayData', () => refusesFalse(() =>
+        useEditorStore.getState().updateShapeOverlayData('nope', { fillColor: '#ff0000ff' })))
+    })
   })
 })
 

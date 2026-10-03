@@ -539,6 +539,26 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).crop).toBeUndefined()
   })
 
+  // ESCSUITE-172: the finding this ticket fixes. A move schedules a pending
+  // write through the throttler; the clip is then deleted while the drag is
+  // still open (the real path is a crop-mode clip leaving the timeline some
+  // other way with the handles still mounted); unmounting runs the gesture's
+  // teardown, which flushes that pending write — `updateClip` against an id
+  // the store no longer holds. It must refuse rather than spend an undo entry
+  // on an edit that landed nowhere.
+  it('flushes a pending move against a deleted clip, and spends no undo entry', () => {
+    const { clip, handle } = mount()
+    fireEvent.mouseDown(handle('Crop left'), { clientX: 0, clientY: 0 })
+    fireEvent.mouseMove(document, { clientX: 96, clientY: 0 }) // schedules a pending move; not yet flushed
+
+    store().removeClipFromTimeline(clip.id) // the clip leaves while the drag is still open
+    const entries = past()
+
+    cleanup() // unmount mid-drag: the teardown flushes the pending move
+
+    expect(past()).toBe(entries)
+  })
+
   it('leaves crop mode on Escape, and claims the key', () => {
     const { onLeave, handle } = mount()
 
