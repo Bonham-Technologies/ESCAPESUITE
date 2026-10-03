@@ -135,7 +135,7 @@ interface Limiter {
  * FIFO concurrency gate. Deliberately tiny and local: the whole contract is "at most N of these
  * at once, in the order they arrived", and a queue of pending promises is the entirety of it.
  */
-function createLimiter(concurrency: number, maxQueue: number): Limiter {
+export function createLimiter(concurrency: number, maxQueue: number): Limiter {
   interface Waiting {
     start: () => void
     reject: (err: unknown) => void
