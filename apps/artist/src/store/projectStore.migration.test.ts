@@ -556,6 +556,13 @@ describe('parseProject (ESCSUITE-102)', () => {
       ['a transform with a NaN y', { x: 0.5, y: NaN, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
       ['a transform with a null rotation', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: null, opacity: 1 }],
       ['a transform with a non-finite opacity', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: Infinity }],
+      // Rereview NIT: the earlier four rows left `Number.isFinite(x)`,
+      // `typeof y === 'number'` and `Number.isFinite(scaleY)`'s false sides
+      // unreached (the `scaleX: NaN` row above hits `Number.isFinite(scaleX)`
+      // instead, and `scaleY: -1` fails on `> 0`, not finiteness).
+      ['a transform with a non-finite x', { x: Infinity, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a non-numeric y', { x: 0.5, y: 'a', scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a non-finite scaleY', { x: 0.5, y: 0.5, scaleX: 1, scaleY: NaN, rotation: 0, opacity: 1 }],
     ])('rejects %s, naming the clip (ESCSUITE-173)', (_label, badTransform) => {
       const bad = validProject()
       // The cast is the point: this is what JSON.parse hands over, and the

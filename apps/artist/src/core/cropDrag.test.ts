@@ -211,6 +211,18 @@ describe('cropForHandleMove', () => {
       })
     })
 
+    it('does the same for the mirror handle, s — the false side of withAspect\'s edges.y === \'top\' ternaries (rereview MINOR b / ESCSUITE-173)', () => {
+      // The exact mirror of the `n` case above: 50% off the bottom leaves
+      // 400x100 at (0,0); held at 1:1 that is 100x100, centred on the
+      // region's centre (200, 50) — 150px off each side.
+      expect(cropForHandleMove(undefined, 's', { x: 0, y: -100 }, SOURCE, 1)).toEqual({
+        left: 0.375,
+        top: 0,
+        right: 0.375,
+        bottom: 0.5,
+      })
+    })
+
     it('leaves a region that already has the aspect alone', () => {
       expect(cropForHandleMove(undefined, 'e', { x: 0, y: 0 }, SOURCE, 2)).toEqual(crop())
     })
@@ -233,6 +245,20 @@ describe('cropForHandleMove', () => {
       expect(cropForHandleMove(undefined, 'se', { x: -380, y: 0 }, SOURCE, 2)).toEqual({
         left: 0, top: 0, right: 0.9, bottom: 0.9,
       })
+    })
+
+    it('clamps the s handle the same way, at this source\'s own native aspect (rereview MINOR b / ESCSUITE-173)', () => {
+      // The `n`/`s` branch's over-limit case: at this source's native 2:1
+      // aspect, `s` scales `bottom` and the split `left`/`right` together.
+      // Asking for 95% off the bottom derives a height that would put `left`
+      // and `right` both at 0.45 — comfortably inside the limit — but the
+      // INDEPENDENT inset itself (`bottom`) is the one that binds here and
+      // slides to exactly 0.9, holding the aspect on the two derived edges.
+      const result = cropForHandleMove(undefined, 's', { x: 0, y: -380 }, SOURCE, 2)
+      expect(result.bottom).toBe(0.9)
+      expect(result.top).toBe(0)
+      expect(result.left).toBeCloseTo(0.45)
+      expect(result.right).toBeCloseTo(0.45)
     })
 
     it('a further move back inside the limit lands normally — the cap is per-move, not sticky', () => {

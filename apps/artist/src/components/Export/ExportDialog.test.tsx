@@ -1911,6 +1911,15 @@ describe('ExportDialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
 
       expect(screen.getByText(/WebM needs this tab visible/)).toBeInTheDocument()
+
+      // The third operand's false side (rereview MINOR a / ESCSUITE-173):
+      // `effectiveAdvancedFormat === 'webm'` must actually gate the note off
+      // when GIF is selected instead, with MP4 unsupported but WebM itself
+      // still fine — the old gate's only reacher for this side selected
+      // 'mp4' (the fallback case below), whose effective format is now
+      // 'webm' too, so nothing was left covering a GIF selection here.
+      chooseGif()
+      expect(screen.queryByText(/WebM needs this tab visible/)).not.toBeInTheDocument()
     })
 
     it('still says it for a restored MP4 preference the browser cannot honour (MEDIUM 3 / ESCSUITE-173)', async () => {
