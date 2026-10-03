@@ -148,6 +148,9 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   exporter say so, before and after, instead of handing back a silent file; a browser with no
   Opus encoder gets the same treatment for WebM). Measured 2026-10-02; see the Key Constraints
   bullet below
+
+  exporter say so, before and after, instead of handing back a silent file). Measured
+  2026-10-02; see the Key Constraints bullet below
 - Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
   audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
@@ -2341,6 +2344,14 @@ never above what the suite actually achieves:
   probe; ESCSUITE-175 gave MP4 the same and gave both the audio half — it also moved the H.264
   ladder and the AAC probe ahead of mixing the audio and loading the media, so a refusal costs
   nothing). See `apps/artist/CLAUDE.md`'s
+
+  configure at the output size — MP4's answers two questions, `{ video, audio }`, because the two
+  failures differ in kind: no H.264 means no MP4 at all, no AAC means an MP4 with no sound in it.
+  A browser can therefore offer one format and not the other, or offer MP4 knowing it will be
+  silent, and the export dialog says which before the click and what happened after it, rather
+  than offering a button that fails the instant it is clicked (ESCSUITE-22/29 for WebM,
+  ESCSUITE-175 for MP4 — which also moved the H.264 ladder and the AAC probe ahead of mixing the
+  audio and loading the media, so a refusal costs nothing). See `apps/artist/CLAUDE.md`'s
   "Export Dialog Browser Support"
 - MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
   end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; composited PiP takes,
