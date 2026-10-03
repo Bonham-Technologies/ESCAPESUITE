@@ -333,9 +333,15 @@ export function generateShareUrl(
  * Outgoing messages (to parent):
  * - READY: {} - Editor is initialized and ready
  * - VIDEO_LOADED: { id: string, name: string } - Video was loaded
- * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string } - Export
- *   finished ('gif' since ESCSUITE-34; a host that only knows the two video formats sees it
- *   only for an export the user explicitly chose GIF for)
+ * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string,
+ *   audio?: boolean } - Export finished ('gif' since ESCSUITE-34; a host that only knows the
+ *   two video formats sees it only for an export the user explicitly chose GIF for).
+ *   `audio` is additive (ESCSUITE-175) and says whether the project's sound reached the
+ *   file: `false` for every GIF (the container has no audio track) and for an MP4 exported
+ *   in a browser with no AAC encoder, `true` otherwise — including for a project that had
+ *   no sound in it, since nothing was dropped. A host that ignores it is unaffected; a host
+ *   that reads it should treat a missing field as `true`, the way every message sent before
+ *   this ticket behaved.
  * - EXPORT_PROGRESS: { progress: number, message: string } - Export progress
  *   [documented but not currently implemented - nothing sends it]
  * - PROJECT_SAVED: {} - Project was saved
