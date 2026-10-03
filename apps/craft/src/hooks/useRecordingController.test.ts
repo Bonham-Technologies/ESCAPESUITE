@@ -1009,6 +1009,121 @@ describe('useRecordingController callback identity (ESCSUITE-118)', () => {
   })
 })
 
+// ESCSUITE-174. The save's *completion* had no identity of its own: `onStop`
+// kicked the save off and then wrote `setState('idle')` into whatever the store
+// held whenever it settled — a save takes a container repair, a metadata probe,
+// a thumbnail decode and two IndexedDB writes, which on a multi-MB take and a
+// slow disk is seconds. Anything that took the app out of 'saving' in that
+// window (Escape used to; the cancel handler still does) left Record live, and
+// the finished save's own 'idle' then landed on the take started after it:
+// recording, with the store saying idle — no Stop, no Cancel, and a Record
+// click that would reassign `recorderRef.current` over a recorder nobody could
+// ever dispose. The completion now carries the recorder it saved, the same
+// `me` the five callbacks above carry.
+describe('useRecordingController a save that completes (ESCSUITE-174)', () => {
+  /** Hold the save open, and hand back the settle for it. */
+  function heldSave(): { resolve: () => void; reject: (error: Error) => void } {
+    // Assigned by the executor below, which runs synchronously on the first
+    // save the take asks for.
+    let settle!: { resolve: () => void; reject: (error: Error) => void }
+    harness.saveRecording.mockImplementation(
+      () => new Promise<void>((resolve, reject) => {
+        settle = { resolve: () => resolve(), reject }
+      })
+    )
+    return {
+      resolve: () => settle.resolve(),
+      reject: (error: Error) => settle.reject(error),
+    }
+  }
+
+  /** Let the save's own promise chain run out. */
+  async function settleChain(): Promise<void> {
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+  }
+
+  /**
+   * Stop take A into a save that is still running, cancel out of 'saving'
+   * through the handler Escape *used* to reach — the point being that this
+   * clobber is not Escape's alone — and start take B. Hands back both
+   * recorders and the save's settle.
+   */
+  async function stopIntoHeldSaveThenStartAnother(result: { current: RecordingController }) {
+    const settle = heldSave()
+    await startTake(result)
+    const a = recorderFactory.last()
+    await act(async () => { a.callbacks.onStop?.(a.stopBlob, null) })
+    expect(state()).toBe('saving')
+    expect(harness.saveRecording).toHaveBeenCalledTimes(1)
+
+    act(() => { result.current.handleCancelRecording() })
+    await startTake(result)
+    const b = recorderFactory.last()
+    expect(b).not.toBe(a)
+    expect(state()).toBe('recording')
+
+    return { a, b, settle }
+  }
+
+  it("returns the app to idle when the take it saved is still the app's take", async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const settle = heldSave()
+    await startTake(result)
+    const recorder = recorderFactory.last()
+
+    await act(async () => { recorder.callbacks.onStop?.(recorder.stopBlob, null) })
+    expect(state()).toBe('saving')
+
+    settle.resolve()
+    await settleChain()
+
+    expect(state()).toBe('idle')
+  })
+
+  it('cannot land its idle on the take started after it', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { settle } = await stopIntoHeldSaveThenStartAnother(result)
+
+    settle.resolve()
+    await settleChain()
+
+    expect(state()).toBe('recording')
+  })
+
+  it('still says the save failed, but leaves the later take recording', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { settle } = await stopIntoHeldSaveThenStartAnother(result)
+
+    settle.reject(new Error('QuotaExceededError'))
+    await settleChain()
+
+    // The user's recording really is not in the library, whatever they have
+    // moved on to — so the notice is said either way. Only the state write is
+    // the finished take's to make.
+    expect(consoleError).toHaveBeenCalledWith('Failed to save recording:', expect.any(Error))
+    expect(useRecorderStore.getState().notice).toBe(
+      'The recording could not be saved — it is not in your library.'
+    )
+    expect(state()).toBe('recording')
+  })
+
+  it('still re-reads the storage headroom — the write happened either way', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    const { settle } = await stopIntoHeldSaveThenStartAnother(result)
+    expect(harness.refreshStorageSpace).not.toHaveBeenCalled()
+
+    settle.resolve()
+    await settleChain()
+
+    expect(harness.refreshStorageSpace).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('useRecordingController picture-in-picture', () => {
   let raf: RafDouble
 

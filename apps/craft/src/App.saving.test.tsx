@@ -311,6 +311,78 @@ describe('App saving a recording', () => {
   });
 });
 
+// ESCSUITE-174. Escape meant "cancel" in every state but 'idle' and
+// 'countdown', and 'saving' is one of those states: pressing it while the
+// header still read "Saving…" ran `handleCancelRecording()` over a take that
+// was already gone. The store went back to 'idle', the duration was reset, the
+// streams were stopped and the sidebar unlocked — all mid-write, which is
+// exactly the window ESCSUITE-104 added `sidebarLocked` to keep — while the
+// save itself (which deliberately does not read `cancelledRef`) carried on
+// behind an idle-looking app. Record was live again too, which is how the
+// finished save's own `setState('idle')` came to land on the take started after
+// it: see the controller suite's "a save that completes" for that half.
+describe('App Escape while the take is being saved', () => {
+  /**
+   * Record a take and stop it with the container repair held open, the way a
+   * multi-MB take's `fixWebMMetadata` holds on a real disk. Hands back the
+   * resolve that lets the save finish.
+   */
+  async function stopIntoAHeldSave() {
+    const screenStream = screenStreamDouble();
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screenStream.stream);
+    permissionsOverrides.requestMicrophone.mockResolvedValue(micStreamDouble().stream);
+
+    await renderApp();
+    await user().click(recordButton());
+    await flush();
+
+    const recorder = recorderFactory.last();
+    recorder.duration = 6;
+
+    let finishRepair: (blob: Blob) => void = () => {};
+    converterModule.fixWebMMetadata.mockImplementation(
+      () => new Promise<Blob>(resolve => { finishRepair = resolve; })
+    );
+
+    await user().click(recordButton());
+    await flush();
+    expect(useRecorderStore.getState().state).toBe('saving');
+
+    return { recorder, finishRepair: () => finishRepair(recorder.stopBlob) };
+  }
+
+  it('does not throw the save away: the app stays in "saving" and the sidebar stays locked', async () => {
+    const { recorder } = await stopIntoAHeldSave();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+
+    expect(useRecorderStore.getState().state).toBe('saving');
+    for (const label of ['Screen', 'Webcam', 'Microphone', 'System Audio']) {
+      expect(screen.getByRole('button', { name: label })).toBeDisabled();
+    }
+    expect(recorder.dispose).not.toHaveBeenCalled();
+  });
+
+  // Green before the fix as well as after it, and kept for what it rules out:
+  // the write itself was never the thing Escape threw away — the save hook
+  // deliberately does not read `cancelledRef`, so the bytes always landed. What
+  // Escape threw away was the app's knowledge that they were still landing.
+  it('lets the held save finish and land the recording in the library', async () => {
+    const { finishRepair } = await stopIntoAHeldSave();
+
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    });
+    act(() => { finishRepair(); });
+
+    await waitFor(() => expect(useRecorderStore.getState().recordings).toHaveLength(1));
+    expect(useRecorderStore.getState().state).toBe('idle');
+    expect(await getRecordingsMetadata()).toHaveLength(1);
+  });
+});
+
 describe('App recording thumbnails', () => {
   it('grabs the thumbnail from the live preview when it has frames', async () => {
     await recordATake({ previewWidth: 1280 });

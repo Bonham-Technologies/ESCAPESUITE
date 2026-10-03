@@ -152,14 +152,43 @@ describe('useKeyboardShortcuts Escape', () => {
     expect(handlers.handleCancelRecording).not.toHaveBeenCalled()
   })
 
-  it('cancels anything else that is not idle', () => {
+  it('cancels a live take, running or paused', () => {
     const { rerender } = mountShortcuts('recording')
 
     press('Escape')
-    rerender(deps('saving'))
+    rerender(deps('paused'))
     press('Escape')
 
     expect(handlers.handleCancelRecording).toHaveBeenCalledTimes(2)
+    expect(handlers.cancelCountdown).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-93/109, pinned here so the 'saving' gate below cannot widen into
+  // it: a take whose capture request is still outstanding — the share picker
+  // or the camera prompt is on screen — IS cancellable, and Escape is how it
+  // is cancelled. The attempt that resumes afterwards finds a token that is no
+  // longer its own and releases what it was handed.
+  it('cancels an attempt that is still preparing', () => {
+    mountShortcuts('preparing')
+
+    press('Escape')
+
+    expect(handlers.handleCancelRecording).toHaveBeenCalledTimes(1)
+    expect(handlers.cancelCountdown).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-174. 'saving' is neither 'idle' nor 'countdown', so Escape used to
+  // run handleCancelRecording() over a take that was already gone: the store
+  // went back to 'idle', the sidebar unlocked mid-write, and Record was live
+  // again while the write carried on behind it. There is nothing left to
+  // cancel by then — only the write — which is the same posture the Record
+  // button takes in 'preparing'/'saving' (ESCSUITE-106).
+  it('does nothing while the finished take is being saved', () => {
+    mountShortcuts('saving')
+
+    press('Escape')
+
+    expect(handlers.handleCancelRecording).not.toHaveBeenCalled()
     expect(handlers.cancelCountdown).not.toHaveBeenCalled()
   })
 
