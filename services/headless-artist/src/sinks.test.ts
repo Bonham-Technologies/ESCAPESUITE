@@ -539,6 +539,33 @@ describe('command sink delivery timeout', () => {
     expect(elapsed).toBeLessThan(timeoutMs + 5000)
   }, 10_000)
 
+  // Review finding 1: the budget rejected only from child.on('close'), which waits for the
+  // stdio pipes rather than the child itself. A child that exits while leaving a backgrounded
+  // grandchild holding the inherited stderr pipe open never emits 'close' until the grandchild
+  // also exits, so the timers were killing a process that was already gone and deliver() never
+  // settled.
+  it('settles even when the direct child leaves a grandchild holding stderr open', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-grandchild' })
+
+    const sink = await getSink('command', {
+      command: '/bin/sh',
+      // The direct child backgrounds a grandchild that inherits its stderr pipe, then exits
+      // itself — 'close' on the direct child cannot fire until the grandchild also exits,
+      // 6 seconds from now.
+      args: ['-c', 'sh -c "sleep 6" & exit 0'],
+      timeoutMs: 300,
+    })
+
+    const startedAt = Date.now()
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'command sink timed out after 300 ms',
+    )
+    // The bound is timeoutMs + COMMAND_KILL_GRACE_MS (2 s), regardless of whether 'close' ever
+    // fires — well short of the 6 s grandchild sleep.
+    expect(Date.now() - startedAt).toBeLessThan(2500)
+  }, 10_000)
 })
 
 describe('webhook sink', () => {
