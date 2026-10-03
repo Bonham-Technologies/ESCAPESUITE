@@ -2,9 +2,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 const { exportToMP4, exportToWebM, exportToGIF } = vi.hoisted(() => ({
-  exportToMP4: vi.fn(async () => new Blob([new Uint8Array([9, 9, 9])], { type: 'video/mp4' })),
-  exportToWebM: vi.fn(async () => new Blob([new Uint8Array([8, 8])], { type: 'video/webm' })),
-  exportToGIF: vi.fn(async () => new Blob([new Uint8Array([7])], { type: 'image/gif' })),
+  // ESCSUITE-175: the three exporters return `{ blob, audio }` now, not a bare
+  // Blob — `audio` says whether the project's sound was dropped on the way out.
+  exportToMP4: vi.fn(async () => ({ blob: new Blob([new Uint8Array([9, 9, 9])], { type: 'video/mp4' }), audio: true })),
+  exportToWebM: vi.fn(async () => ({ blob: new Blob([new Uint8Array([8, 8])], { type: 'video/webm' }), audio: true })),
+  exportToGIF: vi.fn(async () => ({ blob: new Blob([new Uint8Array([7])], { type: 'image/gif' }), audio: false })),
 }))
 vi.mock('../core/exporter', () => ({ exportToMP4, exportToWebM, exportToGIF }))
 // Stands in for the real seeding: fills the fields the probe would supply.

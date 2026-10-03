@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ExportDialog } from './ExportDialog'
 import { ExportAbortedError, ExportError } from '../../core/exporter'
+import {
+  EXPORT_NO_VIDEO_CODEC_REASON,
+  MP4_EXPORTED_WITHOUT_AUDIO,
+  MP4_NO_AUDIO_NOTE,
+  MP4_NO_CODEC_REASON,
+} from '../../core/exportTypes'
+import { installWebCodecsDoubles } from '../../test/doubles/webcodecs'
 import { useEditorStore } from '../../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
 import type { ExportProgress } from '../../store/types'
@@ -15,7 +22,9 @@ const { mockExportToWebM, mockExportToMP4, mockExportToGIF, mockIsMP4ExportSuppo
   mockExportToWebM: vi.fn(),
   mockExportToMP4: vi.fn(),
   mockExportToGIF: vi.fn(),
-  mockIsMP4ExportSupported: vi.fn(() => true),
+  // ESCSUITE-175: a real asynchronous probe answering two questions, the shape
+  // WebM's has had since ESCSUITE-22/29.
+  mockIsMP4ExportSupported: vi.fn(() => Promise.resolve({ video: true, audio: true })),
   mockIsWebMExportSupported: vi.fn(() => Promise.resolve(true)),
 }))
 
@@ -63,6 +72,9 @@ type ExportArgs = [
   AbortSignal,
   { width: number; height: number },
 ]
+
+/** What the three exporters resolve with since ESCSUITE-175. */
+const exported = (blob: Blob, audio = true) => ({ blob, audio })
 
 const webmArgs = () => mockExportToWebM.mock.calls[0] as unknown as ExportArgs
 const mp4Args = () => mockExportToMP4.mock.calls[0] as unknown as ExportArgs
@@ -125,13 +137,16 @@ describe('ExportDialog', () => {
       clickedLinks.push(this)
     }
     mockExportToWebM.mockReset()
-    mockExportToWebM.mockResolvedValue(new Blob())
+    mockExportToWebM.mockResolvedValue(exported(new Blob()))
     mockExportToMP4.mockReset()
-    mockExportToMP4.mockResolvedValue(new Blob())
+    mockExportToMP4.mockResolvedValue(exported(new Blob()))
     mockExportToGIF.mockReset()
-    mockExportToGIF.mockResolvedValue(new Blob([new Uint8Array(1234)], { type: 'image/gif' }))
+    mockExportToGIF.mockResolvedValue(
+      exported(new Blob([new Uint8Array(1234)], { type: 'image/gif' }), false)
+    )
     mockSendMessage.mockReset()
-    mockIsMP4ExportSupported.mockReturnValue(true)
+    mockIsMP4ExportSupported.mockReset()
+    mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: true })
     mockIsWebMExportSupported.mockReset()
     mockIsWebMExportSupported.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(undefined)
@@ -208,8 +223,9 @@ describe('ExportDialog', () => {
       expect(screen.getByText('480p — 270×480')).toBeInTheDocument()
     })
 
-    it('mentions background-tab encoding only where MP4 is available', () => {
+    it('mentions background-tab encoding only where MP4 is available', async () => {
       const { unmount } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
       // Softened (ESCSUITE-153/29 review, MINOR-4): this is a hedge, not a
       // guarantee — a decode worker that fails to start falls back to the
       // same throttled-in-background element path WebM always uses.
@@ -218,15 +234,17 @@ describe('ExportDialog', () => {
       ).toBeInTheDocument()
       unmount()
 
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
 
       expect(screen.queryByText(/MP4 exports keep encoding/)).not.toBeInTheDocument()
     })
 
-    it('disables the MP4 choice in a browser that cannot encode it', () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+    it('disables the MP4 choice in a browser that cannot encode it', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
 
       fireEvent.click(advancedToggle())
 
@@ -327,7 +345,7 @@ describe('ExportDialog', () => {
     })
 
     it('disables both formats with one sentence, in the main body, when neither can be exported', async () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue(false)
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
@@ -347,7 +365,7 @@ describe('ExportDialog', () => {
     // ("Advanced options") reached a button that still ran the failing
     // export.
     it('disables the Advanced download button too, with the same sentence, when neither format can be exported', async () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue(false)
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
@@ -377,7 +395,7 @@ describe('ExportDialog', () => {
     // "requires WebCodecs API" throw, in the one browser this ticket exists
     // to warn before any click.
     it('disables the Advanced button for a restored MP4 setting when neither format can be exported', async () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue(false)
       mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
@@ -426,6 +444,112 @@ describe('ExportDialog', () => {
       await settle()
 
       expect(mockIsWebMExportSupported).toHaveBeenCalledTimes(1)
+    })
+
+    // ESCSUITE-175: MP4's own probe. Everything below is the MP4 half of the
+    // three states above — before this ticket `isMP4ExportSupported()` was a
+    // synchronous globals read, so a browser with WebCodecs and no H.264
+    // encoder was offered MP4 and discovered the truth mid-export, and a
+    // browser with no AAC encoder (Firefox 155) exported a silent file with
+    // nothing but a console.warn to show for it.
+    it('refuses MP4 with its own reason when this browser cannot encode H.264', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      // Said in the main body, before the Advanced disclosure is opened — the
+      // ESCSUITE-22 shape, now for MP4 too.
+      expect(screen.getByText(MP4_NO_CODEC_REASON)).toBeInTheDocument()
+      expect(advancedToggle()).toHaveAttribute('aria-expanded', 'false')
+      // WebM still works, which is what the sentence promises.
+      expect(primaryExport()).toBeEnabled()
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+
+      fireEvent.click(advancedToggle())
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeDisabled()
+      expect(screen.getByRole('radio', { name: /webm/i })).toBeEnabled()
+    })
+
+    it('says MP4 will have no sound, up front, when this browser has no AAC encoder', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.getByText(MP4_NO_AUDIO_NOTE)).toBeInTheDocument()
+      // Still offered: a silent MP4 is a legitimate thing to want, and the
+      // note says what the trade is.
+      expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
+      fireEvent.click(advancedToggle())
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeEnabled()
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      expect(screen.getByRole('button', { name: /download mp4/i })).toBeEnabled()
+    })
+
+    it('says nothing about sound when this browser can encode AAC', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+    })
+
+    it('says neither video format can be encoded when WebCodecs is present but its codecs are not', async () => {
+      // Distinct from the "no WebCodecs at all" alert above: the globals are
+      // here, so that sentence would be a lie. The e2e `Codec Not Supported`
+      // fixture is exactly this browser.
+      const codecs = installWebCodecsDoubles()
+      try {
+        mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
+        mockIsWebMExportSupported.mockResolvedValue(false)
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        await settle()
+
+        expect(screen.getByRole('alert')).toHaveTextContent(EXPORT_NO_VIDEO_CODEC_REASON)
+        expect(screen.getByRole('alert')).not.toHaveTextContent(
+          'Exporting needs WebCodecs, which this browser does not provide'
+        )
+        // One sentence, not two per-format ones.
+        expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
+        expect(primaryExport()).toBeDisabled()
+      } finally {
+        codecs.uninstall()
+      }
+    })
+
+    it('probes MP4 at the resolution the selected preset will actually export', async () => {
+      store().setProjectResolution(1920, 1080)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(mockIsMP4ExportSupported).toHaveBeenCalledWith(1920, 1080)
+      expect(mockIsMP4ExportSupported).toHaveBeenCalledTimes(1)
+      mockIsMP4ExportSupported.mockClear()
+
+      fireEvent.click(advancedToggle())
+      fireEvent.change(screen.getByDisplayValue('Project — 1920×1080'), { target: { value: '720p' } })
+      await settle()
+
+      expect(mockIsMP4ExportSupported).toHaveBeenCalledWith(1280, 720)
+    })
+
+    it('does not let a stale MP4 probe from an earlier open overwrite a later one', async () => {
+      let resolveStale!: (support: { video: boolean; audio: boolean }) => void
+      mockIsMP4ExportSupported.mockReturnValueOnce(
+        new Promise<{ video: boolean; audio: boolean }>((resolve) => {
+          resolveStale = resolve
+        })
+      )
+      const { rerender } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      rerender(<ExportDialog isOpen={false} onClose={onClose} />)
+      rerender(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+
+      resolveStale({ video: false, audio: false })
+      await settle()
+
+      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+      expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
     })
 
     // Review round 1, MAJOR 2(a): the `cancelled` guard in the probe's effect
@@ -647,9 +771,10 @@ describe('ExportDialog', () => {
 
     it('falls back to WebM when MP4 is chosen in a browser without MP4 support', async () => {
       // The radio is disabled here, but a restored setting still asks for mp4.
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
 
       fireEvent.click(await screen.findByRole('button', { name: /download mp4/i }))
 
@@ -670,8 +795,8 @@ describe('ExportDialog', () => {
     })
 
     it('downloads the finished file and tells the host about it', async () => {
-      const exported = new Blob(['video-bytes'], { type: 'video/webm' })
-      mockExportToWebM.mockResolvedValue(exported)
+      const bytes = new Blob(['video-bytes'], { type: 'video/webm' })
+      mockExportToWebM.mockResolvedValue(exported(bytes))
       render(<ExportDialog isOpen={true} onClose={onClose} />)
 
       fireEvent.click(primaryExport())
@@ -680,19 +805,19 @@ describe('ExportDialog', () => {
       expect(clickedLinks).toHaveLength(1)
       expect(clickedLinks[0].download).toBe('Test Project.webm')
       expect(clickedLinks[0].href).toBe(lastObjectUrl())
-      expect(URL.createObjectURL).toHaveBeenCalledWith(exported)
+      expect(URL.createObjectURL).toHaveBeenCalledWith(bytes)
       expect(URL.revokeObjectURL).toHaveBeenCalled()
       expect(document.querySelector('a[download]')).toBeNull()
       expect(mockSendMessage).toHaveBeenCalledWith({
         type: 'EXPORT_COMPLETE',
-        payload: { blob: exported, format: 'webm', name: 'Test Project.webm' },
+        payload: { blob: bytes, format: 'webm', name: 'Test Project.webm', audio: true },
       })
       expect(mockAnalytics.exportCompleted).toHaveBeenCalledWith('webm', 5)
     })
 
     it('names the file after the mp4 extension when exporting MP4', async () => {
-      const exported = new Blob(['mp4-bytes'], { type: 'video/mp4' })
-      mockExportToMP4.mockResolvedValue(exported)
+      const bytes = new Blob(['mp4-bytes'], { type: 'video/mp4' })
+      mockExportToMP4.mockResolvedValue(exported(bytes))
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       fireEvent.click(advancedToggle())
       fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
@@ -702,8 +827,58 @@ describe('ExportDialog', () => {
       await waitFor(() => expect(mockSendMessage).toHaveBeenCalledTimes(1))
       expect(mockSendMessage).toHaveBeenCalledWith({
         type: 'EXPORT_COMPLETE',
-        payload: { blob: exported, format: 'mp4', name: 'Test Project.mp4' },
+        payload: { blob: bytes, format: 'mp4', name: 'Test Project.mp4', audio: true },
       })
+    })
+
+    // ESCSUITE-175: the after-the-fact half. The exporter's result says whether
+    // the project's sound was dropped; the dialog says so on the completion
+    // screen and passes it on to an embedding host.
+    it('says the MP4 came out silent when the exporter dropped its sound', async () => {
+      const bytes = new Blob(['mp4-bytes'], { type: 'video/mp4' })
+      mockExportToMP4.mockResolvedValue(exported(bytes, false))
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.getByText(MP4_EXPORTED_WITHOUT_AUDIO)).toBeInTheDocument()
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: 'EXPORT_COMPLETE',
+        payload: { blob: bytes, format: 'mp4', name: 'Test Project.mp4', audio: false },
+      })
+    })
+
+    it('says nothing of the kind when the MP4 kept its sound', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+
+      fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.queryByText(MP4_EXPORTED_WITHOUT_AUDIO)).not.toBeInTheDocument()
+    })
+
+    // A GIF result always carries `audio: false` — the container has nowhere to
+    // put sound — and the dialog already says so before the export. Blaming the
+    // browser's AAC encoder for it would be wrong, so the sentence is MP4's
+    // alone.
+    it('does not blame AAC for a GIF having no sound', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      chooseGif()
+
+      fireEvent.click(advancedExport())
+
+      await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
+      expect(screen.queryByText(MP4_EXPORTED_WITHOUT_AUDIO)).not.toBeInTheDocument()
+      expect(mockSendMessage.mock.calls[0][0].payload.audio).toBe(false)
     })
 
     it('falls back to a generic file name for an unnamed project', async () => {
@@ -717,7 +892,7 @@ describe('ExportDialog', () => {
     })
 
     it('still completes the export when the host channel throws', async () => {
-      mockExportToWebM.mockResolvedValue(new Blob(['video-bytes'], { type: 'video/webm' }))
+      mockExportToWebM.mockResolvedValue(exported(new Blob(['video-bytes'], { type: 'video/webm' })))
       mockSendMessage.mockImplementation(() => {
         throw new Error('host channel is gone')
       })
@@ -1170,7 +1345,7 @@ describe('ExportDialog', () => {
     // `&& mp4Supported` half, which the test above never exercised (it used
     // a plain Error, not an ExportError).
     it('does not offer an MP4 retry for a WebM ExportError when MP4 is unsupported', async () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       const log = [{ phase: 'codec', detail: 'no supported video codec', timestamp: 1 }]
       mockExportToWebM.mockRejectedValue(
         new ExportError('No supported video codec found. WebM export requires VP9 or VP8 support.', log)
@@ -1179,6 +1354,7 @@ describe('ExportDialog', () => {
       const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
       try {
         render(<ExportDialog isOpen={true} onClose={onClose} />)
+        await settle()
         fireEvent.click(primaryExport())
 
         await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
@@ -1572,10 +1748,11 @@ describe('ExportDialog', () => {
     })
 
     it('leaves GIF enabled, and says so, when the browser has no WebCodecs', async () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue(false)
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await waitFor(() => expect(primaryExport()).toBeDisabled())
+      await settle()
 
       // The ESCSUITE-22 alert is still there, and now carries the sentence that
       // stops it being a dead end.
@@ -1596,10 +1773,11 @@ describe('ExportDialog', () => {
     })
 
     it('exports GIF in a browser with no WebCodecs', async () => {
-      mockIsMP4ExportSupported.mockReturnValue(false)
+      mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue(false)
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await waitFor(() => expect(primaryExport()).toBeDisabled())
+      await settle()
       chooseGif()
       fireEvent.click(screen.getByRole('button', { name: /download gif/i }))
       await settle()

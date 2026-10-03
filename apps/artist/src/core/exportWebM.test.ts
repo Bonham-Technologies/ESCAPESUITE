@@ -8,7 +8,7 @@
 // mixer.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToWebM } from './exportWebM'
-import { ExportAbortedError, ExportError } from './exportTypes'
+import { ExportAbortedError, ExportError, type ExportResult } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import {
@@ -88,7 +88,7 @@ function run({
   signal,
   projectResolution,
   onProgress = vi.fn(),
-}: RunOptions = {}): Promise<Blob> {
+}: RunOptions = {}): Promise<ExportResult> {
   return exportToWebM(
     clips,
     sources,
@@ -155,11 +155,15 @@ describe('exportToWebM preconditions', () => {
 })
 
 describe('exportToWebM muxing', () => {
-  it('produces a WebM blob carrying the muxed bytes', async () => {
-    const blob = await run()
+  it('produces a WebM blob carrying the muxed bytes, and keeps the sound', async () => {
+    const { blob, audio } = await run()
 
     expect(blob.type).toBe('video/webm')
     expect(blob.size).toBe(128)
+    // ESCSUITE-175: WebM's Opus encoder is probed before the mux starts and the
+    // format always carries sound when there is any, so this result never
+    // reports the sound as dropped.
+    expect(audio).toBe(true)
   })
 
   it('muxes a WebM with one VP9 video track', async () => {
