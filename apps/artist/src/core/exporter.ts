@@ -25,13 +25,14 @@ export {
   isWebMExportSupported,
   EXPORT_NO_VIDEO_CODEC_REASON,
   EXPORT_NO_WEBCODECS_REASON,
-  MP4_EXPORTED_WITHOUT_AUDIO,
-  MP4_NO_AUDIO_NOTE,
   MP4_NO_CODEC_REASON,
   WEBM_NO_CODEC_REASON,
   GIF_ALWAYS_AVAILABLE_NOTE,
+  audioCodecName,
+  exportedWithoutSoundReason,
+  noAudioNote,
 } from './exportTypes';
-export type { MP4ExportSupport } from './exportTypes';
+export type { ExportFormatSupport, VideoExportFormat } from './exportTypes';
 
 // Public API - what an export hands back
 export type { ExportResult } from './exportTypes';

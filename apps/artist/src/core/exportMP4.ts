@@ -29,12 +29,12 @@ import {
   findSupportedVideoConfig,
   mp4VideoCodecConfigs,
   aacEncoderConfig,
-  isAacSupported,
+  isAudioCodecSupported,
   waitForEncoderBackpressure,
   ExportError,
-  MP4_AUDIO_CHANNELS,
-  MP4_AUDIO_SAMPLE_RATE,
-  MP4_NO_AUDIO_NOTE,
+  EXPORT_AUDIO_CHANNELS,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  noAudioNote,
   MP4_NO_CODEC_REASON,
 } from './exportTypes';
 import type { ExportResult } from './exportTypes';
@@ -126,7 +126,7 @@ export async function exportToMP4(
 
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
-  const sampleRate = MP4_AUDIO_SAMPLE_RATE;
+  const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
 
   // Ask both codecs before spending anything (ESCSUITE-175). The ladder walker
   // and the candidate list are the ones the export dialog's own up-front probe
@@ -157,11 +157,11 @@ export async function exportToMP4(
   // AAC encoder cannot carry this project's sound however long we spend mixing
   // it, so the mix is skipped outright and the user is told now — not left to
   // discover a silent file.
-  const aacConfig = aacEncoderConfig(sampleRate, MP4_AUDIO_CHANNELS, audioBitrate);
-  const aacSupported = await isAacSupported(aacConfig);
+  const aacConfig = aacEncoderConfig(sampleRate, EXPORT_AUDIO_CHANNELS, audioBitrate);
+  const aacSupported = await isAudioCodecSupported(aacConfig);
   if (!aacSupported) {
     log('codec', 'No AAC encoder: exporting without audio');
-    onProgress({ phase: 'preparing', progress: 1, message: MP4_NO_AUDIO_NOTE });
+    onProgress({ phase: 'preparing', progress: 1, message: noAudioNote('mp4') });
   }
 
   // The space every draw call below is in, as against the raster they land on —
@@ -201,7 +201,7 @@ export async function exportToMP4(
 
   // Slice audio to the selected time range
   // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
-  const audioChannels = MP4_AUDIO_CHANNELS;
+  const audioChannels = EXPORT_AUDIO_CHANNELS;
   const audioData: Float32Array | null = fullAudioData && options.timeRange ? (() => {
     const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
     const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
@@ -677,9 +677,11 @@ export async function exportToMP4(
     if (!buffer) {
       throw new Error('Export failed: no data was written to buffer');
     }
-    // `audio` reports whether the project's sound was *dropped*, which here is
-    // exactly "was there an AAC encoder" — a timeline with no sound in it loses
-    // nothing and reports true.
+    // `audio` reports whether this browser could carry sound at all, which here
+    // is exactly "was there an AAC encoder". Whether this project *had* any is a
+    // question the exporter deliberately cannot answer — knowing would mean
+    // decoding, which is the cost the probe-first ordering removed — so the
+    // dialog pairs this with its own `projectHasAudio` before claiming a loss.
     return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported };
   } catch (error) {
     // Clean up resources on error

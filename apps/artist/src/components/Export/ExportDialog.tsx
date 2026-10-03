@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import {
@@ -13,13 +13,13 @@ import {
   ExportError,
   EXPORT_NO_VIDEO_CODEC_REASON,
   EXPORT_NO_WEBCODECS_REASON,
-  MP4_EXPORTED_WITHOUT_AUDIO,
-  MP4_NO_AUDIO_NOTE,
   MP4_NO_CODEC_REASON,
   WEBM_NO_CODEC_REASON,
   GIF_ALWAYS_AVAILABLE_NOTE,
+  exportedWithoutSoundReason,
+  noAudioNote,
 } from '../../core/exporter';
-import type { ExportResult, MP4ExportSupport } from '../../core/exporter';
+import type { ExportFormatSupport, ExportResult, VideoExportFormat } from '../../core/exporter';
 import {
   getResolution,
   gifFrameRate,
@@ -106,12 +106,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // already this dialog's own default/fallback format.
   const [offerMp4Fallback, setOfferMp4Fallback] = useState(false);
   const [mp4FailedError, setMp4FailedError] = useState<string | null>(null);
-  // Set from the finished export's own result, not from the probe: the file that
-  // was just handed over is the authority on whether its sound survived
-  // (ESCSUITE-175). MP4 only — a GIF result always reports the sound as dropped,
-  // and `MP4_EXPORTED_WITHOUT_AUDIO` blames the AAC encoder, which would be
-  // wrong for a format that has no audio track at all.
-  const [exportedWithoutAudio, setExportedWithoutAudio] = useState(false);
+  // The completion screen's "exported without sound" sentence, or null. Built
+  // from the finished export's own result rather than from the probe — the file
+  // that was just handed over is the authority on what is in it — and only for
+  // a run that actually lost something: see where it is set (ESCSUITE-175).
+  const [exportedWithoutSound, setExportedWithoutSound] = useState<string | null>(null);
 
   // The export currently in flight, if any — the only thing Cancel, ×, and
   // Escape can actually abort. Cleared both by a run's own `finally` (once
@@ -135,8 +134,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // button flash disabled-then-enabled or a note flash in and out, and a user a
   // probe does disable sees it happen within one effect tick of the dialog
   // opening, well before they could have clicked anything.
-  const [webmSupported, setWebmSupported] = useState(true);
-  const [mp4Support, setMp4Support] = useState<MP4ExportSupport>({ video: true, audio: true });
+  const [webmSupport, setWebmSupport] = useState<ExportFormatSupport>({ video: true, audio: true });
+  const [mp4Support, setMp4Support] = useState<ExportFormatSupport>({ video: true, audio: true });
+  const webmSupported = webmSupport.video;
   const mp4Supported = mp4Support.video;
 
   useEffect(() => {
@@ -161,8 +161,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       probeResolution.height,
       probeResolution
     );
-    isWebMExportSupported(width, height).then((supported) => {
-      if (!cancelled) setWebmSupported(supported);
+    isWebMExportSupported(width, height).then((support) => {
+      if (!cancelled) setWebmSupport(support);
     });
     // One effect, one `cancelled` flag, two probes: they key on exactly the same
     // inputs (is the dialog open, the project's size, the chosen preset), so
@@ -216,14 +216,52 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     ? null
     : bothVideoFormatsBlockedReason ?? MP4_NO_CODEC_REASON;
 
-  // H.264 is here but AAC is not (Firefox 155, measured 2026-10-02): MP4 stays
-  // offered and this says what the trade is. Not shown for GIF, which has its
-  // own "no sound" line, and not shown when MP4 is refused outright — there is
-  // no silent MP4 to warn about then.
-  const mp4SilentNote =
-    mp4Supported && !mp4Support.audio && advancedOptions.format !== 'gif'
-      ? MP4_NO_AUDIO_NOTE
-      : null;
+  // Whether this project has anything that could carry sound: a clip whose
+  // track is present, visible and unmuted, whose source is not an image. That
+  // is `core/audioMixer.ts`'s own skip clause minus the per-blob
+  // `decodeAudioData` — which is the one part the dialog cannot afford, and the
+  // whole reason the exporter can no longer answer this question itself
+  // (ESCSUITE-175 probes AAC *before* mixing, precisely so a browser with no
+  // AAC encoder never pays for the mix).
+  //
+  // Approximate in exactly one direction, and deliberately so: a **video file
+  // with no audio track in it** still counts as "could carry sound", so the
+  // completion sentence can appear where strictly nothing was lost. That is the
+  // conservative error — it over-reports rather than staying silent about a real
+  // loss — and making it exact would mean decoding every source, the cost this
+  // ticket removed. What it does rule out is the cases that are *knowably*
+  // silent: an image-only or overlay-only timeline, and one whose every track is
+  // muted or hidden.
+  const projectHasAudio = useMemo(
+    () =>
+      clips.some((clip) => {
+        const track = tracks.find((t) => t.id === clip.trackId);
+        if (!track || track.muted || !track.visible) return false;
+        const source = sourceVideos.find((v) => v.id === clip.sourceVideoId);
+        return source !== undefined && source.mediaType !== 'image';
+      }),
+    [clips, tracks, sourceVideos]
+  );
+
+  // A format whose picture this browser can encode but whose sound it cannot:
+  // H.264 without AAC (Firefox 155, measured 2026-10-02), or VP9/VP8 without
+  // Opus. The format stays offered and this says what the trade is. Not shown
+  // for GIF, which has its own "no sound" line, and not shown for a format that
+  // is refused outright — there is no silent export to warn about then.
+  //
+  // Each note names the *other* format as the way out only when that one really
+  // would keep the sound: a browser with no `AudioEncoder` at all reaches this
+  // with both formats silent, and two notes each pointing at the other would
+  // each be wrong (the audio-side twin of `EXPORT_NO_VIDEO_CODEC_REASON`).
+  const silentFormatNotes = ((): string[] => {
+    if (advancedOptions.format === 'gif') return [];
+    const notes: string[] = [];
+    const isSilent = (s: ExportFormatSupport) => s.video && !s.audio;
+    const keepsAudio = (s: ExportFormatSupport) => s.video && s.audio;
+    if (isSilent(mp4Support)) notes.push(noAudioNote('mp4', keepsAudio(webmSupport)));
+    if (isSilent(webmSupport)) notes.push(noAudioNote('webm', keepsAudio(mp4Support)));
+    return notes;
+  })();
 
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review
@@ -294,7 +332,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     setError(null);
     setOfferMp4Fallback(false);
     setMp4FailedError(null);
-    setExportedWithoutAudio(false);
+    setExportedWithoutSound(null);
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
     // Create new AbortController for this export. Cancelling one export and
@@ -393,7 +431,18 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       analytics.exportCompleted(extension as 'webm' | 'mp4' | 'gif', totalDuration);
 
       if (isCurrentRun()) {
-        setExportedWithoutAudio(format === 'mp4' && !result.audio);
+        // Three conditions, because the sentence asserts a *loss*: the format
+        // has to be one that carries sound at all (GIF never does, and blaming
+        // its container on a missing encoder would be wrong), the browser has
+        // to have failed to carry it, and the project has to have had something
+        // to carry.
+        const soundFormat: VideoExportFormat | null =
+          format === 'mp4' || format === 'webm' ? format : null;
+        setExportedWithoutSound(
+          soundFormat && !result.audio && projectHasAudio
+            ? exportedWithoutSoundReason(soundFormat)
+            : null
+        );
         setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
         // Close dialog after a delay
@@ -451,7 +500,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         abortControllerRef.current = null;
       }
     }
-  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, onClose, timeRange]);
+  }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange]);
 
   const handleCancel = useCallback(() => {
     // Abort any in-progress export
@@ -470,7 +519,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // time it opens.
     setError(null);
     setOfferMp4Fallback(false);
-    setExportedWithoutAudio(false);
+    setExportedWithoutSound(null);
     onClose();
   }, [onClose]);
 
@@ -551,14 +600,14 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   Estimated size: ~{formatFileSize(progress.estimatedBytes)}
                 </span>
               )}
-              {/* The after-the-fact half of MP4_NO_AUDIO_NOTE (ESCSUITE-175):
-                  the file is already downloaded by the time this renders, so it
+              {/* The after-the-fact half of `noAudioNote` (ESCSUITE-175): the
+                  file is already downloaded by the time this renders, so it
                   reports rather than warns — but it reports, which is the whole
-                  point. Before this, a silent MP4 arrived with nothing but a
-                  console.warn behind it. */}
-              {progress.phase === 'complete' && exportedWithoutAudio && (
+                  point. Before this, a silent MP4 (or WebM) arrived with nothing
+                  but a console.warn behind it. */}
+              {progress.phase === 'complete' && exportedWithoutSound && (
                 <span className={styles.summary} role="status">
-                  {MP4_EXPORTED_WITHOUT_AUDIO}
+                  {exportedWithoutSound}
                 </span>
               )}
             </div>
@@ -677,13 +726,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               )}
 
               {/* Said here, in the main body, rather than behind the Advanced
-                  disclosure where MP4 is chosen: the point is that it is read
-                  before the choice, not after it (ESCSUITE-175). */}
-              {mp4SilentNote && (
-                <div className={styles.summary} role="status">
-                  {mp4SilentNote}
+                  disclosure where the format is chosen: the point is that it is
+                  read before the choice, not after it (ESCSUITE-175). One row
+                  per silent format — normally at most one, two only in a browser
+                  with no audio encoder at all. */}
+              {silentFormatNotes.map((note) => (
+                <div className={styles.summary} role="status" key={note}>
+                  {note}
                 </div>
-              )}
+              ))}
 
               {/* The two things a GIF surprises people with, said once. */}
               {advancedOptions.format === 'gif' && (

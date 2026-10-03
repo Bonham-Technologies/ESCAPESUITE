@@ -336,12 +336,14 @@ export function generateShareUrl(
  * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string,
  *   audio?: boolean } - Export finished ('gif' since ESCSUITE-34; a host that only knows the
  *   two video formats sees it only for an export the user explicitly chose GIF for).
- *   `audio` is additive (ESCSUITE-175) and says whether the project's sound reached the
- *   file: `false` for every GIF (the container has no audio track) and for an MP4 exported
- *   in a browser with no AAC encoder, `true` otherwise — including for a project that had
- *   no sound in it, since nothing was dropped. A host that ignores it is unaffected; a host
- *   that reads it should treat a missing field as `true`, the way every message sent before
- *   this ticket behaved.
+ *   `audio` is additive (ESCSUITE-175) and says whether the file carries an audio track:
+ *   `false` for every GIF (the container has none), for an MP4 exported in a browser with
+ *   no AAC encoder and for a WebM exported in one with no Opus encoder; `true` otherwise.
+ *   Read it as "this file has no audio track", **not** as "the project's sound was
+ *   dropped" — a silent project exported in a no-AAC browser also reports `false`, because
+ *   the exporter does not decode the sources and so cannot tell the two apart. A host that
+ *   ignores the field is unaffected; a host that reads it should treat a missing field as
+ *   `true`, the way every message sent before this ticket behaved.
  * - EXPORT_PROGRESS: { progress: number, message: string } - Export progress
  *   [documented but not currently implemented - nothing sends it]
  * - PROJECT_SAVED: {} - Project was saved

@@ -3017,9 +3017,9 @@ MP4 export includes robust error handling and codec compatibility:
   before encoding — and since ESCSUITE-175 **before mixing the audio, loading any media or
   starting the muxer**, so a browser that cannot encode H.264 pays for none of it. A refusal is
   `ExportError(MP4_NO_CODEC_REASON)`, the dialog's own sentence
-- **AAC validation, in the same breath**: `isAacSupported(aacEncoderConfig(…))` right after the
+- **AAC validation, in the same breath**: `isAudioCodecSupported(aacEncoderConfig(…))` right after the
   video ladder. No AAC encoder means the sound cannot be carried however long it is mixed, so
-  `extractAndMixAudio` is skipped outright, `MP4_NO_AUDIO_NOTE` goes out through `onProgress`, and
+  `extractAndMixAudio` is skipped outright, `noAudioNote('mp4')` goes out through `onProgress`, and
   the result carries `audio: false`. It used to be probed deep inside the export, where a refusal
   set `audioData = null` behind a `console.warn` and the export reported "Export complete!" over a
   silent file (ESCSUITE-175; Firefox 155 is the browser, measured 2026-10-02)
@@ -3084,10 +3084,15 @@ file and no fallback. WebM's shape now matches MP4's:
   needs to know *which* configuration it asked about — `exportWebM.ts` labelling its muxer track
   `'vp9'` or `'vp8'` — reads `candidate`, because nothing guarantees `config.codec` still looks
   like the string that was asked about once a browser has normalised it.
-- **Opus, probed independently of video** — the same `AudioEncoder.isConfigSupported()` shape
-  MP4's own AAC check uses: no Opus support drops the audio and still produces a working, silent
-  WebM (`console.warn('Opus not supported, exporting without audio')`), never refuses the export
-  outright.
+- **Opus, probed independently of video** — through the same `isAudioCodecSupported()` the MP4
+  exporter's AAC check calls: no Opus support drops the audio and still produces a working, silent
+  WebM, never refuses the export outright. **And it says so** (ESCSUITE-175 fix round): the two
+  `console.warn`s this used to hide behind became one `onProgress` report of
+  `noAudioNote('webm')`, and the result carries `audio: false` — before that, a browser with VP9
+  and no Opus encoder handed back a silent WebM with nothing before, during or after to say so,
+  which is the exact defect ESCSUITE-175 fixed on the MP4 side and had left standing here. The
+  probe itself stays where it always was, just before the muxer starts, because unlike the MP4
+  side there is nothing expensive after it to protect.
 - **Encoder error tracking.** The video encoder's `error:` callback now stores the exception in
   `videoEncoderError`, checked at the top of every frame iteration and inside the backpressure
   wait, exactly where MP4 checks its own; the audio encoder's `error:` callback does the same,
@@ -3177,9 +3182,10 @@ The third export format (ESCSUITE-34), and the only one that needs nothing from 
 
 ### Export Dialog Browser Support (`src/components/Export/ExportDialog.tsx`, `src/core/exportTypes.ts`)
 
-`isMP4ExportSupported()` and `isWebMExportSupported()` are both real asynchronous codec probes
-since ESCSUITE-175 — before it, only WebM's was, and MP4's answered from globals alone. GIF is the
-third format and has **no predicate at all**:
+`isMP4ExportSupported()` and `isWebMExportSupported()` are both real asynchronous probes resolving
+the same `ExportFormatSupport` — `{ video, audio }` — since ESCSUITE-175. Before it, MP4's answered
+from globals alone and WebM's answered the video half only. GIF is the third format and has **no
+predicate at all**:
 
 - **`isMP4ExportSupported(width, height)`** resolves `{ video: boolean; audio: boolean }`
   (ESCSUITE-175). `video` is whether any of `mp4VideoCodecConfigs`' ten H.264 candidates —
@@ -3187,7 +3193,7 @@ third format and has **no predicate at all**:
   `no-preference` second — can be configured at the output size, asked through the same
   `findSupportedVideoConfig()` walker WebM's probe uses and the same candidate list `exportToMP4`
   itself configures from. `audio` is whether `AudioEncoder.isConfigSupported` accepts AAC-LC
-  (`isAacSupported`, which answers `false` for a missing `AudioEncoder`, a refusal and a throwing
+  (`isAudioCodecSupported`, which answers `false` for a missing `AudioEncoder`, a refusal and a throwing
   probe alike, because the caller's next move is the same in all three).
 
   **Two booleans because the two failures differ in kind.** No H.264 means no MP4 at all; no AAC
@@ -3210,12 +3216,14 @@ third format and has **no predicate at all**:
   `findSupportedVideoConfig()` ladder `exportWebM.ts` configures from, at **the size the export
   will actually use** — `getResolution(advancedOptions.resolution, …)`'s answer, not the raw
   project resolution, so a project whose native size this browser cannot configure but whose
-  720p/480p preset it can does not read as unsupported outright (review round 1, MINOR 2).
+  720p/480p preset it can does not read as unsupported outright (review round 1, MINOR 2) — and,
+  since ESCSUITE-175's fix round, Opus through the same `isAudioCodecSupported()` the MP4 probe
+  asks AAC through, so `audio` means the same thing for both formats.
   `ExportDialog` calls it — **and MP4's probe, in the same effect under the same `cancelled`
   flag** (ESCSUITE-175: identical dependency lists, so two effects would mean two stale-answer
   guards to keep in step) — in a `useEffect` keyed on `isOpen`, the project's own width/height and
   the *selected resolution preset*, so both re-probe when the preset changes and neither on every
-  render. `webmSupported` starts optimistically `true` and `mp4Support` optimistically
+  render. `webmSupport` and `mp4Support` both start optimistically
   `{ video: true, audio: true }` (so the common case — Chrome/Edge, both formats work — never
   flashes a disabled button or a note that appears and vanishes), each flipping only once its own
   probe says otherwise. The effect's `cancelled` flag is the ESCSUITE-98 run-identity shape:
@@ -3239,15 +3247,15 @@ third format and has **no predicate at all**:
   stay disabled — they are WebM's.
 
 The dialog's **video-support states** (GIF is in none of them: it is always possible). Since
-ESCSUITE-175 there are five, because MP4 has both a refusal of its own and a state no other
-format has — possible, but silent:
+ESCSUITE-175 there are five, because each video format now has both a refusal of its own and a
+state neither had before — possible, but silent:
 
 | State | Shown |
 |---|---|
 | Both video formats possible, with sound (the common case) | No notice; both are offered as usual |
 | Only WebM is possible | MP4's radio is `disabled` with its "Not supported in this browser" hint, **and** `MP4_NO_CODEC_REASON` ("This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.") is a `role="status"` line in the main body — the ESCSUITE-22 say-it-before-the-click shape, which ESCSUITE-175 finally gave MP4 too. The primary WebM buttons stay enabled, which is what the sentence's second half promises |
 | Only MP4 is possible | WebM's primary button is `disabled`, with `WEBM_NO_CODEC_REASON` ("This browser cannot encode WebM video — Chrome or Edge can.") in both a `title` and a visible main-body line, followed by "Choose MP4 under Advanced options to export anyway." |
-| MP4 is possible but has no sound (Firefox 155) | MP4 stays fully offered and `MP4_NO_AUDIO_NOTE` ("MP4 export in this browser will have no sound (no AAC encoder). WebM keeps the audio.") is a `role="status"` line in the **main body**, beside the background-tab note — read before the format is chosen, not after. Hidden while GIF is selected (GIF has its own no-sound line) and when MP4 is refused outright (there is no silent MP4 to warn about then). After such an export, the completion screen carries `MP4_EXPORTED_WITHOUT_AUDIO` ("Exported without sound — this browser has no AAC encoder."), driven by the **result's** `audio: false` rather than by the probe — the file that was just handed over is the authority on its own contents |
+| A format is possible but has no sound (MP4 in Firefox 155; WebM in a browser with no Opus encoder) | The format stays fully offered and `noAudioNote(format)` — "MP4 export in this browser will have no sound (no AAC encoder). WebM keeps the audio." / "WebM export in this browser will have no sound (no Opus encoder). MP4 keeps the audio." — is a `role="status"` line in the **main body**, beside the background-tab note, read before the format is chosen rather than after. Hidden while GIF is selected (GIF has its own no-sound line) and for a format that is refused outright (there is no silent export to warn about then). A browser with **no `AudioEncoder` at all** makes both formats silent, and then both notes appear with the second sentence dropped (`noAudioNote(format, false)`): "WebM keeps the audio" and "MP4 keeps the audio" cannot both be true, which is the audio-side twin of the trap in the next row. After such an export the completion screen carries `exportedWithoutSoundReason(format)` ("Exported without sound — this browser has no AAC encoder." / "…no Opus encoder."), from the **result's** `audio: false` rather than from the probe — the file just handed over is the authority on its own contents — **and** from the dialog's own `projectHasAudio`, because the sentence asserts a loss (next paragraph) |
 | Neither video format is possible | One `role="alert"` row in the dialog's **main body**, not behind "Advanced options", carrying whichever cause actually applies — `EXPORT_NO_WEBCODECS_REASON` ("Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.") when `hasMP4EncodeGlobals()` is false, and `EXPORT_NO_VIDEO_CODEC_REASON` ("This browser cannot encode WebM video or MP4 video — Chrome or Edge can.") when WebCodecs is present and neither codec is (ESCSUITE-175: before MP4 had a real probe this state could only mean the globals were missing, so it said so unconditionally) — **followed by `GIF_ALWAYS_AVAILABLE_NOTE`** ("GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway."). Every download button, primary **and** Advanced, stays on screen, `disabled`, the same say-why-do-not-hide shape ESCAPECRAFT's MP4/M4A buttons and `separateTracksBlockedReason` use (`apps/craft/CLAUDE.md`'s "Download Formats"). Both video radios are `disabled`; the **GIF radio is not**, and choosing it enables an Advanced "Download GIF" button with no `title` — this is the one state where the dialog is still useful, and ESCSUITE-34 is why it is no longer a dead end. The two per-format sentences are **not** shown here: each names the other format as the way out, and with both gone both halves would be lies |
 
 `bothVideoFormatsBlockedReason` is the one expression that decides the last row, and
@@ -3255,16 +3263,40 @@ format has — possible, but silent:
 `?? MP4_NO_CODEC_REASON`) so a disabled button's `title` and the body's own line can never
 disagree about why.
 
+**`projectHasAudio`, and why the completion sentence needs it** (ESCSUITE-175 fix round). The
+up-front note says "will have no sound", which is true and harmless for a silent project. The
+completion sentence says "Exported **without** sound", which asserts a **loss** — so showing it
+for an image-only or all-muted timeline would claim something that did not happen. The exporter
+cannot help: `ExportResult.audio` is a statement about the *pipeline* ("this browser has no AAC
+encoder"), not about this project, and it cannot be anything else, because knowing whether a
+source actually carries an audio track means decoding it — the cost the probe-first ordering
+exists to avoid. So the dialog answers the second half itself: a clip whose track is present,
+`visible` and not `muted`, whose source `mediaType !== 'image'`. That is `core/audioMixer.ts`'s own
+skip clause minus its per-blob `decodeAudioData`, memoised on `clips`/`tracks`/`sourceVideos`.
+
+It is **approximate in one direction only**: a video file with no audio track in it still counts,
+so the sentence can appear where strictly nothing was lost. That is the conservative error — it
+over-reports rather than staying quiet about a real loss — and the cases it does rule out are the
+ones that are *knowably* silent. Making it exact would mean the decode this ticket removed; do not.
+
 Before ESCSUITE-22, the dialog's only "not supported" notice was MP4's, and it lived behind the
 collapsed Advanced panel — so a browser with no WebCodecs at all still showed an enabled "Download
-WebM" button front and center, which failed the instant it was clicked. All six reason sentences —
-`EXPORT_NO_WEBCODECS_REASON`, `EXPORT_NO_VIDEO_CODEC_REASON`, `WEBM_NO_CODEC_REASON`,
-`MP4_NO_CODEC_REASON`, `MP4_NO_AUDIO_NOTE` and `MP4_EXPORTED_WITHOUT_AUDIO` — live in
-`exportTypes.ts`, beside the probes, for the same reason ESCAPECRAFT's own disabled-reason
-constants live beside their gates rather than in a shared notices file: nothing has gone wrong yet.
-The last two are the same fact said at two moments, which is why they sit together: the exporter
-hands `MP4_NO_AUDIO_NOTE` straight to its own `onProgress` channel while the export runs, and the
-dialog shows `MP4_EXPORTED_WITHOUT_AUDIO` once it is over.
+WebM" button front and center, which failed the instant it was clicked. Every reason sentence —
+the four constants `EXPORT_NO_WEBCODECS_REASON`, `EXPORT_NO_VIDEO_CODEC_REASON`,
+`WEBM_NO_CODEC_REASON` and `MP4_NO_CODEC_REASON`, and the two builders `noAudioNote(format,
+alternativeKeepsAudio)` and `exportedWithoutSoundReason(format)` — lives in `exportTypes.ts`,
+beside the probes, for the same reason ESCAPECRAFT's own disabled-reason constants live beside
+their gates rather than in a shared notices file: nothing has gone wrong yet.
+
+The last two are builders rather than constants because the sentence differs **per format** and in
+nothing else: one `VIDEO_FORMAT_AUDIO` table holds each format's label, its audio codec and the
+other format to point at, so "AAC" can never be said of WebM or "Opus" of MP4. GIF is deliberately
+*absent* from that table — its result always reports `audio: false` because the container has no
+audio track, and both sentences blame a missing encoder, which would be the wrong explanation; with
+no `gif` entry there is nothing to read. They are also the same fact said at two moments, which is
+why they sit together: an exporter hands `noAudioNote(itsOwnFormat)` straight to its own
+`onProgress` channel while the export runs, and the dialog shows
+`exportedWithoutSoundReason(format)` once it is over.
 
 **What the exporter does with the probes (ESCSUITE-175).** `exportToMP4` asks both codecs
 **before** mixing the timeline's audio, loading any media or starting the muxer. It used to walk
@@ -3276,16 +3308,19 @@ refusal set `audioData = null` behind a `console.warn` and the export carried on
 - No H.264 throws `ExportError(MP4_NO_CODEC_REASON)` before anything is spent, so the refusal
   reads the same sentence before the click and after it, and (being an `ExportError`) reaches the
   dialog's diagnosed-codec-failure path with its log rather than its generic one.
-- No AAC reports `MP4_NO_AUDIO_NOTE` through `onProgress` — the channel the no-worker hedge
+- No AAC reports `noAudioNote('mp4')` through `onProgress` — the channel the no-worker hedge
   already uses — **skips `extractAndMixAudio` entirely** (the most expensive no-op in the
-  pipeline) and resolves with `audio: false`.
+  pipeline) and resolves with `audio: false`. `exportWebM.ts` does the same for Opus
+  (ESCSUITE-175 fix round), with its probe left where it always was: there is nothing expensive
+  after it to protect, only a muxer to not add a track to.
 - All three exporters resolve `ExportResult` (`{ blob, audio }`) rather than a bare `Blob`, so the
-  dialog reads one field whichever format ran: WebM always `true` (Opus is probed before the mux
-  and the container has a track for it), GIF always `false` (no audio track at all), MP4
-  `aacSupported`. **`audio: false` means sound was *dropped*** — a project with no sound in it
-  exports `true`, because nothing was lost and there is nothing to tell the user. The dialog's
-  completion sentence is gated on `format === 'mp4' && !result.audio` for that reason: a GIF's
-  `false` is the container's doing, not the browser's AAC encoder's.
+  dialog reads one field whichever format ran: MP4 `aacSupported`, WebM `!audioDropped`, GIF always
+  `false` (no audio track at all). **`audio: false` is a statement about the pipeline, not about
+  this project**: "this browser could not carry sound in this format". A silent timeline in a
+  no-AAC browser also reports `false`, because the exporter would have to decode every source to
+  know better — which is the cost the probe-first ordering removed. The dialog therefore pairs the
+  field with its own `projectHasAudio` before claiming a loss (above), and gates on
+  `format !== 'gif'` as well, since a GIF's `false` is the container's doing and no encoder's.
 
 **The Advanced "Download {format}" button gates on the format the click will actually run, not
 the one selected in the radio** (review round 1, MAJOR 1). `handleExport` already falls back from

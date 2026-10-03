@@ -8,8 +8,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToMP4, ExportError } from './exportMP4'
 import {
   ExportAbortedError,
-  MP4_NO_AUDIO_NOTE,
   MP4_NO_CODEC_REASON,
+  noAudioNote,
   type ExportResult,
 } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
@@ -429,7 +429,7 @@ describe('exportToMP4 audio', () => {
 
     const { audio } = await run({ onProgress: (p) => progress.push(p) })
 
-    expect(progress.map((p) => p.message)).toContain(MP4_NO_AUDIO_NOTE)
+    expect(progress.map((p) => p.message)).toContain(noAudioNote('mp4'))
     expect(audio).toBe(false)
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
     expect(webcodecs.audioEncoders).toHaveLength(0)
@@ -444,7 +444,7 @@ describe('exportToMP4 audio', () => {
 
     const { audio } = await run({ onProgress: (p) => progress.push(p) })
 
-    expect(progress.map((p) => p.message)).toContain(MP4_NO_AUDIO_NOTE)
+    expect(progress.map((p) => p.message)).toContain(noAudioNote('mp4'))
     expect(audio).toBe(false)
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video'])
     expect(mixAudio).not.toHaveBeenCalled()

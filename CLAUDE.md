@@ -145,8 +145,9 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - WebCodecs API for encoding/decoding. No longer Chrome/Edge only: Firefox 155 and WebKit 26.6
   both expose `VideoEncoder`, and both encode H.264, VP9 and VP8 — but Firefox has **no AAC
   encoder**, so an MP4 exported there has no sound (ESCSUITE-175 made the dialog and the
-  exporter say so, before and after, instead of handing back a silent file). Measured
-  2026-10-02; see the Key Constraints bullet below
+  exporter say so, before and after, instead of handing back a silent file; a browser with no
+  Opus encoder gets the same treatment for WebM). Measured 2026-10-02; see the Key Constraints
+  bullet below
 - Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
   audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
@@ -181,12 +182,15 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   after a successful export (`name` is the download filename; not sent on failure or
   cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
   a new value of a field it already reads, and needs no change unless it wants to treat a GIF
-  differently. `audio` is additive too (ESCSUITE-175) and says whether the project's sound reached
-  the file: `false` for every GIF (no audio track in the container) and for an MP4 exported in a
-  browser with no AAC encoder — Firefox 155 today — and `true` otherwise, including for a project
-  that had no sound in it, since nothing was dropped. A host that ignores the field is unaffected;
-  a host that reads it should treat a missing field as `true`, which is how every message sent
-  before the ticket behaved.
+  differently. `audio` is additive too (ESCSUITE-175) and says whether the file carries an audio
+  track: `false` for every GIF (no audio track in the container), for an MP4 exported in a browser
+  with no AAC encoder (Firefox 155 today) and for a WebM exported in one with no Opus encoder;
+  `true` otherwise. Read it as "this file has no audio track", **not** as "the project's sound was
+  dropped" — a silent project exported in a no-AAC browser also reports `false`, because the
+  exporter does not decode the sources and cannot tell the two apart (the editor's own completion
+  notice pairs the field with its own "did this project have any sound" check before claiming a
+  loss). A host that ignores the field is unaffected; a host that reads it should treat a missing
+  field as `true`, which is how every message sent before the ticket behaved.
   Inbound `LOAD_VIDEO` (`{ url }`) fetches that URL the same way `?video=` does, so it is bound by
   the same `connect-src` — a URL the page's policy refuses gets an `ERROR` reply naming the origin
   and the policy (`code: 'LOAD_ERROR'`) instead of a generic failure. See "URL params (ARTIST)"
@@ -2149,13 +2153,15 @@ never above what the suite actually achieves:
   WebKit 26.6 have `VideoEncoder` with H.264, VP9, VP8 **and** AAC; **Firefox 155 has all three
   video codecs and no AAC encoder**. So both `isMP4ExportSupported(width, height)` and
   `isWebMExportSupported(width, height)` are real asynchronous probes of what this browser can
-  configure at the output size — MP4's answers two questions, `{ video, audio }`, because the two
-  failures differ in kind: no H.264 means no MP4 at all, no AAC means an MP4 with no sound in it.
+  configure at the output size, and both answer two questions, `{ video, audio }`, because the two
+  failures differ in kind: no picture codec means no export in that format at all, while no audio
+  codec (AAC for MP4, Opus for WebM) means a file with no sound in it.
   A browser can therefore offer one format and not the other, or offer MP4 knowing it will be
   silent, and the export dialog says which before the click and what happened after it, rather
-  than offering a button that fails the instant it is clicked (ESCSUITE-22/29 for WebM,
-  ESCSUITE-175 for MP4 — which also moved the H.264 ladder and the AAC probe ahead of mixing the
-  audio and loading the media, so a refusal costs nothing). See `apps/artist/CLAUDE.md`'s
+  than offering a button that fails the instant it is clicked (ESCSUITE-22/29 gave WebM its video
+  probe; ESCSUITE-175 gave MP4 the same and gave both the audio half — it also moved the H.264
+  ladder and the AAC probe ahead of mixing the audio and loading the media, so a refusal costs
+  nothing). See `apps/artist/CLAUDE.md`'s
   "Export Dialog Browser Support"
 - MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
   end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; composited PiP takes,
