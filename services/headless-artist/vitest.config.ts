@@ -35,9 +35,11 @@ export default defineConfig({
       //   cli.ts 491-492  the `if (isDirectRun())` bootstrap, which runs only when the file
       //                   is the process entry point (src/cli.chromium.test.ts spawns it for
       //                   real, under test:e2e)
-      //   serve.ts 195    the catch for a task that throws synchronously; the only task the
-      //                   limiter is ever given is an async arrow, which cannot
-      //   serve.ts 533    the post-listen socket-error handler (EMFILE and friends)
+      //   serve.ts 207    createLimiter's catch for a task that throws synchronously; the only
+      //                   task the limiter is ever given is an async arrow, which cannot
+      //   serve.ts 557    the post-listen `server.on('error')` handler (EMFILE and friends)
+      // The two serve.ts sites are named as well as numbered so a reader can find them after
+      // the next insertion moves the lines again.
       thresholds: {
         lines: 99,
         statements: 99,
