@@ -2218,6 +2218,29 @@ against the success cases that were already there; the file's two pre-existing u
 unknown-id and wrong-type refusals). `components/Preview/useCropHandleGesture.ts` gained no branch: the
 store's refusal propagates through `useGestureHistory.commit`'s return, pinned by the CropHandles
 unmount-mid-drag case. The seven perf/rerender pins and `perfScene.ts` are byte-identical. **No floor
+
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-168 (the delete-track confirm no longer says the
+removal cannot be undone; a marquee released outside the track container no longer swallows the next click —
+the flag clears on the next click anywhere and at the start of the next gesture; a keyframe-mode preview drag
+refuses a write when the playhead has left the clip at either end instead of writing a keyframe at a negative
+or past-the-end time; and a zoom mid clip-drag no longer makes the clip jump, the grab offset being kept as a
+time and re-derived at the current zoom per move): 99.80 / 99.24 / **95.58** / 99.67 against
+99.80 / 99.24 / 95.56 / 99.67 on the commit this branch was rebased onto (`e880b87`, the ESCSUITE-169 / 170
+version-packages commit) — branches up two hundredths, the other three unmoved. The base is the composite
+ESCSUITE-172's paragraph describes (the ESCSUITE-161 / 162 tree plus the ESCSUITE-169 / 170 tree, measured in
+this sitting on disjoint files): 4,782 / 5,004 branches, and this branch 4,787 / 5,008 — four new branches,
+five more covered, so the uncovered column falls 222 → 221 (lines 7,569 / 7,584 → 7,584 / 7,599, statements
+8,518 / 8,583 → 8,533 / 8,598, functions 1,836 / 1,842 → 1,839 / 1,845, every denominator growing by exactly
+what the numerator did; the same 15 / 65 / 6 uncovered). The four new branches are
+`components/Timeline/useTimelineMarquee.ts`'s two (27 → 29: the armed-or-not unmount cleanup of the one-shot
+click listener, reached with a listener armed and with none) and `components/Preview/useTransformHandles.ts`'s
+two — the `keyframeTime >= 0 && keyframeTime <= clip.duration` operands folded into the guard that already
+narrows `clip`, reached from both sides by the playhead-before-the-clip and playhead-past-the-end cases
+against the in-range writes that were already there — and the one pre-existing arm newly reached is in the
+same file (159 / 176 → 162 / 178), driven by the past-the-end case the review asked for.
+`components/Timeline/useClipDrag.ts` gained statements and no decision (the time-based grab offset is one
+division at mousedown and one `timeToPixels` per move); `useTrackHeaderActions.ts` changed a string.
+`timelineGestures.perf.test.ts` and the other six pins and `perfScene.ts` are byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
