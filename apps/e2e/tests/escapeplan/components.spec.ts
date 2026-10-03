@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 const GITHUB_URL = 'https://github.com/Bonham-Technologies/ESCAPESUITE'
 
 test.describe('Header', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('shows the suite logo linking home', async ({ page }) => {
@@ -41,7 +42,7 @@ test.describe('Header', () => {
 test.describe('Theme toggle', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('switching modes updates the document theme', async ({ page }) => {
@@ -63,7 +64,7 @@ test.describe('Theme toggle', () => {
 test.describe('Footer', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('links to the legal pages', async ({ page }) => {
@@ -95,7 +96,7 @@ test.describe('Per-route SEO', () => {
   for (const route of routes) {
     test(`${route.path} sets its own title and canonical`, async ({ page }) => {
       await page.goto(`http://localhost:5173${route.path}`)
-      await page.waitForLoadState('networkidle')
+      await waitForAppReady(page, 'plan')
 
       await expect(page).toHaveTitle(route.title)
 
@@ -114,14 +115,14 @@ test.describe('Per-route SEO', () => {
 test.describe('Routes', () => {
   test('privacy page renders', async ({ page }) => {
     await page.goto('http://localhost:5173/privacy')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   })
 
   test('terms page renders', async ({ page }) => {
     await page.goto('http://localhost:5173/terms')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   })

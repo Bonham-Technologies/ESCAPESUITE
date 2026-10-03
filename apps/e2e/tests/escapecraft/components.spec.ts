@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('VideoPlayer Component', () => {
   test.beforeEach(async ({ page }) => {
@@ -7,7 +8,7 @@ test.describe('VideoPlayer Component', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('play/pause toggle works', async ({ page }) => {
@@ -101,7 +102,7 @@ test.describe('Download Menu', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('download format menu opens', async ({ page }) => {
@@ -170,7 +171,7 @@ test.describe('Recording Controls', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('countdown display appears', async ({ page }) => {
@@ -201,7 +202,7 @@ test.describe('PiP Controls', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('PiP position controls exist', async ({ page }) => {
@@ -249,7 +250,7 @@ test.describe('Source Selection', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('screen source option available', async ({ page }) => {
@@ -289,7 +290,7 @@ test.describe('Audio Controls', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('microphone toggle works', async ({ page }) => {

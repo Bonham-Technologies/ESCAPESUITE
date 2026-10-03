@@ -6,6 +6,7 @@ import {
   grantMediaPermissions,
 } from '../../utils/media-mocks'
 import { canConvertToMp4 } from '../../utils/webcodecs'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * Smoke tests for the ESCAPECRAFT offline build.
@@ -22,7 +23,7 @@ const CRAFT_URL = 'http://localhost:5184'
 test.describe('ESCAPECRAFT Standalone - App Loading', () => {
   test('opens straight into the recorder', async ({ page }) => {
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const html = await page.content()
     expect(html).toContain('<!DOCTYPE html>')
@@ -37,7 +38,7 @@ test.describe('ESCAPECRAFT Standalone - App Loading', () => {
 
   test('does not show the ESCAPEPLAN hub link', async ({ page }) => {
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // The hub link only renders in hosted mode (isStandaloneMode() gates it)
     expect(await page.getByRole('link', { name: '← ESCAPE Suite' }).count()).toBe(0)
@@ -51,7 +52,7 @@ test.describe('ESCAPECRAFT Standalone - App Loading', () => {
 
   test('app content is visible', async ({ page }) => {
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
     await page.waitForTimeout(1000)
 
     // App should show some content (not just loading or error)
@@ -66,7 +67,7 @@ test.describe('ESCAPECRAFT Standalone - Recording Interface', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows recording UI elements', async ({ page }) => {
@@ -117,7 +118,7 @@ test.describe('ESCAPECRAFT Standalone - Recording Interface', () => {
 test.describe('ESCAPECRAFT Standalone - Theme Support', () => {
   test('has theme toggle', async ({ page }) => {
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const themeToggle = page
       .getByRole('button', { name: /theme|dark|light/i })
@@ -133,7 +134,7 @@ test.describe('ESCAPECRAFT Standalone - Theme Support', () => {
     // Emulate dark mode
     await page.emulateMedia({ colorScheme: 'dark' })
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Check if dark theme class is applied
     const isDark = await page.evaluate(() => {
@@ -167,7 +168,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await grantMediaPermissions(page)
 
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Capability detection is async; the toggles stay disabled until it lands
     // and a take started before then acquires no stream.
@@ -218,7 +219,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // MP4 conversion needs an H.264 encoder behind WebCodecs; a browser
     // without one shows the button disabled with its reason, which
@@ -265,7 +266,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     })
 
     await page.goto(CRAFT_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Single-file build should not request external JS/CSS
     const externalAssets = requests.filter(

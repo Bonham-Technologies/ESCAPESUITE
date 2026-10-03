@@ -8,6 +8,7 @@ import {
   mockDeviceInUse,
 } from '../../utils/error-mocks'
 import { mockMediaDevices } from '../../utils/media-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Camera Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
@@ -16,7 +17,7 @@ test.describe('Camera Permission Denied', () => {
     await mockMediaDevices(page)
     await mockCameraPermissionDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
@@ -69,7 +70,7 @@ test.describe('Microphone Permission Denied', () => {
     await mockMediaDevices(page)
     await mockMicrophonePermissionDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
@@ -115,7 +116,7 @@ test.describe('Screen Share Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
     await mockScreenShareDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows error UI when screen share denied', async ({ page }) => {
@@ -160,7 +161,7 @@ test.describe('All Media Permissions Denied', () => {
   test.beforeEach(async ({ page }) => {
     await mockAllMediaPermissionsDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows appropriate error state', async ({ page }) => {
@@ -195,7 +196,7 @@ test.describe('Device Not Found', () => {
     await mockMediaDevices(page)
     await mockDeviceNotFound(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows device not found message', async ({ page }) => {
@@ -222,7 +223,7 @@ test.describe('Device In Use', () => {
     await mockMediaDevices(page)
     await mockDeviceInUse(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows device in use message', async ({ page }) => {
@@ -246,7 +247,7 @@ test.describe('Device In Use', () => {
 test.describe('Permission Recovery', () => {
   test('can recover after granting permissions', async ({ page, context }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Grant permissions (Chromium-only; Firefox/WebKit don't support this)
     const browserName = context.browser()?.browserType().name()
@@ -256,7 +257,7 @@ test.describe('Permission Recovery', () => {
 
     // Refresh to pick up new permissions
     await page.reload()
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Should work normally now
     const html = await page.content()

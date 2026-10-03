@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * ESCAPEARTIST accepts a handful of URL parameters from its integration API
@@ -8,7 +9,7 @@ import { test, expect } from '@playwright/test'
 test.describe('URL Parameter Validation', () => {
   test('handles invalid video URL parameter', async ({ page }) => {
     await page.goto('http://localhost:5175?video=not-a-valid-url')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Should handle gracefully
     const html = await page.content()
@@ -17,7 +18,7 @@ test.describe('URL Parameter Validation', () => {
 
   test('handles invalid project parameter', async ({ page }) => {
     await page.goto('http://localhost:5175?project=invalid-base64!!!')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Should handle gracefully
     const html = await page.content()
@@ -26,7 +27,7 @@ test.describe('URL Parameter Validation', () => {
 
   test('handles missing loadVideo parameter', async ({ page }) => {
     await page.goto('http://localhost:5175?loadVideo=')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Should handle gracefully
     const html = await page.content()
@@ -35,7 +36,7 @@ test.describe('URL Parameter Validation', () => {
 
   test('handles XSS attempt in URL parameters', async ({ page }) => {
     await page.goto('http://localhost:5175?video=<script>alert(1)</script>')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Should not execute script
     const html = await page.content()

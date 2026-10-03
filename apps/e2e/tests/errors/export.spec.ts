@@ -6,11 +6,12 @@ import {
   mockStorageQuotaExceeded,
 } from '../../utils/error-mocks'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Export With No Clips', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('export stays unavailable until the timeline has a clip', async ({ page }) => {
@@ -47,7 +48,7 @@ test.describe('Export With No Clips', () => {
 test.describe('Export Cancellation', () => {
   test('can cancel export in progress', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     await seedTextClip(page)
     await openExportDialog(page)
@@ -68,7 +69,7 @@ test.describe('WebCodecs Unavailable', () => {
   test.beforeEach(async ({ page }) => {
     await mockWebCodecsUnavailable(page)
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('shows fallback when WebCodecs unavailable', async ({ page }) => {
@@ -120,7 +121,7 @@ test.describe('Codec Not Supported', () => {
   test.beforeEach(async ({ page }) => {
     await mockCodecNotSupported(page)
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   // ESCSUITE-22/29: WebCodecs exists here, but every isConfigSupported() call
@@ -154,7 +155,7 @@ test.describe('Export Failure Recovery', () => {
   test.beforeEach(async ({ page }) => {
     await mockExportFailure(page)
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('shows error message on export failure', async ({ page }) => {
@@ -192,7 +193,7 @@ test.describe('Storage Quota Exceeded', () => {
   test.beforeEach(async ({ page }) => {
     await mockStorageQuotaExceeded(page)
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('shows storage full error', async ({ page }) => {
@@ -214,7 +215,7 @@ test.describe('Storage Quota Exceeded', () => {
 test.describe('Background Tab Export', () => {
   test('export continues in background', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Background export uses Web Worker which should work
     // This test verifies the feature is available
@@ -227,7 +228,7 @@ test.describe('Background Tab Export', () => {
 
   test('background tab support is indicated', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     await seedTextClip(page)
     await openExportDialog(page)

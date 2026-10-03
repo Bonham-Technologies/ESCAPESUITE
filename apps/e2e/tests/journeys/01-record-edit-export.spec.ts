@@ -2,6 +2,7 @@ import { statSync } from 'node:fs'
 import { test, expect, Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { getRecordCount } from '../../utils/indexeddb'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * Journey: Record (ESCAPECRAFT) → hand off → Edit (ESCAPEARTIST) → Export
@@ -68,7 +69,7 @@ test.describe('Journey: Record, Edit, Export', () => {
       await grantMediaPermissions(page)
 
       await page.goto(CRAFT_URL)
-      await page.waitForLoadState('networkidle')
+      await waitForAppReady(page, 'craft')
 
       // Nothing gates the tool — it opens straight into the recorder
       await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
@@ -122,7 +123,7 @@ test.describe('Journey: Record, Edit, Export', () => {
 
     await test.step('ESCAPEARTIST opens straight into the editor', async () => {
       await artist.goto(ARTIST_URL)
-      await artist.waitForLoadState('networkidle')
+      await waitForAppReady(artist, 'artist')
 
       await expect(artist.getByRole('button', { name: 'Export video' })).toBeVisible()
       expect(await artist.getByRole('dialog').count()).toBe(0)

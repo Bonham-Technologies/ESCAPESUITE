@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEARTIST Timeline Editing', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('server responds', async ({ page }) => {
@@ -77,7 +78,7 @@ test.describe('ESCAPEARTIST Timeline Editing', () => {
 test.describe('ESCAPEARTIST Overlay Tools', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('has text overlay tool', async ({ page }) => {
@@ -113,7 +114,7 @@ test.describe('ESCAPEARTIST Overlay Tools', () => {
 test.describe('ESCAPEARTIST Undo/Redo', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('has undo button', async ({ page }) => {

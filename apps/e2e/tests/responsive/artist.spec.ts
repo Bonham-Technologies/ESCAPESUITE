@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEARTIST Mobile Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('editor renders on mobile', async ({ page }) => {
@@ -41,7 +42,7 @@ test.describe('ESCAPEARTIST Tablet Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('timeline visible on tablet', async ({ page }) => {
@@ -76,7 +77,7 @@ test.describe('ESCAPEARTIST Panel Auto-Collapse', () => {
   test('panels collapse at 900px breakpoint', async ({ page }) => {
     await page.setViewportSize({ width: 899, height: 768 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const sidePanel = page.locator('[class*="sidebar"], [class*="inspector"]').first()
     const isVisible = await sidePanel.isVisible().catch(() => false)
@@ -88,7 +89,7 @@ test.describe('ESCAPEARTIST Panel Auto-Collapse', () => {
   test('panels visible above breakpoint', async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 800 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const sidePanel = page.locator('[class*="sidebar"], [class*="inspector"]').first()
     const isVisible = await sidePanel.isVisible().catch(() => false)
@@ -102,7 +103,7 @@ test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
   test('inspector slides out on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const inspectorToggle = page
       .getByRole('button', { name: /inspector|properties|panel/i })
@@ -125,7 +126,7 @@ test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
   test('inspector full width on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const inspector = page.locator('[class*="inspector"]').first()
     const isVisible = await inspector.isVisible().catch(() => false)
@@ -144,7 +145,7 @@ test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
   test('export dialog fits mobile screen', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Export is disabled until the timeline holds a clip
     await seedTextClip(page)
@@ -171,7 +172,7 @@ test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
   test('export options stack on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     await seedTextClip(page)
     await openExportDialog(page)
@@ -198,7 +199,7 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
   test('overlay tools accessible on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const overlayToolbar = page.locator('[class*="overlay"], [class*="tools"]').first()
     const isVisible = await overlayToolbar.isVisible().catch(() => false)
@@ -209,7 +210,7 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
   test('overlay tool buttons are touch-friendly', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const toolButtons = page.locator('[class*="tool"] button, [class*="toolbar"] button')
     const count = await toolButtons.count()
@@ -232,7 +233,7 @@ test.describe('ESCAPEARTIST Timeline Responsive', () => {
   test('timeline scrollable on narrow viewports', async ({ page }) => {
     await page.setViewportSize({ width: 640, height: 480 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const timeline = page.locator('[class*="timeline"]').first()
     const isVisible = await timeline.isVisible().catch(() => false)
@@ -250,7 +251,7 @@ test.describe('ESCAPEARTIST Timeline Responsive', () => {
   test('timeline controls visible on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const playButton = page.getByRole('button', { name: /play|pause/i }).first()
     const isVisible = await playButton.isVisible().catch(() => false)
@@ -263,7 +264,7 @@ test.describe('ESCAPEARTIST Landscape Mode', () => {
   test('editor works in landscape', async ({ page }) => {
     await page.setViewportSize({ width: 812, height: 375 }) // iPhone X landscape
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const html = await page.content()
     expect(html).toContain('<div id="root">')
@@ -272,7 +273,7 @@ test.describe('ESCAPEARTIST Landscape Mode', () => {
   test('preview visible in landscape', async ({ page }) => {
     await page.setViewportSize({ width: 812, height: 375 })
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const preview = page.locator('[class*="preview"], video').first()
     const isVisible = await preview.isVisible().catch(() => false)

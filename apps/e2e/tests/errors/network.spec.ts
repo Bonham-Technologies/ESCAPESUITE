@@ -5,6 +5,7 @@ import {
   mockOffline,
   mockOnline,
 } from '../../utils/error-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * The suite ships no backend: every app is static and does all of its work in
@@ -15,7 +16,7 @@ import {
 test.describe('Graceful Degradation', () => {
   test('ESCAPECRAFT keeps running after the network drops', async ({ page }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Capability detection settles before we cut the connection
     const record = page.getByRole('button', { name: 'Start recording' })
@@ -39,7 +40,7 @@ test.describe('Graceful Degradation', () => {
 
   test('ESCAPEARTIST keeps running after the network drops', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const exportButton = page.getByRole('button', { name: 'Export video' })
     await expect(exportButton).toBeVisible()

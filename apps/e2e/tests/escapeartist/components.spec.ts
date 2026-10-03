@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Export Dialog', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
     // "Export video" is disabled while the timeline is empty, so the dialog
     // cannot be reached without a clip on it.
     await seedTextClip(page)
@@ -107,7 +108,7 @@ test.describe('Export Dialog', () => {
 test.describe('Keyframe Panel', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('keyframe panel opens', async ({ page }) => {
@@ -153,7 +154,7 @@ test.describe('Keyframe Panel', () => {
 test.describe('Overlay Tools', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('shape tools available', async ({ page }) => {
@@ -205,7 +206,7 @@ test.describe('Overlay Tools', () => {
 test.describe('Timeline Controls', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   // Note: This test verifies zoom controls but is skipped in CI due to
@@ -251,7 +252,7 @@ test.describe('Timeline Controls', () => {
 test.describe('Waveform Display', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('waveform canvas exists', async ({ page }) => {
@@ -276,7 +277,7 @@ test.describe('Waveform Display', () => {
 test.describe('Project Session', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('session restore prompt appears when applicable', async ({ page }) => {
@@ -305,7 +306,7 @@ test.describe('Project Session', () => {
 test.describe('Inspector Panel', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('inspector panel exists', async ({ page }) => {
@@ -331,7 +332,7 @@ test.describe('Inspector Panel', () => {
 test.describe('Toolbar', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('undo button exists', async ({ page }) => {

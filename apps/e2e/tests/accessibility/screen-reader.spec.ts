@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
 import { seedTextClip } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ARIA Live Regions', () => {
   test('ESCAPEPLAN has status announcements', async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     // Check for ARIA live regions
     const liveRegions = page.locator(
@@ -22,7 +23,7 @@ test.describe('ARIA Live Regions', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Look for status indicators that should announce to screen readers
     const statusElements = page.locator(
@@ -36,7 +37,7 @@ test.describe('ARIA Live Regions', () => {
 
   test('ESCAPEARTIST announces export progress', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Look for progress announcements
     const progressElements = page.locator(
@@ -51,7 +52,7 @@ test.describe('ARIA Live Regions', () => {
 test.describe('Dialog Announcements', () => {
   test('ESCAPECRAFT help dialog is accessible', async ({ page }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const trigger = page.getByRole('button', { name: /help - recording tips/i })
     await expect(trigger).toBeVisible()
@@ -71,7 +72,7 @@ test.describe('Dialog Announcements', () => {
 
   test('ESCAPEARTIST export dialog is accessible', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Export is disabled until the timeline holds a clip
     await seedTextClip(page)
@@ -91,7 +92,7 @@ test.describe('Landmark Regions', () => {
   // in their source code. Run locally to verify.
   test.skip('ESCAPEPLAN has proper landmarks', async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     // Wait for React to render
     await page.waitForSelector('#root', { timeout: 5000 }).catch(() => null)
@@ -118,7 +119,7 @@ test.describe('Landmark Regions', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Wait for React to render
     await page.waitForSelector('#root', { timeout: 5000 }).catch(() => null)
@@ -137,7 +138,7 @@ test.describe('Landmark Regions', () => {
 
   test.skip('ESCAPEARTIST has proper landmarks', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Wait for React to render
     await page.waitForSelector('#root', { timeout: 5000 }).catch(() => null)
@@ -158,7 +159,7 @@ test.describe('Landmark Regions', () => {
 test.describe('Form Error Announcements', () => {
   test('form errors are announced', async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     // Look for form with validation
     const form = page.locator('form').first()
@@ -189,7 +190,7 @@ test.describe('Form Error Announcements', () => {
 test.describe('Progress Indicator Announcements', () => {
   test('loading states are announced', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Check for loading indicators with proper ARIA
     const loaders = page.locator(
@@ -203,7 +204,7 @@ test.describe('Progress Indicator Announcements', () => {
 
   test('progressbar has proper attributes', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const progressbar = page.locator('[role="progressbar"]').first()
     const isVisible = await progressbar.isVisible().catch(() => false)
@@ -225,7 +226,7 @@ test.describe('Button and Control Announcements', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Find buttons that might only have icons
     const iconButtons = page.locator('button:has(svg), button:has(img), button:has([class*="icon"])')
@@ -251,7 +252,7 @@ test.describe('Button and Control Announcements', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const toggles = page.locator(
       '[role="switch"], [aria-pressed], button[class*="toggle"]'
@@ -279,7 +280,7 @@ test.describe('Table and List Accessibility', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Check for recordings list
     const lists = page.locator('ul, ol, [role="list"]')

@@ -1,6 +1,7 @@
 import { test, expect, Page } from '@playwright/test'
 import { getRecordCount, waitForIndexedDB } from '../../utils/indexeddb'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * Cross-app IndexedDB sharing, on the production single-origin layout.
@@ -134,7 +135,7 @@ async function readBlobSize(page: Page, storeName: string, id: string): Promise<
 /** Open ESCAPECRAFT and wait for it to create/open the shared database. */
 async function openCraft(page: Page) {
   await page.goto(CRAFT_URL)
-  await page.waitForLoadState('networkidle')
+  await waitForAppReady(page, 'craft')
   await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   // The app opens the database on mount; poll rather than sample once
   await waitForIndexedDB(page, DB_NAME)
@@ -143,7 +144,7 @@ async function openCraft(page: Page) {
 /** Open ESCAPEARTIST (optionally with a `?loadVideo=` handoff). */
 async function openArtist(page: Page, search = '') {
   await page.goto(`${ARTIST_URL}${search}`)
-  await page.waitForLoadState('networkidle')
+  await waitForAppReady(page, 'artist')
 }
 
 test.describe('IndexedDB Data Sharing', () => {
@@ -213,7 +214,7 @@ test.describe('IndexedDB Data Sharing', () => {
     const artistPromise = context.waitForEvent('page')
     await openInEditor.click()
     const artistPage = await artistPromise
-    await artistPage.waitForLoadState('networkidle')
+    await waitForAppReady(artistPage, 'artist')
 
     expect(artistPage.url()).toMatch(/\/artist\/\?loadVideo=[0-9a-f-]+$/)
     // The "Loaded recording:" toast auto-dismisses after ~3s, so it is not a

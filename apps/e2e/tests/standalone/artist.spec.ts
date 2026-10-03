@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * Smoke tests for the ESCAPEARTIST offline build.
@@ -15,7 +16,7 @@ const ARTIST_URL = 'http://localhost:5185'
 test.describe('ESCAPEARTIST Standalone - App Loading', () => {
   test('opens straight into the editor', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const html = await page.content()
     expect(html).toContain('<!DOCTYPE html>')
@@ -30,7 +31,7 @@ test.describe('ESCAPEARTIST Standalone - App Loading', () => {
 
   test('does not show the ESCAPEPLAN hub link', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // The hub link only renders in hosted mode (isStandaloneMode() gates it)
     expect(await page.getByRole('link', { name: '← ESCAPE Suite' }).count()).toBe(0)
@@ -44,7 +45,7 @@ test.describe('ESCAPEARTIST Standalone - App Loading', () => {
 
   test('app content is visible', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
     await page.waitForTimeout(1000)
 
     // App should show some content (not just loading or error)
@@ -56,7 +57,7 @@ test.describe('ESCAPEARTIST Standalone - App Loading', () => {
 test.describe('ESCAPEARTIST Standalone - Editor Interface', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('shows editor UI elements', async ({ page }) => {
@@ -119,7 +120,7 @@ test.describe('ESCAPEARTIST Standalone - Editor Interface', () => {
 test.describe('ESCAPEARTIST Standalone - Playback Controls', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('has play button', async ({ page }) => {
@@ -146,7 +147,7 @@ test.describe('ESCAPEARTIST Standalone - Playback Controls', () => {
 test.describe('ESCAPEARTIST Standalone - Theme Support', () => {
   test('has theme toggle', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const themeToggle = page
       .getByRole('button', { name: /theme|dark|light/i })
@@ -161,7 +162,7 @@ test.describe('ESCAPEARTIST Standalone - Theme Support', () => {
   test('respects system color scheme', async ({ page }) => {
     await page.emulateMedia({ colorScheme: 'dark' })
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const isDark = await page.evaluate(() => {
       return (
@@ -187,7 +188,7 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
     })
 
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
     await page.waitForTimeout(2000)
 
     // The offline build is air-gapped: no auth, no analytics, no phoning home
@@ -205,7 +206,7 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
     })
 
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Single-file build should not request external JS/CSS
     const externalAssets = requests.filter(
@@ -218,7 +219,7 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
 test.describe('ESCAPEARTIST Standalone - IndexedDB Storage', () => {
   test('can access IndexedDB', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const hasIndexedDB = await page.evaluate(() => {
       return 'indexedDB' in window
@@ -229,7 +230,7 @@ test.describe('ESCAPEARTIST Standalone - IndexedDB Storage', () => {
 
   test('creates database on load', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
     await page.waitForTimeout(2000)
 
     const databases = await page.evaluate(async () => {

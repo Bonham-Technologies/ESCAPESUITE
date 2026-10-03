@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { canConvertToMp4 } from '../../utils/webcodecs'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * ESCAPECRAFT records the webcam and each audio source as its own file
@@ -149,7 +150,7 @@ async function recordSeparateTracksTake(page: Page): Promise<void> {
   await grantMediaPermissions(page)
 
   await page.goto(CRAFT_URL)
-  await page.waitForLoadState('networkidle')
+  await waitForAppReady(page, 'craft')
 
   // Capability detection is async; the source toggles stay disabled until it
   // answers, and a take started before then acquires no stream.

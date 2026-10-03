@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 const GITHUB_URL = 'https://github.com/Bonham-Technologies/ESCAPESUITE'
 
 test.describe('ESCAPEPLAN Landing Page', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('app loads without errors', async ({ page }) => {
@@ -53,7 +54,7 @@ test.describe('ESCAPEPLAN Landing Page', () => {
 test.describe('ESCAPEPLAN Navigation', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('page has working scroll', async ({ page }) => {
@@ -74,7 +75,7 @@ test.describe('ESCAPEPLAN Navigation', () => {
 
   test('unknown routes fall back to the landing page', async ({ page }) => {
     await page.goto('http://localhost:5173/nonexistent-page-12345')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     await expect(page).toHaveURL('http://localhost:5173/')
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible()

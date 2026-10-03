@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
 import { seedTextClip, openExportDialog } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEARTIST Video Import', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('server responds', async ({ page }) => {
@@ -57,7 +58,7 @@ test.describe('ESCAPEARTIST Video Import', () => {
 test.describe('ESCAPEARTIST Toolbar', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('has playback controls', async ({ page }) => {
@@ -104,7 +105,7 @@ test.describe('ESCAPEARTIST Toolbar', () => {
 test.describe('ESCAPEARTIST Export Options', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('export dialog can be triggered', async ({ page }) => {
