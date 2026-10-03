@@ -1026,8 +1026,15 @@ Clips support animated properties via keyframes:
   through `announce`, which the hook now returns beside `nudgeMessage` so both refusals alternate
   through the same `aria-live` region rather than a second one the test suite's
   `getByRole('status')` could no longer resolve unambiguously. `keyframes` here is every handle the
-  graph draws, presets included, so landing on one of those is refused too — the store would merge
-  the two all the same.
+  graph draws, presets included, so landing on a preset's handle is refused too — but for a
+  different reason: the store deletes nothing there (a preset is regenerated from `animation.in` /
+  `out`, never stored as a keyframe), but `getAllKeyframesForProperty` merges two handles within the
+  same epsilon and the custom one wins, so the preset's handle would simply vanish behind it.
+  **Known limitation**: the refusal still lets the point follow the pointer and then snap back on
+  release, the shape of drag ESCSUITE-88 ruled against for the lock — unlike a trim, which (since
+  ESCSUITE-161) stops dead at its neighbour rather than overshooting and bouncing back, this drag
+  cannot know it is heading for an occupied time until the drop, so there is nowhere earlier to stop
+  it; tracked as a follow-up, ESCSUITE-183.
 
 ### Preview (`src/components/Preview/`)
 `PreviewPlayer.tsx` is wiring only — store subscriptions, the `<canvas>`, and a thin

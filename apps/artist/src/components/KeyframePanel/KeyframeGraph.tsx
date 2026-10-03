@@ -362,15 +362,15 @@ export function KeyframeGraph({
         const timeChanged = Math.abs(currentDrag.currentTime - currentDrag.originalTime) > 0.001;
         const valueChanged = Math.abs(currentDrag.currentValue - currentDrag.originalValue) > 0.001;
 
-        // `moveClipKeyframe` deletes whatever already sits within
-        // KEYFRAME_TIME_EPSILON of the target, so a drop that still lands
-        // there is refused outright instead of silently destroying a
+        // `moveClipKeyframe` deletes whatever CUSTOM keyframe already sits
+        // within KEYFRAME_TIME_EPSILON of the target, so a drop that still
+        // lands there is refused outright instead of silently destroying a
         // neighbour (ESCSUITE-179) — the same refusal the keyboard's own
         // `nudgeTime` makes for the identical situation, and announced
         // through the exact same message and live region (`announce`,
         // shared out of `useKeyframeGraphKeyboard`). `keyframes` is every
         // handle drawn on the graph, presets included: landing on a
-        // preset's handle is refused too, but for a different reason — the
+        // PRESET's handle is refused too, but for a different reason — the
         // store deletes nothing there (a preset is regenerated from
         // `animation.in`/`out`, never stored as a keyframe), but
         // `getAllKeyframesForProperty` merges two handles within the same
