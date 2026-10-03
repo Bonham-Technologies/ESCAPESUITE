@@ -233,6 +233,19 @@
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   margin-bottom: 0.25rem;
+  /* Always in the DOM (ESCSUITE-176) — only visibility is conditional, so
+     axe-core and keyboard users (Tab onto the slider) can both reach it.
+     opacity + pointer-events, not display/visibility: either of those would
+     drop the slider from the accessibility tree and the tab order too. */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.volumeContainer:hover .volumeSliderContainer,
+.volumeContainer:focus-within .volumeSliderContainer {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .volumeSlider {

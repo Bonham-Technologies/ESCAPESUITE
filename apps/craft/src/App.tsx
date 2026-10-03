@@ -43,6 +43,7 @@ function App() {
   const recordings = useRecorderStore((s) => s.recordings);
   const notice = useRecorderStore((s) => s.notice);
   const hasStorageSpace = useRecorderStore((s) => s.hasStorageSpace);
+  const hasSeparateTracksSpace = useRecorderStore((s) => s.hasSeparateTracksSpace);
   const setConfig = useRecorderStore((s) => s.setConfig);
   const setCapabilities = useRecorderStore((s) => s.setCapabilities);
   const setDetailedCapabilities = useRecorderStore((s) => s.setDetailedCapabilities);
@@ -113,7 +114,13 @@ function App() {
 
   // Why the Record button (and the R shortcut with it) cannot start a take.
   // Computed here because it is a fact about the store, not about the bar.
-  const blockedReason = recordBlockedReason(capabilitiesReady, config, capabilities, hasStorageSpace);
+  const blockedReason = recordBlockedReason(
+    capabilitiesReady,
+    config,
+    capabilities,
+    hasStorageSpace,
+    hasSeparateTracksSpace
+  );
 
   const {
     cancelCountdown,

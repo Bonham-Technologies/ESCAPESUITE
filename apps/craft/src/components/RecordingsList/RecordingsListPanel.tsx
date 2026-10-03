@@ -3,7 +3,7 @@ import { isEmbedded } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
 import { uploadToHost } from '../../utils/uploadToHost';
-import { UPLOAD_UNAVAILABLE } from '../../utils/notices';
+import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices';
 import { RecordingsList } from './RecordingsList';
 import type { Recording } from '../../store/types';
 
@@ -114,6 +114,10 @@ export function RecordingsListPanel({
         ? await uploadToHost(id, name, part)
         : await uploadToHost(id, name);
       if (result === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+      // ESCSUITE-176: `uploadToHost` never broadcasts a recording's bytes —
+      // without a `?hostOrigin=` it can parse, it posts nothing at all and
+      // says so here, the same shape as the missing-blob case above.
+      if (result === 'refused') setNotice(UPLOAD_NO_HOST_ORIGIN);
     } catch {
       // `getVideoBlob` reaches `getDB()`, which throws outright where
       // IndexedDB is blocked or unreadable. That is the same answer as an

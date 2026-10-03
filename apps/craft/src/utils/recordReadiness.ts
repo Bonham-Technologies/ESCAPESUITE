@@ -21,6 +21,7 @@
 // delete, and read from the store — so the button is already disabled, with
 // the reason on screen, before the user clicks.
 import type { EnvironmentCapabilities, RecordingConfig } from '../store/types'
+import { SEPARATE_TRACKS_NO_SPACE_REASON } from './separateTracksReadiness'
 
 export const CHECKING_CAPABILITIES = 'Checking what this browser can capture…'
 export const NO_SOURCE_ENABLED = 'Turn on a source before recording'
@@ -33,7 +34,17 @@ export function recordBlockedReason(
   capabilitiesReady: boolean,
   config: RecordingConfig,
   capabilities: EnvironmentCapabilities,
-  hasStorageSpace: boolean
+  hasStorageSpace: boolean,
+  /**
+   * Headroom for a separate-tracks take specifically — roughly double a plain
+   * one (`SEPARATE_TRACKS_SIZE_FACTOR` in `store/recorderStore.ts`). Asked
+   * only when the mode would actually run: a separate-tracks toggle left on
+   * in a PiP take. Before this (ESCSUITE-176), the same headroom check only
+   * ever reached the toggle itself — which can disable switching the mode
+   * *on*, but not a take already configured for it — so the button stayed
+   * live and the take started at double the size it had room for.
+   */
+  hasSeparateTracksSpace: boolean
 ): string | null {
   if (!capabilitiesReady) {
     return CHECKING_CAPABILITIES
@@ -52,7 +63,22 @@ export function recordBlockedReason(
     return NO_SOURCE_AVAILABLE
   }
 
-  // Last, because the source reasons are about the toggle the user just
-  // touched and this one is a background fact they did not.
-  return hasStorageSpace ? null : NO_STORAGE_SPACE
+  if (!hasStorageSpace) {
+    return NO_STORAGE_SPACE
+  }
+
+  // Last, because it is the narrowest of the storage reasons: a separate-
+  // tracks take is a PiP take (both screen and webcam) with the toggle on.
+  // Anything else needs no more room than the plain check above already
+  // guaranteed.
+  if (
+    config.separateTracks &&
+    config.screenEnabled &&
+    config.webcamEnabled &&
+    !hasSeparateTracksSpace
+  ) {
+    return SEPARATE_TRACKS_NO_SPACE_REASON
+  }
+
+  return null
 }

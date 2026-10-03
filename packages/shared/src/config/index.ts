@@ -42,10 +42,13 @@ export const editorUrl = (params?: Record<string, string>): string => {
 // The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json;
 // self-hosted builds must set their own.
 //
-// The value must be a bare origin ('https://host.example', port allowed): a URL
-// whose serialisation is exactly its own origin. Anything else is ignored, with
-// one warning per page load so a misconfigured host is noticed but a repeated
-// call cannot flood the console.
+// The value need not be a bare origin: anything `new URL(v)` can parse is
+// accepted and normalised down to its `.origin` (ESCSUITE-176) — a trailing
+// slash or a path included, since a host is as likely to build this from
+// `location.href` or a routed URL as to type a bare origin by hand. Only a
+// value `new URL()` cannot parse at all is ignored, with one warning per page
+// load so a misconfigured host is noticed but a repeated call cannot flood
+// the console.
 let hostOriginWarned = false
 
 export const parseHostOrigin = (
@@ -55,7 +58,12 @@ export const parseHostOrigin = (
   if (!value) return null
 
   try {
-    if (new URL(value).origin === value) return value
+    const origin = new URL(value).origin
+    // An opaque origin (data:, or any scheme with no authority) serialises as
+    // the literal string "null" rather than throwing — accepting it would
+    // hand postMessage a targetOrigin that matches a sandboxed iframe's own
+    // origin, not a real host.
+    if (origin !== 'null') return origin
   } catch {
     // Falls through to the warning below.
   }
@@ -63,7 +71,7 @@ export const parseHostOrigin = (
   if (!hostOriginWarned) {
     hostOriginWarned = true
     console.warn(
-      `[config] ignoring invalid hostOrigin "${value}" — expected a bare origin such as https://host.example`
+      `[config] ignoring invalid hostOrigin "${value}" — expected a URL such as https://host.example`
     )
   }
   return null

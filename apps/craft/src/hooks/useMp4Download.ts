@@ -32,6 +32,7 @@ import {
   mp4ConversionFailed,
   MP4_SAVED_WITHOUT_AUDIO,
   MP4_SAVED_WITHOUT_WEBCAM,
+  RECORDING_UNAVAILABLE,
 } from '../utils/notices'
 import { safeFileName } from '../utils/recordingFormat'
 import type { ConversionProgress } from '../core/converter'
@@ -214,9 +215,13 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // `?.blob` rather than `!record`: one read now answers two questions where
       // `getVideoBlob` answered one, and the second is the one that matters here.
       // A row listed with no bytes behind it — a half-failed save, or storage
-      // cleared under the tab — has always been a silent no-op, and handing an
-      // absent blob to the converter would turn it into `Conversion failed`.
-      if (!record?.blob) return
+      // cleared under the tab — raises the same `RECORDING_UNAVAILABLE` Play and
+      // Download already say for exactly this fact (ESCSUITE-146, ESCSUITE-176):
+      // silence here was indistinguishable from a conversion that never started.
+      if (!record?.blob) {
+        setNotice(RECORDING_UNAVAILABLE)
+        return
+      }
 
       // A take recorded as separate tracks is put back together here: the MP4
       // is the screen with the camera drawn into the corner it was recorded in

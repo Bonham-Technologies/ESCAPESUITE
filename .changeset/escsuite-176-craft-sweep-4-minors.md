@@ -1,0 +1,7 @@
+---
+'@escapesuite/craft': patch
+---
+
+Seven small fixes from the latest accessibility and correctness sweep: a cancelled take no longer leaves its preview frame for the next one, "Upload to host" never broadcasts a recording's bytes to the wrong page, the separate-tracks storage check now reaches the Record button itself, a failed MP4/M4A conversion of a deleted recording says so, the playback dialog's volume slider is reachable by keyboard and screen readers, a progress-bar drag can no longer leak listeners if the dialog closes mid-drag, and the webcam overlay's position and shape buttons announce which one is selected.
+
+A handful of small but real bugs: ending a take by closing the browser's "Stop sharing" bar right after cancelling a previous one could save the new recording with the old one's thumbnail; switching on "Record webcam as a separate track" and then recording with only enough storage for one track used to start the take anyway instead of refusing it up front; converting a recording to MP4 or M4A after it had been deleted from ESCAPEARTIST's media library in another tab silently did nothing instead of saying so; the volume slider only existed in the page while the mouse was hovering it, so it had no name for assistive tech and no way for a keyboard user to reach it; dragging the scrubber and then closing the player left two listeners attached to the whole document forever; and the webcam overlay's corner and shape buttons marked the current choice with styling alone, with nothing for a screen reader to read.

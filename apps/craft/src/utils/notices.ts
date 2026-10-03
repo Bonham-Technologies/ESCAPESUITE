@@ -89,6 +89,17 @@ export const UPLOAD_UNAVAILABLE =
   'That recording could not be read from your library — nothing was sent to the host.'
 
 /**
+ * Said when "Upload to host" has bytes to send but nowhere safe to send them:
+ * `?hostOrigin=` is absent, or carries a value `new URL()` cannot parse at
+ * all (ESCSUITE-176). The id-only `SEND_TO_EDITOR` message may still fall
+ * back to `'*'` — an opaque id is useless to a framer that cannot read the
+ * shared IndexedDB — but a recording's bytes are never broadcast to whoever
+ * happens to be framing the page. See `utils/uploadToHost.ts`.
+ */
+export const UPLOAD_NO_HOST_ORIGIN =
+  'Nothing was sent — this page has no valid ?hostOrigin, so there is no host to send the recording to.'
+
+/**
  * Said after a conversion that could not include the take's camera part.
  *
  * Two things reach it: the part was listed and its bytes were gone

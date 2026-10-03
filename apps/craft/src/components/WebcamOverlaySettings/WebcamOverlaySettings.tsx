@@ -75,6 +75,7 @@ export function WebcamOverlaySettings({
                 }`}
                 onClick={() => onChange({ webcamPosition: pos })}
                 disabled={disabled}
+                aria-pressed={config.webcamPosition === pos}
               >
                 {pos.replace('-', ' ')}
               </button>
@@ -107,6 +108,7 @@ export function WebcamOverlaySettings({
               }`}
               onClick={() => onChange({ webcamShape: shape })}
               disabled={disabled}
+              aria-pressed={config.webcamShape === shape}
             >
               {shape}
             </button>

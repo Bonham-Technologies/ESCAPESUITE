@@ -18,6 +18,13 @@
 // but the decision is the caller's: `RecordingsListPanel` asks `isEmbedded()`
 // and only then offers the button. No analytics event: what a host does with
 // its own recordings is the host's business.
+//
+// This message carries bytes, so it never broadcasts (ESCSUITE-176): without
+// a `?hostOrigin=` that `parseHostOrigin()` can parse, nothing is posted at
+// all — the caller says so through the app's one notice channel. That is
+// stricter than `sendToEditor`'s id-only post, which still falls back to
+// `'*'`: an opaque id is useless to a framer that cannot reach the shared
+// IndexedDB, but a recording's bytes are not.
 
 import { parseHostOrigin } from '@escapesuite/shared/config';
 import { getVideoBlob } from '../core/storage';
@@ -40,12 +47,21 @@ export const uploadToHost = async (
    * that carries every part.
    */
   part?: { role?: RecordingRole; takeId?: string }
-): Promise<'posted' | 'missing'> => {
+): Promise<'posted' | 'missing' | 'refused'> => {
   const blob = await getVideoBlob(id);
   // The row is drawn from store metadata, which can outlive the blob — a
   // failed save, or storage cleared under the tab. Nothing is posted then;
   // the caller says so through the app's one notice channel.
   if (!blob) return 'missing';
+
+  // A host that named itself with `?hostOrigin=` gets the post addressed to
+  // that origin; one that did not, or got it wrong, gets nothing at all
+  // (ESCSUITE-176) — this message carries the recording's **bytes**, and
+  // `'*'` would hand them to whoever happens to be framing the page, possibly
+  // after the real host has navigated away. Unlike `sendToEditor`'s id-only
+  // post, there is no safe broadcast fallback here.
+  const targetOrigin = parseHostOrigin();
+  if (targetOrigin === null) return 'refused';
 
   // Every part of the take, in one message, when this row names the take.
   // A companion row's `takeId` names a different record, so it posts itself
@@ -68,9 +84,6 @@ export const uploadToHost = async (
     }
   }
 
-  // A host that named itself with `?hostOrigin=` gets the post addressed to
-  // that origin; otherwise it goes to whoever is framing us.
-  const targetOrigin = parseHostOrigin() ?? '*';
   window.parent.postMessage(
     {
       type: 'UPLOAD_RECORDING',

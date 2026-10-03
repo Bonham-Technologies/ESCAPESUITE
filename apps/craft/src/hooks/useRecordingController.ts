@@ -64,7 +64,12 @@ export interface RecordingControllerDeps {
   setIsPiPActive: (active: boolean) => void;
   /** Written here at createRecorder time, read by saveRecording. */
   recorderTypeRef: RefObject<'webcodecs' | 'mediarecorder'>;
-  /** Written by handleStopRecording, read and cleared by saveRecording. */
+  /**
+   * Written by handleStopRecording, read and cleared by saveRecording. Also
+   * cleared by every path that throws a take away instead of saving it — both
+   * cancels and the unmount teardown (ESCSUITE-176) — so a take that never
+   * reaches a save cannot leave its frame for the next one that does.
+   */
   capturedThumbnailRef: RefObject<Blob | null>;
   saveRecording: SaveRecording;
   /** The one notice channel — see utils/notices.ts. Cleared when a take starts. */
@@ -255,6 +260,13 @@ export function useRecordingController({
     disposeRecorder();
     stopAllStreamsRef.current();
     zeroAudioLevels();
+    // ESCSUITE-176: the frame `handleStopRecording` grabs is written before
+    // `recorder.stop()` even resolves, so a take thrown away here can leave
+    // one behind — nobody calls `handleStopRecording` on this path, and
+    // `useRecordingSave` only clears the ref once a save actually runs. Left
+    // alone, the *next* take to end on its own (the recorder's own onStop,
+    // not through a Stop click) would be saved with this screen's last frame.
+    capturedThumbnailRef.current = null;
 
     // The store is a module singleton: it outlives this component. Left as it
     // was, the next mount would come up mid-take — 'recording' with a duration
@@ -263,7 +275,7 @@ export function useRecordingController({
     recorder.setState('idle');
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
-  }, [clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
@@ -276,9 +288,12 @@ export function useRecordingController({
     clearCountdownTicker();
     disposeRecorder();
     zeroAudioLevels();
+    // ESCSUITE-176: see the unmount teardown's comment above — the same frame
+    // would otherwise outlive a countdown nobody ever let finish.
+    capturedThumbnailRef.current = null;
     setState('idle');
     stopAllStreams();
-  }, [clearCountdownTicker, disposeRecorder, setState, stopAllStreams, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearCountdownTicker, disposeRecorder, setState, stopAllStreams, zeroAudioLevels]);
 
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
@@ -289,11 +304,13 @@ export function useRecordingController({
     clearDurationTicker();
     disposeRecorder();
     zeroAudioLevels();
+    // ESCSUITE-176: see the unmount teardown's comment above.
+    capturedThumbnailRef.current = null;
 
     setState('idle');
     setCurrentDuration(0);
     stopAllStreams();
-  }, [clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
 
   // Pause recording
   const handlePauseRecording = useCallback(() => {

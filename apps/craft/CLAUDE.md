@@ -43,9 +43,14 @@ whole-store subscription re-renders `App`, every component below it and every ho
 that moves two meter bars. The three fields nothing outside the Sources panel reads
 (`detailedCapabilities`, `audioLevels`, `systemAudioShared`) are not in `App` at all:
 `SourceTogglesPanel` subscribes to them and renders the props-only `SourceToggles`, because a
-field `App` merely passes through still re-renders `App`. `hasSeparateTracksSpace` is the same
-shape one panel further down: `WebcamOverlaySettingsPanel` subscribes to it, turns it into the
-disabled toggle's reason and renders the props-only `WebcamOverlaySettings` (ESCSUITE-14). `App.rerender.test.tsx` is the net,
+field `App` merely passes through still re-renders `App`. `WebcamOverlaySettingsPanel` has its
+own, separate subscription to `hasSeparateTracksSpace`, which it turns into the disabled toggle's
+reason and renders the props-only `WebcamOverlaySettings` (ESCSUITE-14). `App` **also** selects
+`hasSeparateTracksSpace` since ESCSUITE-176, because `recordBlockedReason()` needs it for the
+Record button's own gate (see "Separate tracks" below) — the two subscriptions answer two
+different questions (can the toggle be switched on; can *this* configured take be started) and
+happen to read the same field, which both `refreshStorageSpace()` calls write in one `set()`, so
+the two components still re-render together rather than drifting. `App.rerender.test.tsx` is the net,
 and nothing else is: it counts each component's renders across 12 level pushes and asserts the
 five non-subscribers at exactly 0 (measured 2026-09-16, before → after: `App` 12 → 0,
 `AppHeader` 12 → 0, `RecordingsList` 12 → 0, `RecorderControls` 12 → 0, `RecordingPreview`
@@ -96,7 +101,7 @@ selector contract above.
 | `utils/previewThumbnail.ts` | Capturing a thumbnail frame from the live preview (compositor canvas or `<video>`) and drawing the placeholder used when every other capture path fails. Canvas creation and `toBlob` are its only side effects |
 | `utils/notices.ts` | The app's whole vocabulary of notices — fourteen strings and one one-argument string (`mp4ConversionFailed`), one per thing that can go wrong or be worth saying afterwards. See "Errors and notices" below; there is deliberately no second channel and no notification framework |
 | `utils/downloadBlob.ts` | The anchor both downloads share: object URL, `<a download>`, click, remove, deferred revoke. No naming logic of its own — the caller hands it a finished filename |
-| `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace`. Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
+| `utils/recordReadiness.ts` | `recordBlockedReason` — whether the Record button may start a take, and the sentence shown when it may not. Pure, over `capabilitiesReady` + the config + the capabilities + `hasStorageSpace` + `hasSeparateTracksSpace` (ESCSUITE-176: asked only when the config would actually run the mode — both sources on and the toggle on — reusing `SEPARATE_TRACKS_NO_SPACE_REASON` from `separateTracksReadiness.ts` rather than a reason of its own). Owns `NO_STORAGE_SPACE`, which is a *button reason* rather than a notice |
 | `utils/separateTracksReadiness.ts` | `separateTracksBlockedReason` — whether "Record webcam as a separate track" may be switched on, and the sentence the toggle says when it may not. Pure, over two booleans: what the browser can do (`canRecordSeparateTracks()`) and whether there is room for two tracks (`hasSeparateTracksSpace`). The browser's answer wins when both are false, because nobody can act on "not enough storage" in Safari. Owns both reasons, beside their gate for the same reason `NO_STORAGE_SPACE` is |
 | `utils/takeOrder.ts` | `orderTakes` — newest take first, each take's companion rows directly under the primary they belong to **in role order** (`companionRank`: webcam, then mic, then system, a role this build does not know last), orphaned companions last. Pure over the list; `loadRecordings` is its only caller |
 | `utils/takeParts.ts` | Reading a take's parts back out of storage, for the two things that need them: `loadWebcamCompanion(primary)` — the camera half plus the primary's `overlayPlacement`, for the composite MP4, with **three** answers because "there is no camera part" (a plain take, one saved before ESCSUITE-14, or one whose camera row was deleted, which demotes it) and "there is one I cannot read" are different facts; and `loadTakeParts(takeId, { primaryBlob? })` — every part with its bytes, primary first then camera then sound, **empty** for a take that is one file, for `UPLOAD_RECORDING.parts`. The optional `primaryBlob` is bytes the caller already holds, so the take's largest file is not read twice. A plain take costs no storage read at all. The role order comes from `companionParts.companionRank`, not from a second list |
@@ -106,7 +111,7 @@ selector contract above.
 | `components/AppHeader/AppHeader.tsx` | The app bar: the suite link (hidden in the standalone build), the wordmark, the `aria-live` status region — carrying both the recorder state and the app's one `notice` — and the two header buttons. It resolves `isStandaloneMode()` and `editorUrl()` itself, because both are deployment facts rather than App state |
 | `components/SourceToggles/SourceToggles.tsx` | The Sources panel: one row per capture source — written out four times rather than mapped, since each has its own icon, capability slice and config flag — plus the audio meters shown while an audio source is recording. Also exports the `RecordingSource` union |
 | `components/SourceToggles/SourceTogglesPanel.tsx` | The Sources panel's subscription: the five store fields `SourceToggles` draws, selected here rather than in `App` so the ~12-a-second `audioLevels` push redraws this panel and nothing else. Takes `disabled`, `showMeters` and `onToggleSource` as props — `disabled` is `App`'s `sidebarLocked`, true from the moment a take starts preparing until the write to storage is done (ESCSUITE-104), not just while it is actively recording; `showMeters` is the narrower `isRecordingActive`, kept apart because the meters draw live levels the store never resets between takes and must not sit on screen, frozen, through the whole time a finished take is saving. `SourceToggles` itself stays driven by props alone, which is what its own test asserts |
-| `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, plus the "Record webcam as a separate track" toggle and the one paragraph under it that carries either `SEPARATE_TRACKS_HELP` or the reason the toggle is disabled — never both, so it is one `<p>` and one `aria-describedby` target. Every control reports a config patch; `separateTracksReason` arrives as a prop, so this stays props-only. It draws unconditionally; whether the panel exists at all is the caller's decision. `disabled` (from `WebcamOverlaySettingsPanel`, ultimately `App`'s `sidebarLocked`) covers a take that is preparing or being saved as well as one still recording (ESCSUITE-104) — the stored placement is `captured` once `acquireStreams()` resolves and must not look movable before that snapshot or while the write it feeds is still happening |
+| `components/WebcamOverlaySettings/WebcamOverlaySettings.tsx` | The PiP overlay's position, size and shape, plus the "Record webcam as a separate track" toggle and the one paragraph under it that carries either `SEPARATE_TRACKS_HELP` or the reason the toggle is disabled — never both, so it is one `<p>` and one `aria-describedby` target. Every control reports a config patch; `separateTracksReason` arrives as a prop, so this stays props-only. It draws unconditionally; whether the panel exists at all is the caller's decision. `disabled` (from `WebcamOverlaySettingsPanel`, ultimately `App`'s `sidebarLocked`) covers a take that is preparing or being saved as well as one still recording (ESCSUITE-104) — the stored placement is `captured` once `acquireStreams()` resolves and must not look movable before that snapshot or while the write it feeds is still happening. The four position buttons and the two shape buttons each carry `aria-pressed` (ESCSUITE-176), the same shape the separate-tracks toggle already had — before this, which one was current was a CSS class only, so a screen-reader user had no way to tell where the webcam sat or what shape it was |
 | `components/WebcamOverlaySettings/WebcamOverlaySettingsPanel.tsx` | The overlay panel's one subscription: `hasSeparateTracksSpace`, turned into `separateTracksReason` with `canRecordSeparateTracks()`. Selected here rather than in `App` for the same reason `SourceTogglesPanel` owns `audioLevels` — a field `App` merely passes through still re-renders `App` and every hook it calls |
 | `components/RecordingsList/RecordingsList.tsx` | The library panel: each saved take's thumbnail, name, formatted duration and size, and its six action buttons (four on any companion row — webcam, microphone or system audio — none of which carries MP4 or M4A; see "A take can be several files"), each labelled with the recording's own name — plus the conversion's progress row (named after the format actually running) and the one visible note the MP4 and M4A buttons are described by (`mp4Note`, which is not the same thing as `mp4BlockedReason` — see "Download Formats"). The one gate it decides for itself is `recording.hasAudio`, which disables M4A: a fact about the row rather than about the app. It also resolves each row's `companionPartFor(recording.role)`, which is what hides MP4 and M4A on a companion row and hands `onSendToEditor` the take's primary id when that row is actually present in the list, else the row's own id (ESCSUITE-145). Props only; it touches no storage and holds no state |
 | `components/RecordingsList/RecordingsListPanel.tsx` | The library's own subscription and state: `useMp4Download` lives here rather than in `App`, so a progress report redraws the list and nothing else. It is also where the *format* is chosen — `onDownloadMp4` and `onDownloadM4a` are the same `startMp4Download` with a different last argument. Selects only `setNotice`, which is a stable action. The other four handlers still come down from `App`, because `useRecordingLibrary` owns the playback dialog the shortcuts need |
@@ -197,6 +202,11 @@ the shared IndexedDB row without telling this one (ESCSUITE-146). Before this, b
 nothing at all: no dialog, no file, no explanation, while the row kept showing its name, duration,
 size and thumbnail. Nothing is disabled either way — the ruling is that a row whose blob is
 missing is still deletable — only Play and Download now say so instead of the silent no-op.
+`useMp4Download`'s `startMp4Download` raises the same notice for the same fact (ESCSUITE-176): a
+row whose `getVideo()` read comes back with no `blob` returns from the conversion instead of
+handing the converter nothing, which used to flash "Starting conversion… 0%" and silently return
+to idle with no file and nothing said — one MP4/M4A guard covers both formats, same as everything
+else in that hook.
 
 ### The record button only offers what it can deliver
 
@@ -431,7 +441,13 @@ Reusable video player with full playback controls:
 - **Play/Pause**: the transport button, Space or K, or a click on the video itself
 - **Seeking**: click or drag the progress bar; Left/Right skip ±5s; 0 or Home jumps to the
   start and End to the end. There is no Shift modifier
-- **Volume**: a slider with a mute toggle (M); Up/Down move it in 0.1 steps
+- **Volume**: a slider with a mute toggle (M); Up/Down move it in 0.1 steps. The slider carries
+  `aria-label="Volume"` and stays mounted always — only its visibility (hover or
+  `:focus-within` on `.volumeContainer`, in `VideoPlayer.module.css`) is conditional
+  (ESCSUITE-176). Before this it mounted only on `onMouseEnter`, so it had no accessible name
+  axe could ever see and a keyboard user tabbing through the controls could never reach it —
+  opacity + `pointer-events`, not `display`/`visibility`, keep it in the accessibility tree and
+  the tab order while invisible
 - **Restart**: its own transport button — seek to 0 and play
 - **At the end of the video** it resets to the beginning and stops. It does not loop
 - **Duration**: `video.duration` is used when it is finite and above 0, and `knownDuration`
@@ -441,6 +457,12 @@ Reusable video player with full playback controls:
   `window`; the shared `useDialogBehaviour` binds Escape and Tab on `document` in the capture
   phase, so while the playback dialog is open the dialog's Escape runs first and the player's
   does not
+- **The progress-bar drag's two `document` listeners are removed on unmount, not only on their
+  own mouseup** (ESCSUITE-176): a parent-driven close, a `?loadVideo` navigation or HMR can all
+  skip the mouseup that used to be the only thing that removed them, leaving both listeners live
+  for the rest of the tab — calling `seekTo` against a detached `<video>` and setting state on an
+  unmounted component. `handleProgressMouseDown` now also stashes its own removal in a ref an
+  unmount effect calls
 
 ### Capability Detection (`src/core/permissions.ts`)
 Enhanced capability detection with detailed unavailability reasons:
@@ -489,7 +511,14 @@ The mode is **Chromium/Edge only** and says so: `canRecordSeparateTracks()`
 `utils/separateTracksReadiness.ts` turns a "no" into the sentence on the disabled toggle —
 the browser's answer first, then the storage headroom, which is measured for roughly double
 the bitrate (`hasSeparateTracksSpace`, computed beside the record button's own
-`hasStorageSpace` by one `refreshStorageSpace()`). The webcam pipeline is deliberately
+`hasStorageSpace` by one `refreshStorageSpace()`). **The same headroom check also reaches the
+Record button** (ESCSUITE-176): the toggle's gate can refuse switching the mode *on*, but not a
+take already configured for it, so before this the button stayed live and a take with no room for
+two tracks started anyway, failing at the save (`SAVE_FAILED`) or losing a companion
+(`SEPARATE_TRACK_NOT_SAVED`). `recordBlockedReason()` asks the same `hasSeparateTracksSpace`
+question whenever the config would actually run the mode (both sources on, the toggle on), and
+reuses `SEPARATE_TRACKS_NO_SPACE_REASON` rather than a reason of its own — the two gates say the
+exact same sentence for the exact same fact. The webcam pipeline is deliberately
 track-processor only: the primary keeps its `<video>`+canvas fallback because a take must
 record *something*, and where the processor is missing the recorder warns and records the
 screen alone — as it does for **every** way the webcam half can refuse to be built, including a
@@ -1117,6 +1146,16 @@ next one's meter — closed by `showMeters` for every state but `'countdown'` / 
 `'paused'`, ESCSUITE-104 — never opens on a level the take before it left behind; `'countdown'`
 is the state that matters here, since the recorder (and its monitor) is already initialize()d by
 the time a countdown starts, before the meter has a reading of its own to show.
+
+**`capturedThumbnailRef` follows the same rule (ESCSUITE-176).** `handleStopRecording` writes it
+before `recorder.stop()` even resolves, and `useRecordingSave` is the only place that reads and
+clears it — once a save actually runs. A take thrown away on any other path never reaches a save,
+so without a matching clear there, the ref still held the thrown-away take's frame the next time
+one was needed: a cancel followed by a take that ends on its own (the recorder's own `onStop` —
+"Stop sharing" is exactly this, not a Stop click) read `capturedThumbnailRef.current` in
+`useRecordingSave` and preferred it over decoding one from the new take's own blob, so the second
+take was saved with the first take's picture. The same three paths that call `zeroAudioLevels()`
+now also clear this ref: `handleCancelRecording`, `cancelCountdown`, and the unmount teardown.
 `useRecordingController.test.ts`'s "audio levels" cases pin it: non-zero while a take is live,
 zero after a stop asked for and one the recorder fired on its own, zero after each of the two
 cancel paths, and zero already sitting there the moment the next take reaches `'countdown'`.
@@ -1177,20 +1216,38 @@ host, not CRAFT, is what would otherwise show the result, so silence would look
 like success. See `src/utils/uploadToHost.ts`. No analytics event: what a host
 does with its own recordings is the host's business.
 
+**This message never broadcasts (ESCSUITE-176).** `uploadToHost()` returns
+`'posted' | 'missing' | 'refused'`, and without a `?hostOrigin=` that
+`parseHostOrigin()` can parse it returns `'refused'` and posts nothing at
+all — `RecordingsListPanel` reports that with `UPLOAD_NO_HOST_ORIGIN`, the
+same shape as `UPLOAD_UNAVAILABLE` for a missing blob but a different fact.
+Unlike `sendToEditor`'s id-only post, there is no `'*'` fallback here: this
+message carries the recording's **bytes**, and `'*'` would hand them to
+whoever happens to be framing the page, possibly after the real host has
+navigated elsewhere. The check runs after the missing-blob check (a byteless
+row reports as missing whatever `hostOrigin` says) and before the take's other
+parts are read, so a refused upload cannot cost CRAFT the companion reads.
+
 The header's **"Open Editor" button is deliberately not routed through the
 host**: embedded or not, it opens the editor itself. Only "Send to Editor" and
 "Upload to host", which hand over one specific recording, become messages.
 
 **`?hostOrigin=<origin>`**: when the host names its own origin on CRAFT's URL,
 both host-routed posts — `SEND_TO_EDITOR` and `UPLOAD_RECORDING` — are
-addressed to that origin instead of `'*'`. **A production host should always
-set it now that `UPLOAD_RECORDING` exists**: without it, `SEND_TO_EDITOR`'s
+addressed to that origin instead of `'*'`. **It is required, not merely
+recommended, for a host that offers "Upload to host"**: `SEND_TO_EDITOR`'s
 `'*'` fallback hands an arbitrary framer an opaque id it cannot resolve (the
-database is same-origin to CRAFT), but `UPLOAD_RECORDING`'s hands that same
-framer the recording's **bytes**. A deployment that ships this action wants
-both — its own origin here, and `frame-ancestors` below. The
-value must be a bare origin (`https://host.example`); anything else is ignored
-with one console warning and the post falls back to `'*'`. The parser is
+database is same-origin to CRAFT) and keeps that fallback, but
+`UPLOAD_RECORDING` does not — see above. A deployment that ships this action
+wants both — its own origin here, and `frame-ancestors` below. The value need
+not be a bare origin (ESCSUITE-176): `parseHostOrigin()` accepts anything
+`new URL()` can parse and normalises it down to `.origin`, so a trailing slash
+or a path — as naturally arrives from `location.href` or a routed URL as a
+typed-by-hand origin would — is accepted rather than silently degrading the
+post. Only a value `new URL()` cannot parse at all (or one with an opaque
+origin, such as a `data:` URL) is ignored, with one console warning; for
+`SEND_TO_EDITOR` that still means the `'*'` fallback, and for
+`UPLOAD_RECORDING` it means the refusal above. The parser is
 `parseHostOrigin()` in `@escapesuite/shared/config`, shared with ESCAPEARTIST.
 It protects the **host's** deployment, not against being framed — a hostile
 page that frames CRAFT also controls this URL. Refusing to be framed is
