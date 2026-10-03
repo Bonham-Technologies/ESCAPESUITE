@@ -17,6 +17,22 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { useKeyframeDrag } from './hooks/useKeyframeDrag'
 import type { Keyframe } from '../../store/types'
+// ESCSUITE-183's own pin, below: the graph's point drag builds its occupied
+// windows once per gesture too. Its own imports are kept here rather than
+// folded into the four above so the two 167/m4 cases stay byte-identical.
+import { fireEvent, render } from '@testing-library/react'
+import { createElement } from 'react'
+import { KeyframeGraph } from './KeyframeGraph'
+import { DEFAULT_ANIMATION, DEFAULT_EFFECTS, DEFAULT_TRANSFORM } from '../../store/types'
+import * as keyframeClamp from '../../utils/keyframeClamp'
+
+// The real implementation, behind a counting wrapper: this pins HOW OFTEN the
+// windows are built, not what they come out as, so every other case in this
+// file and in the suite keeps the real arithmetic.
+vi.mock('../../utils/keyframeClamp', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../utils/keyframeClamp')>()
+  return { ...actual, occupiedWindows: vi.fn(actual.occupiedWindows) }
+})
 
 const CLIP_DURATION = 10
 const TRACK_LEFT = 100
@@ -140,5 +156,84 @@ describe('useKeyframeDrag listener lifecycle (ESCSUITE-167 / m4)', () => {
     // `dragState.originalTime` on every call instead of cached at the
     // gesture's start.
     expect(filterSpy).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ESCSUITE-183, review finding 10: the graph's point drag grew the same
+// per-gesture snapshot the diamond row drag has had since ESCSUITE-167 / m4,
+// and it was unpinned — true by construction (it is built in
+// `handleKeyframeMouseDown`, the only path that starts a drag) rather than
+// enforced. This is the graph's mirror of the `.filter()` case above, counted
+// through the shared helper both drags now call.
+describe('KeyframeGraph drag occupied-window snapshot (ESCSUITE-183)', () => {
+  const GRAPH_CLIP_DURATION = 10
+
+  afterEach(() => {
+    cleanup()
+  })
+
+  function renderGraph() {
+    return render(
+      createElement(KeyframeGraph, {
+        property: 'opacity',
+        clipDuration: GRAPH_CLIP_DURATION,
+        animation: {
+          ...DEFAULT_ANIMATION,
+          keyframes: {
+            opacity: [
+              { time: 1, value: 1, easing: 'linear' },
+              { time: 5, value: 0.5, easing: 'linear' },
+              { time: 9, value: 0, easing: 'linear' },
+            ],
+          },
+        },
+        transform: DEFAULT_TRANSFORM,
+        effects: DEFAULT_EFFECTS,
+        playheadTime: 0,
+        locked: false,
+        onKeyframeMoved: () => true,
+        onKeyframeValueChanged: () => true,
+        onAddKeyframe: () => {},
+      })
+    )
+  }
+
+  it('builds the occupied windows once per gesture, however many moves it makes', () => {
+    const { container } = renderGraph()
+    const svg = container.querySelector('svg')!
+    // The graph draws into a 500x200 viewBox; giving the element exactly that
+    // box makes screen coordinates equal viewBox coordinates.
+    svg.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 0,
+        width: 500,
+        height: 200,
+        right: 500,
+        bottom: 200,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }) as DOMRect
+
+    const buildSpy = vi.mocked(keyframeClamp.occupiedWindows)
+    buildSpy.mockClear()
+
+    const point = container.querySelectorAll('circle')[0]
+    fireEvent.mouseDown(point, { altKey: true })
+
+    for (let i = 0; i < MOVES; i++) {
+      fireEvent.mouseMove(window, { clientX: 60 + i, clientY: 100 })
+    }
+
+    fireEvent.mouseUp(window)
+
+    // Measured 2026-10-03: exactly 1 regardless of MOVES — the windows are
+    // built in `handleKeyframeMouseDown` and read from a ref by every move,
+    // and `clampToLegalTime` itself allocates nothing. A clamp that rebuilt
+    // them per pointer frame would read 11 here (one per move plus the
+    // mousedown), the same shape the diamond drag's `.filter()` showed before
+    // ESCSUITE-167 / m4's review fixed it.
+    expect(buildSpy).toHaveBeenCalledTimes(1)
   })
 })
