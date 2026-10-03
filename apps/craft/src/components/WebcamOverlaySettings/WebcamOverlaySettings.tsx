@@ -65,7 +65,7 @@ export function WebcamOverlaySettings({
     <section className={styles.sidebarSection}>
       <h2 className={styles.sidebarTitle}>Webcam Overlay</h2>
       <div className={styles.webcamControls}>
-        <div className={styles.positionGrid}>
+        <div className={styles.positionGrid} role="group" aria-label="Webcam position">
           {(['top-left', 'top-right', 'bottom-left', 'bottom-right'] as WebcamPosition[]).map(
             (pos) => (
               <button
@@ -99,7 +99,7 @@ export function WebcamOverlaySettings({
           />
         </div>
 
-        <div className={styles.shapeToggle}>
+        <div className={styles.shapeToggle} role="group" aria-label="Webcam shape">
           {(['circle', 'rectangle'] as WebcamShape[]).map((shape) => (
             <button
               key={shape}

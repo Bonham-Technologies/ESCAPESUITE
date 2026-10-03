@@ -259,16 +259,18 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `uploadToHost()` never broadcasts them to `'*'` — without a `hostOrigin` it can parse, it
   posts nothing at all and says so through CRAFT's one notice channel. `SEND_TO_EDITOR`'s
   id-only post is the one exception that keeps its `'*'` fallback: an opaque id is useless to a
-  framer that cannot reach the shared IndexedDB, where a recording's bytes are not. Outbound
+  framer that cannot reach the shared IndexedDB, whereas a recording's bytes are not. Outbound
   posts are addressed to `hostOrigin` instead of `'*'` wherever one parses, and ARTIST ignores
   inbound messages from anywhere else. It protects the **host's** deployment, not against being
   framed — a hostile page that frames the app also controls the URL and would supply its own
   origin; refusing to be framed is `Content-Security-Policy: frame-ancestors` on the deployment.
-  Parsed by `parseHostOrigin()` in `packages/shared/src/config`, which accepts any value
-  `new URL()` can parse and normalises it down to its origin — a trailing slash or a path
-  included — rather than rejecting anything but a bare origin; only a value `new URL()` cannot
-  parse at all (or one with an opaque origin, such as a `data:` URL) is ignored, with one console
-  warning. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus
+  Parsed by `parseHostOrigin()` in `packages/shared/src/config`, which accepts any `http:`/
+  `https:` value `new URL()` can parse and normalises it down to its origin — a trailing slash
+  or a path included — rather than rejecting anything but a bare origin; only a value `new URL()`
+  cannot parse at all, one with an opaque origin (a `data:` URL, say), or one on any other scheme
+  (the http(s)-only check is explicit rather than relying on the opaque-origin check alone,
+  because Chromium serialises a `file:` URL's origin as the non-opaque string `'file://'`) is
+  ignored, with one console warning. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus
   `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a
   self-hosted or standalone build must set its own.
 - **Documented but not currently implemented**: inbound `EXPORT`, outbound `EXPORT_PROGRESS` and

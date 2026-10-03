@@ -58,12 +58,21 @@ export const parseHostOrigin = (
   if (!value) return null
 
   try {
-    const origin = new URL(value).origin
+    const url = new URL(value)
     // An opaque origin (data:, or any scheme with no authority) serialises as
     // the literal string "null" rather than throwing — accepting it would
     // hand postMessage a targetOrigin that matches a sandboxed iframe's own
-    // origin, not a real host.
-    if (origin !== 'null') return origin
+    // origin, not a real host. `http:`/`https:` is also enforced explicitly
+    // rather than relying on that check alone: Chromium serialises a
+    // `file:` URL's origin as the non-opaque string `'file://'`, which would
+    // otherwise pass — harmlessly, since no real document has that origin to
+    // receive the post, but a real host is always served over HTTP(S), so
+    // restricting to the schemes one can actually run from closes the gap
+    // outright rather than leaning on the postMessage recipient failing to
+    // exist.
+    if (url.origin !== 'null' && (url.protocol === 'http:' || url.protocol === 'https:')) {
+      return url.origin
+    }
   } catch {
     // Falls through to the warning below.
   }

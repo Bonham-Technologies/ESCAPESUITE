@@ -376,9 +376,11 @@ export function generateShareUrl(
  *   IndexedDB; `id` still addresses the same record there, and `name` is the
  *   recording's name in the library, without an extension. Unlike
  *   SEND_TO_EDITOR, whose id is useless to a page that cannot reach CRAFT's
- *   origin, this message carries the file itself - so with no ?hostOrigin= the
- *   '*' fallback hands the bytes to whatever page is framing CRAFT, and a host
- *   that ships this action should name its origin and set frame-ancestors. See
+ *   origin and which therefore keeps its '*' fallback, this message carries
+ *   the file itself - so without a ?hostOrigin= that parseHostOrigin() can
+ *   read, NOTHING IS POSTED AT ALL, and CRAFT says so through its own notice
+ *   channel (ESCSUITE-176). A host that ships this action MUST name its
+ *   origin with ?hostOrigin=, and should set frame-ancestors too. See
  *   apps/craft/src/utils/uploadToHost.ts.
  *
  *   Since ESCSUITE-14 a take can be several files. `role`
@@ -432,11 +434,20 @@ export function generateShareUrl(
  * - title=<name> - Initial project name (trimmed, max 120 chars); applied only
  *   when the project has not been named by project data or a restored session
  * - hostOrigin=<origin> - The host's own origin, e.g. https://host.example.
- *   Recommended for production hosts: outbound posts are addressed to it
- *   instead of '*', and inbound messages from any other origin are ignored.
- *   It protects the *host's* deployment, not against being framed - a hostile
- *   page that frames the app also controls this URL and would simply supply
- *   its own origin. Refusing to be framed is
+ *   Recommended for production hosts, and REQUIRED of a host that offers
+ *   ESCAPECRAFT's "Upload to host" button (see UPLOAD_RECORDING above): that
+ *   message carries a recording's bytes and has no '*' fallback, so without a
+ *   parseable hostOrigin nothing is ever sent. parseHostOrigin() accepts any
+ *   http:/https: value new URL() can parse and normalises it down to its
+ *   origin - a trailing slash or a path included - rather than requiring a
+ *   bare origin; only a value that cannot be parsed as a URL at all, one with
+ *   an opaque origin (a data: URL, say), or one on any other scheme, is
+ *   ignored, with one console warning.
+ *   Outbound posts are addressed to it instead of '*' wherever one parses,
+ *   and inbound messages from any other origin are ignored. It protects the
+ *   *host's* deployment, not against being framed - a hostile page that
+ *   frames the app also controls this URL and would simply supply its own
+ *   origin. Refusing to be framed is
  *   `Content-Security-Policy: frame-ancestors` on the deployment. The hosted deployment
  *   (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json; self-hosted builds
  *   must set their own.

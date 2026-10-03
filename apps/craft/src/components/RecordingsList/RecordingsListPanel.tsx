@@ -53,6 +53,13 @@ export function RecordingsListPanel({
   // It is written once, by the capability bootstrap, so this panel re-renders
   // once when the probe answers and never again.
   const mp4Support = useRecorderStore((s) => s.mp4Support);
+  // A stable zustand action, like `setNotice` — selecting it here costs this
+  // panel nothing. `useMp4Download` re-runs it when a conversion discovers
+  // the row's bytes are gone (ESCSUITE-176): the quota estimate the Record
+  // button's gate reads (including item 3's separate-tracks arm) is stale
+  // the moment that is discovered, the same reason `useRecordingLibrary`'s
+  // Play and Download handlers already re-run it for the same fact.
+  const refreshStorageSpace = useRecorderStore((s) => s.refreshStorageSpace);
   const {
     converting,
     blockedReason,
@@ -63,6 +70,7 @@ export function RecordingsListPanel({
   } = useMp4Download({
     setNotice,
     mp4Support,
+    refreshStorageSpace,
   });
   // Standalone CRAFT has no one to post to, so the action does not exist
   // there — the prop is simply absent and the button is never drawn.

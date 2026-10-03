@@ -134,9 +134,17 @@ export interface Mp4DownloadDeps {
    * never subscribes to it.
    */
   mp4Support: Mp4Support
+  /**
+   * Re-read the storage headroom. Called when a conversion discovers the
+   * row's bytes are already gone (ESCSUITE-176) — the same re-read
+   * `useRecordingLibrary`'s Play and Download handlers already run for the
+   * same discovery, since the Record button's gate is reading a figure this
+   * path now knows to be wrong.
+   */
+  refreshStorageSpace: () => Promise<void>
 }
 
-export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4Download {
+export function useMp4Download({ setNotice, mp4Support, refreshStorageSpace }: Mp4DownloadDeps): Mp4Download {
   const [converting, setConverting] = useState<Mp4Conversion | null>(null)
   // A ref rather than state: the guard below has to see the running conversion
   // in the same tick a second click arrives, before React has re-rendered.
@@ -218,8 +226,12 @@ export function useMp4Download({ setNotice, mp4Support }: Mp4DownloadDeps): Mp4D
       // cleared under the tab — raises the same `RECORDING_UNAVAILABLE` Play and
       // Download already say for exactly this fact (ESCSUITE-146, ESCSUITE-176):
       // silence here was indistinguishable from a conversion that never started.
+      // The headroom re-read follows the same two handlers' lead too: finding
+      // out a row's bytes are gone means the quota estimate the Record button's
+      // gate reads (item 3's separate-tracks arm included) is stale.
       if (!record?.blob) {
         setNotice(RECORDING_UNAVAILABLE)
+        void refreshStorageSpace()
         return
       }
 

@@ -90,14 +90,17 @@ export const UPLOAD_UNAVAILABLE =
 
 /**
  * Said when "Upload to host" has bytes to send but nowhere safe to send them:
- * `?hostOrigin=` is absent, or carries a value `new URL()` cannot parse at
- * all (ESCSUITE-176). The id-only `SEND_TO_EDITOR` message may still fall
+ * `?hostOrigin=` is absent, or carries a value `parseHostOrigin()` cannot
+ * read (ESCSUITE-176). The id-only `SEND_TO_EDITOR` message may still fall
  * back to `'*'` — an opaque id is useless to a framer that cannot read the
  * shared IndexedDB — but a recording's bytes are never broadcast to whoever
- * happens to be framing the page. See `utils/uploadToHost.ts`.
+ * happens to be framing the page. Named in the user's terms rather than the
+ * query parameter's: the reader who can act on the parenthetical is the
+ * host's developer, reading the console warning `parseHostOrigin()` also
+ * raises, not the live region. See `utils/uploadToHost.ts`.
  */
 export const UPLOAD_NO_HOST_ORIGIN =
-  'Nothing was sent — this page has no valid ?hostOrigin, so there is no host to send the recording to.'
+  'Nothing was sent — the page embedding ESCAPECRAFT has not identified itself (no ?hostOrigin), so there is nowhere safe to send the recording.'
 
 /**
  * Said after a conversion that could not include the take's camera part.
@@ -127,12 +130,17 @@ export const DELETE_FAILED =
   'That recording could not be fully deleted — reload the library to see what is left.'
 
 /**
- * Said when Play or Download found nothing to read: the row is drawn from
- * metadata the store still holds, but `getVideoBlob` answered `undefined` —
- * typically because the recording was deleted from ESCAPEARTIST's media
- * library in another tab, which removes the shared IndexedDB row without
- * telling this one. `UPLOAD_UNAVAILABLE` stays a separate sentence: it also
- * covers a host that could not be reached, which is not true of these two.
+ * Said when Play, Download, or an MP4/M4A conversion found nothing to read:
+ * the row is drawn from metadata the store still holds, but the bytes it
+ * names are gone — typically because the recording was deleted from
+ * ESCAPEARTIST's media library in another tab, which removes the shared
+ * IndexedDB row without telling this one (ESCSUITE-146; the conversion raises
+ * it too as of ESCSUITE-176). `UPLOAD_UNAVAILABLE` stays a separate sentence
+ * for "Upload to host"'s own version of the same fact — reached through
+ * `getVideoBlob` rather than `getVideo`, so it carries no metadata to probe a
+ * duration or dimensions from — and `UPLOAD_NO_HOST_ORIGIN` is the host-
+ * unreachable fact that sentence's own doc comment used to (wrongly) describe
+ * as this one's job.
  */
 export const RECORDING_UNAVAILABLE =
   'That recording could not be read from your library — its file is no longer in storage.'

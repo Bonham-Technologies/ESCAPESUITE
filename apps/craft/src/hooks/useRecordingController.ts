@@ -65,10 +65,15 @@ export interface RecordingControllerDeps {
   /** Written here at createRecorder time, read by saveRecording. */
   recorderTypeRef: RefObject<'webcodecs' | 'mediarecorder'>;
   /**
-   * Written by handleStopRecording, read and cleared by saveRecording. Also
-   * cleared by every path that throws a take away instead of saving it — both
-   * cancels and the unmount teardown (ESCSUITE-176) — so a take that never
-   * reaches a save cannot leave its frame for the next one that does.
+   * Written by handleStopRecording (past its own `cancelledRef` guard — see
+   * there), read and cleared by saveRecording. The authoritative clear for
+   * every path that throws a take away instead of saving it is
+   * `handleStartRecording`'s own, beside `setNotice(null)`: a new take never
+   * inherits the previous one's frame, whether that take was thrown away by
+   * a cancel, the unmount teardown, the recorder's own `onError`, or a save
+   * that rejected before `useRecordingSave` reached its clear (ESCSUITE-176).
+   * Both cancels and the teardown also clear it immediately, on their own,
+   * rather than leaving a stale frame referenced until the next start.
    */
   capturedThumbnailRef: RefObject<Blob | null>;
   saveRecording: SaveRecording;
@@ -331,7 +336,16 @@ export function useRecordingController({
     clearDurationTicker();
 
     // Capture thumbnail from live preview BEFORE stopping (more reliable than from blob)
-    capturedThumbnailRef.current = await capturePreviewThumbnail();
+    const frame = await capturePreviewThumbnail();
+    // A cancel (or the unmount teardown) can land while that grab was still
+    // in flight — capturePreviewThumbnail's own canvas.toBlob is a real async
+    // hop, and nothing sets 'saving' until the recorder's onStop, so Cancel
+    // is still on screen throughout (ESCSUITE-176). Either already cleared
+    // the ref and disposed the recorder; writing the frame back here would
+    // re-arm the exact bug item 1 fixed, for the next take that ends on its
+    // own.
+    if (cancelledRef.current) return;
+    capturedThumbnailRef.current = frame;
 
     if (recorderRef.current) {
       await recorderRef.current.stop();
@@ -380,6 +394,13 @@ export function useRecordingController({
       // take just finished until the next one starts — which is exactly when
       // it is reset, here, and nowhere else.
       setNotice(null);
+      // A new take never inherits the previous one's frame (ESCSUITE-176): a
+      // discard path that does not run through a save — onError, or a save
+      // that rejects before useRecordingSave.ts clears this itself — would
+      // otherwise leave the ref holding the last take's picture for however
+      // long it takes the *next* take to reach handleStopRecording's own
+      // write, or forever if that next take ends on its own ("Stop sharing").
+      capturedThumbnailRef.current = null;
       setSystemAudioShared(true);
       setState('preparing');
 
@@ -841,6 +862,7 @@ export function useRecordingController({
     }
   }, [
     acquireStreams,
+    capturedThumbnailRef,
     clearCountdownTicker,
     clearDurationTicker,
     config,
