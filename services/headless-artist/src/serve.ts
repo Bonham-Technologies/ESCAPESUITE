@@ -229,12 +229,16 @@ export function createLimiter(concurrency: number, maxQueue: number): Limiter {
  *
  * Returns `undefined` when the body was too big — see DRAIN_FACTOR for why that is not simply
  * an immediate socket teardown — and `BODY_GONE` when it was going to fit but never finished
- * arriving at all: `close()` force-ending a request still parked here during shutdown, Node's
- * own `requestTimeout`/`headersTimeout`, or the client simply dropping the connection. Those are
- * not the same failure as "too big" and must not be answered the same way.
+ * arriving at all: `close()` force-ending a request still parked here during shutdown, or the
+ * client dropping the connection. (Measured on Node 26.7: `requestTimeout`/`headersTimeout`
+ * only guard the time *up to* dispatching a request to this listener — once headers have
+ * parsed, as they already have by the time this is called, neither one bounds how long the
+ * body itself may then take, so close()'s own teardown is the only thing that does outside a
+ * client simply giving up.) Either way this is not the same failure as "too big" and must not
+ * be answered the same way.
  */
 function readBody(req: http.IncomingMessage): Promise<string | undefined | typeof BODY_GONE> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const chunks: Buffer[] = []
     let size = 0
     let over = false
@@ -254,18 +258,11 @@ function readBody(req: http.IncomingMessage): Promise<string | undefined | typeo
       chunks.push(chunk)
     })
     req.on('end', () => resolve(over ? undefined : Buffer.concat(chunks).toString('utf8')))
-    req.on('error', (err) => {
-      // A client that resets the connection mid-body surfaces here as an 'error' (Node's own
-      // "aborted", ECONNRESET) before 'close' ever fires — gone, not broken, so it settles the
-      // same way the close()-triggered and oversized-body cases do rather than rejecting into
-      // a 500. Any other error (a malformed encoding, say) is a genuine stream failure and
-      // still rejects.
-      if (!req.complete && (err as NodeJS.ErrnoException).code === 'ECONNRESET') {
-        resolve(BODY_GONE)
-        return
-      }
-      reject(err)
-    })
+    // Any failure reading the body before it finishes — overwhelmingly a connection reset,
+    // which is how Node reports a client giving up mid-body on this object, before 'close'
+    // ever fires — is gone, not broken: it settles the same way the close()-triggered and
+    // oversized-body cases do, never as a stream error to log and fail the request over.
+    req.on('error', () => resolve(BODY_GONE))
     // 'close' fires after a normal 'end' too, but by then the promise has already settled and
     // this is a no-op. `req.complete` is Node's own record of whether 'end' actually happened —
     // false here means the body was destroyed before it finished, for any reason, and the
