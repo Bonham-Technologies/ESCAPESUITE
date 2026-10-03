@@ -650,6 +650,12 @@ Paths in the spec are resolved **by the server**, on the server's filesystem —
 and a `volume` sink's `dir` have to exist where the process runs, not where the client does. The
 API moves job specs, never media.
 
+The listener sets Node's own `requestTimeout` (**30 s**) and `headersTimeout` (**10 s**),
+well short of Node's defaults (300 s and 60 s) — a job spec is a few hundred bytes and has no
+business taking that long to arrive. A client that sends its headers too slowly, or sends them
+and then never finishes the body, is disconnected by Node itself rather than held open for
+minutes; a shutdown in progress does not even wait that long — see [Shutdown](#shutdown).
+
 | Status | When | Body |
 | --- | --- | --- |
 | `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
@@ -657,6 +663,7 @@ API moves job specs, never media.
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
+| `408` | The request's body had not finished arriving when a shutdown began (or, independently of shutdown, when `requestTimeout`/`headersTimeout` above elapsed). Nothing was queued. | `{"error": "request body did not finish arriving before shutdown"}` |
 | `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
 | `415` | `content-type` was not `application/json`. | `{"error": "…"}` |
 | `429` | The queue is full. Carries `Retry-After: 5`. Nothing was queued — resend it, or send it somewhere less busy. | `{"error": "render queue is full (64 queued)"}` |
@@ -819,7 +826,10 @@ drop a render that is half encoded:
 
 1. The listener stops accepting new connections.
 2. Jobs still queued are answered `503 {"error":"server shutting down"}` immediately — they
-   never started, so they are safe to retry elsewhere.
+   never started, so they are safe to retry elsewhere. A request whose body had not finished
+   arriving yet — nothing was queued, so there was nothing for that 503 to reject — is torn
+   down the same moment: `408` while the response can still carry one, otherwise the connection
+   simply goes away. Retrying it is just as safe.
 3. Renders already running are allowed to finish and their clients get the real outcome.
 4. The process exits 0 — or `1`, with `error: shutdown failed: …` on stderr, if the drain
    itself failed and the state of the in-flight renders is therefore unknown.
@@ -830,6 +840,12 @@ signal, and not by the render alone. The `webhook` and `command` sinks each have
 `webhook` means up to a 40-minute drain. Size `terminationGracePeriodSeconds` (or your
 orchestrator's equivalent) against the sum of the two, or a `SIGKILL` will land in the middle of
 an encode or a delivery and leave the scratch directory behind.
+
+Step 2's new half is there so a client that never finishes sending cannot hold the drain open
+indefinitely — nothing used to bound that wait at all. The server also carries its own bound on
+this independent of shutdown: `requestTimeout` (**30 s**) and `headersTimeout` (**10 s**), set
+on the listener, well under Node's defaults of 300 s and 60 s — see
+[`POST /render`](#post-render).
 
 A **second** stop signal during the drain exits immediately with `130`, matching what
 Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you expect. It
