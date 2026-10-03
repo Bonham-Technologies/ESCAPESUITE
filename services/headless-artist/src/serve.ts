@@ -32,10 +32,14 @@ const DEFAULT_MAX_QUEUE = 64
 const RETRY_AFTER_SECONDS = 5
 
 /**
- * How long a whole request — headers plus body — may take once it starts arriving, before
- * Node tears the connection down itself with its own 408. A job spec is a few hundred bytes;
- * this is generous for that and nowhere near Node's own 300 s default, which would otherwise
- * let a silent or trickling client hold a connection for five minutes doing nothing.
+ * How long the request line and headers may take to arrive before Node tears the connection
+ * down itself with its own 408 — measured on Node 26.7, this (like HEADERS_TIMEOUT_MS) only
+ * guards the time *up to* dispatching a request to this server's listener; once the headers
+ * have parsed, as they already have by the time readBody is ever called, neither one bounds
+ * how long the body itself may then take (close()'s own teardown is what does, during a
+ * shutdown — see readBody). A job spec is a few hundred bytes; this is generous for receiving
+ * it and nowhere near Node's own 300 s default, which would otherwise let a silent client hold
+ * a connection for five minutes before even reaching this listener.
  */
 export const REQUEST_TIMEOUT_MS = 30_000
 
@@ -276,9 +280,9 @@ function readBody(req: http.IncomingMessage): Promise<string | undefined | typeo
 /**
  * Distinguishes "the body was never going to finish" from "the body was too big" — both of
  * which `readBody` used to collapse into a single `undefined`. A request that settles with
- * this is already dead (its response was ended by `close()`'s teardown, by Node's own
- * `requestTimeout`/`headersTimeout`, or by the client itself giving up) and must not be sent
- * another response at all, let alone the size-specific 413 an oversized body gets.
+ * this is already dead (its response was ended by `close()`'s teardown, or the client itself
+ * gave up) and must not be sent another response at all, let alone the size-specific 413 an
+ * oversized body gets.
  */
 export const BODY_GONE = Symbol('body-gone')
 
@@ -351,9 +355,9 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     if (raw === BODY_GONE) {
       // Either close() already answered this one (see bodiesInFlight) while its body was
       // still arriving — writableEnded is true, and its real status is worth logging — or the
-      // body is simply gone with nothing ever sent (the client disconnected, or Node's own
-      // requestTimeout/headersTimeout got there first): 499 mirrors how an abandoned queued
-      // job is logged below, rather than a stray, misleading 413.
+      // body is simply gone with nothing ever sent (the client disconnected on its own): 499
+      // mirrors how an abandoned queued job is logged below, rather than a stray, misleading
+      // 413.
       return res.writableEnded ? res.statusCode : 499
     }
 
