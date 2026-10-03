@@ -151,7 +151,20 @@ test.describe('ESCAPECRAFT Standalone - Theme Support', () => {
 })
 
 test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
-  test('makes no requests off the local origin', async ({ page }) => {
+  test('makes no requests off the local origin', async ({ page, browserName }) => {
+    // ESCSUITE-177 review MEDIUM 4: this test records a real take, which
+    // `useRecordingSave` stores as a Blob in IndexedDB — and Playwright's
+    // WebKit cannot store a Blob there at all on this platform
+    // (`UnknownError: Error preparing Blob/File data to be stored in object
+    // store`, the same gap `escapecraft/mp4-download.spec.ts` and the other
+    // specs listed in report-177.md were skipped for). Test-level, not
+    // describe-level: the other tests in this file do not record and are
+    // unaffected.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     const externalCalls: string[] = []
 
     page.on('request', (request) => {
@@ -205,8 +218,15 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     expect(analyticsRuntime).toEqual({ va: 'undefined', queue: 'undefined', scripts: 0 })
   })
 
-  test('converts a recording to MP4 without leaving the page', async ({ page }) => {
+  test('converts a recording to MP4 without leaving the page', async ({ page, browserName }) => {
     test.setTimeout(180_000)
+    // ESCSUITE-177 review MEDIUM 4: same WebKit Blob-in-IndexedDB gap as
+    // "makes no requests off the local origin" above — this test needs the
+    // recorded take saved too, before it ever gets to the MP4 conversion.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
 
     const externalCalls: string[] = []
     page.on('request', (request) => {
