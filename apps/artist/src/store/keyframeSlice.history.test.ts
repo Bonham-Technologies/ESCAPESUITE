@@ -136,11 +136,12 @@ describe('keyframe actions and the undo stack', () => {
       expect(store().removeClipKeyframe('clip1', 'opacity', 2)).toBe(true)
     })
 
-    it('refuses to clear the keyframes of a clip on it', () => {
+    it('refuses to clear the keyframes of a clip on it, and says so', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
       lock()
 
-      refuses(() => store().clearClipKeyframes('clip1'))
+      // Fix round 1: clearClipKeyframes now reports ESCSUITE-87's boolean too.
+      refuses(() => expect(store().clearClipKeyframes('clip1')).toBe(false))
       expect(opacityKeyframes().map((kf) => kf.time)).toEqual([0, 1])
     })
   })
@@ -252,4 +253,44 @@ describe('keyframe actions and the undo stack', () => {
     })
   })
 
+
+  // Fix round 1: clearClipKeyframes had the identical map-and-set shape with
+  // NO existence check at all — not even splitClip/duplicateClip's
+  // `if (!clip) return state`. It now refuses for the same two reasons
+  // removeClipKeyframe does (ESCSUITE-101): an unknown clip, and a clip that
+  // exists but has no animation at all — there is nothing to clear either way.
+  describe('clearClipKeyframes with nothing to clear (ESCSUITE-172)', () => {
+    const past = () => useEditorStore.getState().history.past.length
+    const clipsRef = () => useEditorStore.getState().project.timeline.clips
+
+    beforeEach(() => {
+      clearHistoryAndModified()
+    })
+
+    /** Assert the call answered false and wrote nothing: same clips array, no history entry. */
+    const refusesFalse = (act: () => boolean) => {
+      const before = clipsRef(); const entries = past()
+      expect(act()).toBe(false)
+      expect(clipsRef()).toBe(before)
+      expect(past()).toBe(entries)
+    }
+
+    it('refuses for an unknown clip id', () => {
+      refusesFalse(() => store().clearClipKeyframes('no-such-clip'))
+    })
+
+    it('refuses for a clip that exists but has no animation at all', () => {
+      addClip('clip2', 6, 2) // never had setClipKeyframe called on it — animation is undefined
+      refusesFalse(() => store().clearClipKeyframes('clip2'))
+    })
+
+    it('still clears, and reports true, for a clip that has keyframes', () => {
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      clearHistoryAndModified()
+
+      expect(store().clearClipKeyframes('clip1')).toBe(true)
+      expect(store().project.timeline.clips[0].animation?.keyframes.opacity).toBeUndefined()
+      expect(past()).toBe(1)
+    })
+  })
 })

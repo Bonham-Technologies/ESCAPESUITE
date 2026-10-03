@@ -1105,7 +1105,7 @@ describe('projectStore remaining behaviours', () => {
     it('refuses to move a clip on it to another track', () => reportsRefusal(() => store().moveClipToTrack('h1', free)))
     it('refuses to move a clip onto it from another track', () => reportsRefusal(() => store().moveClipToTrack('f1', held)))
     it('refuses to transform a clip on it', () => reportsRefusal(() => store().updateClipTransform('h1', { x: 0.2 })))
-    it('refuses to change the blend mode of a clip on it', () => refuses(() => store().updateClipBlendMode('h1', 'multiply')))
+    it('refuses to change the blend mode of a clip on it', () => reportsRefusal(() => store().updateClipBlendMode('h1', 'multiply')))
     it('refuses to change the effects of a clip on it', () => reportsRefusal(() => store().updateClipEffects('h1', { blur: 3 })))
     it('refuses to change the transition of a clip on it', () => reportsRefusal(() => store().updateClipTransition('h1', { duration: 1 })))
     it('refuses to change the animation of a clip on it', () => reportsRefusal(() => store().updateClipAnimation('h1', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
@@ -1170,6 +1170,7 @@ describe('projectStore remaining behaviours', () => {
     it('refuses updateClipTransition', () => refusesFalse(() => store().updateClipTransition('nope', { duration: 1 })))
     it('refuses updateClipAnimation', () => refusesFalse(() =>
       store().updateClipAnimation('nope', { in: { type: 'fade', duration: 1, easing: 'linear' } })))
+    it('refuses updateClipBlendMode', () => refusesFalse(() => store().updateClipBlendMode('nope', 'multiply')))
   })
 
   // ESCSUITE-101. Every action here removes a clip from the timeline some way

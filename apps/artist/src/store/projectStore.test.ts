@@ -945,6 +945,20 @@ describe('projectStore integration', () => {
 
       it('refuses updateShapeOverlayData', () => refusesFalse(() =>
         useEditorStore.getState().updateShapeOverlayData('nope', { fillColor: '#ff0000ff' })))
+
+      // Fix round 1: the guard has to match the `map`'s own bypass
+      // (`clip.id === clipId && clip.overlayType === 'text'`/`'shape'`), not
+      // existence alone — a real clip of the WRONG type is still an id the
+      // `map` matches nothing for.
+      it('refuses updateTextOverlayData for a real clip of the wrong type', () => {
+        const shape = useEditorStore.getState().addShapeOverlayClip({ type: 'rectangle' })!
+        refusesFalse(() => useEditorStore.getState().updateTextOverlayData(shape.id, { text: 'Bye' }))
+      })
+
+      it('refuses updateShapeOverlayData for a real clip of the wrong type', () => {
+        const text = useEditorStore.getState().addTextOverlayClip({ text: 'Hi' })!
+        refusesFalse(() => useEditorStore.getState().updateShapeOverlayData(text.id, { fillColor: '#ff0000ff' }))
+      })
     })
   })
 })
