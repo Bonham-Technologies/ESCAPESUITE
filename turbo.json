@@ -4,10 +4,15 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"],
-      "env": [
-        "VITE_BUILD_MODE"
-      ]
+      "outputs": ["dist/**"]
+    },
+    // @escapesuite/shared's `build` script is a no-op (the package ships its own
+    // TypeScript sources; there is no compiled dist/ for consumers to read), so it
+    // never produces anything under the default `build` task's `dist/**` outputs —
+    // overridden here with no outputs declared, which is also what silences
+    // turbo's "no output files found for task @escapesuite/shared#build" warning.
+    "@escapesuite/shared#build": {
+      "outputs": []
     },
     // The kit assembler shells out to the artist's own build:headless, so the two must never
     // run concurrently, and an artist source change has to invalidate the kit. The service
