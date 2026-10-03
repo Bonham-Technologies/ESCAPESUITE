@@ -16,12 +16,16 @@
  *   pnpm test:scripts
  */
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 
 import { checkAppDist, isNonEmptyFile, verifyDistLayout } from './build-all.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 const tmpDirs = [];
 function makeTmpDir() {
@@ -128,4 +132,43 @@ test('verifyDistLayout: reports every missing output when the whole dist is empt
   const dir = makeTmpDir();
   const missing = verifyDistLayout(dir);
   assert.equal(missing.length, 4);
+});
+
+/**
+ * `main()` is only meant to run when this file is executed directly, not when
+ * its helpers are imported for testing. The guard used to compare
+ * `import.meta.url` (which percent-encodes the path) against `process.argv[1]`
+ * (which does not) — so a checkout under a path containing a space (or any
+ * other character a URL encodes) made the guard false, and the script printed
+ * nothing and exited 0 having built nothing. These two cases run the real
+ * file as a subprocess, once from a plain directory and once from a directory
+ * whose name contains a space, and assert both reach the first line `main()`
+ * prints — `pnpm turbo build` has nothing to build here (no package.json), so
+ * both runs fail loudly after that line, which is the point: they ran at all.
+ */
+function runEntryGuardFrom(dirName) {
+  const base = mkdtempSync(join(tmpdir(), 'build-all-entry-'));
+  const scripts = join(base, dirName, 'scripts');
+  mkdirSync(scripts, { recursive: true });
+  cpSync(join(here, 'build-all.mjs'), join(scripts, 'build-all.mjs'));
+  try {
+    return execFileSync(process.execPath, [join(scripts, 'build-all.mjs')], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (err) {
+    // A real run reaches `pnpm turbo build` and fails (no package.json here),
+    // which is the point: it RAN.
+    return `${err.stdout ?? ''}${err.stderr ?? ''}`;
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+}
+
+test('entry guard: build-all.mjs runs when invoked from a path with no space (control)', () => {
+  assert.match(runEntryGuardFrom('plain'), /Building ESCAPE Suite for production/);
+});
+
+test('entry guard: build-all.mjs runs when invoked from a path containing a space', () => {
+  assert.match(runEntryGuardFrom('with space'), /Building ESCAPE Suite for production/);
 });

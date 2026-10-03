@@ -23,8 +23,8 @@
  */
 
 import { execSync } from 'child_process';
-import { cpSync, mkdirSync, rmSync, existsSync, copyFileSync, statSync } from 'fs';
-import { join, dirname } from 'path';
+import { cpSync, mkdirSync, rmSync, existsSync, copyFileSync, statSync, realpathSync } from 'fs';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -68,9 +68,32 @@ export function verifyDistLayout(distDir) {
   return required.filter((path) => !isNonEmptyFile(path));
 }
 
+/**
+ * True when this file was executed, false when a test imported it.
+ *
+ * `import.meta.url` is already realpath'd, so argv[1] has to be too — otherwise
+ * a checkout under a path containing a space (or any other character a URL
+ * encodes) would compare unequal (the old guard's bug: `import.meta.url`
+ * percent-encodes the path while `process.argv[1]` does not) and the script
+ * would exit 0 having built nothing. When realpath itself fails (an unreadable
+ * parent directory, a container mount that refuses it) the lexical comparison
+ * is still right for the unsymlinked case, and a wrong `false` here is the
+ * worst outcome available: a build that silently publishes nothing.
+ */
+export function isDirectRun(entry = process.argv[1]) {
+  if (entry === undefined) return false;
+  const modulePath = fileURLToPath(import.meta.url);
+  const resolved = resolve(entry);
+  try {
+    return realpathSync(resolved) === modulePath;
+  } catch {
+    return resolved === modulePath;
+  }
+}
+
 // Only run the build when this file is executed directly (not when its
 // helpers are imported for testing).
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isDirectRun()) {
   main();
 }
 
