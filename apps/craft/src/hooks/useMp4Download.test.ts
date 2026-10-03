@@ -14,7 +14,7 @@ import {
   MP4_UNSUPPORTED_REASON,
 } from './useMp4Download'
 import type { ConversionFormat } from './useMp4Download'
-import { MP4_SAVED_WITHOUT_AUDIO, MP4_SAVED_WITHOUT_WEBCAM } from '../utils/notices'
+import { MP4_SAVED_WITHOUT_AUDIO, MP4_SAVED_WITHOUT_WEBCAM, RECORDING_UNAVAILABLE } from '../utils/notices'
 import { storeVideo, getDB, deleteVideo, getVideo } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { preserveBlobsInStorage } from '../test/blobStorage'
@@ -48,6 +48,7 @@ vi.mock('../core/storage', async (importOriginal) => {
 })
 
 let setNotice: ReturnType<typeof vi.fn<(notice: string | null) => void>>
+let refreshStorageSpace: ReturnType<typeof vi.fn<() => Promise<void>>>
 let clicks: Array<{ href: string; download: string }>
 
 function metadata(id: string, name: string): SourceVideo {
@@ -108,6 +109,7 @@ function deferConversion(format: ConversionFormat = 'mp4') {
 beforeEach(async () => {
   resetAppDoubles()
   setNotice = vi.fn<(notice: string | null) => void>()
+  refreshStorageSpace = vi.fn<() => Promise<void>>(async () => {})
   clicks = []
   vi.mocked(URL.createObjectURL).mockClear()
   vi.mocked(URL.revokeObjectURL).mockClear()
@@ -145,9 +147,10 @@ const MP4_SILENT: Mp4Support = {
  * move between them with `rerender`.
  */
 function renderMp4Download(mp4Support: Mp4Support = MP4_SUPPORTED) {
-  return renderHook((support: Mp4Support) => useMp4Download({ setNotice, mp4Support: support }), {
-    initialProps: mp4Support,
-  })
+  return renderHook(
+    (support: Mp4Support) => useMp4Download({ setNotice, mp4Support: support, refreshStorageSpace }),
+    { initialProps: mp4Support }
+  )
 }
 
 describe('useMp4Download, start to finish', () => {
@@ -252,7 +255,12 @@ describe('useMp4Download, start to finish', () => {
     expect(clicks).toHaveLength(1)
   })
 
-  it('does nothing when the stored blob has gone missing', async () => {
+  // ESCSUITE-146 gave Play and Download this sentence for exactly this fact —
+  // a row listed in the library whose bytes are no longer in storage, most
+  // commonly a delete from ARTIST's media library in another tab. ESCSUITE-176
+  // gives the MP4/M4A conversion the same one: before this, the row flashed
+  // "Starting conversion… 0%" and silently returned to idle.
+  it('says the recording could not be read, the way Play and Download do, when the stored blob has gone missing', async () => {
     const { result } = renderMp4Download()
 
     await act(async () => {
@@ -261,8 +269,12 @@ describe('useMp4Download, start to finish', () => {
 
     expect(converterModule.convertToMP4).not.toHaveBeenCalled()
     expect(clicks).toEqual([])
-    expect(setNotice).not.toHaveBeenCalled()
+    expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
     expect(result.current.converting).toBeNull()
+    // Review NIT 14: discovering the bytes are gone is the same fact
+    // useRecordingLibrary's Play/Download handlers already re-read the
+    // headroom for — the Record button's gate is reading a stale figure.
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
 
     // …and the other half of the same state: a record that *is* listed with no
     // bytes behind it — a half-failed save, or storage cleared under the tab.
@@ -275,6 +287,8 @@ describe('useMp4Download, start to finish', () => {
       blob: undefined as unknown as Blob,
       metadata: metadata('blobless', 'Blobless Take'),
     })
+    setNotice.mockClear()
+    refreshStorageSpace.mockClear()
 
     await act(async () => {
       await result.current.startMp4Download('blobless', 'Blobless Take')
@@ -282,11 +296,27 @@ describe('useMp4Download, start to finish', () => {
 
     expect(converterModule.convertToMP4).not.toHaveBeenCalled()
     expect(clicks).toEqual([])
-    expect(setNotice).not.toHaveBeenCalled()
+    expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
     expect(result.current.converting).toBeNull()
+    expect(refreshStorageSpace).toHaveBeenCalledTimes(1)
     // The one conversion slot is free again: this refusal releases it exactly as
     // the no-record path above does, so the next row's button still works.
     expect(result.current.blockedReason).toBeNull()
+  })
+
+  // Same fact, same sentence, for the audio-only download — the two
+  // conversions share this one guard.
+  it('says so for an M4A download of a row whose bytes are gone too', async () => {
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('ghost', 'Ghost Take', 'm4a')
+    })
+
+    expect(converterModule.convertToM4A).not.toHaveBeenCalled()
+    expect(clicks).toEqual([])
+    expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
+    expect(result.current.converting).toBeNull()
   })
 })
 

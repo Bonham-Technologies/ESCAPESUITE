@@ -3,7 +3,7 @@ import { isEmbedded } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
 import { uploadToHost } from '../../utils/uploadToHost';
-import { UPLOAD_UNAVAILABLE } from '../../utils/notices';
+import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices';
 import { RecordingsList } from './RecordingsList';
 import type { Recording } from '../../store/types';
 
@@ -53,6 +53,13 @@ export function RecordingsListPanel({
   // It is written once, by the capability bootstrap, so this panel re-renders
   // once when the probe answers and never again.
   const mp4Support = useRecorderStore((s) => s.mp4Support);
+  // A stable zustand action, like `setNotice` — selecting it here costs this
+  // panel nothing. `useMp4Download` re-runs it when a conversion discovers
+  // the row's bytes are gone (ESCSUITE-176): the quota estimate the Record
+  // button's gate reads (including item 3's separate-tracks arm) is stale
+  // the moment that is discovered, the same reason `useRecordingLibrary`'s
+  // Play and Download handlers already re-run it for the same fact.
+  const refreshStorageSpace = useRecorderStore((s) => s.refreshStorageSpace);
   const {
     converting,
     blockedReason,
@@ -63,6 +70,7 @@ export function RecordingsListPanel({
   } = useMp4Download({
     setNotice,
     mp4Support,
+    refreshStorageSpace,
   });
   // Standalone CRAFT has no one to post to, so the action does not exist
   // there — the prop is simply absent and the button is never drawn.
@@ -114,6 +122,10 @@ export function RecordingsListPanel({
         ? await uploadToHost(id, name, part)
         : await uploadToHost(id, name);
       if (result === 'missing') setNotice(UPLOAD_UNAVAILABLE);
+      // ESCSUITE-176: `uploadToHost` never broadcasts a recording's bytes —
+      // without a `?hostOrigin=` it can parse, it posts nothing at all and
+      // says so here, the same shape as the missing-blob case above.
+      if (result === 'refused') setNotice(UPLOAD_NO_HOST_ORIGIN);
     } catch {
       // `getVideoBlob` reaches `getDB()`, which throws outright where
       // IndexedDB is blocked or unreadable. That is the same answer as an

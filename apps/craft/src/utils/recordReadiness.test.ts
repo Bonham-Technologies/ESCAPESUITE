@@ -11,6 +11,7 @@ import {
   NO_SOURCE_AVAILABLE,
   NO_STORAGE_SPACE,
 } from './recordReadiness'
+import { SEPARATE_TRACKS_NO_SPACE_REASON } from './separateTracksReadiness'
 import { defaultConfig, type EnvironmentCapabilities, type RecordingConfig } from '../store/types'
 
 function caps(overrides: Partial<EnvironmentCapabilities> = {}): EnvironmentCapabilities {
@@ -28,14 +29,21 @@ function config(overrides: Partial<RecordingConfig> = {}): RecordingConfig {
   return { ...defaultConfig, ...overrides }
 }
 
-/** The four inputs, with "there is room to store a take" as the default. */
+/** The five inputs, with "there is room to store a take" as the default for both. */
 function blocked(
   capabilitiesReady: boolean,
   cfg: RecordingConfig,
   capabilities: EnvironmentCapabilities,
-  hasStorageSpace = true
+  hasStorageSpace = true,
+  hasSeparateTracksSpace = true
 ): string | null {
-  return recordBlockedReason(capabilitiesReady, cfg, capabilities, hasStorageSpace)
+  return recordBlockedReason(
+    capabilitiesReady,
+    cfg,
+    capabilities,
+    hasStorageSpace,
+    hasSeparateTracksSpace
+  )
 }
 
 describe('recordBlockedReason before detection lands', () => {
@@ -102,5 +110,46 @@ describe('recordBlockedReason with nowhere to put the take', () => {
   it('reports the missing source first — that is the one the user just changed', () => {
     const off = config({ screenEnabled: false, webcamEnabled: false, microphoneEnabled: false })
     expect(blocked(true, off, caps(), false)).toBe(NO_SOURCE_ENABLED)
+  })
+})
+
+// ESCSUITE-176 (probe m3). Before this, the separate-tracks headroom check
+// (`hasSeparateTracksSpace`, roughly double a plain take) only ever reached
+// the toggle — which can refuse switching the mode *on*, but not a take
+// already configured for it, so the Record button stayed live and the take
+// started at double the size it had room for.
+describe('recordBlockedReason with the separate-tracks mode on', () => {
+  function pipConfig(overrides: Partial<RecordingConfig> = {}): RecordingConfig {
+    return config({
+      screenEnabled: true,
+      webcamEnabled: true,
+      microphoneEnabled: false,
+      separateTracks: true,
+      ...overrides,
+    })
+  }
+
+  it('refuses the take, with the toggle\'s own reason, when there is room for only one track', () => {
+    expect(blocked(true, pipConfig(), caps(), true, false)).toBe(SEPARATE_TRACKS_NO_SPACE_REASON)
+  })
+
+  it('allows the take when there is room for both tracks', () => {
+    expect(blocked(true, pipConfig(), caps(), true, true)).toBeNull()
+  })
+
+  it('does not ask the question for a take with the mode off', () => {
+    expect(blocked(true, pipConfig({ separateTracks: false }), caps(), true, false)).toBeNull()
+  })
+
+  it('does not ask the question for a take that is not PiP (webcam off)', () => {
+    expect(blocked(true, pipConfig({ webcamEnabled: false }), caps(), true, false)).toBeNull()
+  })
+
+  it('does not ask the question for a take that is not PiP (screen off)', () => {
+    expect(blocked(true, pipConfig({ screenEnabled: false }), caps(), true, false)).toBeNull()
+  })
+
+  it('reports the plain storage reason first when there is no room at all', () => {
+    expect(blocked(true, pipConfig(), caps(), false, false)).toBe(NO_STORAGE_SPACE)
   })
 })

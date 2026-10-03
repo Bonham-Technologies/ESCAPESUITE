@@ -21,7 +21,11 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
   const [isLoaded, setIsLoaded] = useState(false);
   const [hasError, setHasError] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
-  const [showVolumeSlider, setShowVolumeSlider] = useState(false);
+  // The two document listeners a progress-bar drag installs, so the unmount
+  // effect below can remove them if the dialog goes away mid-drag — a parent-
+  // driven close, a `?loadVideo` navigation, or HMR all skip the mouseup that
+  // would otherwise remove them (ESCSUITE-176).
+  const dragCleanupRef = useRef<(() => void) | null>(null);
 
   // Format time as MM:SS or HH:MM:SS
   const formatTime = (seconds: number): string => {
@@ -146,15 +150,31 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
       seekTo(percent * duration);
     };
 
-    const handleMouseUp = () => {
-      setIsSeeking(false);
+    const removeListeners = () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      dragCleanupRef.current = null;
+    };
+
+    const handleMouseUp = () => {
+      setIsSeeking(false);
+      removeListeners();
     };
 
     document.addEventListener('mousemove', handleMouseMove);
     document.addEventListener('mouseup', handleMouseUp);
+    // So the unmount effect can tear this down if mouseup never fires.
+    dragCleanupRef.current = removeListeners;
   }, [duration, handleProgressClick, seekTo]);
+
+  // A drag that is still in progress when the player unmounts — the dialog
+  // closed from elsewhere, a `?loadVideo` navigation, HMR — otherwise leaves
+  // both document listeners behind for the life of the tab, calling seekTo
+  // against a detached <video> and setting state on an unmounted component
+  // (ESCSUITE-176).
+  useEffect(() => () => {
+    dragCleanupRef.current?.();
+  }, []);
 
   // Toggle mute
   const toggleMute = useCallback(() => {
@@ -372,12 +392,12 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
               <SkipForwardIcon />
             </button>
 
-            {/* Volume controls */}
-            <div
-              className={styles.volumeContainer}
-              onMouseEnter={() => setShowVolumeSlider(true)}
-              onMouseLeave={() => setShowVolumeSlider(false)}
-            >
+            {/* Volume controls. The slider stays in the DOM always — only its
+                visibility (hover or focus-within, in VideoPlayer.module.css)
+                is conditional — so axe-core and keyboard users can reach it
+                (ESCSUITE-176); it used to mount only on hover, which hid it
+                from both. */}
+            <div className={styles.volumeContainer}>
               <button
                 className={styles.controlButton}
                 onClick={toggleMute}
@@ -385,19 +405,18 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
               >
                 {isMuted || volume === 0 ? <VolumeMuteIcon /> : volume < 0.5 ? <VolumeLowIcon /> : <VolumeHighIcon />}
               </button>
-              {showVolumeSlider && (
-                <div className={styles.volumeSliderContainer}>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    className={styles.volumeSlider}
-                  />
-                </div>
-              )}
+              <div className={styles.volumeSliderContainer}>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  className={styles.volumeSlider}
+                  aria-label="Volume"
+                />
+              </div>
             </div>
 
             {/* Time display */}

@@ -42,10 +42,14 @@ export const editorUrl = (params?: Record<string, string>): string => {
 // The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json;
 // self-hosted builds must set their own.
 //
-// The value must be a bare origin ('https://host.example', port allowed): a URL
-// whose serialisation is exactly its own origin. Anything else is ignored, with
-// one warning per page load so a misconfigured host is noticed but a repeated
-// call cannot flood the console.
+// The value need not be a bare origin: any http:/https: value `new URL(v)`
+// can parse is accepted and normalised down to its `.origin` (ESCSUITE-176) —
+// a trailing slash or a path included, since a host is as likely to build
+// this from `location.href` or a routed URL as to type a bare origin by
+// hand. Only a value `new URL()` cannot parse at all, one with an opaque
+// origin, or one on any scheme other than `http:`/`https:`, is ignored, with
+// one warning per page load so a misconfigured host is noticed but a
+// repeated call cannot flood the console.
 let hostOriginWarned = false
 
 export const parseHostOrigin = (
@@ -55,7 +59,21 @@ export const parseHostOrigin = (
   if (!value) return null
 
   try {
-    if (new URL(value).origin === value) return value
+    const url = new URL(value)
+    // An opaque origin (data:, or any scheme with no authority) serialises as
+    // the literal string "null" rather than throwing — accepting it would
+    // hand postMessage a targetOrigin that matches a sandboxed iframe's own
+    // origin, not a real host. `http:`/`https:` is also enforced explicitly
+    // rather than relying on that check alone: Chromium serialises a
+    // `file:` URL's origin as the non-opaque string `'file://'`, which would
+    // otherwise pass — harmlessly, since no real document has that origin to
+    // receive the post, but a real host is always served over HTTP(S), so
+    // restricting to the schemes one can actually run from closes the gap
+    // outright rather than leaning on the postMessage recipient failing to
+    // exist.
+    if (url.origin !== 'null' && (url.protocol === 'http:' || url.protocol === 'https:')) {
+      return url.origin
+    }
   } catch {
     // Falls through to the warning below.
   }
@@ -63,7 +81,7 @@ export const parseHostOrigin = (
   if (!hostOriginWarned) {
     hostOriginWarned = true
     console.warn(
-      `[config] ignoring invalid hostOrigin "${value}" — expected a bare origin such as https://host.example`
+      `[config] ignoring invalid hostOrigin "${value}" — expected a URL such as https://host.example`
     )
   }
   return null

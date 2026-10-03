@@ -20,6 +20,12 @@ function withSearch(search: string): void {
   });
 }
 
+// ESCSUITE-176: `uploadToHost` never broadcasts a recording's bytes, so every
+// test below that is not specifically about the hostOrigin gate itself needs
+// a valid one in place — this is that default. Tests about the gate (the
+// three in the `hostOrigin` describe block) set their own `window.location`.
+const DEFAULT_HOST_ORIGIN = 'https://host.example';
+
 describe('uploadToHost', () => {
   let originalParent: typeof window.parent;
   let originalLocation: Location;
@@ -36,6 +42,7 @@ describe('uploadToHost', () => {
       writable: true,
       configurable: true,
     });
+    withSearch(`?hostOrigin=${encodeURIComponent(DEFAULT_HOST_ORIGIN)}`);
     blob = new Blob(['take bytes'], { type: 'video/webm' });
     getVideoBlobMock.mockResolvedValue(blob);
     // No take in storage by default, which is what keeps every test below that
@@ -63,7 +70,7 @@ describe('uploadToHost', () => {
     expect(getVideoBlobMock).toHaveBeenCalledWith('r7');
     expect(postMessage).toHaveBeenCalledWith(
       { type: 'UPLOAD_RECORDING', payload: { id: 'r7', name: 'Take Seven', blob } },
-      '*'
+      DEFAULT_HOST_ORIGIN
     );
     expect(result).toBe('posted');
   });
@@ -80,25 +87,48 @@ describe('uploadToHost', () => {
     expect(message.payload.blob).toBe(blob);
   });
 
-  it('addresses the post at a valid hostOrigin', async () => {
-    withSearch(`?hostOrigin=${encodeURIComponent('https://host.example')}`);
+  describe('the hostOrigin gate (ESCSUITE-176)', () => {
+    it('addresses the post at whatever valid hostOrigin is set', async () => {
+      withSearch(`?hostOrigin=${encodeURIComponent('https://other-host.example')}`);
 
-    await uploadToHost('r7', 'Take Seven');
+      await uploadToHost('r7', 'Take Seven');
 
-    expect(postMessage).toHaveBeenCalledWith(
-      { type: 'UPLOAD_RECORDING', payload: { id: 'r7', name: 'Take Seven', blob } },
-      'https://host.example'
-    );
-  });
+      expect(postMessage).toHaveBeenCalledWith(
+        { type: 'UPLOAD_RECORDING', payload: { id: 'r7', name: 'Take Seven', blob } },
+        'https://other-host.example'
+      );
+    });
 
-  it('falls back to the wildcard when hostOrigin is invalid', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    withSearch(`?hostOrigin=${encodeURIComponent('https://host.example/app')}`);
+    // A trailing slash or a path is normalised to its origin by
+    // `parseHostOrigin` itself (see `@escapesuite/shared/config`'s own
+    // tests) — this just proves the normalised value is what the post uses.
+    it('addresses the post at the normalised origin when hostOrigin carries a path', async () => {
+      withSearch(`?hostOrigin=${encodeURIComponent('https://other-host.example/embed')}`);
 
-    await uploadToHost('r7', 'Take Seven');
+      await uploadToHost('r7', 'Take Seven');
 
-    expect(postMessage).toHaveBeenCalledWith(expect.anything(), '*');
-    warn.mockRestore();
+      expect(postMessage).toHaveBeenCalledWith(expect.anything(), 'https://other-host.example');
+    });
+
+    it('refuses the upload — posts nothing — when hostOrigin is not a URL at all', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      withSearch(`?hostOrigin=${encodeURIComponent('not a url')}`);
+
+      const result = await uploadToHost('r7', 'Take Seven');
+
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(result).toBe('refused');
+      warn.mockRestore();
+    });
+
+    it('refuses the upload — posts nothing — when no hostOrigin is set at all', async () => {
+      withSearch('');
+
+      const result = await uploadToHost('r7', 'Take Seven');
+
+      expect(postMessage).not.toHaveBeenCalled();
+      expect(result).toBe('refused');
+    });
   });
 
   it('names the part when the row is half of a take', async () => {
@@ -118,7 +148,7 @@ describe('uploadToHost', () => {
           takeId: 'take-1',
         },
       },
-      '*'
+      DEFAULT_HOST_ORIGIN
     );
   });
 
@@ -260,7 +290,7 @@ describe('uploadToHost', () => {
             takeId: 'take-1',
           },
         },
-        '*'
+        DEFAULT_HOST_ORIGIN
       );
     });
 
@@ -320,7 +350,7 @@ describe('uploadToHost', () => {
             takeId: 'take-1',
           },
         },
-        '*'
+        DEFAULT_HOST_ORIGIN
       );
       expect(warn).toHaveBeenCalled();
       warn.mockRestore();

@@ -506,7 +506,11 @@ test.describe('Host embedding contract', () => {
     await openHostPage(page, CRAFT_ORIGIN)
     const recordingId = await seedCraftRecording(page, 'Seeded Recording')
 
-    const frame = await embed(page, '/')
+    // `UPLOAD_RECORDING` carries bytes, so `uploadToHost()` refuses to post it
+    // at all without a `hostOrigin` it can parse (ESCSUITE-176) — the host
+    // page here is served from CRAFT's own origin (see the file doc comment),
+    // so that is what it names itself as.
+    const frame = await embed(page, `/?hostOrigin=${encodeURIComponent(CRAFT_ORIGIN)}`)
     // The button exists only because this CRAFT is framed — standalone CRAFT
     // never draws it (RecordingsListPanel.test.tsx pins that half).
     const upload = frame.getByRole('button', { name: 'Upload Seeded Recording to host' })
@@ -523,13 +527,44 @@ test.describe('Host embedding contract', () => {
     expect(message.blobType).toContain('webm')
   })
 
+  // Review MINOR 7. The two tests above prove the `?hostOrigin=` edit still
+  // lets a real host receive the message; this is the only browser-level pin
+  // of the actual new behaviour that motivated the edit — a host with no
+  // `hostOrigin` at all gets nothing, not the bytes.
+  test('ESCAPECRAFT refuses to hand a recording\'s bytes to a host with no hostOrigin', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000)
+
+    await openHostPage(page, CRAFT_ORIGIN)
+    await seedCraftRecording(page, 'Seeded Recording')
+
+    // No ?hostOrigin= this time — the host never named itself.
+    const frame = await embed(page, '/')
+    const upload = frame.getByRole('button', { name: 'Upload Seeded Recording to host' })
+    await expect(upload).toBeVisible({ timeout: 30_000 })
+
+    await upload.click()
+
+    // Nothing is posted: a short wait for UPLOAD_RECORDING times out rather
+    // than finding one.
+    await expect(waitForHostMessage(page, 'UPLOAD_RECORDING', 2_000)).rejects.toThrow()
+    expect((await hostMessages(page)).some((m) => m.type === 'UPLOAD_RECORDING')).toBe(false)
+
+    // And CRAFT says so through its own notice channel, in the frame itself
+    // — the host, not CRAFT, is what would otherwise show the result.
+    await expect(frame.getByText(/has not identified itself/i)).toBeVisible()
+  })
+
   test('ESCAPECRAFT hands the host every part of a take in one message', async ({ page }) => {
     test.setTimeout(60_000)
 
     await openHostPage(page, CRAFT_ORIGIN)
     const take = await seedCraftTake(page, 'Seeded Take')
 
-    const frame = await embed(page, '/')
+    // See the comment on the single-file upload test above: a bytes-carrying
+    // `UPLOAD_RECORDING` needs a parseable `hostOrigin` or nothing is posted.
+    const frame = await embed(page, `/?hostOrigin=${encodeURIComponent(CRAFT_ORIGIN)}`)
     const uploadTake = frame.getByRole('button', { name: 'Upload Seeded Take to host' })
     await expect(uploadTake).toBeVisible({ timeout: 30_000 })
 

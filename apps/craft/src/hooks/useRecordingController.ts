@@ -64,7 +64,17 @@ export interface RecordingControllerDeps {
   setIsPiPActive: (active: boolean) => void;
   /** Written here at createRecorder time, read by saveRecording. */
   recorderTypeRef: RefObject<'webcodecs' | 'mediarecorder'>;
-  /** Written by handleStopRecording, read and cleared by saveRecording. */
+  /**
+   * Written by handleStopRecording (past its own `cancelledRef` guard — see
+   * there), read and cleared by saveRecording. The authoritative clear for
+   * every path that throws a take away instead of saving it is
+   * `handleStartRecording`'s own, beside `setNotice(null)`: a new take never
+   * inherits the previous one's frame, whether that take was thrown away by
+   * a cancel, the unmount teardown, the recorder's own `onError`, or a save
+   * that rejected before `useRecordingSave` reached its clear (ESCSUITE-176).
+   * Both cancels and the teardown also clear it immediately, on their own,
+   * rather than leaving a stale frame referenced until the next start.
+   */
   capturedThumbnailRef: RefObject<Blob | null>;
   saveRecording: SaveRecording;
   /** The one notice channel — see utils/notices.ts. Cleared when a take starts. */
@@ -255,6 +265,13 @@ export function useRecordingController({
     disposeRecorder();
     stopAllStreamsRef.current();
     zeroAudioLevels();
+    // ESCSUITE-176: the frame `handleStopRecording` grabs is written before
+    // `recorder.stop()` even resolves, so a take thrown away here can leave
+    // one behind — nobody calls `handleStopRecording` on this path, and
+    // `useRecordingSave` only clears the ref once a save actually runs. Left
+    // alone, the *next* take to end on its own (the recorder's own onStop,
+    // not through a Stop click) would be saved with this screen's last frame.
+    capturedThumbnailRef.current = null;
 
     // The store is a module singleton: it outlives this component. Left as it
     // was, the next mount would come up mid-take — 'recording' with a duration
@@ -263,7 +280,7 @@ export function useRecordingController({
     recorder.setState('idle');
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
-  }, [clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
@@ -276,9 +293,12 @@ export function useRecordingController({
     clearCountdownTicker();
     disposeRecorder();
     zeroAudioLevels();
+    // ESCSUITE-176: see the unmount teardown's comment above — the same frame
+    // would otherwise outlive a countdown nobody ever let finish.
+    capturedThumbnailRef.current = null;
     setState('idle');
     stopAllStreams();
-  }, [clearCountdownTicker, disposeRecorder, setState, stopAllStreams, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearCountdownTicker, disposeRecorder, setState, stopAllStreams, zeroAudioLevels]);
 
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
@@ -289,11 +309,13 @@ export function useRecordingController({
     clearDurationTicker();
     disposeRecorder();
     zeroAudioLevels();
+    // ESCSUITE-176: see the unmount teardown's comment above.
+    capturedThumbnailRef.current = null;
 
     setState('idle');
     setCurrentDuration(0);
     stopAllStreams();
-  }, [clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
 
   // Pause recording
   const handlePauseRecording = useCallback(() => {
@@ -314,7 +336,16 @@ export function useRecordingController({
     clearDurationTicker();
 
     // Capture thumbnail from live preview BEFORE stopping (more reliable than from blob)
-    capturedThumbnailRef.current = await capturePreviewThumbnail();
+    const frame = await capturePreviewThumbnail();
+    // A cancel (or the unmount teardown) can land while that grab was still
+    // in flight — capturePreviewThumbnail's own canvas.toBlob is a real async
+    // hop, and nothing sets 'saving' until the recorder's onStop, so Cancel
+    // is still on screen throughout (ESCSUITE-176). Either already cleared
+    // the ref and disposed the recorder; writing the frame back here would
+    // re-arm the exact bug item 1 fixed, for the next take that ends on its
+    // own.
+    if (cancelledRef.current) return;
+    capturedThumbnailRef.current = frame;
 
     if (recorderRef.current) {
       await recorderRef.current.stop();
@@ -363,6 +394,13 @@ export function useRecordingController({
       // take just finished until the next one starts — which is exactly when
       // it is reset, here, and nowhere else.
       setNotice(null);
+      // A new take never inherits the previous one's frame (ESCSUITE-176): a
+      // discard path that does not run through a save — onError, or a save
+      // that rejects before useRecordingSave.ts clears this itself — would
+      // otherwise leave the ref holding the last take's picture for however
+      // long it takes the *next* take to reach handleStopRecording's own
+      // write, or forever if that next take ends on its own ("Stop sharing").
+      capturedThumbnailRef.current = null;
       setSystemAudioShared(true);
       setState('preparing');
 
@@ -824,6 +862,7 @@ export function useRecordingController({
     }
   }, [
     acquireStreams,
+    capturedThumbnailRef,
     clearCountdownTicker,
     clearDurationTicker,
     config,

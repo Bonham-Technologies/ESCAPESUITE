@@ -85,9 +85,23 @@ describe('sendToEditor', () => {
       );
     });
 
-    it('falls back to the wildcard when hostOrigin is invalid', () => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // ESCSUITE-176: `parseHostOrigin` normalises a trailing slash or a path
+    // down to the origin now, rather than rejecting anything but a bare
+    // origin — see `@escapesuite/shared/config`'s own tests.
+    it('addresses the post at the normalised origin when hostOrigin carries a path', () => {
       withSearch(`?hostOrigin=${encodeURIComponent('https://host.example/app')}`);
+
+      sendToEditor('abc123');
+
+      expect(postMessage).toHaveBeenCalledWith(
+        { type: 'SEND_TO_EDITOR', payload: { id: 'abc123' } },
+        'https://host.example'
+      );
+    });
+
+    it('falls back to the wildcard when hostOrigin cannot be parsed at all', () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      withSearch(`?hostOrigin=${encodeURIComponent('not a url')}`);
 
       sendToEditor('abc123');
 
