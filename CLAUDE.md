@@ -110,6 +110,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   `.js` file survives inlining; the hosted build keeps the worker as an ordinary fetchable
   chunk. ESCSUITE-153: before this predicate existed, the standalone build checked only
   `VITE_HEADLESS` here and shipped an un-inlined `decodeWorker-*.js` the release never attached.
+  The standalone HTML also carries the hosted deployment's `rel="canonical"` and `og:url`/
+  `og:image` tags, pointing at `https://www.escapesuite.io` — nothing in the single-file bundle
+  requests either URL, so this is harmless to the offline guarantee (ESCSUITE-177 n2), just an
+  odd-looking artefact of reusing the same `index.html` template for both targets.
 - **Shared dialog behaviour**: `useDialogBehaviour` (`packages/shared/src/hooks`, imported
   as `@escapesuite/shared/hooks`) is the single modal keyboard implementation — initial
   focus, the Tab/Shift+Tab trap, Escape-to-close and focus restored to the opener — used by
