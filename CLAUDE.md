@@ -2063,13 +2063,30 @@ regardless of the number of moves — and the six pre-existing perf files, the t
 `perfScene.ts` are byte-identical. The graph's own point drag can still land on a neighbour and is
 ESCSUITE-179. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-02 for ESCSUITE-174 (Escape while a take is being saved no longer
+runs the cancel handler, and the save's completion carries the identity of the take it saved, so a late
+`setState('idle')` can never land on a later take): 100.00 / 99.52 / **97.74** / 100.00 against the
+100.00 / 99.52 / 97.73 / 100.00 the commit this branch was rebased onto (`94e673d`) measures — branches up a
+hundredth, the other three unmoved at exactly 100, 99.52 and 100. Measured in one sitting, the base gives
+1,337 / 1,368 branches and this branch 1,342 / 1,373: five new branches, five covered, the same 31 uncovered as
+before (statements 2,489 / 2,501 → 2,490 / 2,502, lines 2,337 and functions 448 on both; the same 12
+statements uncovered, in the same four files). The five are `hooks/useKeyboardShortcuts.ts`'s Escape gate,
+now the allow-list `state === 'preparing' || state === 'recording' || state === 'paused'` (26 → 29, each of
+the three operands reached from both sides by the six per-state cases — countdown, preparing, recording,
+paused, saving, idle), and `hooks/useRecordingController.ts`'s `recorderRef.current !== me` guard on the save's
+one `setState('idle')` (122 / 126 → 124 / 128), where the success and failure arms of `saveRecording` now
+converge, reached with the ref still holding `me` by the ordinary late save and with it moved on by the
+clobber cases on both the success and the failure path; the file's four pre-existing uncovered arms are
+untouched. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
+craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.52 | 97.74 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.24 | 95.58 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
