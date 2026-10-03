@@ -197,6 +197,27 @@ describe('renderProject', () => {
     expect(exportToMP4).not.toHaveBeenCalled()
   })
 
+  it('does not adopt the migration\'s 1920x1080 default for a project with no resolution of its own (MAJOR 1 / ESCSUITE-173)', async () => {
+    // `parseProject`'s migration (`ensureTimelineHasTracks`) fills a MISSING
+    // `resolution` in with 1920x1080 — the editor's own default. The headless
+    // path never ran that migration before this ticket, and a resolution-less
+    // job instead fell back to `getResolution('project', …)`'s OTHER path:
+    // the source's own native size — the documented kit contract. A 640x480
+    // source makes the two outcomes unmistakable (1920x1080 is also this
+    // fixture's OTHER plausible-looking number, so it would not bite).
+    const input = baseInput()
+    delete (input.project as Partial<typeof input.project>).resolution
+    input.sourceVideos[0].width = 640
+    input.sourceVideos[0].height = 480
+
+    const res = await renderProject(input)
+
+    const passedResolution = (exportToMP4.mock.calls[0] as unknown[])[6]
+    expect(passedResolution).toBeUndefined()
+    expect(res.meta.width).toBe(640)
+    expect(res.meta.height).toBe(480)
+  })
+
   it('renders a legacy text overlay instead of dropping it from the export', async () => {
     // The headless entry does not go through the store, so before the conversion
     // landed here a project's legacy overlay arrays were silently excluded from

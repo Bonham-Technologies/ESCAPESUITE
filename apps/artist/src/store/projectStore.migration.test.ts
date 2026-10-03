@@ -552,6 +552,10 @@ describe('parseProject (ESCSUITE-102)', () => {
       ['a transform with scaleX of zero', { x: 0.5, y: 0.5, scaleX: 0, scaleY: 1, rotation: 0, opacity: 1 }],
       ['a transform with a negative scaleY', { x: 0.5, y: 0.5, scaleX: 1, scaleY: -1, rotation: 0, opacity: 1 }],
       ['a transform with a non-finite rotation', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: Infinity, opacity: 1 }],
+      ['a transform with a non-numeric x', { x: '0.5', y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a NaN y', { x: 0.5, y: NaN, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }],
+      ['a transform with a null rotation', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: null, opacity: 1 }],
+      ['a transform with a non-finite opacity', { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: Infinity }],
     ])('rejects %s, naming the clip (ESCSUITE-173)', (_label, badTransform) => {
       const bad = validProject()
       // The cast is the point: this is what JSON.parse hands over, and the

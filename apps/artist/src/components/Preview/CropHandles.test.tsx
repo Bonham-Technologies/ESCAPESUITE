@@ -470,22 +470,28 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).crop).toEqual({ left: 0.9, top: 0, right: 0, bottom: 0 })
   })
 
-  it('writes nothing for an aspect-locked drag that would leave no pixel', () => {
-    // The other side of `cropUpdateFor`'s refusal: an aspect-locked drag
-    // DERIVES the dependent axis rather than clamping it, so Shift-dragging the
-    // left handle to the far edge asks for a 1px-wide, 0.6px-high region —
-    // `normaliseCrop` refuses it, and the gesture simply writes nothing rather
-    // than storing a region the renderer could not read.
+  it('clamps along the locked ratio to MAX_CROP_INSET rather than leaving no pixel (ruling 2026-10-02, ESCSUITE-173)', () => {
+    // An aspect-locked drag DERIVES the dependent axis rather than clamping
+    // it independently. Shift-dragging the left handle to the far edge asks
+    // for a 1px-wide region, which at this clip's own 16:9 aspect derives a
+    // top/bottom split past MAX_CROP_INSET on both sides — the handle slides
+    // to exactly 0.9/0.45/0/0.45 instead (the largest region at this aspect
+    // that keeps every inset at or under the limit), rather than leaving no
+    // pixel or breaking the ratio.
     const { clip, handle } = mount()
     const before = past()
 
     drag(handle('Crop left'), 9999, 0, true)
 
-    expect(clipNow(clip.id).crop).toBeUndefined()
-    expect(past()).toBe(before)
+    const crop = clipNow(clip.id).crop!
+    expect(crop.left).toBeCloseTo(0.9)
+    expect(crop.top).toBeCloseTo(0.45)
+    expect(crop.right).toBe(0)
+    expect(crop.bottom).toBeCloseTo(0.45)
+    expect(past()).toBe(before + 1)
   })
 
-  it('refuses an aspect-locked move past MAX_CROP_INSET, keeping the crop at its last valid value (NIT 8 / ESCSUITE-173)', async () => {
+  it('slides to MAX_CROP_INSET past the limit, and a move back inside lands normally, in one undo entry (MINOR 6 / ESCSUITE-173)', async () => {
     // 16:9 is this clip's own uncropped aspect, so Shift-dragging its NW
     // corner scales top and left together: moving the left inset to 50%
     // (960 of 1920 source px, 480 CSS px at this canvas' 0.5 scale) moves top
@@ -500,17 +506,24 @@ describe('the crop handle layer', () => {
     expect(clipNow(clip.id).crop).toEqual({ left: 0.5, top: 0.5, right: 0, bottom: 0 })
 
     // Continuing the SAME drag to 95% derives a top of 0.95 — which
-    // `normaliseCrop`'s clamp alone would have landed at 0.9, a DIFFERENT
-    // value than the one asked for. The gesture refuses the move instead: the
-    // crop stays exactly where the last valid move left it.
+    // `normaliseCrop`'s own clamp would have landed independently at 0.9,
+    // leaving `left` at 0.95 and breaking the ratio. The handle instead
+    // slides to exactly 0.9 on BOTH insets — the limit, ratio intact.
     fireEvent.mouseMove(document, { clientX: 912, clientY: 0, shiftKey: true })
     await frame()
-    expect(clipNow(clip.id).crop).toEqual({ left: 0.5, top: 0.5, right: 0, bottom: 0 })
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.9, top: 0.9, right: 0, bottom: 0 })
+
+    // Moving back inside the limit lands the ordinary, unclamped value — the
+    // cap is re-derived from the gesture's start crop on every move
+    // (ESCSUITE-110's rule), not a sticky state the clamped move left behind.
+    fireEvent.mouseMove(document, { clientX: 600, clientY: 0, shiftKey: true })
+    await frame()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.625, top: 0.625, right: 0, bottom: 0 })
 
     fireEvent.mouseUp(document)
 
-    // The drag stayed open through the refused move rather than aborting: one
-    // undo entry for the one write that actually landed.
+    // One undo entry for the whole gesture, however many writes the three
+    // moves made.
     expect(past()).toBe(before + 1)
   })
 
