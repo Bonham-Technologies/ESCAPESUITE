@@ -25,10 +25,6 @@ test.describe('ESCAPECRAFT Standalone - App Loading', () => {
     await page.goto(CRAFT_URL)
     await waitForAppReady(page, 'craft')
 
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
-    expect(html).toContain('<div id="root">')
-
     // The recorder itself is on screen — nothing gates it
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
 
@@ -40,24 +36,27 @@ test.describe('ESCAPECRAFT Standalone - App Loading', () => {
     await page.goto(CRAFT_URL)
     await waitForAppReady(page, 'craft')
 
+    // Prove the page actually rendered the recorder before trusting the
+    // absence below — a gutted build would also show zero hub links, which
+    // is the pure-negative shape ESCSUITE-201 (hunt K-U1) flagged here.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+
     // The hub link only renders in hosted mode (isStandaloneMode() gates it)
     expect(await page.getByRole('link', { name: '← ESCAPE Suite' }).count()).toBe(0)
   })
 
   test('has page title', async ({ page }) => {
     await page.goto(CRAFT_URL)
-    const title = await page.title()
-    expect(title.length).toBeGreaterThan(0)
+    await expect(page).toHaveTitle(/ESCAPECRAFT/)
   })
 
   test('app content is visible', async ({ page }) => {
     await page.goto(CRAFT_URL)
     await waitForAppReady(page, 'craft')
-    await page.waitForTimeout(1000)
 
-    // App should show some content (not just loading or error)
-    const body = await page.locator('body').textContent()
-    expect(body?.length).toBeGreaterThan(0)
+    // A distinct real element from "opens straight into the recorder"
+    // above: the app's header, always rendered.
+    await expect(page.locator('header')).toBeVisible()
   })
 })
 
@@ -71,82 +70,45 @@ test.describe('ESCAPECRAFT Standalone - Recording Interface', () => {
   })
 
   test('shows recording UI elements', async ({ page }) => {
-    // Wait for React to fully mount
-    await page.waitForTimeout(1000)
-
-    // Should have some recording-related UI (check if any of these exist, don't fail if not)
-    const recordingUI = page
-      .getByText(/record|screen|webcam|capture|start/i)
-      .first()
-
-    // For smoke tests, just verify the check runs - actual UI may vary
-    const isVisible = await recordingUI.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Screen' })).toBeVisible()
   })
 
   test('has source selection options', async ({ page }) => {
-    const sourceSelector = page
-      .getByText(/screen|window|tab|display/i)
-      .or(page.locator('[data-testid="source-selector"]'))
-      .first()
-
-    const isVisible = await sourceSelector.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    // The real source-selection UI is the Screen toggle (`SourceToggles.tsx`).
+    await expect(page.getByRole('button', { name: 'Screen' })).toBeVisible()
   })
 
   test('has webcam toggle', async ({ page }) => {
-    const webcamToggle = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .or(page.locator('[data-testid="webcam-toggle"]'))
-      .or(page.getByText(/webcam|camera/i).first())
-
-    const isVisible = await webcamToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByRole('button', { name: 'Webcam' })).toBeVisible()
   })
 
   test('has microphone toggle', async ({ page }) => {
-    const micToggle = page
-      .getByRole('button', { name: /mic|audio|microphone/i })
-      .or(page.locator('[data-testid="mic-toggle"]'))
-      .or(page.getByText(/microphone|mic/i).first())
-
-    const isVisible = await micToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByRole('button', { name: 'Microphone' })).toBeVisible()
   })
 })
 
 test.describe('ESCAPECRAFT Standalone - Theme Support', () => {
-  test('has theme toggle', async ({ page }) => {
+  // ESCSUITE-201: there is no theme-toggle button anywhere in ESCAPECRAFT —
+  // `packages/shared/src/theme`'s `ThemeToggle` component exists but CRAFT
+  // never renders it; the app only reads a stored preference or
+  // `?theme=` (see `accessibility/core.spec.ts`'s theme audits). "has theme
+  // toggle" had no feature to find and is deleted rather than kept as a
+  // placeholder for a control that does not exist.
+
+  test('defaults to dark on a fresh load regardless of system color scheme', async ({
+    page,
+  }) => {
+    // `theme.ts`'s `DEFAULT_THEME` is 'dark', not 'system' — so a fresh
+    // load with no stored preference stays dark even when the OS prefers
+    // light. `applyTheme` sets `data-theme="light"` for light and removes
+    // the attribute for dark, the same convention the live-theme audits in
+    // `accessibility/core.spec.ts` use.
+    await page.emulateMedia({ colorScheme: 'light' })
     await page.goto(CRAFT_URL)
     await waitForAppReady(page, 'craft')
 
-    const themeToggle = page
-      .getByRole('button', { name: /theme|dark|light/i })
-      .or(page.locator('[data-testid="theme-toggle"]'))
-      .or(page.locator('[aria-label*="theme"]'))
-      .first()
-
-    const isVisible = await themeToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
-  })
-
-  test('respects system color scheme', async ({ page }) => {
-    // Emulate dark mode
-    await page.emulateMedia({ colorScheme: 'dark' })
-    await page.goto(CRAFT_URL)
-    await waitForAppReady(page, 'craft')
-
-    // Check if dark theme class is applied
-    const isDark = await page.evaluate(() => {
-      return (
-        document.documentElement.classList.contains('dark') ||
-        document.body.classList.contains('dark') ||
-        document.documentElement.getAttribute('data-theme') === 'dark'
-      )
-    })
-
-    // Should respect system preference or have default theme
-    expect(typeof isDark).toBe('boolean')
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/)
   })
 })
 
