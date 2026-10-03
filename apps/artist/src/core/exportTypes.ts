@@ -219,9 +219,29 @@ export const blendModeToCanvas: Record<BlendMode, GlobalCompositeOperation> = {
 };
 
 /**
- * Check if WebCodecs export is supported
+ * Whether the three WebCodecs globals the MP4 pipeline needs exist —
+ * `VideoEncoder` to encode, `VideoFrame` to hand it frames, and `VideoDecoder`
+ * because MP4 (unlike WebM) decodes its sources through WebCodecs.
+ *
+ * A globals read, nothing more: it says whether there is an API to ask, not
+ * whether that API can encode anything. This used to be the whole of
+ * `isMP4ExportSupported()`, and the gap was the defect ESCSUITE-175 fixed — a
+ * browser with WebCodecs and no H.264 encoder read "MP4 available" and only
+ * found out mid-export, and a browser with no AAC encoder (Firefox 155,
+ * measured 2026-10-02) exported a silent file. The real probe is below; this is
+ * kept for the two callers that genuinely only need "is the API here at all":
+ * `exportToMP4`'s own door guard, and `isMP4ExportSupported`'s short-circuit.
+ *
+ * `ExportDialog` also reads it, for one narrow question: when *neither* video
+ * format can be exported, is that because WebCodecs is missing
+ * ({@link EXPORT_NO_WEBCODECS_REASON}) or because it is present and cannot
+ * configure either codec ({@link EXPORT_NO_VIDEO_CODEC_REASON})? Every
+ * combination that reaches that question is answered correctly by this
+ * predicate, because the only global it reads that WebM does not need is
+ * `VideoDecoder`, and a browser missing *only* `VideoDecoder` still exports
+ * WebM — so the "neither" branch is never reached there.
  */
-export function isMP4ExportSupported(): boolean {
+export function hasMP4EncodeGlobals(): boolean {
   return (
     typeof VideoEncoder !== 'undefined' &&
     typeof VideoDecoder !== 'undefined' &&
@@ -299,15 +319,29 @@ export function webMVideoCodecConfigs(
 }
 
 /**
- * A representative bitrate/framerate for the export dialog's up-front probe.
+ * A representative bitrate/framerate for the export dialog's up-front probes.
  * The dialog asks before the user has chosen a quality setting — `quality`
  * only scales bitrate, never which codecs exist — so one fixed, reasonable
- * figure is enough to answer "can this browser encode WebM at all", the same
- * reasoning CRAFT's own `probeMP4Support()` documents for probing at a
- * representative size instead of the take's own.
+ * figure is enough to answer "can this browser encode this format at all", the
+ * same reasoning CRAFT's own `probeMP4Support()` documents for probing at a
+ * representative size instead of the take's own. Shared by both video probes
+ * (ESCSUITE-175) so neither can drift from the other.
  */
-const WEBM_PROBE_BITRATE = 5_000_000;
-const WEBM_PROBE_FRAMERATE = 30;
+const EXPORT_PROBE_BITRATE = 5_000_000;
+const EXPORT_PROBE_FRAMERATE = 30;
+
+/**
+ * The AAC bitrate the dialog's audio probe asks about: the `'medium'` quality
+ * setting's, because the probe runs before any quality is chosen and — as with
+ * the video bitrate above — the answer is about the codec, not the rate.
+ */
+const MP4_AUDIO_PROBE_BITRATE = 192_000;
+
+/** The sample rate both the MP4 exporter and its probe use. */
+export const MP4_AUDIO_SAMPLE_RATE = 48000;
+
+/** Stereo, in both the exporter's mix and its probe. */
+export const MP4_AUDIO_CHANNELS = 2;
 
 /**
  * Shown in the export dialog when neither WebM nor MP4 can be exported at
@@ -325,6 +359,51 @@ export const EXPORT_NO_WEBCODECS_REASON =
  */
 export const WEBM_NO_CODEC_REASON =
   'This browser cannot encode WebM video — Chrome or Edge can.';
+
+/**
+ * Shown in the export dialog when `VideoEncoder` exists but this browser can
+ * configure no H.264 profile at any of {@link mp4VideoCodecConfigs}' ten
+ * candidates — MP4's half of {@link WEBM_NO_CODEC_REASON} (ESCSUITE-175). It
+ * names what is *left*, because the two formats that need no H.264 are both
+ * still there; that second sentence is only true while WebM is available, which
+ * is why the dialog shows this reason only when it is, and
+ * {@link EXPORT_NO_VIDEO_CODEC_REASON} when it is not.
+ */
+export const MP4_NO_CODEC_REASON =
+  'This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.';
+
+/**
+ * Shown when WebCodecs is present and neither video format can be encoded — so
+ * {@link EXPORT_NO_WEBCODECS_REASON} would be a lie and the two per-format
+ * reasons would each contradict the other's "but this one works" clause
+ * (ESCSUITE-175). `GIF_ALWAYS_AVAILABLE_NOTE` still follows it: `gifenc` needs
+ * no encoder at all.
+ */
+export const EXPORT_NO_VIDEO_CODEC_REASON =
+  'This browser cannot encode WebM video or MP4 video — Chrome or Edge can.';
+
+/**
+ * Shown under the format controls *before* an MP4 export, and reported by
+ * `exportToMP4` through its own `onProgress` channel once it is running, when
+ * this browser has H.264 but no AAC encoder (Firefox 155, measured 2026-10-02).
+ *
+ * MP4 stays offered: a silent MP4 is a legitimate thing to want, and the one
+ * thing the user must not have is a file that turns out silent with no warning
+ * — which is exactly what happened before ESCSUITE-175, behind a `console.warn`.
+ * {@link MP4_EXPORTED_WITHOUT_AUDIO} is the same fact said afterwards.
+ */
+export const MP4_NO_AUDIO_NOTE =
+  'MP4 export in this browser will have no sound (no AAC encoder). WebM keeps the audio.';
+
+/**
+ * Shown on the dialog's completion screen when an MP4 export's result carries
+ * `audio: false` — {@link MP4_NO_AUDIO_NOTE}'s after-the-fact form. MP4's
+ * alone: a GIF result always reports `audio: false` because the container has
+ * nowhere to put sound, and blaming the browser's AAC encoder for that would be
+ * wrong.
+ */
+export const MP4_EXPORTED_WITHOUT_AUDIO =
+  'Exported without sound — this browser has no AAC encoder.';
 
 /**
  * Whether the two WebCodecs globals WebM encoding needs — `VideoEncoder` and
@@ -363,9 +442,140 @@ export async function isWebMExportSupported(width: number, height: number): Prom
     return false;
   }
   const found = await findSupportedVideoConfig(
-    webMVideoCodecConfigs(width, height, WEBM_PROBE_BITRATE, WEBM_PROBE_FRAMERATE)
+    webMVideoCodecConfigs(width, height, EXPORT_PROBE_BITRATE, EXPORT_PROBE_FRAMERATE)
   );
   return found !== null;
+}
+
+/**
+ * The H.264 ladder, quality first and compatibility last, walked twice: once
+ * asking for hardware acceleration (a GPU encode where there is one) and once
+ * with no preference, which is what lets software encoding answer on a headless
+ * or CI box with no GPU. Levels 4.0 come before 5.1 so a 1080p export keeps the
+ * more compatible level; `isConfigSupported` refuses Level 4.0 above 1920x1080,
+ * which is what makes the 5.1 entries reachable for a 1440p or 4K raster.
+ *
+ * Lifted out of `exportMP4.ts` by ESCSUITE-175, for the same reason
+ * {@link webMVideoCodecConfigs} exists: the dialog's up-front probe and the
+ * exporter's own `configure()` must ask one question, not two that can drift.
+ */
+export function mp4VideoCodecConfigs(
+  width: number,
+  height: number,
+  videoBitrate: number,
+  frameRate: number
+): VideoEncoderConfig[] {
+  const codecs = [
+    'avc1.640028', // High Profile Level 4.0 - best quality (up to 1080p30)
+    'avc1.4d0028', // Main Profile Level 4.0 - good compatibility
+    'avc1.42001f', // Baseline Profile Level 3.1 - maximum compatibility
+    'avc1.640033', // High Profile Level 5.1 - 1440p and 4K
+    'avc1.4d0033', // Main Profile Level 5.1
+  ];
+  const hwModes: VideoEncoderConfig['hardwareAcceleration'][] = ['prefer-hardware', 'no-preference'];
+  const configs: VideoEncoderConfig[] = [];
+  for (const hardwareAcceleration of hwModes) {
+    for (const codec of codecs) {
+      configs.push({
+        codec,
+        width,
+        height,
+        bitrate: videoBitrate,
+        framerate: frameRate,
+        latencyMode: 'quality',
+        hardwareAcceleration,
+      });
+    }
+  }
+  return configs;
+}
+
+/** AAC-LC, the one audio codec the MP4 exporter writes. */
+export function aacEncoderConfig(
+  sampleRate: number,
+  numberOfChannels: number,
+  bitrate: number
+): AudioEncoderConfig {
+  return { codec: 'mp4a.40.2', sampleRate, numberOfChannels, bitrate };
+}
+
+/**
+ * Whether this browser's `AudioEncoder` can configure the given AAC config.
+ * `false` rather than a throw for every way of not knowing — no `AudioEncoder`
+ * at all, a refusal, or a probe that rejects — because the caller's next move
+ * is the same in all three: export without sound, and say so.
+ */
+export async function isAacSupported(config: AudioEncoderConfig): Promise<boolean> {
+  if (typeof AudioEncoder === 'undefined') {
+    return false;
+  }
+  try {
+    const support = await AudioEncoder.isConfigSupported(config);
+    return support.supported === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What an MP4 export can actually do in this browser: `video` is whether any
+ * H.264 profile can be configured at the output size, `audio` whether AAC can.
+ *
+ * Two booleans because the two failures are different in kind. No H.264 means
+ * no MP4 at all — the dialog refuses the format. No AAC means an MP4 with no
+ * sound in it — the dialog keeps offering MP4 and says what the trade is.
+ */
+export interface MP4ExportSupport {
+  video: boolean;
+  audio: boolean;
+}
+
+/**
+ * Check whether MP4 export is possible, and whether it will have sound.
+ *
+ * Until ESCSUITE-175 this was {@link hasMP4EncodeGlobals} under this name — a
+ * read of which globals exist, which answered "yes" for any browser with
+ * WebCodecs whether or not its `VideoEncoder` could configure H.264 and whether
+ * or not it had an AAC encoder at all. It is now the same shape of real probe
+ * `isWebMExportSupported` has had since ESCSUITE-22/29: it asks the browser,
+ * through the same {@link findSupportedVideoConfig} ladder walker and the same
+ * {@link mp4VideoCodecConfigs} list `exportToMP4` configures from.
+ *
+ * `width`/`height` should be the size the export will actually configure the
+ * encoder at — `getResolution(preset, …)`'s answer, not the raw project
+ * resolution — for the reason `isWebMExportSupported` documents: a project whose
+ * native size this browser cannot configure should not read as unsupported when
+ * a smaller preset would have worked.
+ */
+export async function isMP4ExportSupported(
+  width: number,
+  height: number
+): Promise<MP4ExportSupport> {
+  if (!hasMP4EncodeGlobals()) {
+    return { video: false, audio: false };
+  }
+  const found = await findSupportedVideoConfig(
+    mp4VideoCodecConfigs(width, height, EXPORT_PROBE_BITRATE, EXPORT_PROBE_FRAMERATE)
+  );
+  const audio = await isAacSupported(
+    aacEncoderConfig(MP4_AUDIO_SAMPLE_RATE, MP4_AUDIO_CHANNELS, MP4_AUDIO_PROBE_BITRATE)
+  );
+  return { video: found !== null, audio };
+}
+
+/**
+ * What an export hands back: the bytes, and whether the project's sound
+ * survived the trip (ESCSUITE-175).
+ *
+ * `audio: false` means sound was **dropped** — an MP4 in a browser with no AAC
+ * encoder, and every GIF, whose container has nowhere to put it. A project with
+ * no sound in it exports `audio: true`: nothing was lost, so there is nothing to
+ * tell the user. One field across all three formats so the dialog reads it the
+ * same way whichever ran.
+ */
+export interface ExportResult {
+  blob: Blob;
+  audio: boolean;
 }
 
 /**

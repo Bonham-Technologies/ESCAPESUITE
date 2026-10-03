@@ -10,7 +10,7 @@ import {
   EncodedPacket,
 } from 'mediabunny';
 import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
-import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
+import type { ExportResult, MediaDrawOptions, ProgressCallback } from './exportTypes';
 import { projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
@@ -49,7 +49,7 @@ export async function exportToWebM(
   tracks?: Track[],
   signal?: AbortSignal,
   projectResolution?: { width: number; height: number }
-): Promise<Blob> {
+): Promise<ExportResult> {
   // WebM never decodes through WebCodecs (this exporter seeks
   // HTMLVideoElements directly), so only VideoEncoder/VideoFrame need to
   // exist — unlike `isMP4ExportSupported()`, which also needs VideoDecoder.
@@ -456,7 +456,10 @@ export async function exportToWebM(
     if (!buffer) {
       throw new Error('Export failed: no data was written to buffer');
     }
-    return new Blob([buffer], { type: 'video/webm' });
+    // WebM always carries the project's sound: its Opus encoder is probed
+    // before the mux starts and the format has a track for it, so nothing is
+    // ever dropped here (ESCSUITE-175).
+    return { blob: new Blob([buffer], { type: 'video/webm' }), audio: true };
   } catch (error) {
     // Clean up resources on error. The release is the same one the success path
     // made and runs at most once: the two paths are not exclusive — the

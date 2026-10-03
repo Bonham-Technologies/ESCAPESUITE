@@ -13,7 +13,7 @@
 // cancellation work — the abort is checked at the top of every frame, so the
 // export stops within one frame of the click.
 import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
-import type { MediaDrawOptions, ProgressCallback } from './exportTypes';
+import type { ExportResult, MediaDrawOptions, ProgressCallback } from './exportTypes';
 import { projectToOutputScale } from './outputTransform';
 import {
   checkAborted,
@@ -66,7 +66,7 @@ export async function exportToGIF(
   tracks?: Track[],
   signal?: AbortSignal,
   projectResolution?: { width: number; height: number }
-): Promise<Blob> {
+): Promise<ExportResult> {
   // No capability check: there is nothing to check. `gifenc` is pure
   // JavaScript and a 2D canvas is all this pipeline needs, which is why this
   // export is still offered in a browser where both video formats are refused —
@@ -254,7 +254,10 @@ export async function exportToGIF(
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-    return new Blob([bytes], { type: 'image/gif' });
+    // A GIF never carries sound: the container has nowhere to put it, which is
+    // why this is the one exporter whose result always reports it as dropped
+    // (ESCSUITE-175). The dialog says so before the export too.
+    return { blob: new Blob([bytes], { type: 'image/gif' }), audio: false };
   } catch (error) {
     releaseSources();
 
