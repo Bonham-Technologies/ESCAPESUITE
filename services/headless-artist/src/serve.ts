@@ -544,14 +544,13 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     // A request whose body has not finished arriving cannot be waited on: nothing queued it,
     // and nothing bounds how long a client can withhold the rest. Each one is force-ended here
     // instead of kept alive until it either finishes or times out on its own — 408 while the
-    // response can still carry one, otherwise just the connection going away. Not awaited one
-    // by one; readBody's own 'close' listener settles it either way, which still lets the
-    // openRequests wait below reach zero.
+    // response can still carry one, otherwise just the connection going away. `send` is a no-op
+    // on a response already destroyed or ended, so there is no guard to write here by hand; it
+    // also sets `connection: close`, same as every other shutdown-time response. Not awaited
+    // one by one; readBody's own 'close'/'error' handling settles it either way (resolving
+    // BODY_GONE), which still lets the openRequests wait below reach zero.
     for (const { req, res } of bodiesInFlight) {
-      if (!res.headersSent && !res.writableEnded) {
-        res.writeHead(408, JSON_HEADERS)
-        res.end(JSON.stringify({ error: 'request body did not finish arriving before shutdown' }) + '\n')
-      }
+      send(res, 408, { error: 'request body did not finish arriving before shutdown' })
       req.destroy()
     }
 
