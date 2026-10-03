@@ -32,7 +32,7 @@ const legacyText = (): TextOverlay => ({
 const baseInput = (): RenderInput => ({
   project: {
     id: 'p', name: 'n', resolution: { width: 64, height: 48 },
-    timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0' }], textOverlays: [], shapeOverlays: [], duration: 1 },
+    timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0', trackId: 't0' }], textOverlays: [], shapeOverlays: [], duration: 1 },
   } as unknown as RenderInput['project'],
   sourceVideos: [{ id: 's0', name: 's.mp4', mimeType: 'video/mp4', width: 1920, height: 1080 } as RenderInput['sourceVideos'][number]],
   sourceBlobs: { s0: new Uint8Array([1]).buffer },
@@ -172,8 +172,29 @@ describe('renderProject', () => {
 
   it('ignores overlay clips during validation', async () => {
     const input = baseInput()
-    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({ id: 'txt', sourceVideoId: '', overlayType: 'text', timelinePosition: 0, duration: 1 })
+    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({ id: 'txt', sourceVideoId: '', overlayType: 'text', timelinePosition: 0, duration: 1, trackId: 't0' })
     await expect(renderProject(input)).resolves.toBeTruthy()
+  })
+
+  it('rejects a malformed crop through parseProject instead of silently dropping the clip (ESCSUITE-173)', async () => {
+    // Before this, `validateInput` checked sources only: a crop of the wrong
+    // shape reached `croppedSourceRect` as NaN and the clip was quietly
+    // omitted from an unattended render rather than failing the job.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).crop = {
+      left: -1, top: 0, right: 0, bottom: 0,
+    }
+    await expect(renderProject(input)).rejects.toThrow(/invalid crop/i)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('rejects a project with a duplicate clip id instead of rendering whichever one won (ESCSUITE-173)', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips as unknown as Record<string, unknown>[]).push({
+      id: 'c0', sourceVideoId: 's0', trackId: 't0',
+    })
+    await expect(renderProject(input)).rejects.toThrow(/duplicate clip id/i)
+    expect(exportToMP4).not.toHaveBeenCalled()
   })
 
   it('renders a legacy text overlay instead of dropping it from the export', async () => {

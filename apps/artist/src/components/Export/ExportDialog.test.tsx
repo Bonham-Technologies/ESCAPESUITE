@@ -1901,6 +1901,18 @@ describe('ExportDialog', () => {
       expect(screen.getByText(/GIF export needs this tab visible and has no sound/)).toBeInTheDocument()
     })
 
+    it('still says WebM needs the tab visible when the browser has no MP4 support (ESCSUITE-173)', () => {
+      // WebM drives the same `elementFrames.ts` rAF readiness poll GIF does —
+      // the browser throttles it once the tab is hidden — but the note used to
+      // be bundled with MP4's own "keeps encoding in a background tab"
+      // sentence and hidden entirely whenever `mp4Supported` was false, taking
+      // the equally-true WebM fact down with it.
+      mockIsMP4ExportSupported.mockReturnValue(false)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(screen.getByText(/WebM needs this tab visible/)).toBeInTheDocument()
+    })
+
     it('leaves GIF enabled, and says so, when the browser has no WebCodecs', async () => {
       mockIsMP4ExportSupported.mockResolvedValue({ video: false, audio: true })
       mockIsWebMExportSupported.mockResolvedValue({ video: false, audio: true })

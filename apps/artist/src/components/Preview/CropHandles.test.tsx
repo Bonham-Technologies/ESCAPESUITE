@@ -485,6 +485,75 @@ describe('the crop handle layer', () => {
     expect(past()).toBe(before)
   })
 
+  it('refuses an aspect-locked move past MAX_CROP_INSET, keeping the crop at its last valid value (NIT 8 / ESCSUITE-173)', async () => {
+    // 16:9 is this clip's own uncropped aspect, so Shift-dragging its NW
+    // corner scales top and left together: moving the left inset to 50%
+    // (960 of 1920 source px, 480 CSS px at this canvas' 0.5 scale) moves top
+    // to 50% too, well inside MAX_CROP_INSET (0.9).
+    const { clip, handle } = mount()
+    const before = past()
+    const button = handle('Crop top left')
+
+    fireEvent.mouseDown(button, { clientX: 0, clientY: 0 })
+    fireEvent.mouseMove(document, { clientX: 480, clientY: 0, shiftKey: true })
+    await frame()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.5, top: 0.5, right: 0, bottom: 0 })
+
+    // Continuing the SAME drag to 95% derives a top of 0.95 — which
+    // `normaliseCrop`'s clamp alone would have landed at 0.9, a DIFFERENT
+    // value than the one asked for. The gesture refuses the move instead: the
+    // crop stays exactly where the last valid move left it.
+    fireEvent.mouseMove(document, { clientX: 912, clientY: 0, shiftKey: true })
+    await frame()
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.5, top: 0.5, right: 0, bottom: 0 })
+
+    fireEvent.mouseUp(document)
+
+    // The drag stayed open through the refused move rather than aborting: one
+    // undo entry for the one write that actually landed.
+    expect(past()).toBe(before + 1)
+  })
+
+  it('keeps a drag\'s listeners live when it renders null mid-drag — only a true unmount takes them (UNVERIFIED 4 / ESCSUITE-173)', () => {
+    // `CropHandles` can return null WITHOUT unmounting: the preview panel
+    // collapsing under an open drag reports a 0x0 canvas box, which the
+    // component's OWN `content.scaleX <= 0` guard reads below `useCropHandleGesture`,
+    // so the hook — and its two `document` listeners — stays mounted and
+    // running; only a real unmount (the sibling test above) takes
+    // `endDragRef`'s cleanup with it. This pins that a render returning null
+    // does not: the drag that was already open keeps working.
+    const canvas = previewCanvas()
+    const clip = addClip('clip1', 0, 4)
+    render(
+      <CropHandles
+        clip={clip}
+        source={video}
+        canvas={canvas}
+        projectSize={{ width: 1920, height: 1080 }}
+        time={1}
+        locked={false}
+        onLeave={vi.fn()}
+      />
+    )
+    const before = past()
+
+    fireEvent.mouseDown(screen.getByRole('button', { name: 'Crop left' }), { clientX: 0, clientY: 0 })
+
+    setRect(canvas, { left: 0, top: 0, width: 0, height: 0 })
+    act(() => observer.emit(canvas, { width: 0, height: 0 }))
+    expect(screen.queryByRole('group', { name: 'Crop handles' })).not.toBeInTheDocument()
+
+    // The move and release the open drag is waiting for still land the write
+    // and close the history entry, exactly as an ordinary drag would — the
+    // `onMove`/`onUp` closures captured the content scale from the press, not
+    // from this later, handle-less render.
+    fireEvent.mouseMove(document, { clientX: 96, clientY: 0 })
+    fireEvent.mouseUp(document)
+
+    expect(clipNow(clip.id).crop).toEqual({ left: 0.1, top: 0, right: 0, bottom: 0 })
+    expect(past()).toBe(before + 1)
+  })
+
   it('renders nothing while the preview panel is collapsed to nothing', () => {
     // A preview whose panel has been dragged shut reports a 0x0 box — the case
     // ESCSUITE-90's `handleScreenScale` guards — and a content box with no area

@@ -77,6 +77,18 @@ describe('sourceDelta', () => {
     expect(local.x).toBeCloseTo(40)
     expect(local.y).toBeCloseTo(0)
   })
+
+  it('floors a corrupt zero scale instead of dividing by it (ESCSUITE-173)', () => {
+    // `updateClipTransform` applies no floor at all — the UI's 0.1 lives in
+    // `useTransformHandles.ts` and `TransformSection.tsx`, which a drag can
+    // never get past, but a `.veditor`, a host `LOAD_PROJECT` payload or a
+    // headless job spec could carry `scaleX: 0` before `parseProject` checked
+    // transforms. Finite output, not NaN/Infinity, is the whole guarantee.
+    const result = sourceDelta({ x: 40, y: 40 }, transform({ scaleX: 0, scaleY: 0 }))
+
+    expect(Number.isFinite(result.x)).toBe(true)
+    expect(Number.isFinite(result.y)).toBe(true)
+  })
 })
 
 describe('cropForHandleMove', () => {
@@ -191,6 +203,16 @@ describe('cropForHandleMove', () => {
 
     it('leaves a region that already has the aspect alone', () => {
       expect(cropForHandleMove(undefined, 'e', { x: 0, y: 0 }, SOURCE, 2)).toEqual(crop())
+    })
+
+    it('refuses a move whose derived inset would exceed MAX_CROP_INSET, instead of landing a clamp that breaks the lock', () => {
+      // A corner handle's dependent axis lands entirely on the edge it does not
+      // own (`nw` pins `bottom` and writes the whole change into `top`). At an
+      // extreme aspect (1000:1 here) the derived `top` comes out at 0.998 —
+      // `normaliseCrop`'s clamp would have landed it at 0.9 (MAX_CROP_INSET) and
+      // the kept region would no longer have the ratio the drag asked for
+      // (NIT 8 / ESCSUITE-173). The gesture refuses the move instead.
+      expect(cropForHandleMove(undefined, 'nw', { x: 0, y: 0 }, SOURCE, 1000)).toBeUndefined()
     })
   })
 })
