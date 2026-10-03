@@ -290,11 +290,13 @@ A single `multipart/form-data` POST with two fields: `manifest` (the verificatio
 JSON string) and `file` (the render, filename `<jobId>.<ext>`, content type `video/mp4`,
 `video/webm` or `image/gif`). Any non-2xx response fails the job. `outputLocation` is the URL.
 
-`timeoutMs` (a positive integer, default **10 minutes**) bounds the whole POST — connect,
-upload, and the server's response. `HEADLESS_TIMEOUT_MS` does not cover delivery, so without
-this an endpoint that accepts the body and never answers would hold the worker forever; the job
-then fails with `webhook sink timed out after <n> ms`. Raise it if you push large files over a
-slow link.
+`timeoutMs` (a positive integer, default **10 minutes**, at most **2147483647** — 2^31-1 ms,
+~24.8 days, the largest delay a timer can represent; anything above that is refused by name
+rather than silently clamped to ~1 ms) bounds the whole POST — connect, upload, and the
+server's response. `HEADLESS_TIMEOUT_MS` does not cover delivery, so without this an endpoint
+that accepts the body and never answers would hold the worker forever; the job then fails with
+`webhook sink timed out after <n> ms`. Raise it, short of the bound, if you push large files
+over a slow link.
 
 `headers` are sent as given with one exception: a `Content-Type` you set is **ignored**. The
 boundary is generated per request and lives in that header — overriding it would leave the
@@ -357,7 +359,7 @@ paths.
 | `HEADLESS_GPU` | unset | `true` launches Chromium with GPU acceleration instead of `--disable-gpu`. See [GPU](#gpu). |
 | `HEADLESS_CHROMIUM_PATH` | Playwright's browser | Path to a Chromium binary to launch instead. |
 | `HEADLESS_NO_SANDBOX` | unset | `true` adds `--no-sandbox`. Needed when running as root — e.g. in a container with no `USER`. Prefer running as a non-root user and leaving this off. |
-| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-**render** budget, launch included — it does not cover delivery (the `webhook` sink has its own `timeoutMs`). Must be a positive integer; anything else exits 2. |
+| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-**render** budget, launch included — it does not cover delivery (the `webhook` and `command` sinks each have their own `timeoutMs`). Must be a positive integer of at most `2147483647` (2^31-1 ms, ~24.8 days — the largest delay `setTimeout` can represent); anything else, including a larger value, exits 2. |
 | `HEADLESS_LOG` | `text` | `json` emits one JSON object per stderr line (`{ts, level, msg}`, level `error` or `info`). |
 | `HEADLESS_PORT` | `8787` | `serve` only: port to bind. `0` picks a free one and prints it. |
 | `HEADLESS_HOST` | `127.0.0.1` | `serve` only: interface to bind. There is no auth — see [HTTP service mode](#http-service-mode) before changing it. |

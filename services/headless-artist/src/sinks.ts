@@ -2,6 +2,7 @@ import { openAsBlob, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import type { VerificationManifest } from './manifest'
+import { MAX_TIMEOUT_MS } from './timeouts'
 
 export interface OutputSink {
   deliver(
@@ -231,6 +232,14 @@ function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
     (typeof rawTimeout !== 'number' || !Number.isInteger(rawTimeout) || rawTimeout <= 0)
   ) {
     throw new Error('webhook sink requires config.timeoutMs (positive integer) when provided')
+  }
+  // AbortSignal.timeout clamps any delay above 2^31-1 to 1 ms rather than refusing it (and
+  // throws ERR_OUT_OF_RANGE above 2^32-1), so a value past this bound would abort the delivery
+  // almost instantly instead of giving it the long budget that was asked for.
+  if (typeof rawTimeout === 'number' && rawTimeout > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
   }
 
   return {
