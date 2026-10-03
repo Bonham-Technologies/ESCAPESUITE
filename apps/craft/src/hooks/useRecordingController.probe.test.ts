@@ -1,10 +1,18 @@
-// ESCSUITE-176 item 1 (probe). Every path that throws a take away — a cancel
-// from a live take, a cancelled countdown, and the unmount teardown — has to
-// clear `capturedThumbnailRef` the same way ESCSUITE-114 made them all zero
-// the audio levels. Left uncleared, the *next* take that ends on its own (the
-// recorder's own onStop, not through handleStopRecording — "Stop sharing" is
-// exactly this) is saved with the thrown-away take's frame, because
-// `useRecordingSave` only clears the ref once a save actually runs.
+// ESCSUITE-176 item 1 (probe), fix round 1. Every path that throws a take
+// away — a cancel from a live take, a cancelled countdown, the unmount
+// teardown, and the recorder's own onError — has to leave nothing behind in
+// `capturedThumbnailRef` for the *next* take to inherit, the same way
+// ESCSUITE-114 made them all zero the audio levels. Left stale, the next take
+// that ends on its own (the recorder's own onStop, not through
+// handleStopRecording — "Stop sharing" is exactly this) is saved with the
+// wrong frame, because `useRecordingSave` only clears the ref once a save
+// actually runs.
+//
+// The first case drives the real path end to end (review NIT 11): a deferred
+// `drawThumbnail` lets a cancel land strictly between `handleStopRecording`'s
+// await and its write (review MINOR 2's exact trigger). The others assign
+// the ref directly, which is enough to prove the *clearing* side without
+// needing a real grab in flight.
 //
 // Harness lifted from useRecordingController.test.ts: the recorder factory is
 // doubled (jsdom has neither MediaRecorder nor WebCodecs) and the capture side
@@ -18,6 +26,7 @@ import { defaultConfig, type RecordingConfig } from '../store/types'
 import {
   allCapabilities,
   allDetailedCapabilities,
+  recorderFactory,
   resetAppDoubles,
 } from '../test/appDoubles'
 import { createStreamDouble, createTrackDouble } from '../test/doubles/mediastream'
@@ -33,6 +42,27 @@ vi.mock('../core/storage', async (importOriginal) => ({
   hasSpaceForRecording,
 }))
 
+// A controllable stand-in for `drawThumbnail`'s own `canvas.toBlob` hop, so a
+// test can land a cancel strictly between `capturePreviewThumbnail`'s await
+// and `handleStopRecording`'s write (MINOR 2's exact trigger). Only
+// `resolveDraw` is read by tests; the mock factory closes over the setter.
+const { setResolveDraw, callResolveDraw } = vi.hoisted(() => {
+  let resolve: (blob: Blob | null) => void = () => {}
+  return {
+    setResolveDraw: (fn: (blob: Blob | null) => void) => { resolve = fn },
+    callResolveDraw: (blob: Blob | null) => resolve(blob),
+  }
+})
+vi.mock('../utils/previewThumbnail', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../utils/previewThumbnail')>()
+  return {
+    ...actual,
+    drawThumbnail: vi.fn(
+      () => new Promise<Blob | null>((resolve) => setResolveDraw(resolve))
+    ),
+  }
+})
+
 interface Harness {
   deps: RecordingControllerDeps
   capturedThumbnailRef: { current: Blob | null }
@@ -45,6 +75,14 @@ let harness: Harness
 
 function screenStream(): MediaStream {
   return createStreamDouble([createTrackDouble('video', { id: 'screen-video' })])
+}
+
+/** A preview <video> with intrinsic dimensions, as a playing one has. */
+function previewWithFrames(): HTMLVideoElement {
+  const video = document.createElement('video')
+  Object.defineProperty(video, 'videoWidth', { value: 1280, configurable: true })
+  Object.defineProperty(video, 'videoHeight', { value: 720, configurable: true })
+  return video
 }
 
 function resetStore(config: Partial<RecordingConfig> = {}): void {
@@ -119,16 +157,32 @@ afterEach(() => {
 })
 
 describe('PROBE: the preview frame a cancelled take grabbed', () => {
-  it('is not left behind for the next take (cancel from a live take)', async () => {
+  // MINOR 2's exact trigger: Stop is clicked, capturePreviewThumbnail's own
+  // async hop (drawThumbnail -> canvas.toBlob) is still in flight, and Cancel
+  // — still on screen, since nothing sets 'saving' until the recorder's own
+  // onStop — lands before that hop resolves.
+  it('is not left behind for the next take when a cancel lands mid-grab (cancel from a live take)', async () => {
     const { result } = mountController({ countdownSeconds: 0 })
+    harness.deps.previewRef.current = previewWithFrames()
     await act(async () => { await result.current.handleStartRecording() })
 
-    // The take grabbed a frame before Stop finished landing — exactly what
-    // handleStopRecording does, captured here directly since the recorder
-    // double never calls it on its own.
-    harness.capturedThumbnailRef.current = new Blob(['take-a-frame'])
+    // handleStopRecording does nothing synchronous before its own await —
+    // clearDurationTicker only clears an interval — so this is safe to call
+    // outside act(): no render can be pending from it yet.
+    let stopSettled = false
+    const stopPromise = result.current.handleStopRecording().then(() => { stopSettled = true })
 
+    // The grab is parked on the deferred drawThumbnail; Cancel lands here,
+    // strictly between the await and the write.
     act(() => { result.current.handleCancelRecording() })
+    expect(harness.capturedThumbnailRef.current).toBeNull()
+    expect(stopSettled).toBe(false)
+
+    // The grab finally resolves — this is the write the bug used to make.
+    await act(async () => {
+      callResolveDraw(new Blob(['take-a-frame']))
+      await stopPromise
+    })
 
     expect(harness.capturedThumbnailRef.current).toBeNull()
   })
@@ -151,6 +205,27 @@ describe('PROBE: the preview frame a cancelled take grabbed', () => {
     harness.capturedThumbnailRef.current = new Blob(['take-a-frame'])
 
     unmount()
+
+    expect(harness.capturedThumbnailRef.current).toBeNull()
+  })
+
+  // MINOR 3. onError throws a take away without a save ever running — Stop
+  // was clicked (the ref already holds a frame), the recorder's finalize or
+  // muxer then fails, and onError fires instead of onStop. Nothing on that
+  // path cleared the ref before this fix; only the *next* start does, which
+  // is what this asserts.
+  it('is not inherited by the next take after the recorder fails instead of stopping cleanly (onError)', async () => {
+    const { result } = mountController({ countdownSeconds: 0 })
+    await act(async () => { await result.current.handleStartRecording() })
+    const recorderA = recorderFactory.last()
+
+    // Stop already wrote a frame for take A before the muxer gave up.
+    harness.capturedThumbnailRef.current = new Blob(['take-a-frame'])
+    act(() => { recorderA.failWith(new Error('muxer failed')) })
+
+    // Take B starts. Its own grab has not run yet — this is the clear
+    // handleStartRecording does up front, for exactly this discard path.
+    await act(async () => { await result.current.handleStartRecording() })
 
     expect(harness.capturedThumbnailRef.current).toBeNull()
   })

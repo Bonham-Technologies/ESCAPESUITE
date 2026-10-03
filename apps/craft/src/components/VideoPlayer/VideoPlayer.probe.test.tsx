@@ -33,7 +33,12 @@ describe('PROBE: VideoPlayer', () => {
     expect(slider?.getAttribute('aria-label') ?? '').toMatch(/volume/i);
   });
 
-  it('removes the document drag listeners when it unmounts mid-drag', () => {
+  // Review NIT 10: asserting the event *names* alone would also pass an
+  // unmount cleanup that removed some other function under the same names —
+  // a no-op against the listeners the drag actually installed. The pairs
+  // removed must be exactly the pairs added.
+  it('removes the exact (type, handler) pairs it added when it unmounts mid-drag', () => {
+    const addSpy = vi.spyOn(document, 'addEventListener');
     const removeSpy = vi.spyOn(document, 'removeEventListener');
     const { progressBar, unmount } = mountPlayer();
 
@@ -41,12 +46,19 @@ describe('PROBE: VideoPlayer', () => {
       fireEvent.mouseDown(progressBar, { clientX: 150 });
     });
 
+    const added = addSpy.mock.calls
+      .filter(([type]) => type === 'mousemove' || type === 'mouseup')
+      .map(([type, handler]) => [type, handler]);
+    expect(added).toHaveLength(2);
+
     unmount();
 
-    const removedEvents = removeSpy.mock.calls.map((call) => call[0]);
-    expect(removedEvents).toContain('mousemove');
-    expect(removedEvents).toContain('mouseup');
+    const removed = removeSpy.mock.calls
+      .filter(([type]) => type === 'mousemove' || type === 'mouseup')
+      .map(([type, handler]) => [type, handler]);
+    expect(removed).toEqual(added);
 
+    addSpy.mockRestore();
     removeSpy.mockRestore();
   });
 });

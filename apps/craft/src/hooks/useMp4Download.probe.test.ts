@@ -18,10 +18,12 @@ vi.mock('@vercel/analytics', async () => (await import('../test/appDoubles')).an
 const MP4_SUPPORTED: Mp4Support = { state: 'ready', supported: true, audio: true }
 
 let setNotice: ReturnType<typeof vi.fn<(notice: string | null) => void>>
+let refreshStorageSpace: ReturnType<typeof vi.fn<() => Promise<void>>>
 
 beforeEach(async () => {
   resetAppDoubles()
   setNotice = vi.fn<(notice: string | null) => void>()
+  refreshStorageSpace = vi.fn<() => Promise<void>>(async () => {})
   await clearAllRecordings()
 })
 
@@ -30,7 +32,7 @@ afterEach(() => {
 })
 
 function mount() {
-  return renderHook(() => useMp4Download({ setNotice, mp4Support: MP4_SUPPORTED }))
+  return renderHook(() => useMp4Download({ setNotice, mp4Support: MP4_SUPPORTED, refreshStorageSpace }))
 }
 
 describe('PROBE: conversion of a recording whose bytes are gone', () => {

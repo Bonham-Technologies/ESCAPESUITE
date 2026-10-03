@@ -38,4 +38,23 @@ describe('PROBE: WebcamOverlaySettings', () => {
     expect(screen.getByRole('button', { name: 'circle', pressed: true })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'rectangle', pressed: false })).toBeInTheDocument()
   })
+
+  // Review NIT 12: aria-pressed alone still leaves a screen-reader user
+  // hearing "top left, not pressed" with no indication of what the four
+  // buttons are choosing between. Each set is its own labelled group.
+  it('groups the position buttons under their own label', () => {
+    renderSettings()
+
+    const group = screen.getByRole('group', { name: 'Webcam position' })
+    expect(group).toContainElement(screen.getByRole('button', { name: 'top left' }))
+    expect(group).toContainElement(screen.getByRole('button', { name: 'bottom right' }))
+  })
+
+  it('groups the shape buttons under their own label', () => {
+    renderSettings()
+
+    const group = screen.getByRole('group', { name: 'Webcam shape' })
+    expect(group).toContainElement(screen.getByRole('button', { name: 'circle' }))
+    expect(group).toContainElement(screen.getByRole('button', { name: 'rectangle' }))
+  })
 })

@@ -175,6 +175,14 @@ describe('parseHostOrigin', () => {
     expect(parseHostOrigin('?hostOrigin=data%3Atext%2Fhtml%2Chi')).toBeNull()
   })
 
+  // NIT 13: a non-opaque origin on a scheme no real host is ever served from
+  // (ws:, ftp:, …) used to pass the `origin !== 'null'` guard alone — safe in
+  // practice (no document has that origin to receive the post, so it fails
+  // closed) but not a scheme the protocol restriction should let through.
+  it('rejects a non-opaque origin whose scheme is not http or https', () => {
+    expect(parseHostOrigin('?hostOrigin=ws%3A%2F%2Fhost.example')).toBeNull()
+  })
+
   it('warns once for an invalid value', () => {
     parseHostOrigin('?hostOrigin=nonsense')
     parseHostOrigin('?hostOrigin=also-nonsense')

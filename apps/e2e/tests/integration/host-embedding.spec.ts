@@ -527,6 +527,35 @@ test.describe('Host embedding contract', () => {
     expect(message.blobType).toContain('webm')
   })
 
+  // Review MINOR 7. The two tests above prove the `?hostOrigin=` edit still
+  // lets a real host receive the message; this is the only browser-level pin
+  // of the actual new behaviour that motivated the edit — a host with no
+  // `hostOrigin` at all gets nothing, not the bytes.
+  test('ESCAPECRAFT refuses to hand a recording\'s bytes to a host with no hostOrigin', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000)
+
+    await openHostPage(page, CRAFT_ORIGIN)
+    await seedCraftRecording(page, 'Seeded Recording')
+
+    // No ?hostOrigin= this time — the host never named itself.
+    const frame = await embed(page, '/')
+    const upload = frame.getByRole('button', { name: 'Upload Seeded Recording to host' })
+    await expect(upload).toBeVisible({ timeout: 30_000 })
+
+    await upload.click()
+
+    // Nothing is posted: a short wait for UPLOAD_RECORDING times out rather
+    // than finding one.
+    await expect(waitForHostMessage(page, 'UPLOAD_RECORDING', 2_000)).rejects.toThrow()
+    expect((await hostMessages(page)).some((m) => m.type === 'UPLOAD_RECORDING')).toBe(false)
+
+    // And CRAFT says so through its own notice channel, in the frame itself
+    // — the host, not CRAFT, is what would otherwise show the result.
+    await expect(frame.getByText(/has not identified itself/i)).toBeVisible()
+  })
+
   test('ESCAPECRAFT hands the host every part of a take in one message', async ({ page }) => {
     test.setTimeout(60_000)
 
