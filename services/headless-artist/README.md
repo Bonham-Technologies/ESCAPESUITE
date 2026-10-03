@@ -672,7 +672,8 @@ minutes; a shutdown in progress does not even wait that long — see [Shutdown](
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
-| `408` | The request's body had not finished arriving when a shutdown began (or, independently of shutdown, when `requestTimeout`/`headersTimeout` above elapsed). Nothing was queued. | `{"error": "request body did not finish arriving before shutdown"}` |
+| `408` | The request's body had not finished arriving when a shutdown began. Nothing was queued. | `{"error": "request body did not finish arriving before shutdown"}` |
+| `408` | Independently of shutdown: `requestTimeout`/`headersTimeout` above elapsed. This is **Node's own** answer, written raw to the socket rather than through this server's JSON responses. | None at all — exactly `HTTP/1.1 408 Request Timeout` plus `Connection: close`, no body. |
 | `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
 | `415` | `content-type` was not `application/json`. | `{"error": "…"}` |
 | `429` | The queue is full. Carries `Retry-After: 5`. Nothing was queued — resend it, or send it somewhere less busy. | `{"error": "render queue is full (64 queued)"}` |
@@ -846,9 +847,13 @@ drop a render that is half encoded:
 Step 3 is bounded by `HEADLESS_TIMEOUT_MS` **plus** the job's own delivery budget — not by the
 signal, and not by the render alone. The `webhook` and `command` sinks each have their own
 `timeoutMs` (10 minutes and 5 minutes by default), so a 30-minute render that then delivers over
-`webhook` means up to a 40-minute drain. Size `terminationGracePeriodSeconds` (or your
-orchestrator's equivalent) against the sum of the two, or a `SIGKILL` will land in the middle of
-an encode or a delivery and leave the scratch directory behind.
+`webhook` means up to a 40-minute drain. **`volume` needs no budget of its own — it is a local
+filesystem write — but `s3` has none either**: the sink sets no timeout of its own, so a stalled
+upload is bounded only by the AWS SDK's own defaults (no timeout, with retries), and a drain
+waiting on one has no bound this kit controls at all. An `s3` delivery budget is a follow-up, not
+something this ticket adds. Size `terminationGracePeriodSeconds` (or your orchestrator's
+equivalent) against the sum you can actually bound, or a `SIGKILL` will land in the middle of an
+encode or a delivery and leave the scratch directory behind.
 
 Step 2's new half is there so a client that never finishes sending cannot hold the drain open
 indefinitely — nothing used to bound that wait at all. The server also carries its own bound on
