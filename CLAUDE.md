@@ -2123,6 +2123,34 @@ are byte-identical — nothing per frame moved — as are the other five pins an
 pin changed (`apps/e2e/tests/errors/export.spec.ts`'s codec-not-supported case) and was run in Chromium:
 11 / 11. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-178 and ESCSUITE-179 (the preview's selection
+chrome, hit test, cursor and marquee follow a hidden track — no chrome, no hit, no marquee pick for a clip
+whose track is hidden, the selection itself surviving the hide — and the keyframe graph's own point drag
+refuses a drop within `KEYFRAME_TIME_EPSILON` of another keyframe of the same property the way the diamond
+row has since ESCSUITE-167, through the same `occupiedTimeMessage` and the graph's one live region; the
+inline `!track || !track.visible` shape that nine sites in seven files had each written out is one
+`store/trackVisibility.ts` helper, a pure move): 99.80 / 99.25 / **95.64** / 99.67 against the
+99.80 / 99.25 / 95.63 / 99.67 that `main` at `cc950559` measures in the same sitting — a direct measurement
+of `main` again, now that every earlier sweep-4 branch has landed and the composite bases the ESCSUITE-172,
+175 and 173 paragraphs describe are no longer needed. Branches up a hundredth, the other three unmoved:
+the base gives 4,797 / 5,016 branches and this branch 4,807 / 5,026 — ten new branches, ten covered, the
+same 219 uncovered (lines 7,611 / 7,626 → 7,621 / 7,636, statements 8,568 / 8,632 → 8,583 / 8,647,
+functions 1,844 / 1,850 → 1,847 / 1,853, every denominator growing by exactly what the numerator did; the
+same 15 / 64 / 6 uncovered). The movement is spread across the readers and the helper: `KeyframeGraph.tsx`
+111 / 120 → 117 / 126 (the occupancy refusal before any `useGestureHistory` commit, the `timeChanged`
+short-circuit's refusal side, each reached by the onto-a-neighbour, near-but-not-within, left-overshoot-onto-
+the-start-keyframe and value-only-drag cases; the same nine pre-existing arms uncovered),
+`components/Preview/selectionOverlay.ts` 36 / 38 → 40 / 42, `hitTest.ts` 85 / 87 → 87 / 89 and
+`dragGeometry.ts` 67 / 82 → 69 / 84 (the hidden-track test in each draw, hit and marquee path, reached with
+the track hidden, shown again and absent, with the same two, two and fifteen pre-existing arms uncovered),
+`store/trackVisibility.ts` 4 / 4 on arrival, and three files whose denominators *fell* because their inline
+shape became a call — `store/clipQueries.ts` 14 → 12, `components/Preview/cropOverlay.ts` 29 → 27 and
+`core/exportTypes.ts` 124 → 120 (120 / 124 → 116 / 120, the
+same four pre-existing arms uncovered). The seven perf/rerender pins, `keyframeGestures.perf.test.ts` and
+`perfScene.ts` are byte-identical: the chrome's extra work is one track lookup per drawn clip and the
+refusal is one comparison at release. The refuse-and-snap-back shape both keyframe drags share is
+ESCSUITE-183. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2130,7 +2158,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.74 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.24 | 95.61 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.25 | 95.64 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 

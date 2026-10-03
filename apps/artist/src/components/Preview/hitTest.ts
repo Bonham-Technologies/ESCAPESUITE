@@ -3,6 +3,7 @@
 // Handles take priority over overlay bodies, and the keyframe panel narrows
 // interaction to the selected clip alone. Pure: the scene is a parameter.
 import { getClipsAtTime } from '../../store/projectStore';
+import { isTrackVisible } from '../../store/trackVisibility';
 import {
   getClipOpacity,
   getClipType,
@@ -61,16 +62,24 @@ export function hitHandlesOnClip(
   mouseX: number,
   mouseY: number,
   canvas: HTMLCanvasElement,
-  scene: Pick<HitTestContext, 'clips' | 'sourceVideos' | 'currentTime' | 'transition'>,
+  scene: Pick<HitTestContext, 'clips' | 'tracks' | 'sourceVideos' | 'currentTime' | 'transition'>,
   options: HandleCascadeOptions,
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): HandleHit | null {
-  const { clips, sourceVideos, currentTime, transition } = scene;
+  const { clips, tracks, sourceVideos, currentTime, transition } = scene;
 
   const clip = clips.find(c => c.id === clipId);
   const clipType = clip ? getClipType(clip, sourceVideos) : null;
   if (!clip || !clipType) return null;
+
+  // A clip on a hidden track is not under the pointer because it is not in
+  // the picture at all (ESCSUITE-178) — the same question `getClipsAtTime`
+  // asks before the second pass below ever sees a clip. Without this, the
+  // selected clip's own handles (this function's two callers below) stayed
+  // live over a frame that drew nothing for it.
+  if (!isTrackVisible(tracks, clip.trackId)) return null;
+
   if (options.skipKeyframed && hasCustomKeyframes(clip)) return null;
 
   const clipEnd = clip.timelinePosition + clip.duration;

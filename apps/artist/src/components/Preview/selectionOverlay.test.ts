@@ -15,6 +15,7 @@ import {
   makeAnimation,
   makeClip,
   makeSourceVideo,
+  makeTrack,
   makeTransitionInfo,
 } from '../../test/fixtures/clipFixtures'
 import {
@@ -72,6 +73,7 @@ const mediaClip = (overrides: Partial<Clip> = {}): Clip =>
 function selection(overrides: Partial<SelectionOverlayContext> = {}): SelectionOverlayContext {
   return {
     clips: [mediaClip()],
+    tracks: [makeTrack()],
     sourceVideos: [source],
     selectedClipId: 'clip1',
     isPlaying: false,
@@ -85,6 +87,7 @@ function multiSelection(
 ): MultiSelectOverlayContext {
   return {
     clips: [mediaClip()],
+    tracks: [makeTrack()],
     sourceVideos: [source],
     selectedClipId: null,
     selectedClipIds: new Set(['clip1', 'clip2']),
@@ -210,6 +213,21 @@ describe('drawSelectionHandles', () => {
 
   it('draws nothing when the clip’s bounds cannot be worked out', () => {
     drawSelectionHandles(canvas, 1, selection({ clips: [mediaClip({ sourceVideoId: 'missing' })] }))
+
+    expect(ctx.calls).toHaveLength(0)
+  })
+
+  // ESCSUITE-178: a clip on a hidden track takes no picture in the frame
+  // either (getClipsAtTime's own `!track || !track.visible` test), so its
+  // selection box and handles no longer sit over a picture nobody can see.
+  it('draws nothing for a clip on a hidden track', () => {
+    drawSelectionHandles(canvas, 1, selection({ tracks: [makeTrack({ visible: false })] }))
+
+    expect(ctx.calls).toHaveLength(0)
+  })
+
+  it('draws nothing for a clip whose track is gone', () => {
+    drawSelectionHandles(canvas, 1, selection({ tracks: [] }))
 
     expect(ctx.calls).toHaveLength(0)
   })
@@ -355,6 +373,44 @@ describe('drawMultiSelectHandles', () => {
 
     expect(() => drawMultiSelectHandles(el, 1, multiSelection())).not.toThrow()
     expect(getCanvasContext(el)).toBeUndefined()
+  })
+
+  // ESCSUITE-178: the hidden clip takes no box; its visible sibling still
+  // gets one, the same way a clip with no source or one that is off screen is
+  // skipped while the rest of the selection draws normally.
+  it('skips a clip on a hidden track but keeps drawing its visible sibling', () => {
+    const second = mediaClip({ id: 'clip2', trackId: 'hidden' })
+
+    drawMultiSelectHandles(
+      canvas,
+      1,
+      multiSelection({
+        clips: [mediaClip(), second],
+        tracks: [makeTrack(), makeTrack({ id: 'hidden', visible: false })],
+      })
+    )
+
+    expect(ctx.argsFor('strokeRect')).toEqual([[-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2]])
+  })
+
+  // Review round 1, NIT 4: the single-select twin of this already has a
+  // "track is gone" case (`drawSelectionHandles`' `tracks: []` test above);
+  // this is its multi-select pair, so the `!track` operand is reached false
+  // (the visible sibling) and true (the one whose track is simply absent)
+  // in both describes, not just one.
+  it('skips a clip whose track is gone but keeps drawing its visible sibling', () => {
+    const second = mediaClip({ id: 'clip2', trackId: 'gone' })
+
+    drawMultiSelectHandles(
+      canvas,
+      1,
+      multiSelection({
+        clips: [mediaClip(), second],
+        tracks: [makeTrack()],
+      })
+    )
+
+    expect(ctx.argsFor('strokeRect')).toEqual([[-HALF_W, -HALF_H, HALF_W * 2, HALF_H * 2]])
   })
 })
 

@@ -11,6 +11,7 @@
 // sample, same as the preview.
 
 import type { Clip, Track } from '../store/types';
+import { isVisibleTrack } from '../store/trackVisibility';
 import { getVideoBlob } from './storage';
 import { getAnimatedVolume } from '../utils/animation';
 
@@ -44,8 +45,8 @@ export async function extractAndMixAudio(
 
     // Skip a clip whose track has been deleted, a muted track, and a hidden
     // track (ESCSUITE-127: the preview is already silent for a hidden track
-    // — `getClipsAtTime` filters on `track.visible` — so an export agrees).
-    if (!track || track.muted || !track.visible) continue;
+    // — `getClipsAtTime` filters on it too — so an export agrees).
+    if (!track || track.muted || !isVisibleTrack(track)) continue;
 
     // Get track volume (default to 1 if not set)
     const trackVolume = track.volume ?? 1;

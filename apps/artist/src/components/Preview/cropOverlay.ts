@@ -19,6 +19,7 @@ import {
   type OverlayBoundsOptions,
 } from './previewGeometry';
 import type { Clip, ClipCrop, SourceVideo, Track } from '../../store/types';
+import { isTrackVisible } from '../../store/trackVisibility';
 import type { DragMode, OverlayBounds, ProjectSize } from './types';
 
 /** Everything crop mode's chrome reads out of the editor store. */
@@ -110,8 +111,7 @@ export function cropTarget(scene: CropOverlayScene): CropTarget | null {
   const clip = clips.find((c) => c.id === cropClipId);
   if (!clip) return null;
 
-  const track = tracks.find((t) => t.id === clip.trackId);
-  if (!track || !track.visible) return null;
+  if (!isTrackVisible(tracks, clip.trackId)) return null;
 
   const source = sourceVideos.find((s) => s.id === clip.sourceVideoId);
   if (!source) return null;

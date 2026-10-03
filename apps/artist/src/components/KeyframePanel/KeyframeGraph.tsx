@@ -1,5 +1,5 @@
 import { useMemo, useCallback, useRef, useState, useEffect } from 'react';
-import { getAllKeyframesForProperty, interpolateKeyframes } from '../../utils/animation';
+import { getAllKeyframesForProperty, interpolateKeyframes, KEYFRAME_TIME_EPSILON } from '../../utils/animation';
 import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects, EasingType } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { EASING_TYPES } from '../../utils/easingOptions';
@@ -8,6 +8,7 @@ import {
   formatValue,
   keyframeOptionId,
   keyframeOptionLabel,
+  occupiedTimeMessage,
   PROPERTY_LABELS,
   useKeyframeGraphKeyboard,
 } from './hooks/useKeyframeGraphKeyboard';
@@ -134,7 +135,7 @@ export function KeyframeGraph({
     ? undefined
     : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
 
-  const { activeIndex, activeId, setActiveTime, nudgeMessage, onKeyDown } = useKeyframeGraphKeyboard({
+  const { activeIndex, activeId, setActiveTime, nudgeMessage, announce, onKeyDown } = useKeyframeGraphKeyboard({
     property,
     keyframes,
     isCustomKeyframe,
@@ -361,31 +362,57 @@ export function KeyframeGraph({
         const timeChanged = Math.abs(currentDrag.currentTime - currentDrag.originalTime) > 0.001;
         const valueChanged = Math.abs(currentDrag.currentValue - currentDrag.originalValue) > 0.001;
 
+        // `moveClipKeyframe` deletes whatever CUSTOM keyframe already sits
+        // within KEYFRAME_TIME_EPSILON of the target, so a drop that still
+        // lands there is refused outright instead of silently destroying a
+        // neighbour (ESCSUITE-179) — the same refusal the keyboard's own
+        // `nudgeTime` makes for the identical situation, and announced
+        // through the exact same message and live region (`announce`,
+        // shared out of `useKeyframeGraphKeyboard`). `keyframes` is every
+        // handle drawn on the graph, presets included: landing on a
+        // PRESET's handle is refused too, but for a different reason — the
+        // store deletes nothing there (a preset is regenerated from
+        // `animation.in`/`out`, never stored as a keyframe), but
+        // `getAllKeyframesForProperty` merges two handles within the same
+        // epsilon and the custom one wins, so the preset's handle would
+        // simply vanish behind it.
+        const occupied = timeChanged && keyframes.some(kf =>
+          Math.abs(kf.time - currentDrag.originalTime) >= KEYFRAME_TIME_EPSILON &&
+          Math.abs(kf.time - currentDrag.currentTime) < KEYFRAME_TIME_EPSILON
+        );
+
         // One gesture, one undo entry (ESCSUITE-163 / M1): the move commits
         // first — synchronously, no setTimeout — and the value write, when
         // there is one, joins the same entry via `gestureHistory`'s
-        // `skipHistory`. A refused move (a locked track) leaves `settledTime`
-        // at the keyframe's original time, so a value-only write — if any —
-        // lands there rather than on a time the drag never actually reached.
+        // `skipHistory`. An occupied drop (ESCSUITE-179) refuses before any
+        // `commit` at all — the gesture still opens and closes, owing
+        // nothing and writing nothing, move included — and a refused move (a
+        // locked track) leaves `settledTime` at the keyframe's original
+        // time either way, so a value-only write — if any — lands there
+        // rather than on a time the drag never actually reached.
         let settledTime = currentDrag.originalTime;
         if (timeChanged || valueChanged) {
           gestureHistory.begin();
 
-          let moveLanded = true;
-          if (timeChanged) {
-            moveLanded = gestureHistory.commit((skipHistory) =>
-              onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime, skipHistory)
-            );
-            if (moveLanded) settledTime = currentDrag.currentTime;
-          }
+          if (occupied) {
+            announce(occupiedTimeMessage(property, currentDrag.currentTime));
+          } else {
+            let moveLanded = true;
+            if (timeChanged) {
+              moveLanded = gestureHistory.commit((skipHistory) =>
+                onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime, skipHistory)
+              );
+              if (moveLanded) settledTime = currentDrag.currentTime;
+            }
 
-          // A refused move leaves the value alone: committing it at the
-          // keyframe's old time would write a second keyframe the drag never
-          // intended, right where the move itself landed on being refused.
-          if (valueChanged && moveLanded) {
-            gestureHistory.commit((skipHistory) =>
-              onKeyframeValueChanged(property, settledTime, currentDrag.currentValue, skipHistory)
-            );
+            // A refused move leaves the value alone: committing it at the
+            // keyframe's old time would write a second keyframe the drag never
+            // intended, right where the move itself landed on being refused.
+            if (valueChanged && moveLanded) {
+              gestureHistory.commit((skipHistory) =>
+                onKeyframeValueChanged(property, settledTime, currentDrag.currentValue, skipHistory)
+              );
+            }
           }
 
           gestureHistory.end();
@@ -407,7 +434,7 @@ export function KeyframeGraph({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime, gestureHistory]);
+  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime, gestureHistory, keyframes, announce]);
 
   // Click on graph background to deselect
   const handleGraphClick = useCallback(() => {

@@ -291,6 +291,7 @@ export function PreviewPlayer() {
 
     selectionOverlay.drawSelectionHandles(canvas, time, {
       clips,
+      tracks,
       sourceVideos,
       selectedClipId,
       isPlaying,
@@ -306,6 +307,7 @@ export function PreviewPlayer() {
     if (!canvas) return;
     selectionOverlay.drawMultiSelectHandles(canvas, time, {
       clips,
+      tracks,
       sourceVideos,
       selectedClipId,
       selectedClipIds,

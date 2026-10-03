@@ -213,6 +213,22 @@ describe('PreviewPlayer marquee selection', () => {
     expect(store().selectedClipIds.has(right.id)).toBe(false)
   })
 
+  // ESCSUITE-178: a clip on a hidden track takes no picture in the frame, so
+  // a marquee drawn right over where it would be catches nothing.
+  it('does not sweep up a clip on a hidden track', async () => {
+    const { left } = twoShapes()
+    store().updateTrack(clipOf(left.id).trackId, { visible: false })
+
+    const preview = await renderPreview()
+    fireEvent.mouseDown(preview.canvas, preview.atCss(100, 100))
+    fireEvent.mouseMove(preview.canvas, preview.atCss(400, 400))
+    await settle()
+    fireEvent.mouseUp(preview.canvas, preview.atCss(400, 400))
+    await settle()
+
+    expect(store().selectedClipIds.size).toBe(0)
+  })
+
   it('draws the marquee box while the drag is in flight', async () => {
     twoShapes()
 
@@ -410,6 +426,26 @@ describe('PreviewPlayer selection handles', () => {
     await settle(60)
 
     expect(preview.calls('arc')).not.toHaveLength(0)
+  })
+
+  // ESCSUITE-178: a clip on a hidden track takes no picture in the frame
+  // either, so its selection box and handles come and go with the picture.
+  it('draws no handles for a clip on a hidden track, and brings them back once it is shown', async () => {
+    const track = store().addTrack('Hidden')
+    const shape = store().addShapeOverlayClip(undefined, track.id, 0, 4)!
+    store().setSelectedClipId(shape.id)
+    store().updateTrack(track.id, { visible: false })
+
+    const preview = await renderPreview()
+
+    expect(preview.calls('arc')).toHaveLength(0)
+    expect(preview.calls('strokeRect')).toHaveLength(0)
+
+    preview.clearCalls()
+    store().updateTrack(track.id, { visible: true })
+    await settle(FRAME_MS)
+
+    expect(preview.calls('arc').length).toBeGreaterThan(0)
   })
 
   it('draws no handles when the selected clip is not at the playhead', async () => {

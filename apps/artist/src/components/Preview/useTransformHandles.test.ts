@@ -134,6 +134,26 @@ describe('useTransformHandles drag listeners', () => {
     expect(result.current.marqueeActive).toBe(false)
   })
 
+  // ESCSUITE-178: a clip on a hidden track is not in the picture, so a press
+  // over it is indistinguishable from a press on empty canvas. The press is
+  // aimed at the ROTATION HANDLE specifically — the second pass'
+  // getClipsAtTime already filters a hidden track out of the body-hit pass,
+  // so only the first pass (the selected clip's own handle cascade) can mask
+  // this gap: it fed hitHandlesOnClip the selected clip directly, with no
+  // track check of its own.
+  it('binds nothing for a selected clip’s handle on a hidden track, and starts a marquee instead', async () => {
+    const shape = addShape() // selects it
+    store().updateTrack(shape.trackId, { visible: false })
+    const { result } = mountHandles()
+
+    await act(async () =>
+      result.current.handleMouseDown(at(960, 540 - SHAPE.halfH - GRIP))
+    )
+
+    expect(dragTypes(addListener)).toEqual([])
+    expect(result.current.marqueeStart).not.toBeNull()
+  })
+
   // ESCSUITE-88. A press on a clip whose row is locked selects it — so the
   // inspector can show it, and say why it is read-only — and stops there: no
   // undo bookkeeping, no drag state, and nothing bound to the window, so the
@@ -242,6 +262,17 @@ describe('useTransformHandles cursor', () => {
     expect(await cursorAt(960, 540 - SHAPE.halfH - GRIP)).toBe('not-allowed')
     // Empty canvas is still empty canvas — the marquee is unaffected.
     expect(await cursorAt(100, 100)).toBe('default')
+  })
+
+  // ESCSUITE-178: unlike a locked track's, which still promises not-allowed
+  // for a press that would select, a hidden track's clip is simply not there
+  // to hover — the pointer sees the same canvas it would see over empty space.
+  it('offers the default cursor over a clip on a hidden track', async () => {
+    const shape = addShape()
+    store().updateTrack(shape.trackId, { visible: false })
+
+    expect(await cursorAt(960, 540)).toBe('default')
+    expect(await cursorAt(960 - SHAPE.halfW, 540 - SHAPE.halfH)).toBe('default')
   })
 
   // ESCSUITE-3: the same promise as a locked row's — a press over a keyframed

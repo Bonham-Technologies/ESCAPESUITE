@@ -10,18 +10,19 @@ import {
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry';
+import { isTrackVisible } from '../../store/trackVisibility';
 import type { PreviewSceneContext, ProjectSize } from './types';
 
 /** The slice of the scene the full selection handles read. */
 export type SelectionOverlayContext = Pick<
   PreviewSceneContext,
-  'clips' | 'sourceVideos' | 'selectedClipId' | 'isPlaying' | 'keyframePanelOpen' | 'transition'
+  'clips' | 'tracks' | 'sourceVideos' | 'selectedClipId' | 'isPlaying' | 'keyframePanelOpen' | 'transition'
 >;
 
 /** The slice of the scene the multi-selection boxes read. */
 export type MultiSelectOverlayContext = Pick<
   PreviewSceneContext,
-  'clips' | 'sourceVideos' | 'selectedClipId' | 'selectedClipIds' | 'isPlaying' | 'transition'
+  'clips' | 'tracks' | 'sourceVideos' | 'selectedClipId' | 'selectedClipIds' | 'isPlaying' | 'transition'
 >;
 
 /**
@@ -52,7 +53,7 @@ export function drawSelectionHandles(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): void {
-  const { clips, sourceVideos, selectedClipId, isPlaying, transition } = scene;
+  const { clips, tracks, sourceVideos, selectedClipId, isPlaying, transition } = scene;
   if (!selectedClipId || isPlaying) return;
 
   const ctx = canvas.getContext('2d');
@@ -61,6 +62,13 @@ export function drawSelectionHandles(
   // Find the selected clip
   const selectedClip = clips.find(c => c.id === selectedClipId);
   if (!selectedClip || !isManipulableClip(selectedClip, sourceVideos)) return;
+
+  // A clip on a hidden track takes no picture in the frame (ESCSUITE-178) —
+  // the same test getClipsAtTime makes before drawing a clip at all — so its
+  // selection box and handles no longer sit over a picture nobody can see.
+  // Re-showing the track brings the chrome back; a LOCKED track's chrome is
+  // unaffected, since a locked clip is still drawn, just inert.
+  if (!isTrackVisible(tracks, selectedClip.trackId)) return;
 
   // Check if clip is visible at current time
   const clipEnd = selectedClip.timelinePosition + selectedClip.duration;
@@ -163,7 +171,7 @@ export function drawMultiSelectHandles(
   project: ProjectSize = canvas,
   screenScale: number = 1
 ): void {
-  const { clips, sourceVideos, selectedClipId, selectedClipIds, isPlaying, transition } = scene;
+  const { clips, tracks, sourceVideos, selectedClipId, selectedClipIds, isPlaying, transition } = scene;
   if (selectedClipIds.size <= 1 || isPlaying) return;
 
   const ctx = canvas.getContext('2d');
@@ -175,6 +183,10 @@ export function drawMultiSelectHandles(
 
     const clip = clips.find(c => c.id === clipId);
     if (!clip || !isManipulableClip(clip, sourceVideos)) continue;
+
+    // Same hidden-track test as drawSelectionHandles (ESCSUITE-178): a clip
+    // on a track that is not showing it gets no dashed box either.
+    if (!isTrackVisible(tracks, clip.trackId)) continue;
 
     // Check if clip is visible at current time
     const clipEnd = clip.timelinePosition + clip.duration;

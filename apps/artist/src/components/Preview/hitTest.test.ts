@@ -497,6 +497,23 @@ describe('hitTestHandles handles on the selected clip', () => {
     expect(hitAt(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET, unloaded)).toBeNull()
   })
 
+  // ESCSUITE-178: a clip on a hidden track takes no picture in the frame, so
+  // the selected clip's own handle cascade — the one pass hitHandlesOnClip
+  // feeds directly, with no z-order filtering of its own — has to ask the
+  // same question the second pass' getClipsAtTime already does. Nothing
+  // underneath it either, since there is only the one clip in this scene.
+  it('offers no handles, and no body hit, on a selected clip whose track is hidden', () => {
+    const hiddenTrack = makeTrack({ id: 'track2', visible: false })
+    const onHiddenTrack = scene({
+      clips: [mediaClip({ trackId: 'track2' })],
+      tracks: [track, hiddenTrack],
+      selectedClipId: 'clip1',
+    })
+
+    expect(hitAt(CENTER_X, CENTER_Y - HALF_H - ROTATION_HANDLE_OFFSET, onHiddenTrack)).toBeNull()
+    expect(hitAt(CENTER_X, CENTER_Y, onHiddenTrack)).toBeNull()
+  })
+
   it('offers no handles on an audio clip, which has no type to drag', () => {
     const audio = makeSourceVideo({ id: 'audio1', mediaType: 'audio' })
     const audioScene = scene({
@@ -612,6 +629,19 @@ describe('hitTestHandles with the keyframe panel open', () => {
     ).toBeNull()
   })
 
+  // ESCSUITE-178: this pass restricts interaction to the selected clip alone,
+  // so a hidden track leaves nothing at all for the pointer to find here —
+  // there is no second pass to fall through to while the panel is open.
+  it('ignores a click when the selected clip’s track is hidden', () => {
+    const hiddenTrack = makeTrack({ id: 'track2', visible: false })
+    const onHiddenTrack = open({
+      clips: [{ ...keyframed, trackId: 'track2' }],
+      tracks: [track, hiddenTrack],
+    })
+
+    expect(hitAt(CENTER_X, CENTER_Y, onHiddenTrack)).toBeNull()
+  })
+
   it('falls back to the normal passes when nothing is selected', () => {
     expect(
       hitAt(CENTER_X, CENTER_Y, scene({ clips: [mediaClip()], keyframePanelOpen: true }))?.mode
@@ -633,6 +663,22 @@ describe('hitHandlesOnClip', () => {
 
   it('finds nothing for a clip id that is not in the scene', () => {
     expect(cascade(CENTER_X, CENTER_Y, scene(), both)).toBeNull()
+  })
+
+  // ESCSUITE-178: a clip on a hidden track takes no picture in the frame, the
+  // same question getClipsAtTime asks before drawing a clip at all.
+  it('finds nothing for a clip on a hidden track', () => {
+    const hiddenTrack = makeTrack({ id: 'track2', visible: false })
+    const clip = mediaClip({ trackId: 'track2' })
+
+    expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [clip], tracks: [track, hiddenTrack] }), both))
+      .toBeNull()
+  })
+
+  it('finds nothing for a clip whose track is gone', () => {
+    const clip = mediaClip({ trackId: 'missing' })
+
+    expect(cascade(CENTER_X, CENTER_Y, scene({ clips: [clip] }), both)).toBeNull()
   })
 
   it('finds nothing for a clip with no manipulable type', () => {

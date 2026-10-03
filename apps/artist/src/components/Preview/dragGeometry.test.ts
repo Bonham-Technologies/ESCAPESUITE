@@ -167,7 +167,7 @@ describe('clipsIntersectingMarquee during a transition (ESCSUITE-147)', () => {
 
     expect(
       clipsIntersectingMarquee(
-        makeCanvas(), strip.start, strip.current, [clip], 3.5, [TRANSITION_SOURCE],
+        makeCanvas(), strip.start, strip.current, [clip], [makeTrack()], 3.5, [TRANSITION_SOURCE],
         undefined, owningTransition(clip)
       )
     ).toEqual(['out1'])
@@ -176,7 +176,7 @@ describe('clipsIntersectingMarquee during a transition (ESCSUITE-147)', () => {
   it('sweeps the preset’s own box when no transition owns that side', () => {
     expect(
       clipsIntersectingMarquee(
-        makeCanvas(), strip.start, strip.current, [slidingOut()], 3.5, [TRANSITION_SOURCE]
+        makeCanvas(), strip.start, strip.current, [slidingOut()], [makeTrack()], 3.5, [TRANSITION_SOURCE]
       )
     ).toEqual([])
   })
@@ -187,7 +187,9 @@ describe('clipsIntersectingMarquee', () => {
     const clip = shapeClip()
 
     expect(
-      clipsIntersectingMarquee(makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], 0, [])
+      clipsIntersectingMarquee(
+        makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], [makeTrack()], 0, []
+      )
     ).toEqual(['shape1'])
   })
 
@@ -196,7 +198,9 @@ describe('clipsIntersectingMarquee', () => {
     const clip = shapeClip({ timelinePosition: 10, duration: 5 })
 
     expect(
-      clipsIntersectingMarquee(makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], 0, [])
+      clipsIntersectingMarquee(
+        makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], [makeTrack()], 0, []
+      )
     ).toEqual([])
   })
 
@@ -206,9 +210,11 @@ describe('clipsIntersectingMarquee', () => {
     const clip = makeClip({ id: 'orphan', sourceVideoId: 'missing' })
 
     expect(
-      clipsIntersectingMarquee(makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], 0, [
-        makeSourceVideo(),
-      ])
+      clipsIntersectingMarquee(
+        makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], [makeTrack()], 0, [
+          makeSourceVideo(),
+        ]
+      )
     ).toEqual([])
   })
 
@@ -221,7 +227,9 @@ describe('clipsIntersectingMarquee', () => {
     const strip = { start: { x: 380, y: 250 }, current: { x: 420, y: 290 } }
 
     expect(
-      clipsIntersectingMarquee(makeCanvas(), strip.start, strip.current, [makeClip({ id: 'c1' })], 0, [source])
+      clipsIntersectingMarquee(
+        makeCanvas(), strip.start, strip.current, [makeClip({ id: 'c1' })], [makeTrack()], 0, [source]
+      )
     ).toEqual(['c1'])
 
     expect(
@@ -230,8 +238,33 @@ describe('clipsIntersectingMarquee', () => {
         strip.start,
         strip.current,
         [makeClip({ id: 'c1', crop: { left: 0.5, top: 0, right: 0, bottom: 0 } })],
+        [makeTrack()],
         0,
         [source]
+      )
+    ).toEqual([])
+  })
+
+  // ESCSUITE-178: a clip on a hidden track takes no picture in the frame, so
+  // the marquee cannot sweep it up either — the same question getClipsAtTime
+  // asks before drawing a clip at all.
+  it('passes over a clip on a hidden track', () => {
+    const clip = shapeClip({ trackId: 'hidden' })
+
+    expect(
+      clipsIntersectingMarquee(
+        makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip],
+        [makeTrack({ id: 'hidden', visible: false })], 0, []
+      )
+    ).toEqual([])
+  })
+
+  it('passes over a clip whose track is gone', () => {
+    const clip = shapeClip({ trackId: 'missing' })
+
+    expect(
+      clipsIntersectingMarquee(
+        makeCanvas(), WHOLE_CANVAS.start, WHOLE_CANVAS.current, [clip], [makeTrack()], 0, []
       )
     ).toEqual([])
   })
