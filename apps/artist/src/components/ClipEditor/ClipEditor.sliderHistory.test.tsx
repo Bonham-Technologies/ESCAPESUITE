@@ -242,6 +242,30 @@ describe('an inspector slider drag and the undo stack', () => {
 
     expect(past() - before).toBe(2)
   })
+
+  it('still records one entry for a drag with a Shift tap in the middle of it (ESCSUITE-169)', async () => {
+    // Shift reaches the slider too — it is what a crop or transform drag held
+    // elsewhere in the app locks the aspect with — but a range input does
+    // nothing with it on its own. Tapping it mid-drag used to end the pointer
+    // drag's gesture out from under it, so every later value pushed its own
+    // entry.
+    const { user } = await selectedClipEditor()
+    await openSection(user, 'Effects')
+    const blur = rowControl('Blur')
+    const before = past()
+
+    fireEvent.pointerDown(blur)
+    slide(blur, 1)
+    fireEvent.keyDown(blur, { key: 'Shift' })
+    fireEvent.keyUp(blur, { key: 'Shift' })
+    slide(blur, 2)
+    slide(blur, 3)
+    fireEvent.pointerUp(blur)
+
+    expect(clipNow().effects?.blur).toBe(3)
+    expect(past() - before).toBe(1)
+  })
+
   it('records one entry for an animation duration drag', async () => {
     const { clip } = await selectedClipEditor()
     // The duration row only exists once a preset other than `none` is chosen.

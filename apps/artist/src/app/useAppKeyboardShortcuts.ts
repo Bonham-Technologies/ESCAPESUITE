@@ -418,7 +418,15 @@ export function useAppKeyboardShortcuts({
         // on top of everything; above the in/out points and the two selection
         // branches, because deselecting would leave crop mode as a side effect
         // and take the selection with it.
-        if (cropClipId) {
+        //
+        // Gated on the resolved target — `cropClipId === selectedClipId` — not
+        // the raw latch (ESCSUITE-170): every other reader (`cropTarget`,
+        // `cropOnCanvas`) already treats a latch that no longer names the
+        // selected clip as inert, and this branch has to agree or it claims
+        // Escape for a mode that is already off on screen, clearing nothing
+        // and leaving the in/out points behind it for a second Escape to
+        // reach.
+        if (cropClipId && cropClipId === selectedClipId) {
           e.preventDefault();
           setCropClipId(null);
           return;

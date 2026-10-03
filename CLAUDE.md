@@ -1974,6 +1974,26 @@ it is not counted against the ticket. Lines 7,519 / 7,534 → 7,548 / 7,563, sta
 same 15 / 65 / 6 uncovered). The seven perf/rerender pins and `perfScene.ts` are byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-169 and ESCSUITE-170 (releasing Shift or losing
+focus during a crop-handle drag no longer ends the gesture's undo scope, the inspector's slider gesture gets
+the same two guards, and the Escape cascade reads the crop latch through the resolved target so an inert latch
+no longer swallows Escape): 99.80 / 99.23 / **95.55** / 99.67 against the 99.80 / 99.23 / 95.53 / 99.67 the
+commit this branch was rebased onto (`46c2b76`) measures — branches up two hundredths, the other three
+unmoved. Measured in one sitting, the base gives 4,733 / 4,954 branches and this branch 4,749 / 4,970:
+sixteen new branches, sixteen covered, the same 221 uncovered as before (lines 7,519 / 7,534 →
+7,540 / 7,555, statements 8,455 / 8,520 → 8,482 / 8,547, functions 1,824 / 1,830 → 1,830 / 1,836, every
+denominator growing by exactly what the numerator did; the same 15 / 65 / 6 uncovered). The sixteen are
+`components/Preview/useCropHandleGesture.ts`'s six (the mouse-drag-open guard on `onKeyUp` and on the now
+separate `onBlur`, and the arrow-key-only test on `onKeyUp` — reached in isolation by the keyboard-only case
+the review asked for), `components/ClipEditor/useSliderGesture.ts`'s eight (`RANGE_KEYS` membership on
+`onKeyDown` and `onKeyUp`, the pointer-drag-open guard on each, and `onBlur` resetting the pointer flag before
+it ends the gesture — the review's one MAJOR, a blurred drag otherwise leaving every later keyboard nudge
+unscoped) and `app/useAppKeyboardShortcuts.ts`'s two (`cropClipId === selectedClipId`), each reached from both
+sides by the Shift-mid-drag, blur-mid-drag, keyboard-only, pointer-then-blur-then-nudge and the three
+latch-state (null, live, inert) cases against the ordinary gestures that were already there. The seven
+perf/rerender pins and `perfScene.ts` are byte-identical. **No floor crossed**; artist's floors stay
+99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -1981,7 +2001,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.24 | 95.54 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.23 | 95.55 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 

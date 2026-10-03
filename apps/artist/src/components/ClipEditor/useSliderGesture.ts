@@ -35,8 +35,20 @@
 // listeners that drive it. It holds no state, so a slider wired to it adds no
 // store subscription and no render — `ClipEditor.rerender.test.tsx`'s counts are
 // unchanged by design, not by luck.
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { useGestureHistory } from '../../hooks';
+
+/**
+ * The keys a native `<input type="range">` actually acts on. `onKeyDown` used
+ * to call `begin()` for ANY non-repeat key, Shift included, and `onKeyUp`
+ * `end()`d for any key — so tapping Shift mid-drag (to hold an aspect lock
+ * elsewhere in the app, say) reset the "have I pushed?" flag and then closed
+ * the gesture the pointer was still driving (ESCSUITE-169). Mirrors
+ * `Preview/useCropHandleGesture.ts`'s `ARROW_STEPS` filter on its own keydown.
+ */
+const RANGE_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown',
+]);
 
 /**
  * The listeners to spread onto an `<input type="range">`, so the hook can see
@@ -56,8 +68,8 @@ export interface SliderGestureHandlers {
    * own undo entry.
    */
   onPointerCancel: () => void;
-  onKeyDown: (event: { repeat: boolean }) => void;
-  onKeyUp: () => void;
+  onKeyDown: (event: { repeat: boolean; key: string }) => void;
+  onKeyUp: (event: { key: string }) => void;
   onBlur: () => void;
 }
 
@@ -89,18 +101,46 @@ export interface SliderGesture {
  * every repetition after the first carrying `repeat: true`, and a repeat leaves
  * the open gesture exactly as it is (the same rule the keyframe drags took in
  * #373).
+ *
+ * The keyboard side only ever acts on a key the slider itself responds to
+ * (`RANGE_KEYS`), and only while no pointer drag already owns the gesture
+ * (ESCSUITE-169): a key reaching the input mid-drag — Shift, chiefly — must
+ * neither reopen the "have I pushed?" flag on its keydown nor close the
+ * pointer's own gesture on its keyup. `onBlur` carries neither guard: unlike
+ * `Preview/useCropHandleGesture.ts`'s mouse drag, which has its own document
+ * listeners standing by to supply the eventual `mouseup` regardless of focus,
+ * a slider's pointer drag has no such backstop — blur IS the substitute for a
+ * `pointerup` that may never come — so it closes whatever is open regardless
+ * of key or pointer state. It still has to reset `pointerDownRef` on its way
+ * out, the same as `onPointerUp`/`onPointerCancel` do: leaving it stuck
+ * `true` would hand every later keydown/keyup to the pointer guard above
+ * instead of to the keyboard, closing the door a blur is supposed to open
+ * (ESCSUITE-169 review round 1).
  */
 export function useSliderGesture(): SliderGesture {
   // Not state: this is read and written by DOM listeners and at write time,
   // never rendered, and a re-render of the whole inspector per pointer move is
   // the cost this hook exists to avoid.
   const history = useGestureHistory();
+  /** Whether a pointer drag is open — see the keyboard guard above. */
+  const pointerDownRef = useRef(false);
 
   const handlers = useMemo<SliderGestureHandlers>(() => ({
-    onPointerDown: history.begin,
-    onPointerUp: history.end,
-    onPointerCancel: history.end,
+    onPointerDown: () => {
+      pointerDownRef.current = true;
+      history.begin();
+    },
+    onPointerUp: () => {
+      pointerDownRef.current = false;
+      history.end();
+    },
+    onPointerCancel: () => {
+      pointerDownRef.current = false;
+      history.end();
+    },
     onKeyDown: (event) => {
+      if (pointerDownRef.current) return;
+      if (!RANGE_KEYS.has(event.key)) return;
       // A repetition of a key that is already down continues the gesture it
       // started; it must not reopen it, or a held arrow would push an entry
       // per repeat.
@@ -110,8 +150,19 @@ export function useSliderGesture(): SliderGesture {
       }
       history.begin();
     },
-    onKeyUp: history.end,
-    onBlur: history.end,
+    onKeyUp: (event) => {
+      if (pointerDownRef.current) return;
+      if (!RANGE_KEYS.has(event.key)) return;
+      history.end();
+    },
+    onBlur: () => {
+      // Give the gesture back to the keyboard too: leaving the flag stuck
+      // `true` made every later onKeyDown/onKeyUp short-circuit on the
+      // pointer guard above before ever reaching `RANGE_KEYS` or
+      // `begin`/`resume` (ESCSUITE-169 review round 1).
+      pointerDownRef.current = false;
+      history.end();
+    },
   }), [history]);
 
   return { handlers, commit: history.commit };

@@ -140,7 +140,7 @@ export function CropHandles({
             onMouseDown={(e) => gesture.onMouseDown(handle, e)}
             onKeyDown={(e) => gesture.onKeyDown(handle, e)}
             onKeyUp={gesture.onKeyUp}
-            onBlur={gesture.onKeyUp}
+            onBlur={gesture.onBlur}
           />
         ))}
       </div>

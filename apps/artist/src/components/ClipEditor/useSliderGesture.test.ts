@@ -107,15 +107,15 @@ describe('useSliderGesture', () => {
   it('treats a key press and its repetitions as one gesture', () => {
     const { on, write } = gesture()
 
-    on().onKeyDown({ repeat: false })
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
     expect(write()).toBe(false)
 
     // The browser fires keydown again for every repetition while the key is
     // held. Each brings one more input event, and all of them belong to the
     // entry the first write pushed.
-    on().onKeyDown({ repeat: true })
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
     expect(write()).toBe(true)
-    on().onKeyDown({ repeat: true })
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
     expect(write()).toBe(true)
   })
 
@@ -124,7 +124,7 @@ describe('useSliderGesture', () => {
 
     // Focus can arrive mid-hold, so a repeat is also a valid way to start: it
     // opens the gesture and the first write still pushes.
-    on().onKeyDown({ repeat: true })
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
 
     expect(write()).toBe(false)
     expect(write()).toBe(true)
@@ -133,9 +133,9 @@ describe('useSliderGesture', () => {
   it('ends the gesture on keyup', () => {
     const { on, write } = gesture()
 
-    on().onKeyDown({ repeat: false })
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
     write()
-    on().onKeyUp()
+    on().onKeyUp({ key: 'ArrowRight' })
 
     expect(write()).toBe(false)
   })
@@ -162,6 +162,97 @@ describe('useSliderGesture', () => {
     on().onBlur()
 
     expect(write()).toBe(false)
+  })
+
+  it('does not begin a gesture for a key the range input does not act on (ESCSUITE-169)', () => {
+    // Shift reaches the input too, but a range input does nothing with it on
+    // its own; treating it as the start of a gesture is the bug this fixes —
+    // in the full sequence below it reset the "have I pushed?" flag mid an
+    // already-open pointer drag.
+    const { on, write } = gesture()
+
+    on().onKeyDown({ repeat: false, key: 'Shift' })
+
+    expect(write()).toBe(false)
+  })
+
+  it('does not end a keyboard gesture on a key the range input does not act on (ESCSUITE-169)', () => {
+    const { on, write } = gesture()
+
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+    write()
+    on().onKeyUp({ key: 'Shift' })
+
+    // Still part of the arrow key's gesture: Shift's keyup must not have
+    // closed it.
+    expect(write()).toBe(true)
+  })
+
+  it('still ends the gesture on the arrow key that opened it', () => {
+    const { on, write } = gesture()
+
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+    write()
+    on().onKeyUp({ key: 'ArrowRight' })
+
+    expect(write()).toBe(false)
+  })
+
+  it('ignores a keydown while a pointer drag owns the gesture (ESCSUITE-169)', () => {
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    // A real arrow key reaching the input while the mouse is still dragging
+    // it must not reopen the "have I pushed?" flag the pointer drag is
+    // already carrying.
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+
+    expect(write()).toBe(true)
+  })
+
+  it('ignores a keyup while a pointer drag owns the gesture (ESCSUITE-169)', () => {
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    on().onKeyUp({ key: 'ArrowRight' })
+
+    expect(write()).toBe(true)
+  })
+
+  it('leaves a pointer drag open through a full Shift tap mid-drag (ESCSUITE-169)', () => {
+    // The exact reported shape: a Shift tap — keydown then keyup — while the
+    // mouse is still holding a slider's pointer drag open.
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    write()
+    on().onKeyDown({ repeat: false, key: 'Shift' })
+    on().onKeyUp({ key: 'Shift' })
+
+    expect(write()).toBe(true)
+  })
+
+  it('resets the pointer flag on blur, so a later keyboard nudge groups its own held key (ESCSUITE-169 review round 1)', () => {
+    // `onBlur` is the substitute for a pointerup that never arrives — but it
+    // has to give the gesture back to the keyboard too. Leaving
+    // `pointerDownRef` stuck `true` made every later `onKeyDown`/`onKeyUp`
+    // short-circuit on the pointer guard before ever reaching `RANGE_KEYS` or
+    // `begin`/`resume` — so a held arrow key pressed after the blur pushed one
+    // undo entry per repeated keystroke instead of one for the whole hold,
+    // the exact regression ESCSUITE-75 exists to prevent.
+    const { on, write } = gesture()
+
+    on().onPointerDown()
+    on().onBlur()
+
+    on().onKeyDown({ repeat: false, key: 'ArrowRight' })
+    expect(write()).toBe(false)
+    // The held key's repeat must continue the SAME gesture, not open one of
+    // its own.
+    on().onKeyDown({ repeat: true, key: 'ArrowRight' })
+    expect(write()).toBe(true)
   })
 
   it('keeps one identity for the listeners across renders', () => {
