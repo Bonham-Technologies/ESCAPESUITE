@@ -1,5 +1,10 @@
-import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { test, expect, type Page } from '@playwright/test'
+import {
+  mockGetUserMedia,
+  mockMediaRecorder,
+  mockSyntheticMedia,
+  grantMediaPermissions,
+} from '../../utils/media-mocks'
 import { checkFocusOrder } from '../../utils/accessibility'
 import { seedTextClip } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
@@ -46,19 +51,11 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
     }
   })
 
-  test('Space key activates buttons', async ({ page }) => {
-    const button = page.getByRole('button').first()
-    const isVisible = await button.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await button.focus()
-      await page.keyboard.press('Space')
-
-      // Button should respond to Space
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
-  })
+  // ESCSUITE-187: a `Space key activates buttons` case used to live here,
+  // but it asserted nothing a regression could break (doctype-only) and the
+  // real Space behaviour worth proving — ESCSUITE-185's playback dialog —
+  // needs ESCAPECRAFT, not ESCAPEPLAN. It moved to the
+  // `VideoPlayer Keyboard Shortcuts` describe below.
 
   test('skip link functionality', async ({ page }) => {
     // Check for skip link
@@ -149,25 +146,25 @@ test.describe('ESCAPECRAFT Keyboard Navigation', () => {
   })
 
   test('Space toggles toggle switches', async ({ page }) => {
+    // ESCSUITE-187: this used to accept `initialState`/`newState` both being
+    // `null` as a pass, which a toggle that did nothing at all would also
+    // satisfy. The source toggles (`SourceToggles.tsx`) are real `aria-pressed`
+    // buttons — pressing Space on a focused native `<button>` is the
+    // browser's own activation, no app code involved — so the "Screen" toggle
+    // (pressed by default) is a real one to assert against.
     const toggle = page
       .locator('[role="switch"]')
       .or(page.locator('[aria-pressed]'))
       .first()
 
-    const isVisible = await toggle.isVisible().catch(() => false)
+    await expect(toggle).toBeVisible()
+    const initialState = await toggle.getAttribute('aria-pressed')
+    expect(initialState).not.toBeNull()
 
-    if (isVisible) {
-      const initialState = await toggle.getAttribute('aria-pressed').catch(() => null)
+    await toggle.focus()
+    await page.keyboard.press('Space')
 
-      await toggle.focus()
-      await page.keyboard.press('Space')
-      await page.waitForTimeout(100)
-
-      const newState = await toggle.getAttribute('aria-pressed').catch(() => null)
-
-      // State may or may not change depending on logic
-      expect([initialState, newState].some((s) => s !== null)).toBe(true)
-    }
+    await expect(toggle).toHaveAttribute('aria-pressed', initialState === 'true' ? 'false' : 'true')
   })
 
   test('Escape cancels recording selection', async ({ page }) => {
@@ -298,12 +295,22 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   })
 
   test('Space bar toggles play/pause', async ({ page }) => {
-    // Space should toggle playback when not in an input
-    await page.keyboard.press('Space')
+    // ESCSUITE-187: with no clip on the timeline `canPlay` is false and Space
+    // does nothing (`PlaybackControls.tsx`'s `handlePlayPause` early-returns),
+    // so the old doctype-only version of this test could not have told a
+    // working toggle from a dead one. `seedTextClip` puts a clip on the
+    // timeline so there is something to play, and the transport button's
+    // `title` (its accessible name, same text ESCAPECRAFT's own `VideoPlayer`
+    // button uses) says which state it is in.
+    await seedTextClip(page)
 
-    // Should not crash
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Pause (Space)')).toBeVisible()
+
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
   })
 
   test('keyboard shortcuts work without focus on inputs', async ({ page }) => {
@@ -360,31 +367,121 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   })
 })
 
+/**
+ * Records a short real take — `mockSyntheticMedia` hands the recorder a real
+ * canvas-backed stream, so there is a genuine decodable file to save and
+ * play back, the same shape `apps/e2e/tests/accessibility/core.spec.ts`'s
+ * "playback dialog passes axe-core audit" test uses — and opens its playback
+ * dialog from the library row's "Play" button.
+ */
+async function recordAndOpenPlayback(page: Page): Promise<void> {
+  const screenSource = page
+    .locator('[class*="sourceToggle"]')
+    .filter({ hasText: 'Screen' })
+    .last()
+  await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+  await page.getByRole('button', { name: 'Start recording' }).click()
+  await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+    timeout: 30_000,
+  })
+  await page.waitForTimeout(2000)
+  await page.getByRole('button', { name: 'Stop recording' }).click()
+
+  const play = page.getByRole('button', { name: /^Play / })
+  await expect(play).toBeVisible({ timeout: 30_000 })
+  await play.click()
+
+  await expect(page.getByRole('dialog')).toBeVisible()
+}
+
 test.describe('VideoPlayer Keyboard Shortcuts', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockGetUserMedia(page)
+  test.beforeEach(async ({ page, browserName }) => {
+    // ESCSUITE-177: WebKit cannot store a Blob in IndexedDB in Playwright
+    // (`UnknownError: Error preparing Blob/File data to be stored in object
+    // store`), and every test below needs a saved take before there is
+    // anything to open a playback dialog for.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
+    await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
-  test('Space toggles play/pause in VideoPlayer', async ({ page }) => {
-    // Check if VideoPlayer is present
-    const videoPlayer = page
-      .locator('[data-testid="video-player"]')
-      .or(page.locator('video'))
-      .first()
+  // ESCSUITE-185, proved in a real browser (ESCSUITE-187). Space is the
+  // platform's own activation key for a focused button, and the player used
+  // to claim it everywhere — so Space on the playback dialog's Close button
+  // toggled playback instead of closing the dialog. `spaceBelongsToTarget`
+  // (`VideoPlayer.tsx`) is the fix: it leaves Space alone when focus is on
+  // something Space already activates.
+  test('Space on the playback dialog Close button closes it, not the video', async ({ page }) => {
+    test.setTimeout(120_000)
+    await recordAndOpenPlayback(page)
 
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
+    // Patch the *instance's* play()/pause() rather than listen for the
+    // 'play'/'pause' events: removing a playing <video> from the document —
+    // which closing the dialog always does — fires a 'pause' event of its
+    // own regardless of whether `togglePlayPause` ran, so that event is not
+    // a reliable signal here. `togglePlayPause` (ESCSUITE-185's bug) calls
+    // one of these two methods directly; the browser's own removal-time
+    // event does not go through them.
+    await page.evaluate(() => {
+      const video = document.querySelector('video') as HTMLVideoElement
+      const w = window as unknown as { __escsuite187ToggleCalled: boolean }
+      w.__escsuite187ToggleCalled = false
+      const originalPlay = video.play.bind(video)
+      const originalPause = video.pause.bind(video)
+      video.play = ((...args: Parameters<typeof video.play>) => {
+        w.__escsuite187ToggleCalled = true
+        return originalPlay(...args)
+      }) as typeof video.play
+      video.pause = ((...args: Parameters<typeof video.pause>) => {
+        w.__escsuite187ToggleCalled = true
+        return originalPause(...args)
+      }) as typeof video.pause
+    })
 
-    if (isVisible) {
-      await videoPlayer.focus()
-      await page.keyboard.press('Space')
+    const closeButton = page.getByRole('button', { name: 'Close playback' })
+    await closeButton.focus()
+    await page.keyboard.press('Space')
 
-      // Should respond without crashing
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
+    // The dialog (and its video) is gone — Space activated the focused
+    // button the way the platform always does for one — so whether
+    // `togglePlayPause` ran is read from the flag set above, not the (now
+    // unmounted) video element.
+    await expect(page.getByRole('dialog')).toBeHidden()
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { __escsuite187ToggleCalled: boolean }).__escsuite187ToggleCalled
+      )
+    ).toBe(false)
+  })
+
+  // The inverse: nothing in the dialog claims Space for its own activation,
+  // so it stays the player's play/pause shortcut.
+  test('Space toggles play/pause when focus is on the dialog body', async ({ page }) => {
+    test.setTimeout(120_000)
+    await recordAndOpenPlayback(page)
+
+    // A real click, not `autoPlay`, puts the player in a known state —
+    // independent of whichever way the browser's autoplay policy decided
+    // the mount's `autoPlay` attribute.
+    const transportToggle = page.getByTitle(/^(Play|Pause) \(Space\)$/)
+    if ((await transportToggle.getAttribute('title')) === 'Play (Space)') {
+      await transportToggle.click()
     }
+    await expect(page.getByTitle('Pause (Space)')).toBeVisible()
+
+    await page.getByRole('dialog').focus()
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Pause (Space)')).toBeVisible()
   })
 
   test('M key toggles mute', async ({ page }) => {
