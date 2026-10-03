@@ -2243,6 +2243,36 @@ division at mousedown and one `timeToPixels` per move); `useTrackHeaderActions.t
 `timelineGestures.perf.test.ts` and the other six pins and `perfScene.ts` are byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-173 (the headless entry validates a job's project
+through `parseProject` and fails the job with the reason — while keeping a project with no `resolution` of its
+own at the source's native size rather than adopting the editor's 1920x1080 default; `parseProject` validates a
+clip's `transform` and `sourceDelta` floors its divisor at a documented `MIN_SCALE` for any non-finite or
+non-positive scale; an aspect-locked crop drag past the limit slides to `MAX_CROP_INSET` along the locked ratio
+instead of breaking the lock; the tab-visible note is one constant shown for WebM and GIF alike, gated on the
+effective format): 99.80 / 99.24 / **95.61** / 99.67 against 99.80 / 99.24 / 95.57 / 99.67 on the commit this
+branch was rebased onto (`ddb8cab`, the ESCSUITE-171 version-packages commit) — branches up four hundredths,
+the other three unmoved. The base is the composite ESCSUITE-175's paragraph describes (the ESCSUITE-161 / 162,
+169 / 170 and 171 trees, measured in this sitting): 4,788 / 5,010 branches, and this branch 4,838 / 5,060 —
+fifty new branches, fifty covered, the same 222 uncovered (lines 7,573 / 7,588 → 7,611 / 7,626, statements
+8,524 / 8,589 → 8,563 / 8,628, functions 1,837 / 1,843 → 1,839 / 1,845, every denominator growing by exactly
+what the numerator did; the same 15 / 65 / 6 uncovered). The fifty are `store/projectMigration.ts`'s
+twenty-two (75 → 97: `isValidTransform`'s fourteen operands, each reached from both sides by a row per
+operand, and the `transform` gate), `core/cropDrag.ts`'s twenty (42 → 62: the finite-and-positive scale
+floor, `withAspect`'s cap widening the region to the largest of the pointer's and each limited edge's value
+for both corners and both axes, reached by the `nw`, `se`, `w`, `n` and `s` cases), `headless/renderProject.ts`'s
+four (31 / 34 → 35 / 38: the parse refusal and the raw-input `resolution` choice; the same three pre-existing
+arms uncovered) and `components/Export/ExportDialog.tsx`'s four (169 / 170 → 173 / 174: the WebM note's
+`webmSupported` and effective-format operands, reached by the saved-MP4-preference, both-unsupported and
+GIF-selected cases; the same one pre-existing arm uncovered). The branch also touches
+`components/Preview/useCropHandleGesture.ts`, a file the ESCSUITE-169 tree had changed, which is why that
+tree's own measurement is the reference for it: the hook gained no branch, but its `write` guard against a
+crop `cropUpdateFor` refuses — reached on `main` once, by a Shift drag whose derived inset the normaliser
+refused — lost that reacher when the aspect clamp made such a crop impossible, and the measurement round
+pinned it from the one route left, a source with no dimensions (ESCSUITE-97's stored 0×0 shape). The seven
+perf/rerender pins and `perfScene.ts` are byte-identical; the kit's own source is untouched (its README gains
+the new failure mode under a patch changeset) and its figures do not move. **No floor crossed**; artist's
+floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
