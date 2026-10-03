@@ -37,7 +37,7 @@
       "destination": "/artist/index.html"
     },
     {
-      "source": "/((?!craft|artist|assets|favicon).*)",
+      "source": "/((?!(?:craft|artist|assets|favicon)(?:/|$)).*)",
       "destination": "/index.html"
     }
   ]

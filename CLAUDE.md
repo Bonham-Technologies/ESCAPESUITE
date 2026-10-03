@@ -341,7 +341,12 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
   (which mirrors `vercel.json`'s rewrites, and — since ESCSUITE-121 part 2 — reads and sends
   `vercel.json`'s `headers` block too, so the suite runs under the real hosted
   Content-Security-Policy and `X-Frame-Options` rather than none at all; `tests/production/csp-media.spec.ts`
-  is the regression test, proving a `blob:` video source survives that CSP in both apps). That
+  is the regression test, proving a `blob:` video source survives that CSP in both apps). Since
+  ESCSUITE-196, `serve-dist.mjs`'s rewrite table is *derived* from `vercel.json`'s `rewrites`
+  array (walked in order through the same `source`-pattern matcher the `headers` block already
+  used), not a hand-coded copy of it — `tests/production/spa-fallback.spec.ts` and
+  `serve-dist.test.mjs`'s drift-guard test are the regression coverage, proving a genuine miss
+  reaches `dist/404.html` with a real 404 instead of the hub SPA or a plain-text fallback. That
   is the only setup where CRAFT (`/craft/`) and ARTIST (`/artist/`) share `video-editor-db`,
   so the cross-app IndexedDB tests live there: `pnpm build:deploy && pnpm test:e2e:production`
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
