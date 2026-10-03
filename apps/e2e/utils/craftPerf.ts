@@ -277,6 +277,9 @@ export async function openCraft(
   await grantMediaPermissions(page)
 
   await page.goto(CRAFT_URL)
+  // Not swapped for waitForAppReady (ESCSUITE-177): playwright.perf.config.ts
+  // runs chromium only, so the Firefox `networkidle` hang that motivated the
+  // swap elsewhere does not apply here.
   await page.waitForLoadState('networkidle')
 
   const screenToggle = page.getByRole('button', { name: 'Screen', exact: true })

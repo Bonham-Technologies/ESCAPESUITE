@@ -65,6 +65,10 @@ export function captureConsole(page: Page): ConsoleCapture {
  */
 export async function recordPipTake(page: Page, url: string): Promise<void> {
   await page.goto(url)
+  // Not swapped for waitForAppReady (ESCSUITE-177): the specs that call this
+  // (escapecraft/pip-seekable.spec.ts and its production twin) are
+  // Chromium-only, so the Firefox `networkidle` hang that motivated the
+  // swap elsewhere does not apply here.
   await page.waitForLoadState('networkidle')
 
   // Capability detection is async; the source toggles stay disabled until it

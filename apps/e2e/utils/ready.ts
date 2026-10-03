@@ -26,21 +26,22 @@ import { Page } from '@playwright/test'
  * (not a different) condition — every caller that goes on to assert its own
  * visible element (a button, a heading) is unaffected.
  *
- * `app` is taken rather than inferred from the URL so a call site reads as
- * "this page is ESCAPEPLAN/CRAFT/ARTIST" at a glance; today the three
- * branches do the same thing, and are kept separate so a future app-specific
- * readiness condition (e.g. waiting on ARTIST's `READY` postMessage for an
- * embedded case) has somewhere to go without changing every call site.
+ * `app` is reserved for a future per-app condition (e.g. waiting on
+ * ARTIST's `READY` postMessage for an embedded case) — today it drives no
+ * branch, but a call site still reads as "this page is
+ * ESCAPEPLAN/CRAFT/ARTIST" at a glance.
+ *
+ * No explicit `timeout`: a locator `waitFor` with one overrides
+ * `use.actionTimeout`, and this config sets no `navigationTimeout`/
+ * `actionTimeout` of its own, so a hard-coded number here would silently
+ * stop tracking a future config change. Leaving it off lets the action
+ * timeout (and, failing that, the test timeout) govern, the same as every
+ * other `expect(locator)` call in this suite.
  */
 export async function waitForAppReady(
   page: Page,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- reserved, see the doc comment above
   app: 'plan' | 'craft' | 'artist'
 ): Promise<void> {
-  switch (app) {
-    case 'plan':
-    case 'craft':
-    case 'artist':
-      await page.locator('main').first().waitFor({ state: 'attached', timeout: 30_000 })
-      break
-  }
+  await page.locator('main').first().waitFor({ state: 'attached' })
 }
