@@ -8,6 +8,7 @@ import type { Mock } from 'vitest'
 import { isDirectRun, main } from './cli'
 import { runJob } from './run'
 import { startServer } from './serve'
+import { MAX_TIMEOUT_MS } from './timeouts'
 import type { RenderOutcome } from './types'
 
 /**
@@ -288,6 +289,38 @@ describe('HEADLESS_TIMEOUT_MS', () => {
     expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: '0' })).toBe(2)
 
     expect(stderrText()).toContain('HEADLESS_TIMEOUT_MS must be a positive integer, got "0"')
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
+  // ESCSUITE-188 (hunt J-8): HEADLESS_TIMEOUT_MS admitted any run of digits, so a value past
+  // what setTimeout can represent (Node clamps above 2^31-1 to 1 ms) silently meant "fail every
+  // render instantly" instead of "effectively no timeout" — the opposite of what was asked.
+  it('accepts exactly the 32-bit bound, 2147483647 ms', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: String(MAX_TIMEOUT_MS) })).toBe(0)
+
+    expect(vi.mocked(runJob).mock.calls[0][1].timeoutMs).toBe(MAX_TIMEOUT_MS)
+  })
+
+  it('exits 2, naming the bound, one past it — rather than overflowing the render deadline to 1 ms', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+    const tooLarge = MAX_TIMEOUT_MS + 1
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: String(tooLarge) })).toBe(2)
+
+    expect(stderrText()).toContain(
+      `HEADLESS_TIMEOUT_MS must be a positive integer of at most ${MAX_TIMEOUT_MS}, got "${tooLarge}"`,
+    )
+    expect(runJob).not.toHaveBeenCalled()
+  })
+
+  it('exits 2 for the ~34-day value an operator would reach for "no timeout", instead of clamping the deadline to 1 ms', async () => {
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], { HEADLESS_TIMEOUT_MS: '3000000000' })).toBe(2)
+
+    expect(stderrText()).toContain(`HEADLESS_TIMEOUT_MS must be a positive integer of at most ${MAX_TIMEOUT_MS}`)
     expect(runJob).not.toHaveBeenCalled()
   })
 })
