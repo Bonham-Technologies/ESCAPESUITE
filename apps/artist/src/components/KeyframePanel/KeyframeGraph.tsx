@@ -59,6 +59,16 @@ const PROPERTY_RANGES: Record<AnimatableProperty, { min: number; max: number; st
 const GRAPH_PADDING = { top: 20, right: 20, bottom: 30, left: 50 };
 const SAMPLE_INTERVAL = 4; // pixels between curve samples
 
+/**
+ * A hair past `KEYFRAME_TIME_EPSILON` itself, so a clamped landing clears
+ * `handleMouseUp`'s own `< KEYFRAME_TIME_EPSILON` occupied check with room
+ * to spare — see `useKeyframeDrag.ts`'s identical constant for the float
+ * arithmetic this works around (`occupiedTime ± KEYFRAME_TIME_EPSILON`
+ * occasionally measures back as a hair under the epsilon it used to compute
+ * itself). Nine orders of magnitude below the epsilon it rides on.
+ */
+const CLAMP_MARGIN = 1e-9;
+
 export function KeyframeGraph({
   property,
   clipDuration,
@@ -254,6 +264,9 @@ export function KeyframeGraph({
     focusGraph();
     setActiveTime(kf.time);
     setSelectedKeyframeTime(kf.time);
+    occupiedTimesRef.current = keyframes
+      .map(k => k.time)
+      .filter(t => Math.abs(t - kf.time) >= KEYFRAME_TIME_EPSILON);
     setDragState({
       isDragging: true,
       originalTime: kf.time,
@@ -262,7 +275,7 @@ export function KeyframeGraph({
       currentValue: kf.value,
       dragType: e.shiftKey ? 'value' : e.altKey ? 'time' : 'both',
     });
-  }, [isCustomKeyframe, locked, focusGraph, setActiveTime]);
+  }, [isCustomKeyframe, locked, focusGraph, setActiveTime, keyframes]);
 
   // Handle click on keyframe to select it
   const handleKeyframeClick = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -325,6 +338,17 @@ export function KeyframeGraph({
   const dragStateRef = useRef(dragState);
   dragStateRef.current = dragState;
 
+  /**
+   * Every occupied time but the one being dragged, snapshotted once per
+   * gesture — `handleKeyframeMouseDown`'s twin of `useKeyframeDrag.ts`'s own
+   * `occupiedTimesRef`, added so `handleMouseMove` below can clamp against it
+   * on every move without recomputing (and reallocating) the filter per
+   * pointer frame (ESCSUITE-183). `keyframes` is every handle drawn on the
+   * graph, presets included, the same list `handleMouseUp`'s own occupied
+   * check already reads.
+   */
+  const occupiedTimesRef = useRef<number[]>([]);
+
   // One gesture is one undo entry (ESCSUITE-163 / M1), the same mechanism
   // useTrimDrag and useTransformHandles already use: the move's own write,
   // when there is one, goes first and reports whether it landed, and the
@@ -342,8 +366,23 @@ export function KeyframeGraph({
 
       const { x, y } = coords;
 
-      const newTime = Math.max(0, Math.min(graphDimensions.xToTime(x), clipDuration));
+      let newTime = Math.max(0, Math.min(graphDimensions.xToTime(x), clipDuration));
       const newValue = Math.max(range.min, Math.min(graphDimensions.yToValue(y), range.max));
+
+      // Clamp away from every neighbour's epsilon window (ESCSUITE-183): one
+      // pass over the once-per-gesture occupied list, no allocation. The
+      // point can no longer be dragged onto a neighbour and refused on
+      // release — it stops at the window's edge instead. Re-clamped to the
+      // clip bounds afterwards, since a neighbour right at an edge could
+      // otherwise push the point just past it.
+      for (const occupiedTime of occupiedTimesRef.current) {
+        if (Math.abs(newTime - occupiedTime) < KEYFRAME_TIME_EPSILON) {
+          newTime = newTime < occupiedTime
+            ? occupiedTime - KEYFRAME_TIME_EPSILON - CLAMP_MARGIN
+            : occupiedTime + KEYFRAME_TIME_EPSILON + CLAMP_MARGIN;
+        }
+      }
+      newTime = Math.max(0, Math.min(newTime, clipDuration));
 
       // Update visual position only (don't commit to store yet)
       setDragState(prev => {
@@ -375,7 +414,12 @@ export function KeyframeGraph({
         // `animation.in`/`out`, never stored as a keyframe), but
         // `getAllKeyframesForProperty` merges two handles within the same
         // epsilon and the custom one wins, so the preset's handle would
-        // simply vanish behind it.
+        // simply vanish behind it. Backstop, not the common case
+        // (ESCSUITE-183): `handleMouseMove`'s clamp keeps `currentTime` out
+        // of every occupied window on every move, so a mouse drag should
+        // never actually reach this `true` arm any more — this file's own
+        // tests confirm it. Kept anyway as the same rule `nudgeTime` enforces
+        // for its own, different entry point.
         const occupied = timeChanged && keyframes.some(kf =>
           Math.abs(kf.time - currentDrag.originalTime) >= KEYFRAME_TIME_EPSILON &&
           Math.abs(kf.time - currentDrag.currentTime) < KEYFRAME_TIME_EPSILON
