@@ -2,6 +2,7 @@
 // arguments and never touch the store, so the preview and the exporters can share them without pulling the store into their graph.
 
 import type { Clip, Track } from './types';
+import { isVisibleTrack } from './trackVisibility';
 
 // Get all clips at a specific timeline time, sorted by track index (for compositing)
 export function getClipsAtTime(
@@ -16,7 +17,7 @@ export function getClipsAtTime(
     const clipEnd = clip.timelinePosition + clip.duration;
     if (time >= clip.timelinePosition && time < clipEnd) {
       const track = trackMap.get(clip.trackId);
-      if (track && track.visible) {
+      if (isVisibleTrack(track)) {
         results.push({
           clip,
           clipTime: time - clip.timelinePosition,

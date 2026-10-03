@@ -10,6 +10,7 @@ import {
   HANDLE_SIZE,
   ROTATION_HANDLE_OFFSET,
 } from './previewGeometry';
+import { isTrackVisible } from '../../store/trackVisibility';
 import type { PreviewSceneContext, ProjectSize } from './types';
 
 /** The slice of the scene the full selection handles read. */
@@ -63,13 +64,11 @@ export function drawSelectionHandles(
   if (!selectedClip || !isManipulableClip(selectedClip, sourceVideos)) return;
 
   // A clip on a hidden track takes no picture in the frame (ESCSUITE-178) —
-  // the same `!track || !track.visible` test getClipsAtTime makes before
-  // drawing a clip at all — so its selection box and handles no longer sit
-  // over a picture nobody can see. Re-showing the track brings the chrome
-  // back; a LOCKED track's chrome is unaffected, since a locked clip is still
-  // drawn, just inert.
-  const selectedTrack = tracks.find(t => t.id === selectedClip.trackId);
-  if (!selectedTrack || !selectedTrack.visible) return;
+  // the same test getClipsAtTime makes before drawing a clip at all — so its
+  // selection box and handles no longer sit over a picture nobody can see.
+  // Re-showing the track brings the chrome back; a LOCKED track's chrome is
+  // unaffected, since a locked clip is still drawn, just inert.
+  if (!isTrackVisible(tracks, selectedClip.trackId)) return;
 
   // Check if clip is visible at current time
   const clipEnd = selectedClip.timelinePosition + selectedClip.duration;
@@ -187,8 +186,7 @@ export function drawMultiSelectHandles(
 
     // Same hidden-track test as drawSelectionHandles (ESCSUITE-178): a clip
     // on a track that is not showing it gets no dashed box either.
-    const track = tracks.find(t => t.id === clip.trackId);
-    if (!track || !track.visible) continue;
+    if (!isTrackVisible(tracks, clip.trackId)) continue;
 
     // Check if clip is visible at current time
     const clipEnd = clip.timelinePosition + clip.duration;

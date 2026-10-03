@@ -1,6 +1,7 @@
 // Shared types, constants, and utility functions for the export pipeline
 
 import type { Clip, Track, ExportOptions, ExportProgress, BlendMode, SourceVideo } from '../store/types';
+import { isTrackVisible, isVisibleTrack } from '../store/trackVisibility';
 import { PRESET_SUPPRESSION } from '../utils/animation';
 import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
 
@@ -38,8 +39,7 @@ export function getActiveTransition(clips: Clip[], tracks: Track[], time: number
   for (const clip of clips) {
     if (clip.transition.type === 'none' || clip.transition.duration <= 0) continue;
 
-    const track = tracks.find(t => t.id === clip.trackId);
-    if (!track || !track.visible) continue;
+    if (!isTrackVisible(tracks, clip.trackId)) continue;
 
     const clipEnd = clip.timelinePosition + clip.duration;
     const transitionStart = clipEnd - clip.transition.duration;
@@ -68,7 +68,7 @@ export function getActiveTransition(clips: Clip[], tracks: Track[], time: number
             const t = tracks.find(tr => tr.id === c.trackId);
             return { clip: c, track: t };
           })
-          .filter(({ track: t }) => t && t.visible)
+          .filter(({ track: t }) => isVisibleTrack(t))
           .sort((a, b) => (b.track?.index ?? 0) - (a.track?.index ?? 0)); // Higher index = on top
 
         if (clipsAtEnd.length > 0) {
