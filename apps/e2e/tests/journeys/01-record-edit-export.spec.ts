@@ -2,6 +2,7 @@ import { statSync } from 'node:fs'
 import { test, expect, Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { getRecordCount } from '../../utils/indexeddb'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * Journey: Record (ESCAPECRAFT) → hand off → Edit (ESCAPEARTIST) → Export
@@ -68,7 +69,7 @@ test.describe('Journey: Record, Edit, Export', () => {
       await grantMediaPermissions(page)
 
       await page.goto(CRAFT_URL)
-      await page.waitForLoadState('networkidle')
+      await waitForAppReady(page, 'craft')
 
       // Nothing gates the tool — it opens straight into the recorder
       await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
@@ -121,11 +122,21 @@ test.describe('Journey: Record, Edit, Export', () => {
     const artist = await context.newPage()
 
     await test.step('ESCAPEARTIST opens straight into the editor', async () => {
-      await artist.goto(ARTIST_URL)
-      await artist.waitForLoadState('networkidle')
+      // ESCSUITE-177 review "Races" 1: waitForAppReady now resolves at
+      // React's first commit (attachment), earlier than the old
+      // `networkidle` ever did, which can land before ARTIST's own
+      // asynchronous `getSessionState()` has decided whether to raise the
+      // "Resume Previous Session?" prompt. `?suppressRestore=1` means
+      // ARTIST never asks in the first place, rather than racing whichever
+      // lands first.
+      await artist.goto(`${ARTIST_URL}?suppressRestore=1`)
+      await waitForAppReady(artist, 'artist')
 
       await expect(artist.getByRole('button', { name: 'Export video' })).toBeVisible()
-      expect(await artist.getByRole('dialog').count()).toBe(0)
+      // A retrying assertion rather than a one-shot count: belt-and-braces
+      // alongside `?suppressRestore=1` above, in case anything else async
+      // ever puts up a dialog here.
+      await expect(artist.getByRole('dialog')).toHaveCount(0)
     })
 
     await test.step('import the recording and put it on the timeline', async () => {

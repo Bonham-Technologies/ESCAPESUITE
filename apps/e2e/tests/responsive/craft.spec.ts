@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPECRAFT Mobile Layout', () => {
   test.beforeEach(async ({ page }) => {
@@ -8,7 +9,7 @@ test.describe('ESCAPECRAFT Mobile Layout', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('recording UI renders on mobile', async ({ page }) => {
@@ -60,7 +61,7 @@ test.describe('ESCAPECRAFT Tablet Layout', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('recording UI renders on tablet', async ({ page }) => {
@@ -92,7 +93,7 @@ test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const settingsPanel = page.locator('[class*="settings"], [class*="panel"]').first()
     const isVisible = await settingsPanel.isVisible().catch(() => false)
@@ -106,7 +107,7 @@ test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const settingsToggle = page
       .getByRole('button', { name: /settings|options|gear/i })
@@ -122,7 +123,7 @@ test.describe('ESCAPECRAFT Recording List Responsive', () => {
   test('recording list stacks on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const recordingsList = page.locator('[class*="recordings"], [class*="list"]').first()
     const isVisible = await recordingsList.isVisible().catch(() => false)
@@ -139,7 +140,7 @@ test.describe('ESCAPECRAFT Recording List Responsive', () => {
   test('recording thumbnails resize on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const thumbnails = page.locator('[class*="thumbnail"], [class*="preview"] img')
     const count = await thumbnails.count()
@@ -162,7 +163,7 @@ test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const videoPlayer = page.locator('video').first()
     const isVisible = await videoPlayer.isVisible().catch(() => false)
@@ -181,7 +182,7 @@ test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const playButton = page
       .getByRole('button', { name: /play/i })
@@ -206,7 +207,7 @@ test.describe('ESCAPECRAFT Landscape Mode', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const html = await page.content()
     expect(html).toContain('<div id="root">')
@@ -217,7 +218,7 @@ test.describe('ESCAPECRAFT Landscape Mode', () => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     const preview = page.locator('video, [class*="preview"]').first()
     const isVisible = await preview.isVisible().catch(() => false)

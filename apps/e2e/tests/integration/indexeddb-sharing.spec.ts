@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 const DB_NAME = 'video-editor-db'
 
@@ -19,7 +20,7 @@ test.describe('IndexedDB Data Sharing', () => {
     // Create recording in CRAFT
     const craftPage = await context.newPage()
     await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'craft')
 
     const craftLoaded = await craftPage.content()
     expect(craftLoaded).toContain('<div id="root">')
@@ -27,7 +28,7 @@ test.describe('IndexedDB Data Sharing', () => {
     // Check in ARTIST
     const artistPage = await context.newPage()
     await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
+    await waitForAppReady(artistPage, 'artist')
 
     const artistLoaded = await artistPage.content()
     expect(artistLoaded).toContain('<div id="root">')
@@ -40,7 +41,7 @@ test.describe('Video Data Integrity', () => {
   test('video blob stored and retrieved correctly', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit times out on IndexedDB blob operations in Playwright')
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Store and retrieve video data
     const integrity = await page.evaluate((dbName) => {
@@ -89,7 +90,7 @@ test.describe('Large Video Handling', () => {
   test('large blobs can be stored', async ({ page, browserName }) => {
     test.skip(browserName === 'webkit', 'WebKit times out on IndexedDB blob operations in Playwright')
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Test with larger data (1MB)
     const success = await page.evaluate((dbName) => {
@@ -132,7 +133,7 @@ test.describe('Large Video Handling', () => {
 test.describe('Database Version Handling', () => {
   test('database upgrades handled correctly', async ({ page }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Open with different versions
     const upgradeWorks = await page.evaluate((dbName) => {
@@ -174,8 +175,8 @@ test.describe('Concurrent Access', () => {
     ])
 
     await Promise.all([
-      craftPage.waitForLoadState('networkidle'),
-      artistPage.waitForLoadState('networkidle'),
+      waitForAppReady(craftPage, 'craft'),
+      waitForAppReady(artistPage, 'artist'),
     ])
 
     // Both should load successfully

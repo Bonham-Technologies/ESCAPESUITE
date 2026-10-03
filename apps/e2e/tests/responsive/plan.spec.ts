@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEPLAN Mobile Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('landing page renders on mobile', async ({ page }) => {
@@ -96,7 +97,7 @@ test.describe('ESCAPEPLAN Tablet Layout', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 768, height: 1024 })
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
   })
 
   test('landing page renders on tablet', async ({ page }) => {
@@ -123,7 +124,7 @@ test.describe('ESCAPEPLAN Desktop Layout', () => {
   test('tool cards sit side by side on desktop', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     const craftBox = await page
       .getByRole('button', { name: 'Use ESCAPECRAFT' })

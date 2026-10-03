@@ -701,6 +701,9 @@ export async function loadPerfScene(
   transform?: (project: SceneProject) => SceneProject
 ): Promise<string> {
   await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+  // Not swapped for waitForAppReady (ESCSUITE-177): playwright.perf.config.ts
+  // runs chromium only, so the Firefox `networkidle` hang that motivated the
+  // swap elsewhere does not apply here.
   await page.waitForLoadState('networkidle')
 
   await page.locator('input[type="file"]').setInputFiles({

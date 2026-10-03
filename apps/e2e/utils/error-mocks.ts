@@ -1,4 +1,5 @@
 import { Page } from '@playwright/test'
+import { installMediaDevicesLayer } from './media-mocks'
 
 /**
  * Utilities for mocking error scenarios in E2E tests
@@ -63,19 +64,34 @@ export async function mockAPIError(
 
 /**
  * Mock permission denied for camera
+ *
+ * Replaces the whole `navigator.mediaDevices` property via
+ * `window.__layerMediaDevices` (installed by `installMediaDevicesLayer`, see
+ * `media-mocks.ts`'s module comment), rather than assigning one method on it
+ * — a plain `navigator.mediaDevices.getUserMedia = fn` is not what the
+ * committed WebKit specs needed (ESCSUITE-177).
  */
 export async function mockCameraPermissionDenied(page: Page): Promise<void> {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
-      navigator.mediaDevices
-    )
+    // Optional with a fallback: the layer always binds a real getUserMedia
+    // from the prototype chain, but a layer that genuinely has none (a
+    // browser missing the API entirely) must not make this script throw.
+    const originalGetUserMedia =
+      navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices) ??
+      (async () => {
+        throw new DOMException('No getUserMedia implementation', 'NotFoundError')
+      })
 
-    navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const getUserMedia: typeof navigator.mediaDevices.getUserMedia = async (constraints) => {
       if (constraints?.video) {
         throw new DOMException('Permission denied', 'NotAllowedError')
       }
       return originalGetUserMedia(constraints)
     }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia })
   })
 }
 
@@ -83,17 +99,23 @@ export async function mockCameraPermissionDenied(page: Page): Promise<void> {
  * Mock permission denied for microphone
  */
 export async function mockMicrophonePermissionDenied(page: Page): Promise<void> {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(
-      navigator.mediaDevices
-    )
+    const originalGetUserMedia =
+      navigator.mediaDevices.getUserMedia?.bind(navigator.mediaDevices) ??
+      (async () => {
+        throw new DOMException('No getUserMedia implementation', 'NotFoundError')
+      })
 
-    navigator.mediaDevices.getUserMedia = async (constraints) => {
+    const getUserMedia: typeof navigator.mediaDevices.getUserMedia = async (constraints) => {
       if (constraints?.audio) {
         throw new DOMException('Permission denied', 'NotAllowedError')
       }
       return originalGetUserMedia(constraints)
     }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia })
   })
 }
 
@@ -101,10 +123,14 @@ export async function mockMicrophonePermissionDenied(page: Page): Promise<void> 
  * Mock permission denied for screen capture
  */
 export async function mockScreenShareDenied(page: Page): Promise<void> {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    navigator.mediaDevices.getDisplayMedia = async () => {
+    const getDisplayMedia = async () => {
       throw new DOMException('Permission denied', 'NotAllowedError')
     }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getDisplayMedia })
   })
 }
 
@@ -112,18 +138,22 @@ export async function mockScreenShareDenied(page: Page): Promise<void> {
  * Mock all media permissions denied
  */
 export async function mockAllMediaPermissionsDenied(page: Page): Promise<void> {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
+    const getUserMedia = async () => {
       throw new DOMException('Permission denied', 'NotAllowedError')
     }
 
-    navigator.mediaDevices.getDisplayMedia = async () => {
+    const getDisplayMedia = async () => {
       throw new DOMException('Permission denied', 'NotAllowedError')
     }
 
-    navigator.mediaDevices.enumerateDevices = async () => {
-      return []
+    const enumerateDevices = async () => {
+      return [] as MediaDeviceInfo[]
     }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia, getDisplayMedia, enumerateDevices })
   })
 }
 
@@ -131,10 +161,14 @@ export async function mockAllMediaPermissionsDenied(page: Page): Promise<void> {
  * Mock device not found error
  */
 export async function mockDeviceNotFound(page: Page): Promise<void> {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
+    const getUserMedia = async () => {
       throw new DOMException('Requested device not found', 'NotFoundError')
     }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia })
   })
 }
 
@@ -142,10 +176,14 @@ export async function mockDeviceNotFound(page: Page): Promise<void> {
  * Mock device in use error
  */
 export async function mockDeviceInUse(page: Page): Promise<void> {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    navigator.mediaDevices.getUserMedia = async () => {
+    const getUserMedia = async () => {
       throw new DOMException('Could not start video source', 'NotReadableError')
     }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia })
   })
 }
 

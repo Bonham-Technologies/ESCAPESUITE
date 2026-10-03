@@ -5,6 +5,73 @@ import { Page } from '@playwright/test'
  */
 
 /**
+ * Every init script below that wants to override a `navigator.mediaDevices`
+ * method replaces the **whole** `mediaDevices` property rather than
+ * assigning one method on it (`navigator.mediaDevices.foo = fn`) — in the
+ * committed specs that used the assignment form, the override was
+ * demonstrably not in effect by the time the app called it (the WebKit
+ * recording specs failed with the browser's own `NotAllowedError`, which only
+ * fires from the native `getUserMedia`). A minimal repro of the bare
+ * assignment on a fresh page does not reproduce a dropped override on any of
+ * the three engines, so the precise mechanism is not established — but
+ * `Object.defineProperty(navigator, 'mediaDevices', { value: {...} })` is
+ * strictly more robust regardless (it replaces the property outright instead
+ * of relying on whatever `navigator.mediaDevices` happens to return being
+ * mutable), so that is the form used everywhere here (ESCSUITE-177).
+ *
+ * `{ ...navigator.mediaDevices, ...overrides }` is **not** that: `MediaDevices`'
+ * own methods live on `MediaDevices.prototype`, and object spread copies only
+ * *own enumerable* properties, of which a fresh `navigator.mediaDevices` has
+ * none — `Object.keys({ ...navigator.mediaDevices })` is `[]` on all three
+ * engines. Every override below therefore goes through
+ * `window.__layerMediaDevices(overrides)`, installed once per document by
+ * `installMediaDevicesLayer()` (idempotent — a second call's init script sees
+ * the helper already there and does nothing), which *walks the prototype
+ * chain* binding each native method to the original object before layering
+ * `overrides` on top:
+ *
+ *     for (let o = native; o && o !== Object.prototype; o = getPrototypeOf(o))
+ *       for (const key of getOwnPropertyNames(o)) layered[key] = bind(native[key])
+ *
+ * `Object.create(native)` is not a substitute — a native method invoked with
+ * `this` bound to a derived object throws "Illegal invocation". Binding is
+ * also why every override layers onto whatever is already there instead of
+ * erasing it: `mockGetUserMedia`/`mockSyntheticMedia`'s `getUserMedia`/
+ * `getDisplayMedia` land on top of `mockMediaDevices`'s `enumerateDevices`,
+ * and `error-mocks.ts`'s wrappers land on top of a real, callable
+ * `getUserMedia` to fall back to.
+ */
+export async function installMediaDevicesLayer(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as {
+      __layerMediaDevices?: (overrides: Record<string, unknown>) => void
+    }
+    if (w.__layerMediaDevices) return
+
+    w.__layerMediaDevices = (overrides: Record<string, unknown>) => {
+      const native = navigator.mediaDevices as unknown as Record<string, unknown>
+      const layered: Record<string, unknown> = {}
+      for (
+        let proto: object | null = native;
+        proto && proto !== Object.prototype;
+        proto = Object.getPrototypeOf(proto)
+      ) {
+        for (const key of Object.getOwnPropertyNames(proto)) {
+          if (key === 'constructor' || key in layered) continue
+          const value = native[key]
+          layered[key] =
+            typeof value === 'function'
+              ? (value as (...args: unknown[]) => unknown).bind(native)
+              : value
+        }
+      }
+      Object.assign(layered, overrides)
+      Object.defineProperty(navigator, 'mediaDevices', { value: layered, configurable: true })
+    }
+  })
+}
+
+/**
  * Report a camera and a microphone from `enumerateDevices`.
  *
  * ESCAPECRAFT's capability detection (`apps/craft/src/core/permissions.ts`)
@@ -22,13 +89,17 @@ import { Page } from '@playwright/test'
  * Must be called BEFORE navigating.
  */
 export async function mockMediaDevices(page: Page) {
+  await installMediaDevicesLayer(page)
   await page.addInitScript(() => {
-    navigator.mediaDevices.enumerateDevices = async () =>
+    const enumerateDevices = async () =>
       [
         { deviceId: 'mock-camera', kind: 'videoinput', label: 'Mock Camera', groupId: 'mock' },
         { deviceId: 'mock-mic', kind: 'audioinput', label: 'Mock Microphone', groupId: 'mock' },
         { deviceId: 'mock-speaker', kind: 'audiooutput', label: 'Mock Speaker', groupId: 'mock' },
       ].map((device) => ({ ...device, toJSON: () => device })) as MediaDeviceInfo[]
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ enumerateDevices })
   })
 }
 
@@ -51,11 +122,11 @@ export async function mockGetUserMedia(page: Page) {
       active: true,
     }
 
-    // Override getUserMedia
-    navigator.mediaDevices.getUserMedia = async () => mockStream as unknown as MediaStream
+    const getUserMedia = async () => mockStream as unknown as MediaStream
+    const getDisplayMedia = async () => mockStream as unknown as MediaStream
 
-    // Override getDisplayMedia for screen capture
-    navigator.mediaDevices.getDisplayMedia = async () => mockStream as unknown as MediaStream
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia, getDisplayMedia })
   })
 }
 
@@ -214,22 +285,21 @@ export async function mockSyntheticMedia(
         return destination.stream.getAudioTracks()[0]
       }
 
-      navigator.mediaDevices.getDisplayMedia = async (
-        constraints?: DisplayMediaStreamOptions
-      ) => {
+      const getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
         const stream = new MediaStream([makeVideoTrack()])
         if (constraints?.audio) stream.addTrack(makeAudioTrack())
         return stream
       }
 
-      navigator.mediaDevices.getUserMedia = async (
-        constraints?: MediaStreamConstraints
-      ) => {
+      const getUserMedia = async (constraints?: MediaStreamConstraints) => {
         const tracks: MediaStreamTrack[] = []
         if (constraints?.video) tracks.push(makeVideoTrack())
         if (constraints?.audio) tracks.push(makeAudioTrack())
         return new MediaStream(tracks)
       }
+
+      ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+        .__layerMediaDevices({ getDisplayMedia, getUserMedia })
     },
     { width, height, painter }
   )

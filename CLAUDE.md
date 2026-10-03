@@ -110,6 +110,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   `.js` file survives inlining; the hosted build keeps the worker as an ordinary fetchable
   chunk. ESCSUITE-153: before this predicate existed, the standalone build checked only
   `VITE_HEADLESS` here and shipped an un-inlined `decodeWorker-*.js` the release never attached.
+  The standalone HTML also carries the hosted deployment's `rel="canonical"` and `og:url`/
+  `og:image` tags, pointing at `https://www.escapesuite.io` — nothing in the single-file bundle
+  requests either URL, so this is harmless to the offline guarantee (ESCSUITE-177 n2), just an
+  odd-looking artefact of reusing the same `index.html` template for both targets.
 - **Shared dialog behaviour**: `useDialogBehaviour` (`packages/shared/src/hooks`, imported
   as `@escapesuite/shared/hooks`) is the single modal keyboard implementation — initial
   focus, the Tab/Shift+Tab trap, Escape-to-close and focus restored to the opener — used by
@@ -148,6 +152,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   exporter say so, before and after, instead of handing back a silent file; a browser with no
   Opus encoder gets the same treatment for WebM). Measured 2026-10-02; see the Key Constraints
   bullet below
+
+  exporter say so, before and after, instead of handing back a silent file). Measured
+  2026-10-02; see the Key Constraints bullet below
+
 - Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
   audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
@@ -2273,6 +2281,27 @@ perf/rerender pins and `perfScene.ts` are byte-identical; the kit's own source i
 the new failure mode under a patch changeset) and its figures do not move. **No floor crossed**; artist's
 floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-02 for ESCSUITE-177 (sweep 4's cross-browser follow-ups: the
+e2e a11y helper keeps the first failing node's selector; the light palette's `--text-muted` darkened from
+`#718096` to `#606d80` so it clears AA on `--bg-secondary` — the one real finding behind the Firefox
+light-theme axe failure, which was an unavailable source row's label, not the Recording label the test's
+comment suspected — with the player's error overlay given its own on-dark colours because that surface is
+black in both themes; the WebCodecs docs claim corrected; `waitForAppReady` replacing 185 `networkidle` waits
+across 29 spec files; the media mocks layered onto `navigator.mediaDevices` by binding its prototype chain;
+WebKit skips with stated reasons): 100.00 / 99.52 / 97.73 / 100.00, byte-identical to the
+100.00 / 99.52 / 97.73 / 100.00 the commit this branch was cut from (`599d505`; craft's source is unchanged on
+`main` since, ESCSUITE-174 not yet landed when measured) measures — lines 2,337, statements 2,489 / 2,501,
+branches 1,337 / 1,368 and functions 448 on both trees, the same 12 statements and 31 branches uncovered. The
+craft change is two CSS files and one new unit test (`themeTokens.test.ts`, pinning both palettes'
+`--text-muted` contrast on `--bg-secondary` and the overlay's colours on black), none of which is in the
+measured numerators, so nothing moves. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical.
+Outside vitest's measurement: the full Chromium Playwright project on this branch, run twice in one sitting,
+287 passed / 9 skipped / 0 failed, against 284 / 9 / 3 before the round-2 fixes (two of the three were
+`waitForAppReady` waiting for the landmark to be visible at a landscape phone viewport, the third a
+machine-contention flake that passes alone); `errors/permissions.spec.ts` was red (3) on the first mock rewrite
+and is 9 passed / 2 skipped on the bound-prototype one. **No floor crossed**; craft's floors stay
+100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2335,6 +2364,16 @@ never above what the suite actually achieves:
   configure at the output size, and both answer two questions, `{ video, audio }`, because the two
   failures differ in kind: no picture codec means no export in that format at all, while no audio
   codec (AAC for MP4, Opus for WebM) means a file with no sound in it.
+  A browser can therefore offer one format and not the other, or offer MP4 knowing it will be
+  silent, and the export dialog says which before the click and what happened after it, rather
+  than offering a button that fails the instant it is clicked (ESCSUITE-22/29 gave WebM its video
+  probe; ESCSUITE-175 gave MP4 the same and gave both the audio half — it also moved the H.264
+  ladder and the AAC probe ahead of mixing the audio and loading the media, so a refusal costs
+  nothing). See `apps/artist/CLAUDE.md`'s
+
+  configure at the output size — MP4's answers two questions, `{ video, audio }`, because the two
+  failures differ in kind: no H.264 means no MP4 at all, no AAC means an MP4 with no sound in it.
+
   A browser can therefore offer one format and not the other, or offer MP4 knowing it will be
   silent, and the export dialog says which before the click and what happened after it, rather
   than offering a button that fails the instant it is clicked (ESCSUITE-22/29 gave WebM its video

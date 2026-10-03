@@ -8,6 +8,7 @@ import {
   mockDeviceInUse,
 } from '../../utils/error-mocks'
 import { mockMediaDevices } from '../../utils/media-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Camera Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
@@ -16,7 +17,16 @@ test.describe('Camera Permission Denied', () => {
     await mockMediaDevices(page)
     await mockCameraPermissionDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
+
+    // ESCSUITE-177 review MAJOR 1: a real assertion that the mock actually
+    // installed, not just that the app rendered *something*. Denying the
+    // camera must not take Screen down with it — if `mockCameraPermissionDenied`
+    // had replaced `navigator.mediaDevices` with an object spread (which
+    // carries none of the platform's own methods, camera denial included),
+    // every source would read as unavailable and this button would be
+    // disabled.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
@@ -69,7 +79,7 @@ test.describe('Microphone Permission Denied', () => {
     await mockMediaDevices(page)
     await mockMicrophonePermissionDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
@@ -113,9 +123,29 @@ test.describe('Microphone Permission Denied', () => {
 
 test.describe('Screen Share Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
+    // Webcam/Microphone availability depends on `enumerateDevices()`
+    // reporting at least one device of each kind (`permissions.ts`), so
+    // without this the Screen/Webcam/Microphone assertion below is a CI
+    // runner's own hardware, not the mock: a developer laptop's camera and
+    // mic pass it by accident, and a CI runner with neither fails it for a
+    // reason that has nothing to do with `mockScreenShareDenied` (observed
+    // in CI: Screen and Microphone enabled, Webcam not, on a runner with no
+    // camera). `mockMediaDevices` first, same as the Camera/Microphone
+    // describes above, so the three-rows-enabled assertion proves the
+    // layering fix instead of the runner's hardware.
+    await mockMediaDevices(page)
     await mockScreenShareDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
+
+    // ESCSUITE-177 review MAJOR 1: denying screen share alone must not take
+    // Webcam/Microphone down with it — that was the symptom of the broken
+    // object-spread layer (it replaced `navigator.mediaDevices` with just
+    // `{ getDisplayMedia }`, which reads as neither API existing for the
+    // other two sources).
+    await expect(page.getByRole('button', { name: 'Screen' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Webcam' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Microphone' })).toBeEnabled()
   })
 
   test('shows error UI when screen share denied', async ({ page }) => {
@@ -160,7 +190,7 @@ test.describe('All Media Permissions Denied', () => {
   test.beforeEach(async ({ page }) => {
     await mockAllMediaPermissionsDenied(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows appropriate error state', async ({ page }) => {
@@ -195,7 +225,7 @@ test.describe('Device Not Found', () => {
     await mockMediaDevices(page)
     await mockDeviceNotFound(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows device not found message', async ({ page }) => {
@@ -222,7 +252,7 @@ test.describe('Device In Use', () => {
     await mockMediaDevices(page)
     await mockDeviceInUse(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows device in use message', async ({ page }) => {
@@ -246,7 +276,7 @@ test.describe('Device In Use', () => {
 test.describe('Permission Recovery', () => {
   test('can recover after granting permissions', async ({ page, context }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Grant permissions (Chromium-only; Firefox/WebKit don't support this)
     const browserName = context.browser()?.browserType().name()
@@ -256,7 +286,7 @@ test.describe('Permission Recovery', () => {
 
     // Refresh to pick up new permissions
     await page.reload()
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Should work normally now
     const html = await page.content()

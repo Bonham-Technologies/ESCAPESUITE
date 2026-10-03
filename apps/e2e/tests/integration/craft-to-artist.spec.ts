@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { clearIndexedDB, databaseExists } from '../../utils/indexeddb'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * Integration tests for the ESCAPECRAFT -> ESCAPEARTIST workflow
@@ -11,7 +12,7 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
   test('ESCAPEARTIST loads with URL parameters', async ({ page }) => {
     // App should handle URL params gracefully
     await page.goto('http://localhost:5175?video=test')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // App should still load (an unusable video URL must not break it)
     const html = await page.content()
@@ -21,7 +22,7 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
 
   test('ESCAPEARTIST has postMessage support', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Verify postMessage is available (standard browser API)
     const hasPostMessage = await page.evaluate(() => {
@@ -33,7 +34,7 @@ test.describe('ESCAPECRAFT to ESCAPEARTIST Integration', () => {
 
   test('ESCAPEARTIST has integration API', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Check if integration message handlers are set up
     const canReceiveMessages = await page.evaluate(() => {
@@ -51,21 +52,21 @@ test.describe('Cross-App Connectivity', () => {
     // Test ESCAPEPLAN
     const planPage = await context.newPage()
     await planPage.goto('http://localhost:5173')
-    await planPage.waitForLoadState('networkidle')
+    await waitForAppReady(planPage, 'plan')
     const planHtml = await planPage.content()
     expect(planHtml).toContain('<div id="root">')
 
     // Test ESCAPECRAFT
     const craftPage = await context.newPage()
     await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'craft')
     const craftHtml = await craftPage.content()
     expect(craftHtml).toContain('<div id="root">')
 
     // Test ESCAPEARTIST
     const artistPage = await context.newPage()
     await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
+    await waitForAppReady(artistPage, 'artist')
     const artistHtml = await artistPage.content()
     expect(artistHtml).toContain('<div id="root">')
 
@@ -74,7 +75,7 @@ test.describe('Cross-App Connectivity', () => {
 
   test('ESCAPEPLAN can be queried for tool references', async ({ page }) => {
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
 
     // Look for any mention of the tools on the landing page
     const craftCount = await page.getByText(/craft|record|screen/i).count()
@@ -91,12 +92,12 @@ test.describe('Cross-App Connectivity', () => {
     // Check ESCAPECRAFT
     const craftPage = await context.newPage()
     await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'craft')
 
     // Check ESCAPEARTIST
     const artistPage = await context.newPage()
     await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
+    await waitForAppReady(artistPage, 'artist')
 
     // Both apps should recognize the shared database
     // Note: Database may not exist until first write
@@ -118,7 +119,7 @@ test.describe('Cross-App Connectivity', () => {
 test.describe('IndexedDB Data Sharing', () => {
   test('IndexedDB can be cleared between tests', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Clear IndexedDB
     await clearIndexedDB(page)
@@ -135,7 +136,7 @@ test.describe('IndexedDB Data Sharing', () => {
 
   test('can write and read from IndexedDB', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Write a test value to IndexedDB
     const writeResult = await page.evaluate(async () => {
@@ -170,13 +171,13 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
     // Start in ESCAPECRAFT
     const craftPage = await context.newPage()
     await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'craft')
     const craftHtml = await craftPage.content()
     expect(craftHtml).toContain('<div id="root">')
 
     // Navigate to ESCAPEARTIST (simulating "Send to Editor")
     await craftPage.goto('http://localhost:5175')
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'artist')
     const artistHtml = await craftPage.content()
     expect(artistHtml).toContain('<div id="root">')
 
@@ -187,7 +188,7 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
 
     // Navigate with a video ID parameter
     await page.goto('http://localhost:5175?loadVideo=test-video-123')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // App should load and handle the parameter
     const html = await page.content()
@@ -199,7 +200,7 @@ test.describe('Full CRAFT to ARTIST Workflow', () => {
 
     // Navigate with an invalid video ID
     await page.goto('http://localhost:5175?loadVideo=nonexistent')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // App should still load without crashing
     const html = await page.content()

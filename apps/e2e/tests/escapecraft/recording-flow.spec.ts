@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPECRAFT Recording Interface', () => {
   test.beforeEach(async ({ page }) => {
@@ -7,7 +8,7 @@ test.describe('ESCAPECRAFT Recording Interface', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('server responds', async ({ page }) => {
@@ -62,7 +63,7 @@ test.describe('ESCAPECRAFT Recording Controls', () => {
     await mockMediaRecorder(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('has recording settings area', async ({ page }) => {
@@ -102,7 +103,7 @@ test.describe('ESCAPECRAFT Recording Controls', () => {
 test.describe('ESCAPECRAFT Recording List', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('shows recordings list section', async ({ page }) => {
@@ -133,7 +134,7 @@ test.describe('ESCAPECRAFT Recording List', () => {
 test.describe('ESCAPECRAFT User Interface', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
   })
 
   test('has header or navigation', async ({ page }) => {

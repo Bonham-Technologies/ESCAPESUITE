@@ -2,6 +2,7 @@ import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { test, expect, Page } from '@playwright/test'
 import { getRecordCount, waitForIndexedDB } from '../../utils/indexeddb'
+import { waitForAppReady } from '../../utils/ready'
 
 /**
  * ESCSUITE-142: ESCAPEARTIST's media library "Clear All" must not delete
@@ -74,7 +75,7 @@ async function putVideoRecord(
 /** Open ESCAPECRAFT and wait for it to create/open the shared database. */
 async function openCraft(page: Page) {
   await page.goto(CRAFT_URL)
-  await page.waitForLoadState('networkidle')
+  await waitForAppReady(page, 'craft')
   await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   await waitForIndexedDB(page, DB_NAME)
 }
@@ -113,7 +114,7 @@ test.describe('Clear All in ARTIST is scoped to its own library (ESCSUITE-142)',
     // user never sent it to the editor.
     const artistPage = await context.newPage()
     await artistPage.goto(ARTIST_URL)
-    await artistPage.waitForLoadState('networkidle')
+    await waitForAppReady(artistPage, 'artist')
 
     await artistPage.locator('input[type="file"]').setInputFiles(FIXTURE_MP4)
     const addToTimeline = artistPage.getByRole('button', { name: 'Add to timeline' })
@@ -132,7 +133,7 @@ test.describe('Clear All in ARTIST is scoped to its own library (ESCSUITE-142)',
     // Reload CRAFT: its take is still there, both in the database and in its
     // own recordings list.
     await craftPage.reload()
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'craft')
     await expect(craftPage.getByText(CRAFT_TAKE_NAME)).toBeVisible({ timeout: 30_000 })
     expect(await getRecordCount(craftPage, DB_NAME, 'videos')).toBeGreaterThan(0)
 

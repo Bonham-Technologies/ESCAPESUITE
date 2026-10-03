@@ -1,6 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import {
+  mockGetUserMedia,
+  mockMediaRecorder,
+  grantMediaPermissions,
+  installMediaDevicesLayer,
+} from '../../utils/media-mocks'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
   test('recording workflow to editor', async ({ browser }) => {
@@ -8,20 +14,28 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
 
     // Start in ESCAPECRAFT
     const craftPage = await context.newPage()
+    // Mock media APIs through the shared layering helper (ESCSUITE-177; see
+    // media-mocks.ts's module comment) rather than assigning one method on
+    // `navigator.mediaDevices` or spreading it, neither of which carries the
+    // platform's other methods forward.
+    await installMediaDevicesLayer(craftPage)
     await craftPage.addInitScript(() => {
-      // Mock media APIs
-      navigator.mediaDevices.getUserMedia = async () => ({
-        getTracks: () => [],
-        getVideoTracks: () => [],
-        getAudioTracks: () => [],
-        addTrack: () => {},
-        removeTrack: () => {},
-        active: true,
-      }) as unknown as MediaStream
+      const getUserMedia = async () =>
+        ({
+          getTracks: () => [],
+          getVideoTracks: () => [],
+          getAudioTracks: () => [],
+          addTrack: () => {},
+          removeTrack: () => {},
+          active: true,
+        }) as unknown as MediaStream
+
+      ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+        .__layerMediaDevices({ getUserMedia })
     })
 
     await craftPage.goto('http://localhost:5174')
-    await craftPage.waitForLoadState('networkidle')
+    await waitForAppReady(craftPage, 'craft')
 
     // Verify CRAFT loaded
     const craftHtml = await craftPage.content()
@@ -30,7 +44,7 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
     // Navigate to ARTIST
     const artistPage = await context.newPage()
     await artistPage.goto('http://localhost:5175')
-    await artistPage.waitForLoadState('networkidle')
+    await waitForAppReady(artistPage, 'artist')
 
     // Verify ARTIST loaded
     const artistHtml = await artistPage.content()
@@ -45,7 +59,7 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
     await grantMediaPermissions(page)
 
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
 
     // Verify UI allows multiple recordings
     const recordButton = page
@@ -60,7 +74,7 @@ test.describe('Record in CRAFT, Edit in ARTIST', () => {
 test.describe('Export After Editing', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
   })
 
   test('can access export from editor', async ({ page }) => {
@@ -87,7 +101,7 @@ test.describe('Export After Editing', () => {
 test.describe('Project Save and Reload', () => {
   test('project can be saved', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const saveButton = page
       .getByRole('button', { name: /save/i })
@@ -100,7 +114,7 @@ test.describe('Project Save and Reload', () => {
 
   test('project persists across page reload', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Store something in IndexedDB to simulate project save
     await page.evaluate(() => {
@@ -129,7 +143,7 @@ test.describe('Project Save and Reload', () => {
 
     // Reload page
     await page.reload()
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Page should still work
     const html = await page.content()
@@ -144,7 +158,7 @@ test.describe('Cross-Session State Persistence', () => {
     // First session
     const page1 = await context.newPage()
     await page1.goto('http://localhost:5175')
-    await page1.waitForLoadState('networkidle')
+    await waitForAppReady(page1, 'artist')
 
     // Store a setting
     await page1.evaluate(() => {
@@ -156,7 +170,7 @@ test.describe('Cross-Session State Persistence', () => {
     // Second session
     const page2 = await context.newPage()
     await page2.goto('http://localhost:5175')
-    await page2.waitForLoadState('networkidle')
+    await waitForAppReady(page2, 'artist')
 
     // Check setting persisted
     const settings = await page2.evaluate(() => {
@@ -170,7 +184,7 @@ test.describe('Cross-Session State Persistence', () => {
 
   test('undo history clears on new session', async ({ page }) => {
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // Undo button should be disabled on fresh load
     const undoButton = page
@@ -196,17 +210,17 @@ test.describe('App-to-App Navigation', () => {
 
     // ESCAPEPLAN
     await page.goto('http://localhost:5173')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'plan')
     expect(await page.content()).toContain('<div id="root">')
 
     // ESCAPECRAFT
     await page.goto('http://localhost:5174')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'craft')
     expect(await page.content()).toContain('<div id="root">')
 
     // ESCAPEARTIST
     await page.goto('http://localhost:5175')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
     expect(await page.content()).toContain('<div id="root">')
 
     await context.close()
@@ -216,7 +230,7 @@ test.describe('App-to-App Navigation', () => {
 test.describe('URL Parameter Handling', () => {
   test('loadVideo parameter handled', async ({ page }) => {
     await page.goto('http://localhost:5175?loadVideo=test-123')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     // App should handle the parameter without crashing
     const html = await page.content()
@@ -227,7 +241,7 @@ test.describe('URL Parameter Handling', () => {
     // Base64 encoded project data
     const projectData = btoa(JSON.stringify({ name: 'Test Project' }))
     await page.goto(`http://localhost:5175?project=${projectData}`)
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const html = await page.content()
     expect(html).toContain('<div id="root">')
@@ -235,7 +249,7 @@ test.describe('URL Parameter Handling', () => {
 
   test('video URL parameter handled', async ({ page }) => {
     await page.goto('http://localhost:5175?video=https://example.com/test.mp4')
-    await page.waitForLoadState('networkidle')
+    await waitForAppReady(page, 'artist')
 
     const html = await page.content()
     expect(html).toContain('<div id="root">')
