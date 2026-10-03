@@ -271,7 +271,11 @@ export function useKeyframeGraphKeyboard({
     // nudge instead — nothing moves, the live region says why, and the key is
     // still swallowed rather than falling through to the editor.
     // `keyframes` is every handle on the graph, presets included: landing on a
-    // preset is refused too, because the store would merge the two all the same.
+    // PRESET's handle is refused too, but for a different reason — the store
+    // deletes nothing there (a preset is regenerated from `animation.in` /
+    // `out`, never stored as a keyframe), but `getAllKeyframesForProperty`
+    // merges two handles within the same epsilon and the custom one wins, so
+    // the preset's handle would simply vanish behind it.
     const occupied = keyframes.some(kf =>
       Math.abs(kf.time - selectedKeyframe.time) >= KEYFRAME_TIME_EPSILON &&
       Math.abs(kf.time - newTime) < KEYFRAME_TIME_EPSILON
