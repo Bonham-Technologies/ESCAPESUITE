@@ -863,6 +863,10 @@ Clips support animated properties via keyframes:
     land between them, and a pointer aimed into the gap comes back out the side it went in by.
     When such a merged window covers the whole clip there is **no legal time at all**, and the
     move is ignored outright: the diamond stays where it is, nothing is written, nothing is said.
+    In the graph this applies to a value-axis (Shift) drag too — the clamp runs before the value
+    write — so on such a clip the value cannot be dragged either. A clip under about two
+    milliseconds with a clustered neighbour is the only way to reach it, and it fails closed;
+    accepted limit (re-review of ESCSUITE-183).
   - **The occupied list is the gesture's own snapshot**, taken on `startDrag`. A keyframe added or
     removed by some other path mid-gesture — an undo from the keyboard, a preset toggled — is not
     seen until the next gesture. Accepted limit (review of ESCSUITE-183, finding 6): it is what
