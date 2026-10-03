@@ -782,6 +782,32 @@ describe('close()', () => {
   })
 })
 
+// Review finding 8 (nit 8 accepted): readBody resolved `undefined` for both "too big" and
+// "never arrived", so a client that disconnects mid-body — independently of any shutdown —
+// used to reach handleRender's 413 branch and be logged as if the body had been oversized,
+// when really it was simply gone.
+describe('an abandoned request body', () => {
+  it('logs 499, not 413, when the client disconnects mid-body with no shutdown in progress', async () => {
+    await start({ concurrency: 1 })
+    const body = JSON.stringify(validSpec('job-abandoned'))
+
+    const { socket, connected } = rawSocket()
+    await connected
+    socket.write(
+      `POST /render HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-type: application/json\r\n` +
+        `content-length: ${Buffer.byteLength(body)}\r\n\r\n${body.slice(0, 1)}`,
+    )
+    await settle()
+
+    // The client itself gives up — no close() anywhere in this test.
+    socket.destroy()
+
+    await waitFor(() => expect(logs.some((line) => line.startsWith('POST /render 499'))).toBe(true))
+    expect(logs.some((line) => line.startsWith('POST /render 413'))).toBe(false)
+    expect(runJob).not.toHaveBeenCalled()
+  })
+})
+
 describe('handler failures', () => {
   it('answers 500 and keeps serving when a handler throws', async () => {
     vi.mocked(runJob).mockImplementation(() => {
