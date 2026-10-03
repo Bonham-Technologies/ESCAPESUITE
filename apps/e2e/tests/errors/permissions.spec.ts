@@ -31,32 +31,10 @@ test.describe('Camera Permission Denied', () => {
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
   // Nothing is shown when a camera cannot be opened: the failure only reaches
-  // the console, at record time. This test matched no buttons until the source
-  // toggles gained accessible names, so it had never actually run.
-  test.fixme('shows error UI when camera denied', async ({ page }) => {
-    // Try to enable webcam
-    const webcamToggle = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .or(page.locator('[data-testid="webcam-toggle"]'))
-      .first()
-
-    const isVisible = await webcamToggle.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await webcamToggle.click()
-      await page.waitForTimeout(500)
-
-      // Should show error message or disabled state
-      const errorMessage = page.getByText(/denied|permission|blocked|not allowed/i).first()
-      const errorVisible = await errorMessage.isVisible().catch(() => false)
-
-      // Either show error or toggle should be disabled/inactive
-      const isDisabled = await webcamToggle.isDisabled().catch(() => false)
-      const ariaDisabled = await webcamToggle.getAttribute('aria-disabled')
-
-      expect(errorVisible || isDisabled || ariaDisabled === 'true').toBe(true)
-    }
-  })
+  // the console, at record time. Bodiless on purpose — the K-1-family shapes
+  // a real version of this test would need (isVisible().catch(), an
+  // isDisabled-or-error disjunction) must not survive even unexecuted.
+  test.fixme('shows error UI when camera denied', async () => {})
 
   test('app remains functional after camera denial', async ({ page }) => {
     // Other controls should still work — the camera denial must not take the
@@ -89,18 +67,12 @@ test.describe('Microphone Permission Denied', () => {
   // so a refused prompt is only discovered at Start. A take STARTED with a
   // closed microphone is no longer this gap — ESCSUITE-184 gave that path the
   // notice the real case below proves.
-  test.fixme('shows error UI when the microphone is toggled on with a refused prompt', async ({ page }) => {
-    const micToggle = page.getByRole('button', { name: 'Microphone' })
-    await expect(micToggle).toBeEnabled()
-
-    // Default-on, so this turns it off, then on again — the toggle the gap
-    // is about.
-    await micToggle.click()
-    await micToggle.click()
-    await page.waitForTimeout(500)
-
-    await expect(page.getByText(/denied|permission|blocked/i).first()).toBeVisible()
-  })
+  // Bodiless on purpose — a real version needs the toggle-time notice
+  // issue #289 asks for, which does not exist yet to assert against.
+  test.fixme(
+    'shows error UI when the microphone is toggled on with a refused prompt',
+    async () => {}
+  )
 
   // ESCSUITE-184, proved in a real browser (ESCSUITE-187). Screen and
   // Microphone are both on by default (`recorderStore`'s initial config), so
@@ -132,6 +104,7 @@ test.describe('Microphone Permission Denied', () => {
     ).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible()
 
+    // This is the take's length, not a settle.
     await page.waitForTimeout(2000)
     await page.getByRole('button', { name: 'Stop recording' }).click()
     await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toBeVisible({

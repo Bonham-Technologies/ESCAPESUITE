@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import {
   mockGetUserMedia,
   mockMediaRecorder,
@@ -7,6 +7,7 @@ import {
 } from '../../utils/media-mocks'
 import { checkFocusOrder } from '../../utils/accessibility'
 import { seedTextClip } from '../../utils/artist'
+import { recordAndOpenPlayback } from '../../utils/craft'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEPLAN Keyboard Navigation', () => {
@@ -370,34 +371,6 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     expect(html).toContain('<!DOCTYPE html>')
   })
 })
-
-/**
- * Records a short real take — `mockSyntheticMedia` hands the recorder a real
- * canvas-backed stream, so there is a genuine decodable file to save and
- * play back, the same shape `apps/e2e/tests/accessibility/core.spec.ts`'s
- * "playback dialog passes axe-core audit" test uses — and opens its playback
- * dialog from the library row's "Play" button.
- */
-async function recordAndOpenPlayback(page: Page): Promise<void> {
-  const screenSource = page
-    .locator('[class*="sourceToggle"]')
-    .filter({ hasText: 'Screen' })
-    .last()
-  await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
-
-  await page.getByRole('button', { name: 'Start recording' }).click()
-  await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
-    timeout: 30_000,
-  })
-  await page.waitForTimeout(2000)
-  await page.getByRole('button', { name: 'Stop recording' }).click()
-
-  const play = page.getByRole('button', { name: /^Play / })
-  await expect(play).toBeVisible({ timeout: 30_000 })
-  await play.click()
-
-  await expect(page.getByRole('dialog')).toBeVisible()
-}
 
 test.describe('VideoPlayer Keyboard Shortcuts', () => {
   test.beforeEach(async ({ page, browserName }) => {

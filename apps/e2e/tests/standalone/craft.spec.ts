@@ -108,6 +108,11 @@ test.describe('ESCAPECRAFT Standalone - Theme Support', () => {
     await page.goto(CRAFT_URL)
     await waitForAppReady(page, 'craft')
 
+    // Prove the page actually rendered the recorder before trusting the
+    // absence below — a page that never applied any theme at all would
+    // show the same missing attribute.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/)
   })
 })

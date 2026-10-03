@@ -1,53 +1,7 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import { mockSyntheticMedia, mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { recordATake, recordAndOpenPlayback } from '../../utils/craft'
 import { waitForAppReady } from '../../utils/ready'
-
-/**
- * Records a short real take — `mockSyntheticMedia` hands the recorder a real
- * canvas-backed stream, so there is a genuine decodable file to save — and
- * opens its playback dialog from the library row's "Play" button. Same shape
- * as `accessibility/keyboard-navigation.spec.ts`'s helper of the same name;
- * duplicated rather than imported because that file's copy is private to a
- * describe ESCSUITE-201 does not own exclusively, and the brief asks for a
- * report note instead of a shared-helper edit (see report-201.md).
- */
-async function recordAndOpenPlayback(page: Page): Promise<void> {
-  const screenSource = page
-    .locator('[class*="sourceToggle"]')
-    .filter({ hasText: 'Screen' })
-    .last()
-  await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
-
-  await page.getByRole('button', { name: 'Start recording' }).click()
-  await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
-    timeout: 30_000,
-  })
-  await page.waitForTimeout(2000)
-  await page.getByRole('button', { name: 'Stop recording' }).click()
-
-  const play = page.getByRole('button', { name: /^Play / })
-  await expect(play).toBeVisible({ timeout: 30_000 })
-  await play.click()
-
-  await expect(page.getByRole('dialog')).toBeVisible()
-}
-
-/** Records a take and leaves it in the library, without opening playback. */
-async function recordATake(page: Page): Promise<void> {
-  const screenSource = page
-    .locator('[class*="sourceToggle"]')
-    .filter({ hasText: 'Screen' })
-    .last()
-  await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
-
-  await page.getByRole('button', { name: 'Start recording' }).click()
-  await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
-    timeout: 30_000,
-  })
-  await page.waitForTimeout(2000)
-  await page.getByRole('button', { name: 'Stop recording' }).click()
-  await expect(page.getByRole('button', { name: /^Play / })).toBeVisible({ timeout: 30_000 })
-}
 
 test.describe('VideoPlayer Component', () => {
   test.beforeEach(async ({ page, browserName }) => {

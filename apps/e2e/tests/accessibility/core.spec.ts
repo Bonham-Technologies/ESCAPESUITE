@@ -119,7 +119,15 @@ test.describe('ESCAPECRAFT Accessibility', () => {
   })
 
   test('recording UI has valid heading hierarchy', async ({ page }) => {
-    const { valid } = await checkHeadingHierarchy(page)
+    // Zero headings is a "valid" hierarchy too — `checkHeadingHierarchy`
+    // only reports skipped levels and duplicate h1s, so this floors it on
+    // the idle shell's own stable set: the h1 "ESCAPECRAFT" logo
+    // (AppHeader.tsx) plus the h2 "Sources" and "Recordings" section
+    // titles (WebcamOverlaySettings' "Webcam Overlay" h2 only renders once
+    // the webcam is on, and the Help dialog's headings only once it is
+    // open — neither is true on a fresh idle load).
+    const { valid, headings } = await checkHeadingHierarchy(page)
+    expect(headings).toHaveLength(3)
     expect(valid).toBe(true)
   })
 

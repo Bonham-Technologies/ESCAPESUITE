@@ -111,6 +111,7 @@ test.describe('ESCAPECRAFT Recording List', () => {
     await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
       timeout: 30_000,
     })
+    // This is the take's length, not a settle.
     await page.waitForTimeout(2000)
     await page.getByRole('button', { name: 'Stop recording' }).click()
 
@@ -132,6 +133,10 @@ test.describe('ESCAPECRAFT User Interface', () => {
   })
 
   test('has no account controls', async ({ page }) => {
+    // Prove the page actually rendered the recorder before trusting the
+    // absence below — a gutted page would also show zero account controls.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+
     // The recorder is account-free: nothing to sign into, nothing to sign out of
     const accountUI = page
       .getByRole('button', { name: /sign in|sign out|profile|account/i })
