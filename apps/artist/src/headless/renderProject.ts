@@ -100,7 +100,22 @@ async function render(
 
   const clips = project.timeline.clips
   const tracks = project.timeline.tracks
-  const resolution = project.resolution
+  // `ensureTimelineHasTracks`'s migration (inside `parseProject`) fills a
+  // MISSING `resolution` in with 1920x1080 — the editor's own default, meant
+  // for a human opening a blank project. The headless path never ran that
+  // migration before this ticket, and a job spec without its own `resolution`
+  // relied on `getResolution('project', …)`'s OTHER fallback instead: the
+  // bottom-most media clip's own native size (documented in the kit's
+  // README). Every other migration default below — `trackId`,
+  // `timelinePosition`, `transform`, `effects`, `transition`, and
+  // `timeline.duration` — is deliberately adopted here: a trackless headless
+  // project rendered nothing at all before this ticket (`getClipsAtTime`
+  // drops a clip whose `trackId` names no track) and now renders correctly.
+  // `resolution` is the one exception, read from the RAW input rather than
+  // the migrated `project`, so an absent one stays `undefined` all the way to
+  // `getResolution` and the exporters, instead of silently becoming 1080p.
+  const resolution =
+    (request.project as Partial<Project>).resolution === undefined ? undefined : project.resolution
   const progress = onProgress
     ? (ep: { progress: number }) => onProgress(ep.progress)
     : () => {}

@@ -181,6 +181,12 @@ later otherwise:
 - **Every media clip's `sourceVideoId` must exist in `sources`.** A mismatch fails with
   `clip "<id>" references unknown source "<id>"` — it means the project and the manifest have
   drifted apart, not that a file is missing.
+- **The project itself is validated in the page before any frame is drawn** (ESCSUITE-173): the
+  same shape check the editor runs on a dropped `.veditor` or a host's `LOAD_PROJECT` — every
+  clip id unique, every clip's track existing, a `crop` or `transform` that is present shaped
+  correctly, `resolution` (if the project carries one) within range. A failure is reported as
+  `Invalid project: <reason>`, naming the problem rather than rendering a frame silently missing
+  the offending clip.
 
 ### `.veditor` bundle
 
@@ -886,6 +892,12 @@ never started points at the launch.
 timeline references a source the manifest doesn't list. This is caught before Chromium starts,
 so it costs nothing but it will never resolve itself — regenerate the manifest from the same
 project you're rendering.
+
+**`Invalid project: <reason>`.** The project document itself failed the editor's own shape
+check (ESCSUITE-173) — a malformed `crop` or `transform` on a clip, a duplicate clip id, a clip
+on a track that doesn't exist, or a `resolution` out of range. `<reason>` names the clip and the
+field; this is caught in the page before any frame is drawn, so re-exporting the project from
+the editor (which applies the same check on load) is the usual fix.
 
 **`could not infer a MIME type for "<file>"`.** The extension isn't in the inference table. Add
 `"mimeType"` to that source's entry.
