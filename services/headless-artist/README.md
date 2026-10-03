@@ -264,6 +264,13 @@ alongside `config.env` merged over the runner's own environment. A non-zero exit
 the last ~20 lines of the command's stderr come back in the outcome's `error`. Its **stdout is
 discarded** — log as much as you like, there is no output buffer to overflow.
 
+`timeoutMs` (a positive integer, default **5 minutes**, same `2147483647` — 2^31-1 ms — bound as
+the webhook sink's) is this delivery's own budget, separate from `HEADLESS_TIMEOUT_MS` (which
+only covers the render). A command that outruns it is sent `SIGTERM`, then `SIGKILL` two
+seconds later if it is still alive, and the job fails with `command sink timed out after <n> ms`
+— the same message shape the webhook sink's timeout uses. Without this a delivery command that
+never exits held the worker slot forever, since `HEADLESS_TIMEOUT_MS` does not reach delivery.
+
 **In `serve` this sink is off by default.** A `POST /render` body chooses its own sink, so
 over HTTP this one is "run the program I name, as you" — see
 [the sink allow-list](#the-sink-allow-list). The one-shot `render` command always honours it:
@@ -817,10 +824,12 @@ drop a render that is half encoded:
 4. The process exits 0 — or `1`, with `error: shutdown failed: …` on stderr, if the drain
    itself failed and the state of the in-flight renders is therefore unknown.
 
-Step 3 is bounded by `HEADLESS_TIMEOUT_MS`, not by the signal, so a 30-minute render means up to
-a 30-minute drain. Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent)
-accordingly, or a `SIGKILL` will land in the middle of an encode and leave the scratch directory
-behind.
+Step 3 is bounded by `HEADLESS_TIMEOUT_MS` **plus** the job's own delivery budget — not by the
+signal, and not by the render alone. The `webhook` and `command` sinks each have their own
+`timeoutMs` (10 minutes and 5 minutes by default), so a 30-minute render that then delivers over
+`webhook` means up to a 40-minute drain. Size `terminationGracePeriodSeconds` (or your
+orchestrator's equivalent) against the sum of the two, or a `SIGKILL` will land in the middle of
+an encode or a delivery and leave the scratch directory behind.
 
 A **second** stop signal during the drain exits immediately with `130`, matching what
 Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you expect. It

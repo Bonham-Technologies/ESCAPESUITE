@@ -62,7 +62,9 @@ export interface ServeHandle {
   port: number
   /**
    * Stops accepting, turns queued jobs away with 503, waits for the in-flight ones (bounded by
-   * the render timeout, not by this call), then resolves. Idempotent.
+   * the render timeout plus whatever the job's own delivery sink budgets for itself — the
+   * `webhook` and `command` sinks' `timeoutMs` — not by this call, and not by the render alone),
+   * then resolves. Idempotent.
    */
   close(): Promise<void>
 }
