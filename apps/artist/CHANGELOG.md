@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.15.5
+
+### Patch Changes
+
+- 51b2acd: Tapping or releasing Shift during a crop-handle or slider drag no longer splits the drag's undo step; Escape clears the in/out points even if crop mode was left open on a clip you have since deselected.
+
 ## 2.15.4
 
 ### Patch Changes
