@@ -446,6 +446,97 @@ describe('command sink', () => {
   })
 })
 
+// ESCSUITE-189 (hunt J-2): the command sink waited on `child.on('close')` with no timeout of
+// its own, so a delivery command that never exits held the worker slot forever — HEADLESS_TIMEOUT_MS
+// bounds only the render phase. It now gets the same kind of delivery budget the webhook sink
+// has, validated the same way and defaulted to five minutes.
+describe('command sink delivery timeout', () => {
+  it('validates config.timeoutMs is a positive integer when provided', async () => {
+    await expect(getSink('command', { command: 'echo', timeoutMs: 0 })).rejects.toThrow(
+      /command sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+    await expect(getSink('command', { command: 'echo', timeoutMs: 1.5 })).rejects.toThrow(
+      /command sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+    await expect(getSink('command', { command: 'echo', timeoutMs: '10' })).rejects.toThrow(
+      /command sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+  })
+
+  it('refuses a timeoutMs above the 32-bit timer bound, naming it', async () => {
+    await expect(getSink('command', { command: 'echo', timeoutMs: MAX_TIMEOUT_MS + 1 })).rejects.toThrow(
+      `command sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
+  })
+
+  it('accepts exactly the bound', async () => {
+    await expect(getSink('command', { command: 'echo', timeoutMs: MAX_TIMEOUT_MS })).resolves.toBeTruthy()
+  })
+
+  it('kills a delivery command that outlives its budget and rejects with the timeout message', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-timeout' })
+
+    const sink = await getSink('command', {
+      command: '/bin/sh',
+      args: ['-c', 'sleep 4'],
+      timeoutMs: 200,
+    })
+
+    const startedAt = Date.now()
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'command sink timed out after 200 ms',
+    )
+    // Settling at all, well short of the 4 s sleep, is itself proof the child was killed rather
+    // than merely abandoned: nothing else would make `close` fire this early.
+    expect(Date.now() - startedAt).toBeLessThan(1500)
+  }, 10_000)
+
+  it('does not time out a command that finishes well inside its budget', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-fast' })
+
+    const sink = await getSink('command', {
+      command: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      timeoutMs: 5000,
+    })
+
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toEqual({
+      outputLocation: `command:${process.execPath}`,
+    })
+  })
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-stubborn' })
+
+    const script = `
+      process.on('SIGTERM', () => {})
+      setInterval(() => {}, 1000)
+    `
+    const sink = await getSink('command', {
+      command: process.execPath,
+      args: ['-e', script],
+      timeoutMs: 100,
+    })
+
+    const startedAt = Date.now()
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'command sink timed out after 100 ms',
+    )
+    // SIGTERM alone never ends this child, so settling here at all means the SIGKILL
+    // escalation fired — roughly two seconds after the SIGTERM, per its own grace period.
+    const elapsed = Date.now() - startedAt
+    expect(elapsed).toBeGreaterThanOrEqual(1900)
+    expect(elapsed).toBeLessThan(4000)
+  }, 10_000)
+
+})
+
 describe('webhook sink', () => {
   it('validates config.url is required', async () => {
     await expect(getSink('webhook', {})).rejects.toThrow(/webhook sink requires config\.url \(string\)/)
