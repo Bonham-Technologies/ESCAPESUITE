@@ -38,4 +38,19 @@ test.describe('production: vercel.json rewrite parity (ESCSUITE-196)', () => {
     const response = await request.get('http://localhost:5190/privacy')
     expect(response.status()).toBe(200)
   })
+
+  // Review round 1, finding 1: pin a look-alike path end to end against the
+  // real production layout too, not just the unit-level regression test in
+  // serve-dist.test.mjs. `/artist-guide` only shares a word-prefix with
+  // `artist` — it isn't under /artist/ — and 404'd under the old prefix-test
+  // pattern.
+  test('/artist-guide (a look-alike, not the artist app) reaches the hub SPA with a 200', async ({
+    request,
+  }) => {
+    const response = await request.get('http://localhost:5190/artist-guide')
+    expect(response.status()).toBe(200)
+
+    const indexResponse = await request.get('http://localhost:5190/')
+    expect(await response.text()).toBe(await indexResponse.text())
+  })
 })
