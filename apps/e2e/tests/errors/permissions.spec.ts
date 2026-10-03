@@ -123,6 +123,17 @@ test.describe('Microphone Permission Denied', () => {
 
 test.describe('Screen Share Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
+    // Webcam/Microphone availability depends on `enumerateDevices()`
+    // reporting at least one device of each kind (`permissions.ts`), so
+    // without this the Screen/Webcam/Microphone assertion below is a CI
+    // runner's own hardware, not the mock: a developer laptop's camera and
+    // mic pass it by accident, and a CI runner with neither fails it for a
+    // reason that has nothing to do with `mockScreenShareDenied` (observed
+    // in CI: Screen and Microphone enabled, Webcam not, on a runner with no
+    // camera). `mockMediaDevices` first, same as the Camera/Microphone
+    // describes above, so the three-rows-enabled assertion proves the
+    // layering fix instead of the runner's hardware.
+    await mockMediaDevices(page)
     await mockScreenShareDenied(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
