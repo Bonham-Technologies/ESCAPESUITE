@@ -3428,19 +3428,20 @@ refusal set `audioData = null` behind a `console.warn` and the export carried on
   field with its own `projectHasAudio` before claiming a loss (above), and gates on
   `format !== 'gif'` as well, since a GIF's `false` is the container's doing and no encoder's.
 
-**The Advanced "Download {format}" button gates on the format the click will actually run, not
-the one selected in the radio** (review round 1, MAJOR 1). `handleExport` already falls back from
-`'mp4'` to `'webm'` whenever MP4 is unsupported — the intentional behaviour behind a restored
-`{format:'mp4'}` setting in a now-MP4-less browser still exporting, as WebM, when the Advanced
-button is clicked — so `effectiveAdvancedFormat` recomputes that same fallback and the button
-disables exactly when *that* format is blocked, with the blocking reason as its `title`. Since
-ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a `'gif'` selection
-is its own effective format, so `advancedBlockedReason` is `null` whenever GIF is chosen and
-nothing can disable that button but an empty timeline. The button's *label* still reads the
-selected format, not the effective one, deliberately: relabelling it would read correctly but
-breaks nothing for the user, since the one existing case where they can diverge (a stale `'mp4'`
-setting with MP4 now unsupported) already explains itself via the one-format sentence above the
-primary section.
+**The Advanced "Download {format}" button gates AND labels from the format the click will
+actually run, not the one selected in the radio** (review round 1, MAJOR 1; the label itself,
+ESCSUITE-182). `handleExport` already falls back from `'mp4'` to `'webm'` whenever MP4 is
+unsupported — the intentional behaviour behind a restored `{format:'mp4'}` setting in a
+now-MP4-less browser still exporting, as WebM, when the Advanced button is clicked — so
+`effectiveAdvancedFormat` recomputes that same fallback, the button disables exactly when *that*
+format is blocked (with the blocking reason as its `title`), and its text reads
+`effectiveAdvancedFormat` too: a restored `{format:'mp4'}` in a browser whose H.264 probe says no
+shows an enabled "Download WebM", not an enabled "Download MP4" that silently writes a `.webm`
+— the MP4 *radio* still stays checked and disabled with its own reason (ESCSUITE-175), since the
+ticket is about what the button under it promises to produce, not about hiding the user's saved
+choice. Since ESCSUITE-34 it is three-way, and **GIF short-circuits the fallback entirely**: a
+`'gif'` selection is its own effective format, so `advancedBlockedReason` is `null` whenever GIF
+is chosen and nothing can disable that button but an empty timeline.
 
 **The GIF controls (ESCSUITE-34).** GIF is a third radio under Advanced options, beside MP4 — not
 a fourth primary button: WebM stays the default and GIF is a deliberate choice, like MP4. Four
