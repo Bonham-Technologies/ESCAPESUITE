@@ -325,8 +325,33 @@ export function useTransformHandles({
     const keyframeTime = clip ? currentTime - clip.timelinePosition : 0;
 
     // Helper to create keyframe or update overlay
+    //
+    // A drag can only START while the playhead sits inside the clip
+    // (hitTestHandles' own bounds check gates the handle that begins it), but
+    // nothing stops the playhead moving outside it mid-gesture — pressing
+    // Space mid-drag walks it off either end, since only `handleMouseDown`
+    // guards on `isPlaying`, not this handler. Every other add path clamps to
+    // [0, duration] instead (ESCSUITE-88's `addAtPlayhead`, `useKeyframeDrag`'s
+    // `pixelsToTime`), but those derive their time from the keyframe panel's
+    // own geometry — a pixel inside the graph, the playhead already read
+    // relative to the clip — which has nowhere further out to go; a drag's
+    // `currentTime` can leave the clip by any amount, and clamping it to the
+    // nearest edge would write a keyframe at a time the pointer was never near.
+    // So this is the one keyframe-time computation that refuses outright
+    // rather than clamps, once the playhead has left the clip (ESCSUITE-168).
+    // The refusal is silent on purpose: the chrome this drag is moving is
+    // already off-screen by the time it fires — `selectionOverlay.ts`'s bounds
+    // check returns before drawing a box or handles for a clip the playhead
+    // has left, and the clip itself is not drawn at a time it does not span —
+    // so there is nothing left on screen to explain, and nothing freezes.
+    //
+    // `clip` is narrowed by the same clause: `isKeyframeMode` on its own does
+    // not prove `clip` is non-null to the type checker, and no caller reaches
+    // this with `isKeyframeMode` true and `clip` null (`isKeyframeMode` is
+    // itself `keyframePanelOpen && clip && …`), so there is no third arm to
+    // test or delete.
     const applyChange = (property: 'x' | 'y' | 'rotation' | 'scaleX' | 'scaleY', value: number) => {
-      if (isKeyframeMode && clip) {
+      if (isKeyframeMode && clip && keyframeTime >= 0 && keyframeTime <= clip.duration) {
         gestureHistory.commit((skipHistory) => setClipKeyframe(clip.id, property, {
           time: keyframeTime,
           value,

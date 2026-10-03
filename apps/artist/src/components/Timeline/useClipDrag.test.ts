@@ -33,6 +33,8 @@ let container: HTMLDivElement
 let containerRef: { current: HTMLDivElement | null }
 let trackA: string
 let trackB: string
+/** Mutable so a test can simulate a zoom step (+/-) mid-drag via `rerender()`. */
+let currentPPS = PPS
 let actions: Pick<
   ClipDragDeps,
   | 'setSelectedClipId'
@@ -45,6 +47,7 @@ let actions: Pick<
 
 beforeEach(() => {
   resetStoreForTest()
+  currentPPS = PPS
   addListener = vi.spyOn(document, 'addEventListener')
   removeListener = vi.spyOn(document, 'removeEventListener')
 
@@ -87,7 +90,7 @@ const deps = (): ClipDragDeps => {
   const state = useEditorStore.getState()
   return {
     trackContainerRef: containerRef,
-    pixelsPerSecond: PPS,
+    pixelsPerSecond: currentPPS,
     clips: state.project.timeline.clips,
     tracks: state.project.timeline.tracks,
     snapEnabled: state.snapEnabled,
@@ -397,6 +400,28 @@ describe('useClipDrag following the pointer', () => {
     move(pointerFor(4.4))
 
     expect(result.current.dragState?.currentPosition).toBe(2)
+  })
+
+  // ESCSUITE-168 (U3): the grab offset is cached in pixels at mousedown and
+  // never revisited, so a zoom change mid-drag (`+`/`-`, which needs no
+  // pointer) leaves the next move dividing a stale-zoom pixel offset by the
+  // new pixelsPerSecond. The pointer has not moved from where it grabbed the
+  // clip (client X 220 = 2s + the 20px grab, at the original 50px/s), so a
+  // fix that re-derives the offset from the current zoom at each move should
+  // read the clip's start as 0.8s — the pointer's own time at the new 100px/s
+  // zoom (1.2s) minus the 0.4s the grab was always into the clip. The stale
+  // formula instead keeps subtracting 20 raw pixels, which is 0.2s at the new
+  // zoom, and lands on 1.0s.
+  it('keeps the grab offset in seconds, not pixels, across a zoom change mid-drag', () => {
+    store().setSnapEnabled(false)
+    const { result, rerender } = mountDrag()
+    grabClip1(result)
+
+    currentPPS = 100
+    rerender()
+    move(LEFT + 2 * PPS + GRAB)
+
+    expect(result.current.dragState?.currentPosition).toBeCloseTo(0.8, 5)
   })
 
   // The release clears the drag state, but the effect that unbinds the listeners
