@@ -2323,13 +2323,44 @@ machine (twenty runs clean before and after), so the fix rests on the sink's str
 Node's documented asynchronous open; `fetchS3ToLocal`, the Chromium parity cases and the bench are
 untouched. **No floor crossed**; the kit's floors stay 99 / 99 / 98 / 98.
 
+`@escapesuite/craft` was re-measured 2026-10-03 for ESCSUITE-180, 184 and 185 (the thumbnail probe's
+`<video>` load has a five-second deadline, so a take whose bytes never fire `loadeddata` saves with the
+placeholder tile instead of parking the app in `saving` forever; a microphone that cannot be opened — refused,
+in use or unplugged — no longer costs a take that still has a screen or a webcam, the take proceeding without
+it and one cause-neutral notice saying so; and Space on a focused button, link or select inside the playback
+dialog is left to that control instead of toggling playback underneath it): 100.00 / 99.52 / **97.77** / 100.00
+against the 100.00 / 99.52 / 97.75 / 100.00 that `main` at `cb37d7b` measures in the same sitting — branches
+up two hundredths, the other three unmoved at exactly 100, 99.52 and 100. The base gives 1,350 / 1,381
+branches and this branch 1,363 / 1,394: thirteen new branches, thirteen covered, the same 31 uncovered as
+before (lines 2,359 → 2,378, statements 2,517 / 2,529 → 2,537 / 2,549, functions 450 → 452, every
+denominator growing by exactly what the numerator did; the same 12 statements uncovered, in the same four
+files). The thirteen are `components/VideoPlayer/VideoPlayer.tsx`'s seven (91 / 99 → 98 / 106: the
+`e.key === ' ' && spaceBelongsToTarget(e.target)` early return and `spaceBelongsToTarget`'s three operands —
+an `HTMLElement`, `isContentEditable`, the `SPACE_ACTIVATES` match — each reached from both sides by the
+button, `role="button"`, contenteditable, dialog-body, `<video>` and non-element targets and by `k` on a
+button; the file's eight pre-existing uncovered arms untouched), `hooks/useMediaStreams.ts`'s four (24 → 28:
+the `!screen && !webcam` rethrow inside the microphone request's own `try` / `catch`, reached by the
+mic-only take that still fails, the screen take and the webcam-only take that keep going) and
+`hooks/useRecordingController.ts`'s two (126 / 130 → 128 / 132: the `micUnavailable` notice, raised after
+`NO_SYSTEM_AUDIO` and after the abandoned-attempt return, reached with and without a refused microphone;
+the file's four pre-existing uncovered arms untouched). `core/thumbnailGenerator.ts` gained seven lines and
+one function and no branch: the deadline is a `setTimeout` whose callback runs the same `cleanup()` the
+error path does, `cleanup()` clears it and cancels the frame request unconditionally — `frameHandle` starts
+at 0, which `cancelAnimationFrame` ignores — so the module adds no conditional at all, and both of its
+cases pin behaviour (one revoke, one `clearTimeout`) rather than arms. The review's one MEDIUM was the
+notice's wording, not a branch: `MIC_REFUSED` claimed a refusal for every failure the catch swallows, and
+became the cause-neutral `MIC_UNAVAILABLE` with no new decision; the review also had the unreachable
+`input, textarea` operands dropped from `SPACE_ACTIVATES` rather than kept, since the typing guard above
+already returns for both. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor
+crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.52 | 97.75 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.24 | 95.59 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.57 |
