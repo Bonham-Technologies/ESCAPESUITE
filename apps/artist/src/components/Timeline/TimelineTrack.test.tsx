@@ -51,7 +51,6 @@ function makeDrag(overrides: Partial<DragState> = {}): DragState {
     currentTrackId: TRACK_ID,
     currentPosition: 0,
     snappedPosition: null,
-    offsetX: 0,
     ...overrides,
   }
 }

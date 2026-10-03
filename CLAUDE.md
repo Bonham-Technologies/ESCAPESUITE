@@ -2354,6 +2354,45 @@ became the cause-neutral `MIC_UNAVAILABLE` with no new decision; the review also
 already returns for both. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor
 crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-03 for ESCSUITE-181, 182 and 183 (the write-only
+`DragState.offsetX` deleted; the Advanced download button labelled from the format that will actually be
+exported; and both keyframe drags — the diamond row's and the graph's — clamping the dragged point at the edge
+of a neighbour's epsilon window during the move, on the side the pointer came from, instead of following the
+pointer and snapping back on release): 99.80 / 99.27 / **95.79** / 99.68 against the 99.80 / 99.27 / 95.77 /
+99.68 that `main` at `cb37d7b` measures in the same sitting — branches up two hundredths, the other three
+unmoved. The base gives 4,945 / 5,163 branches and this branch 4,963 / 5,181: eighteen new branches, eighteen
+covered, the same 218 uncovered as before (lines 7,744 / 7,759 → 7,761 / 7,776, statements 8,744 / 8,808 →
+8,766 / 8,830, functions 1,883 / 1,889 → 1,884 / 1,890, every denominator growing by exactly what the numerator
+did; the same 15 / 64 / 6 uncovered). The table row below had read 99.80 / 99.24 / 95.59 / 99.67 — the ESCSUITE-172
+figures — while the paragraphs after it measured 95.61, 95.64 and 95.77 without updating the row; the base
+figures here are a direct measurement of `main`, and the row is corrected to this branch's. The movement is
+one new module and two files that shrank. `utils/keyframeClamp.ts` arrives at 24 / 24 branches, 26 / 26
+statements and 3 / 3 functions: `occupiedWindows` (the per-time window `t ± KEYFRAME_TIME_EPSILON` widened by a
+private `CLAMP_MARGIN` of 1e-9 — `|3 − 3.001|` measures 0.0009999999999998899, under the epsilon — merged where
+two windows overlap or touch, the empty-list arm) and `clampToLegalTime` (inside no window → the time itself;
+else the edge on the side `previousTime` came from, the nearer edge when the previous position was itself
+inside, the other edge when the approached one is outside `[min, max]`, and `null` when neither is legal),
+every arm reached from both sides by that module's twenty-one cases — including the neighbour at `max`
+approached from `max` itself, the exact tie from each side, and three keyframes 0.0015 s apart merging into one
+window. `components/KeyframePanel/KeyframeGraph.tsx` went 117 / 126 → 113 / 122 and
+`hooks/useKeyframeDrag.ts` kept its 14 / 14 while losing five statements and two functions, because each
+drag's inline clamp loop became one call and each `handleMouseUp` lost its occupancy refusal: with every
+landing legal or the move ignored, the two mouse-path refusals had no caller left and were deleted under the
+house rule rather than kept; the `null → return` each `handleMouseMove` gained is reached by a 0.0015 s clip
+whose keyframes at 0 and 0.001 leave no legal time. `KeyframePanel.tsx` went 46 / 56 → 44 / 54 for the same
+reason — `handleKeyframeDragAnnounce` and its non-empty `announceWithMark` arm, which only the deleted
+refusal fed, are gone and `setKeyframeDragMessage` is passed straight through — and `ExportDialog.tsx`,
+`useClipDrag.ts` and `Timeline/types.ts` gained no unit: the label reads `effectiveAdvancedFormat` where it read
+`advancedOptions.format`, and `offsetX` was a property in an object literal. The keyboard path's refusal in
+`useKeyframeGraphKeyboard.ts`'s `nudgeTime` is untouched and every keyboard test unchanged. The review's one
+MAJOR was the first clamp's bounds step pulling a point straight back into the window of a neighbour sitting at
+`clipDuration` — which `generateOutPresetKeyframes` puts there for every Animate Out — and is the bound-aware
+side choice above; its two MEDIUMs on the tie and on two keyframes closer than two epsilons are the
+`previousTime` rule and the merge. `keyframeGestures.perf.test.ts` gains one case — one `occupiedWindows` build
+per gesture for the graph, none per move, red at 11 when rebuilt per move — with its existing cases
+byte-identical, and the other six `*.perf.test.ts` files, the three rerender pins and `perfScene.ts` are
+byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2361,7 +2400,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.24 | 95.59 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.57 |
 

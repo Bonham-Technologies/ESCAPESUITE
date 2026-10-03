@@ -180,7 +180,6 @@ describe('useTimelineMarquee starting', () => {
       currentTrackId: trackA,
       currentPosition: 1,
       snappedPosition: null,
-      offsetX: 0,
     }
     const { result } = mountMarquee()
 

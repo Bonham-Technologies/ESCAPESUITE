@@ -658,10 +658,13 @@ describe('KeyframeGraph', () => {
     })
 
     // ESCSUITE-179: moveClipKeyframe deletes whatever already sits within
-    // KEYFRAME_TIME_EPSILON of the drop, so the graph's own point drag has to
-    // refuse a drop that lands there instead of silently destroying a
-    // neighbour — the same refusal the keyboard's nudgeTime already makes.
-    describe('refusing a drop onto another keyframe (ESCSUITE-179)', () => {
+    // KEYFRAME_TIME_EPSILON of the drop. The graph's own point drag used to
+    // let the point follow the pointer there and refuse the drop on release
+    // — the shape ESCSUITE-88 ruled against for a locked track's own drag —
+    // and now clamps `currentTime` away from the window on every move
+    // instead (ESCSUITE-183), so these cases land (slightly off the
+    // neighbour) rather than refuse.
+    describe('clamping a drop away from another keyframe (ESCSUITE-183, supersedes 179\'s refuse-and-snap-back)', () => {
       beforeEach(() => {
         // A third keyframe at t=3, beyond the two opacityKeyframes() already
         // set at t=0 and t=1, so a drag of the t=1 point has somewhere to
@@ -669,26 +672,35 @@ describe('KeyframeGraph', () => {
         store().setClipKeyframe('clip1', 'opacity', { time: 3, value: 0.8, easing: 'linear' })
       })
 
-      it('keeps all three keyframes and pushes nothing', () => {
+      // The drag starts at 1s and aims at the 3s neighbour, so it approaches
+      // from the LEFT and stops short of it — not thrown to its far side,
+      // which would swap the two keyframes' order (review of ESCSUITE-183,
+      // finding 2).
+      it('clamps the drop to just short of the neighbour, keeping all three keyframes', () => {
         const { container, onKeyframeMoved, onKeyframeValueChanged } = renderGraph('opacity')
         measureGraph(container)
 
-        // Alt-drag: time only, so the refusal is isolated from any value write.
+        // Alt-drag: time only, so the clamp is isolated from any value write.
         fireEvent.mouseDown(points(container)[1], { altKey: true })
         fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.5) })
         fireEvent.mouseUp(window)
 
-        expect(onKeyframeMoved).not.toHaveBeenCalled()
+        expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeLessThan(3)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(3, 2)
         expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+        // `onKeyframeMoved` is a mock here and never actually writes to the
+        // store, so the rendered points still reflect the real, unmoved
+        // keyframe once the drag state clears on release.
         expect(points(container)).toHaveLength(3)
         expect(Number(points(container)[1].getAttribute('cx'))).toBeCloseTo(xForTime(1), 6)
       })
 
-      it('leaves the value unchanged too, since the move never landed', async () => {
+      it('commits the value alongside the clamped time, since the move now lands', async () => {
         const { container, onKeyframeMoved, onKeyframeValueChanged } = renderGraph('opacity')
         measureGraph(container)
 
-        // No modifier: both time and value would change together.
+        // No modifier: both time and value change together.
         fireEvent.mouseDown(points(container)[1])
         fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.2) })
         fireEvent.mouseUp(window)
@@ -697,11 +709,13 @@ describe('KeyframeGraph', () => {
           await new Promise((resolve) => setTimeout(resolve, 0))
         })
 
-        expect(onKeyframeMoved).not.toHaveBeenCalled()
-        expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+        expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeLessThan(3)
+        expect(onKeyframeValueChanged).toHaveBeenCalledTimes(1)
+        expect(onKeyframeValueChanged.mock.calls[0][2]).toBeCloseTo(0.2, 6)
       })
 
-      it('announces the refusal through the shared live region', () => {
+      it('announces nothing — the live region stays clear once the clamped drop lands', () => {
         const { container } = renderGraph('opacity')
         measureGraph(container)
 
@@ -709,9 +723,7 @@ describe('KeyframeGraph', () => {
         fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.5) })
         fireEvent.mouseUp(window)
 
-        expect(screen.getByRole('status')).toHaveTextContent(
-          'Opacity keyframe not moved: another keyframe is at 3.00 seconds'
-        )
+        expect(screen.getByRole('status')).toBeEmptyDOMElement()
       })
 
       it('lands normally just outside the epsilon window', () => {
@@ -719,7 +731,8 @@ describe('KeyframeGraph', () => {
         measureGraph(container)
 
         // 0.002s away from the t=3 keyframe — outside KEYFRAME_TIME_EPSILON
-        // (0.001s) — so this is an ordinary, uncontested move.
+        // (0.001s) — so this is an ordinary, uncontested move, unaffected by
+        // the clamp.
         fireEvent.mouseDown(points(container)[1], { altKey: true })
         fireEvent.mouseMove(window, { clientX: xForTime(2.998), clientY: yForUnitValue(0.5) })
         fireEvent.mouseUp(window)
@@ -728,14 +741,29 @@ describe('KeyframeGraph', () => {
         expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(2.998, 6)
       })
 
+      it('clamps a drop approaching a neighbour from the right, landing just past it', () => {
+        const { container, onKeyframeMoved } = renderGraph('opacity')
+        measureGraph(container)
+
+        // Drag the t=3 point down toward the t=1 neighbour, from above it.
+        fireEvent.mouseDown(points(container)[2], { altKey: true })
+        fireEvent.mouseMove(window, { clientX: xForTime(1.0005), clientY: yForUnitValue(0.5) })
+        fireEvent.mouseUp(window)
+
+        expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeGreaterThan(1)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(1, 2)
+        expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      })
+
       // Review round 1, MINOR 2: a left overshoot clamps to time 0 (the same
       // clamp 'clamps a drag that leaves the plot area' pins at the clip's
-      // END, now that the start is occupied), which lands inside the
-      // t=0 keyframe's own epsilon window and is refused the same way a
-      // pixel-exact collision would be — pinning this is what keeps the
-      // lower `Math.max(0, …)` clamp itself under a mutant's reach, since
-      // nothing else in the suite drags past the left edge any more.
-      it('refuses a left overshoot that clamps into the start keyframe', () => {
+      // END, now that the start is occupied) — which used to land inside the
+      // t=0 keyframe's own epsilon window and be refused the same way a
+      // pixel-exact collision would be. `handleMouseMove`'s own clamp now
+      // catches this case before release ever sees it: the overshoot stops
+      // just past the start keyframe instead, same as any other neighbour.
+      it('clamps a left overshoot to just past the start keyframe, instead of refusing', () => {
         const { container, onKeyframeMoved } = renderGraph('opacity')
         measureGraph(container)
 
@@ -743,10 +771,80 @@ describe('KeyframeGraph', () => {
         fireEvent.mouseMove(window, { clientX: -400, clientY: yForUnitValue(0.5) })
         fireEvent.mouseUp(window)
 
+        expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeGreaterThan(0)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(0, 2)
+        expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      })
+
+      // The configuration the first fix round reopened the whole bug in
+      // (review of ESCSUITE-183, finding 1). The old clamp chose its side
+      // first and clamped to the clip's bounds afterwards, so a neighbour at
+      // the clip's own end — which every Animate Out = fade clip has, since
+      // `generateOutPresetKeyframes` puts an opacity handle at exactly
+      // `clipDuration` — pushed the point past the end, the bounds clamp
+      // pulled it straight back onto the neighbour, and the release refused
+      // the drop: refuse-and-snap-back, in the commonest configuration there
+      // is. The bounds are part of the side choice now, so it goes left.
+      it("stops just inside the clip when the neighbour sits at the clip's own end", () => {
+        store().setClipKeyframe('clip1', 'opacity', { time: CLIP_DURATION, value: 0.1, easing: 'linear' })
+        const { container, onKeyframeMoved } = renderGraph('opacity')
+        measureGraph(container)
+
+        // Keyframes at 0, 1, 3 and CLIP_DURATION; drag the 3s one off the
+        // right of the plot area, so the pointer time is exactly the last
+        // keyframe's own.
+        fireEvent.mouseDown(points(container)[2], { altKey: true })
+        fireEvent.mouseMove(window, { clientX: 99999, clientY: yForUnitValue(0.5) })
+        fireEvent.mouseUp(window)
+
+        expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeLessThan(CLIP_DURATION)
+        expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(CLIP_DURATION, 2)
+        expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      })
+
+      // Two keyframes closer together than twice the epsilon leave nowhere
+      // legal between them, and on a clip this short the merged window covers
+      // the whole of it — so there is no time this drag could write. The move
+      // is ignored outright: the point does not follow the pointer, nothing is
+      // committed, and nothing is announced. (This is the case that used to
+      // reach the release-time refusal, and the only one that ever could; it
+      // is now handled where the pointer is read, so the refusal was deleted.)
+      it('ignores a move when the clip offers no legal time at all', () => {
+        resetStoreForTest()
+        addClip('clip1', 0, 0.0015)
+        store().setClipKeyframe('clip1', 'opacity', { time: 0.001, value: 0.5, easing: 'linear' })
+        const { container, onKeyframeMoved, onKeyframeValueChanged } = renderGraph('opacity')
+        measureGraph(container)
+
+        // 394px is 0.0012s on a 0.0015s clip — inside the 0.001s keyframe's
+        // window, as is every other time in this clip.
+        fireEvent.mouseDown(points(container)[0], { altKey: true })
+        fireEvent.mouseMove(window, { clientX: 394, clientY: yForUnitValue(0.5) })
+
+        expect(Number(points(container)[0].getAttribute('cx'))).toBeCloseTo(50, 6)
+
+        fireEvent.mouseUp(window)
+
         expect(onKeyframeMoved).not.toHaveBeenCalled()
-        expect(screen.getByRole('status')).toHaveTextContent(
-          'Opacity keyframe not moved: another keyframe is at 0.00 seconds'
-        )
+        expect(onKeyframeValueChanged).not.toHaveBeenCalled()
+        expect(screen.getByRole('status')).toBeEmptyDOMElement()
+      })
+
+      // The clamp runs on every move, so no mouse drag can produce a landing
+      // the release would have to refuse: the occupied-neighbour refusal is
+      // the KEYBOARD's (`nudgeTime`, which has no pointer position to clamp),
+      // and the graph's live region stays empty throughout a drag.
+      it('never announces the occupied-neighbour refusal from a mouse drag', () => {
+        const { container } = renderGraph('opacity')
+        measureGraph(container)
+
+        fireEvent.mouseDown(points(container)[1], { altKey: true })
+        fireEvent.mouseMove(window, { clientX: xForTime(3), clientY: yForUnitValue(0.5) }) // exactly on the t=3 neighbour
+        fireEvent.mouseUp(window)
+
+        expect(screen.getByRole('status')).not.toHaveTextContent(/another keyframe is at/)
       })
     })
   })

@@ -181,7 +181,6 @@ describe('useClipDrag starting a drag', () => {
       currentTrackId: trackA,
       currentPosition: 2,
       snappedPosition: null,
-      offsetX: GRAB,
     })
   })
 

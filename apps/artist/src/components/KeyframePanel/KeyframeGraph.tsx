@@ -1,5 +1,10 @@
 import { useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import { getAllKeyframesForProperty, interpolateKeyframes, KEYFRAME_TIME_EPSILON } from '../../utils/animation';
+import {
+  clampToLegalTime,
+  occupiedWindows,
+  type OccupiedWindow,
+} from '../../utils/keyframeClamp';
 import type { AnimatableProperty, Keyframe, ClipAnimation, ClipTransform, ClipEffects, EasingType } from '../../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import { EASING_TYPES } from '../../utils/easingOptions';
@@ -8,7 +13,6 @@ import {
   formatValue,
   keyframeOptionId,
   keyframeOptionLabel,
-  occupiedTimeMessage,
   PROPERTY_LABELS,
   useKeyframeGraphKeyboard,
 } from './hooks/useKeyframeGraphKeyboard';
@@ -135,7 +139,7 @@ export function KeyframeGraph({
     ? undefined
     : keyframes.find(kf => Math.abs(kf.time - selectedKeyframeTime) < 0.001 && isCustomKeyframe(kf));
 
-  const { activeIndex, activeId, setActiveTime, nudgeMessage, announce, onKeyDown } = useKeyframeGraphKeyboard({
+  const { activeIndex, activeId, setActiveTime, nudgeMessage, onKeyDown } = useKeyframeGraphKeyboard({
     property,
     keyframes,
     isCustomKeyframe,
@@ -254,6 +258,12 @@ export function KeyframeGraph({
     focusGraph();
     setActiveTime(kf.time);
     setSelectedKeyframeTime(kf.time);
+    occupiedWindowsRef.current = occupiedWindows(
+      keyframes
+        .map(k => k.time)
+        .filter(t => Math.abs(t - kf.time) >= KEYFRAME_TIME_EPSILON)
+    );
+    previousTimeRef.current = kf.time;
     setDragState({
       isDragging: true,
       originalTime: kf.time,
@@ -262,7 +272,7 @@ export function KeyframeGraph({
       currentValue: kf.value,
       dragType: e.shiftKey ? 'value' : e.altKey ? 'time' : 'both',
     });
-  }, [isCustomKeyframe, locked, focusGraph, setActiveTime]);
+  }, [isCustomKeyframe, locked, focusGraph, setActiveTime, keyframes]);
 
   // Handle click on keyframe to select it
   const handleKeyframeClick = useCallback((e: React.MouseEvent, kf: Keyframe) => {
@@ -325,6 +335,41 @@ export function KeyframeGraph({
   const dragStateRef = useRef(dragState);
   dragStateRef.current = dragState;
 
+  /**
+   * The forbidden windows around every occupied time but the one being
+   * dragged, built once per gesture in `handleKeyframeMouseDown` — the twin of
+   * `useKeyframeDrag.ts`'s own, through the same `utils/keyframeClamp.ts` the
+   * diamond row drag calls, so the two drags cannot disagree about where a
+   * point may land (ESCSUITE-183 and its review's finding 3). `keyframes` is
+   * every handle drawn on the graph, presets included: a preset's handle is
+   * off limits too, for a different reason — the store deletes nothing there
+   * (a preset is regenerated from `animation.in` / `out`, never stored as a
+   * keyframe), but `getAllKeyframesForProperty` merges two handles within the
+   * same epsilon and the custom one wins, so the preset's would simply vanish
+   * behind it.
+   *
+   * It is the gesture's own snapshot and is never re-read from the live
+   * `keyframes` memo, so the clamp and everything downstream of it agree by
+   * construction (review of ESCSUITE-183, finding 6). A keyframe added or
+   * removed by some other path mid-gesture — an undo from the keyboard, a
+   * preset toggled — is therefore not seen until the next gesture, which is
+   * the documented limit: `apps/artist/CLAUDE.md` names it beside the clamp.
+   */
+  const occupiedWindowsRef = useRef<readonly OccupiedWindow[]>([]);
+
+  /**
+   * Where the clamp put the point on the previous move of this gesture, seeded
+   * with the keyframe's own time at mousedown. It is what tells
+   * `clampToLegalTime` which way the gesture is travelling, and so which edge
+   * of a window a pointer that lands bit-exactly on a neighbour stops at — the
+   * old code read the raw time's side of the neighbour instead, which threw
+   * every exact tie to the right whichever way the drag was going (review of
+   * ESCSUITE-183, finding 2). A plain number rather than a read of
+   * `dragStateRef`, which carries a value axis this question has nothing to do
+   * with and is `null` between gestures.
+   */
+  const previousTimeRef = useRef(0);
+
   // One gesture is one undo entry (ESCSUITE-163 / M1), the same mechanism
   // useTrimDrag and useTransformHandles already use: the move's own write,
   // when there is one, goes first and reports whether it landed, and the
@@ -342,8 +387,28 @@ export function KeyframeGraph({
 
       const { x, y } = coords;
 
-      const newTime = Math.max(0, Math.min(graphDimensions.xToTime(x), clipDuration));
+      const pointerTime = Math.max(0, Math.min(graphDimensions.xToTime(x), clipDuration));
       const newValue = Math.max(range.min, Math.min(graphDimensions.yToValue(y), range.max));
+
+      // Where the pointer is allowed to put the point (ESCSUITE-183): the
+      // once-per-gesture windows, the clip's bounds and the direction of
+      // travel decided together by `clampToLegalTime`, so the point stops at
+      // the edge of a neighbour's window on the side it came from rather than
+      // following the pointer in and having the drop refused on release — the
+      // "follows the pointer, then snaps back" shape ESCSUITE-88 ruled against
+      // for the lock, and the one a trim has not had since ESCSUITE-161.
+      // `null` means the clip has no legal time at all (a cluster whose merged
+      // window covers it), and the move is ignored rather than shown somewhere
+      // it could not be dropped.
+      const newTime = clampToLegalTime(
+        pointerTime,
+        previousTimeRef.current,
+        occupiedWindowsRef.current,
+        0,
+        clipDuration
+      );
+      if (newTime === null) return;
+      previousTimeRef.current = newTime;
 
       // Update visual position only (don't commit to store yet)
       setDragState(prev => {
@@ -362,57 +427,44 @@ export function KeyframeGraph({
         const timeChanged = Math.abs(currentDrag.currentTime - currentDrag.originalTime) > 0.001;
         const valueChanged = Math.abs(currentDrag.currentValue - currentDrag.originalValue) > 0.001;
 
-        // `moveClipKeyframe` deletes whatever CUSTOM keyframe already sits
-        // within KEYFRAME_TIME_EPSILON of the target, so a drop that still
-        // lands there is refused outright instead of silently destroying a
-        // neighbour (ESCSUITE-179) — the same refusal the keyboard's own
-        // `nudgeTime` makes for the identical situation, and announced
-        // through the exact same message and live region (`announce`,
-        // shared out of `useKeyframeGraphKeyboard`). `keyframes` is every
-        // handle drawn on the graph, presets included: landing on a
-        // PRESET's handle is refused too, but for a different reason — the
-        // store deletes nothing there (a preset is regenerated from
-        // `animation.in`/`out`, never stored as a keyframe), but
-        // `getAllKeyframesForProperty` merges two handles within the same
-        // epsilon and the custom one wins, so the preset's handle would
-        // simply vanish behind it.
-        const occupied = timeChanged && keyframes.some(kf =>
-          Math.abs(kf.time - currentDrag.originalTime) >= KEYFRAME_TIME_EPSILON &&
-          Math.abs(kf.time - currentDrag.currentTime) < KEYFRAME_TIME_EPSILON
-        );
-
+        // No occupied check here (ESCSUITE-183 and its review's findings 4 and
+        // 6): `handleMouseMove`'s clamp only ever writes a legal time, and
+        // ignores the move outright when the clip has none, so `currentTime`
+        // cannot be inside a neighbour's forbidden window by the time the
+        // mouse comes up. The release-time refusal this used to carry
+        // (ESCSUITE-179) had no reachable caller left — and read the live
+        // `keyframes` memo where the clamp read the gesture's own snapshot, so
+        // the two could disagree — and was deleted rather than kept and tested
+        // through a path nothing can take. The occupied-time refusal itself is
+        // the keyboard's: `useKeyframeGraphKeyboard.ts`'s `nudgeTime` has no
+        // pointer position to clamp, and still refuses and still says so
+        // through the live region below.
+        //
         // One gesture, one undo entry (ESCSUITE-163 / M1): the move commits
         // first — synchronously, no setTimeout — and the value write, when
         // there is one, joins the same entry via `gestureHistory`'s
-        // `skipHistory`. An occupied drop (ESCSUITE-179) refuses before any
-        // `commit` at all — the gesture still opens and closes, owing
-        // nothing and writing nothing, move included — and a refused move (a
-        // locked track) leaves `settledTime` at the keyframe's original
-        // time either way, so a value-only write — if any — lands there
-        // rather than on a time the drag never actually reached.
+        // `skipHistory`. A refused move (a locked track) leaves `settledTime`
+        // at the keyframe's original time, so a value-only write — if any —
+        // lands there rather than on a time the drag never actually reached.
         let settledTime = currentDrag.originalTime;
         if (timeChanged || valueChanged) {
           gestureHistory.begin();
 
-          if (occupied) {
-            announce(occupiedTimeMessage(property, currentDrag.currentTime));
-          } else {
-            let moveLanded = true;
-            if (timeChanged) {
-              moveLanded = gestureHistory.commit((skipHistory) =>
-                onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime, skipHistory)
-              );
-              if (moveLanded) settledTime = currentDrag.currentTime;
-            }
+          let moveLanded = true;
+          if (timeChanged) {
+            moveLanded = gestureHistory.commit((skipHistory) =>
+              onKeyframeMoved(property, currentDrag.originalTime, currentDrag.currentTime, skipHistory)
+            );
+            if (moveLanded) settledTime = currentDrag.currentTime;
+          }
 
-            // A refused move leaves the value alone: committing it at the
-            // keyframe's old time would write a second keyframe the drag never
-            // intended, right where the move itself landed on being refused.
-            if (valueChanged && moveLanded) {
-              gestureHistory.commit((skipHistory) =>
-                onKeyframeValueChanged(property, settledTime, currentDrag.currentValue, skipHistory)
-              );
-            }
+          // A refused move leaves the value alone: committing it at the
+          // keyframe's old time would write a second keyframe the drag never
+          // intended, right where the move itself landed on being refused.
+          if (valueChanged && moveLanded) {
+            gestureHistory.commit((skipHistory) =>
+              onKeyframeValueChanged(property, settledTime, currentDrag.currentValue, skipHistory)
+            );
           }
 
           gestureHistory.end();
@@ -434,7 +486,7 @@ export function KeyframeGraph({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime, gestureHistory, keyframes, announce]);
+  }, [dragState?.isDragging, graphDimensions, clipDuration, range, property, onKeyframeMoved, onKeyframeValueChanged, screenToSvgCoords, setActiveTime, gestureHistory]);
 
   // Click on graph background to deselect
   const handleGraphClick = useCallback(() => {

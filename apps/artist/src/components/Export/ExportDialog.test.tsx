@@ -425,7 +425,11 @@ describe('ExportDialog', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
 
-      const advanced = await screen.findByRole('button', { name: /download mp4/i })
+      // Labelled from the effective format, 'webm' — the primary button
+      // reads "Download WebM" too, so `advancedExport()` picks this one
+      // specifically (ESCSUITE-182).
+      await waitFor(() => expect(advancedExport()).toHaveTextContent('Download WebM'))
+      const advanced = advancedExport()
       expect(advanced).toBeDisabled()
       expect(advanced).toHaveAttribute(
         'title',
@@ -861,8 +865,18 @@ describe('ExportDialog', () => {
       mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project' })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
+      await waitFor(() => expect(screen.getByRole('radio', { name: /mp4/i })).toBeChecked())
 
-      fireEvent.click(await screen.findByRole('button', { name: /download mp4/i }))
+      // The button is labelled from the EFFECTIVE format — the one the click
+      // will actually run — not the selected radio (ESCSUITE-182): a restored
+      // `{ format: 'mp4' }` in a browser whose H.264 probe says no must read
+      // "Download WebM", not an enabled "Download MP4" that silently writes
+      // a .webm. `advancedExport()` picks the Advanced button specifically;
+      // the primary button reads "Download WebM" too, by construction.
+      const button = advancedExport()
+      expect(button).toHaveTextContent('Download WebM')
+
+      fireEvent.click(button)
 
       await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
       expect(mockExportToMP4).not.toHaveBeenCalled()

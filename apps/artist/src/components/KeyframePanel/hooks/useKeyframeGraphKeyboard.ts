@@ -34,8 +34,11 @@ const NUDGE_STEPS: Record<AnimatableProperty, { fine: number; coarse: number }> 
 };
 
 // How far Alt+Arrow moves a keyframe in time, in seconds. The fine step is ten
-// times the graph's own 0.001s "same keyframe" tolerance, so one nudge can
-// never land inside a neighbour; the coarse step is a tenth of the graph's
+// times the graph's own 0.001s "same keyframe" tolerance, so a nudge is always
+// a real move rather than one the `< 0.001` check below reads as standing
+// still — it says nothing about where it lands, which is why `nudgeTime` has
+// to test the destination for a neighbour (a keyframe 0.0099s away is one fine
+// nudge from being destroyed). The coarse step is a tenth of the graph's
 // one-second gridlines.
 const TIME_NUDGE = { fine: 0.01, coarse: 0.1 };
 
@@ -69,20 +72,23 @@ export function keyframeOptionId(property: AnimatableProperty, index: number): s
 
 // Appended to alternate announcements so two identical ones in a row are two
 // different strings; see the live region's comment in the hook below.
-export const ANNOUNCE_MARK = '\u200B';
+const ANNOUNCE_MARK = '\u200B';
 
 /**
  * Write a message into a live region's state, alternating the mark so two
  * textually identical announcements in a row are two different strings \u2014 an
  * `aria-atomic` region whose text does not change is not re-read, which is
- * exactly the case a user repeating one edit (or, in `useKeyframeDrag.ts`,
- * one refused drop) lands in. Exported so that hook can share this exact
- * mechanism rather than hand-rolling a third copy beside this one and
+ * exactly the case a user repeating one edit lands in.
+ *
+ * It was exported for a while so `useKeyframeDrag.ts`'s refused drop and
+ * `KeyframePanel`'s row-wide live region could share this exact mechanism
+ * rather than hand-roll a third copy beside this one and
  * `Preview/useCropHandleGesture.ts`'s (ESCSUITE-163/167 review round 1,
- * MAJOR 1) \u2014 the two keyframe-time refusals in this file and that hook are
- * meant to "read identically wherever the user meets them", mark included.
+ * MAJOR 1). ESCSUITE-183 took that refusal away — a pointer drag's landing is
+ * always legal now — so the only announcements left that can repeat are this
+ * file's own, and it is module-local again.
  */
-export function announceWithMark(
+function announceWithMark(
   setMessage: Dispatch<SetStateAction<string>>,
   text: string
 ): void {
@@ -100,15 +106,17 @@ function nudgeAnnouncement(property: AnimatableProperty, value: number, time: nu
 }
 
 /**
- * What the live region says when a move would land within
+ * What the live region says when a nudge would land within
  * `KEYFRAME_TIME_EPSILON` of a time another keyframe already occupies —
- * `moveClipKeyframe` deletes whatever is there, so every refusal that can
- * reach this situation says it the same way: this keyboard's own `nudgeTime`
- * below, the diamond-row pointer drag in `useKeyframeDrag.ts` (ESCSUITE-167 /
- * M6), and the graph's own point drag in `KeyframeGraph.tsx`'s
- * `handleMouseUp` (ESCSUITE-179).
+ * `moveClipKeyframe` deletes whatever is there, so `nudgeTime` below refuses
+ * and says why.
+ *
+ * The keyboard is the only path that can reach this since ESCSUITE-183: both
+ * pointer drags used to make the same refusal on release, and now clamp the
+ * pointer instead (`utils/keyframeClamp.ts`), so a drag has no illegal landing
+ * to refuse. That is why this is module-local again rather than exported.
  */
-export function occupiedTimeMessage(property: AnimatableProperty, time: number): string {
+function occupiedTimeMessage(property: AnimatableProperty, time: number): string {
   return `${PROPERTY_LABELS[property]} keyframe not moved: another keyframe is at ${time.toFixed(2)} seconds`;
 }
 
@@ -431,13 +439,5 @@ export function useKeyframeGraphKeyboard({
     setActiveTime,
     nudgeMessage,
     onKeyDown: handleKeyDown,
-    /**
-     * The one alternating live-region setter, shared out so `KeyframeGraph`'s
-     * own pointer drag (`handleMouseUp`) can post its occupied-time refusal
-     * (ESCSUITE-179) through the exact same `nudgeMessage` region this hook
-     * renders, instead of a second `role="status"` element the test suite's
-     * `getByRole('status')` could no longer resolve unambiguously.
-     */
-    announce,
   };
 }

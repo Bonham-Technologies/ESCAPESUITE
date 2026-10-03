@@ -13,7 +13,6 @@ export interface DragState {
   currentTrackId: string;
   currentPosition: number;
   snappedPosition: number | null;
-  offsetX: number; // Mouse offset from clip left edge
 }
 
 /** A clip edge being dragged, with the trim it started from so it can be re-derived. */

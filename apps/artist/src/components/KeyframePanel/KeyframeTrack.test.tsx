@@ -247,7 +247,15 @@ describe('KeyframeTrack', () => {
     // into (KeyframePanel.test.tsx pins the shared alternation) — so this
     // checks the raw text the row hands up through `onAnnounce` instead of
     // querying a `role="status"` here.
-    it('refuses a drop that lands exactly on another keyframe, and says why', () => {
+    //
+    // ESCSUITE-183: a drop aimed exactly at another keyframe used to be
+    // refused outright on release; `handleMouseMove` now clamps it to the edge
+    // of the neighbour's window on the side the pointer came from, so it
+    // lands. The drag here comes from the left (the diamond started at 1s), so
+    // it stops SHORT of the 2s neighbour rather than being thrown to its far
+    // side and swapping the two keyframes' order — review of ESCSUITE-183,
+    // finding 2.
+    it('clamps a drop aimed exactly at another keyframe to just short of it, instead of refusing', () => {
       store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
       const { container, onKeyframeMoved, onAnnounce } = renderTrack('opacity', { playheadTime: 0 })
       measureTrack(container)
@@ -259,10 +267,12 @@ describe('KeyframeTrack', () => {
       fireEvent.mouseMove(window, { clientX: 300 }) // exactly 2s
       fireEvent.mouseUp(window)
 
-      expect(onKeyframeMoved).not.toHaveBeenCalled()
-      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith(
-        'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
-      )
+      expect(onKeyframeMoved).toHaveBeenCalledTimes(1)
+      expect(onKeyframeMoved.mock.calls[0][0]).toBe('opacity')
+      expect(onKeyframeMoved.mock.calls[0][1]).toBe(1)
+      expect(onKeyframeMoved.mock.calls[0][2]).toBeLessThan(2)
+      expect(onKeyframeMoved.mock.calls[0][2]).toBeCloseTo(2, 2)
+      expect(onAnnounce).toHaveBeenCalledExactlyOnceWith('')
     })
 
     it('reports nothing when the keyframe is released where it started', () => {

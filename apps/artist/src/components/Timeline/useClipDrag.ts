@@ -158,12 +158,13 @@ export function useClipDrag({
    * mousedown, like the snap points, but re-read into pixels at the *current*
    * `pixelsPerSecond` on every move. `+`/`-` changes the zoom with no pointer
    * of its own, so a zoom step mid-drag is a render this hook sees without a
-   * mousemove to go with it; `dragState.offsetX` is still kept, in pixels, at
-   * whatever zoom the gesture started at — nothing outside this hook reads
-   * it, and nothing inside it either, now — so caching the grab point there
-   * instead of here would leave the only copy describing the OLD zoom's pixel
-   * grid, and the next move would subtract a now-wrong distance from a cursor
-   * position that moved zero pixels of its own (ESCSUITE-168).
+   * mousemove to go with it; caching the grab point in pixels instead of here
+   * would leave the only copy describing the OLD zoom's pixel grid, and the
+   * next move would subtract a now-wrong distance from a cursor position that
+   * moved zero pixels of its own (ESCSUITE-168). `DragState` used to carry
+   * that pixel figure too, as `offsetX` — written at mousedown and read by
+   * nothing, since this ref is what every move actually reads — and was
+   * deleted outright rather than kept as an unread field (ESCSUITE-181).
    */
   const offsetSecondsRef = useRef(0);
   const trackArea = useTrackAreaCache();
@@ -185,9 +186,8 @@ export function useClipDrag({
     // Kept as the original two-step expression: `pointerTime` would sum the
     // same terms in a different order, and the extraction promised identical
     // floating-point results. The grab offset is re-derived from the current
-    // zoom here — one read, no allocation — rather than taken from
-    // `drag.offsetX`, which is fixed in pixels at whatever zoom the gesture
-    // started at (ESCSUITE-168).
+    // zoom here — one read, no allocation — rather than cached in pixels at
+    // whatever zoom the gesture started at (ESCSUITE-168).
     const offsetXNow = timeToPixels(offsetSecondsRef.current, pixelsPerSecond);
     const x = e.clientX - area.left + container.scrollLeft - offsetXNow;
     let newPosition = pixelsToTime(x, pixelsPerSecond);
@@ -386,7 +386,6 @@ export function useClipDrag({
         currentTrackId: clip.trackId,
         currentPosition: clip.timelinePosition,
         snappedPosition: null,
-        offsetX,
       };
       dragRef.current = initial;
       setDragState(initial);

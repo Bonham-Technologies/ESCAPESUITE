@@ -127,7 +127,6 @@ describe('TimelineTrack waveform resample ceiling (ESCSUITE-13)', () => {
             currentTrackId: TRACK_ID,
             currentPosition: i,
             snappedPosition: null,
-            offsetX: 0,
           },
         })
       )

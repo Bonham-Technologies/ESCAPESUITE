@@ -936,7 +936,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       disabled={clips.length === 0 || advancedBlockedReason !== null}
                       title={advancedBlockedReason ?? undefined}
                     >
-                      Download {advancedOptions.format === 'gif' ? 'GIF' : advancedOptions.format === 'mp4' ? 'MP4' : 'WebM'}
+                      Download {effectiveAdvancedFormat === 'gif' ? 'GIF' : effectiveAdvancedFormat === 'mp4' ? 'MP4' : 'WebM'}
                     </button>
                   </div>
                 )}
