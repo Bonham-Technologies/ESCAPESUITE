@@ -7,6 +7,7 @@ import { runJob } from './run'
 import type { RunJobDeps } from './run'
 import { startServer } from './serve'
 import type { ServeHandle } from './serve'
+import { MAX_TIMEOUT_MS } from './timeouts'
 
 /**
  * Re-exported so brokers can reach it from the packaged kit (`dist/cli.js` is the only JS the
@@ -46,7 +47,7 @@ Environment:
   HEADLESS_GPU=true      launch Chromium with GPU acceleration
   HEADLESS_CHROMIUM_PATH Chromium binary to use instead of the bundled one
   HEADLESS_NO_SANDBOX=true  add --no-sandbox (needed in most containers)
-  HEADLESS_TIMEOUT_MS    overall render budget, a positive integer
+  HEADLESS_TIMEOUT_MS    overall render budget, a positive integer of at most ${MAX_TIMEOUT_MS}
   HEADLESS_LOG=json|text stderr log format (default: text)
   HEADLESS_PORT          serve: port to bind (default: 8787)
   HEADLESS_HOST          serve: interface to bind (default: 127.0.0.1)
@@ -196,7 +197,16 @@ function parseTimeoutMs(raw: string | undefined): number | undefined {
   if (!/^\d+$/.test(raw) || Number(raw) === 0) {
     throw new UsageError(`HEADLESS_TIMEOUT_MS must be a positive integer, got "${raw}"`)
   }
-  return Number(raw)
+  const value = Number(raw)
+  // Node clamps any setTimeout delay above 2^31-1 to 1 ms rather than refusing it, so a value
+  // past this bound would not mean "a very long time" — it would mean "the render deadline
+  // fires at launch, and every render fails instantly". Refuse it by name instead.
+  if (value > MAX_TIMEOUT_MS) {
+    throw new UsageError(
+      `HEADLESS_TIMEOUT_MS must be a positive integer of at most ${MAX_TIMEOUT_MS}, got "${raw}"`,
+    )
+  }
+  return value
 }
 
 const DEFAULT_PORT = 8787
