@@ -227,3 +227,22 @@
   height: 12px;
   cursor: nesw-resize;
 }
+
+/* Visually hidden, still read: the one live region every property row's
+   diamond drag shares (ESCSUITE-167 / M6, review round 1 MINOR 6) — only one
+   diamond on one row can ever be dragging at a time. The standard 1px
+   clip-rect pattern, matching KeyframeGraph.module.css's own .srOnly —
+   `display: none` or `visibility: hidden` would take it out of the
+   accessibility tree along with the pixels. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}

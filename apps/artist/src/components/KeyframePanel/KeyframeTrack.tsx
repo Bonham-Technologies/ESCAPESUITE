@@ -25,7 +25,14 @@ interface KeyframeTrackProps {
   locked: boolean;
   onSelect: () => void;
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
-  onAddKeyframe: (property: AnimatableProperty, time: number) => void;
+  onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
+  /**
+   * Told the raw text of a refused diamond drop (ESCSUITE-167 / M6), or `''`
+   * once a drop lands. `KeyframePanel` is the one live region every row
+   * shares — only one diamond on one row can ever be dragging at a time
+   * (review round 1, MINOR 6) — not one `role="status"` per row.
+   */
+  onAnnounce: (text: string) => void;
 }
 
 const PROPERTY_LABELS: Record<AnimatableProperty, string> = {
@@ -53,6 +60,7 @@ export function KeyframeTrack({
   onSelect,
   onKeyframeMoved,
   onAddKeyframe,
+  onAnnounce,
 }: KeyframeTrackProps) {
   // Note: _clipId is used by parent for identification but not needed in this component
   // Get all keyframes for this property (including preset-generated ones)
@@ -71,19 +79,21 @@ export function KeyframeTrack({
     return keyframes.map(kf => kf.time);
   }, [keyframes]);
 
+  // The value the curve holds where there are no keyframes at all — shared by
+  // the readout below and by the double-click add (ESCSUITE-167 / m3), which
+  // needs the curve's value at the CLICKED time, not this one.
+  const defaultValue = useMemo(() => {
+    if (property === 'blur') return effects?.blur ?? 0;
+    if (property === 'volume') return 1; // Volume default is 1 (100%)
+    const val = transform?.[property as keyof ClipTransform];
+    return typeof val === 'number' ? val : 0;
+  }, [property, transform, effects]);
+
   // Get current interpolated value
-  const currentValue = useMemo(() => {
-    let defaultValue: number;
-    if (property === 'blur') {
-      defaultValue = effects?.blur ?? 0;
-    } else if (property === 'volume') {
-      defaultValue = 1; // Volume default is 1 (100%)
-    } else {
-      const val = transform?.[property as keyof ClipTransform];
-      defaultValue = typeof val === 'number' ? val : 0;
-    }
-    return interpolateKeyframes(keyframes, currentTime, defaultValue);
-  }, [keyframes, currentTime, property, transform, effects]);
+  const currentValue = useMemo(
+    () => interpolateKeyframes(keyframes, currentTime, defaultValue),
+    [keyframes, currentTime, defaultValue]
+  );
 
   // Check if a keyframe is custom (user-created) vs preset-generated
   const isCustomKeyframe = useCallback((kf: Keyframe): boolean => {
@@ -100,7 +110,8 @@ export function KeyframeTrack({
     clipDuration,
     playheadTime,
     allKeyframeTimes,
-    handleKeyframeMoved
+    handleKeyframeMoved,
+    onAnnounce
   );
 
   // Handle double-click on track to add keyframe
@@ -116,9 +127,14 @@ export function KeyframeTrack({
     // Always use clientX - rect.left for consistent positioning
     // nativeEvent.offsetX is relative to e.target which may be a child element
     const relativeX = e.clientX - rect.left;
-    const time = (relativeX / rect.width) * clipDuration;
-    onAddKeyframe(property, Math.max(0, Math.min(time, clipDuration)));
-  }, [clipDuration, locked, property, onAddKeyframe, trackRef]);
+    const time = Math.max(0, Math.min((relativeX / rect.width) * clipDuration, clipDuration));
+    // At the value the curve already has there (ESCSUITE-167 / m3), so the
+    // shape the user can see does not jump when they add to it — the same
+    // reason the graph's own two add paths pass a value rather than let the
+    // panel fall back to the clip's static default.
+    const value = interpolateKeyframes(keyframes, time, defaultValue);
+    onAddKeyframe(property, time, value);
+  }, [clipDuration, locked, property, onAddKeyframe, trackRef, keyframes, defaultValue]);
 
   // Format value for display
   const formatValue = (value: number): string => {

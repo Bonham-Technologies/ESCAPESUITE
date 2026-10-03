@@ -2036,6 +2036,33 @@ statement — the `clearHistory()` call after the last source — and no decisio
 pin that it is never reached. The seven perf/rerender pins and `perfScene.ts` are byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-02 for ESCSUITE-163 and ESCSUITE-167 (a diagonal keyframe
+drag in the graph is one undo entry — the move committed first, the value only if the move landed, under the
+same entry through `useGestureHistory`, and the deferral that split them deleted; `moveClipKeyframe` refuses
+an unknown clip, a property with no keyframes or an origin holding none; the diamond-row drag no longer snaps
+onto an occupied time and refuses a drop within `KEYFRAME_TIME_EPSILON` of one through the shared
+`occupiedTimeMessage` and the panel's one live region; a row's double-click adds at the curve's value; and the
+drag binds its listener pair and computes its occupied list once per gesture): 99.80 / 99.24 / **95.58** /
+99.67 against the 99.80 / 99.24 / 95.54 / 99.67 the commit this branch was rebased onto (`599d505`, the
+ESCSUITE-161 / 162 squash) measures — branches up four hundredths, the other three unmoved. Measured in one
+sitting, the base gives 4,766 / 4,988 branches and this branch 4,766 / 4,986: the denominator *shrank* by two
+and the uncovered column by two (222 → 220), with the covered count unchanged, because the new decisions
+and the deleted ones balance — `components/KeyframePanel/KeyframePanel.tsx` went 52 / 64 → 46 / 56 (eight
+per-row live regions became one shared `role="status"` fed by an `onAnnounce` prop, taking two uncovered
+render arms with them), `hooks/useKeyframeDrag.ts` 16 / 16 → 14 / 14 (the two `isDragging` guards the
+review found unreachable behind `useWindowListener`'s own gate were deleted rather than tested; the
+occupancy refusal and the once-per-gesture `occupiedTimesRef` are the new arms, and the `drag.property`
+guard's idle side — a second mouseup landing before React re-renders — is reached by the case the
+measurement round added), `KeyframeGraph.tsx` 107 / 116 → 111 / 120 and `store/keyframeSlice.ts`
+63 / 74 → 67 / 78 (the move-then-value commit and the three pre-`set` refusals, each from both sides, with the
+same nine and eleven pre-existing arms uncovered as before). Lines 7,548 / 7,563 → 7,568 / 7,583,
+statements 8,491 / 8,556 → 8,516 / 8,581 and functions 1,830 / 1,836 → 1,837 / 1,843 each grew by exactly
+what their numerators did (the same 15 / 65 / 6 uncovered). `keyframeGestures.perf.test.ts` is the new
+ceiling file — exactly two listener adds and two removes per gesture, one occupied-list build per gesture
+regardless of the number of moves — and the six pre-existing perf files, the three rerender pins and
+`perfScene.ts` are byte-identical. The graph's own point drag can still land on a neighbour and is
+ESCSUITE-179. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2043,7 +2070,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.73 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.25 | 95.57 | 99.67 |
+| `@escapesuite/artist` | 99.80 | 99.24 | 95.58 | 99.67 |
 | `@escapesuite/shared` | 100.00 | 98.54 | 90.78 | 100.00 |
 | `@escapesuite/headless-artist` | 99.47 | 99.38 | 98.27 | 98.56 |
 

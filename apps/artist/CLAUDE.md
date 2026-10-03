@@ -824,6 +824,54 @@ Clips support animated properties via keyframes:
   (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
   keyframes default to `ease-in-out` and a value drag preserves the stored easing
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
+- **The diamond row drag refuses an occupied drop, and does not even aim for one (ESCSUITE-167 /
+  M6)**. `KeyframeTrack.tsx`'s diamonds are dragged through `hooks/useKeyframeDrag.ts`, which used
+  to `findSnapTime` onto the playhead **and onto every other keyframe's time**, regardless of
+  whether one was already there — and `moveClipKeyframe` deletes whatever already sits within
+  `KEYFRAME_TIME_EPSILON` of the target, so a drag that snapped onto a neighbour, or onto the
+  playhead where one sat, silently destroyed it. The exact case
+  `useKeyframeGraphKeyboard.ts`'s `nudgeTime` already refused on purpose for the keyboard. Other
+  keyframes' times are no longer snap candidates at all, and the playhead stays one only when no
+  keyframe already sits there; `handleMouseUp` additionally refuses outright — leaving the
+  keyframe at its original time, pushing nothing — if the final position still lands within
+  epsilon of an occupied time (a pixel-exact coincidence could reach that without ever snapping),
+  reported through the **same string** `nudgeTime` uses (`occupiedTimeMessage`, exported from
+  `useKeyframeGraphKeyboard.ts`), so the two refusals read identically wherever the user meets
+  them. The occupied-times list is computed once, on `startDrag`, into a ref rather than
+  recomputed (and reallocated) on every pointer move (review round 1, MINOR 2), and the listener
+  pair is likewise bound once per gesture rather than rebuilt per move — the same fix the five
+  timeline gesture hooks already had — both pinned exactly by
+  `KeyframePanel/keyframeGestures.perf.test.ts` (2 listener adds / 2 removes; one `.filter()` call
+  for the whole gesture). The hook has no live region of its own: it reports the raw refusal text
+  (or `''` once a drop lands, clearing a stale refusal — review round 1, NIT 8) to an `onAnnounce`
+  callback, and `KeyframePanel` is the one `role="status"` every property row shares — only one
+  diamond on one row can ever be dragging at a time, so eight per-row regions would carry a
+  message only one of them could ever produce (review round 1, MINOR 6) — alternating it with the
+  same `announceWithMark` helper `useKeyframeGraphKeyboard.ts`'s own `announce` now calls, rather
+  than a third hand-rolled copy of the zero-width-space mechanism (review round 1, MAJOR 1): a
+  second, textually identical refusal is audible, not silent.
+
+  **Known remaining hole, tracked as ESCSUITE-179**: the graph's own point drag
+  (`KeyframeGraph.tsx`'s `handleMouseUp`) has no occupancy check of its own, and
+  `moveClipKeyframe` still deletes whatever sits within `KEYFRAME_TIME_EPSILON` of a pixel-exact
+  landing there — the graph does not snap, so it takes an exact coincidence rather than an
+  approach, but the window is a sizeable fraction of a pixel on a short clip, not a vanishing one.
+  ESCSUITE-163 / M1 makes the damage *recoverable* (the move and value writes are one undo entry
+  now), which is why this is not urgent, but it is a real gap: dragging a point in the graph onto
+  a neighbour's time still destroys it in silence. The fix shape differs from the diamond row's —
+  the graph has no snap list to prune, and its live region and `useGestureHistory` gesture are
+  already open at the point of refusal — and wants its own red test, which is why it is a
+  follow-up rather than folded into this ticket.
+- **A track's double-click adds at the curve's value, not the clip's static default
+  (ESCSUITE-167 / m3)**. `KeyframeTrack.tsx`'s double-click used to call `onAddKeyframe` with no
+  value, which fell back to `clip.transform[property]` (or `effects.blur` / `1` for volume) —
+  jumping the shape visibly if a keyframe already held a different value at that time. It now
+  passes `interpolateKeyframes(keyframes, time, defaultValue)`, the same value it already computes
+  for its own readout, matching `KeyframeGraph.tsx`'s two add paths
+  (`handleDoubleClick`'s clicked Y, `useKeyframeGraphKeyboard.ts`'s `addAtPlayhead`), which have
+  always passed a value. `KeyframePanel.handleAddKeyframe`'s `value` parameter is required now:
+  nothing calls it without one, so the clip-default fallback was deleted rather than kept
+  unreachable.
 - **The playhead follows the timeline, not a local scrub state (ESCSUITE-126)**. `KeyframePanel.tsx`
   used to keep a `previewTime` local override, set only by `handlePreviewTimeChange` (the callback
   `ClipPreview`'s scrubber and Play button both call) and never reset back to `null` by anything —
@@ -2090,7 +2138,12 @@ that does exist sits on a locked track; `muteSelectedClips`/`unmuteSelectedClips
 every relevant track already has the mute state being asked for; and `removeClipKeyframe` —
 already on the list above for the lock — also refuses for three reasons that have nothing to do
 with it: an unknown clip, a property the clip has no keyframes on, or no keyframe within
-`KEYFRAME_TIME_EPSILON` of the given time. All of them still mean exactly what `false` means
+`KEYFRAME_TIME_EPSILON` of the given time. `moveClipKeyframe` got the identical three-way guard in
+ESCSUITE-163 / m2 — it used to bail inside its own `set` updater for exactly those cases while
+still bumping `modified`, pushing an undo entry, and returning `true`, the same "reported a write
+it never made" shape `removeClipKeyframe` had before ESCSUITE-101; the check moved in front of the
+`set`, mirroring `removeClipKeyframe` exactly down to reusing `KEYFRAME_TIME_EPSILON` in place of
+its own hand-written `0.001`. All of them still mean exactly what `false` means
 above. ESCSUITE-115 gave `removeClipFromTimeline` the same treatment: it used to filter the
 clips, bump `modified` and push an undo entry for an id naming no clip, unable to say so because
 it returned `void`; it now reads through `get()` the same as the guards above, refuses (`false`,
@@ -2112,6 +2165,22 @@ updaters exactly where it read the flag before, and `Timeline/useTrimDrag.ts` in
 `if (update)`. The contract is `hooks/useGestureHistory.test.ts`; each hook's own suite adds the
 end-to-end case of a row locked under an open gesture and unlocked mid-way, and the entry riding
 the write that landed.
+
+A fourth joined it later than the others, and later than it should have: **the keyframe graph's
+own diamond drag** (`KeyframePanel/KeyframeGraph.tsx`'s `handleMouseUp`, ESCSUITE-163 / M1). A
+diagonal drag that changes a keyframe's time *and* its value used to call `onKeyframeMoved`
+synchronously and `onKeyframeValueChanged` inside an uncancelled `setTimeout(…, 0)` — two writes,
+neither `skipHistory`'d, so two undo entries. One Ctrl+Z put the value back and left the keyframe
+at its **new time**, the exact ESCSUITE-79 shape the clip drag was fixed for, and the deferral
+itself was dead weight: both writes are synchronous zustand `set`s, so there was never anything
+to wait for — only a race the fix removes outright. `handleMouseUp` now opens a `useGestureHistory`
+gesture, `commit`s the move first and reads whether it landed, and `commit`s the value — at the
+keyframe's **new** time if the move landed, or its original time if there was no move at all —
+only when it did; a move the store refuses (a locked track) leaves the value untouched rather than
+writing it at the time the drag never actually reached. Covered end to end by
+`KeyframePanel.test.tsx`'s "moves a keyframe in time and value together as a single undo entry"
+(one push, one undo restoring both halves) and at the component level by
+`KeyframeGraph.test.tsx`'s "dragging keyframes" suite.
 
 The keyframe graph's keyboard is the other caller that had to read the answer.
 `KeyframePanel/hooks/useKeyframeGraphKeyboard.ts`'s two nudges called the host and then

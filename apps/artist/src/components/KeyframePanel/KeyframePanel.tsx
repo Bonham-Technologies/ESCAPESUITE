@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react';
+import { useMemo, useCallback, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../../store/projectStore';
 import { clipOnLockedTrack } from '../../store/trackLock';
@@ -7,6 +7,7 @@ import { useDraggablePanel } from './hooks/useDraggablePanel';
 import { KeyframeTrack } from './KeyframeTrack';
 import { KeyframeGraph } from './KeyframeGraph';
 import { ClipPreview } from './ClipPreview';
+import { announceWithMark } from './hooks/useKeyframeGraphKeyboard';
 import styles from './KeyframePanel.module.css';
 
 // Visual properties - transforms and effects
@@ -146,29 +147,16 @@ export function KeyframePanel() {
     return moveClipKeyframe(selectedClipId, property, originalTime, newTime, skipHistory);
   }, [selectedClipId, moveClipKeyframe]);
 
-  // Handle add keyframe (with optional value)
-  const handleAddKeyframe = useCallback((property: AnimatableProperty, time: number, value?: number) => {
+  // Handle add keyframe. Both the graph's two add paths and the track's
+  // double-click (ESCSUITE-167 / m3) always supply the curve's own value at
+  // `time` — nothing left falls back to the clip's static default, which used
+  // to make a track double-click jump the shape it was adding to.
+  const handleAddKeyframe = useCallback((property: AnimatableProperty, time: number, value: number) => {
     if (!selectedClip) return;
-
-    // Get current value at this time for interpolation if not provided
-    let keyframeValue = value;
-    if (keyframeValue === undefined) {
-      const transform = selectedClip.transform;
-      const effects = selectedClip.effects;
-
-      if (property === 'blur') {
-        keyframeValue = effects?.blur ?? 0;
-      } else if (property === 'volume') {
-        keyframeValue = 1; // Volume default is 1 (100%)
-      } else {
-        const val = transform?.[property as keyof typeof transform];
-        keyframeValue = typeof val === 'number' ? val : 0;
-      }
-    }
 
     setClipKeyframe(selectedClipId!, property, {
       time,
-      value: keyframeValue!,
+      value,
       easing: 'ease-in-out',
     });
   }, [selectedClip, selectedClipId, setClipKeyframe]);
@@ -232,6 +220,24 @@ export function KeyframePanel() {
     if (!selectedClipId) return false;
     return removeClipKeyframe(selectedClipId, property, time);
   }, [selectedClipId, removeClipKeyframe]);
+
+  // The one live region every property row's diamond drag shares
+  // (ESCSUITE-167 / M6, review round 1 MINOR 6): only one diamond on one row
+  // can ever be dragging at a time, so eight per-row regions would carry a
+  // message only one of them could ever produce. `''` (a landed drop,
+  // useKeyframeDrag.ts's own NIT-8 clear) is written straight through — an
+  // empty region has nothing for the alternation mark to help re-read —
+  // and anything else goes through the same `announceWithMark` this panel's
+  // graph keyboard uses, so two identical refusals in a row are still two
+  // different strings.
+  const [keyframeDragMessage, setKeyframeDragMessage] = useState('');
+  const handleKeyframeDragAnnounce = useCallback((text: string) => {
+    if (text === '') {
+      setKeyframeDragMessage('');
+      return;
+    }
+    announceWithMark(setKeyframeDragMessage, text);
+  }, []);
 
   if (!isOpen) return null;
 
@@ -336,6 +342,7 @@ export function KeyframePanel() {
                   locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
                   onAddKeyframe={handleAddKeyframe}
+                  onAnnounce={handleKeyframeDragAnnounce}
                 />
               ))}
             </div>
@@ -362,6 +369,7 @@ export function KeyframePanel() {
                       locked={trackLocked}
                       onKeyframeMoved={handleKeyframeMoved}
                       onAddKeyframe={handleAddKeyframe}
+                      onAnnounce={handleKeyframeDragAnnounce}
                     />
                   ))}
                 </div>
@@ -372,6 +380,14 @@ export function KeyframePanel() {
             <div className={styles.helpText}>
               Double-click track to add keyframe • Drag diamonds to move • Click track to see curve
             </div>
+
+            {/* Always rendered, never conditional: a live region has to exist
+                before its content changes for a screen reader to announce the
+                change. Shared by every property row's diamond drag — see
+                handleKeyframeDragAnnounce above. */}
+            <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+              {keyframeDragMessage}
+            </span>
           </>
         )}
       </div>

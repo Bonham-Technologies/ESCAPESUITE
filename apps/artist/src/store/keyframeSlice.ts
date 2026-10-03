@@ -190,6 +190,20 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
 
+    // ESCSUITE-163 / m2: false, with nothing written and no undo entry pushed,
+    // for an unknown clip, a property the clip has no keyframes on, or an
+    // originalTime holding no keyframe — the same three refusals
+    // removeClipKeyframe gained in ESCSUITE-101, and for the same reason: the
+    // `=> boolean` contract in types.ts means `false` is a promise that
+    // nothing changed, which a caller threading `skipHistory` into a later
+    // write (or announcing the move, as the graph's keyboard does) depends on.
+    const targetClip = clips.find((c) => c.id === clipId);
+    const targetKeyframes = targetClip?.animation?.keyframes[property];
+    const hasMatch = targetKeyframes?.some(
+      (kf) => Math.abs(kf.time - originalTime) < KEYFRAME_TIME_EPSILON
+    ) ?? false;
+    if (!hasMatch) return false;
+
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {
         if (clip.id !== clipId) return clip;
@@ -200,12 +214,12 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
         if (!currentKeyframes) return clip;
 
         // Find the keyframe to move
-        const keyframeToMove = currentKeyframes.find(kf => Math.abs(kf.time - originalTime) < 0.001);
+        const keyframeToMove = currentKeyframes.find(kf => Math.abs(kf.time - originalTime) < KEYFRAME_TIME_EPSILON);
         if (!keyframeToMove) return clip;
 
         // Remove any existing keyframe at the new time, then update the moved keyframe's time
         const newKeyframes = currentKeyframes
-          .filter(kf => Math.abs(kf.time - originalTime) >= 0.001 && Math.abs(kf.time - newTime) >= 0.001)
+          .filter(kf => Math.abs(kf.time - originalTime) >= KEYFRAME_TIME_EPSILON && Math.abs(kf.time - newTime) >= KEYFRAME_TIME_EPSILON)
           .concat({ ...keyframeToMove, time: newTime })
           .sort((a, b) => a.time - b.time);
 

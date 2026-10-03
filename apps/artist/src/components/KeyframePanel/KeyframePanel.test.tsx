@@ -292,6 +292,69 @@ describe('KeyframePanel', () => {
     })
   })
 
+  // Review round 1, MAJOR 1 + MINOR 6: every property row's diamond drag
+  // shares ONE live region, owned by the panel, so this is where the
+  // re-read alternation that makes a second identical refusal audible is
+  // actually exercised end to end — `useKeyframeDrag.test.ts` only proves
+  // the hook forwards the same raw text twice; it has no live region of its
+  // own to alternate.
+  describe('a diamond row drag refuses an occupied drop (ESCSUITE-167 / M6)', () => {
+    const diamondsIn = (label: string) =>
+      Array.from(trackFor(label).querySelectorAll<HTMLElement>(`.${trackStyles.diamond}`))
+
+    beforeEach(() => {
+      openPanelWithClip()
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.75, easing: 'linear' })
+    })
+
+    it('announces the same refusal twice with two different live-region strings', () => {
+      render(<KeyframePanel />)
+      measureTrackArea('Opacity')
+      // Keyframes sit at 0, 1 and 2 seconds; drag the one at 1s onto the one
+      // at 2s (200px and 300px into a 430px/4.3s track, left offset 100).
+      const custom = diamondsIn('Opacity')[1]
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 })
+      fireEvent.mouseUp(window)
+      const first = screen.getByRole('status').textContent
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 })
+      fireEvent.mouseUp(window)
+      const second = screen.getByRole('status').textContent
+
+      // Two different strings (the mark alternates) that read the same once
+      // it is stripped off.
+      expect(second).not.toBe(first)
+      expect((second ?? '').replace(/\u200B$/, '')).toBe((first ?? '').replace(/\u200B$/, ''))
+      expect((first ?? '').replace(/\u200B$/, '')).toBe(
+        'Opacity keyframe not moved: another keyframe is at 2.00 seconds'
+      )
+      // Neither refusal moved the keyframe.
+      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 1, 2])
+    })
+
+    it('clears the live region once a later drop in the same row lands', () => {
+      render(<KeyframePanel />)
+      measureTrackArea('Opacity')
+      const custom = diamondsIn('Opacity')[1]
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 300 }) // exactly 2s — refused
+      fireEvent.mouseUp(window)
+      expect(screen.getByRole('status').textContent).not.toBe('')
+
+      fireEvent.mouseDown(custom, { clientX: 200 })
+      fireEvent.mouseMove(window, { clientX: 400 }) // 3s — lands
+      fireEvent.mouseUp(window)
+
+      expect(screen.getByRole('status')).toHaveTextContent('')
+      expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 2, 3])
+    })
+  })
+
   describe('editing keyframes in the graph', () => {
     beforeEach(() => {
       openPanelWithClip()
@@ -308,6 +371,31 @@ describe('KeyframePanel', () => {
       fireEvent.mouseUp(window)
 
       expect(keyframesOf('opacity')!.map((kf) => kf.time)).toEqual([0, 3])
+    })
+
+    // ESCSUITE-163 / M1: a diagonal drag used to commit the move synchronously
+    // and the value in a setTimeout(…, 0) — two writes, two undo entries, so
+    // one Ctrl+Z put the value back but left the keyframe at its new time
+    // (exactly the ESCSUITE-79 shape the clip drag was fixed for).
+    it('moves a keyframe in time and value together as a single undo entry', () => {
+      render(<KeyframePanel />)
+      measureGraph()
+      const historyBefore = store().history.past.length
+
+      // t=3 (x = 50 + 100*3), value=0.2 (y = 20 + (1-0.2)*150).
+      fireEvent.mouseDown(graphPoints()[1])
+      fireEvent.mouseMove(window, { clientX: 50 + 100 * 3, clientY: 20 + (1 - 0.2) * 150 })
+      fireEvent.mouseUp(window)
+
+      const moved = keyframesOf('opacity')![1]
+      expect(moved.time).toBe(3)
+      expect(moved.value).toBeCloseTo(0.2, 6)
+      expect(moved.easing).toBe('linear')
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+
+      // One undo restores BOTH halves of the drag, not just the value.
+      store().undo()
+      expect(keyframesOf('opacity')![1]).toEqual({ time: 1, value: 0.5, easing: 'linear' })
     })
 
     it('changes a keyframe value, keeping its easing, when it is dragged vertically', () => {
