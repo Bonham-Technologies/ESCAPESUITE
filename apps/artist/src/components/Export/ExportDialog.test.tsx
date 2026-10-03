@@ -485,6 +485,22 @@ describe('ExportDialog', () => {
       expect(screen.getByRole('button', { name: /download mp4/i })).toBeEnabled()
     })
 
+    it('drops the no-sound note while GIF is selected — GIF has its own', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({ video: true, audio: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+      expect(screen.getByText(MP4_NO_AUDIO_NOTE)).toBeInTheDocument()
+
+      chooseGif()
+
+      // Two sentences about sound, one of which is about a format that is not
+      // being exported, is one too many.
+      expect(screen.queryByText(MP4_NO_AUDIO_NOTE)).not.toBeInTheDocument()
+      expect(
+        screen.getByText(/GIF export needs this tab visible and has no sound/)
+      ).toBeInTheDocument()
+    })
+
     it('says nothing about sound when this browser can encode AAC', async () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       await settle()
