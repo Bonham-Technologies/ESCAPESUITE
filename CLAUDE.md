@@ -2532,6 +2532,29 @@ coverage-excluded, gained the straggling-launch case through a mocked `playwrigh
 parity suite ran 30 / 30 four times before the round and once after. **No floor crossed**; the kit's
 floors stay 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-04 for ESCSUITE-191 (a
+headless job's `options.timeRange` is clamped to the timeline — `[0, duration]` — before the exporter is
+asked, so a one-second project asked for `{start: 0, end: 600}` encodes one second and its verification
+manifest's `durationSec` says one, where it used to say 600; an empty or inverted intersection fails the job
+naming the field and the timeline's extent; and the kit refuses a non-finite bound or a negative `start` at
+parse time, 400 or exit 2, before Chromium launches), each in one sitting against `main` at `5450f757` (the
+kit PR #2 version-packages commit). **Artist**: 99.80 / 99.27 / 95.79 / 99.68, byte-identical on every
+percentage to the base — lines 7,761 / 7,776 → 7,768 / 7,783, statements 8,766 / 8,830 → 8,773 / 8,837,
+branches 4,963 / 5,181 → 4,967 / 5,185 and functions 1,884 / 1,890 on both, every denominator growing by
+exactly what the numerator did (the same 15 / 64 / 218 / 6 uncovered). The four new branches are
+`headless/renderProject.ts`'s `if (options.timeRange)` and the empty-intersection refusal, each reached
+from both sides by the three new cases (the end past the timeline, the negative start, the range that
+misses the timeline entirely) against the in-range and no-range renders that were already there, plus the
+review's one untested case — a clipless timeline, whose every range misses `0s-0s` — which adds a
+pin and no unit; the file's three pre-existing uncovered arms are untouched. **Kit**: 99.55 / 99.47 / **98.48** / 98.72 against
+99.55 / 99.47 / 98.47 / 98.72 — branches up a hundredth, the other three unmoved: lines 887 / 891 →
+889 / 893, statements 941 / 946 → 943 / 948, branches 581 / 590 → 585 / 594 and functions 155 / 157 on
+both, the same 4 / 5 / 9 / 2 uncovered. The four are `src/jobSpec.ts`'s two `Number.isFinite` operands on
+the `timeRange` bounds and the `start < 0` refusal, reached by the non-finite and negative cases against
+the valid range the suite already kept. `src/manifest.ts` is untouched — it copies `durationSec` through,
+and the value it copies is now the clamped one. Artist's seven perf/rerender pins are byte-identical.
+**No floor crossed**; artist's floors stay 99 / 99 / 95 / 99 and the kit's 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2541,7 +2564,7 @@ never above what the suite actually achieves:
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.56 | 91.66 | 100.00 |
-| `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.47 | 98.72 |
+| `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
