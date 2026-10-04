@@ -1,37 +1,14 @@
 import { test, expect } from '@playwright/test'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+  importMediaAndAddToTimeline,
+  makeToneWav,
+  keyframePanel,
+  inspector,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
-
-/**
- * A tiny real WAV file: a one-second mono tone, synthesised rather than
- * loaded from a fixture — `extractWaveformData` decodes real audio bytes via
- * `AudioContext.decodeAudioData` (`app/takeImport.ts`/`core/videoProcessor.ts`),
- * so nothing short of real, decodable audio produces a real waveform to
- * assert against.
- */
-function makeToneWav(durationSec: number, sampleRate = 8000, freq = 440): Buffer {
-  const numSamples = Math.floor(durationSec * sampleRate)
-  const dataSize = numSamples * 2 // 16-bit mono
-  const buffer = Buffer.alloc(44 + dataSize)
-  buffer.write('RIFF', 0)
-  buffer.writeUInt32LE(36 + dataSize, 4)
-  buffer.write('WAVE', 8)
-  buffer.write('fmt ', 12)
-  buffer.writeUInt32LE(16, 16)
-  buffer.writeUInt16LE(1, 20)
-  buffer.writeUInt16LE(1, 22)
-  buffer.writeUInt32LE(sampleRate, 24)
-  buffer.writeUInt32LE(sampleRate * 2, 28)
-  buffer.writeUInt16LE(2, 32)
-  buffer.writeUInt16LE(16, 34)
-  buffer.write('data', 36)
-  buffer.writeUInt32LE(dataSize, 40)
-  for (let i = 0; i < numSamples; i++) {
-    const sample = Math.round(Math.sin((2 * Math.PI * freq * i) / sampleRate) * 16000)
-    buffer.writeInt16LE(sample, 44 + i * 2)
-  }
-  return buffer
-}
 
 test.describe('Export Dialog', () => {
   test.beforeEach(async ({ page }) => {
@@ -150,9 +127,7 @@ test.describe('Keyframe Panel', () => {
     await expect(keyframeButton).toBeVisible()
     await keyframeButton.click()
 
-    // The panel is a portal on document.body, a sibling of #root (which has
-    // its own "Open Keyframe Editor" button) — scope past that with :not().
-    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    const panel = keyframePanel(page)
     await expect(panel).toBeVisible()
 
     // ...and the button now reads "Close" and closes it.
@@ -166,7 +141,7 @@ test.describe('Keyframe Panel', () => {
     // double-clicking a property's row in the graph the Open Keyframe Editor
     // button reveals.
     await page.getByRole('button', { name: 'Open Keyframe Editor' }).click()
-    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    const panel = keyframePanel(page)
     await panel.getByText('Opacity', { exact: true }).click()
 
     const graph = page.getByRole('listbox', { name: 'Keyframes for Opacity' })
@@ -236,13 +211,14 @@ test.describe('Overlay Tools', () => {
     await expect(page.getByRole('heading', { name: 'Blur' })).toBeVisible()
   })
 
-  test('overlay transform handles appear on selection', async ({ page }) => {
+  test("the inspector's Transform section opens for a selected overlay", async ({ page }) => {
     // The selection's transform handles are drawn directly on the preview
     // canvas (`drawSelectionHandles`, `components/Preview/selectionOverlay.ts`),
     // not as DOM elements a locator can see — there is nothing under
     // `[class*="handle"]` for any clip, selected or not. What a locator *can*
-    // see is the inspector's own Transform section, which opens for exactly
-    // the same reason: a clip is selected.
+    // see, and what this test is actually named for, is the inspector's own
+    // Transform section, which opens for exactly the same reason: a clip is
+    // selected.
     await page.getByRole('button', { name: 'Rectangle' }).click()
     await expect(page.getByRole('button', { name: 'Transform', exact: true })).toBeVisible()
   })
@@ -311,15 +287,11 @@ test.describe('Waveform Display', () => {
     // blob's bytes itself (`app/takeImport.ts`), so seeding a fake/empty
     // blob directly into storage would never produce peaks. A tiny
     // synthesised WAV tone is the cheapest real audio there is.
-    await page.locator('input[type="file"]').setInputFiles({
+    await importMediaAndAddToTimeline(page, {
       name: 'tone.wav',
       mimeType: 'audio/wav',
       buffer: makeToneWav(1),
     })
-    const addToTimeline = page.getByRole('button', { name: 'Add to timeline' })
-    await expect(addToTimeline).toBeVisible({ timeout: 30_000 })
-    await addToTimeline.click()
-    await expect(page.getByText(/^1 clip/).first()).toBeVisible({ timeout: 15_000 })
   })
 
   test('waveform canvas exists', async ({ page }) => {
@@ -350,13 +322,14 @@ test.describe('Waveform Display', () => {
     expect(beforeSelection).not.toBeNull()
 
     await page.locator('[data-clip-id]').first().click()
-    // Redraw is synchronous with the store write that flips `isSelected`,
-    // but give React/canvas a frame to actually paint.
-    await page.waitForTimeout(100)
-
-    const afterSelection = await samplePixel()
-    expect(afterSelection).not.toBeNull()
-    expect(afterSelection).not.toEqual(beforeSelection)
+    // Polled rather than a fixed sleep: the redraw is synchronous with the
+    // store write that flips `isSelected`, but still needs a paint, and a
+    // poll only waits as long as that actually takes.
+    await expect.poll(samplePixel).not.toEqual(beforeSelection)
+    // The poll above is satisfied by `null` too (it is simply "not equal" to
+    // the real array `beforeSelection`) — confirm the settled pixel is a
+    // real sample, not a transiently empty canvas read.
+    expect(await samplePixel()).not.toBeNull()
   })
 })
 
@@ -448,20 +421,19 @@ test.describe('Inspector Panel', () => {
   })
 
   test('inspector panel exists', async ({ page }) => {
-    await expect(page.locator('aside[aria-labelledby="inspector-title"]')).toBeVisible()
+    await expect(inspector(page)).toBeVisible()
     await expect(page.getByText('Inspector')).toBeVisible()
   })
 
   test('property controls appear for selected clip', async ({ page }) => {
-    const inspector = page.locator('aside[aria-labelledby="inspector-title"]')
     // The empty state has no `<input>` at all — five plain buttons.
-    await expect(inspector.locator('input')).toHaveCount(0)
+    await expect(inspector(page).locator('input')).toHaveCount(0)
 
     await seedTextClip(page)
     // A selected text clip's open inspector carries real inputs (its name,
     // the Transform section's position/scale fields once opened — Text
     // Content's own text field is visible by default).
-    await expect(inspector.locator('input')).not.toHaveCount(0)
+    await expect(inspector(page).locator('input')).not.toHaveCount(0)
   })
 })
 
