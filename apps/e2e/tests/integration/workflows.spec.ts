@@ -1,73 +1,48 @@
 import { test, expect } from '@playwright/test'
-import {
-  mockGetUserMedia,
-  mockMediaRecorder,
-  grantMediaPermissions,
-  installMediaDevicesLayer,
-} from '../../utils/media-mocks'
+import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
-  test('recording workflow to editor', async ({ browser }) => {
-    const context = await browser.newContext()
-
-    // Start in ESCAPECRAFT
-    const craftPage = await context.newPage()
-    // Mock media APIs through the shared layering helper (ESCSUITE-177; see
-    // media-mocks.ts's module comment) rather than assigning one method on
-    // `navigator.mediaDevices` or spreading it, neither of which carries the
-    // platform's other methods forward.
-    await installMediaDevicesLayer(craftPage)
-    await craftPage.addInitScript(() => {
-      const getUserMedia = async () =>
-        ({
-          getTracks: () => [],
-          getVideoTracks: () => [],
-          getAudioTracks: () => [],
-          addTrack: () => {},
-          removeTrack: () => {},
-          active: true,
-        }) as unknown as MediaStream
-
-      ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
-        .__layerMediaDevices({ getUserMedia })
-    })
-
-    await craftPage.goto('http://localhost:5174')
-    await waitForAppReady(craftPage, 'craft')
-
-    // Verify CRAFT loaded
-    const craftHtml = await craftPage.content()
-    expect(craftHtml).toContain('<div id="root">')
-
-    // Navigate to ARTIST
-    const artistPage = await context.newPage()
-    await artistPage.goto('http://localhost:5175')
-    await waitForAppReady(artistPage, 'artist')
-
-    // Verify ARTIST loaded
-    const artistHtml = await artistPage.content()
-    expect(artistHtml).toContain('<div id="root">')
-
-    await context.close()
-  })
+  // The real "recorded take becomes an ARTIST import" journey needs CRAFT and
+  // ARTIST to share one IndexedDB, which only happens on the combined
+  // production layout (the dev servers here put them on :5174 and :5175 —
+  // two origins). That workflow is proven, un-skipped, by
+  // tests/production/indexeddb-sharing.spec.ts's "a recording made in CRAFT
+  // opens in ARTIST" (`pnpm test:e2e:production`).
 
   test('multiple recordings can be made', async ({ page }) => {
-    await mockGetUserMedia(page)
-    await mockMediaRecorder(page)
+    test.setTimeout(60_000)
+
+    await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
 
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    // Verify UI allows multiple recordings
-    const recordButton = page
-      .getByRole('button', { name: /record|start/i })
-      .first()
+    // Capability detection is async; the source toggles stay disabled until it
+    // finishes and starting before then acquires no stream.
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    const isVisible = await recordButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    for (let i = 0; i < 2; i++) {
+      await page.getByRole('button', { name: 'Start recording' }).click()
+      await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+        timeout: 30_000,
+      })
+      await page.waitForTimeout(1500) // a take's length, not an arbitrary pause
+      await page.getByRole('button', { name: 'Stop recording' }).click()
+
+      // Each save finishing (and the row's "Play" button appearing) is what
+      // makes the controls ready for the next recording, so this also gates
+      // the loop's next iteration.
+      await expect(page.getByRole('button', { name: /^Play / })).toHaveCount(i + 1, {
+        timeout: 30_000,
+      })
+    }
   })
 })
 
@@ -78,13 +53,12 @@ test.describe('Export After Editing', () => {
   })
 
   test('can access export from editor', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
+    const exportButton = page.getByRole('button', { name: 'Export video' })
+    // Disabled while the timeline is empty — there is nothing to encode yet.
+    await expect(exportButton).toBeDisabled()
 
-    const isVisible = await exportButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await seedTextClip(page)
+    await expect(exportButton).toBeEnabled()
   })
 
   test('export dialog shows format options', async ({ page }) => {
@@ -103,155 +77,102 @@ test.describe('Project Save and Reload', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const saveButton = page
-      .getByRole('button', { name: /save/i })
-      .or(page.locator('[data-testid="save-button"]'))
-      .first()
+    // "Save Project" downloads a `.veditor` file (core/projectManager.ts) —
+    // the real consequence of the click, not just that a button exists.
+    const downloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: 'Save project' }).click()
+    const download = await downloadPromise
 
-    const isVisible = await saveButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    expect(download.suggestedFilename()).toMatch(/\.veditor$/)
   })
 
-  test('project persists across page reload', async ({ page }) => {
-    await page.goto('http://localhost:5175')
-    await waitForAppReady(page, 'artist')
-
-    // Store something in IndexedDB to simulate project save
-    await page.evaluate(() => {
-      return new Promise((resolve) => {
-        const request = indexedDB.open('video-editor-db', 1)
-        request.onupgradeneeded = () => {
-          const db = request.result
-          if (!db.objectStoreNames.contains('projects')) {
-            db.createObjectStore('projects', { keyPath: 'id' })
-          }
-        }
-        request.onsuccess = () => {
-          const db = request.result
-          if (db.objectStoreNames.contains('projects')) {
-            const tx = db.transaction('projects', 'readwrite')
-            const store = tx.objectStore('projects')
-            store.put({ id: 'test-project', name: 'Test', data: {} })
-            tx.oncomplete = () => resolve(true)
-          } else {
-            resolve(true)
-          }
-        }
-        request.onerror = () => resolve(false)
-      })
-    })
-
-    // Reload page
-    await page.reload()
-    await waitForAppReady(page, 'artist')
-
-    // Page should still work
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
-  })
+  // "project persists across page reload" used to write a hand-rolled record
+  // straight into IndexedDB (never read by the app) and then check for
+  // `<div id="root">` after a reload — it asserted nothing the app actually
+  // does. The real persistence mechanism — a session written to the
+  // `settings` store and offered back as "Resume Previous Session?" on the
+  // next load — is pinned by
+  // tests/escapeartist/components.spec.ts's "Project Session" describe,
+  // `'session restore prompt appears when applicable'`.
 })
 
 test.describe('Cross-Session State Persistence', () => {
-  test('settings persist across sessions', async ({ browser }) => {
-    const context = await browser.newContext()
+  // "settings persist across sessions" used to round-trip a fabricated
+  // `escapesuite-settings` localStorage key that no app code reads or
+  // writes — it tested that `localStorage` itself persists within a browser
+  // context, a standard browser API, not this app. Deleted rather than kept
+  // as a placeholder.
 
-    // First session
-    const page1 = await context.newPage()
-    await page1.goto('http://localhost:5175')
-    await waitForAppReady(page1, 'artist')
-
-    // Store a setting
-    await page1.evaluate(() => {
-      localStorage.setItem('escapesuite-settings', JSON.stringify({ theme: 'dark' }))
-    })
-
-    await page1.close()
-
-    // Second session
-    const page2 = await context.newPage()
-    await page2.goto('http://localhost:5175')
-    await waitForAppReady(page2, 'artist')
-
-    // Check setting persisted
-    const settings = await page2.evaluate(() => {
-      return localStorage.getItem('escapesuite-settings')
-    })
-
-    expect(settings).toContain('dark')
-
-    await context.close()
-  })
-
-  test('undo history clears on new session', async ({ page }) => {
+  test('undo history clears when starting a new project', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    // Undo button should be disabled on fresh load
-    const undoButton = page
-      .getByRole('button', { name: /undo/i })
-      .or(page.locator('[data-testid="undo-button"]'))
-      .first()
+    const undoButton = page.getByRole('button', { name: 'Undo (Ctrl+Z)' })
+    await expect(undoButton).toBeDisabled()
 
-    const isVisible = await undoButton.isVisible().catch(() => false)
+    await seedTextClip(page)
+    await expect(undoButton).toBeEnabled()
 
-    if (isVisible) {
-      const isDisabled = await undoButton.isDisabled().catch(() => true)
-      // Undo should be disabled when no history
-      expect(typeof isDisabled).toBe('boolean')
-    }
+    // New Project confirms before discarding unsaved clips.
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: 'File menu' }).click()
+    await page.getByRole('button', { name: /New Project/ }).click()
+
+    await expect(undoButton).toBeDisabled()
   })
 })
 
 test.describe('App-to-App Navigation', () => {
-  test('can navigate between all three apps', async ({ browser }) => {
+  test('each app renders its own identity at its own URL', async ({ browser }) => {
     const context = await browser.newContext()
-
     const page = await context.newPage()
 
-    // ESCAPEPLAN
     await page.goto('http://localhost:5173')
     await waitForAppReady(page, 'plan')
-    expect(await page.content()).toContain('<div id="root">')
+    await expect(page.getByRole('heading', { level: 1 })).toContainText(/how-to videos/i)
 
-    // ESCAPECRAFT
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
-    expect(await page.content()).toContain('<div id="root">')
+    await expect(page.getByRole('heading', { level: 1, name: 'ESCAPECRAFT' })).toBeVisible()
 
-    // ESCAPEARTIST
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
-    expect(await page.content()).toContain('<div id="root">')
+    await expect(page.getByRole('heading', { level: 1, name: 'ESCAPEARTIST' })).toBeVisible()
 
     await context.close()
   })
 })
 
 test.describe('URL Parameter Handling', () => {
-  test('loadVideo parameter handled', async ({ page }) => {
+  test('an unresolvable loadVideo id reports "Recording not found"', async ({ page }) => {
     await page.goto('http://localhost:5175?loadVideo=test-123')
     await waitForAppReady(page, 'artist')
 
-    // App should handle the parameter without crashing
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    // app/useHostIntegration.ts: a `loadVideo` id IndexedDB does not have
+    // raises the app's one notice, rather than failing silently.
+    await expect(page.getByRole('status')).toContainText('Recording not found')
   })
 
-  test('project parameter handled', async ({ page }) => {
-    // Base64 encoded project data
-    const projectData = btoa(JSON.stringify({ name: 'Test Project' }))
-    await page.goto(`http://localhost:5175?project=${projectData}`)
-    await waitForAppReady(page, 'artist')
+  // "project parameter handled" used to assert only `<div id="root">` after
+  // navigating with `?project=<base64>`. The root CLAUDE.md says why that is
+  // all it could ever assert: `?project=` is "documented but not currently
+  // implemented" — `utils/integration.ts` parses it into `UrlParams.projectData`
+  // and nothing reads that field, so there is no app behaviour beyond "did
+  // not crash", which every other test's `waitForAppReady` already covers.
+  // Deleted rather than kept as a placeholder for a feature that isn't there.
 
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
-  })
+  test('a cross-origin video URL is refused and reported', async ({ page }) => {
+    // Routed rather than a real fetch to example.com: the CORS/opaque-response
+    // failure this reproduces is deterministic and needs no network access.
+    await page.route('https://example.com/test.mp4', (route) => route.abort('failed'))
 
-  test('video URL parameter handled', async ({ page }) => {
     await page.goto('http://localhost:5175?video=https://example.com/test.mp4')
     await waitForAppReady(page, 'artist')
 
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    // utils/integration.ts's describeFetchFailure (ESCSUITE-130): a rejected
+    // fetch to a different origin names that origin and the likely CSP cause.
+    await expect(page.getByRole('status')).toContainText(
+      /Could not load the video from https:\/\/example\.com/
+    )
   })
 })
