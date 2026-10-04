@@ -199,6 +199,17 @@ describe('renderProject', () => {
     expect(exportToMP4).not.toHaveBeenCalled()
   })
 
+  it('refuses any timeRange on a timeline with no clips, naming the empty extent', async () => {
+    // Zero clips is a zero-second timeline, so every requested range misses it;
+    // the message should say so rather than render nothing or pass the request through.
+    const input = baseInput()
+    input.project.timeline.clips = []
+    input.options = { format: 'mp4', timeRange: { start: 0, end: 1 } } as RenderInput['options']
+
+    await expect(renderProject(input)).rejects.toThrow(/does not overlap the timeline \(0s-0s\)/)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
   it('rejects a clip whose sourceVideoId is not in sourceVideos instead of rendering black', async () => {
     const input = baseInput()
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).sourceVideoId = 'ghost'
