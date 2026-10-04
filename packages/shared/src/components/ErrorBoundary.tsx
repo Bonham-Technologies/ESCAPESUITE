@@ -21,7 +21,7 @@
 // component below it. A throw from an event handler, a `setTimeout`/
 // `requestAnimationFrame` callback, an async function, a rejected promise,
 // or the fallback it renders itself, reaches none of this.
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, createRef, type ErrorInfo, type ReactNode } from 'react';
 
 export interface ErrorBoundaryProps {
   children: ReactNode;
@@ -52,6 +52,15 @@ interface ErrorBoundaryState {
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
+  /**
+   * The outer panel, focused once in `componentDidCatch` below. A plain
+   * class field rather than a callback ref: `componentDidCatch` runs during
+   * the same commit that mounts this element, after refs are attached, so
+   * `.current` is never null by the time it is read there — see the
+   * non-null assertion on that line.
+   */
+  private panelRef = createRef<HTMLDivElement>();
+
   static getDerivedStateFromError(): ErrorBoundaryState {
     return { hasError: true };
   }
@@ -65,6 +74,15 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       console.error('[ErrorBoundary] caught a render error:', error, info);
     }
     this.props.onError?.(error, info);
+    // `render()` has no recovery path (see the class doc comment), so
+    // `componentDidCatch` only ever runs once per instance — there is no
+    // "hasError was already true" case to guard against here, unlike a
+    // `componentDidUpdate`-based focus would need. Replacing everything that
+    // was on screen with this panel and leaving focus wherever it happened
+    // to be — often nowhere, since the element it was on is gone — would
+    // otherwise strand a keyboard or screen-reader user with nothing to do
+    // but Tab in from the top of the page.
+    this.panelRef.current!.focus();
   }
 
   private handleReload = (): void => {
@@ -78,7 +96,8 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     return (
       <div
-        role="alert"
+        ref={this.panelRef}
+        tabIndex={-1}
         style={{
           display: 'flex',
           flexDirection: 'column',
@@ -91,8 +110,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           fontFamily: 'system-ui, sans-serif',
         }}
       >
-        <h1 style={{ margin: 0, fontSize: '1.25rem' }}>Something went wrong</h1>
-        <p style={{ margin: 0 }}>An unexpected error occurred. Reloading the page should fix it.</p>
+        {/* `role="alert"` on the text alone, not the button beside it —
+            interactive content inside an `alert` is not expected to receive
+            focus (that is what `alertdialog` is for), and every other live
+            region in this repo already keeps the two apart. */}
+        <div role="alert">
+          <h1 style={{ margin: 0, fontSize: '1.25rem' }}>Something went wrong</h1>
+          <p style={{ margin: 0 }}>An unexpected error occurred. Reloading the page should fix it.</p>
+        </div>
         <button type="button" onClick={this.handleReload}>
           Reload
         </button>

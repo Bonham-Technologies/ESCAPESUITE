@@ -48,6 +48,31 @@ describe('ErrorBoundary', () => {
     expect(screen.getByRole('button', { name: 'Reload' })).not.toBeNull()
   })
 
+  it('keeps the Reload button outside the alert region (interactive content does not belong in role="alert")', () => {
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>
+    )
+
+    const panel = screen.getByRole('alert')
+    expect(panel.querySelector('button')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Reload' }).closest('[role="alert"]')).toBeNull()
+  })
+
+  it('moves focus to the panel, so a keyboard or screen-reader user is not left with nothing to Tab to', () => {
+    render(
+      <ErrorBoundary>
+        <Boom />
+      </ErrorBoundary>
+    )
+
+    // The focused element is the outer, tabIndex={-1} container the alert
+    // region lives in, not the alert region itself.
+    const panel = screen.getByRole('alert').parentElement
+    expect(document.activeElement).toBe(panel)
+  })
+
   it('reloads the page when the Reload button is clicked', () => {
     const reload = vi.fn()
     const originalLocation = window.location
@@ -137,6 +162,16 @@ describe('ErrorBoundary', () => {
     )
     expect(onError).toHaveBeenCalledTimes(1)
 
+    // Move focus away from the panel before the second render, so a second,
+    // unguarded focus() call on the re-render would be visible: componentDidCatch
+    // only ever fires for a genuinely new catch (render() never re-renders the
+    // children that already threw), so this proves no second focus call rides
+    // along with the re-render itself.
+    const elsewhere = document.createElement('input')
+    document.body.appendChild(elsewhere)
+    elsewhere.focus()
+    expect(document.activeElement).toBe(elsewhere)
+
     rerender(
       <ErrorBoundary onError={onError}>
         <Boom message="second" />
@@ -145,5 +180,8 @@ describe('ErrorBoundary', () => {
 
     expect(screen.getAllByRole('alert')).toHaveLength(1)
     expect(onError).toHaveBeenCalledTimes(1)
+    expect(document.activeElement).toBe(elsewhere)
+
+    elsewhere.remove()
   })
 })
