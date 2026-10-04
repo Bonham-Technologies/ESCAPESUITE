@@ -2648,6 +2648,24 @@ gains a second real case beside ESCSUITE-202's import-under-quota one, under the
 after the rebase that merged the two rewrites of that describe.
 **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/plan` was re-measured 2026-10-04 for ESCSUITE-214 (a "Skip to main content" link is the first
+focusable element in `Layout` on every route — off-screen until focused, above the sticky header when it
+slides in — and activating it moves focus to `<main id="main" tabIndex={-1}>` through an explicit
+`focus()` rather than the browser's fragment jump, so it behaves the same in every browser and in jsdom and
+leaves no `#main` history entry; ESCAPECRAFT and ESCAPEARTIST were checked and left alone, their first
+focusable control being one a keyboard user wants and neither carrying a navigation block to skip):
+100.00 / 100.00 / 100.00 / 100.00, the same four figures as `main` at `207e6ece` (the ESCSUITE-202
+squash) in the same sitting — lines 78 → 82, statements 79 → 83, functions 26 → 27 and branches 21 on both,
+every new unit covered. The change adds no decision at all: the click handler is two unconditional
+statements, with the ref read cast rather than guarded, because `<main>` is rendered unconditionally by
+the same component and a null guard would be a branch no test could take against plan's 100 % floors.
+The three new `Layout.test.tsx` cases (the link is the first Tab stop; activating it moves
+`document.activeElement` to `main`; it renders on a second route) were red before the change. Outside
+vitest's measurement, `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` gains the PLAN case the
+ESCSUITE-202 rewrite left as a comment — the link off-screen, the first Tab landing on it, on-screen once
+focused, Enter moving focus into `main` — red on `main`, 21 / 21 on Chromium with the change, and
+`core.spec.ts`'s 32 axe cases unaffected. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
