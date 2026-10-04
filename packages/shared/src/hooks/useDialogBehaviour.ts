@@ -65,9 +65,16 @@ import { useEffect, useRef, type RefObject } from 'react';
 /**
  * Everything the browser will let a user Tab to, minus anything explicitly
  * taken out of the tab order.
+ *
+ * The five element-type arms (`[contenteditable]`, `audio[controls]`,
+ * `video[controls]`, `iframe`, `summary`) deliberately ignore
+ * `tabindex="-1"` — `button:not(:disabled)` always has, too. A `-1` keeps an
+ * element out of the page's own Tab order but not out of `.focus()`'s reach,
+ * and this selector only needs the latter: the trap calls `.focus()`
+ * directly, it never simulates a browser's Tab key.
  */
 const FOCUSABLE_SELECTOR =
-  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"]), audio[controls], video[controls], iframe, summary, area[href]';
+  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable]:not([contenteditable="false"]), audio[controls], video[controls], iframe, summary';
 
 /**
  * Every dialog instance currently open, oldest first. The last entry is the
@@ -115,10 +122,10 @@ export function useDialogBehaviour(
 
     const previouslyFocused = document.activeElement as HTMLElement | null;
 
-    // This instance's place in the open-dialog stack. Pushed on open, popped
-    // on close/unmount below — never left behind.
+    // This instance's place in the open-dialog stack. Declared here so
+    // `handleKeyDown`'s closure below can capture it, but not pushed until
+    // right before the listener that reads it is bound — see there for why.
     const id = Symbol('dialog');
-    openDialogs.push(id);
 
     // Re-read on every Tab rather than once: the playback dialog's controls come
     // and go with the player's own state, and the export dialog swaps its whole
@@ -181,6 +188,17 @@ export function useDialogBehaviour(
       }
     };
 
+    // Pushed immediately before the listener that reads it is bound, rather
+    // than up where `id` is declared, so as little as possible sits between
+    // the push and the `return` below that registers its pop. If something
+    // earlier in this effect threw, the effect body would never reach its
+    // `return`, React would never see a cleanup function to run, and the
+    // pushed id would stay on the stack forever — disabling Escape for every
+    // dialog opened after it, for the rest of the page's life. Nothing
+    // between here and the `return` can throw today (`addEventListener`
+    // does not), so this is hardening against a risk the code does not
+    // currently carry, not a fix for one it does.
+    openDialogs.push(id);
     document.addEventListener('keydown', handleKeyDown, true);
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
