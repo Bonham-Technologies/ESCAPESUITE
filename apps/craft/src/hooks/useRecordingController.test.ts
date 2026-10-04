@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import {
   CAPTURE_TIMEOUT_MS,
+  disposeLiveRecordingSession,
   useRecordingController,
   type RecordingController,
   type RecordingControllerDeps,
@@ -1802,6 +1803,46 @@ describe('useRecordingController teardown', () => {
     expect(vi.getTimerCount()).toBe(0)
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(state()).toBe('idle')
+  })
+
+  // ESCSUITE-212: the same teardown, reached from outside React — this is
+  // what the app's ErrorBoundary.onError calls when a render-time throw
+  // anywhere in the tree would otherwise leave this take capturing into a
+  // dead UI.
+  describe('disposeLiveRecordingSession', () => {
+    it('disposes the live recorder and releases the capture when called directly', async () => {
+      const { result, unmount } = mountController({ countdownSeconds: 0 })
+      await startTake(result)
+      const recorder = recorderFactory.last()
+      recorder.duration = 7
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(useRecorderStore.getState().currentDuration).toBe(7)
+
+      disposeLiveRecordingSession()
+
+      expect(recorder.dispose).toHaveBeenCalledTimes(1)
+      expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+      expect(useRecorderStore.getState().currentDuration).toBe(0)
+      expect(state()).toBe('idle')
+
+      // The real unmount that follows (React's own, once the ErrorBoundary's
+      // fallback replaces the crashed tree) runs the same teardown again.
+      // disposeRecorder()'s own `recorderRef.current` guard keeps a second
+      // dispose() call from reaching an already-disposed recorder; calling
+      // stopAllStreams twice is harmless on the real path (it reads the
+      // store and stops whatever is still there, which by then is nothing),
+      // and the double here simply reflects the mock being invoked twice.
+      unmount()
+      expect(recorder.dispose).toHaveBeenCalledTimes(1)
+      expect(harness.stopAllStreams).toHaveBeenCalledTimes(2)
+    })
+
+    it('does nothing when no controller is mounted', () => {
+      const { unmount } = mountController({ countdownSeconds: 0 })
+      unmount()
+
+      expect(() => disposeLiveRecordingSession()).not.toThrow()
+    })
   })
 
   it('drops a chunk that arrives after the screen went away', async () => {
