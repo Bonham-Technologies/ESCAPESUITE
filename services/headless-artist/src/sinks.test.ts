@@ -154,6 +154,32 @@ describe('s3 sink selection', () => {
       /s3 sink requires config\.prefix to name a bucket/,
     )
   })
+
+  // ESCSUITE-209: unlike every other sink, s3 had no delivery budget of its own -- a stalled
+  // upload was bounded only by the AWS SDK's own defaults (no timeout, with retries).
+  describe('config.timeoutMs', () => {
+    it('validates it is a positive integer when provided', async () => {
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: 0 })).rejects.toThrow(
+        /s3 sink requires config\.timeoutMs \(positive integer\) when provided/,
+      )
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: 1.5 })).rejects.toThrow(
+        /s3 sink requires config\.timeoutMs \(positive integer\) when provided/,
+      )
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: '10' })).rejects.toThrow(
+        /s3 sink requires config\.timeoutMs \(positive integer\) when provided/,
+      )
+    })
+
+    it('refuses a timeoutMs above the 32-bit timer bound, naming it', async () => {
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: MAX_TIMEOUT_MS + 1 })).rejects.toThrow(
+        `s3 sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
+
+    it('accepts exactly the bound', async () => {
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: MAX_TIMEOUT_MS })).resolves.toBeTruthy()
+    })
+  })
 })
 
 describe('volume sink', () => {
