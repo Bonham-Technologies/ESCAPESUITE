@@ -17,39 +17,36 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   })
 
   test('can tab through navigation links', async ({ page, browserName }) => {
-    const nav = page.locator('nav, header').first()
-    const isVisible = await nav.isVisible().catch(() => false)
+    // `Layout.tsx` always renders a real `<header>`/`<nav>` — no `if
+    // (isVisible)` guard needed around the only assertion (ESCSUITE-202 K-4).
+    //
+    // ESCSUITE-177: WebKit's default "Tab to links" preference is off (the
+    // native macOS behaviour Playwright's WebKit inherits), so a plain Tab
+    // never reaches a link — the nav bar here is nothing but links. The
+    // real-Safari equivalent for "tab to everything" is Option+Tab
+    // (Alt+Tab in Playwright's key names).
+    const advance = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
 
-    if (isVisible) {
-      // ESCSUITE-177: WebKit's default "Tab to links" preference is off (the
-      // native macOS behaviour Playwright's WebKit inherits), so a plain Tab
-      // never reaches a link — the nav bar here is nothing but links. The
-      // real-Safari equivalent for "tab to everything" is Option+Tab
-      // (Alt+Tab in Playwright's key names).
-      const advance = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+    // Focus the document
+    await page.keyboard.press(advance)
 
-      // Focus the document
-      await page.keyboard.press(advance)
-
-      // Tab through and verify focus moves
-      const focusOrder = await checkFocusOrder(page, advance)
-      expect(focusOrder.length).toBeGreaterThan(0)
-    }
+    // Tab through and verify focus moves
+    const focusOrder = await checkFocusOrder(page, advance)
+    expect(focusOrder.length).toBeGreaterThan(0)
   })
 
   test('Enter key activates buttons', async ({ page }) => {
-    const button = page.getByRole('button').first()
-    const isVisible = await button.isVisible().catch(() => false)
+    // "Open the editor" calls `launchTool('artist')`, which `window.open`s
+    // in dev — a real, observable consequence instead of a doctype check
+    // that survives any amount of React failure (ESCSUITE-202 K-3).
+    const button = page.getByRole('button', { name: 'Open the editor' })
+    await button.focus()
 
-    if (isVisible) {
-      await button.focus()
-      await page.keyboard.press('Enter')
-
-      // Button should respond to Enter (may open modal, navigate, etc.)
-      // Just verify no crash occurred
-      const html = await page.content()
-      expect(html).toContain('<!DOCTYPE html>')
-    }
+    const popupPromise = page.waitForEvent('popup')
+    await page.keyboard.press('Enter')
+    const popup = await popupPromise
+    expect(popup.url()).toContain(':5175')
+    await popup.close()
   })
 
   // ESCSUITE-187: a `Space key activates buttons` case used to live here,
@@ -58,39 +55,35 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   // needs ESCAPECRAFT, not ESCAPEPLAN. It moved to the
   // `VideoPlayer Keyboard Shortcuts` describe below.
 
-  test('skip link functionality', async ({ page }) => {
-    // Check for skip link
-    const skipLink = page.locator('a[href="#main"], a[href="#content"], .skip-link').first()
-    const exists = (await skipLink.count()) > 0
-
-    if (exists) {
-      await page.keyboard.press('Tab')
-
-      // Skip link should be one of the first focusable elements
-      const activeElement = await page.evaluate(() => document.activeElement?.textContent)
-      // Skip links often say "Skip to main content" or similar
-      expect(activeElement?.toLowerCase()).toContain('skip')
-    }
-  })
+  // ESCSUITE-202: ESCAPEPLAN has no skip link anywhere
+  // (`grep -rn "skip-link\|Skip to" apps/plan/src` has no matches) — a real,
+  // surfaced gap, not fixed here (test-only ticket). "skip link
+  // functionality" had no feature to find (its only assertion sat behind an
+  // `if (exists)` that was always false) and is deleted rather than kept as
+  // a placeholder for a control that does not exist.
 
   test('focusable elements have visible focus', async ({ page }) => {
     // Tab to first few elements and check for focus indicators
     for (let i = 0; i < 5; i++) {
       await page.keyboard.press('Tab')
 
-      const hasFocusIndicator = await page.evaluate(() => {
+      const result = await page.evaluate(() => {
         const el = document.activeElement
-        if (!el || el === document.body) return true // Skip if no focus
+        if (!el || el === document.body) return { onBody: true, hasFocusIndicator: false }
 
         const styles = window.getComputedStyle(el)
         const outlineWidth = parseInt(styles.outlineWidth) || 0
         const boxShadow = styles.boxShadow !== 'none'
 
-        return outlineWidth > 0 || boxShadow
+        return { onBody: false, hasFocusIndicator: outlineWidth > 0 || boxShadow }
       })
 
-      // Focus should be visible
-      expect(hasFocusIndicator).toBe(true)
+      // Focus actually moved off the document (ESCAPEPLAN has real nav
+      // links and CTA buttons to land on) and is visible once it does —
+      // the old version's `if (!el || el === document.body) return true`
+      // made a broken focus ring and a broken Tab order indistinguishable.
+      expect(result.onBody).toBe(false)
+      expect(result.hasFocusIndicator).toBe(true)
     }
   })
 })
@@ -255,49 +248,43 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   })
 
   test('can tab through toolbar', async ({ page }) => {
-    // First verify there are focusable elements on the page
-    const focusableCount = await page.evaluate(() => {
-      const focusable = document.querySelectorAll(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      )
-      return focusable.length
-    })
-
-    // Skip focus order check if no focusable elements (can happen in headless CI)
-    if (focusableCount === 0) {
-      // Page loaded but no focusable elements - pass with note
-      expect(true).toBe(true)
-      return
-    }
-
-    // Click on body first to ensure focus is in document
+    // ESCSUITE-202 K-1: the old version's fallback — `if (focusableCount ===
+    // 0) { expect(true).toBe(true); return }` — was a literal always-pass
+    // placeholder. `checkFocusOrder` identifies a focused element by
+    // `id || data-testid || tagName`, which collapses every unlabelled
+    // icon-only toolbar button to the same "button" string and reports a
+    // false cycle after the second one — so this counts real Tab stops by
+    // marking each focused element as it is visited, the actual claim
+    // "can tab through toolbar" makes: the editor's toolbar, File menu and
+    // inspector alone are comfortably more than five focusable elements.
     await page.click('body')
-    await checkFocusOrder(page)
-
-    // In headless mode, focus behavior can vary - just verify page is functional
-    expect(focusableCount).toBeGreaterThan(0)
-  })
-
-  test('arrow keys navigate in menus', async ({ page }) => {
-    // Look for a dropdown or menu
-    const menuButton = page
-      .getByRole('button', { name: /menu|options|more/i })
-      .or(page.locator('[aria-haspopup="menu"]'))
-      .first()
-
-    const isVisible = await menuButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await menuButton.click()
-      await page.waitForTimeout(300)
-
-      // Arrow down should move focus in menu
-      await page.keyboard.press('ArrowDown')
-
-      const focusedAfterArrow = await page.evaluate(() => document.activeElement?.textContent)
-      expect(focusedAfterArrow).toBeDefined()
+    let distinctStops = 0
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press('Tab')
+      const isNew = await page.evaluate(() => {
+        const el = document.activeElement
+        if (!el || el === document.body) return false
+        if (el.hasAttribute('data-e2e-tab-seen')) return false
+        el.setAttribute('data-e2e-tab-seen', '1')
+        return true
+      })
+      if (isNew) distinctStops++
     }
+    expect(distinctStops).toBeGreaterThan(5)
   })
+
+  // ESCSUITE-202: a real app defect, not fixed here (test-only ticket).
+  // `FileMenu.tsx`'s dropdown — the one `aria-haspopup="menu"` control in
+  // ESCAPEARTIST — wraps `role="menu"` around four plain `<button>`s with no
+  // `role="menuitem"` and no arrow-key handler at all; ArrowDown does
+  // nothing but whatever the browser's own default is (nothing, for a plain
+  // button). The APG expects a real `role="menu"` to implement roving
+  // tabindex and arrow-key navigation. "arrow keys navigate in menus" had no
+  // such behaviour to find — its only assertion sat behind an
+  // `if (isVisible)` and then asserted `toBeDefined()` on a string, which is
+  // true for `undefined` read back out of `document.activeElement
+  // ?.textContent` too — and is deleted rather than kept as a placeholder
+  // for it.
 
   test('Space bar toggles play/pause', async ({ page }) => {
     // ESCSUITE-187: with no clip on the timeline `canPlay` is false and Space
@@ -319,13 +306,16 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   })
 
   test('keyboard shortcuts work without focus on inputs', async ({ page }) => {
-    // Common video editor shortcuts
-    // Z for undo
-    await page.keyboard.press('z')
+    // Bare "z" is not a shortcut (undo is Ctrl/Cmd+Z) — the old version
+    // pressed a key that does nothing and then asserted a doctype, which
+    // would pass whether or not the real shortcut worked. `seedTextClip`
+    // leaves focus on the "Add Text" button (a plain button, not an input),
+    // so Ctrl+Z firing from there is the real claim this test's name makes.
+    await seedTextClip(page)
+    await expect(page.getByText(/^1 clip/).first()).toBeVisible()
 
-    // Should not crash
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
+    await page.keyboard.press('Control+z')
+    await expect(page.getByText(/^0 clips/)).toBeVisible()
   })
 
   test('Escape closes panels and modals', async ({ page }) => {
@@ -362,13 +352,20 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
   })
 
   test('timeline keyboard shortcuts', async ({ page }) => {
-    // Left/Right arrows for frame stepping
-    await page.keyboard.press('ArrowLeft')
-    await page.keyboard.press('ArrowRight')
+    // `PlaybackControls.tsx`'s global ArrowLeft/ArrowRight handler steps the
+    // playhead a whole second at a time (not a frame — the test's own name
+    // is loose about that, the shortcut itself is real) whenever focus is
+    // off an input, select or textarea. The preview's timecode readout is
+    // the real, observable consequence.
+    await seedTextClip(page)
+    const timecode = page.locator('[class*="timecode"]').first()
+    await expect(timecode).toHaveText('00:00.000')
 
-    // Should not crash
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
+    await page.keyboard.press('ArrowRight')
+    await expect(timecode).toHaveText('00:01.000')
+
+    await page.keyboard.press('ArrowLeft')
+    await expect(timecode).toHaveText('00:00.000')
   })
 })
 
