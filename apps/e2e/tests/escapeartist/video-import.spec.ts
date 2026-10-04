@@ -1,14 +1,12 @@
-import { dirname, resolve as resolvePath } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { test, expect } from '@playwright/test'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  ARTIST_FIXTURE_MP4,
+  importMediaAndAddToTimeline,
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
-
-/** The same one-second fixture the integration and perf suites import. */
-const ARTIST_FIXTURE_MP4 = resolvePath(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../fixtures/headless/source.mp4'
-)
 
 test.describe('ESCAPEARTIST Video Import', () => {
   test.beforeEach(async ({ page }) => {
@@ -42,11 +40,7 @@ test.describe('ESCAPEARTIST Video Import', () => {
     // Even an empty project has a track to hold whatever lands on it.
     await expect(page.locator('[data-track-id]')).toHaveCount(1)
 
-    await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
-    const addToTimeline = page.getByRole('button', { name: 'Add to timeline' })
-    await expect(addToTimeline).toBeVisible({ timeout: 30_000 })
-    await addToTimeline.click()
-    await expect(page.getByText(/^1 clip/).first()).toBeVisible({ timeout: 15_000 })
+    await importMediaAndAddToTimeline(page)
   })
 
   test('has preview area with canvas', async ({ page }) => {
@@ -55,29 +49,27 @@ test.describe('ESCAPEARTIST Video Import', () => {
     // claim this test makes needs a clip on it first.
     await expect(page.locator('canvas')).toHaveCount(0)
 
-    await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
-    const addToTimeline = page.getByRole('button', { name: 'Add to timeline' })
-    await expect(addToTimeline).toBeVisible({ timeout: 30_000 })
-    await addToTimeline.click()
-    await expect(page.getByText(/^1 clip/).first()).toBeVisible({ timeout: 15_000 })
+    await importMediaAndAddToTimeline(page)
 
     const canvas = page.locator('canvas')
     await expect(canvas).toBeVisible()
 
     // And it actually draws the imported source, not an empty backing store.
     await page.getByTitle('Go to start (Home)').click()
-    await page.waitForTimeout(500)
-    const nonBlackPixels = await page.evaluate(() => {
-      const el = document.querySelector('canvas') as HTMLCanvasElement
-      const ctx = el.getContext('2d')!
-      const { data } = ctx.getImageData(0, 0, el.width, el.height)
-      let count = 0
-      for (let i = 0; i < data.length; i += 4) {
-        if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) count++
-      }
-      return count
-    })
-    expect(nonBlackPixels).toBeGreaterThan(0)
+    const countNonBlackPixels = () =>
+      page.evaluate(() => {
+        const el = document.querySelector('canvas') as HTMLCanvasElement
+        const ctx = el.getContext('2d')!
+        const { data } = ctx.getImageData(0, 0, el.width, el.height)
+        let count = 0
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i] > 10 || data[i + 1] > 10 || data[i + 2] > 10) count++
+        }
+        return count
+      })
+    // Polled rather than a fixed sleep: the decode settles asynchronously
+    // after the seek, and a poll only waits as long as it actually takes.
+    await expect.poll(countNonBlackPixels).toBeGreaterThan(0)
   })
 })
 
