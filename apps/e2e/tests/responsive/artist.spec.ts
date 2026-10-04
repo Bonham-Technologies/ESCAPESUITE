@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+  inspector,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEARTIST Mobile Layout', () => {
@@ -42,9 +47,8 @@ test.describe('ESCAPEARTIST Tablet Layout', () => {
 
   test('panels fit within tablet width', async ({ page }) => {
     const mediaSidebar = page.locator('aside').filter({ has: page.locator('#media-library-title') })
-    const inspector = page.locator('aside[aria-labelledby="inspector-title"]')
 
-    for (const panel of [mediaSidebar, inspector]) {
+    for (const panel of [mediaSidebar, inspector(page)]) {
       await expect(panel).toBeVisible()
       const box = (await panel.boundingBox())!
       expect(box.width).toBeLessThanOrEqual(768)
@@ -93,21 +97,18 @@ test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
 
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-label', 'Show inspector')
-    await expect(page.locator('aside[aria-labelledby="inspector-title"]')).toHaveClass(
-      /inspectorCollapsed/
-    )
+    await expect(inspector(page)).toHaveClass(/inspectorCollapsed/)
 
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-label', 'Hide inspector')
   })
 
   test('inspector full width on mobile', async ({ page }) => {
-    const inspector = page.locator('aside[aria-labelledby="inspector-title"]')
-    await expect(inspector).toBeVisible()
+    await expect(inspector(page)).toBeVisible()
     // The slide-out panel is a fixed ~300px width (plus border), not the
     // 375px viewport's — it overlays the editor rather than reflowing to
     // fill it.
-    const box = (await inspector.boundingBox())!
+    const box = (await inspector(page).boundingBox())!
     expect(box.width).toBeLessThan(350)
     expect(box.width).toBeGreaterThan(280)
   })
