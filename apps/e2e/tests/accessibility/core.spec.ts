@@ -31,6 +31,13 @@ test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
     await waitForAppReady(page, 'plan')
+
+    // ESCSUITE-202 K-7: every test below is a pure negative (zero
+    // violations, zero images without alt text, zero unlabelled forms, at
+    // most two vague links) — every one of those is also true of a page
+    // with nothing rendered on it. Anchor the whole describe on the real
+    // landing page once, here, rather than in each test.
+    await expect(page.locator('h1').first()).toBeVisible()
   })
 
   test('landing page passes axe-core audit', async ({ page }) => {
@@ -388,7 +395,14 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 
   test('editor has valid heading hierarchy', async ({ page }) => {
-    const { valid } = await checkHeadingHierarchy(page)
+    // Zero headings is "valid" too (`checkHeadingHierarchy` only reports
+    // skipped levels and duplicate h1s), which a gutted page would also
+    // report — floor it on the idle shell's own stable set: just the h1
+    // "ESCAPEARTIST" logo (`AppHeader.tsx`). Every other heading in the app
+    // is inside a dialog or the clip inspector's selected state, neither of
+    // which is true on a fresh idle load.
+    const { valid, headings } = await checkHeadingHierarchy(page)
+    expect(headings).toHaveLength(1)
     expect(valid).toBe(true)
   })
 
@@ -408,7 +422,11 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 
   test('form inputs have associated labels', async ({ page }) => {
-    const { unlabeled } = await checkFormLabels(page)
+    // An empty page reports zero unlabelled controls too — prove the idle
+    // shell actually had real inputs to check: the resolution picker and the
+    // default track's volume slider are both unconditionally on screen.
+    const { labeled, unlabeled } = await checkFormLabels(page)
+    expect(labeled).toBeGreaterThanOrEqual(2)
     expect(unlabeled).toHaveLength(0)
   })
 
