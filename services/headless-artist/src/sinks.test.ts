@@ -3,10 +3,19 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import http from 'node:http'
+import crypto from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { getSink } from './sinks'
 import type { VerificationManifest } from './manifest'
 import { MAX_TIMEOUT_MS } from './timeouts'
+
+// A handle to the real, unmocked fs.promises so a test that spies on fs.rename can still
+// delegate the calls it does not want to intercept.
+const fsOriginal = { rename: fs.rename.bind(fs) }
+
+function sha256Of(data: string): string {
+  return crypto.createHash('sha256').update(data).digest('hex')
+}
 
 const cleanupPaths: string[] = []
 const cleanupServers: http.Server[] = []
@@ -220,37 +229,20 @@ describe('volume sink', () => {
   })
 })
 
-describe('volume sink cross-device fallback', () => {
-  it('removes the partial destination when the copy fails, rather than leaving a truncated file', async () => {
-    const srcDir = await makeTempDir()
-    const destDir = await makeTempDir()
-    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
-    const manifest = fakeManifest({ jobId: 'job-exdev' })
-    const destOutput = path.join(destDir, 'job-exdev.mp4')
-
-    const renameSpy = vi
-      .spyOn(fs, 'rename')
-      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
-    const copySpy = vi.spyOn(fs, 'copyFile').mockImplementation(async () => {
-      // What a real interrupted copy leaves behind: a destination with only some of the bytes.
-      await fs.writeFile(destOutput, Buffer.from('hel'))
-      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
-    })
-
-    try {
-      const sink = await getSink('volume', { dir: destDir })
-      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-        'no space left on device',
-      )
-    } finally {
-      renameSpy.mockRestore()
-      copySpy.mockRestore()
+/** Mocks `fs.rename` so a move that crosses out of its destination's own directory (the
+ * video's `outputPath -> temp-in-dir` move) fails with EXDEV, simulating `dir` living on a
+ * different filesystem from the job's own scratch dir, while every same-directory rename (a
+ * temp name onto its final published name) passes through to the real implementation
+ * unaffected -- exactly as it would on a real filesystem. */
+function mockCrossDeviceRename(): ReturnType<typeof vi.spyOn> {
+  return vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+    const [oldPath, newPath] = args as [string, string]
+    if (path.dirname(oldPath) !== path.dirname(newPath)) {
+      throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
     }
-
-    // A half-written render must never be left where a consumer would pick it up as finished.
-    await expect(fs.access(destOutput)).rejects.toThrow()
+    return fsOriginal.rename(...(args as Parameters<typeof fsOriginal.rename>))
   })
-})
+}
 
 describe('volume sink failures', () => {
   it('propagates a rename failure that is not a cross-device link', async () => {
@@ -260,56 +252,52 @@ describe('volume sink failures', () => {
 
     const sink = await getSink('volume', { dir: destDir })
 
-    // The render is not where the sink was told it would be: an ENOENT, not an EXDEV, so
-    // there is nothing to fall back to and the failure must surface as it is.
+    // The render is not where the sink was told it would be: an ENOENT, so there is nothing
+    // to copy either, and the failure must surface as it is.
     await expect(
       sink.deliver(manifest.jobId, path.join(srcDir, 'never-written.mp4'), manifest),
     ).rejects.toThrow(/ENOENT/)
 
+    // Rolled back: the manifest published fine before the missing video was ever attempted.
     expect(await fs.readdir(destDir)).toEqual([])
   })
 
-  it('never lets a failed cleanup mask the copy failure that caused it', async () => {
+  it('never lets a failed cleanup mask the real publish failure that caused it', async () => {
     const srcDir = await makeTempDir()
     const destDir = await makeTempDir()
-    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
+    // A directory where the sink expects a file: createReadStream on it fails with EISDIR
+    // once the stream copy actually starts reading -- a genuine failure, not a mocked one.
+    const outputPath = path.join(srcDir, 'not-actually-a-file')
+    await fs.mkdir(outputPath)
     const manifest = fakeManifest({ jobId: 'job-exdev' })
 
-    const renameSpy = vi
-      .spyOn(fs, 'rename')
-      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
-    const copySpy = vi
-      .spyOn(fs, 'copyFile')
-      .mockRejectedValue(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }))
+    const renameSpy = mockCrossDeviceRename()
     const rmSpy = vi
       .spyOn(fs, 'rm')
       .mockRejectedValue(Object.assign(new Error('read-only file system'), { code: 'EROFS' }))
 
     try {
       const sink = await getSink('volume', { dir: destDir })
-      // The ENOSPC, not the EROFS: the operator needs to know why the delivery failed.
-      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-        'no space left on device',
-      )
+      // The EISDIR that actually caused the failure, not the EROFS from either of the two
+      // (now-futile) cleanup attempts it triggers.
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(/EISDIR/)
       expect(rmSpy).toHaveBeenCalled()
     } finally {
       renameSpy.mockRestore()
-      copySpy.mockRestore()
       rmSpy.mockRestore()
     }
   })
 })
 
 describe('volume sink cross-device success', () => {
-  it('copies the render across the device boundary and removes the source', async () => {
+  it('streams the render across the device boundary, never via fs.copyFile, and removes the source', async () => {
     const srcDir = await makeTempDir()
     const destDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
     const manifest = fakeManifest({ jobId: 'job-exdev-ok' })
 
-    const renameSpy = vi
-      .spyOn(fs, 'rename')
-      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
+    const renameSpy = mockCrossDeviceRename()
+    const copySpy = vi.spyOn(fs, 'copyFile')
 
     try {
       const sink = await getSink('volume', { dir: destDir })
@@ -317,12 +305,124 @@ describe('volume sink cross-device success', () => {
 
       expect(result.outputLocation).toBe(path.join(destDir, 'job-exdev-ok.mp4'))
       expect(await fs.readFile(result.outputLocation, 'utf8')).toBe('hello world')
+      expect(copySpy).not.toHaveBeenCalled()
+      // Nothing but the two published files survives -- no stray temp names.
+      expect((await fs.readdir(destDir)).sort()).toEqual(
+        ['job-exdev-ok.manifest.json', 'job-exdev-ok.mp4'].sort(),
+      )
     } finally {
       renameSpy.mockRestore()
+      copySpy.mockRestore()
     }
 
     // A copy that leaves the original behind fills the scratch volume one render at a time.
     await expect(fs.access(outputPath)).rejects.toThrow()
+  })
+})
+
+// ESCSUITE-190 (hunt-j J-3 / verify V-4): the video was renamed into place before the sidecar
+// was written, so a manifest failure left a finished-looking video with nothing beside it; and
+// the EXDEV fallback copied straight into the shared destination path, so two concurrent
+// deliveries under one jobId could interleave at the byte level. Publication is now sidecar
+// first, both files staged at a private, unique temp name inside `dir` and published with one
+// same-directory rename each -- which a reader can only ever see as the old file or the new
+// one, never a half-written one -- and the `fs.copyFile` fallback is gone outright.
+describe('volume sink atomic publication (ESCSUITE-190)', () => {
+  it('leaves no <jobId>.<ext> behind when the sidecar fails to publish', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
+    const manifest = fakeManifest({ jobId: 'job-1' })
+    // Anything that makes the sidecar's own publish fail: here the final name is already a
+    // directory, so the rename that would publish it rejects with EISDIR.
+    await fs.mkdir(path.join(destDir, 'job-1.manifest.json'))
+
+    const sink = await getSink('volume', { dir: destDir })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow()
+
+    // The video must never be published while the manifest beside it is not -- a consumer
+    // watching the directory must never see a finished-looking render with nothing to verify
+    // it against.
+    await expect(fs.access(path.join(destDir, 'job-1.mp4'))).rejects.toThrow()
+    // No stray temp file left behind either.
+    const leftover = (await fs.readdir(destDir)).filter((name) => !name.endsWith('.manifest.json'))
+    expect(leftover).toEqual([])
+  })
+
+  it('rolls back an already-published sidecar when the video fails to publish', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
+    const manifest = fakeManifest({ jobId: 'job-2' })
+
+    // The sidecar publishes fine; only the *video*'s own final rename fails (its name is
+    // already a directory).
+    const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+      const [, newPath] = args as [unknown, string]
+      if (newPath === path.join(destDir, 'job-2.mp4')) {
+        throw Object.assign(new Error('is a directory'), { code: 'EISDIR' })
+      }
+      return fsOriginal.rename(...(args as Parameters<typeof fsOriginal.rename>))
+    })
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(/is a directory/)
+    } finally {
+      renameSpy.mockRestore()
+    }
+
+    // The manifest that landed before the video failed must not be left signing a render
+    // that was never actually delivered.
+    await expect(fs.access(path.join(destDir, 'job-2.manifest.json'))).rejects.toThrow()
+  })
+
+  it('never calls fs.copyFile, and delivers exactly one job whole rather than a blend, when two deliveries race under one jobId across a filesystem boundary', async () => {
+    const destDir = await makeTempDir()
+    const srcDirA = await makeTempDir()
+    const srcDirB = await makeTempDir()
+
+    const bytesA = 'A'.repeat(64 * 1024)
+    const bytesB = 'B'.repeat(96 * 1024)
+    const outputPathA = await makeOutputFile(srcDirA, Buffer.from(bytesA), 'render-a.mp4')
+    const outputPathB = await makeOutputFile(srcDirB, Buffer.from(bytesB), 'render-b.mp4')
+    const manifestA = fakeManifest({ jobId: 'job-race', sha256: sha256Of(bytesA) })
+    const manifestB = fakeManifest({ jobId: 'job-race', sha256: sha256Of(bytesB) })
+
+    // Simulates `dir` living on a different filesystem from each job's own scratch dir: the
+    // move of the render *into* dir hits EXDEV; a rename that stays entirely inside `dir`
+    // (the private temp name to its final published name) is unaffected and passes through.
+    const renameSpy = mockCrossDeviceRename()
+    const copySpy = vi.spyOn(fs, 'copyFile')
+
+    try {
+      const sinkA = await getSink('volume', { dir: destDir })
+      const sinkB = await getSink('volume', { dir: destDir })
+      const results = await Promise.all([
+        sinkA.deliver('job-race', outputPathA, manifestA),
+        sinkB.deliver('job-race', outputPathB, manifestB),
+      ])
+
+      expect(new Set(results.map((r) => r.outputLocation)).size).toBe(1)
+      expect(copySpy).not.toHaveBeenCalled()
+
+      const delivered = await fs.readFile(path.join(destDir, 'job-race.mp4'), 'utf8')
+      const deliveredManifest = JSON.parse(
+        await fs.readFile(path.join(destDir, 'job-race.manifest.json'), 'utf8'),
+      ) as VerificationManifest
+      const deliveredSha = sha256Of(delivered)
+
+      // Each job wrote to its own private temp name while EXDEV forced a stream copy, so the
+      // slow part never shared a destination path -- the only thing that could race is the
+      // final same-directory rename, and a rename replaces a name outright. The result must
+      // be exactly one job's bytes next to that same job's manifest, never a mix of both.
+      expect([bytesA, bytesB]).toContain(delivered)
+      expect(deliveredManifest.sha256).toBe(deliveredSha)
+      expect([manifestA.sha256, manifestB.sha256]).toContain(deliveredManifest.sha256)
+    } finally {
+      renameSpy.mockRestore()
+      copySpy.mockRestore()
+    }
   })
 })
 
