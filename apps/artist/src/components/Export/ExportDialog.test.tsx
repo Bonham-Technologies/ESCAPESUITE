@@ -127,18 +127,24 @@ async function settle() {
 }
 
 /**
- * jsdom leaves offsetParent null on every element, which the dialog's focus
- * trap reads as "not visible". Make the tree look laid out.
+ * jsdom leaves getClientRects() empty for every element, which the dialog's
+ * focus trap reads as "not visible". Make the tree look laid out.
+ *
+ * ESCSUITE-208 (I-U3): this used to patch `offsetParent` instead, because the
+ * trap used to filter on `offsetParent !== null` — which a real browser also
+ * sets to `null` for any `position: fixed` control, dropping it from the trap
+ * entirely. The trap now reads `getClientRects()`, so this stub moved onto
+ * the same property.
  */
 function pretendElementsAreVisible(): () => void {
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
-  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getClientRects')
+  Object.defineProperty(HTMLElement.prototype, 'getClientRects', {
     configurable: true,
-    get: () => document.body,
+    value: () => [{} as DOMRect],
   })
   return () => {
-    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
-    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+    if (original) Object.defineProperty(HTMLElement.prototype, 'getClientRects', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'getClientRects')
   }
 }
 
