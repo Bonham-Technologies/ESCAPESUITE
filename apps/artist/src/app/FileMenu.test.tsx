@@ -179,3 +179,87 @@ describe('FileMenu as a real menu (ESCSUITE-216)', () => {
     expect(trigger).toHaveAttribute('aria-controls', menu.id);
   });
 });
+
+describe('FileMenu arrow-key navigation (ESCSUITE-216)', () => {
+  const labels = (items: HTMLElement[]) => items.map((item) => item.textContent);
+
+  it('moves focus down one item, and takes the tab stop with it', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+
+    await user.keyboard('{ArrowDown}');
+
+    const items = screen.getAllByRole('menuitem');
+    expect(items[1]).toHaveFocus();
+    expect(items.map((item) => item.tabIndex)).toEqual([-1, 0, -1, -1]);
+  });
+
+  it('wraps round from the last item to the first', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}');
+    expect(screen.getAllByRole('menuitem')[3]).toHaveFocus();
+
+    await user.keyboard('{ArrowDown}');
+
+    expect(screen.getAllByRole('menuitem')[0]).toHaveFocus();
+  });
+
+  it('moves focus up, wrapping from the first item to the last', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getAllByRole('menuitem')[3]).toHaveFocus();
+
+    await user.keyboard('{ArrowUp}');
+    expect(screen.getAllByRole('menuitem')[2]).toHaveFocus();
+  });
+
+  it('jumps to the first item on Home and the last on End', async () => {
+    const user = userEvent.setup();
+    renderMenu();
+
+    await user.keyboard('{End}');
+    expect(screen.getAllByRole('menuitem')[3]).toHaveFocus();
+
+    await user.keyboard('{Home}');
+    expect(screen.getAllByRole('menuitem')[0]).toHaveFocus();
+  });
+
+  it.each(['{ArrowLeft}', '{ArrowRight}', 'a'])(
+    'leaves focus alone on %s — a key the menu does not navigate on',
+    async (key) => {
+      const user = userEvent.setup();
+      renderMenu();
+      await user.keyboard('{ArrowDown}');
+
+      await user.keyboard(key);
+
+      const items = screen.getAllByRole('menuitem');
+      expect(items[1]).toHaveFocus();
+      expect(items.map((item) => item.tabIndex)).toEqual([-1, 0, -1, -1]);
+    }
+  );
+
+  it('steps over an item that cannot take focus', async () => {
+    const user = userEvent.setup();
+    renderMenu({ isSaving: true });
+    const items = screen.getAllByRole('menuitem');
+    expect(labels(items)[2]).toBe('Save ProjectCtrl+S');
+
+    await user.keyboard('{ArrowDown}{ArrowDown}');
+
+    expect(items[3]).toHaveFocus();
+  });
+
+  it('ends on the last item that can take focus', async () => {
+    const user = userEvent.setup();
+    renderMenu({ canExport: false });
+
+    await user.keyboard('{End}');
+
+    expect(screen.getAllByRole('menuitem')[2]).toHaveFocus();
+  });
+});

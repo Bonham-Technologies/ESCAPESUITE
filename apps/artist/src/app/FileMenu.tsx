@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { nextMenuIndex } from './menuNavigation';
 import styles from '../App.module.css';
 
 interface FileMenuProps {
@@ -103,6 +104,11 @@ export function FileMenu({
     },
   ];
 
+  // The items the roving focus walks. A `disabled` <button> is out of
+  // `.focus()`'s reach as well as out of the tab order, so the arrows step
+  // over it rather than aiming at something that cannot take focus.
+  const focusable = items.flatMap((item, index) => (item.disabled ? [] : [index]));
+
   // Opening the menu hands focus to its first item and makes that the one tab
   // stop. The first item is New Project, which is never disabled, so this
   // never aims focus at something that cannot take it.
@@ -112,6 +118,19 @@ export function FileMenu({
       itemRefs.current[0].focus();
     }
   }, [isOpen]);
+
+  const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const next = nextMenuIndex(focusable.indexOf(activeIndex), e.key, focusable.length);
+    // A key the menu does not navigate on is the browser's: Enter and Space
+    // are a <button>'s own activation, and anything else belongs to whatever
+    // is listening above.
+    if (next === null) return;
+
+    e.preventDefault();
+    const target = focusable[next];
+    setActiveIndex(target);
+    itemRefs.current[target].focus();
+  };
 
   return (
     <div className={styles.menuContainer}>
@@ -136,7 +155,13 @@ export function FileMenu({
       {isOpen && (
         <>
           <div className={styles.menuBackdrop} onClick={onClose} aria-hidden="true" />
-          <div className={styles.menuDropdown} id={menuId} role="menu" aria-label="File options">
+          <div
+            className={styles.menuDropdown}
+            id={menuId}
+            role="menu"
+            aria-label="File options"
+            onKeyDown={handleKeyDown}
+          >
             {items.map((item, index) => (
               <Fragment key={item.label}>
                 {item.separatorBefore && <div className={styles.menuDivider} role="separator" />}
