@@ -328,6 +328,19 @@ describe('useRecordingController the click path', () => {
     expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', notFound)
     expect(useRecorderStore.getState().notice).toBe('The recording could not be started.')
   })
+
+  it('says the generic failure for a rejection that is not an object at all (ESCSUITE-210)', async () => {
+    // Nothing in the start path rejects with a bare value today; this pins that failureName's
+    // optional chains hold if something ever does, rather than turning a refusal into a crash.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    harness.acquireStreams.mockRejectedValue(undefined)
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', undefined)
+    expect(useRecorderStore.getState().notice).toBe('The recording could not be started.')
+  })
 })
 
 describe('useRecordingController notices', () => {
