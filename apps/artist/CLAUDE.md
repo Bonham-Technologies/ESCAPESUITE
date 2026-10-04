@@ -3925,6 +3925,19 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   `SecurityError: Failed to construct 'Worker'`.
 - `options.resolution` defaults to `'project'`; `meta` describes the encoded output
   (honours `resolution` and `timeRange`).
+- **`options.timeRange` is clamped to the timeline before the exporter ever sees it**
+  (ESCSUITE-191, hunt-j J-9): `render()` clamps `{start, end}` to `[0, timelineDuration]`
+  — an `end` past the timeline is pulled in to it, a negative `start` is floored at
+  0 — and replaces `options.timeRange` with the clamped pair in place, so the
+  `exportToMP4`/`exportToWebM`/`exportToGIF` call below it and the `durationSec` derived
+  after it both read the clamped range, never the caller's raw request. Before this, a
+  one-second project asked for `{start: 0, end: 600}` encoded roughly 599 seconds of
+  black and the signed verification manifest reported `durationSec: 600` for it — the
+  manifest describing the request rather than the bytes. A range whose clamped
+  intersection with the timeline is empty (both bounds past the end, or both before 0)
+  throws rather than rendering zero frames or the un-clamped request. The kit's own
+  `jobSpec.ts` additionally refuses a non-finite or negative bound while parsing, before
+  any of this runs (see `services/headless-artist/README.md` §options).
 - **A GIF's `meta.durationSec` is its frame delays, not its range.** `options.fps`
   (`10 | 15 | 20`, GIF only, default 15 through `gifFrameRate`) feeds the encoder's
   `ceil(seconds x rate)` frames, and a GIF plays for as long as the delays it **stores** say.
