@@ -281,7 +281,7 @@ describe('runJob', () => {
   // it -- it is written straight from the outcome object.
   it('strips ANSI escape sequences and control characters from outcome.error', async () => {
     const workDir = await makeTempDir()
-    const ansiMessage = '[2mbrowserType.launch:[22m Target page\tclosed ([31mcode[39m)'
+    const ansiMessage = '\x1b[2mbrowserType.launch:\x1b[22m Target page\tclosed\x07 (\x1b[31mcode\x1b[39m)'
     vi.mocked(renderInChromium).mockRejectedValue(new Error(ansiMessage))
 
     const outcome = await runJob(
@@ -292,7 +292,7 @@ describe('runJob', () => {
     expect(outcome.ok).toBe(false)
     expect(outcome.error).toBeDefined()
     // eslint-disable-next-line no-control-regex -- asserting none of these bytes survive
-    expect(outcome.error).not.toMatch(/[ -]/)
+    expect(outcome.error).not.toMatch(/[\u0000-\u001f\u007f]/)
     // The readable text survives, just without the escape/control bytes around it.
     expect(outcome.error).toContain('browserType.launch:')
     expect(outcome.error).toContain('Target page')
