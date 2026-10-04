@@ -56,6 +56,10 @@ src/
     └── Legal/              # Privacy and Terms pages
 ```
 
+`Layout.tsx` renders a visually hidden "Skip to main content" link as its first child on every
+route — the first Tab stop, pointing at `<main id="main" tabindex="-1">`, whose focus it moves
+itself rather than leaving the jump to the browser's fragment navigation (ESCSUITE-214).
+
 ## Routes
 
 | Path | Component | Description |
