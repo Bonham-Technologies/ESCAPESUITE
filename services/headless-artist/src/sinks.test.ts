@@ -399,7 +399,38 @@ describe('volume sink atomic publication (ESCSUITE-190)', () => {
     expect(leftover).toEqual([])
   })
 
-  it('rolls back an already-published sidecar when the video fails to publish', async () => {
+  // Review finding 3: nothing in the suite made the manifest's own *temp write* fail (as
+  // opposed to its publish rename, covered above) -- the arm that must remove both temps and
+  // propagate the original error was entirely unproven.
+  it('removes both staged temps and propagates the error when writing the manifest temp fails', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
+    const manifest = fakeManifest({ jobId: 'job-manifest-write-fails' })
+
+    const writeFileSpy = vi
+      .spyOn(fs, 'writeFile')
+      .mockRejectedValueOnce(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }))
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        'no space left on device',
+      )
+    } finally {
+      writeFileSpy.mockRestore()
+    }
+
+    // Nothing published, and the staged video temp went with it -- the directory is empty.
+    expect(await fs.readdir(destDir)).toEqual([])
+  })
+
+  // Review finding 7: an unconditional rollback here would delete a manifest this delivery
+  // may not own -- a previous, still-valid run's (on a re-run that fails this late) or a
+  // concurrent delivery's just-published one. A manifest with no video beside it is harmless
+  // to a consumer watching for the finished render; the reverse is not, which is why it is the
+  // one this sink refuses to ever publish without its sidecar (the test above).
+  it('leaves the published sidecar in place when the video fails to publish', async () => {
     const srcDir = await makeTempDir()
     const destDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
@@ -422,9 +453,11 @@ describe('volume sink atomic publication (ESCSUITE-190)', () => {
       renameSpy.mockRestore()
     }
 
-    // The manifest that landed before the video failed must not be left signing a render
-    // that was never actually delivered.
-    await expect(fs.access(path.join(destDir, 'job-2.manifest.json'))).rejects.toThrow()
+    // The manifest that landed before the video failed is left exactly where it published.
+    const published = JSON.parse(
+      await fs.readFile(path.join(destDir, 'job-2.manifest.json'), 'utf8'),
+    ) as VerificationManifest
+    expect(published.jobId).toBe('job-2')
   })
 
   it('never calls fs.copyFile, and delivers exactly one job whole rather than a blend, when two deliveries race under one jobId across a filesystem boundary', async () => {
@@ -448,27 +481,23 @@ describe('volume sink atomic publication (ESCSUITE-190)', () => {
     try {
       const sinkA = await getSink('volume', { dir: destDir })
       const sinkB = await getSink('volume', { dir: destDir })
-      const results = await Promise.all([
+      await Promise.all([
         sinkA.deliver('job-race', outputPathA, manifestA),
         sinkB.deliver('job-race', outputPathB, manifestB),
       ])
 
-      expect(new Set(results.map((r) => r.outputLocation)).size).toBe(1)
       expect(copySpy).not.toHaveBeenCalled()
 
       const delivered = await fs.readFile(path.join(destDir, 'job-race.mp4'), 'utf8')
-      const deliveredManifest = JSON.parse(
-        await fs.readFile(path.join(destDir, 'job-race.manifest.json'), 'utf8'),
-      ) as VerificationManifest
-      const deliveredSha = sha256Of(delivered)
 
       // Each job wrote to its own private temp name while EXDEV forced a stream copy, so the
       // slow part never shared a destination path -- the only thing that could race is the
       // final same-directory rename, and a rename replaces a name outright. The result must
-      // be exactly one job's bytes next to that same job's manifest, never a mix of both.
+      // be exactly one job's bytes, never a byte-level blend of both (the two load-bearing
+      // claims this test makes). Which job's *manifest* ends up paired with it is a separate,
+      // narrower race this sink does not close -- see README §volume and review finding 1 --
+      // so this test does not assert that pairing.
       expect([bytesA, bytesB]).toContain(delivered)
-      expect(deliveredManifest.sha256).toBe(deliveredSha)
-      expect([manifestA.sha256, manifestB.sha256]).toContain(deliveredManifest.sha256)
     } finally {
       renameSpy.mockRestore()
       copySpy.mockRestore()

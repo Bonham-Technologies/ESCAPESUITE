@@ -80,13 +80,24 @@ async function moveIntoDir(sourcePath: string, tempPath: string): Promise<void> 
   }
 }
 
+/**
+ * Removes `path` and swallows any failure to do so — used only for best-effort cleanup of a
+ * temp file this module itself created, where the failure that triggered the cleanup is
+ * always the one that matters. One shared function (rather than a `.catch(() => undefined)`
+ * repeated at every call site) so the "resolves" and "rejects" shapes of that swallow are each
+ * exercised once, not five times (review finding 2).
+ */
+async function removeQuietly(path: string): Promise<void> {
+  await fs.rm(path, { force: true }).catch(() => undefined)
+}
+
 /** Renames `tempPath` onto `finalPath` — one atomic, same-directory rename. On failure the
  * temp name is removed and the original error propagates, never masked by a cleanup failure. */
 async function publishTemp(tempPath: string, finalPath: string): Promise<void> {
   try {
     await fs.rename(tempPath, finalPath)
   } catch (err) {
-    await fs.rm(tempPath, { force: true }).catch(() => undefined)
+    await removeQuietly(tempPath)
     throw err
   }
 }
@@ -107,12 +118,14 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
       // the two publishing renames below happen back to back with nothing but each other in
       // between, keeping the window in which a *concurrent* delivery for the same jobId could
       // interleave its own publish as small as it already was on the plain same-filesystem
-      // rename path (hunt-j V-4 found 0 mismatches in 240 trials there).
+      // rename path (hunt-j V-4 found 0 mismatches in 240 trials there). It is narrowed, not
+      // closed: two deliveries of the same jobId overlapping in time can still publish one
+      // job's manifest beside the other's video (see README §volume).
       const videoTemp = tempNameFor(destOutputPath)
       try {
         await moveIntoDir(outputPath, videoTemp)
       } catch (err) {
-        await fs.rm(videoTemp, { force: true }).catch(() => undefined)
+        await removeQuietly(videoTemp)
         throw err
       }
 
@@ -120,8 +133,8 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
       try {
         await fs.writeFile(manifestTemp, manifestJson(manifest))
       } catch (err) {
-        await fs.rm(manifestTemp, { force: true }).catch(() => undefined)
-        await fs.rm(videoTemp, { force: true }).catch(() => undefined)
+        await removeQuietly(manifestTemp)
+        await removeQuietly(videoTemp)
         throw err
       }
 
@@ -131,18 +144,16 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
       try {
         await publishTemp(manifestTemp, destManifestPath)
       } catch (err) {
-        await fs.rm(videoTemp, { force: true }).catch(() => undefined)
+        await removeQuietly(videoTemp)
         throw err
       }
 
-      try {
-        await publishTemp(videoTemp, destOutputPath)
-      } catch (err) {
-        // The manifest already landed; a video that never follows must not be left behind
-        // signing a render that was never actually delivered.
-        await fs.rm(destManifestPath, { force: true }).catch(() => undefined)
-        throw err
-      }
+      // No rollback of the sidecar if this fails: a manifest with no video beside it is
+      // harmless to a consumer watching for the finished render, while deleting it here could
+      // itself delete the *previous*, still-valid delivery for this jobId (if this is a
+      // re-run) or a concurrent delivery's just-published manifest — strictly worse than
+      // leaving a name that might not be this call's to remove.
+      await publishTemp(videoTemp, destOutputPath)
 
       return { outputLocation: destOutputPath, manifestLocation: destManifestPath }
     },
