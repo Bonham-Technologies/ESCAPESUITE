@@ -1,5 +1,3 @@
-import { dirname, resolve as resolvePath } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { test, expect } from '@playwright/test'
 import {
   mockWebCodecsUnavailable,
@@ -7,14 +5,13 @@ import {
   mockExportFailure,
   mockStorageQuotaExceeded,
 } from '../../utils/error-mocks'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  ARTIST_FIXTURE_MP4,
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
-
-/** The same one-second fixture the integration and perf suites import. */
-const ARTIST_FIXTURE_MP4 = resolvePath(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../fixtures/headless/source.mp4'
-)
 
 test.describe('Export With No Clips', () => {
   test.beforeEach(async ({ page }) => {
@@ -269,14 +266,25 @@ test.describe('Storage Quota Exceeded', () => {
 })
 
 test.describe('Background Tab Export', () => {
-  test('export continues in background', async ({ page }) => {
+  test('an MP4 export runs to completion', async ({ page }) => {
     // ESCSUITE-202 K-9: `typeof Worker !== 'undefined'` tests that Chromium
     // implements the Worker constructor, not that ESCAPEARTIST's export does
-    // anything with it. The real claim — the CLAUDE.md-documented "MP4
-    // exports run at full speed even in background tabs" — is that the
-    // export's frame loop (`core/exportMP4.ts`, a plain `for` loop with no
-    // rAF/rVFC in it) keeps running once the tab reports itself hidden,
-    // where a rAF-driven exporter would be throttled to near zero.
+    // anything with it. The real claim worth proving is that a real MP4
+    // export — the CLAUDE.md-documented "MP4 exports run at full speed even
+    // in background tabs" names `core/exportMP4.ts`'s frame loop, a plain
+    // `for` loop with no rAF/rVFC in it, as the actual mechanism — reaches
+    // completion. Not named for backgrounding: a second page brought to
+    // front in the same context (`page.context().newPage()` +
+    // `bringToFront()`) still reports `document.visibilityState ===
+    // 'visible'` on this `page` under headless Chromium, confirmed by a red
+    // run here, so there is no way to drive genuine tab-hidden throttling
+    // from this suite — and the app reads no `visibilitychange`/
+    // `document.hidden` itself (`grep -rn "visibilitychange|document.hidden"
+    // apps/artist/src` has no matches) for a redefined property to exercise
+    // either. A real `seedTextClip` + real MP4 encode comfortably clears the
+    // default 30s test budget without headroom, so it gets its own.
+    test.setTimeout(120_000)
+
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
     await seedTextClip(page)
@@ -286,17 +294,7 @@ test.describe('Background Tab Export', () => {
 
     await page.getByRole('button', { name: 'Download MP4' }).first().click()
     await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
-
-    await page.evaluate(() => {
-      Object.defineProperty(document, 'hidden', { value: true, configurable: true })
-      Object.defineProperty(document, 'visibilityState', {
-        value: 'hidden',
-        configurable: true,
-      })
-      document.dispatchEvent(new Event('visibilitychange'))
-    })
-
-    await expect(page.getByText('Export complete!')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Export complete!')).toBeVisible({ timeout: 60_000 })
   })
 
   test('background tab support is indicated', async ({ page }) => {
