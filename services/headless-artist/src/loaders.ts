@@ -151,8 +151,19 @@ function extensionOf(name: string | undefined): string | undefined {
   return ext.length > 0 ? ext : undefined
 }
 
+/** Fails fast (before Chromium) when a project has no `timeline` at all, or one whose `clips`
+ * is not an array -- naming the field rather than letting the walk below leak a bare
+ * `Cannot read properties of undefined (reading 'clips')`. */
+function assertTimelineShape(project: Project): void {
+  const timeline = (project as { timeline?: unknown }).timeline
+  if (!isRecord(timeline) || !Array.isArray((timeline as { clips?: unknown }).clips)) {
+    throw new Error('project.timeline must be an object with an array "clips"')
+  }
+}
+
 /** Fails fast (before Chromium) when a media clip references a source id that isn't loaded. */
 function validateClipReferences(project: Project, sourceIds: Set<string>): void {
+  assertTimelineShape(project)
   for (const clip of project.timeline.clips) {
     // Overlay clips (and any clip with no source, defensively) carry no source reference.
     if (clip.overlayType || !clip.sourceVideoId) continue

@@ -38,4 +38,15 @@ describe('the s3 sink without its optional dependency', () => {
 
     expect(typeof sink.deliver).toBe('function')
   })
+
+  // Review finding 2: probeS3Sdk's own body (ensureSinkReady's one pre-render check) is
+  // mocked away wherever ensureSinkReady is tested, so nothing had ever driven the real
+  // function. This is the "rejects" side; s3.sdk.test.ts's "resolves" case is the other.
+  it('probeS3Sdk itself rejects naming the optional dependency', async () => {
+    const { probeS3Sdk } = await import('./s3')
+
+    await expect(probeS3Sdk()).rejects.toThrow(
+      's3 sink requires the optional dependency @aws-sdk/client-s3',
+    )
+  })
 })

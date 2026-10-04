@@ -1,6 +1,8 @@
-import { openAsBlob, promises as fs } from 'node:fs'
+import { createReadStream, createWriteStream, openAsBlob, promises as fs } from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { pipeline } from 'node:stream/promises'
 import type { VerificationManifest } from './manifest'
 import { MAX_TIMEOUT_MS } from './timeouts'
 
@@ -29,7 +31,7 @@ function manifestJson(manifest: VerificationManifest): string {
   return JSON.stringify(manifest, null, 2) + '\n'
 }
 
-function requireString(config: Record<string, unknown>, field: string, sinkName: string): string {
+export function requireString(config: Record<string, unknown>, field: string, sinkName: string): string {
   const value = config[field]
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`${sinkName} sink requires config.${field} (string)`)
@@ -45,8 +47,59 @@ interface VolumeConfig {
   dir: string
 }
 
-function validateVolumeConfig(config: Record<string, unknown>): VolumeConfig {
+export function validateVolumeConfig(config: Record<string, unknown>): VolumeConfig {
   return { dir: requireString(config, 'dir', 'volume') }
+}
+
+/** A private, unique name inside `finalPath`'s own directory — never shared with any other
+ * delivery, including a concurrent one for the same jobId. */
+function tempNameFor(finalPath: string): string {
+  const unique = crypto.randomBytes(8).toString('hex')
+  return path.join(path.dirname(finalPath), `.${path.basename(finalPath)}.tmp-${unique}`)
+}
+
+/**
+ * Moves `sourcePath` to `tempPath` (a name inside the sink's target directory). Tries a
+ * rename first — free, and the common case when the job's scratch dir and the sink's `dir`
+ * share a filesystem — and falls back to a stream copy across a filesystem boundary.
+ *
+ * Never `fs.copyFile`: that call writes straight to the destination path it is given, so two
+ * concurrent deliveries racing the *same* destination (one jobId, one dir) can interleave at
+ * the byte level (hunt-j V-4b). `tempPath` is unique per call, so no concurrent delivery ever
+ * shares a destination during this slower part — only the final, same-directory renames in
+ * `deliver` below can race, and a rename replaces a name outright; it cannot blend two files'
+ * bytes.
+ */
+async function moveIntoDir(sourcePath: string, tempPath: string): Promise<void> {
+  try {
+    await fs.rename(sourcePath, tempPath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+    await pipeline(createReadStream(sourcePath), createWriteStream(tempPath))
+    await fs.rm(sourcePath, { force: true })
+  }
+}
+
+/**
+ * Removes `path` and swallows any failure to do so — used only for best-effort cleanup of a
+ * temp file this module itself created, where the failure that triggered the cleanup is
+ * always the one that matters. One shared function (rather than a `.catch(() => undefined)`
+ * repeated at every call site) so the "resolves" and "rejects" shapes of that swallow are each
+ * exercised once, not five times (review finding 2).
+ */
+async function removeQuietly(path: string): Promise<void> {
+  await fs.rm(path, { force: true }).catch(() => undefined)
+}
+
+/** Renames `tempPath` onto `finalPath` — one atomic, same-directory rename. On failure the
+ * temp name is removed and the original error propagates, never masked by a cleanup failure. */
+async function publishTemp(tempPath: string, finalPath: string): Promise<void> {
+  try {
+    await fs.rename(tempPath, finalPath)
+  } catch (err) {
+    await removeQuietly(tempPath)
+    throw err
+  }
 }
 
 function createVolumeSink(config: VolumeConfig): OutputSink {
@@ -60,30 +113,47 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
       const destOutputPath = path.join(dir, `${jobId}.${ext}`)
       const destManifestPath = path.join(dir, `${jobId}.manifest.json`)
 
+      // Stage everything at private temp names first — the video's move/copy included, which
+      // is the slow, possibly cross-filesystem part — before anything is published. That way
+      // the two publishing renames below happen back to back with nothing but each other in
+      // between, keeping the window in which a *concurrent* delivery for the same jobId could
+      // interleave its own publish as small as it already was on the plain same-filesystem
+      // rename path (hunt-j V-4 found 0 mismatches in 240 trials there). It is narrowed, not
+      // closed: two deliveries of the same jobId overlapping in time can still publish one
+      // job's manifest beside the other's video (see README §volume).
+      const videoTemp = tempNameFor(destOutputPath)
       try {
-        await fs.rename(outputPath, destOutputPath)
+        await moveIntoDir(outputPath, videoTemp)
       } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
-          try {
-            await fs.copyFile(outputPath, destOutputPath)
-          } catch (copyErr) {
-            // A failed copy (ENOSPC, most likely) leaves a truncated file at the destination,
-            // which a consumer watching the directory would happily pick up as a finished
-            // render. Removing it unconditionally is safe: the path is `<dir>/<jobId>.<ext>`,
-            // so the most this can delete is an earlier render of the same jobId — which this
-            // delivery was overwriting anyway.
-            // Take it away before the failure propagates, and never let a cleanup failure
-            // mask the copy failure that caused it.
-            await fs.rm(destOutputPath, { force: true }).catch(() => undefined)
-            throw copyErr
-          }
-          await fs.rm(outputPath, { force: true })
-        } else {
-          throw err
-        }
+        await removeQuietly(videoTemp)
+        throw err
       }
 
-      await fs.writeFile(destManifestPath, manifestJson(manifest))
+      const manifestTemp = tempNameFor(destManifestPath)
+      try {
+        await fs.writeFile(manifestTemp, manifestJson(manifest))
+      } catch (err) {
+        await removeQuietly(manifestTemp)
+        await removeQuietly(videoTemp)
+        throw err
+      }
+
+      // Publish: the sidecar first — if this fails, the video must never be published either,
+      // so a consumer watching `dir` never sees a finished-looking video with no manifest
+      // beside it to verify it against (hunt-j J-3).
+      try {
+        await publishTemp(manifestTemp, destManifestPath)
+      } catch (err) {
+        await removeQuietly(videoTemp)
+        throw err
+      }
+
+      // No rollback of the sidecar if this fails: a manifest with no video beside it is
+      // harmless to a consumer watching for the finished render, while deleting it here could
+      // itself delete the *previous*, still-valid delivery for this jobId (if this is a
+      // re-run) or a concurrent delivery's just-published manifest — strictly worse than
+      // leaving a name that might not be this call's to remove.
+      await publishTemp(videoTemp, destOutputPath)
 
       return { outputLocation: destOutputPath, manifestLocation: destManifestPath }
     },
@@ -108,7 +178,7 @@ interface CommandConfig {
  */
 const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000
 
-function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
+export function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
   const command = requireString(config, 'command', 'command')
 
   const rawArgs = config.args
@@ -273,7 +343,7 @@ function withoutContentType(headers: Record<string, string>): Record<string, str
   return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'))
 }
 
-function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
+export function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
   const url = requireString(config, 'url', 'webhook')
 
   const rawHeaders = config.headers
@@ -316,6 +386,28 @@ function isTimeoutError(err: unknown): boolean {
   return false
 }
 
+/**
+ * Reads `response`'s body to completion without accumulating it anywhere, so undici can
+ * return the connection to its keep-alive pool (ESCSUITE-205 / hunt-j unverified / verify V-1)
+ * without buffering a misconfigured or hostile intake's response into memory first the way
+ * `response.arrayBuffer()` would. A response with no body (a 204, say) has `body: null` and
+ * needs nothing drained; a body that errors mid-read has nothing further to drain either way —
+ * the delivery's own status/redirect checks below still decide success or failure from the
+ * response already in hand, not from whether the drain itself finished cleanly.
+ */
+async function drainBody(response: Response): Promise<void> {
+  if (!response.body) return
+  try {
+    // DOM's ReadableStream type (this package's lib) does not declare Symbol.asyncIterator,
+    // but Node's actual implementation (and the one this runs on) supports it.
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      void chunk
+    }
+  } catch {
+    // See the doc comment above: nothing left to drain, and nothing this function decides.
+  }
+}
+
 function createWebhookSink(config: WebhookConfig): OutputSink {
   return {
     async deliver(jobId, outputPath, manifest) {
@@ -333,6 +425,13 @@ function createWebhookSink(config: WebhookConfig): OutputSink {
           method: 'POST',
           headers: config.headers,
           body: form,
+          // Never follow a redirect: the default (`follow`) would re-POST the whole render
+          // and every caller header except Content-Type to whatever host a 307/308 names,
+          // which is not the one the operator configured or reviewed (ESCSUITE-205 / hunt-j
+          // unverified / verify V-2). `manual` (rather than `error`) is what gets this sink a
+          // real response object with the status and the Location header still readable, so
+          // the failure below can name where the intake tried to send it.
+          redirect: 'manual',
           signal: AbortSignal.timeout(config.timeoutMs),
         })
       } catch (err) {
@@ -340,6 +439,20 @@ function createWebhookSink(config: WebhookConfig): OutputSink {
           throw new Error(`webhook sink timed out after ${config.timeoutMs} ms`, { cause: err })
         }
         throw err
+      }
+
+      // Drain the response body on every path -- success or failure -- so undici can return
+      // the connection to its keep-alive pool instead of holding it (and whatever bytes it
+      // buffered) open until GC. An unread body meant one fresh TCP connection per delivery
+      // (ESCSUITE-205 / hunt-j unverified / verify V-1).
+      await drainBody(response)
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location')
+        throw new Error(
+          `webhook sink refused to follow a redirect (${response.status}` +
+            `${location ? ` to ${location}` : ''})`,
+        )
       }
 
       if (!response.ok) {
@@ -364,15 +477,13 @@ export async function getSink(kind: string, config: Record<string, unknown>): Pr
     case 'webhook':
       return createWebhookSink(validateWebhookConfig(config))
     case 's3': {
-      const prefix = requireString(config, 'prefix', 's3')
-      // s3.ts loads `@aws-sdk/client-s3` itself, lazily, and throws the "optional
-      // dependency" error from inside s3Sink() when it can't — nothing to catch here.
-      const { s3Sink } = await import('./s3')
-      return s3Sink({
-        prefix,
-        endpoint: typeof config.endpoint === 'string' ? config.endpoint : undefined,
-        region: typeof config.region === 'string' ? config.region : undefined,
-      })
+      // This dynamic import is no longer what keeps `@aws-sdk/client-s3` out of the module
+      // graph (`jobSpec.ts` already imports `./s3` statically, for `validateS3Config` and
+      // `ensureSinkReady`) — what actually does is `s3.ts` never importing the SDK itself at
+      // the top level: `loadS3ClientModule` loads it at call time, and throws the "optional
+      // dependency" error from inside `s3Sink()` when it can't — nothing to catch here.
+      const { s3Sink, validateS3Config } = await import('./s3')
+      return s3Sink(validateS3Config(config))
     }
     default:
       throw new Error(`Unknown output sink: ${kind}`)

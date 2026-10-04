@@ -119,15 +119,20 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p`, `480p` and `360p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. All five are accepted for every format; ESCAPEARTIST's own export dialog offers `720p`, `480p` (its default) and `360p` for `gif`, because a GIF at 1080p is enormous and one at the project's own resolution is unpredictable. The kit applies no such narrowing and issues no size warning — ask for `{ "format": "gif", "resolution": "1080p" }` and you get exactly that, however large (see [Sizing and throughput](#sizing-and-throughput) on GIF memory, which grows with duration). |
 | `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both numbers, `start` strictly less than `end`. Omit to render the whole timeline. |
 | `output.sink` | yes | `volume`, `command`, `webhook` or `s3`. |
-| `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)). |
+| `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)), and is validated against that sink's own requirements as part of parsing. |
 
-Anything the spec gets wrong — an unknown format, a missing field, a `jobId` with a slash in it
-— is caught before Chromium launches and exits **2**.
+Anything the spec gets wrong — an unknown format, a missing field, a `jobId` with a slash in
+it, a sink config that could never work (no `config.dir`, an s3 prefix naming no bucket, ...)
+— is caught before Chromium launches, so `POST /render` answers **400** and `render` exits
+**2** without spending a render on a job that was never going to deliver. The one check that
+cannot run synchronously — whether the optional s3 SDK can even be loaded — runs as a second,
+still-pre-render step right after parsing.
 
 A field this table does not list is ignored rather than rejected, but the CLI says so on
 stderr — `warning: unknown field "options.resoluton"` — so a typo in an optional field does not
-quietly render something other than what you asked for. Keys under `output.config` belong to
-the sink and are not checked here.
+quietly render something other than what you asked for. Keys under `output.config` that the
+chosen sink's own validator does not recognise are not flagged this way — only the fields each
+sink actually requires or type-checks are enforced.
 
 ## Inputs
 
@@ -234,10 +239,28 @@ manifest](#output-and-verification).
 ```
 
 Writes `<dir>/<jobId>.<mp4|webm|gif>` and `<dir>/<jobId>.manifest.json`. The directory is created
-if missing. The video is moved into place with a rename (falling back to a copy across
-filesystems), and both files **overwrite** anything already at those names — which is what
-makes re-running a job id idempotent rather than duplicative. `outputLocation` and
-`manifestLocation` in the outcome are absolute paths.
+if missing. Publication is atomic **per file**: each is staged at a private, unique temp name
+inside `dir` and published with one same-directory rename, so a reader watching the directory
+only ever sees the old copy of that one file or the complete new one, never a half-written
+one. The **sidecar publishes first** — if it fails for any reason, the video is never published
+either, so a failed delivery can never leave a finished-looking video with no manifest beside
+it to verify it against (ESCSUITE-190). If the video then fails to publish, the sidecar that
+already landed is left in place rather than rolled back — a manifest with no video beside it
+is harmless to a consumer watching for the finished render, and an unconditional rollback could
+delete a *previous*, still-valid delivery's manifest (on a re-run that fails this late) or a
+concurrent delivery's just-published one. Both files **overwrite** anything already at those
+names on a clean re-run — which is what makes re-running a job id idempotent rather than
+duplicative. `outputLocation` and `manifestLocation` in the outcome are absolute paths.
+
+**Atomicity is per file, not per delivery.** Two deliveries of the *same* `jobId` running at
+the same time can still publish one job's manifest beside the other's video — the window is
+the gap between the two files' own renames — even though a single file is never a byte-level
+blend of two renders (that failure mode is closed outright; see ESCSUITE-190). A broker must
+therefore not start a retry while a previous attempt for that `jobId` may still be delivering;
+see [Broker integration](#broker-integration). A hard kill (`SIGKILL`) mid-delivery can also
+leave an orphaned `.<jobId>.<ext>.tmp-<hex>` (or `.<jobId>.manifest.json.tmp-<hex>`) dotfile in
+`dir` — safe to delete; nothing reads it, and the leading dot plus the `.tmp-…` suffix keep it
+out of a `*.mp4` glob.
 
 ### `command` — hand off to your own program
 
@@ -306,6 +329,13 @@ A single `multipart/form-data` POST with two fields: `manifest` (the verificatio
 JSON string) and `file` (the render, filename `<jobId>.<ext>`, content type `video/mp4`,
 `video/webm` or `image/gif`). Any non-2xx response fails the job. `outputLocation` is the URL.
 
+**The configured URL is never redirected.** A redirect is never followed — **the intake
+endpoint you configure must answer the POST itself, not send a 3xx**. A 307/308 fails the job
+naming the status and the `Location` header it pointed at, rather than silently re-sending the
+whole render (and every caller header but `Content-Type`) to a host the job spec never named.
+The connection is also always drained, success or failure, so a long-lived `serve` process
+reuses one pooled connection per delivery instead of leaking a fresh one each time.
+
 `timeoutMs` (a positive integer, default **10 minutes**, at most **2147483647** — 2^31-1 ms,
 ~24.8 days, the largest delay a timer can represent; anything above that is refused by name
 rather than silently clamped to ~1 ms) bounds the whole POST — connect, upload, and the
@@ -329,13 +359,18 @@ the render itself is still fully offline.
   "config": {
     "prefix": "s3://my-renders/outgoing",
     "region": "us-east-1",
-    "endpoint": "https://s3.us-east-1.amazonaws.com"
+    "endpoint": "https://s3.us-east-1.amazonaws.com",
+    "timeoutMs": 300000
   }
 }
 ```
 
 Requires the optional dependency `@aws-sdk/client-s3`; without it the job fails with
-`s3 sink requires the optional dependency @aws-sdk/client-s3`.
+`s3 sink requires the optional dependency @aws-sdk/client-s3` before Chromium ever launches,
+not after a full render. **The reference [`Dockerfile`](Dockerfile) does not have it** — it
+installs with `--omit=optional` and sets `HEADLESS_SINKS=volume,webhook` for exactly this
+reason (see [Running in a container](#running-in-a-container)); drop `--omit=optional` and
+widen `HEADLESS_SINKS` back to build an image that can use this sink.
 
 `prefix` accepts `s3://bucket/key-prefix` or a bare `bucket/key-prefix` (a trailing slash is
 harmless), and a bucket with no prefix at all. Objects are written as
@@ -343,6 +378,13 @@ harmless), and a bucket with no prefix at all. Objects are written as
 from disk rather than buffered, and tagged `video/mp4` / `video/webm` / `image/gif` (the manifest
 `application/json`) so a signed URL plays instead of downloading. `endpoint` and `region` are
 both optional — set `endpoint` for MinIO, Ceph, R2 and friends.
+
+`timeoutMs` (a positive integer, default **5 minutes**, same `2147483647` — 2^31-1 ms — bound
+as the webhook and command sinks') is this delivery's own budget, applied as an `AbortSignal`
+on each `send()` call (the video put and the manifest put separately). Unlike those two sinks,
+s3 previously had no budget of its own at all: a stalled upload was bounded only by the AWS
+SDK's own defaults (no timeout, with retries), so a drain waiting on one had no bound this kit
+controlled. A put that outruns it fails with `s3 sink timed out after <n> ms`.
 
 **Credentials come from the environment**, via the AWS SDK's standard chain:
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`), `AWS_PROFILE`,
@@ -542,7 +584,7 @@ cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headles
 This image is built from `services/headless-artist` and smoke-tested (`render` and `--version`)
 in CI on every non-Dependabot pull request (the `kit-docker` job).
 
-Two things worth knowing:
+Three things worth knowing:
 
 - It runs as `pwuser`, not root, which keeps Chromium's own sandbox usable — so
   `HEADLESS_NO_SANDBOX` is *not* set. If you change the image to run as root you must set
@@ -550,6 +592,11 @@ Two things worth knowing:
   directory is writable by uid 1000.
 - Scratch space defaults to the container's `/tmp`. For long renders, mount real storage and
   set `HEADLESS_WORK_DIR` to it.
+- **This image cannot use the `s3` sink.** It installs with `--omit=optional`, so
+  `@aws-sdk/client-s3` is never there, and the `Dockerfile` sets `HEADLESS_SINKS=volume,webhook`
+  so `serve` refuses an s3 job with 403 (and `/healthz`'s `allowedSinks` never advertises it)
+  instead of accepting one it can only fail. Build your own image with `--omit=optional`
+  dropped and `HEADLESS_SINKS` widened to use it — see [`s3`](#s3--upload-to-s3-or-an-s3-compatible-store).
 
 `examples/k8s-job.yaml` is the same thing as a one-shot Kubernetes `Job` — `restartPolicy:
 Never`, `backoffLimit: 0`, input and output volumes, an `emptyDir` for scratch, and a commented
@@ -562,17 +609,24 @@ is a working loop; the contract it relies on is small:
 
 - **One process per job.** No warm-up to amortise, no shared state to corrupt, so you can run
   as many in parallel as the box has cores and memory for.
-- **Idempotent by `jobId`.** The `volume` and `s3` sinks write `<jobId>.<ext>` and
-  `<jobId>.manifest.json`, overwriting. Re-running a job that died halfway leaves one correct
-  output rather than a duplicate. On the `volume` sink the video is *renamed* into place, so on
-  one filesystem it appears atomically; across filesystems it falls back to a copy, which does
-  not.
+- **Idempotent by `jobId` — for sequential retries.** The `volume` and `s3` sinks write
+  `<jobId>.<ext>` and `<jobId>.manifest.json`, overwriting. Re-running a job that died halfway,
+  *after* the first attempt has finished (or definitely failed), leaves one correct output
+  rather than a duplicate. **Do not start a retry while a previous attempt for the same `jobId`
+  may still be delivering**: the `volume` sink's two files publish atomically *individually*,
+  not as a pair, so two overlapping deliveries can leave one attempt's manifest beside the
+  other's video — see [`volume`](#volume--write-to-a-directory) for the window and why an
+  in-process lock does not close it for the documented one-process-per-job deployment.
 - **Retry on exit 1, never on exit 2.** Exit 1 is a failure that may be transient (a busy disk,
   a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
   those to a dead-letter queue instead of a retry loop.
 - **Read `outputLocation` from the outcome**, don't reconstruct it — it differs per sink.
-- **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page can't hold a worker slot
-  indefinitely; the job then fails with `render timed out after <n> ms` and exit 1.
+- **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page — or a Chromium binary that
+  never finishes launching — can't hold a worker slot indefinitely; the job then fails with
+  `render timed out after <n> ms` and exit 1. The budget covers the Chromium launch too, not
+  just the page once it is up — on a launch that hangs it was previously bounded only by
+  Playwright's own default (measured 180 s on Playwright 1.63.0), sixty times most operators'
+  intended budget.
 
 If spawning a process per job is the part that doesn't fit, [HTTP service mode](#http-service-mode)
 keeps every one of those properties except the first, and swaps exit codes for status codes.
@@ -849,16 +903,16 @@ drop a render that is half encoded:
 4. The process exits 0 — or `1`, with `error: shutdown failed: …` on stderr, if the drain
    itself failed and the state of the in-flight renders is therefore unknown.
 
-Step 3 is bounded by `HEADLESS_TIMEOUT_MS` **plus** the job's own delivery budget — not by the
-signal, and not by the render alone. The `webhook` and `command` sinks each have their own
-`timeoutMs` (10 minutes and 5 minutes by default), so a 30-minute render that then delivers over
-`webhook` means up to a 40-minute drain. **`volume` needs no budget of its own — it is a local
-filesystem write — but `s3` has none either**: the sink sets no timeout of its own, so a stalled
-upload is bounded only by the AWS SDK's own defaults (no timeout, with retries), and a drain
-waiting on one has no bound this kit controls at all. An `s3` delivery budget is a follow-up, not
-something this ticket adds. Size `terminationGracePeriodSeconds` (or your orchestrator's
-equivalent) against the sum you can actually bound, or a `SIGKILL` will land in the middle of an
-encode or a delivery and leave the scratch directory behind.
+Step 3 is bounded by `HEADLESS_TIMEOUT_MS` (Chromium launch included, not only the page once it
+is up) **plus** the job's own delivery budget — not by the signal, and not by the render alone.
+The `webhook`, `command` and `s3` sinks each have their own `timeoutMs` (10 minutes, 5 minutes
+and 5 minutes by default), so a 30-minute render that then delivers over `webhook` means up to
+a 40-minute drain. **`s3` budgets each of its two puts separately** (the video, then the
+manifest), so its own contribution to that sum is up to **twice** `timeoutMs` — 10 minutes at
+the default, not 5. **`volume` needs no budget of its own** — it is a local filesystem write.
+Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent) against the sum you
+can actually bound, or a `SIGKILL` will land in the middle of an encode or a delivery and leave
+the scratch directory behind.
 
 Step 2's new half is there so a client that never finishes sending cannot hold **this** drain
 open indefinitely — nothing used to bound that wait at all. The server's own `requestTimeout`

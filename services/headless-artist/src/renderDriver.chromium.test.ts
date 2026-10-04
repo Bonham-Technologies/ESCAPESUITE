@@ -110,3 +110,49 @@ describe('renderInChromium', () => {
     expect(Date.now() - startedAt).toBeLessThan(15_000)
   }, 60_000)
 })
+
+// ESCSUITE-206 (hunt-j verify V-3a): `createDeadline(timeoutMs)` was built, but
+// `await chromium.launch(...)` was not inside the `Promise.race` and had no `timeout` of its
+// own, so the launch phase was bounded only by Playwright's own default (measured 180 000 ms
+// on Playwright 1.63.0) rather than by `timeoutMs`. A Chromium binary that never prints its
+// DevTools line used to hold the call — and, on `serve`, the only worker — for three minutes
+// on a budget as small as 3 s, failing with Playwright's own `Timeout … exceeded` rather than
+// the driver's `render timed out after <n> ms`.
+describe('renderInChromium launch deadline', () => {
+  it('is bounded by timeoutMs, not by Playwright default launch timeout', async () => {
+    const scratch = await fs.mkdtemp(path.join(os.tmpdir(), 'headless-artist-launch-deadline-'))
+    try {
+      const hangs = path.join(scratch, 'hangs.sh')
+      await fs.writeFile(hangs, '#!/bin/sh\nexec sleep 600\n', { mode: 0o755 })
+      const outputPath = path.join(scratch, 'never.mp4')
+      const timeoutMs = 2000
+
+      const startedAt = Date.now()
+      let message = ''
+      try {
+        await renderInChromium(BUNDLE, job, { format: 'mp4', quality: 'medium' }, outputPath, {
+          chromiumPath: hangs,
+          timeoutMs,
+          log: quiet,
+        })
+        throw new Error('expected the launch to fail')
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err)
+      }
+      const elapsed = Date.now() - startedAt
+
+      // Bounded by the render budget, not by Playwright's own (measured 180 000 ms) launch
+      // default; kept well under 5 s so this stays a fast test rather than a repeat of V-3a's
+      // own 180 s reproduction. `timeout: timeoutMs` (passed to chromium.launch) and the race
+      // against deadline.promise both fire at the same configured budget, so either message
+      // -- the driver's own "render timed out after 2000 ms" or Playwright's own
+      // "Timeout 2000ms exceeded" -- proves the fix; only the OLD unbounded default would fail
+      // this assertion.
+      expect(elapsed).toBeLessThan(5000)
+      expect(message).toMatch(new RegExp(`${timeoutMs}\\s*ms`))
+      expect(message).not.toMatch(/180000\s*ms/)
+    } finally {
+      await fs.rm(scratch, { recursive: true, force: true })
+    }
+  }, 15_000)
+})

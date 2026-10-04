@@ -2496,6 +2496,42 @@ undocumented private copy in `ExportDialog.test.tsx` — stub `getClientRects` i
 cases against CRAFT's help dialog on Chromium, Firefox and WebKit, outside this measurement. **No floor crossed**;
 shared's floors stay 100 / 98 / 91 / 100.
 
+`@escapesuite/headless-artist` was re-measured 2026-10-04 for ESCSUITE-190, 192, 205, 206 and 209 (the
+`volume` sink stages its video and its manifest at private temp names inside the target directory and
+publishes each with one same-directory rename, sidecar first, the cross-filesystem `fs.copyFile` fallback
+replaced by a stream copy into that private temp so two concurrent deliveries can never blend into one
+file; a sink's config is validated while the job spec is parsed and the s3 SDK's presence probed before
+Chromium launches, with the probe placed after `serve`'s allow-list so a disallowed s3 job is a 403 and
+never probed; a `timeline`-less project is refused by name and a render failure's message is stripped of
+terminal escapes — the CSI class widened to `[0-?]` after the review found `ESC[1;31m` surviving as text;
+the webhook sink drains every response body without buffering it and refuses to follow a redirect; the
+render deadline covers the browser launch, a straggling launch that resolves after the deadline being
+closed; and the s3 sink budgets each of its two puts with an `AbortSignal`): **99.55** / **99.47** /
+**98.47** / **98.72** against the 99.51 / 99.42 / 98.36 / 98.62 that `main` at `11de3827` (the
+ESCSUITE-188 / 189 / 193 version-packages commit; no kit source has changed on `main` since) measures in
+the same sitting — every figure up, with the uncovered column unmoved. Lines 813 / 817 → 887 / 891,
+statements 865 / 870 → 941 / 946, branches 541 / 550 → 581 / 590 and functions 143 / 145 → 155 / 157,
+every denominator growing by exactly what the numerator did; the same 4 / 5 / 9 / 2 uncovered, in the same
+places (`cli.ts`'s `isDirectRun` bootstrap, `serve.ts`'s limiter sync-throw catch and post-listen
+socket-error handler, named in `vitest.config.ts`'s ledger, whose line numbers moved and were re-derived).
+The forty new branches are `src/sinks.ts`'s net four (eight in — `drainBody`'s null-body guard, the
+3xx range and the redirect message's Location-or-not — less the two `typeof` ternaries its s3 entry lost to
+`validateS3Config`; `moveIntoDir`'s EXDEV test only changed sign), `src/s3.ts`'s twenty-six (`validateS3Config`'s empty
+bucket, non-string `region` / `endpoint` and `timeoutMs` bound, each operand from both sides, and
+`sendWithTimeout`'s `signal.aborted` choice), `src/jobSpec.ts`'s six (`validateSinkConfig`'s per-sink
+dispatch and `ensureSinkReady`'s s3-or-not) and `src/loaders.ts`'s four (`assertTimelineShape` from both
+sides on each input). The first measurement of the branch, before the review's fix round, came back at
+99.09 / 98.41 / 98.29 / **94.40** — functions nine under its 98 floor — because seven
+`.catch(() => undefined)` arrows on the sink's cleanup paths, the manifest-write failure arm and
+`probeS3Sdk`'s body were never invoked: the arrows became one `removeQuietly` helper the existing
+failed-cleanup case drives, the manifest-write arm got its red-first case (the staged video gone, nothing
+published), and `probeS3Sdk` is driven directly from both sides. The same round deleted the sidecar
+rollback rather than test it — a manifest with no video is harmless to a consumer watching for the video,
+and the rollback could delete a manifest a concurrent delivery had just published — and `renderDriver.ts`,
+coverage-excluded, gained the straggling-launch case through a mocked `playwright` instead. The Chromium
+parity suite ran 30 / 30 four times before the round and once after. **No floor crossed**; the kit's
+floors stay 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2505,7 +2541,7 @@ never above what the suite actually achieves:
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.56 | 91.66 | 100.00 |
-| `@escapesuite/headless-artist` | 99.51 | 99.42 | 98.36 | 98.62 |
+| `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.47 | 98.72 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

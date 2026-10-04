@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { collectUnknownKeys, parseJobSpec } from './jobSpec'
+import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 
@@ -94,11 +94,9 @@ export interface ServeHandle {
   /**
    * Stops accepting, turns queued jobs away with 503, waits for the in-flight ones (bounded by
    * the render timeout plus whatever the job's own delivery sink budgets for itself — the
-   * `webhook` and `command` sinks' `timeoutMs` — not by this call, and not by the render alone).
-   * Exception: `s3` sets no timeout of its own, so a stalled upload is bounded only by the AWS
-   * SDK's own defaults (no timeout, with retries) — a follow-up, not something this covers.
-   * Also tears down, rather than waits on, any request whose body has not finished arriving.
-   * Resolves once all of that settles. Idempotent.
+   * `webhook`, `command` and `s3` sinks' `timeoutMs` — not by this call, and not by the render
+   * alone). Also tears down, rather than waits on, any request whose body has not finished
+   * arriving. Resolves once all of that settles. Idempotent.
    */
   close(): Promise<void>
 }
@@ -405,14 +403,27 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
       return 400
     }
 
-    // Decided before anything is queued: a sink this server does not enable is a refusal, not
-    // a job that fails later. The caller picks the sink, so this is the whole security boundary
-    // between "renders video" and "runs the program you named".
+    // Decided before anything else, allow-list included: a sink this server does not enable
+    // is a refusal, not a job that fails later -- and not a sink probed for readiness on its
+    // behalf either (review finding 4: probing first meant a disallowed s3 job answered 400,
+    // from the SDK-missing check, rather than the documented 403). The caller picks the sink,
+    // so this is the whole security boundary between "renders video" and "runs the program
+    // you named".
     if (!allowedSinks.includes(spec.output.sink)) {
       send(res, 403, withWarnings({
         error: `sink "${spec.output.sink}" is not enabled on this server (HEADLESS_SINKS)`,
       }))
       return 403
+    }
+
+    try {
+      // The one sink-config check parseJobSpec cannot run synchronously: whether the
+      // optional s3 SDK can even be loaded. Still before the job is queued (ESCSUITE-192 /
+      // hunt-j J-4), and now only for a sink this server actually allows.
+      await ensureSinkReady(spec.output)
+    } catch (err) {
+      send(res, 400, withWarnings({ error: messageOf(err) }))
+      return 400
     }
 
     // The response is written inside the limiter slot so that "the job finished" and "the

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 import { isDirectRun, main } from './cli'
 import { runJob } from './run'
+import * as s3Module from './s3'
 import { startServer } from './serve'
 import { MAX_TIMEOUT_MS } from './timeouts'
 import type { RenderOutcome } from './types'
@@ -437,6 +438,44 @@ describe('unknown job-spec fields', () => {
 
     const entry = JSON.parse(stderr.map((line) => line.trim()).find((line) => line.includes('unknown field')) as string)
     expect(entry).toMatchObject({ level: 'info', msg: 'warning: unknown field "extra"' })
+  })
+})
+
+// ESCSUITE-192 (hunt-j J-4): a sink config that could never work used to render for the full
+// budget before failing at delivery. The sink's own shape is checked synchronously while the
+// spec is parsed (covered in jobSpec.test.ts); the one check that cannot run synchronously --
+// whether the optional s3 SDK can even be loaded -- is awaited here, still before runJob.
+describe('sink readiness', () => {
+  it('exits 2 when the s3 SDK cannot be loaded, without ever calling runJob', async () => {
+    const probeSpy = vi
+      .spyOn(s3Module, 'probeS3Sdk')
+      .mockRejectedValue(new Error('s3 sink requires the optional dependency @aws-sdk/client-s3'))
+    try {
+      const jobFile = await writeJobSpec(
+        validSpec({ output: { sink: 's3', config: { prefix: 'bucket/renders' } } }),
+      )
+
+      expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+      expect(stderrText()).toContain('s3 sink requires the optional dependency @aws-sdk/client-s3')
+      expect(runJob).not.toHaveBeenCalled()
+    } finally {
+      probeSpy.mockRestore()
+    }
+  })
+
+  it('does not probe the SDK, and still renders, for a non-s3 sink', async () => {
+    const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')
+    try {
+      const jobFile = await writeJobSpec(validSpec())
+
+      expect(await main(['render', '--job', jobFile], {})).toBe(0)
+
+      expect(probeSpy).not.toHaveBeenCalled()
+      expect(runJob).toHaveBeenCalledTimes(1)
+    } finally {
+      probeSpy.mockRestore()
+    }
   })
 })
 

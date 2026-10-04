@@ -1,0 +1,15 @@
+---
+'@escapesuite/headless-artist': patch
+---
+
+A volume delivery's video and manifest each publish atomically, a bad sink config or a missing s3 SDK is refused before the render, the webhook sink never follows a redirect and reuses its connection, a wedged browser binary fails within the configured timeout, and an s3 upload has a budget of its own.
+
+The `volume` sink publishes its video and manifest sidecar-first: each is staged at a private, unique temp name inside the target directory and published with one same-directory rename, so a reader watching the directory never sees a half-written file, and a failed delivery never leaves a finished-looking video with no manifest beside it. A render is also never a byte-level blend of two concurrent deliveries' bytes, which the old cross-filesystem fallback could produce — the `fs.copyFile` path is gone outright; a cross-filesystem move now streams into the same private temp name instead of writing straight to the shared destination path. Atomicity is per file, not per delivery: two deliveries of the same jobId overlapping in time can still publish one job's manifest beside the other's video, so a broker must not start a retry while a previous attempt may still be delivering (see the README for the exact window).
+
+A sink's own config (`config.dir`, `config.command`, `config.url`, an s3 `prefix` that names no bucket, a non-string `region`/`endpoint`) is validated while the job spec is parsed, so a config that could never work answers 400 (`serve`) or exits 2 (`render`) before Chromium ever launches instead of after a full render. The s3 SDK's presence is checked the same way. The reference Docker image, which never has the optional `@aws-sdk/client-s3` dependency, now advertises and accepts only `volume` and `webhook` by default so it refuses an s3 job with 403 instead of accepting one it can only fail. A project manifest or bundle with no `timeline` at all now names the field instead of leaking a bare property-read error, and a render failure's message is stripped of any stray terminal colour codes before it reaches the JSON outcome or the HTTP response.
+
+The `webhook` sink always drains its response body, so a long-running `serve` process reuses its pooled connection to an intake endpoint instead of opening a fresh one for every delivery, and it no longer follows a redirect — a 307/308 from the configured endpoint fails the delivery naming where it tried to send your render, rather than silently re-POSTing the whole file (and your headers) to a different host.
+
+The render timeout now covers the whole job, launch included: a Chromium binary that never finishes starting used to be bounded only by Playwright's own three-minute default regardless of how small a budget you configured; it now fails at your configured timeout like everything else does.
+
+The `s3` sink gets a delivery budget of its own (`config.timeoutMs`, default 5 minutes, same bound as the webhook and command sinks') — previously a stalled upload was bounded only by the AWS SDK's own defaults (no timeout, with retries), so a drain waiting on one had no bound this kit controlled at all.

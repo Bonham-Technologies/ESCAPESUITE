@@ -3,6 +3,8 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { OutputSink } from './sinks'
+import { requireString } from './sinks'
+import { MAX_TIMEOUT_MS } from './timeouts'
 import type { VerificationManifest } from './manifest'
 
 export interface S3SinkConfig {
@@ -13,7 +15,18 @@ export interface S3SinkConfig {
   prefix: string
   endpoint?: string
   region?: string
+  /**
+   * This delivery's own budget (positive integer, default 300 000 ms / 5 minutes, same
+   * 2^31-1 ms bound as the webhook and command sinks'). Unlike those two, s3 used to have
+   * none of its own: a stalled upload was bounded only by the AWS SDK's own defaults (no
+   * timeout, with retries), so a drain waiting on one had no bound this kit controlled at
+   * all (ESCSUITE-209).
+   */
+  timeoutMs?: number
 }
+
+/** Default when `config.timeoutMs` is not given — see the field's own doc comment above. */
+const DEFAULT_S3_TIMEOUT_MS = 300_000
 
 const FORMAT_TO_EXTENSION: Record<VerificationManifest['format'], string> = {
   mp4: 'mp4',
@@ -33,7 +46,7 @@ const FORMAT_TO_MIME: Record<VerificationManifest['format'], string> = {
  * installed.
  */
 export interface MinimalS3Client {
-  send(command: unknown): Promise<unknown>
+  send(command: unknown, options?: { abortSignal?: AbortSignal }): Promise<unknown>
 }
 
 /**
@@ -92,6 +105,64 @@ export function keyFor(keyPrefix: string, fileName: string): string {
 }
 
 /**
+ * Checks that the optional `@aws-sdk/client-s3` dependency can be loaded, without building a
+ * client or sending anything. Called from `jobSpec.ts`'s `ensureSinkReady` so an s3 job whose
+ * environment is missing the SDK fails before Chromium launches (ESCSUITE-192 / hunt-j J-4),
+ * rather than discovering it only after a full render.
+ */
+export async function probeS3Sdk(): Promise<void> {
+  await loadS3ClientModule()
+}
+
+/**
+ * Validates `output.config` for the `s3` sink -- synchronously and without touching the
+ * optional SDK, so it can run at job-spec parse time (`jobSpec.ts`'s `validateSinkConfig`) as
+ * well as from `getSink`. `prefix` must name a non-empty bucket: `requireString` alone accepts
+ * `"s3://"` or `"/"`, both of which split to an empty bucket and would otherwise only fail once
+ * the SDK actually tries to address `Bucket: ""`. `region`/`endpoint`, when given, must be
+ * strings -- previously a wrong-typed value was dropped silently instead of refused by name,
+ * unlike every other sink's config.
+ */
+export function validateS3Config(config: Record<string, unknown>): S3SinkConfig {
+  const prefix = requireString(config, 'prefix', 's3')
+  const { bucket } = splitPrefix(prefix)
+  if (bucket.length === 0) {
+    throw new Error(`s3 sink requires config.prefix to name a bucket (got ${JSON.stringify(prefix)})`)
+  }
+
+  const endpoint = config.endpoint
+  if (endpoint !== undefined && typeof endpoint !== 'string') {
+    throw new Error('s3 sink requires config.endpoint (string) when provided')
+  }
+
+  const region = config.region
+  if (region !== undefined && typeof region !== 'string') {
+    throw new Error('s3 sink requires config.region (string) when provided')
+  }
+
+  const rawTimeout = config.timeoutMs
+  if (
+    rawTimeout !== undefined &&
+    (typeof rawTimeout !== 'number' || !Number.isInteger(rawTimeout) || rawTimeout <= 0)
+  ) {
+    throw new Error('s3 sink requires config.timeoutMs (positive integer) when provided')
+  }
+  // Same 32-bit timer bound as the webhook and command sinks' — see MAX_TIMEOUT_MS.
+  if (typeof rawTimeout === 'number' && rawTimeout > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `s3 sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
+  }
+
+  return {
+    prefix,
+    endpoint: endpoint as string | undefined,
+    region: region as string | undefined,
+    timeoutMs: (rawTimeout as number | undefined) ?? DEFAULT_S3_TIMEOUT_MS,
+  }
+}
+
+/**
  * Builds an S3 output sink. With no `client`, the AWS SDK is loaded lazily (see
  * `loadS3ClientModule`), so `getSink('s3', …)` fails fast with a clear error when the optional
  * dependency isn't installed, before anything else about the config is touched.
@@ -108,8 +179,33 @@ export function keyFor(keyPrefix: string, fileName: string): string {
  * directly. Production callers go through `getSink('s3', …)`, which passes no client and uses
  * the SDK.
  */
+/**
+ * `send()` with `config.timeoutMs`'s own `AbortSignal`, converting an abort into the sink's
+ * own clear timeout message rather than whatever shape the SDK's (or a test double's) abort
+ * rejection happens to take. Checking `signal.aborted` after the catch, rather than inspecting
+ * the error itself, is what makes that reliable regardless of that shape (ESCSUITE-209).
+ */
+async function sendWithTimeout(
+  s3: MinimalS3Client,
+  command: unknown,
+  timeoutMs: number,
+): Promise<unknown> {
+  const signal = AbortSignal.timeout(timeoutMs)
+  try {
+    return await s3.send(command, { abortSignal: signal })
+  } catch (err) {
+    if (signal.aborted) {
+      throw new Error(`s3 sink timed out after ${timeoutMs} ms`, { cause: err })
+    }
+    throw err
+  }
+}
+
 export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Promise<OutputSink> {
   const { bucket, keyPrefix } = splitPrefix(config.prefix)
+  // Defaulted here too, not only in validateS3Config: a caller of s3Sink directly (an
+  // embedder, or a test) may not have gone through that validator at all.
+  const timeoutMs = config.timeoutMs ?? DEFAULT_S3_TIMEOUT_MS
 
   let s3: MinimalS3Client
   let putObject: (input: Record<string, unknown>) => unknown
@@ -148,7 +244,8 @@ export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Pr
       // body) sees the event too, and this harmless no-op doesn't suppress `send()`'s rejection.
       body.on('error', () => {})
       try {
-        await s3.send(
+        await sendWithTimeout(
+          s3,
           putObject({
             Bucket: bucket,
             Key: outputKey,
@@ -160,6 +257,7 @@ export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Pr
             // object straight from the bucket (a signed URL, a CDN) downloads it instead of playing it.
             ContentType: FORMAT_TO_MIME[manifest.format],
           }),
+          timeoutMs,
         )
       } finally {
         // Release the handle as soon as send() settles, win or lose, rather than leaving it
@@ -169,7 +267,8 @@ export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Pr
       }
 
       const manifestBody = Buffer.from(JSON.stringify(manifest, null, 2) + '\n')
-      await s3.send(
+      await sendWithTimeout(
+        s3,
         putObject({
           Bucket: bucket,
           Key: manifestKey,
@@ -177,6 +276,7 @@ export async function s3Sink(config: S3SinkConfig, client?: MinimalS3Client): Pr
           ContentLength: manifestBody.byteLength,
           ContentType: 'application/json',
         }),
+        timeoutMs,
       )
 
       return {

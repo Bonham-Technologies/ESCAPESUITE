@@ -1,3 +1,5 @@
+import { validateCommandConfig, validateVolumeConfig, validateWebhookConfig } from './sinks'
+import { probeS3Sdk, validateS3Config } from './s3'
 import type { JobSpec } from './types'
 
 const JOB_ID_RE = /^[A-Za-z0-9._-]{1,128}$/
@@ -109,6 +111,43 @@ function parseOptions(value: unknown): JobSpec['options'] {
   return options
 }
 
+/**
+ * Validates `output.config` against the shape its own sink requires -- the same checks
+ * `getSink` applies before building the sink, run here too so a config that could never work
+ * (no `config.dir`, an s3 prefix naming no bucket, ...) is refused while the spec is being
+ * parsed, before any render (ESCSUITE-192 / hunt-j J-4), rather than discovered only after one.
+ * Called for its validation side effect alone -- `parseOutput` keeps the caller's own `config`
+ * object, not whatever defaults a sink's validator fills in.
+ */
+export function validateSinkConfig(sink: JobSpec['output']['sink'], config: Record<string, unknown>): void {
+  switch (sink) {
+    case 'volume':
+      validateVolumeConfig(config)
+      break
+    case 'command':
+      validateCommandConfig(config)
+      break
+    case 'webhook':
+      validateWebhookConfig(config)
+      break
+    case 's3':
+      validateS3Config(config)
+      break
+  }
+}
+
+/**
+ * The one sink-config check that cannot run inside `parseJobSpec` itself: whether the optional
+ * `@aws-sdk/client-s3` dependency can even be loaded. That is a dynamic import, so it is async,
+ * and a caller awaits it right after `parseJobSpec` -- still before any render -- rather than
+ * having it folded into parsing. A no-op for every sink but `s3`.
+ */
+export async function ensureSinkReady(output: JobSpec['output']): Promise<void> {
+  if (output.sink === 's3') {
+    await probeS3Sdk()
+  }
+}
+
 function parseOutput(value: unknown): JobSpec['output'] {
   if (!isRecord(value)) {
     throw new Error('output must be an object')
@@ -123,6 +162,8 @@ function parseOutput(value: unknown): JobSpec['output'] {
   if (!isRecord(config)) {
     throw new Error('output.config must be an object')
   }
+
+  validateSinkConfig(sink as JobSpec['output']['sink'], config)
 
   return { sink: sink as JobSpec['output']['sink'], config }
 }

@@ -2,7 +2,7 @@
 import { promises as fs, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { collectUnknownKeys, parseJobSpec } from './jobSpec'
+import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 import { startServer } from './serve'
@@ -450,6 +450,9 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
     for (const field of collectUnknownKeys(json)) {
       log(`warning: unknown field "${field}"`)
     }
+    // The one sink-config check parseJobSpec cannot run synchronously: whether the optional
+    // s3 SDK can even be loaded. Still before Chromium launches (ESCSUITE-192 / hunt-j J-4).
+    await ensureSinkReady(spec.output)
 
     const deps = depsFromEnv(env, versionsOf(await readKitJson()), log)
 

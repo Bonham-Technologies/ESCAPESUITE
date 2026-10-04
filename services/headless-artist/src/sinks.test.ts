@@ -3,10 +3,19 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import http from 'node:http'
+import crypto from 'node:crypto'
 import type { AddressInfo } from 'node:net'
 import { getSink } from './sinks'
 import type { VerificationManifest } from './manifest'
 import { MAX_TIMEOUT_MS } from './timeouts'
+
+// A handle to the real, unmocked fs.promises so a test that spies on fs.rename can still
+// delegate the calls it does not want to intercept.
+const fsOriginal = { rename: fs.rename.bind(fs) }
+
+function sha256Of(data: string): string {
+  return crypto.createHash('sha256').update(data).digest('hex')
+}
 
 const cleanupPaths: string[] = []
 const cleanupServers: http.Server[] = []
@@ -116,10 +125,60 @@ describe('s3 sink selection', () => {
     expect(typeof sink.deliver).toBe('function')
   })
 
-  it('builds one from a bare prefix, leaving region and endpoint to the SDK', async () => {
-    const sink = await getSink('s3', { prefix: 'bucket', region: 42, endpoint: null })
+  it('builds one from a bare prefix with no region or endpoint at all', async () => {
+    const sink = await getSink('s3', { prefix: 'bucket' })
 
     expect(typeof sink.deliver).toBe('function')
+  })
+
+  // ESCSUITE-192 (hunt-j J-4): region/endpoint of the wrong type used to be dropped silently
+  // (read only if typeof === 'string', ignored otherwise) instead of refused by name, unlike
+  // every other sink's config.
+  it('refuses a non-string region or endpoint by name, rather than dropping it silently', async () => {
+    await expect(getSink('s3', { prefix: 'bucket', region: 42 })).rejects.toThrow(
+      /s3 sink requires config\.region \(string\) when provided/,
+    )
+    await expect(getSink('s3', { prefix: 'bucket', endpoint: null })).rejects.toThrow(
+      /s3 sink requires config\.endpoint \(string\) when provided/,
+    )
+  })
+
+  // ESCSUITE-192 (hunt-j J-4): "s3://" and "/" both pass requireString's "non-empty string"
+  // check and split to an empty bucket, which used to reach the SDK as Bucket: "" instead of
+  // being refused up front.
+  it('refuses a prefix that names no bucket', async () => {
+    await expect(getSink('s3', { prefix: 's3://' })).rejects.toThrow(
+      /s3 sink requires config\.prefix to name a bucket/,
+    )
+    await expect(getSink('s3', { prefix: '/' })).rejects.toThrow(
+      /s3 sink requires config\.prefix to name a bucket/,
+    )
+  })
+
+  // ESCSUITE-209: unlike every other sink, s3 had no delivery budget of its own -- a stalled
+  // upload was bounded only by the AWS SDK's own defaults (no timeout, with retries).
+  describe('config.timeoutMs', () => {
+    it('validates it is a positive integer when provided', async () => {
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: 0 })).rejects.toThrow(
+        /s3 sink requires config\.timeoutMs \(positive integer\) when provided/,
+      )
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: 1.5 })).rejects.toThrow(
+        /s3 sink requires config\.timeoutMs \(positive integer\) when provided/,
+      )
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: '10' })).rejects.toThrow(
+        /s3 sink requires config\.timeoutMs \(positive integer\) when provided/,
+      )
+    })
+
+    it('refuses a timeoutMs above the 32-bit timer bound, naming it', async () => {
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: MAX_TIMEOUT_MS + 1 })).rejects.toThrow(
+        `s3 sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
+
+    it('accepts exactly the bound', async () => {
+      await expect(getSink('s3', { prefix: 'bucket', timeoutMs: MAX_TIMEOUT_MS })).resolves.toBeTruthy()
+    })
   })
 })
 
@@ -220,37 +279,20 @@ describe('volume sink', () => {
   })
 })
 
-describe('volume sink cross-device fallback', () => {
-  it('removes the partial destination when the copy fails, rather than leaving a truncated file', async () => {
-    const srcDir = await makeTempDir()
-    const destDir = await makeTempDir()
-    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
-    const manifest = fakeManifest({ jobId: 'job-exdev' })
-    const destOutput = path.join(destDir, 'job-exdev.mp4')
-
-    const renameSpy = vi
-      .spyOn(fs, 'rename')
-      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
-    const copySpy = vi.spyOn(fs, 'copyFile').mockImplementation(async () => {
-      // What a real interrupted copy leaves behind: a destination with only some of the bytes.
-      await fs.writeFile(destOutput, Buffer.from('hel'))
-      throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' })
-    })
-
-    try {
-      const sink = await getSink('volume', { dir: destDir })
-      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-        'no space left on device',
-      )
-    } finally {
-      renameSpy.mockRestore()
-      copySpy.mockRestore()
+/** Mocks `fs.rename` so a move that crosses out of its destination's own directory (the
+ * video's `outputPath -> temp-in-dir` move) fails with EXDEV, simulating `dir` living on a
+ * different filesystem from the job's own scratch dir, while every same-directory rename (a
+ * temp name onto its final published name) passes through to the real implementation
+ * unaffected -- exactly as it would on a real filesystem. */
+function mockCrossDeviceRename(): ReturnType<typeof vi.spyOn> {
+  return vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+    const [oldPath, newPath] = args as [string, string]
+    if (path.dirname(oldPath) !== path.dirname(newPath)) {
+      throw Object.assign(new Error('cross-device link'), { code: 'EXDEV' })
     }
-
-    // A half-written render must never be left where a consumer would pick it up as finished.
-    await expect(fs.access(destOutput)).rejects.toThrow()
+    return fsOriginal.rename(...(args as Parameters<typeof fsOriginal.rename>))
   })
-})
+}
 
 describe('volume sink failures', () => {
   it('propagates a rename failure that is not a cross-device link', async () => {
@@ -260,56 +302,52 @@ describe('volume sink failures', () => {
 
     const sink = await getSink('volume', { dir: destDir })
 
-    // The render is not where the sink was told it would be: an ENOENT, not an EXDEV, so
-    // there is nothing to fall back to and the failure must surface as it is.
+    // The render is not where the sink was told it would be: an ENOENT, so there is nothing
+    // to copy either, and the failure must surface as it is.
     await expect(
       sink.deliver(manifest.jobId, path.join(srcDir, 'never-written.mp4'), manifest),
     ).rejects.toThrow(/ENOENT/)
 
+    // Rolled back: the manifest published fine before the missing video was ever attempted.
     expect(await fs.readdir(destDir)).toEqual([])
   })
 
-  it('never lets a failed cleanup mask the copy failure that caused it', async () => {
+  it('never lets a failed cleanup mask the real publish failure that caused it', async () => {
     const srcDir = await makeTempDir()
     const destDir = await makeTempDir()
-    const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
+    // A directory where the sink expects a file: createReadStream on it fails with EISDIR
+    // once the stream copy actually starts reading -- a genuine failure, not a mocked one.
+    const outputPath = path.join(srcDir, 'not-actually-a-file')
+    await fs.mkdir(outputPath)
     const manifest = fakeManifest({ jobId: 'job-exdev' })
 
-    const renameSpy = vi
-      .spyOn(fs, 'rename')
-      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
-    const copySpy = vi
-      .spyOn(fs, 'copyFile')
-      .mockRejectedValue(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }))
+    const renameSpy = mockCrossDeviceRename()
     const rmSpy = vi
       .spyOn(fs, 'rm')
       .mockRejectedValue(Object.assign(new Error('read-only file system'), { code: 'EROFS' }))
 
     try {
       const sink = await getSink('volume', { dir: destDir })
-      // The ENOSPC, not the EROFS: the operator needs to know why the delivery failed.
-      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
-        'no space left on device',
-      )
+      // The EISDIR that actually caused the failure, not the EROFS from either of the two
+      // (now-futile) cleanup attempts it triggers.
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(/EISDIR/)
       expect(rmSpy).toHaveBeenCalled()
     } finally {
       renameSpy.mockRestore()
-      copySpy.mockRestore()
       rmSpy.mockRestore()
     }
   })
 })
 
 describe('volume sink cross-device success', () => {
-  it('copies the render across the device boundary and removes the source', async () => {
+  it('streams the render across the device boundary, never via fs.copyFile, and removes the source', async () => {
     const srcDir = await makeTempDir()
     const destDir = await makeTempDir()
     const outputPath = await makeOutputFile(srcDir, Buffer.from('hello world'))
     const manifest = fakeManifest({ jobId: 'job-exdev-ok' })
 
-    const renameSpy = vi
-      .spyOn(fs, 'rename')
-      .mockRejectedValue(Object.assign(new Error('cross-device link'), { code: 'EXDEV' }))
+    const renameSpy = mockCrossDeviceRename()
+    const copySpy = vi.spyOn(fs, 'copyFile')
 
     try {
       const sink = await getSink('volume', { dir: destDir })
@@ -317,12 +355,153 @@ describe('volume sink cross-device success', () => {
 
       expect(result.outputLocation).toBe(path.join(destDir, 'job-exdev-ok.mp4'))
       expect(await fs.readFile(result.outputLocation, 'utf8')).toBe('hello world')
+      expect(copySpy).not.toHaveBeenCalled()
+      // Nothing but the two published files survives -- no stray temp names.
+      expect((await fs.readdir(destDir)).sort()).toEqual(
+        ['job-exdev-ok.manifest.json', 'job-exdev-ok.mp4'].sort(),
+      )
     } finally {
       renameSpy.mockRestore()
+      copySpy.mockRestore()
     }
 
     // A copy that leaves the original behind fills the scratch volume one render at a time.
     await expect(fs.access(outputPath)).rejects.toThrow()
+  })
+})
+
+// ESCSUITE-190 (hunt-j J-3 / verify V-4): the video was renamed into place before the sidecar
+// was written, so a manifest failure left a finished-looking video with nothing beside it; and
+// the EXDEV fallback copied straight into the shared destination path, so two concurrent
+// deliveries under one jobId could interleave at the byte level. Publication is now sidecar
+// first, both files staged at a private, unique temp name inside `dir` and published with one
+// same-directory rename each -- which a reader can only ever see as the old file or the new
+// one, never a half-written one -- and the `fs.copyFile` fallback is gone outright.
+describe('volume sink atomic publication (ESCSUITE-190)', () => {
+  it('leaves no <jobId>.<ext> behind when the sidecar fails to publish', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
+    const manifest = fakeManifest({ jobId: 'job-1' })
+    // Anything that makes the sidecar's own publish fail: here the final name is already a
+    // directory, so the rename that would publish it rejects with EISDIR.
+    await fs.mkdir(path.join(destDir, 'job-1.manifest.json'))
+
+    const sink = await getSink('volume', { dir: destDir })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow()
+
+    // The video must never be published while the manifest beside it is not -- a consumer
+    // watching the directory must never see a finished-looking render with nothing to verify
+    // it against.
+    await expect(fs.access(path.join(destDir, 'job-1.mp4'))).rejects.toThrow()
+    // No stray temp file left behind either.
+    const leftover = (await fs.readdir(destDir)).filter((name) => !name.endsWith('.manifest.json'))
+    expect(leftover).toEqual([])
+  })
+
+  // Review finding 3: nothing in the suite made the manifest's own *temp write* fail (as
+  // opposed to its publish rename, covered above) -- the arm that must remove both temps and
+  // propagate the original error was entirely unproven.
+  it('removes both staged temps and propagates the error when writing the manifest temp fails', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
+    const manifest = fakeManifest({ jobId: 'job-manifest-write-fails' })
+
+    const writeFileSpy = vi
+      .spyOn(fs, 'writeFile')
+      .mockRejectedValueOnce(Object.assign(new Error('no space left on device'), { code: 'ENOSPC' }))
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        'no space left on device',
+      )
+    } finally {
+      writeFileSpy.mockRestore()
+    }
+
+    // Nothing published, and the staged video temp went with it -- the directory is empty.
+    expect(await fs.readdir(destDir)).toEqual([])
+  })
+
+  // Review finding 7: an unconditional rollback here would delete a manifest this delivery
+  // may not own -- a previous, still-valid run's (on a re-run that fails this late) or a
+  // concurrent delivery's just-published one. A manifest with no video beside it is harmless
+  // to a consumer watching for the finished render; the reverse is not, which is why it is the
+  // one this sink refuses to ever publish without its sidecar (the test above).
+  it('leaves the published sidecar in place when the video fails to publish', async () => {
+    const srcDir = await makeTempDir()
+    const destDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('the whole render'))
+    const manifest = fakeManifest({ jobId: 'job-2' })
+
+    // The sidecar publishes fine; only the *video*'s own final rename fails (its name is
+    // already a directory).
+    const renameSpy = vi.spyOn(fs, 'rename').mockImplementation(async (...args) => {
+      const [, newPath] = args as [unknown, string]
+      if (newPath === path.join(destDir, 'job-2.mp4')) {
+        throw Object.assign(new Error('is a directory'), { code: 'EISDIR' })
+      }
+      return fsOriginal.rename(...(args as Parameters<typeof fsOriginal.rename>))
+    })
+
+    try {
+      const sink = await getSink('volume', { dir: destDir })
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(/is a directory/)
+    } finally {
+      renameSpy.mockRestore()
+    }
+
+    // The manifest that landed before the video failed is left exactly where it published.
+    const published = JSON.parse(
+      await fs.readFile(path.join(destDir, 'job-2.manifest.json'), 'utf8'),
+    ) as VerificationManifest
+    expect(published.jobId).toBe('job-2')
+  })
+
+  it('never calls fs.copyFile, and delivers exactly one job whole rather than a blend, when two deliveries race under one jobId across a filesystem boundary', async () => {
+    const destDir = await makeTempDir()
+    const srcDirA = await makeTempDir()
+    const srcDirB = await makeTempDir()
+
+    const bytesA = 'A'.repeat(64 * 1024)
+    const bytesB = 'B'.repeat(96 * 1024)
+    const outputPathA = await makeOutputFile(srcDirA, Buffer.from(bytesA), 'render-a.mp4')
+    const outputPathB = await makeOutputFile(srcDirB, Buffer.from(bytesB), 'render-b.mp4')
+    const manifestA = fakeManifest({ jobId: 'job-race', sha256: sha256Of(bytesA) })
+    const manifestB = fakeManifest({ jobId: 'job-race', sha256: sha256Of(bytesB) })
+
+    // Simulates `dir` living on a different filesystem from each job's own scratch dir: the
+    // move of the render *into* dir hits EXDEV; a rename that stays entirely inside `dir`
+    // (the private temp name to its final published name) is unaffected and passes through.
+    const renameSpy = mockCrossDeviceRename()
+    const copySpy = vi.spyOn(fs, 'copyFile')
+
+    try {
+      const sinkA = await getSink('volume', { dir: destDir })
+      const sinkB = await getSink('volume', { dir: destDir })
+      await Promise.all([
+        sinkA.deliver('job-race', outputPathA, manifestA),
+        sinkB.deliver('job-race', outputPathB, manifestB),
+      ])
+
+      expect(copySpy).not.toHaveBeenCalled()
+
+      const delivered = await fs.readFile(path.join(destDir, 'job-race.mp4'), 'utf8')
+
+      // Each job wrote to its own private temp name while EXDEV forced a stream copy, so the
+      // slow part never shared a destination path -- the only thing that could race is the
+      // final same-directory rename, and a rename replaces a name outright. The result must
+      // be exactly one job's bytes, never a byte-level blend of both (the two load-bearing
+      // claims this test makes). Which job's *manifest* ends up paired with it is a separate,
+      // narrower race this sink does not close -- see README §volume and review finding 1 --
+      // so this test does not assert that pairing.
+      expect([bytesA, bytesB]).toContain(delivered)
+    } finally {
+      renameSpy.mockRestore()
+      copySpy.mockRestore()
+    }
   })
 })
 
@@ -799,6 +978,203 @@ describe('webhook sink', () => {
     await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
       /webhook sink failed: 500/,
     )
+  })
+})
+
+// ESCSUITE-205 (hunt-j unverified / verify V-1): the response was checked for `ok` and
+// dropped without ever being read or cancelled, so undici could not return the connection to
+// its keep-alive pool -- every delivery opened a fresh TCP connection to the intake endpoint
+// instead of reusing one.
+describe('webhook sink drains the response body (ESCSUITE-205)', () => {
+  it('reuses the keep-alive connection across deliveries instead of opening one per delivery', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest()
+
+    // A large keep-alive body: big enough that undici cannot have it buffered and done with,
+    // so an unread body is what blocks the connection from going back to the pool.
+    const body = 'x'.repeat(256 * 1024)
+    let connections = 0
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200, {
+          'content-type': 'text/plain',
+          'content-length': String(body.length),
+          connection: 'keep-alive',
+        })
+        res.end(body)
+      })
+    })
+    server.keepAliveTimeout = 30_000
+    server.on('connection', () => {
+      connections++
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+    const url = `http://127.0.0.1:${port}/upload`
+
+    const sink = await getSink('webhook', { url })
+    const N = 8
+    for (let i = 0; i < N; i++) {
+      await sink.deliver(`job-${i}`, outputPath, manifest)
+    }
+
+    // A sink that reads or cancels the body reuses undici's pooled connection; the defect was
+    // one socket per delivery.
+    expect(connections).toBeLessThan(4)
+  }, 30_000)
+
+  it('drains the body on a failure response too', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest()
+
+    const body = 'x'.repeat(256 * 1024)
+    let connections = 0
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(500, { 'content-length': String(body.length), connection: 'keep-alive' })
+        res.end(body)
+      })
+    })
+    server.keepAliveTimeout = 30_000
+    server.on('connection', () => {
+      connections++
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+    const url = `http://127.0.0.1:${port}/upload`
+
+    const sink = await getSink('webhook', { url })
+    for (let i = 0; i < 4; i++) {
+      await expect(sink.deliver(`job-${i}`, outputPath, manifest)).rejects.toThrow(/webhook sink failed: 500/)
+    }
+
+    expect(connections).toBeLessThan(4)
+  }, 30_000)
+})
+
+// ESCSUITE-205 (hunt-j unverified / verify V-2): `fetch` followed a redirect by default, so a
+// 307/308 from the configured intake endpoint re-POSTed the whole render and the caller's own
+// headers to a host the operator never named.
+describe('webhook sink refuses a redirect (ESCSUITE-205)', () => {
+  it('fails the delivery naming the Location, and the render never reaches the redirect target', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('THE-WHOLE-RENDER-BYTES'))
+    const manifest = fakeManifest({ jobId: 'job-redirect' })
+
+    let targetHits = 0
+    const target = http.createServer((req, res) => {
+      targetHits++
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200)
+        res.end('ok')
+      })
+    })
+    cleanupServers.push(target)
+    await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', () => resolve()))
+    const targetPort = (target.address() as AddressInfo).port
+    const targetUrl = `http://127.0.0.1:${targetPort}/stolen`
+
+    let redirectHits = 0
+    const intake = http.createServer((req, res) => {
+      redirectHits++
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(307, { location: targetUrl })
+        res.end()
+      })
+    })
+    cleanupServers.push(intake)
+    await new Promise<void>((resolve) => intake.listen(0, '127.0.0.1', () => resolve()))
+    const intakePort = (intake.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${intakePort}/intake` })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      new RegExp(`refused to follow a redirect.*${targetUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+    )
+
+    expect(redirectHits).toBe(1)
+    // The render never reached the host the operator never configured.
+    expect(targetHits).toBe(0)
+  })
+
+  it('names only the status when the redirect carries no Location header', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-redirect-no-location' })
+
+    const intake = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        // A 3xx with no Location at all -- malformed, but the sink must still refuse it
+        // rather than crash constructing the message.
+        res.writeHead(302)
+        res.end()
+      })
+    })
+    cleanupServers.push(intake)
+    await new Promise<void>((resolve) => intake.listen(0, '127.0.0.1', () => resolve()))
+    const port = (intake.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/intake` })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'webhook sink refused to follow a redirect (302)',
+    )
+  })
+})
+
+// Review finding 8 / coverage: drainBody's two conditionals (a response with no body at all,
+// and a body that errors partway through) each need a case reaching both their arms.
+describe('webhook sink body draining (ESCSUITE-205 / review finding 8)', () => {
+  it('succeeds against a 204 response, which has no body at all to drain', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-no-content' })
+
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(204)
+        res.end()
+      })
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/intake` })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toBeDefined()
+  })
+
+  it('still succeeds when the response body errors partway through the drain', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-body-error' })
+
+    // A Content-Length that promises more than is ever sent, then the socket is cut: the
+    // client's fetch resolves with a 200 (headers already arrived), but reading the body
+    // throws partway through. The drain's own try/catch must swallow that -- the delivery
+    // still succeeds on the status this response already answered with.
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200, { 'content-length': '1000' })
+        res.write('short')
+        setTimeout(() => res.socket?.destroy(), 20)
+      })
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/intake`, timeoutMs: 5000 })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toBeDefined()
   })
 })
 

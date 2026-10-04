@@ -40,6 +40,28 @@ function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+/**
+ * A Chromium launch failure's Playwright call log — the shape `outcome.error` can carry — runs
+ * to kilobytes of its own argv and ANSI colour escapes (hunt-j verify V-3b). `cli.ts`'s text
+ * logger already strips control characters from ordinary log lines, but `outcome.error` is the
+ * `error` field of the one-line JSON outcome on stdout and of the `POST /render` 200 body,
+ * neither of which goes through that logger — so it is sanitised here, once, for both.
+ * Strips ANSI/VT escape sequences first (as whole sequences, not just their leading ESC byte,
+ * which would otherwise leave the rest of the sequence as visible text) and then any remaining
+ * C0 control character or DEL. The CSI parameter class is [0-?] (0x30-0x3F), ECMA-48's full
+ * parameter-byte range -- ';' and ':' included -- so a multi-parameter sequence like
+ * ESC[1;31m matches as one whole unit rather than failing to match at all and leaking
+ * " [1;31m" as visible text (review finding 6).
+ */
+// eslint-disable-next-line no-control-regex -- matching escape/control bytes is the point
+const ANSI_ESCAPE_RE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\\]^_])/g
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f]/g
+
+function sanitizeErrorMessage(message: string): string {
+  return message.replace(ANSI_ESCAPE_RE, '').replace(CONTROL_CHAR_RE, ' ')
+}
+
 /** Runs a cleanup step so a teardown failure is reported but never replaces the real outcome. */
 async function tryCleanup(what: string, log: (line: string) => void, step: () => Promise<void>): Promise<void> {
   try {
@@ -125,7 +147,7 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
       durationMs: Date.now() - startedAt,
     }
   } catch (err) {
-    const error = messageOf(err)
+    const error = sanitizeErrorMessage(messageOf(err))
     log(`error: ${error}`)
     return { jobId: spec.jobId, ok: false, error, durationMs: Date.now() - startedAt }
   } finally {

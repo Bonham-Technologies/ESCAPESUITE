@@ -17,7 +17,12 @@ const sdk = vi.hoisted(() => {
     commands: { name: string; input: Record<string, unknown> }[]
     clientConfigs: Record<string, unknown>[]
     body: unknown
-  } = { commands: [], clientConfigs: [], body: undefined }
+    /** When set, send() never resolves on its own -- it only ever settles via the
+     * abortSignal passed in its options, the same way the real SDK's requestHandler would
+     * reject an in-flight request once that signal fires. */
+    hang: boolean
+    lastAbortSignal: AbortSignal | undefined
+  } = { commands: [], clientConfigs: [], body: undefined, hang: false, lastAbortSignal: undefined }
 
   class GetObjectCommand {
     readonly name = 'GetObject'
@@ -50,8 +55,23 @@ const sdk = vi.hoisted(() => {
     constructor(config: Record<string, unknown>) {
       state.clientConfigs.push(config)
     }
-    async send(command: { name: string; input: Record<string, unknown> }): Promise<unknown> {
+    async send(
+      command: { name: string; input: Record<string, unknown> },
+      options?: { abortSignal?: AbortSignal },
+    ): Promise<unknown> {
       await drainBody(command.input?.Body)
+      state.lastAbortSignal = options?.abortSignal
+      if (state.hang) {
+        await new Promise((_resolve, reject) => {
+          const signal = options?.abortSignal
+          if (!signal) return // never resolves -- the test that sets hang always supplies one
+          if (signal.aborted) {
+            reject(signal.reason ?? new Error('aborted'))
+            return
+          }
+          signal.addEventListener('abort', () => reject(signal.reason ?? new Error('aborted')))
+        })
+      }
       state.commands.push({ name: command.name, input: command.input })
       return command.name === 'GetObject' ? { Body: state.body } : {}
     }
@@ -72,6 +92,8 @@ beforeEach(() => {
   sdk.state.commands = []
   sdk.state.clientConfigs = []
   sdk.state.body = undefined
+  sdk.state.hang = false
+  sdk.state.lastAbortSignal = undefined
 })
 
 afterEach(async () => {
@@ -178,6 +200,72 @@ describe('s3Sink object metadata', () => {
     })
     // Fully read by the time deliver() resolves (ESCSUITE-186) -- see drainBody's comment.
     expect((sdk.state.commands[0].input.Body as Readable).readableEnded).toBe(true)
+  })
+})
+
+// ESCSUITE-209: unlike every other sink, s3 set no budget of its own -- a stalled upload was
+// bounded only by the AWS SDK's own defaults (no timeout, with retries), so a drain waiting on
+// one had no bound this kit controlled at all.
+// Review finding 2: this is the "resolves" side of probeS3Sdk; s3.nosdk.test.ts's own direct
+// test is the "rejects" side. ensureSinkReady's own tests mock probeS3Sdk itself, so neither
+// side was ever reached by the real function before.
+describe('probeS3Sdk', () => {
+  it('resolves when the SDK loads', async () => {
+    const { probeS3Sdk } = await import('./s3')
+
+    await expect(probeS3Sdk()).resolves.toBeUndefined()
+  })
+})
+
+describe('s3Sink delivery timeout (ESCSUITE-209)', () => {
+  it('rejects with a clear message when the upload hangs past config.timeoutMs', async () => {
+    const { s3Sink } = await import('./s3')
+    const srcDir = await makeTempDir()
+    const outputPath = path.join(srcDir, 'render.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+    sdk.state.hang = true
+
+    const sink = await s3Sink({ prefix: 'bucket/renders', timeoutMs: 50 })
+
+    await expect(sink.deliver('job-s3', outputPath, fakeManifest())).rejects.toThrow(
+      's3 sink timed out after 50 ms',
+    )
+  })
+
+  it('passes an abortSignal through to send(), so a real SDK can actually cancel the request', async () => {
+    const { s3Sink } = await import('./s3')
+    const srcDir = await makeTempDir()
+    const outputPath = path.join(srcDir, 'render.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+
+    const sink = await s3Sink({ prefix: 'bucket/renders' })
+    await sink.deliver('job-s3', outputPath, fakeManifest())
+
+    expect(sdk.state.lastAbortSignal).toBeInstanceOf(AbortSignal)
+  })
+
+  it('does not time out an upload that finishes well inside its budget', async () => {
+    const { s3Sink } = await import('./s3')
+    const srcDir = await makeTempDir()
+    const outputPath = path.join(srcDir, 'render.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+
+    const sink = await s3Sink({ prefix: 'bucket/renders', timeoutMs: 5000 })
+    await expect(sink.deliver('job-s3', outputPath, fakeManifest())).resolves.toMatchObject({
+      outputLocation: 's3://bucket/renders/job-s3.mp4',
+    })
+  })
+
+  it('defaults to 300000 ms when config.timeoutMs is not given', async () => {
+    const { s3Sink, validateS3Config } = await import('./s3')
+    expect(validateS3Config({ prefix: 'bucket' }).timeoutMs).toBe(300_000)
+
+    // And deliver() still works end to end with no timeoutMs supplied at all.
+    const srcDir = await makeTempDir()
+    const outputPath = path.join(srcDir, 'render.mp4')
+    await fs.writeFile(outputPath, Buffer.from('mp4 bytes'))
+    const sink = await s3Sink({ prefix: 'bucket/renders' })
+    await expect(sink.deliver('job-s3', outputPath, fakeManifest())).resolves.toBeDefined()
   })
 })
 

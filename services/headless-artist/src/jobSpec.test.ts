@@ -1,5 +1,6 @@
-import { describe, it, expect } from 'vitest'
-import { collectUnknownKeys, parseJobSpec } from './jobSpec'
+import { describe, it, expect, vi } from 'vitest'
+import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
+import * as s3Module from './s3'
 
 function validSpec(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -178,6 +179,63 @@ describe('parseJobSpec', () => {
     )
   })
 
+  // ESCSUITE-192 (hunt-j J-4): output.config was unvalidated at parse time, so a job with a
+  // sink config that could never work (no config.dir, say) was accepted with a 200/exit-0 and
+  // rendered for the full budget before failing at delivery. The sink's own config shape is
+  // now checked while the spec is parsed, so this fails before Chromium ever launches.
+  describe('sink config is validated at parse time', () => {
+    it('rejects a volume job with no config.dir', () => {
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 'volume', config: {} } })),
+      ).toThrow(/volume sink requires config\.dir \(string\)/)
+    })
+
+    it('rejects a command job with no config.command', () => {
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 'command', config: {} } })),
+      ).toThrow(/command sink requires config\.command \(string\)/)
+    })
+
+    it('rejects a webhook job with no config.url', () => {
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 'webhook', config: {} } })),
+      ).toThrow(/webhook sink requires config\.url \(string\)/)
+    })
+
+    it('rejects an s3 job whose prefix names no bucket', () => {
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 's3', config: { prefix: 's3://' } } })),
+      ).toThrow(/s3 sink requires config\.prefix to name a bucket/)
+    })
+
+    it('rejects an s3 job with a non-string region', () => {
+      expect(() =>
+        parseJobSpec(
+          validSpec({ output: { sink: 's3', config: { prefix: 'bucket', region: 42 } } }),
+        ),
+      ).toThrow(/s3 sink requires config\.region \(string\) when provided/)
+    })
+
+    it('accepts a valid config for every sink', () => {
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 'command', config: { command: '/bin/true' } } })),
+      ).not.toThrow()
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 'webhook', config: { url: 'https://x/y' } } })),
+      ).not.toThrow()
+      expect(() =>
+        parseJobSpec(validSpec({ output: { sink: 's3', config: { prefix: 'bucket/renders' } } })),
+      ).not.toThrow()
+    })
+
+    it('keeps the raw config object in the parsed spec, unmodified', () => {
+      // Validation is a side effect, not a normalisation step: the config a caller gets back
+      // is exactly the one it sent, defaults (command's timeoutMs, say) included or not.
+      const spec = parseJobSpec(validSpec({ output: { sink: 'command', config: { command: '/bin/true' } } }))
+      expect(spec.output.config).toEqual({ command: '/bin/true' })
+    })
+  })
+
   it('accepts gif as a format', () => {
     const spec = parseJobSpec(validSpec({ options: { format: 'gif' } }))
     expect(spec.options).toEqual({ format: 'gif', quality: 'high' })
@@ -283,5 +341,54 @@ describe('collectUnknownKeys', () => {
 
   it('does not flag fps, which the parser reads', () => {
     expect(collectUnknownKeys(validSpec({ options: { format: 'gif', fps: 15 } }))).toEqual([])
+  })
+})
+
+// ESCSUITE-192 (hunt-j J-4): the s3 SDK's presence is the one sink-config check that cannot
+// run synchronously inside parseJobSpec (it is a dynamic import), so it is a separate step a
+// caller awaits right after parsing -- still before any render -- rather than folded into the
+// parser itself.
+describe('ensureSinkReady', () => {
+  it('probes the s3 SDK and resolves when it is present', async () => {
+    const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk').mockResolvedValue(undefined)
+    try {
+      await expect(
+        ensureSinkReady({ sink: 's3', config: { prefix: 'bucket' } }),
+      ).resolves.toBeUndefined()
+      expect(probeSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      probeSpy.mockRestore()
+    }
+  })
+
+  it('propagates the SDK-missing error', async () => {
+    const probeSpy = vi
+      .spyOn(s3Module, 'probeS3Sdk')
+      .mockRejectedValue(new Error('s3 sink requires the optional dependency @aws-sdk/client-s3'))
+    try {
+      await expect(ensureSinkReady({ sink: 's3', config: { prefix: 'bucket' } })).rejects.toThrow(
+        /requires the optional dependency @aws-sdk\/client-s3/,
+      )
+    } finally {
+      probeSpy.mockRestore()
+    }
+  })
+
+  it('does nothing for every sink but s3', async () => {
+    const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')
+    try {
+      await expect(
+        ensureSinkReady({ sink: 'volume', config: { dir: '/tmp' } }),
+      ).resolves.toBeUndefined()
+      await expect(
+        ensureSinkReady({ sink: 'command', config: { command: '/bin/true' } }),
+      ).resolves.toBeUndefined()
+      await expect(
+        ensureSinkReady({ sink: 'webhook', config: { url: 'https://x/y' } }),
+      ).resolves.toBeUndefined()
+      expect(probeSpy).not.toHaveBeenCalled()
+    } finally {
+      probeSpy.mockRestore()
+    }
   })
 })

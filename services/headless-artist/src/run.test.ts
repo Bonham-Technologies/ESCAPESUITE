@@ -274,6 +274,48 @@ describe('runJob', () => {
     expect(outcome).toMatchObject({ ok: false, error: 'page closed before the render started' })
   })
 
+  // ESCSUITE-192 (hunt-j verify V-3b): Playwright's own call-log errors carry raw ANSI escape
+  // sequences and C0 control characters (observed: ESC + "[2m" ... "[22m"). That string is the
+  // `error` field of the one-line JSON outcome on stdout and of the POST /render 200 body, and
+  // the text logger's own control-character stripping (createLogger in cli.ts) never touches
+  // it -- it is written straight from the outcome object.
+  it('strips ANSI escape sequences and control characters from outcome.error', async () => {
+    const workDir = await makeTempDir()
+    const ansiMessage = '\x1b[2mbrowserType.launch:\x1b[22m Target page\tclosed\x07 (\x1b[31mcode\x1b[39m)'
+    vi.mocked(renderInChromium).mockRejectedValue(new Error(ansiMessage))
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: workDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.error).toBeDefined()
+    // eslint-disable-next-line no-control-regex -- asserting none of these bytes survive
+    expect(outcome.error).not.toMatch(/[\u0000-\u001f\u007f]/)
+    // The readable text survives, just without the escape/control bytes around it.
+    expect(outcome.error).toContain('browserType.launch:')
+    expect(outcome.error).toContain('Target page')
+    expect(outcome.error).toContain('closed')
+    expect(outcome.error).toContain('code')
+  })
+
+  // Review finding 6: the CSI parameter-byte class was [0-9?], but ECMA-48 parameter
+  // bytes are 0x30-0x3F -- ';' and ':' included -- so a multi-parameter sequence like
+  // ESC[1;31m survived as visible text (" [1;31m") instead of being stripped.
+  it('strips a multi-parameter CSI sequence (e.g. ESC[1;31m), not just single-parameter ones', async () => {
+    const workDir = await makeTempDir()
+    const ansiMessage = '\x1b[1;31mred bold\x1b[0m text'
+    vi.mocked(renderInChromium).mockRejectedValue(new Error(ansiMessage))
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: workDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.error).toBe('red bold text')
+  })
+
   it('omits manifestLocation for a sink that does not durably store one', async () => {
     const workDir = await makeTempDir()
     mockRenderWriting('hello')
