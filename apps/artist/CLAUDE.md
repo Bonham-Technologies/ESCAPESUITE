@@ -2779,6 +2779,17 @@ on the dialog's own padding lands. Shift+Tab from there walked backwards out of 
 the last control; `ExportDialog` carries `tabIndex={-1}` so the container is a focus target
 at all.
 
+ESCSUITE-208 fixed three more latent gaps in the shared hook, none reachable through any of
+these five dialogs as shipped (no modal here holds a `position: fixed` control, a
+`[contenteditable]`, an `<iframe>` or a native media player, and no two of these five can ever
+be open at once — see `apps/craft/CLAUDE.md`'s "Dialogs" for why and for the full detail, since
+the hook itself lives in `packages/shared` rather than in either app): the trap's "is this
+control visible" check moved from `offsetParent !== null` to `getClientRects().length > 0`, so a
+pinned control is no longer dropped from the trap the way a real browser's `offsetParent` would
+drop it; the focusable-element selector gained arms for `[contenteditable]`, `audio[controls]`,
+`video[controls]`, `iframe` and `summary`; and Escape now defers to a module-level stack of open
+dialogs, so only the topmost instance's `onClose` runs if two were ever open together.
+
 #### The modal gate on the global shortcuts
 
 **While a modal is up, the editor behind it takes no key at all.** `App` computes one flag —
