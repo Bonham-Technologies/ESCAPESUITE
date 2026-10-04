@@ -264,6 +264,22 @@ alongside `config.env` merged over the runner's own environment. A non-zero exit
 the last ~20 lines of the command's stderr come back in the outcome's `error`. Its **stdout is
 discarded** — log as much as you like, there is no output buffer to overflow.
 
+`timeoutMs` (a positive integer, default **5 minutes**, same `2147483647` — 2^31-1 ms — bound as
+the webhook sink's) is this delivery's own budget, separate from `HEADLESS_TIMEOUT_MS` (which
+only covers the render). A command that outruns it is sent `SIGTERM`, then `SIGKILL` two
+seconds later if it is still alive, and the job fails with `command sink timed out after <n> ms`
+— the same message shape the webhook sink's timeout uses, and the rejection fires on that
+schedule regardless of whether the child has actually exited by then. Without this a delivery
+command that never exits held the worker slot forever, since `HEADLESS_TIMEOUT_MS` does not
+reach delivery.
+
+**Only the direct child is signalled.** A command that backgrounds work of its own — forking a
+grandchild and exiting itself — leaves that grandchild running; killing a whole process tree
+needs a wrapper that kills its own process group, or `detached` plus a group kill, which is a
+follow-up, not what this does today. The scratch directory is removed as soon as the job fails
+(the same cleanup every failure gets), so a surviving grandchild loses the file it was reading
+or writing out from under it.
+
 **In `serve` this sink is off by default.** A `POST /render` body chooses its own sink, so
 over HTTP this one is "run the program I name, as you" — see
 [the sink allow-list](#the-sink-allow-list). The one-shot `render` command always honours it:
@@ -290,11 +306,13 @@ A single `multipart/form-data` POST with two fields: `manifest` (the verificatio
 JSON string) and `file` (the render, filename `<jobId>.<ext>`, content type `video/mp4`,
 `video/webm` or `image/gif`). Any non-2xx response fails the job. `outputLocation` is the URL.
 
-`timeoutMs` (a positive integer, default **10 minutes**) bounds the whole POST — connect,
-upload, and the server's response. `HEADLESS_TIMEOUT_MS` does not cover delivery, so without
-this an endpoint that accepts the body and never answers would hold the worker forever; the job
-then fails with `webhook sink timed out after <n> ms`. Raise it if you push large files over a
-slow link.
+`timeoutMs` (a positive integer, default **10 minutes**, at most **2147483647** — 2^31-1 ms,
+~24.8 days, the largest delay a timer can represent; anything above that is refused by name
+rather than silently clamped to ~1 ms) bounds the whole POST — connect, upload, and the
+server's response. `HEADLESS_TIMEOUT_MS` does not cover delivery, so without this an endpoint
+that accepts the body and never answers would hold the worker forever; the job then fails with
+`webhook sink timed out after <n> ms`. Raise it, short of the bound, if you push large files
+over a slow link.
 
 `headers` are sent as given with one exception: a `Content-Type` you set is **ignored**. The
 boundary is generated per request and lives in that header — overriding it would leave the
@@ -357,7 +375,7 @@ paths.
 | `HEADLESS_GPU` | unset | `true` launches Chromium with GPU acceleration instead of `--disable-gpu`. See [GPU](#gpu). |
 | `HEADLESS_CHROMIUM_PATH` | Playwright's browser | Path to a Chromium binary to launch instead. |
 | `HEADLESS_NO_SANDBOX` | unset | `true` adds `--no-sandbox`. Needed when running as root — e.g. in a container with no `USER`. Prefer running as a non-root user and leaving this off. |
-| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-**render** budget, launch included — it does not cover delivery (the `webhook` sink has its own `timeoutMs`). Must be a positive integer; anything else exits 2. |
+| `HEADLESS_TIMEOUT_MS` | `1800000` (30 min) | Whole-**render** budget, launch included — it does not cover delivery (the `webhook` and `command` sinks each have their own `timeoutMs`). Must be a positive integer of at most `2147483647` (2^31-1 ms, ~24.8 days — the largest delay `setTimeout` can represent); anything else, including a larger value, exits 2. |
 | `HEADLESS_LOG` | `text` | `json` emits one JSON object per stderr line (`{ts, level, msg}`, level `error` or `info`). |
 | `HEADLESS_PORT` | `8787` | `serve` only: port to bind. `0` picks a free one and prints it. |
 | `HEADLESS_HOST` | `127.0.0.1` | `serve` only: interface to bind. There is no auth — see [HTTP service mode](#http-service-mode) before changing it. |
@@ -641,6 +659,17 @@ Paths in the spec are resolved **by the server**, on the server's filesystem —
 and a `volume` sink's `dir` have to exist where the process runs, not where the client does. The
 API moves job specs, never media.
 
+The listener sets Node's own `requestTimeout` (**30 s**) and `headersTimeout` (**10 s**), well
+short of Node's defaults (300 s and 60 s) — a job spec is a few hundred bytes and has no
+business taking that long to arrive. **`requestTimeout` bounds the whole request, body
+included** (per Node's own docs, "receiving the entire request from the client"), not just the
+request line and headers; `headersTimeout` is the tighter window for the headers alone. Both are
+checked on a periodic sweep rather than watched continuously —
+`connectionsCheckingInterval` (**5 s** here; Node's own default is 30 s) — so the effective bound
+on a stalled request is the configured timeout plus up to one sweep period. A shutdown in
+progress tears such a request down immediately instead of waiting for the next sweep — see
+[Shutdown](#shutdown).
+
 | Status | When | Body |
 | --- | --- | --- |
 | `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
@@ -648,6 +677,8 @@ API moves job specs, never media.
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
+| `408` | The request's body had not finished arriving when a shutdown began. Nothing was queued. | `{"error": "request body did not finish arriving before shutdown"}` |
+| `408` | Independently of shutdown: the request line, the headers, **or the body** took longer than `requestTimeout`/`headersTimeout` to arrive, caught on the next `connectionsCheckingInterval` sweep. This is **Node's own** answer, written raw to the socket rather than through this server's JSON responses. | None at all — exactly `HTTP/1.1 408 Request Timeout` plus `Connection: close`, no body. |
 | `413` | The body is over 1 MiB. A job spec names paths, never payloads; it has no business being that big. | `{"error": "…"}` |
 | `415` | `content-type` was not `application/json`. | `{"error": "…"}` |
 | `429` | The queue is full. Carries `Retry-After: 5`. Nothing was queued — resend it, or send it somewhere less busy. | `{"error": "render queue is full (64 queued)"}` |
@@ -810,15 +841,32 @@ drop a render that is half encoded:
 
 1. The listener stops accepting new connections.
 2. Jobs still queued are answered `503 {"error":"server shutting down"}` immediately — they
-   never started, so they are safe to retry elsewhere.
+   never started, so they are safe to retry elsewhere. A request whose body had not finished
+   arriving yet — nothing was queued, so there was nothing for that 503 to reject — is torn
+   down the same moment: `408` while the response can still carry one, otherwise the connection
+   simply goes away. Retrying it is just as safe.
 3. Renders already running are allowed to finish and their clients get the real outcome.
 4. The process exits 0 — or `1`, with `error: shutdown failed: …` on stderr, if the drain
    itself failed and the state of the in-flight renders is therefore unknown.
 
-Step 3 is bounded by `HEADLESS_TIMEOUT_MS`, not by the signal, so a 30-minute render means up to
-a 30-minute drain. Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent)
-accordingly, or a `SIGKILL` will land in the middle of an encode and leave the scratch directory
-behind.
+Step 3 is bounded by `HEADLESS_TIMEOUT_MS` **plus** the job's own delivery budget — not by the
+signal, and not by the render alone. The `webhook` and `command` sinks each have their own
+`timeoutMs` (10 minutes and 5 minutes by default), so a 30-minute render that then delivers over
+`webhook` means up to a 40-minute drain. **`volume` needs no budget of its own — it is a local
+filesystem write — but `s3` has none either**: the sink sets no timeout of its own, so a stalled
+upload is bounded only by the AWS SDK's own defaults (no timeout, with retries), and a drain
+waiting on one has no bound this kit controls at all. An `s3` delivery budget is a follow-up, not
+something this ticket adds. Size `terminationGracePeriodSeconds` (or your orchestrator's
+equivalent) against the sum you can actually bound, or a `SIGKILL` will land in the middle of an
+encode or a delivery and leave the scratch directory behind.
+
+Step 2's new half is there so a client that never finishes sending cannot hold **this** drain
+open indefinitely — nothing used to bound that wait at all. The server's own `requestTimeout`
+(**30 s**) and `headersTimeout` (**10 s**) bound the request line, the headers *and* the body,
+well under Node's defaults of 300 s and 60 s, but only on a periodic sweep
+(`connectionsCheckingInterval`, **5 s** here) — see [`POST /render`](#post-render). So outside a
+shutdown a stalled request is still disconnected, just not as promptly as during one: `close()`'s
+teardown is the *immediate* bound once a shutdown begins, not the only bound there is.
 
 A **second** stop signal during the drain exits immediately with `130`, matching what
 Node does with an unhandled `SIGINT` — so pressing Ctrl-C twice does what you expect. It

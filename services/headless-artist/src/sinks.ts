@@ -2,6 +2,7 @@ import { openAsBlob, promises as fs } from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import type { VerificationManifest } from './manifest'
+import { MAX_TIMEOUT_MS } from './timeouts'
 
 export interface OutputSink {
   deliver(
@@ -97,7 +98,15 @@ interface CommandConfig {
   command: string
   args: string[]
   env: Record<string, string>
+  timeoutMs: number
 }
+
+/**
+ * Delivery budget when `config.timeoutMs` is not given. `HEADLESS_TIMEOUT_MS` bounds only the
+ * render phase, so without one of these a delivery command that never exits would hold the
+ * worker slot forever.
+ */
+const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000
 
 function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
   const command = requireString(config, 'command', 'command')
@@ -119,8 +128,26 @@ function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
     throw new Error('command sink config.env values must be strings')
   }
 
-  return { command, args, env: env as Record<string, string> }
+  const rawTimeout = config.timeoutMs
+  if (
+    rawTimeout !== undefined &&
+    (typeof rawTimeout !== 'number' || !Number.isInteger(rawTimeout) || rawTimeout <= 0)
+  ) {
+    throw new Error('command sink requires config.timeoutMs (positive integer) when provided')
+  }
+  // Same 32-bit timer bound as the webhook sink's — see MAX_TIMEOUT_MS.
+  if (typeof rawTimeout === 'number' && rawTimeout > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `command sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
+  }
+  const timeoutMs = (rawTimeout as number | undefined) ?? DEFAULT_COMMAND_TIMEOUT_MS
+
+  return { command, args, env: env as Record<string, string>, timeoutMs }
 }
+
+/** How long a child is given to exit after SIGTERM before SIGKILL follows. */
+const COMMAND_KILL_GRACE_MS = 2000
 
 /** Last ~20 lines of stderr, for a useful failure message without dumping megabytes. */
 function tailLines(text: string, count: number): string {
@@ -161,13 +188,45 @@ function createCommandSink(config: CommandConfig): OutputSink {
           stderr = (stderr + chunk).slice(-STDERR_TAIL_CHARS)
         })
 
+        // The delivery's own budget — HEADLESS_TIMEOUT_MS only covers the render, so without
+        // this a command that never exits would hold the worker slot forever. SIGTERM first,
+        // then SIGKILL after a grace period for a child that ignores it. The rejection fires
+        // from the escalation timer itself, right after the SIGKILL, rather than waiting on
+        // 'close' — 'close' waits for the stdio pipes, not the child, so a direct child that
+        // backgrounds a grandchild inheriting the stderr pipe and then exits would otherwise
+        // never emit it, leaving deliver() unsettled long after both timers have fired.
+        let timedOut = false
+        let killTimer: NodeJS.Timeout | undefined
+        const timeoutTimer = setTimeout(() => {
+          timedOut = true
+          child.kill('SIGTERM')
+          killTimer = setTimeout(() => {
+            child.kill('SIGKILL')
+            reject(new Error(`command sink timed out after ${config.timeoutMs} ms`))
+          }, COMMAND_KILL_GRACE_MS)
+        }, config.timeoutMs)
+        const clearTimers = (): void => {
+          clearTimeout(timeoutTimer)
+          if (killTimer !== undefined) clearTimeout(killTimer)
+        }
+
         child.on('error', (err) => {
+          clearTimers()
           const why =
             (err as NodeJS.ErrnoException).code === 'ENOENT' ? 'command not found' : err.message
           reject(new Error(`command sink "${config.command}" could not be run: ${why}`, { cause: err }))
         })
 
         child.on('close', (code, signal) => {
+          clearTimers()
+          if (timedOut) {
+            // Already rejected from the escalation timer above (or will be, if the child's own
+            // pipes close before the kill timer fires) — a second reject on a settled promise
+            // is a no-op. Kept so a child that dies in the same instant the timer fires still
+            // reports a timeout rather than falling through to the exit-code branch below.
+            reject(new Error(`command sink timed out after ${config.timeoutMs} ms`))
+            return
+          }
           if (code === 0) {
             resolve()
             return
@@ -231,6 +290,14 @@ function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
     (typeof rawTimeout !== 'number' || !Number.isInteger(rawTimeout) || rawTimeout <= 0)
   ) {
     throw new Error('webhook sink requires config.timeoutMs (positive integer) when provided')
+  }
+  // AbortSignal.timeout clamps any delay above 2^31-1 to 1 ms rather than refusing it (and
+  // throws ERR_OUT_OF_RANGE above 2^32-1), so a value past this bound would abort the delivery
+  // almost instantly instead of giving it the long budget that was asked for.
+  if (typeof rawTimeout === 'number' && rawTimeout > MAX_TIMEOUT_MS) {
+    throw new Error(
+      `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
   }
 
   return {

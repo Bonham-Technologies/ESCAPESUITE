@@ -1,7 +1,13 @@
 import http from 'node:http'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { startServer } from './serve'
+import {
+  CONNECTIONS_CHECKING_INTERVAL_MS,
+  createLimiter,
+  HEADERS_TIMEOUT_MS,
+  REQUEST_TIMEOUT_MS,
+  startServer,
+} from './serve'
 import type { ServeOptions, ServeHandle } from './serve'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
@@ -185,6 +191,24 @@ afterEach(async () => {
     if (server) await server.close()
   }
   vi.restoreAllMocks()
+})
+
+// Review finding 3: the rewritten drain test (close() tears down a half-sent body itself,
+// rather than letting it reach the limiter after shutdown) took away the only path through the
+// server that ever reached createLimiter.run's own `if (closed)` guard — the limiter's own
+// documented contract, not just route()'s closing-503 check ahead of it. Exercised directly here
+// instead, alongside the queue tests below that already drive the false side.
+describe('createLimiter', () => {
+  it('rejects run() with the shutdown error after shutdown(), enqueuing nothing', async () => {
+    const limiter = createLimiter(1, 10)
+    limiter.shutdown()
+
+    const limited = limiter.run(async () => 'done')
+
+    await expect(limited.promise).rejects.toThrow('server shutting down')
+    expect(limiter.queued).toBe(0)
+    expect(limiter.inFlight).toBe(0)
+  })
 })
 
 describe('GET /healthz', () => {
@@ -442,6 +466,37 @@ describe('binding', () => {
 
 })
 
+// ESCSUITE-193 (hunt J-6): the server set neither requestTimeout nor headersTimeout, so the
+// only bound on a slow or silent client was Node's own default (300 s / 60 s) — far longer
+// than a job spec, a few hundred bytes at most, could ever legitimately take to arrive.
+describe('request and headers timeouts', () => {
+  it('sets both, well short of Node defaults, on the real http.Server', async () => {
+    const spy = vi.spyOn(http, 'createServer')
+    await start()
+    const created = spy.mock.results[0]?.value as http.Server
+    spy.mockRestore()
+
+    expect(created.requestTimeout).toBe(REQUEST_TIMEOUT_MS)
+    expect(created.headersTimeout).toBe(HEADERS_TIMEOUT_MS)
+    expect(REQUEST_TIMEOUT_MS).toBeLessThan(300_000)
+    expect(HEADERS_TIMEOUT_MS).toBeLessThan(60_000)
+  })
+
+  // Re-review N1: both timeouts above are enforced on a periodic sweep
+  // (connectionsCheckingInterval), whose Node default is 30 s — far coarser than either
+  // configured timeout, so without this option 30 s/10 s are honoured only to the nearest
+  // 30 s. A statement, not a branch: this just pins what was passed to http.createServer.
+  it('passes connectionsCheckingInterval, well short of Node default, to http.createServer', async () => {
+    const spy = vi.spyOn(http, 'createServer')
+    await start()
+    const options = spy.mock.calls[0]?.[0] as http.ServerOptions
+    spy.mockRestore()
+
+    expect(options.connectionsCheckingInterval).toBe(CONNECTIONS_CHECKING_INTERVAL_MS)
+    expect(CONNECTIONS_CHECKING_INTERVAL_MS).toBeLessThan(30_000)
+  })
+})
+
 describe('the log sink', () => {
   it('survives one that throws, rather than turning it into an unhandled rejection', async () => {
     const seen: string[] = []
@@ -679,7 +734,11 @@ describe('close()', () => {
     await closing
   })
 
-  it('turns away a job whose body was still arriving when the drain began', async () => {
+  // ESCSUITE-193 (hunt J-6): a request whose body had not finished arriving used to be left
+  // parked in readBody — nothing queued it, so the limiter's shutdown had nothing to reject,
+  // and close() simply waited (unbounded) for bytes a client might never send. It is now torn
+  // down by close() itself, with a 408 while the response can still carry one.
+  it('tears down a job whose body was still arriving when the drain began, with a 408', async () => {
     await start({ concurrency: 1 })
     const body = JSON.stringify(validSpec('job-late'))
 
@@ -694,17 +753,33 @@ describe('close()', () => {
     await settle()
 
     const closing = server().close()
-    // Only now does the spec finish arriving — the job reaches the limiter after shutdown.
-    socket.write(body.slice(1))
 
     const answer = await response
-    // Answered at all, rather than reset: the request was live before the drain started, so
-    // this 503 is the limiter refusing to *start* it, not the router refusing to accept it.
-    expect(answer).toContain('HTTP/1.1 503 Service Unavailable')
-    expect(answer).toContain('"error":"server shutting down"')
+    expect(answer).toContain('HTTP/1.1 408')
+    expect(answer).toContain('"error":"request body did not finish arriving before shutdown"')
     expect(runJob).not.toHaveBeenCalled()
     await closing
   })
+
+  it('close() does not wait on a client that never finishes sending its body', async () => {
+    await start({ concurrency: 1 })
+
+    const { socket, connected } = rawSocket()
+    await connected
+    // A well-formed POST whose declared body never arrives: nothing is queued, so the
+    // limiter's shutdown has nothing to reject either.
+    socket.write(
+      'POST /render HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-type: application/json\r\n' +
+        'content-length: 4096\r\n\r\n{',
+    )
+    await settle()
+
+    const raced = await Promise.race([
+      server().close().then(() => 'closed'),
+      new Promise<string>((resolve) => setTimeout(() => resolve('still draining'), 2000)),
+    ])
+    expect(raced).toBe('closed')
+  }, 15_000)
 
   it('turns away a request pipelined onto a live connection during the drain', async () => {
     const gate = deferred<RenderOutcome>()
@@ -742,6 +817,32 @@ describe('close()', () => {
 
     await Promise.all([server.close(), server.close()])
     await server.close()
+  })
+})
+
+// Review finding 8 (nit 8 accepted): readBody resolved `undefined` for both "too big" and
+// "never arrived", so a client that disconnects mid-body — independently of any shutdown —
+// used to reach handleRender's 413 branch and be logged as if the body had been oversized,
+// when really it was simply gone.
+describe('an abandoned request body', () => {
+  it('logs 499, not 413, when the client disconnects mid-body with no shutdown in progress', async () => {
+    await start({ concurrency: 1 })
+    const body = JSON.stringify(validSpec('job-abandoned'))
+
+    const { socket, connected } = rawSocket()
+    await connected
+    socket.write(
+      `POST /render HTTP/1.1\r\nhost: 127.0.0.1\r\ncontent-type: application/json\r\n` +
+        `content-length: ${Buffer.byteLength(body)}\r\n\r\n${body.slice(0, 1)}`,
+    )
+    await settle()
+
+    // The client itself gives up — no close() anywhere in this test.
+    socket.destroy()
+
+    await waitFor(() => expect(logs.some((line) => line.startsWith('POST /render 499'))).toBe(true))
+    expect(logs.some((line) => line.startsWith('POST /render 413'))).toBe(false)
+    expect(runJob).not.toHaveBeenCalled()
   })
 })
 

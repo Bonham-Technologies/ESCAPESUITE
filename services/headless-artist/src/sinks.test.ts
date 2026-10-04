@@ -6,6 +6,7 @@ import http from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { getSink } from './sinks'
 import type { VerificationManifest } from './manifest'
+import { MAX_TIMEOUT_MS } from './timeouts'
 
 const cleanupPaths: string[] = []
 const cleanupServers: http.Server[] = []
@@ -31,6 +32,46 @@ async function makeOutputFile(dir: string, bytes: Buffer, name = 'render-output.
   const filePath = path.join(dir, name)
   await fs.writeFile(filePath, bytes)
   return filePath
+}
+
+/** `kill -0` — true while the pid is still alive (any signal would do; 0 sends none). */
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Polls until `check` stops throwing, so a death check never depends on a fixed delay. */
+async function waitFor(check: () => void, timeoutMs = 2000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    try {
+      check()
+      return
+    } catch (err) {
+      if (Date.now() > deadline) throw err
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
+}
+
+/** Reads a pid a stubborn-child script wrote via `config.env.PID_FILE`, retrying briefly in
+ * case the write hasn't landed on disk yet by the time the caller looks for it. */
+async function readPidFile(pidFile: string): Promise<number> {
+  let lastErr: unknown
+  const deadline = Date.now() + 2000
+  for (;;) {
+    try {
+      return Number((await fs.readFile(pidFile, 'utf8')).trim())
+    } catch (err) {
+      lastErr = err
+      if (Date.now() > deadline) throw lastErr
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }
 }
 
 function fakeManifest(overrides: Partial<VerificationManifest> = {}): VerificationManifest {
@@ -445,6 +486,159 @@ describe('command sink', () => {
   })
 })
 
+// ESCSUITE-189 (hunt J-2): the command sink waited on `child.on('close')` with no timeout of
+// its own, so a delivery command that never exits held the worker slot forever — HEADLESS_TIMEOUT_MS
+// bounds only the render phase. It now gets the same kind of delivery budget the webhook sink
+// has, validated the same way and defaulted to five minutes.
+describe('command sink delivery timeout', () => {
+  it('validates config.timeoutMs is a positive integer when provided', async () => {
+    await expect(getSink('command', { command: 'echo', timeoutMs: 0 })).rejects.toThrow(
+      /command sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+    await expect(getSink('command', { command: 'echo', timeoutMs: 1.5 })).rejects.toThrow(
+      /command sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+    await expect(getSink('command', { command: 'echo', timeoutMs: '10' })).rejects.toThrow(
+      /command sink requires config\.timeoutMs \(positive integer\) when provided/,
+    )
+  })
+
+  it('refuses a timeoutMs above the 32-bit timer bound, naming it', async () => {
+    await expect(getSink('command', { command: 'echo', timeoutMs: MAX_TIMEOUT_MS + 1 })).rejects.toThrow(
+      `command sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+    )
+  })
+
+  it('accepts exactly the bound', async () => {
+    await expect(getSink('command', { command: 'echo', timeoutMs: MAX_TIMEOUT_MS })).resolves.toBeTruthy()
+  })
+
+  it('kills a delivery command that outlives its budget and rejects with the timeout message', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-timeout' })
+
+    const sink = await getSink('command', {
+      command: '/bin/sh',
+      args: ['-c', 'sleep 4'],
+      timeoutMs: 200,
+    })
+
+    const startedAt = Date.now()
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'command sink timed out after 200 ms',
+    )
+    // Settling at all, well short of the 4 s sleep, is itself proof the child was killed rather
+    // than merely abandoned. The bound is the design's own: SIGTERM at the budget, SIGKILL
+    // COMMAND_KILL_GRACE_MS later, and the rejection no later than that second timer — a loaded
+    // CI runner has been seen taking the full escalation (2206 ms) where a quiet machine settles
+    // on `close` at ~250 ms, so the assertion allows the escalation plus a second of slack.
+    expect(Date.now() - startedAt).toBeLessThan(200 + 2000 + 1000)
+  }, 10_000)
+
+  it('does not time out a command that finishes well inside its budget', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-fast' })
+
+    const sink = await getSink('command', {
+      command: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      timeoutMs: 5000,
+    })
+
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toEqual({
+      outputLocation: `command:${process.execPath}`,
+    })
+  })
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-stubborn' })
+    const pidFile = path.join(srcDir, 'pid')
+
+    // A generous timeoutMs (well past the freshly-spawned process's own startup) so the
+    // SIGTERM handler is registered before the signal arrives — otherwise the child dies to
+    // the ordinary default action instead of ever getting the chance to ignore it. Review
+    // finding 7: 500 ms still lost that race on a loaded runner often enough to flake.
+    const timeoutMs = 2000
+    const script = `
+      require('fs').writeFileSync(process.env.PID_FILE, String(process.pid))
+      process.on('SIGTERM', () => {})
+      setInterval(() => {}, 1000)
+    `
+    const sink = await getSink('command', {
+      command: process.execPath,
+      args: ['-e', script],
+      env: { PID_FILE: pidFile },
+      timeoutMs,
+    })
+
+    let pid: number | undefined
+    try {
+      const startedAt = Date.now()
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        `command sink timed out after ${timeoutMs} ms`,
+      )
+      // The rejection now fires from the escalation timer itself, right after the SIGKILL call
+      // — so settling proves only that the *timer* fired, not that the signal landed. Read the
+      // pid the child wrote at startup and wait for it to actually be gone (re-review N2).
+      const elapsed = Date.now() - startedAt
+      expect(elapsed).toBeGreaterThanOrEqual(timeoutMs + 1800)
+      expect(elapsed).toBeLessThan(timeoutMs + 5000)
+
+      pid = await readPidFile(pidFile)
+      await waitFor(() => expect(isAlive(pid as number)).toBe(false))
+    } finally {
+      // A survivor would otherwise run setInterval forever; this is the net under the pin
+      // above, not a substitute for it.
+      if (pid !== undefined && isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
+  }, 10_000)
+
+  // Review finding 1: the budget rejected only from child.on('close'), which waits for the
+  // stdio pipes rather than the child itself. A child that exits while leaving a backgrounded
+  // grandchild holding the inherited stderr pipe open never emits 'close' until the grandchild
+  // also exits, so the timers were killing a process that was already gone and deliver() never
+  // settled.
+  it('settles even when the direct child leaves a grandchild holding stderr open', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-cmd-grandchild' })
+    const pidFile = path.join(srcDir, 'grandchild-pid')
+
+    const sink = await getSink('command', {
+      command: '/bin/sh',
+      // The direct child backgrounds a grandchild that inherits its stderr pipe, writes the
+      // grandchild's own pid (not the direct child's) via $! so the test can reap it, then
+      // exits itself — 'close' on the direct child cannot fire until the grandchild also
+      // exits, 6 seconds from now. The 6 s is load-bearing for red-first (re-review: it must
+      // clear timeoutMs + the kill grace period by a wide margin, or the pre-fix code would
+      // settle on 'close' inside the assertion window and this case would pass on the bug) and
+      // is kept as-is; only the grandchild's own lingering is cleaned up, in the finally below.
+      args: ['-c', 'sh -c "sleep 6" & echo $! > "$PID_FILE"; exit 0'],
+      env: { PID_FILE: pidFile },
+      timeoutMs: 300,
+    })
+
+    let pid: number | undefined
+    try {
+      const startedAt = Date.now()
+      await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+        'command sink timed out after 300 ms',
+      )
+      // The bound is timeoutMs + COMMAND_KILL_GRACE_MS (2 s), regardless of whether 'close' ever
+      // fires — well short of the 6 s grandchild sleep.
+      expect(Date.now() - startedAt).toBeLessThan(2500)
+
+      pid = await readPidFile(pidFile)
+    } finally {
+      if (pid !== undefined && isAlive(pid)) process.kill(pid, 'SIGKILL')
+    }
+  }, 10_000)
+})
+
 describe('webhook sink', () => {
   it('validates config.url is required', async () => {
     await expect(getSink('webhook', {})).rejects.toThrow(/webhook sink requires config\.url \(string\)/)
@@ -532,6 +726,37 @@ describe('webhook sink', () => {
     await expect(getSink('webhook', { url: 'http://x/', timeoutMs: '10' })).rejects.toThrow(
       /webhook sink requires config\.timeoutMs \(positive integer\) when provided/,
     )
+  })
+
+  // ESCSUITE-188 (hunt J-1): timeoutMs had no upper bound, so a value past what setTimeout can
+  // represent overflowed to a ~1 ms timeout (aborting the delivery instantly) or, past 2^32-1,
+  // threw ERR_OUT_OF_RANGE from inside deliver. Both must now be refused at validation time,
+  // before any request is sent.
+  describe('config.timeoutMs upper bound', () => {
+    it('refuses a timeoutMs above 2^31-1, naming the bound, rather than overflowing to ~1 ms', async () => {
+      await expect(getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: 2_147_483_648 })).rejects.toThrow(
+        `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
+
+    it('refuses a timeoutMs above 2^32-1 the same way, rather than throwing ERR_OUT_OF_RANGE from inside deliver', async () => {
+      await expect(getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: 2 ** 40 })).rejects.toThrow(
+        `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
+
+    it('accepts exactly the bound, 2^31-1', async () => {
+      const sink = await getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: MAX_TIMEOUT_MS })
+      expect(sink).toBeDefined()
+    })
+
+    it('refuses one past the bound', async () => {
+      await expect(
+        getSink('webhook', { url: 'http://127.0.0.1:1/x', timeoutMs: MAX_TIMEOUT_MS + 1 }),
+      ).rejects.toThrow(
+        `webhook sink requires config.timeoutMs (positive integer, at most ${MAX_TIMEOUT_MS}) when provided`,
+      )
+    })
   })
 
   it('gives up on a server that accepts the request and never responds', async () => {
