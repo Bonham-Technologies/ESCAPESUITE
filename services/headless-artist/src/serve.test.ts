@@ -11,6 +11,7 @@ import {
 import type { ServeOptions, ServeHandle } from './serve'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
+import * as s3Module from './s3'
 import type { RenderOutcome } from './types'
 
 // Chromium is out of scope here: these tests are about routing, limits and shutdown.
@@ -307,6 +308,48 @@ describe('the sink allow-list', () => {
     const res = await postSpec(validSpec('job-1', { options: { format: 'avi' } }))
 
     expect(res.status).toBe(400)
+  })
+})
+
+// ESCSUITE-192 (hunt-j J-4): the one sink-config check that cannot run synchronously inside
+// parseJobSpec -- whether the optional s3 SDK can even be loaded -- is awaited right after it,
+// still before the job is ever queued, so this answers 400 rather than queuing a job that can
+// only ever fail at delivery.
+describe('sink readiness', () => {
+  it('answers 400 when the s3 SDK cannot be loaded, without queuing the job', async () => {
+    const probeSpy = vi
+      .spyOn(s3Module, 'probeS3Sdk')
+      .mockRejectedValue(new Error('s3 sink requires the optional dependency @aws-sdk/client-s3'))
+    try {
+      await start()
+
+      const res = await postSpec(
+        validSpec('job-1', { output: { sink: 's3', config: { prefix: 'bucket/renders' } } }),
+      )
+
+      expect(res.status).toBe(400)
+      expect(await res.json()).toEqual({
+        error: 's3 sink requires the optional dependency @aws-sdk/client-s3',
+      })
+      expect(runJob).not.toHaveBeenCalled()
+      await waitForHealth({ inFlight: 0, queued: 0 })
+    } finally {
+      probeSpy.mockRestore()
+    }
+  })
+
+  it('does not probe the SDK for a non-s3 sink', async () => {
+    const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')
+    try {
+      await start()
+
+      const res = await postSpec(validSpec('job-1'))
+
+      expect(res.status).toBe(200)
+      expect(probeSpy).not.toHaveBeenCalled()
+    } finally {
+      probeSpy.mockRestore()
+    }
   })
 })
 

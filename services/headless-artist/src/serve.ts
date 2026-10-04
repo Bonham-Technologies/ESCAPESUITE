@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { collectUnknownKeys, parseJobSpec } from './jobSpec'
+import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 
@@ -400,6 +400,10 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     let spec
     try {
       spec = parseJobSpec(json)
+      // The one sink-config check parseJobSpec cannot run synchronously: whether the
+      // optional s3 SDK can even be loaded. Still before the job is queued (ESCSUITE-192 /
+      // hunt-j J-4).
+      await ensureSinkReady(spec.output)
     } catch (err) {
       send(res, 400, withWarnings({ error: messageOf(err) }))
       return 400
