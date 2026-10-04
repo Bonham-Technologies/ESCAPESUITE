@@ -9,6 +9,7 @@ import {
   noAudioNote,
 } from '../../core/exportTypes'
 import { installWebCodecsDoubles } from '../../test/doubles/webcodecs'
+import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import { useEditorStore } from '../../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
 import type { ExportProgress } from '../../store/types'
@@ -124,28 +125,6 @@ async function settle() {
     await Promise.resolve()
     await Promise.resolve()
   })
-}
-
-/**
- * jsdom leaves getClientRects() empty for every element, which the dialog's
- * focus trap reads as "not visible". Make the tree look laid out.
- *
- * ESCSUITE-208 (I-U3): this used to patch `offsetParent` instead, because the
- * trap used to filter on `offsetParent !== null` — which a real browser also
- * sets to `null` for any `position: fixed` control, dropping it from the trap
- * entirely. The trap now reads `getClientRects()`, so this stub moved onto
- * the same property.
- */
-function pretendElementsAreVisible(): () => void {
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getClientRects')
-  Object.defineProperty(HTMLElement.prototype, 'getClientRects', {
-    configurable: true,
-    value: () => [{} as DOMRect],
-  })
-  return () => {
-    if (original) Object.defineProperty(HTMLElement.prototype, 'getClientRects', original)
-    else Reflect.deleteProperty(HTMLElement.prototype, 'getClientRects')
-  }
 }
 
 describe('ExportDialog', () => {
