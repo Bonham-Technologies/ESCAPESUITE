@@ -122,6 +122,13 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   hook calls whatever it is handed, and ARTIST's session-restore prompt hands it a no-op because
   declining discards the
   saved session. See each app's CLAUDE.md "Dialogs" note
+- **Shared error boundary**: `ErrorBoundary` (`packages/shared/src/components`, imported as
+  `@escapesuite/shared/components`) is the one React error boundary for both apps, mounted by
+  `bootstrapApp()` around `<App />`. A render-time throw anywhere below it shows one minimal,
+  accessible fallback panel instead of unmounting the whole app to a blank page, and calls an
+  optional `onError(error, info)` — the one hook a host app has for releasing anything a crash
+  would otherwise leave dangling. CRAFT's disposes a live recorder; ARTIST's is a documented
+  no-op. See each app's CLAUDE.md
 
 ### ESCAPEPLAN (apps/plan)
 - React Router for client-side routing
