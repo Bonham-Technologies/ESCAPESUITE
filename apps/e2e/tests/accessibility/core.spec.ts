@@ -1,5 +1,3 @@
-import { dirname, resolve as resolvePath } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
 import {
   mockGetUserMedia,
@@ -14,23 +12,20 @@ import {
   checkFormLabels,
   checkLinkText,
 } from '../../utils/accessibility'
-import { ARTIST_URL, seedTextClip } from '../../utils/artist'
+import { ARTIST_URL, ARTIST_FIXTURE_MP4, seedTextClip, keyframePanel } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
-
-/**
- * The same one-second fixture the integration and perf suites import — the
- * cheapest way to get a *media* clip onto the timeline, which is the only clip
- * kind whose inspector shows Blend Mode, Mask & Stroke, Effects and Transition.
- */
-const ARTIST_FIXTURE_MP4 = resolvePath(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../fixtures/headless/source.mp4'
-)
 
 test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5173')
     await waitForAppReady(page, 'plan')
+
+    // ESCSUITE-202 K-7: every test below is a pure negative (zero
+    // violations, zero images without alt text, zero unlabelled forms, at
+    // most two vague links) — every one of those is also true of a page
+    // with nothing rendered on it. Anchor the whole describe on the real
+    // landing page once, here, rather than in each test.
+    await expect(page.locator('h1').first()).toBeVisible()
   })
 
   test('landing page passes axe-core audit', async ({ page }) => {
@@ -349,6 +344,13 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 
   test('editor UI passes axe-core audit', async ({ page }) => {
+    // ESCSUITE-202 K-7: an axe audit is a pure negative, satisfied by a page
+    // with nothing in it. Prove the idle editor shell actually rendered
+    // before trusting zero violations — the dialog/keyframe/clip-inspector
+    // audits elsewhere in this describe cover the states this one does not
+    // reach.
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+
     const results = await runAxeCheck(page, {
       // Disable color-contrast for canvas-based timeline
       disableRules: ['color-contrast'],
@@ -363,26 +365,32 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 
   test('toolbar buttons have accessible names', async ({ page }) => {
     const toolbar = page.locator('[role="toolbar"], .toolbar, [class*="toolbar"]').first()
-    const isVisible = await toolbar.isVisible().catch(() => false)
+    await expect(toolbar).toBeVisible()
 
-    if (isVisible) {
-      const buttons = toolbar.getByRole('button')
-      const count = await buttons.count()
+    const buttons = toolbar.getByRole('button')
+    const count = await buttons.count()
+    expect(count).toBeGreaterThan(0)
 
-      for (let i = 0; i < count; i++) {
-        const button = buttons.nth(i)
-        const name = await button.getAttribute('aria-label')
-        const text = await button.textContent()
-        const title = await button.getAttribute('title')
+    for (let i = 0; i < count; i++) {
+      const button = buttons.nth(i)
+      const name = await button.getAttribute('aria-label')
+      const text = await button.textContent()
+      const title = await button.getAttribute('title')
 
-        const hasAccessibleName = !!(name || text?.trim() || title)
-        expect(hasAccessibleName).toBe(true)
-      }
+      const hasAccessibleName = !!(name || text?.trim() || title)
+      expect(hasAccessibleName).toBe(true)
     }
   })
 
   test('editor has valid heading hierarchy', async ({ page }) => {
-    const { valid } = await checkHeadingHierarchy(page)
+    // Zero headings is "valid" too (`checkHeadingHierarchy` only reports
+    // skipped levels and duplicate h1s), which a gutted page would also
+    // report — floor it on the idle shell's own stable set: just the h1
+    // "ESCAPEARTIST" logo (`AppHeader.tsx`). Every other heading in the app
+    // is inside a dialog or the clip inspector's selected state, neither of
+    // which is true on a fresh idle load.
+    const { valid, headings } = await checkHeadingHierarchy(page)
+    expect(headings).toHaveLength(1)
     expect(valid).toBe(true)
   })
 
@@ -402,7 +410,11 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 
   test('form inputs have associated labels', async ({ page }) => {
-    const { unlabeled } = await checkFormLabels(page)
+    // An empty page reports zero unlabelled controls too — prove the idle
+    // shell actually had real inputs to check: the resolution picker and the
+    // default track's volume slider are both unconditionally on screen.
+    const { labeled, unlabeled } = await checkFormLabels(page)
+    expect(labeled).toBeGreaterThanOrEqual(2)
     expect(unlabeled).toHaveLength(0)
   })
 
@@ -607,7 +619,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     // uses `--z-panel` (150), below the modals.
     await seedTextClip(page)
     await page.keyboard.press('k')
-    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    const panel = keyframePanel(page)
     await expect(panel).toBeVisible()
     await panel.getByText('Opacity', { exact: true }).click()
 
@@ -775,9 +787,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     // panel with `k`, and click the Opacity track to open its curve.
     await seedTextClip(page)
     await page.keyboard.press('k')
-    // The panel is a portal on document.body, so it is a sibling of #root —
-    // which has a "Keyframe Editor" button of its own, hence the :not().
-    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    const panel = keyframePanel(page)
     await expect(panel).toBeVisible()
     await panel.getByText('Opacity', { exact: true }).click()
 
@@ -993,6 +1003,10 @@ test.describe('Color Contrast', () => {
     await page.goto('http://localhost:5173')
     await waitForAppReady(page, 'plan')
 
+    // A page with nothing rendered reports zero contrast violations too —
+    // prove the real landing page was there to audit (ESCSUITE-202 K-7).
+    await expect(page.locator('h1').first()).toBeVisible()
+
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],
     })
@@ -1056,6 +1070,10 @@ test.describe('Color Contrast', () => {
   test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+
+    // A page with nothing rendered reports zero contrast violations too —
+    // prove the real editor shell was there to audit (ESCSUITE-202 K-7).
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
 
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],

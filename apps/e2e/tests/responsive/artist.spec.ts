@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+  inspector,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEARTIST Mobile Layout', () => {
@@ -10,33 +15,24 @@ test.describe('ESCAPEARTIST Mobile Layout', () => {
   })
 
   test('editor renders on mobile', async ({ page }) => {
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
   })
 
-  test('toolbar collapses on mobile', async ({ page }) => {
+  test('toolbar fits within mobile width', async ({ page }) => {
     const toolbar = page.locator('[class*="toolbar"]').first()
-    const isVisible = await toolbar.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await toolbar.boundingBox()
-      if (box) {
-        // Toolbar should fit within mobile width
-        expect(box.width).toBeLessThanOrEqual(375)
-      }
-    }
-  })
-
-  test('mobile menu toggle exists', async ({ page }) => {
-    const menuToggle = page
-      .getByRole('button', { name: /menu|more|options/i })
-      .or(page.locator('[class*="hamburger"]'))
-      .first()
-
-    const exists = (await menuToggle.count()) > 0
-    expect(typeof exists).toBe('boolean')
+    await expect(toolbar).toBeVisible()
+    const box = (await toolbar.boundingBox())!
+    expect(box.width).toBeLessThanOrEqual(375)
   })
 })
+
+// ESCSUITE-202: there is no hamburger/mobile-menu control anywhere in
+// apps/artist/src — a deleted "mobile menu toggle exists" test used to stand
+// in for one here. The two real collapse controls (`MediaLibrarySidebar`'s
+// and `InspectorSidebar`'s own collapse buttons, plus the floating
+// `MobileInspectorToggle` shown only below the 900px breakpoint) are covered
+// below, the same shape ESCSUITE-201 gave CRAFT's deleted "Settings Panel
+// Responsive" describe.
 
 test.describe('ESCAPEARTIST Tablet Layout', () => {
   test.beforeEach(async ({ page }) => {
@@ -46,98 +42,75 @@ test.describe('ESCAPEARTIST Tablet Layout', () => {
   })
 
   test('timeline visible on tablet', async ({ page }) => {
-    const timeline = page
-      .locator('[class*="timeline"], [data-testid="timeline"]')
-      .first()
-
-    const isVisible = await timeline.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByRole('button', { name: 'Add new track' })).toBeVisible()
   })
 
-  test('panels adapt to tablet width', async ({ page }) => {
-    const panels = page.locator('[class*="panel"]')
-    const count = await panels.count()
+  test('panels fit within tablet width', async ({ page }) => {
+    const mediaSidebar = page.locator('aside').filter({ has: page.locator('#media-library-title') })
 
-    for (let i = 0; i < Math.min(count, 3); i++) {
-      const panel = panels.nth(i)
-      const isVisible = await panel.isVisible().catch(() => false)
-
-      if (isVisible) {
-        const box = await panel.boundingBox()
-        if (box) {
-          // Panels should fit within tablet width
-          expect(box.width).toBeLessThanOrEqual(768)
-        }
-      }
+    for (const panel of [mediaSidebar, inspector(page)]) {
+      await expect(panel).toBeVisible()
+      const box = (await panel.boundingBox())!
+      expect(box.width).toBeLessThanOrEqual(768)
     }
   })
 })
 
 test.describe('ESCAPEARTIST Panel Auto-Collapse', () => {
-  test('panels collapse at 900px breakpoint', async ({ page }) => {
+  test('media sidebar collapses at 900px breakpoint', async ({ page }) => {
     await page.setViewportSize({ width: 899, height: 768 })
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const sidePanel = page.locator('[class*="sidebar"], [class*="inspector"]').first()
-    const isVisible = await sidePanel.isVisible().catch(() => false)
+    // Prove the page actually rendered the editor before trusting the
+    // absence below (ESCSUITE-201 hunt K-U1): a gutted page would also hide
+    // this text.
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
 
-    // Sidebar may be collapsed at narrow widths
-    expect(typeof isVisible).toBe('boolean')
+    // `App.module.css`'s `@media (max-width: 900px)` rule hides the
+    // sidebar's expanded header text, shrinking it to a 40px strip.
+    await expect(page.getByText('Media Library')).toBeHidden()
   })
 
-  test('panels visible above breakpoint', async ({ page }) => {
+  test('media sidebar expanded above breakpoint', async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 800 })
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const sidePanel = page.locator('[class*="sidebar"], [class*="inspector"]').first()
-    const isVisible = await sidePanel.isVisible().catch(() => false)
-
-    // Sidebar should be visible at wider widths
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByText('Media Library')).toBeVisible()
   })
 })
 
 test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
-  test('inspector slides out on mobile', async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+  })
 
-    const inspectorToggle = page
-      .getByRole('button', { name: /inspector|properties|panel/i })
-      .first()
+  test('inspector slides out on mobile', async ({ page }) => {
+    // `MobileInspectorToggle` — the floating round button shown only below
+    // the 900px breakpoint — toggles the slide-out panel shut and back open.
+    const toggle = page.getByRole('button', { name: /^(Hide|Show) inspector$/ })
+    await expect(toggle).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-label', 'Hide inspector')
 
-    const toggleVisible = await inspectorToggle.isVisible().catch(() => false)
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-label', 'Show inspector')
+    await expect(inspector(page)).toHaveClass(/inspectorCollapsed/)
 
-    if (toggleVisible) {
-      await inspectorToggle.click()
-      await page.waitForTimeout(300)
-
-      const inspector = page.locator('[class*="inspector"]').first()
-      const isVisible = await inspector.isVisible().catch(() => false)
-
-      // Inspector should be able to open on mobile
-      expect(typeof isVisible).toBe('boolean')
-    }
+    await toggle.click()
+    await expect(toggle).toHaveAttribute('aria-label', 'Hide inspector')
   })
 
   test('inspector full width on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await page.goto('http://localhost:5175')
-    await waitForAppReady(page, 'artist')
-
-    const inspector = page.locator('[class*="inspector"]').first()
-    const isVisible = await inspector.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await inspector.boundingBox()
-      if (box) {
-        // Inspector may take full width on mobile
-        expect(box.width).toBeLessThanOrEqual(375)
-      }
-    }
+    await expect(inspector(page)).toBeVisible()
+    // The slide-out panel is a fixed ~300px width (plus border), not the
+    // 375px viewport's — it overlays the editor rather than reflowing to
+    // fill it.
+    const box = (await inspector(page).boundingBox())!
+    expect(box.width).toBeLessThan(350)
+    expect(box.width).toBeGreaterThan(280)
   })
 })
 
@@ -196,35 +169,27 @@ test.describe('ESCAPEARTIST Export Dialog Responsive', () => {
 })
 
 test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
-  test('overlay tools accessible on mobile', async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+  })
 
-    const overlayToolbar = page.locator('[class*="overlay"], [class*="tools"]').first()
-    const isVisible = await overlayToolbar.isVisible().catch(() => false)
-
-    expect(typeof isVisible).toBe('boolean')
+  test('overlay tools accessible on mobile', async ({ page }) => {
+    // The inspector's empty-state overlay buttons, visible on screen (the
+    // slide-out panel defaults open) at a phone width.
+    await expect(page.getByRole('button', { name: 'Add Text' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Rectangle' })).toBeVisible()
   })
 
   test('overlay tool buttons are touch-friendly', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await page.goto('http://localhost:5175')
-    await waitForAppReady(page, 'artist')
-
-    const toolButtons = page.locator('[class*="tool"] button, [class*="toolbar"] button')
-    const count = await toolButtons.count()
-
-    for (let i = 0; i < Math.min(count, 5); i++) {
-      const button = toolButtons.nth(i)
-      const isVisible = await button.isVisible().catch(() => false)
-
-      if (isVisible) {
-        const box = await button.boundingBox()
-        if (box) {
-          expect(box.height).toBeGreaterThanOrEqual(40)
-        }
-      }
+    for (const name of ['Add Text', 'Rectangle', 'Ellipse', 'Arrow', 'Blur']) {
+      const button = page.getByRole('button', { name })
+      await expect(button).toBeVisible()
+      const box = (await button.boundingBox())!
+      // WCAG 2.2 AA 2.5.8 Target Size (Minimum) is 24x24 — the level this
+      // repo actually audits (see `accessibility/core.spec.ts`).
+      expect(box.height).toBeGreaterThanOrEqual(24)
     }
   })
 })
@@ -235,17 +200,13 @@ test.describe('ESCAPEARTIST Timeline Responsive', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const timeline = page.locator('[class*="timeline"]').first()
-    const isVisible = await timeline.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const overflow = await timeline.evaluate((el) => {
-        return window.getComputedStyle(el).overflowX
-      })
-
-      // Timeline should allow horizontal scroll if needed
-      expect(['auto', 'scroll', 'visible', 'hidden']).toContain(overflow)
-    }
+    // `.trackContainer` is the real scrollable element — `.tracksArea`
+    // itself clips (`overflow-x: hidden`), with the horizontal scroll one
+    // level in.
+    const trackContainer = page.locator('[class*="trackContainer"]').first()
+    await expect(trackContainer).toBeVisible()
+    const overflow = await trackContainer.evaluate((el) => window.getComputedStyle(el).overflowX)
+    expect(['auto', 'scroll']).toContain(overflow)
   })
 
   test('timeline controls visible on mobile', async ({ page }) => {
@@ -253,10 +214,7 @@ test.describe('ESCAPEARTIST Timeline Responsive', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const playButton = page.getByRole('button', { name: /play|pause/i }).first()
-    const isVisible = await playButton.isVisible().catch(() => false)
-
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
   })
 })
 
@@ -266,8 +224,7 @@ test.describe('ESCAPEARTIST Landscape Mode', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
   })
 
   test('preview visible in landscape', async ({ page }) => {
@@ -275,9 +232,8 @@ test.describe('ESCAPEARTIST Landscape Mode', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    const preview = page.locator('[class*="preview"], video').first()
-    const isVisible = await preview.isVisible().catch(() => false)
-
-    expect(typeof isVisible).toBe('boolean')
+    // The preview's own wrapper, present whether it is showing the "Add
+    // clips to the timeline to preview" placeholder or the canvas.
+    await expect(page.locator('[class*="videoWrapper"]').first()).toBeVisible()
   })
 })
