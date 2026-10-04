@@ -9,10 +9,13 @@
 // Only the interval timers are faked, exactly as the App recording suite fakes
 // them: the countdown and the duration ticker are the app's own, while
 // setTimeout stays real so promise chains still settle.
+import { createElement } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, renderHook } from '@testing-library/react'
+import { act, render, renderHook } from '@testing-library/react'
+import { ErrorBoundary } from '@escapesuite/shared/components'
 import {
   CAPTURE_TIMEOUT_MS,
+  disposeLiveRecordingSession,
   useRecordingController,
   type RecordingController,
   type RecordingControllerDeps,
@@ -1850,6 +1853,110 @@ describe('useRecordingController teardown', () => {
     expect(vi.getTimerCount()).toBe(0)
     expect(useRecorderStore.getState().currentDuration).toBe(0)
     expect(state()).toBe('idle')
+  })
+
+  // ESCSUITE-212: the same teardown, reached from outside React — this is
+  // what the app's ErrorBoundary.onError calls when a render-time throw
+  // anywhere in the tree would otherwise leave this take capturing into a
+  // dead UI.
+  describe('disposeLiveRecordingSession', () => {
+    it('disposes the live recorder and releases the capture when called directly', async () => {
+      const { result, unmount } = mountController({ countdownSeconds: 0 })
+      await startTake(result)
+      const recorder = recorderFactory.last()
+      recorder.duration = 7
+      act(() => { vi.advanceTimersByTime(100) })
+      expect(useRecorderStore.getState().currentDuration).toBe(7)
+
+      disposeLiveRecordingSession()
+
+      expect(recorder.dispose).toHaveBeenCalledTimes(1)
+      expect(harness.stopAllStreams).toHaveBeenCalledTimes(1)
+      expect(useRecorderStore.getState().currentDuration).toBe(0)
+      expect(state()).toBe('idle')
+
+      // The real unmount that follows (React's own, once the ErrorBoundary's
+      // fallback replaces the crashed tree) runs the same teardown again.
+      // disposeRecorder()'s own `recorderRef.current` guard keeps a second
+      // dispose() call from reaching an already-disposed recorder; calling
+      // stopAllStreams twice is harmless on the real path (it reads the
+      // store and stops whatever is still there, which by then is nothing),
+      // and the double here simply reflects the mock being invoked twice.
+      unmount()
+      expect(recorder.dispose).toHaveBeenCalledTimes(1)
+      expect(harness.stopAllStreams).toHaveBeenCalledTimes(2)
+    })
+
+    it('does nothing when no controller is mounted', () => {
+      const { unmount } = mountController({ countdownSeconds: 0 })
+      unmount()
+
+      expect(() => disposeLiveRecordingSession()).not.toThrow()
+    })
+
+    // ESCSUITE-212 R2: the whole fix rests on one unverified assumption — that
+    // the module slot is still registered when the real ErrorBoundary's
+    // componentDidCatch calls onError, i.e. that React runs the deleted
+    // subtree's effect cleanups (which null the slot) *after* componentDidCatch,
+    // not before. Every other test in this file calls disposeLiveRecordingSession
+    // by hand, with no boundary involved, so none of them would notice that
+    // assumption flipping. This one mounts the real hook and a throwing sibling
+    // under the real shared ErrorBoundary, and asserts — synchronously, inside
+    // onError itself — that the recorder was disposed *as a result of the call
+    // onError just made*, not by some other path.
+    it('is still registered when the real ErrorBoundary calls onError (ordering pin)', async () => {
+      resetStore({ countdownSeconds: 0 })
+      harness = makeHarness({ countdownSeconds: 0 })
+      let controller: RecordingController | null = null
+      let onErrorRan = false
+
+      function ControllerHost({ onReady }: { onReady: (c: RecordingController) => void }) {
+        const c = useRecordingController(harness.deps)
+        onReady(c)
+        return null
+      }
+
+      function Boom({ shouldThrow }: { shouldThrow: boolean }) {
+        if (shouldThrow) {
+          throw new Error('boom')
+        }
+        return null
+      }
+
+      function tree(shouldThrow: boolean) {
+        return createElement(ErrorBoundary, {
+          onError: () => {
+            onErrorRan = true
+            disposeLiveRecordingSession()
+            // Must already be true by the time this line runs, as a direct
+            // result of the call just above — not merely true eventually.
+            // A guard that nulls the slot before componentDidCatch runs
+            // would make disposeLiveRecordingSession() a no-op here, and
+            // this assertion is what would catch it.
+            expect(recorderFactory.last().dispose).toHaveBeenCalledTimes(1)
+          },
+          children: [
+            createElement(ControllerHost, { key: 'host', onReady: (c) => { controller = c } }),
+            createElement(Boom, { key: 'boom', shouldThrow }),
+          ],
+        })
+      }
+
+      const { rerender } = render(tree(false))
+
+      await act(async () => {
+        await controller!.handleStartRecording()
+      })
+      const recorder = recorderFactory.last()
+      expect(recorder.dispose).not.toHaveBeenCalled()
+
+      rerender(tree(true))
+
+      // Not vacuous: onError genuinely ran, and the recorder it disposed is
+      // the same one the take was using.
+      expect(onErrorRan).toBe(true)
+      expect(recorder.dispose).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('drops a chunk that arrives after the screen went away', async () => {
