@@ -31,7 +31,11 @@ export interface BootstrapConfig {
  * `@vercel/analytics` runtime — the script injector that would fetch
  * `va.vercel-scripts.com` — is dropped from the standalone bundle rather than
  * shipped inert. `<Analytics />` sits outside the `ErrorBoundary` so a crash
- * in `App` cannot also take it down.
+ * in `App` cannot also take it down. That placement is deliberately
+ * one-sided: Analytics is not itself guarded by anything, so a throw from
+ * `<Analytics />` is uncaught and blanks the page — the one render path at
+ * the root this ticket leaves unprotected, accepted because it is a small,
+ * third-party, hosted-only script injector rather than a reason to change.
  */
 export function bootstrapApp(config: BootstrapConfig): void {
   const { rootId = 'root', App, onError } = config
