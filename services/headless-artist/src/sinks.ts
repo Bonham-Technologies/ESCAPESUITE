@@ -31,7 +31,7 @@ function manifestJson(manifest: VerificationManifest): string {
   return JSON.stringify(manifest, null, 2) + '\n'
 }
 
-function requireString(config: Record<string, unknown>, field: string, sinkName: string): string {
+export function requireString(config: Record<string, unknown>, field: string, sinkName: string): string {
   const value = config[field]
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(`${sinkName} sink requires config.${field} (string)`)
@@ -47,7 +47,7 @@ interface VolumeConfig {
   dir: string
 }
 
-function validateVolumeConfig(config: Record<string, unknown>): VolumeConfig {
+export function validateVolumeConfig(config: Record<string, unknown>): VolumeConfig {
   return { dir: requireString(config, 'dir', 'volume') }
 }
 
@@ -66,9 +66,9 @@ function tempNameFor(finalPath: string): string {
  * Never `fs.copyFile`: that call writes straight to the destination path it is given, so two
  * concurrent deliveries racing the *same* destination (one jobId, one dir) can interleave at
  * the byte level (hunt-j V-4b). `tempPath` is unique per call, so no concurrent delivery ever
- * shares a destination during this slower part — only the final, same-directory rename in
- * `publishAtomically` below can race, and a rename replaces a name outright; it cannot blend
- * two files' bytes.
+ * shares a destination during this slower part — only the final, same-directory renames in
+ * `deliver` below can race, and a rename replaces a name outright; it cannot blend two files'
+ * bytes.
  */
 async function moveIntoDir(sourcePath: string, tempPath: string): Promise<void> {
   try {
@@ -80,17 +80,10 @@ async function moveIntoDir(sourcePath: string, tempPath: string): Promise<void> 
   }
 }
 
-/**
- * Publishes `finalPath` by writing it first to a private temp name in the same directory, via
- * `write`, and then renaming that temp name onto `finalPath` — one atomic, same-filesystem
- * rename, so a reader watching the directory only ever sees the old file or the complete new
- * one, never a half-written one. On any failure the temp name is removed and the original
- * error propagates (never masked by a cleanup failure).
- */
-async function publishAtomically(finalPath: string, write: (tempPath: string) => Promise<void>): Promise<void> {
-  const tempPath = tempNameFor(finalPath)
+/** Renames `tempPath` onto `finalPath` — one atomic, same-directory rename. On failure the
+ * temp name is removed and the original error propagates, never masked by a cleanup failure. */
+async function publishTemp(tempPath: string, finalPath: string): Promise<void> {
   try {
-    await write(tempPath)
     await fs.rename(tempPath, finalPath)
   } catch (err) {
     await fs.rm(tempPath, { force: true }).catch(() => undefined)
@@ -109,13 +102,41 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
       const destOutputPath = path.join(dir, `${jobId}.${ext}`)
       const destManifestPath = path.join(dir, `${jobId}.manifest.json`)
 
-      // Sidecar first: if this fails for any reason, nothing has been published at all, so a
-      // consumer watching `dir` never sees a finished-looking video with no manifest beside it
-      // to verify it against (hunt-j J-3).
-      await publishAtomically(destManifestPath, (tmp) => fs.writeFile(tmp, manifestJson(manifest)))
+      // Stage everything at private temp names first — the video's move/copy included, which
+      // is the slow, possibly cross-filesystem part — before anything is published. That way
+      // the two publishing renames below happen back to back with nothing but each other in
+      // between, keeping the window in which a *concurrent* delivery for the same jobId could
+      // interleave its own publish as small as it already was on the plain same-filesystem
+      // rename path (hunt-j V-4 found 0 mismatches in 240 trials there).
+      const videoTemp = tempNameFor(destOutputPath)
+      try {
+        await moveIntoDir(outputPath, videoTemp)
+      } catch (err) {
+        await fs.rm(videoTemp, { force: true }).catch(() => undefined)
+        throw err
+      }
+
+      const manifestTemp = tempNameFor(destManifestPath)
+      try {
+        await fs.writeFile(manifestTemp, manifestJson(manifest))
+      } catch (err) {
+        await fs.rm(manifestTemp, { force: true }).catch(() => undefined)
+        await fs.rm(videoTemp, { force: true }).catch(() => undefined)
+        throw err
+      }
+
+      // Publish: the sidecar first — if this fails, the video must never be published either,
+      // so a consumer watching `dir` never sees a finished-looking video with no manifest
+      // beside it to verify it against (hunt-j J-3).
+      try {
+        await publishTemp(manifestTemp, destManifestPath)
+      } catch (err) {
+        await fs.rm(videoTemp, { force: true }).catch(() => undefined)
+        throw err
+      }
 
       try {
-        await publishAtomically(destOutputPath, (tmp) => moveIntoDir(outputPath, tmp))
+        await publishTemp(videoTemp, destOutputPath)
       } catch (err) {
         // The manifest already landed; a video that never follows must not be left behind
         // signing a render that was never actually delivered.
@@ -146,7 +167,7 @@ interface CommandConfig {
  */
 const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000
 
-function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
+export function validateCommandConfig(config: Record<string, unknown>): CommandConfig {
   const command = requireString(config, 'command', 'command')
 
   const rawArgs = config.args
@@ -311,7 +332,7 @@ function withoutContentType(headers: Record<string, string>): Record<string, str
   return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'))
 }
 
-function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
+export function validateWebhookConfig(config: Record<string, unknown>): WebhookConfig {
   const url = requireString(config, 'url', 'webhook')
 
   const rawHeaders = config.headers
@@ -402,15 +423,10 @@ export async function getSink(kind: string, config: Record<string, unknown>): Pr
     case 'webhook':
       return createWebhookSink(validateWebhookConfig(config))
     case 's3': {
-      const prefix = requireString(config, 'prefix', 's3')
       // s3.ts loads `@aws-sdk/client-s3` itself, lazily, and throws the "optional
       // dependency" error from inside s3Sink() when it can't — nothing to catch here.
-      const { s3Sink } = await import('./s3')
-      return s3Sink({
-        prefix,
-        endpoint: typeof config.endpoint === 'string' ? config.endpoint : undefined,
-        region: typeof config.region === 'string' ? config.region : undefined,
-      })
+      const { s3Sink, validateS3Config } = await import('./s3')
+      return s3Sink(validateS3Config(config))
     }
     default:
       throw new Error(`Unknown output sink: ${kind}`)

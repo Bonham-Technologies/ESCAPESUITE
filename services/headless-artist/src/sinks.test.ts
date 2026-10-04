@@ -125,10 +125,34 @@ describe('s3 sink selection', () => {
     expect(typeof sink.deliver).toBe('function')
   })
 
-  it('builds one from a bare prefix, leaving region and endpoint to the SDK', async () => {
-    const sink = await getSink('s3', { prefix: 'bucket', region: 42, endpoint: null })
+  it('builds one from a bare prefix with no region or endpoint at all', async () => {
+    const sink = await getSink('s3', { prefix: 'bucket' })
 
     expect(typeof sink.deliver).toBe('function')
+  })
+
+  // ESCSUITE-192 (hunt-j J-4): region/endpoint of the wrong type used to be dropped silently
+  // (read only if typeof === 'string', ignored otherwise) instead of refused by name, unlike
+  // every other sink's config.
+  it('refuses a non-string region or endpoint by name, rather than dropping it silently', async () => {
+    await expect(getSink('s3', { prefix: 'bucket', region: 42 })).rejects.toThrow(
+      /s3 sink requires config\.region \(string\) when provided/,
+    )
+    await expect(getSink('s3', { prefix: 'bucket', endpoint: null })).rejects.toThrow(
+      /s3 sink requires config\.endpoint \(string\) when provided/,
+    )
+  })
+
+  // ESCSUITE-192 (hunt-j J-4): "s3://" and "/" both pass requireString's "non-empty string"
+  // check and split to an empty bucket, which used to reach the SDK as Bucket: "" instead of
+  // being refused up front.
+  it('refuses a prefix that names no bucket', async () => {
+    await expect(getSink('s3', { prefix: 's3://' })).rejects.toThrow(
+      /s3 sink requires config\.prefix to name a bucket/,
+    )
+    await expect(getSink('s3', { prefix: '/' })).rejects.toThrow(
+      /s3 sink requires config\.prefix to name a bucket/,
+    )
   })
 })
 

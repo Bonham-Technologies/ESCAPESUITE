@@ -3,6 +3,7 @@ import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import type { OutputSink } from './sinks'
+import { requireString } from './sinks'
 import type { VerificationManifest } from './manifest'
 
 export interface S3SinkConfig {
@@ -89,6 +90,49 @@ export function splitPrefix(prefix: string): { bucket: string; keyPrefix: string
 /** Joins a (possibly empty) key prefix with a file name into a full S3 object key. */
 export function keyFor(keyPrefix: string, fileName: string): string {
   return keyPrefix ? `${keyPrefix}/${fileName}` : fileName
+}
+
+/**
+ * Checks that the optional `@aws-sdk/client-s3` dependency can be loaded, without building a
+ * client or sending anything. Called from `jobSpec.ts`'s `ensureSinkReady` so an s3 job whose
+ * environment is missing the SDK fails before Chromium launches (ESCSUITE-192 / hunt-j J-4),
+ * rather than discovering it only after a full render.
+ */
+export async function probeS3Sdk(): Promise<void> {
+  await loadS3ClientModule()
+}
+
+/**
+ * Validates `output.config` for the `s3` sink -- synchronously and without touching the
+ * optional SDK, so it can run at job-spec parse time (`jobSpec.ts`'s `validateSinkConfig`) as
+ * well as from `getSink`. `prefix` must name a non-empty bucket: `requireString` alone accepts
+ * `"s3://"` or `"/"`, both of which split to an empty bucket and would otherwise only fail once
+ * the SDK actually tries to address `Bucket: ""`. `region`/`endpoint`, when given, must be
+ * strings -- previously a wrong-typed value was dropped silently instead of refused by name,
+ * unlike every other sink's config.
+ */
+export function validateS3Config(config: Record<string, unknown>): S3SinkConfig {
+  const prefix = requireString(config, 'prefix', 's3')
+  const { bucket } = splitPrefix(prefix)
+  if (bucket.length === 0) {
+    throw new Error(`s3 sink requires config.prefix to name a bucket (got ${JSON.stringify(prefix)})`)
+  }
+
+  const endpoint = config.endpoint
+  if (endpoint !== undefined && typeof endpoint !== 'string') {
+    throw new Error('s3 sink requires config.endpoint (string) when provided')
+  }
+
+  const region = config.region
+  if (region !== undefined && typeof region !== 'string') {
+    throw new Error('s3 sink requires config.region (string) when provided')
+  }
+
+  return {
+    prefix,
+    endpoint: endpoint as string | undefined,
+    region: region as string | undefined,
+  }
 }
 
 /**
