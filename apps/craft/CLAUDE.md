@@ -668,6 +668,17 @@ Skipping disposal leaks one AudioContext per attempt, and Chrome refuses to crea
 about six. The duration ticker is cleared in `onStop` as well, because a recorder can finish a
 take on its own (the capture ended) with nobody having gone through `handleStopRecording`.
 
+A sixth exit belongs to neither list: a render-time throw anywhere in the app's React tree
+(ESCSUITE-212). Before this there was no boundary at all, so a throw unmounted the whole app to
+a blank page while a live recorder kept capturing into a UI nobody could see or stop. `main.tsx`
+now wires `@escapesuite/shared`'s `ErrorBoundary` (mounted by `bootstrapApp()` around `<App />`)
+to `useRecordingController`'s own `disposeLiveRecordingSession` as its `onError` — the same
+`disposeRecorder()` / `stopAllStreamsRef.current()` the unmount teardown already calls, now
+reachable from outside React through one module-level slot the mounted controller keeps current,
+because `onError` is bound once at bootstrap, before any component (and so any ref) exists. Both
+calls are idempotent, so this running once from `onError` and again from React's own unmount
+cleanup costs nothing twice over.
+
 The capture can also die on its own — the user hits the browser's "Stop sharing" — and the take
 is not always mid-recording when it does. Both recorders handle the video track's `ended` event
 in all three states:
