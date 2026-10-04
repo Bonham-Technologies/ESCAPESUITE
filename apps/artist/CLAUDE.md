@@ -2586,11 +2586,14 @@ chrome lives in one module each under `src/app/`.
 **`main.tsx` wraps `App` in `@escapesuite/shared`'s `ErrorBoundary`**, via `bootstrapApp()`
 (ESCSUITE-212), so a render-time throw anywhere below shows that package's own minimal fallback
 panel instead of unmounting the whole app to a blank page. `main.tsx` passes it a documented
-no-op `onError`: unlike ESCAPECRAFT's live recorder, ARTIST holds nothing a crash could leave
-running — no open `MediaStream`, no encoder mid-flush — so there is nothing here to release. The
-no-op is written out rather than the prop being left unset, so that absence of work reads as a
-decision rather than an unfinished one; the boundary's own `componentDidCatch` already logs the
-error to the console in dev.
+no-op `onError`: unlike ESCAPECRAFT's live recorder, ARTIST holds no live *capture* — no camera
+or microphone light, no `getDisplayMedia` stream — which is what CRAFT's dispose exists for. An
+export in flight does own things a crash leaves running (a `decodeWorker` Web Worker, one or two
+WebCodecs encoders, a WebM muxer): the ruling is to let them run rather than tear them down from
+an unrelated render error, since an export that is already encoding is better finished than
+killed, and the panel's Reload ends them either way. The no-op is written out rather than the
+prop being left unset, so that choice reads as a decision rather than an unfinished one; the
+boundary's own `componentDidCatch` already logs the error to the console in dev.
 
 **The hooks are called in a fixed order, and the order is the behaviour.** The order the hooks
 are called in is the order their effects run in, and it is the order the six effects ran in
