@@ -12,7 +12,13 @@
 // re-render the editor every ~200 ms. The re-arm test below is what pins that.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { useSessionAutosave, type SessionAutosaveDeps } from './useSessionAutosave'
+import {
+  useSessionAutosave,
+  autosaveFailureNotice,
+  AUTOSAVE_QUOTA_NOTICE,
+  AUTOSAVE_GENERIC_NOTICE,
+  type SessionAutosaveDeps,
+} from './useSessionAutosave'
 import { saveSessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest } from '../test/fixtures/projectStore'
@@ -43,6 +49,7 @@ beforeEach(() => {
     sourceVideos: state.sourceVideos,
     selectedClipId: state.selectedClipId,
     zoom: state.zoom,
+    showNotification: vi.fn(),
   }
 })
 
@@ -152,5 +159,128 @@ describe('useSessionAutosave', () => {
     await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith(expect.any(Error)))
 
     consoleError.mockRestore()
+  })
+
+  it('raises nothing when the write resolves', () => {
+    mountAutosave()
+
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY)
+
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
+  it('reports a rejected write through the editor notice, once', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new Error('disk full')
+    // Three separate `...Once` rejections, not a persistent `mockRejectedValue`
+    // — the latter would replace the double's base implementation for every
+    // later test in this file, not just the three ticks this one drives.
+    vi.mocked(saveSessionState)
+      .mockRejectedValueOnce(error)
+      .mockRejectedValueOnce(error)
+      .mockRejectedValueOnce(error)
+    mountAutosave()
+
+    // Three ticks, all failing. `advanceTimersByTimeAsync` — unlike the sync
+    // `advanceTimersByTime` the other tests use — flushes the promise chain
+    // after each timer fires, so the latch set inside this tick's `.catch`
+    // has actually run before the next tick is armed.
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    movePlayhead(1)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    movePlayhead(2)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(saveSessionState).toHaveBeenCalledTimes(3)
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenCalledWith(AUTOSAVE_GENERIC_NOTICE, 'error')
+    // The detail is still logged on every failure, latch or no latch.
+    expect(consoleError).toHaveBeenCalledTimes(3)
+
+    consoleError.mockRestore()
+  })
+
+  it('reports a later failure again once a write in between has succeeded', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new Error('disk full')
+    mountAutosave()
+
+    vi.mocked(saveSessionState).mockRejectedValueOnce(error)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+
+    // This tick succeeds (the double's default), clearing the latch.
+    movePlayhead(1)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    expect(saveSessionState).toHaveBeenCalledTimes(2)
+
+    vi.mocked(saveSessionState).mockRejectedValueOnce(error)
+    movePlayhead(2)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(deps.showNotification).toHaveBeenCalledTimes(2)
+
+    consoleError.mockRestore()
+  })
+
+  it('shows the quota sentence for a bare QuotaExceededError', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(saveSessionState).mockRejectedValueOnce(
+      new DOMException('full', 'QuotaExceededError')
+    )
+    mountAutosave()
+
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(deps.showNotification).toHaveBeenCalledWith(AUTOSAVE_QUOTA_NOTICE, 'error')
+
+    consoleError.mockRestore()
+  })
+
+  it('shows the generic sentence for a rejection that is not a quota error', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(saveSessionState).mockRejectedValueOnce(new Error('disk full'))
+    mountAutosave()
+
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(deps.showNotification).toHaveBeenCalledWith(AUTOSAVE_GENERIC_NOTICE, 'error')
+
+    consoleError.mockRestore()
+  })
+})
+
+describe('autosaveFailureNotice', () => {
+  it('reads the quota sentence from a bare DOMException', () => {
+    expect(autosaveFailureNotice(new DOMException('full', 'QuotaExceededError'))).toBe(
+      AUTOSAVE_QUOTA_NOTICE
+    )
+  })
+
+  it('reads the quota sentence through a wrapped cause (ESCSUITE-210 shape)', () => {
+    // The shape `core/permissions.ts`'s ESCAPECRAFT counterpart actually
+    // produces is `new Error('…', { cause })`, but the lib this project
+    // targets (ES2020, unlike ESCAPECRAFT's ES2022) has no typed `cause`
+    // option on `Error` itself — the real wrapper only ever reaches
+    // `autosaveFailureNotice` as `unknown` regardless, so a plain object of
+    // the same shape exercises the same `error.cause ?? error` read.
+    const quotaError = new DOMException('full', 'QuotaExceededError')
+    expect(autosaveFailureNotice({ cause: quotaError })).toBe(AUTOSAVE_QUOTA_NOTICE)
+  })
+
+  it('falls back to the generic sentence for a wrapped cause that is not a quota error', () => {
+    const otherError = new DOMException('nope', 'UnknownError')
+    expect(autosaveFailureNotice({ cause: otherError })).toBe(AUTOSAVE_GENERIC_NOTICE)
+  })
+
+  it('falls back to the generic sentence for a plain Error with no cause', () => {
+    expect(autosaveFailureNotice(new Error('disk full'))).toBe(AUTOSAVE_GENERIC_NOTICE)
+  })
+
+  it('falls back to the generic sentence for a rejection that is not an object at all', () => {
+    // Nothing today rejects `saveSessionState` with a bare value; this pins
+    // that the optional chains hold if something ever does, rather than
+    // turning a rejection into a crash.
+    expect(autosaveFailureNotice(undefined)).toBe(AUTOSAVE_GENERIC_NOTICE)
   })
 })

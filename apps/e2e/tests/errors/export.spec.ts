@@ -252,16 +252,33 @@ test.describe('Storage Quota Exceeded', () => {
     // "Save Project" (Ctrl+S) is a file download, not an IndexedDB write —
     // it does not touch `db.put` at all unless the project references a
     // source video. The editor's autosave does write (`saveSessionState`,
-    // `db.put('settings', …)`), but its failure is swallowed into
-    // `console.error` with nothing shown to the user — a real, surfaced gap,
-    // not something this test can observe. Importing media is the one write
-    // path whose failure *is* reported: `VideoUploader.tsx`'s catch turns a
-    // `QuotaExceededError` from `db.put('videos', …)` into a visible row.
+    // `db.put('settings', …)`) — its failure used to be swallowed into
+    // `console.error`, and ESCSUITE-217 made it a notice; the next case pins
+    // that. Importing media is the write path this case drives:
+    // `VideoUploader.tsx`'s catch turns a `QuotaExceededError` from
+    // `db.put('videos', …)` into a visible row.
     await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
 
     await expect(
       page.getByText('Storage quota exceeded. Remove some media to free up space.')
     ).toBeVisible({ timeout: 30_000 })
+  })
+
+  // ESCSUITE-217: the session autosave used to send a rejected write to
+  // console.error alone, so a user working under real storage-quota pressure
+  // was never told the session had stopped saving at all — this is the
+  // defect this file's old quota case (a conditional "try to save, then
+  // assert the page still has a root div") could not have caught, since it
+  // never drove the autosave at all. A timeline edit re-arms the debounce;
+  // once it fires against this mock's poisoned writes, the editor's one
+  // notice says so, in the same sentence the media library already uses for
+  // a quota failure on import.
+  test('a failed session autosave notifies the user', async ({ page }) => {
+    await seedTextClip(page)
+
+    await expect(
+      page.getByText('Storage quota exceeded. Remove some media to free up space.')
+    ).toBeVisible({ timeout: 10_000 })
   })
 })
 

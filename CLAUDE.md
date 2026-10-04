@@ -2625,6 +2625,29 @@ only artist source the ticket touches is the excluded `main.tsx`. The `App.*rere
 so the happy path gains no work per render. **No floor crossed**; shared's floors stay 100 / 98 / 91 /
 100, craft's 100 / 99 / 97 / 100 and artist's 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-04 for ESCSUITE-217 (the session autosave reports a rejected
+write once — the media library's own quota sentence when the browser's error says `QuotaExceededError`,
+read through `error.cause ?? error` the way ESCSUITE-210 reads a refusal in ESCAPECRAFT, and "Your session
+could not be saved — storage may be full." for anything else — through the editor's one notice, latched so a
+run of failing ticks says it once and a later run says it again after a write in between succeeded;
+`console.error` keeps the detail on every failure): 99.80 / 99.27 / **95.80** / 99.68 against the
+99.80 / 99.27 / 95.79 / 99.68 that `main` at `207e6ece` (the ESCSUITE-202 squash) measures in the same
+sitting — branches up a hundredth, the other three unmoved. Lines 7,768 / 7,783 → 7,779 / 7,794, statements
+8,773 / 8,837 → 8,784 / 8,848, branches 4,967 / 5,185 → 4,973 / 5,191 and functions
+1,884 / 1,890 → 1,888 / 1,894, every denominator growing by
+exactly what the numerator did; the same 15 / 64 / 218 / 6 uncovered. The six new branches are all
+`app/useSessionAutosave.ts`'s — `failureName`'s `cause`-or-error choice, `autosaveFailureNotice`'s
+quota-or-generic ternary and the latch's "not yet reported" gate — each reached from both sides by the
+hook's ten new cases (three failing ticks → one notice; fail, succeed, fail → two; a bare
+`DOMException`, a wrapped cause, a plain `Error` and `undefined` through the helper; a resolving write
+that raises nothing). `showNotification` joins the effect's dependencies as a stable `useCallback`, so the
+autosave's debounce is unchanged and the `App.*rerender*` pins and every `*.perf.test.ts` are
+byte-identical. Outside vitest's measurement, `apps/e2e/tests/errors/export.spec.ts`'s `Storage Quota Exceeded` describe
+gains a second real case beside ESCSUITE-202's import-under-quota one, under the same
+`mockStorageQuotaExceeded`: a timeline edit, the debounce, and the exact sentence — 12 / 12 on Chromium
+after the rebase that merged the two rewrites of that describe.
+**No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2632,7 +2655,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.77 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
+| `@escapesuite/artist` | 99.80 | 99.27 | 95.80 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.62 | 91.89 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
