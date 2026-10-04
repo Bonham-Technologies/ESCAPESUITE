@@ -281,7 +281,6 @@ describe('runJob', () => {
   // it -- it is written straight from the outcome object.
   it('strips ANSI escape sequences and control characters from outcome.error', async () => {
     const workDir = await makeTempDir()
-    // eslint-disable-next-line no-control-regex -- constructing the exact defect being fixed
     const ansiMessage = '[2mbrowserType.launch:[22m Target page\tclosed ([31mcode[39m)'
     vi.mocked(renderInChromium).mockRejectedValue(new Error(ansiMessage))
 
