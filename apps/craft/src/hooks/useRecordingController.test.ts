@@ -293,6 +293,41 @@ describe('useRecordingController the click path', () => {
     expect(consoleError).toHaveBeenCalled()
     expect(useRecorderStore.getState().notice).toBe('The recording could not be started.')
   })
+
+  it('says the capture was refused when the wrapper reports it through cause (ESCSUITE-210)', async () => {
+    // core/permissions.ts's requestScreenCapture/requestWebcam/requestMicrophone
+    // catch the browser's DOMException and rethrow `new Error('…', { cause })`
+    // — this is that real shape, not a DOMException with its name copied onto
+    // it directly.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    const refused = new Error('Screen capture permission denied', {
+      cause: new DOMException('Permission denied', 'NotAllowedError'),
+    })
+    harness.acquireStreams.mockRejectedValue(refused)
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', refused)
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).toBe(
+      'The browser refused the capture — nothing was recorded.'
+    )
+  })
+
+  it('says the generic failure when a wrapped cause is not a refusal (ESCSUITE-210)', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0 })
+    const notFound = new Error('No screen available for capture', {
+      cause: new DOMException('No display found', 'NotFoundError'),
+    })
+    harness.acquireStreams.mockRejectedValue(notFound)
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', notFound)
+    expect(useRecorderStore.getState().notice).toBe('The recording could not be started.')
+  })
 })
 
 describe('useRecordingController notices', () => {
