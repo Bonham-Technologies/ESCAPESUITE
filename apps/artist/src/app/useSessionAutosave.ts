@@ -6,12 +6,52 @@
 //
 // `suppressRestore` arrives as a boolean for the same reason it does in
 // `useSessionRestore`: `urlParams.suppressRestore` was the inline dependency.
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { saveSessionState, type SessionState } from '../core/storage';
 import { AUTO_SAVE_DELAY } from './appConstants';
 import { buildSessionSnapshot } from './sessionSnapshot';
 import type { Project, SourceVideo } from '../store/types';
+import type { ShowNotification } from './useNotification';
+
+/**
+ * The same sentence `components/VideoUploader.tsx` already shows for a quota
+ * failure on import — kept verbatim so a quota error reads the same way
+ * wherever ESCAPEARTIST hits it.
+ */
+export const AUTOSAVE_QUOTA_NOTICE =
+  'Storage quota exceeded. Remove some media to free up space.';
+
+/** What the autosave says when the rejection is not a quota error at all. */
+export const AUTOSAVE_GENERIC_NOTICE = 'Your session could not be saved — storage may be full.';
+
+/**
+ * The DOMException name behind a rejected session write, the same shape
+ * ESCAPECRAFT's `failureName` reads (ESCSUITE-210,
+ * `hooks/useRecordingController.ts`): a caller that wants to attach more
+ * context reaches for `new Error('…', { cause })`, carrying the browser's own
+ * `DOMException` — and its real name — as `cause`, while a rejection
+ * `saveSessionState` can hit directly (the e2e quota mock, `idb`'s own
+ * rejections) is a bare `DOMException` with no wrapper at all. Reading
+ * `error.cause ?? error` covers both; the error itself is read when it is
+ * not wrapped, or when the rejection is not an object at all (nothing today
+ * rejects with a bare value, but the optional chain holds rather than
+ * crashing if something ever does).
+ */
+function failureName(error: unknown): string | undefined {
+  const err = error as { name?: string; cause?: unknown } | null | undefined;
+  return ((err?.cause ?? err) as { name?: string } | null | undefined)?.name;
+}
+
+/**
+ * What the editor's notice says about a rejected autosave: the media
+ * library's own quota sentence when the browser's error says
+ * `QuotaExceededError`, the generic one for anything else — a session write
+ * can fail for reasons a quota check cannot name.
+ */
+export function autosaveFailureNotice(error: unknown): string {
+  return failureName(error) === 'QuotaExceededError' ? AUTOSAVE_QUOTA_NOTICE : AUTOSAVE_GENERIC_NOTICE;
+}
 
 /** What re-arms the autosave, and what switches it off. */
 export interface SessionAutosaveDeps {
@@ -23,6 +63,8 @@ export interface SessionAutosaveDeps {
   sourceVideos: SourceVideo[];
   selectedClipId: string | null;
   zoom: number;
+  /** Raised once, not on every failed tick, while writes keep failing. */
+  showNotification: ShowNotification;
 }
 
 export function useSessionAutosave({
@@ -32,7 +74,16 @@ export function useSessionAutosave({
   sourceVideos,
   selectedClipId,
   zoom,
+  showNotification,
 }: SessionAutosaveDeps): void {
+  // The latch: raised the moment a write first fails, so a run of failing
+  // ticks reports once rather than once per tick. It clears on the next
+  // SUCCESSFUL write, so a later failure — a fresh run, not the same one —
+  // is reported again. A ref, not state: it must survive the effect
+  // re-running on every edit (the dependency array below) without itself
+  // causing a render.
+  const hasReportedFailureRef = useRef(false);
+
   // Auto-save session on state changes (debounced)
   //
   // `currentTime` re-arms the debounce but is deliberately NOT a dependency:
@@ -56,7 +107,18 @@ export function useSessionAutosave({
       timeoutId = setTimeout(() => {
         const state = useEditorStore.getState();
         const session: SessionState = buildSessionSnapshot(state, Date.now());
-        saveSessionState(session).catch(console.error);
+        saveSessionState(session).then(
+          () => {
+            hasReportedFailureRef.current = false;
+          },
+          (error: unknown) => {
+            console.error(error);
+            if (!hasReportedFailureRef.current) {
+              hasReportedFailureRef.current = true;
+              showNotification(autosaveFailureNotice(error), 'error');
+            }
+          }
+        );
       }, AUTO_SAVE_DELAY);
     };
 
@@ -69,5 +131,5 @@ export function useSessionAutosave({
       clearTimeout(timeoutId);
       unsubscribe();
     };
-  }, [sessionRestored, suppressRestore, project, sourceVideos, selectedClipId, zoom]);
+  }, [sessionRestored, suppressRestore, project, sourceVideos, selectedClipId, zoom, showNotification]);
 }

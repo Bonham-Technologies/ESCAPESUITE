@@ -144,6 +144,7 @@ function App() {
     sourceVideos,
     selectedClipId,
     zoom,
+    showNotification,
   });
 
   const { handleZoomIn, handleZoomOut } = useTimelineZoom({ zoom, setZoom });
