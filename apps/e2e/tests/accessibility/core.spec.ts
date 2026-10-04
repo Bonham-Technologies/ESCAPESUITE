@@ -349,6 +349,13 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   })
 
   test('editor UI passes axe-core audit', async ({ page }) => {
+    // ESCSUITE-202 K-7: an axe audit is a pure negative, satisfied by a page
+    // with nothing in it. Prove the idle editor shell actually rendered
+    // before trusting zero violations — the dialog/keyframe/clip-inspector
+    // audits elsewhere in this describe cover the states this one does not
+    // reach.
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+
     const results = await runAxeCheck(page, {
       // Disable color-contrast for canvas-based timeline
       disableRules: ['color-contrast'],
@@ -363,21 +370,20 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 
   test('toolbar buttons have accessible names', async ({ page }) => {
     const toolbar = page.locator('[role="toolbar"], .toolbar, [class*="toolbar"]').first()
-    const isVisible = await toolbar.isVisible().catch(() => false)
+    await expect(toolbar).toBeVisible()
 
-    if (isVisible) {
-      const buttons = toolbar.getByRole('button')
-      const count = await buttons.count()
+    const buttons = toolbar.getByRole('button')
+    const count = await buttons.count()
+    expect(count).toBeGreaterThan(0)
 
-      for (let i = 0; i < count; i++) {
-        const button = buttons.nth(i)
-        const name = await button.getAttribute('aria-label')
-        const text = await button.textContent()
-        const title = await button.getAttribute('title')
+    for (let i = 0; i < count; i++) {
+      const button = buttons.nth(i)
+      const name = await button.getAttribute('aria-label')
+      const text = await button.textContent()
+      const title = await button.getAttribute('title')
 
-        const hasAccessibleName = !!(name || text?.trim() || title)
-        expect(hasAccessibleName).toBe(true)
-      }
+      const hasAccessibleName = !!(name || text?.trim() || title)
+      expect(hasAccessibleName).toBe(true)
     }
   })
 
@@ -993,6 +999,10 @@ test.describe('Color Contrast', () => {
     await page.goto('http://localhost:5173')
     await waitForAppReady(page, 'plan')
 
+    // A page with nothing rendered reports zero contrast violations too —
+    // prove the real landing page was there to audit (ESCSUITE-202 K-7).
+    await expect(page.locator('h1').first()).toBeVisible()
+
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],
     })
@@ -1056,6 +1066,10 @@ test.describe('Color Contrast', () => {
   test('ESCAPEARTIST has adequate color contrast', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+
+    // A page with nothing rendered reports zero contrast violations too —
+    // prove the real editor shell was there to audit (ESCSUITE-202 K-7).
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
 
     const results = await runAxeCheck(page, {
       includeTags: ['wcag2aa'],
