@@ -105,13 +105,15 @@ test.describe('ESCAPEPLAN Tablet Layout', () => {
     expect(html).toContain('<div id="root">')
   })
 
-  // Note: This test verifies tablet navigation but is skipped in CI due to
-  // app loading/rendering timing issues. Run locally to verify.
-  test.skip('navigation adapts to tablet', async ({ page }) => {
-    const nav = page.locator('nav, header').first()
-    const isVisible = await nav.isVisible().catch(() => false)
-
-    expect(isVisible).toBe(true)
+  // ESCSUITE-198/202 K-8: this used to be `test.skip` under a stale "skipped
+  // in CI due to rendering timing issues" comment — ESCSUITE-177's
+  // `waitForAppReady` (React's first commit, not `networkidle`) already
+  // fixed the timing hazard the comment blamed. `Layout.tsx` always renders
+  // a real `<header>` with a real `<nav>` inside it, so both are asserted
+  // directly rather than the weaker "one or the other" `isVisible` guard.
+  test('navigation adapts to tablet', async ({ page }) => {
+    await expect(page.locator('header')).toBeVisible()
+    await expect(page.locator('nav')).toBeVisible()
   })
 
   test('tool cards adapt layout', async ({ page }) => {
