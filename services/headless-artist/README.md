@@ -316,6 +316,13 @@ A single `multipart/form-data` POST with two fields: `manifest` (the verificatio
 JSON string) and `file` (the render, filename `<jobId>.<ext>`, content type `video/mp4`,
 `video/webm` or `image/gif`). Any non-2xx response fails the job. `outputLocation` is the URL.
 
+**The configured URL is never redirected.** A redirect is never followed — **the intake
+endpoint you configure must answer the POST itself, not send a 3xx**. A 307/308 fails the job
+naming the status and the `Location` header it pointed at, rather than silently re-sending the
+whole render (and every caller header but `Content-Type`) to a host the job spec never named.
+The connection is also always drained, success or failure, so a long-lived `serve` process
+reuses one pooled connection per delivery instead of leaking a fresh one each time.
+
 `timeoutMs` (a positive integer, default **10 minutes**, at most **2147483647** — 2^31-1 ms,
 ~24.8 days, the largest delay a timer can represent; anything above that is refused by name
 rather than silently clamped to ~1 ms) bounds the whole POST — connect, upload, and the

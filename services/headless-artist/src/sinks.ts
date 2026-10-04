@@ -392,6 +392,13 @@ function createWebhookSink(config: WebhookConfig): OutputSink {
           method: 'POST',
           headers: config.headers,
           body: form,
+          // Never follow a redirect: the default (`follow`) would re-POST the whole render
+          // and every caller header except Content-Type to whatever host a 307/308 names,
+          // which is not the one the operator configured or reviewed (ESCSUITE-205 / hunt-j
+          // unverified / verify V-2). `manual` (rather than `error`) is what gets this sink a
+          // real response object with the status and the Location header still readable, so
+          // the failure below can name where the intake tried to send it.
+          redirect: 'manual',
           signal: AbortSignal.timeout(config.timeoutMs),
         })
       } catch (err) {
@@ -399,6 +406,20 @@ function createWebhookSink(config: WebhookConfig): OutputSink {
           throw new Error(`webhook sink timed out after ${config.timeoutMs} ms`, { cause: err })
         }
         throw err
+      }
+
+      // Drain the response body on every path -- success or failure -- so undici can return
+      // the connection to its keep-alive pool instead of holding it (and whatever bytes it
+      // buffered) open until GC. An unread body meant one fresh TCP connection per delivery
+      // (ESCSUITE-205 / hunt-j unverified / verify V-1).
+      await response.arrayBuffer().catch(() => undefined)
+
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location')
+        throw new Error(
+          `webhook sink refused to follow a redirect (${response.status}` +
+            `${location ? ` to ${location}` : ''})`,
+        )
       }
 
       if (!response.ok) {
