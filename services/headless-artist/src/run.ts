@@ -48,10 +48,13 @@ function messageOf(err: unknown): string {
  * neither of which goes through that logger — so it is sanitised here, once, for both.
  * Strips ANSI/VT escape sequences first (as whole sequences, not just their leading ESC byte,
  * which would otherwise leave the rest of the sequence as visible text) and then any remaining
- * C0 control character or DEL.
+ * C0 control character or DEL. The CSI parameter class is [0-?] (0x30-0x3F), ECMA-48's full
+ * parameter-byte range -- ';' and ':' included -- so a multi-parameter sequence like
+ * ESC[1;31m matches as one whole unit rather than failing to match at all and leaking
+ * " [1;31m" as visible text (review finding 6).
  */
 // eslint-disable-next-line no-control-regex -- matching escape/control bytes is the point
-const ANSI_ESCAPE_RE = /\u001b(?:\[[0-9?]*[ -/]*[@-~]|[@-Z\\\]^_])/g
+const ANSI_ESCAPE_RE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|[@-Z\\\]^_])/g
 // eslint-disable-next-line no-control-regex
 const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f]/g
 
