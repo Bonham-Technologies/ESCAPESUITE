@@ -2586,15 +2586,54 @@ the valid range the suite already kept. `src/manifest.ts` is untouched — it co
 and the value it copies is now the clamped one. Artist's seven perf/rerender pins are byte-identical.
 **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99 and the kit's 99 / 99 / 98 / 98.
 
+`@escapesuite/shared`, `@escapesuite/craft` and `@escapesuite/artist` were re-measured 2026-10-04 for
+ESCSUITE-212 (one React error boundary for both apps: `packages/shared/src/components/ErrorBoundary.tsx`
+renders a panel — a `role="alert"` region holding a heading and one sentence, a Reload button beside it,
+the panel itself taking focus — in place of a tree that threw during render, calls an optional `onError`
+once, and logs only in a dev build (a throw from an event handler, a timer, a promise or the fallback
+itself is outside what any React boundary catches, and the docs now say so); `bootstrapApp()` mounts it
+around the app root; ESCAPECRAFT hands it `disposeLiveRecordingSession`, which runs the controller's own
+unmount teardown — the recorder disposed, every captured stream stopped — so a take cannot keep capturing
+into a dead UI, and ESCAPEARTIST hands it a documented no-op, holding no live capture a crash could leave
+running), each in one sitting against `main` at `591b19a2` (the ESCSUITE-208 version-packages commit).
+**Shared**: 100.00 / **98.62** / **91.89** / 100.00 against 100.00 / 98.56 / 91.66 / 100.00 — statements and
+branches up, lines and functions still exactly 100: lines 260 → 272, statements 274 / 278 → 286 / 290,
+branches 132 / 144 → 136 / 148 and functions 69 → 73, every denominator growing by exactly what the
+numerator did, the same 4 statements and 12 branches uncovered. The four new branches are all
+`ErrorBoundary.tsx`'s two decisions — the `hasError` choice in `render` and the dev-only log gate in
+`componentDidCatch` — each reached from both sides by the component's own cases (a child that throws
+against one that does not; `import.meta.env.DEV` stubbed true and false, which v8 confirms at ten hits
+against one); the optional `onError` call and the focus call are not decisions v8 counts, and are pinned
+by the prop-present, prop-absent and `document.activeElement` cases; the "second throw does not
+double-render" case pins that a caught error stays caught;
+`bootstrap/index.tsx`'s `onError` pass-through is a prop forward and adds no decision. **Craft**: 100.00 /
+**99.53** / 97.77 / 100.00 against 100.00 / 99.52 / 97.77 / 100.00 — statements up a hundredth, the other
+three unmoved: lines 2,378 → 2,385, statements 2,537 / 2,549 → 2,543 / 2,555, functions 452 → 455 and
+branches unchanged at 1,363 / 1,394, the same 12 statements and 31 branches uncovered. The change in
+`hooks/useRecordingController.ts` is the unmount cleanup's body lifted into a `disposeSession` callback
+that is both the effect's cleanup and the module-level slot `disposeLiveRecordingSession()` calls through
+an optional call — three new functions, no new decision Istanbul counts — reached by the cases that call
+it with a live session (the recorder disposed once, and once only across the explicit call and React's own
+cleanup) and with none — and by the review's required pin, which mounts the real hook inside the real
+boundary, makes a sibling throw, and asserts from inside `onError` that the recorder was disposed
+synchronously: the whole CRAFT half rests on `componentDidCatch` running before the deleted subtree's
+passive cleanup nulls the slot, and the pin was shown red with that order deliberately inverted. `src/main.tsx` is coverage-excluded in every package, so its new test files move
+no figure. **Artist**: 99.80 / 99.27 / 95.79 / 99.68, byte-identical on every count to the base — lines
+7,761 / 7,776, statements 8,766 / 8,830, branches 4,963 / 5,181, functions 1,884 / 1,890 — because the
+only artist source the ticket touches is the excluded `main.tsx`. The `App.*rerender*` pins and every
+`*.perf.test.ts` are byte-identical: the boundary wraps the root and its `render` returns its children,
+so the happy path gains no work per render. **No floor crossed**; shared's floors stay 100 / 98 / 91 /
+100, craft's 100 / 99 / 97 / 100 and artist's 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
-| `@escapesuite/shared` | 100.00 | 98.56 | 91.66 | 100.00 |
+| `@escapesuite/shared` | 100.00 | 98.62 | 91.89 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
