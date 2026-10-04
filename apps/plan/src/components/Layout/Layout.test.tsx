@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import Layout from './Layout'
 import Header from './Header'
@@ -132,6 +133,49 @@ describe('Layout', () => {
     expect(repoLink).toHaveAttribute('href', 'https://github.com/Bonham-Technologies/ESCAPESUITE')
     expect(repoLink).toHaveAttribute('target', '_blank')
     expect(repoLink).toHaveAttribute('rel', 'noopener noreferrer')
+  })
+
+  it('puts the skip link first in the tab order', async () => {
+    renderLayout()
+
+    // Nothing is focused yet, so the first Tab lands on the first tabbable
+    // element in the document — which must be the skip link, ahead of the
+    // header's logo, GitHub link and theme toggle.
+    await userEvent.tab()
+
+    expect(screen.getByRole('link', { name: 'Skip to main content' })).toHaveFocus()
+  })
+
+  it('moves focus into the main landmark when the skip link is activated', async () => {
+    const { container } = renderLayout()
+    const main = container.querySelector('main')
+    const skipLink = screen.getByRole('link', { name: 'Skip to main content' })
+
+    expect(skipLink).toHaveAttribute('href', '#main')
+    expect(main).toHaveAttribute('id', 'main')
+    // `<main>` is not naturally focusable — without tabindex="-1" the jump
+    // would scroll and leave focus where it was.
+    expect(main).toHaveAttribute('tabindex', '-1')
+
+    await userEvent.click(skipLink)
+
+    expect(main).toHaveFocus()
+  })
+
+  it('renders the skip link on every route', () => {
+    render(
+      <MemoryRouter initialEntries={['/privacy']}>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<div>Home Content</div>} />
+            <Route path="/privacy" element={<div>Privacy Content</div>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('Privacy Content')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Skip to main content' })).toBeInTheDocument()
   })
 
   it('displays current year in footer', () => {

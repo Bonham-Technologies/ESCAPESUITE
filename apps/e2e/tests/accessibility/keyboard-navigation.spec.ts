@@ -55,12 +55,38 @@ test.describe('ESCAPEPLAN Keyboard Navigation', () => {
   // needs ESCAPECRAFT, not ESCAPEPLAN. It moved to the
   // `VideoPlayer Keyboard Shortcuts` describe below.
 
-  // ESCSUITE-202: ESCAPEPLAN has no skip link anywhere
-  // (`grep -rn "skip-link\|Skip to" apps/plan/src` has no matches) — a real,
-  // surfaced gap, not fixed here (test-only ticket). "skip link
-  // functionality" had no feature to find (its only assertion sat behind an
-  // `if (exists)` that was always false) and is deleted rather than kept as
-  // a placeholder for a control that does not exist.
+  // ESCSUITE-214: ESCAPEPLAN's skip link, the gap ESCSUITE-202 surfaced here
+  // and left unfixed (that was a test-only ticket). `Layout.tsx` renders it as
+  // its first child on every route, off-screen until focused.
+  test('the skip link is the first Tab stop and moves focus into main', async ({
+    page,
+    browserName,
+  }) => {
+    // ESCSUITE-177: WebKit's default "Tab to links" preference is off, so a
+    // plain Tab never reaches a link — Option+Tab (Alt+Tab here) is the
+    // real-Safari equivalent, the same as `can tab through navigation links`.
+    const advance = browserName === 'webkit' ? 'Alt+Tab' : 'Tab'
+
+    const skipLink = page.getByRole('link', { name: 'Skip to main content' })
+
+    // Off-screen before it is focused — present in the tab order, absent from
+    // the page.
+    const hidden = await skipLink.boundingBox()
+    expect(hidden?.y).toBeLessThan(0)
+
+    // The very first Tab, with nothing focused yet, lands on it — ahead of the
+    // header's logo link, GitHub link and theme toggle.
+    await page.keyboard.press(advance)
+    await expect(skipLink).toBeFocused()
+
+    // ...and it is on screen once it has focus.
+    const shown = await skipLink.boundingBox()
+    expect(shown?.y).toBeGreaterThanOrEqual(0)
+
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('main')).toBeFocused()
+  })
 
   test('focusable elements have visible focus', async ({ page }) => {
     // Tab to first few elements and check for focus indicators
