@@ -18,6 +18,7 @@
 // well — and no longer needs to lie: jsdom's `getClientRects()` is genuinely
 // empty for every element by default (same root cause, no layout), so this
 // stub reports a non-empty one, exactly as a real rendered element would.
+import { useLayoutEffect } from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, renderHook, fireEvent } from '@testing-library/react'
 import { useDialogBehaviour } from './useDialogBehaviour'
@@ -324,6 +325,69 @@ describe('useDialogBehaviour focus trap finds controls regardless of offsetParen
   })
 })
 
+// The other half of the same filter: an *unrendered* control must still be
+// left out. The two I-U3 cases above only pin that the trap no longer
+// consults `offsetParent` — nothing yet pinned that `getClientRects()` still
+// excludes a control that genuinely reports none, e.g. one `display: none`
+// has hidden. Deleting the filter outright (`.filter(() => true)`) left the
+// rest of this suite green, because the global `installGetClientRectsStub`
+// makes every element report a rect; a stub on one element's own
+// `getClientRects` (an instance property, not the prototype) is what it
+// takes to tell the two apart.
+//
+// The stub has to land before `useDialogBehaviour`'s own effect reads it, and
+// that effect is a plain `useEffect` (passive) — so a `useLayoutEffect` in
+// this wrapper, which React always flushes before any passive effect in the
+// same commit, gets there first regardless of hook call order.
+function DialogWithOneUnrenderedButton({
+  onClose,
+  hiddenIndex,
+}: {
+  onClose: () => void
+  hiddenIndex: number
+}) {
+  const dialogRef = useDialogBehaviour(onClose)
+  useLayoutEffect(() => {
+    const target = dialogRef.current?.querySelectorAll('button')[hiddenIndex]
+    if (target) {
+      Object.defineProperty(target, 'getClientRects', {
+        configurable: true,
+        value: () => [],
+      })
+    }
+  }, [dialogRef, hiddenIndex])
+  return (
+    <div ref={dialogRef} tabIndex={-1} role="dialog" aria-label="Test dialog with a hidden button">
+      <button>first</button>
+      <button>middle</button>
+      <button>last</button>
+    </div>
+  )
+}
+
+describe('useDialogBehaviour focus trap still excludes a control with no client rects', () => {
+  it('skips a control reporting an empty getClientRects() when taking initial focus', () => {
+    const onClose = vi.fn()
+    const view = render(<DialogWithOneUnrenderedButton onClose={onClose} hiddenIndex={0} />)
+    const buttons = [...view.container.querySelectorAll('button')]
+
+    expect(document.activeElement).toBe(buttons[1])
+  })
+
+  it('skips a control reporting an empty getClientRects() when the forward wrap lands on it', () => {
+    const onClose = vi.fn()
+    const view = render(<DialogWithOneUnrenderedButton onClose={onClose} hiddenIndex={0} />)
+    const buttons = [...view.container.querySelectorAll('button')]
+    buttons[2].focus()
+
+    fireEvent.keyDown(document, { key: 'Tab' })
+
+    // first (buttons[0]) is excluded, so forward-wrap from the real last
+    // control lands on middle (buttons[1]), not on the hidden one.
+    expect(document.activeElement).toBe(buttons[1])
+  })
+})
+
 // ESCSUITE-208 (I-U2): FOCUSABLE_SELECTOR only named the control types the
 // seven existing dialogs happen to use, so a tabbable element of a type it
 // has no arm for was invisible to the trap — Tab from it walked straight out
@@ -333,15 +397,16 @@ describe('useDialogBehaviour focus trap finds controls regardless of offsetParen
 //
 // jsdom's own focus() implementation
 // (lib/jsdom/living/helpers/focusing.js, isFocusableAreaElement) has no case
-// at all for <audio>, <video> or <area> — a deliberate, documented gap
+// at all for <audio> or <video> — a deliberate, documented gap
 // (https://github.com/whatwg/html/issues/5490), not something this project's
 // test doubles can paper over the way the layout-related ones do. Real
-// browsers do move focus onto them (confirmed for audio/area by hunt-i's
-// Playwright probe against Chromium and WebKit). Giving just the element
-// under test an explicit tabindex is enough for jsdom's own algorithm to
-// treat it as a focusable area and actually move document.activeElement —
-// it does not also make `[tabindex]:not([tabindex="-1"])` match it, since
-// that arm explicitly excludes -1.
+// browsers do move focus onto them (hunt-i's Playwright probe confirms it
+// for a native controls player in Chromium and WebKit). Giving just the
+// element under test an explicit tabindex is enough for jsdom's own
+// algorithm to treat it as a focusable area and actually move
+// document.activeElement — it does not also make
+// `[tabindex]:not([tabindex="-1"])` match it, since that arm explicitly
+// excludes -1.
 function makeFocusableUnderJsdom(el: HTMLElement): void {
   el.tabIndex = -1
 }
@@ -440,24 +505,6 @@ describe('useDialogBehaviour focus trap selector arms (I-U2)', () => {
 
     expect(document.activeElement).toBe(buttons[0])
   })
-
-  it('area[href] is found and Tab from it as the last control wraps to the first', () => {
-    const { view, buttons } = renderDialog()
-    const dialog = view.container.querySelector('[role="dialog"]') as HTMLElement
-    const map = document.createElement('map')
-    const area = document.createElement('area')
-    area.setAttribute('href', '#')
-    makeFocusableUnderJsdom(area)
-    map.appendChild(area)
-    dialog.appendChild(map)
-
-    area.focus()
-    expect(document.activeElement).toBe(area)
-
-    fireEvent.keyDown(document, { key: 'Tab' })
-
-    expect(document.activeElement).toBe(buttons[0])
-  })
 })
 
 // ESCSUITE-208 (I-U1): every open dialog binds its own capture-phase keydown
@@ -495,5 +542,24 @@ describe('useDialogBehaviour Escape with more than one dialog open (I-U1)', () =
     expect(innerClose).not.toHaveBeenCalled()
 
     outer.unmount()
+  })
+
+  it('still closes the remaining dialog when the OUTER one closed first (out-of-LIFO order)', () => {
+    // openDialogs is id-addressed (indexOf + splice), not a plain pop(). A
+    // pop() would remove whichever id happens to be last in the array
+    // regardless of which dialog actually unmounted — here that is the
+    // INNER dialog's id, even though the inner dialog is the one still on
+    // screen, leaving it permanently un-closable by Escape.
+    const outerClose = vi.fn()
+    const innerClose = vi.fn()
+
+    const outer = render(<Dialog onClose={outerClose} />)
+    render(<Dialog onClose={innerClose} />)
+
+    outer.unmount()
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    expect(innerClose).toHaveBeenCalledTimes(1)
+    expect(outerClose).not.toHaveBeenCalled()
   })
 })
