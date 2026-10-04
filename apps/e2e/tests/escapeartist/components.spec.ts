@@ -491,9 +491,21 @@ test.describe('Toolbar', () => {
     await page.getByRole('button', { name: 'Add Text' }).click()
     await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible()
 
+    // Click each clip a third of the way in rather than at its centre or
+    // its ends: the playhead line can sit over the middle of a freshly added
+    // clip and intercept a centre click (CI, three attempts, ESCSUITE-202),
+    // and the clip's ends carry its trim handles, where a click starts a
+    // trim rather than a selection.
     const clips = page.locator('[data-clip-id]')
-    await clips.nth(0).click({ modifiers: ['Control'] })
-    await clips.nth(1).click({ modifiers: ['Control'] })
+    for (const index of [0, 1]) {
+      const clip = clips.nth(index)
+      const box = await clip.boundingBox()
+      if (!box) throw new Error(`clip ${index} has no bounding box`)
+      await clip.click({
+        modifiers: ['Control'],
+        position: { x: Math.max(4, box.width * 0.3), y: box.height / 2 },
+      })
+    }
 
     const deleteButton = page.getByRole('button', { name: 'Delete selected clips (Delete)' })
     await expect(deleteButton).toBeVisible()
