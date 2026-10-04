@@ -70,6 +70,48 @@ test('release.yml marks every per-package release make_latest: false', () => {
   assert.match(job, /make_latest:\s*['"]false['"]/);
 });
 
+test('release.yml re-marks the current umbrella release latest right after the per-package marking (ESCSUITE-218)', () => {
+  // GitHub's make_latest:'false' above only takes effect on a release that
+  // is becoming not-latest; it leaves the pointer alone when the release
+  // being updated is ALREADY "latest" (observed 2026-10-04: a shared-only
+  // release stayed /releases/latest for ~25 minutes, until
+  // standalone-release.yml's own --latest ran afterwards and moved it).
+  // This job must re-point /releases/latest at the umbrella `vX.Y.Z`
+  // release itself, rather than relying solely on standalone-release.yml
+  // running later.
+  const job = sliceFrom(
+    releaseYml,
+    /mark-per-package-releases-not-latest:/,
+    /^\s{2}\S.*:\s*$/m // next top-level job key
+  );
+
+  const makeLatestFalseIndex = job.search(/make_latest:\s*['"]false['"]/);
+  assert.notStrictEqual(
+    makeLatestFalseIndex,
+    -1,
+    'expected the make_latest: false marking in this job'
+  );
+
+  const ghReleaseEditIndex = job.search(/gh release edit\b[^\n]*--latest\b/);
+  assert.notStrictEqual(
+    ghReleaseEditIndex,
+    -1,
+    'expected a `gh release edit ... --latest` step marking the umbrella release latest'
+  );
+
+  assert.ok(
+    makeLatestFalseIndex < ghReleaseEditIndex,
+    'the per-package make_latest:false marking must run before the umbrella release is marked latest'
+  );
+
+  // Tag discovery must target a `v`-prefixed umbrella tag, never a
+  // per-package `@scope/name@version` tag.
+  assert.match(job, /\^v\[0-9\]/);
+
+  // A fresh repo with no umbrella release yet must not fail the job.
+  assert.match(job, /exit 0/);
+});
+
 test('standalone-release.yml creates the umbrella release as latest', () => {
   const createStep = sliceFrom(
     standaloneReleaseYml,

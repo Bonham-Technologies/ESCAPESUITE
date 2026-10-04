@@ -138,6 +138,36 @@ jobs:
               core.setFailed(`Marking make_latest=false failed for ${failed.join('; ')} — re-run this job, or fix it by hand.`);
             }
 
+      # `make_latest: 'false'` above only takes effect on a release that is
+      # BECOMING not-latest; GitHub leaves the pointer alone when the release
+      # being updated is already "latest" (observed 2026-10-04: after the
+      # release run for 591b19a2, the not-latest job above succeeded, yet
+      # GET /releases/latest named @escapesuite/shared@1.4.3 for ~25 minutes —
+      # until standalone-release.yml's own --latest ran afterwards and cut a
+      # new umbrella release). So this step re-points /releases/latest at the
+      # current umbrella `vX.Y.Z` release itself, right after the marking
+      # above, rather than relying solely on standalone-release.yml running
+      # later — standalone-release.yml's own --latest stays as the second
+      # line of defence.
+      - name: Mark the current umbrella release latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          # This job has no checkout, so the umbrella tag is found through
+          # the releases list rather than `git tag`: the newest non-draft,
+          # non-prerelease release whose tag looks like `vX.Y.Z` (never a
+          # per-package `@scope/name@version` tag).
+          TAG=$(gh release list --repo "$REPO" --exclude-drafts --exclude-pre-releases --json tagName --jq '[.[] | select(.tagName | test("^v[0-9]"))][0].tagName')
+
+          if [ -z "$TAG" ]; then
+            echo "No umbrella release exists yet; nothing to mark latest."
+            exit 0
+          fi
+
+          echo "Marking $TAG latest"
+          gh release edit "$TAG" --repo "$REPO" --latest
+
   # Attach standalone builds and the headless-artist kit to the GitHub Release
   # when craft, artist, or headless-artist is released
   upload-standalone:
