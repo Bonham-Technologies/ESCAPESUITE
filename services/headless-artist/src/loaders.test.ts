@@ -200,6 +200,42 @@ describe('loadManifest', () => {
     expect(job.project.timeline.clips.some((clip) => clip.id === 'clip-empty')).toBe(true)
     await job.cleanup()
   })
+
+  // ESCSUITE-192 (hunt-j J-5): project.timeline.clips was read with no shape check, so a
+  // manifest whose project has no "timeline" at all leaked a bare TypeError ("Cannot read
+  // properties of undefined (reading 'clips')") instead of naming the field, the way every
+  // neighbouring validation failure does.
+  it('names the field, rather than leaking a TypeError, when the project has no timeline', async () => {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { id: 'no-timeline-here' },
+        sources: [{ id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' }],
+      }),
+    )
+
+    await expect(loadManifest(path.join(dir, 'manifest.json'))).rejects.toThrow(
+      /project\.timeline must be an object with an array "clips"/,
+    )
+  })
+
+  it('names the field when project.timeline.clips is present but not an array', async () => {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { id: 'bad-clips', timeline: { clips: 'nope' } },
+        sources: [{ id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' }],
+      }),
+    )
+
+    await expect(loadManifest(path.join(dir, 'manifest.json'))).rejects.toThrow(
+      /project\.timeline must be an object with an array "clips"/,
+    )
+  })
 })
 
 describe('loadManifest "meta"', () => {
@@ -432,6 +468,24 @@ describe('loadBundle', () => {
     await expect(loadBundle(badPath, dir)).rejects.toThrow(
       /clip-0.*does-not-exist|does-not-exist.*clip-0/,
     )
+  })
+
+  // ESCSUITE-192 (hunt-j J-5): same shape check as loadManifest's -- a bundle whose project
+  // has no "timeline" at all must name the field rather than leak a bare TypeError.
+  it('names the field, rather than leaking a TypeError, when the project has no timeline', async () => {
+    const dir = await makeTempDir()
+    const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
+    delete veditor.project.timeline
+    const badPath = path.join(dir, 'bad.veditor')
+    await fs.writeFile(badPath, JSON.stringify(veditor))
+
+    await expect(loadBundle(badPath, dir)).rejects.toThrow(
+      /project\.timeline must be an object with an array "clips"/,
+    )
+
+    // No temp dir should have been created -- this validation runs before mkdtemp.
+    const entries = await fs.readdir(dir)
+    expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
   })
 
   it('rejects a video id that would escape the temp directory', async () => {
