@@ -300,6 +300,22 @@ describe('runJob', () => {
     expect(outcome.error).toContain('code')
   })
 
+  // Review finding 6: the CSI parameter-byte class was [0-9?], but ECMA-48 parameter
+  // bytes are 0x30-0x3F -- ';' and ':' included -- so a multi-parameter sequence like
+  // ESC[1;31m survived as visible text (" [1;31m") instead of being stripped.
+  it('strips a multi-parameter CSI sequence (e.g. ESC[1;31m), not just single-parameter ones', async () => {
+    const workDir = await makeTempDir()
+    const ansiMessage = '\x1b[1;31mred bold\x1b[0m text'
+    vi.mocked(renderInChromium).mockRejectedValue(new Error(ansiMessage))
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: workDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.error).toBe('red bold text')
+  })
+
   it('omits manifestLocation for a sink that does not durably store one', async () => {
     const workDir = await makeTempDir()
     mockRenderWriting('hello')
