@@ -1,5 +1,3 @@
-import { dirname, resolve as resolvePath } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
 import {
   mockGetUserMedia,
@@ -14,18 +12,8 @@ import {
   checkFormLabels,
   checkLinkText,
 } from '../../utils/accessibility'
-import { ARTIST_URL, seedTextClip } from '../../utils/artist'
+import { ARTIST_URL, ARTIST_FIXTURE_MP4, seedTextClip, keyframePanel } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
-
-/**
- * The same one-second fixture the integration and perf suites import — the
- * cheapest way to get a *media* clip onto the timeline, which is the only clip
- * kind whose inspector shows Blend Mode, Mask & Stroke, Effects and Transition.
- */
-const ARTIST_FIXTURE_MP4 = resolvePath(
-  dirname(fileURLToPath(import.meta.url)),
-  '../../fixtures/headless/source.mp4'
-)
 
 test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
@@ -631,7 +619,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     // uses `--z-panel` (150), below the modals.
     await seedTextClip(page)
     await page.keyboard.press('k')
-    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    const panel = keyframePanel(page)
     await expect(panel).toBeVisible()
     await panel.getByText('Opacity', { exact: true }).click()
 
@@ -799,9 +787,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     // panel with `k`, and click the Opacity track to open its curve.
     await seedTextClip(page)
     await page.keyboard.press('k')
-    // The panel is a portal on document.body, so it is a sibling of #root —
-    // which has a "Keyframe Editor" button of its own, hence the :not().
-    const panel = page.locator('body > div:not(#root)').filter({ hasText: 'Keyframe Editor' })
+    const panel = keyframePanel(page)
     await expect(panel).toBeVisible()
     await panel.getByText('Opacity', { exact: true }).click()
 
