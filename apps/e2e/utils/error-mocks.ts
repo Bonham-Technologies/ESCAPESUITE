@@ -188,55 +188,59 @@ export async function mockDeviceInUse(page: Page): Promise<void> {
 }
 
 /**
- * Mock storage quota exceeded error
+ * Mock storage quota exceeded error.
+ *
+ * Poisons `IDBObjectStore.prototype.put`, `.add` and `IDBCursor.prototype.update`
+ * — once, at the prototype, rather than re-wrapping a store on every
+ * `transaction()`/`objectStore()` call — for any `readwrite` transaction of
+ * the app's own `video-editor-db` only; every other database (and every
+ * `readonly` transaction of this one) is untouched.
+ *
+ * `.delete` is deliberately NOT poisoned: deleting frees quota rather than
+ * consuming it, and the five write call sites in this repo
+ * (`packages/shared/src/storage/index.ts`, `apps/artist/src/core/storage.ts`)
+ * are all `db.put` — there is no `db.add`/cursor-`update` write path today
+ * (K-U3, ESCSUITE-207) — but a future one that used `add` or a cursor would
+ * otherwise escape this mock silently.
+ *
+ * `localStorage` is NOT covered by this mock at all. ESCAPEARTIST writes two
+ * UI preferences to it directly (`app/timelineHeight.ts`,
+ * `components/KeyframePanel/hooks/useDraggablePanel.ts`) and those writes
+ * still succeed under "storage quota exceeded" — this mock only simulates
+ * IndexedDB running out of room.
  */
 export async function mockStorageQuotaExceeded(page: Page): Promise<void> {
   await page.addInitScript(() => {
-    // Override IndexedDB put to throw quota exceeded
-    const originalOpen = indexedDB.open.bind(indexedDB)
+    const QUOTA_DB_NAME = 'video-editor-db'
 
-    indexedDB.open = function (name: string, version?: number): IDBOpenDBRequest {
-      const request = originalOpen(name, version)
+    const isPoisonedWrite = (transaction: IDBTransaction | null): boolean =>
+      !!transaction && transaction.mode === 'readwrite' && transaction.db.name === QUOTA_DB_NAME
 
-      const originalResult = Object.getOwnPropertyDescriptor(
-        IDBRequest.prototype,
-        'result'
-      )
+    const quotaExceeded = () => {
+      throw new DOMException('QuotaExceededError', 'QuotaExceededError')
+    }
 
-      Object.defineProperty(request, 'result', {
-        get() {
-          const db = originalResult?.get?.call(this)
-          if (!db) return db
+    const originalPut = IDBObjectStore.prototype.put
+    IDBObjectStore.prototype.put = function (this: IDBObjectStore, ...args: unknown[]) {
+      if (isPoisonedWrite(this.transaction)) quotaExceeded()
+      // @ts-expect-error — forwarding the original call's arguments as-is
+      return originalPut.apply(this, args)
+    }
 
-          // Wrap transactions to throw quota errors on writes
-          const originalTransaction = db.transaction.bind(db)
-          db.transaction = function (
-            storeNames: string | string[],
-            mode?: IDBTransactionMode
-          ) {
-            const tx = originalTransaction(storeNames, mode)
+    const originalAdd = IDBObjectStore.prototype.add
+    IDBObjectStore.prototype.add = function (this: IDBObjectStore, ...args: unknown[]) {
+      if (isPoisonedWrite(this.transaction)) quotaExceeded()
+      // @ts-expect-error — forwarding the original call's arguments as-is
+      return originalAdd.apply(this, args)
+    }
 
-            if (mode === 'readwrite') {
-              const originalObjectStore = tx.objectStore.bind(tx)
-              tx.objectStore = function (name: string) {
-                const store = originalObjectStore(name)
-
-                store.put = function () {
-                  throw new DOMException('QuotaExceededError', 'QuotaExceededError')
-                }
-
-                return store
-              }
-            }
-
-            return tx
-          }
-
-          return db
-        },
-      })
-
-      return request
+    const originalCursorUpdate = IDBCursor.prototype.update
+    IDBCursor.prototype.update = function (this: IDBCursor, ...args: unknown[]) {
+      const source = this.source as IDBObjectStore | IDBIndex
+      const transaction = 'transaction' in source ? source.transaction : source.objectStore.transaction
+      if (isPoisonedWrite(transaction)) quotaExceeded()
+      // @ts-expect-error — forwarding the original call's arguments as-is
+      return originalCursorUpdate.apply(this, args)
     }
   })
 }
@@ -313,6 +317,22 @@ export async function mockOnline(page: Page): Promise<void> {
 
 /**
  * Mock export failure
+ *
+ * `MockVideoEncoder` is a deliberately partial stand-in for the real
+ * `VideoEncoder` — it exists only to make `Export Failure Recovery`'s tests
+ * fail the way a real encoder failure fails, not to reproduce every member
+ * the class has.
+ * The members the real exporters actually read from an encoder
+ * (`core/exportTypes.ts`'s `waitForEncoderBackpressure`, and both exporters'
+ * frame loops) are: `encodeQueueSize`, `state`, `encode`, `flush`, `close`
+ * and the static `isConfigSupported`. Everything else a real `VideoEncoder`
+ * has (e.g. `ondequeue`) is never read by this app and is not mocked here.
+ * K-U4 (ESCSUITE-207): `encodeQueueSize` was missing entirely, so
+ * `waitForEncoderBackpressure`'s `while (encoder.encodeQueueSize > threshold)`
+ * read `undefined > 0` — always `false` — and its error/timeout/sleep body
+ * never ran under this mock. It is declared and maintained now so a future
+ * test *can* exercise that loop through this mock; the two existing
+ * `Export Failure Recovery` tests do not read the queue and are unaffected.
  */
 export async function mockExportFailure(page: Page): Promise<void> {
   await page.addInitScript(() => {
@@ -330,12 +350,14 @@ export async function mockExportFailure(page: Page): Promise<void> {
 
         _init: VideoEncoderInit
         state: string
+        encodeQueueSize = 0
 
         configure(_config: VideoEncoderConfig) {
           this.state = 'configured'
         }
 
         encode(_frame: VideoFrame) {
+          this.encodeQueueSize += 1
           // Simulate error during encoding
           if (this._init.error) {
             this._init.error(new DOMException('Encoding failed', 'EncodingError'))
@@ -343,11 +365,13 @@ export async function mockExportFailure(page: Page): Promise<void> {
         }
 
         flush() {
+          this.encodeQueueSize = 0
           return Promise.reject(new DOMException('Flush failed', 'EncodingError'))
         }
 
         close() {
           this.state = 'closed'
+          this.encodeQueueSize = 0
         }
 
         static isConfigSupported = OriginalVideoEncoder.isConfigSupported

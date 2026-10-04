@@ -187,6 +187,58 @@ test.describe('Export Failure Recovery', () => {
     await openExportDialog(page)
     await expect(startExport).toBeEnabled()
   })
+
+  // K-U4 (ESCSUITE-207): `MockVideoEncoder` used to declare no
+  // `encodeQueueSize` at all, so `core/exportTypes.ts`'s
+  // `waitForEncoderBackpressure` — `while (encoder.encodeQueueSize >
+  // threshold)` — read `undefined > 0` as `false` and never ran its body
+  // under this mock. This does not touch either test above (neither reads
+  // the queue); it only proves the stand-in now answers the one question a
+  // real exporter's backpressure wait asks an encoder.
+  test('MockVideoEncoder.encodeQueueSize grows with encode and resets on flush', async ({
+    page,
+  }) => {
+    const result = await page.evaluate(async () => {
+      type QueuedEncoder = {
+        state: string
+        encodeQueueSize: number
+        configure: (config: unknown) => void
+        encode: (frame: unknown) => void
+        flush: () => Promise<void>
+        close: () => void
+      }
+      const Ctor = (window as unknown as { VideoEncoder: new (init: unknown) => QueuedEncoder })
+        .VideoEncoder
+      const encoder = new Ctor({ output: () => {}, error: () => {} })
+
+      encoder.configure({})
+      const beforeEncode = encoder.encodeQueueSize
+
+      encoder.encode({})
+      encoder.encode({})
+      encoder.encode({})
+      const afterEncode = encoder.encodeQueueSize
+
+      let flushRejected = false
+      try {
+        await encoder.flush()
+      } catch {
+        flushRejected = true
+      }
+      const afterFlush = encoder.encodeQueueSize
+
+      encoder.close()
+      const afterClose = encoder.encodeQueueSize
+
+      return { beforeEncode, afterEncode, flushRejected, afterFlush, afterClose }
+    })
+
+    expect(result.beforeEncode).toBe(0)
+    expect(result.afterEncode).toBe(3)
+    expect(result.flushRejected).toBe(true)
+    expect(result.afterFlush).toBe(0)
+    expect(result.afterClose).toBe(0)
+  })
 })
 
 test.describe('Storage Quota Exceeded', () => {

@@ -103,99 +103,27 @@ export async function mockMediaDevices(page: Page) {
   })
 }
 
-/**
- * Mock getUserMedia to return a fake video stream
- */
-export async function mockGetUserMedia(page: Page) {
-  // A stream the app can open implies devices it can enumerate; without this
-  // the source toggles stay disabled on hardware-less runners.
-  await mockMediaDevices(page)
-
-  await page.addInitScript(() => {
-    // Create a mock MediaStream
-    const mockStream = {
-      getTracks: () => [],
-      getVideoTracks: () => [],
-      getAudioTracks: () => [],
-      addTrack: () => {},
-      removeTrack: () => {},
-      active: true,
-    }
-
-    const getUserMedia = async () => mockStream as unknown as MediaStream
-    const getDisplayMedia = async () => mockStream as unknown as MediaStream
-
-    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
-      .__layerMediaDevices({ getUserMedia, getDisplayMedia })
-  })
+/** What a captured track builder installed on `window.__syntheticMedia` offers. */
+interface SyntheticMediaBuilders {
+  makeVideoTrack(): MediaStreamTrack
+  makeAudioTrack(): MediaStreamTrack
 }
 
 /**
- * Mock MediaRecorder for recording tests
- */
-export async function mockMediaRecorder(page: Page) {
-  await page.addInitScript(() => {
-    class MockMediaRecorder {
-      state = 'inactive'
-      ondataavailable: ((event: { data: Blob }) => void) | null = null
-      onstop: (() => void) | null = null
-      onerror: ((error: Error) => void) | null = null
-
-      constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {
-        // Mock constructor
-      }
-
-      start(_timeslice?: number) {
-        this.state = 'recording'
-      }
-
-      stop() {
-        this.state = 'inactive'
-        // Emit a mock blob
-        if (this.ondataavailable) {
-          this.ondataavailable({ data: new Blob(['mock video data'], { type: 'video/webm' }) })
-        }
-        if (this.onstop) {
-          this.onstop()
-        }
-      }
-
-      pause() {
-        this.state = 'paused'
-      }
-
-      resume() {
-        this.state = 'recording'
-      }
-
-      static isTypeSupported(mimeType: string) {
-        return mimeType.includes('webm')
-      }
-    }
-
-    // @ts-expect-error — a deliberately partial stand-in for the real MediaRecorder class
-    window.MediaRecorder = MockMediaRecorder
-  })
-}
-
-/**
- * Replace the capture APIs with *real* synthetic media.
- *
- * Unlike `mockGetUserMedia` (an inert stub with no tracks), this hands back a
- * live canvas-backed video track and an oscillator-backed audio track, so the
- * app's real recording pipeline — WebCodecs or MediaRecorder — produces a
- * genuine, decodable file. Use it when a test needs actual recorded output.
+ * Install `window.__syntheticMedia` — a real canvas-backed video track
+ * builder and a silent oscillator-backed audio track builder — once per
+ * document (idempotent, the same pattern as `installMediaDevicesLayer`
+ * above). `mockGetUserMedia` and `mockSyntheticMedia` both layer their
+ * `getUserMedia`/`getDisplayMedia` overrides on top of this, so there is
+ * exactly one implementation of "what a captured track actually is"
+ * (ESCSUITE-207).
  *
  * Must be called BEFORE navigating.
  */
-export async function mockSyntheticMedia(
+export async function installSyntheticMediaBuilders(
   page: Page,
   options: { width?: number; height?: number; painter?: 'interval' | 'raf' } = {}
-) {
-  // Same reason as mockGetUserMedia: capture that works implies devices that
-  // enumerate, and hardware-less runners enumerate none.
-  await mockMediaDevices(page)
-
+): Promise<void> {
   const width = options.width ?? 640
   const height = options.height ?? 360
   // ESCSUITE-86: which loop paints the source canvas. `'interval'` is the
@@ -211,6 +139,9 @@ export async function mockSyntheticMedia(
 
   await page.addInitScript(
     ({ width, height, painter }) => {
+      const w = window as unknown as { __syntheticMedia?: SyntheticMediaBuilders }
+      if (w.__syntheticMedia) return
+
       const makeVideoTrack = (): MediaStreamTrack => {
         const canvas = document.createElement('canvas')
         canvas.width = width
@@ -285,24 +216,145 @@ export async function mockSyntheticMedia(
         return destination.stream.getAudioTracks()[0]
       }
 
-      const getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
-        const stream = new MediaStream([makeVideoTrack()])
-        if (constraints?.audio) stream.addTrack(makeAudioTrack())
-        return stream
-      }
-
-      const getUserMedia = async (constraints?: MediaStreamConstraints) => {
-        const tracks: MediaStreamTrack[] = []
-        if (constraints?.video) tracks.push(makeVideoTrack())
-        if (constraints?.audio) tracks.push(makeAudioTrack())
-        return new MediaStream(tracks)
-      }
-
-      ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
-        .__layerMediaDevices({ getDisplayMedia, getUserMedia })
+      w.__syntheticMedia = { makeVideoTrack, makeAudioTrack }
     },
     { width, height, painter }
   )
+}
+
+/**
+ * Layer `getUserMedia`/`getDisplayMedia` overrides that build real streams
+ * from `window.__syntheticMedia` (installed by `installSyntheticMediaBuilders`,
+ * which the caller must have awaited first).
+ */
+async function installSyntheticGetUserMedia(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const api = (window as unknown as { __syntheticMedia: SyntheticMediaBuilders }).__syntheticMedia
+
+    const getDisplayMedia = async (constraints?: DisplayMediaStreamOptions) => {
+      const stream = new MediaStream([api.makeVideoTrack()])
+      if (constraints?.audio) stream.addTrack(api.makeAudioTrack())
+      return stream
+    }
+
+    const getUserMedia = async (constraints?: MediaStreamConstraints) => {
+      const tracks: MediaStreamTrack[] = []
+      if (constraints?.video) tracks.push(api.makeVideoTrack())
+      if (constraints?.audio) tracks.push(api.makeAudioTrack())
+      return new MediaStream(tracks)
+    }
+
+    ;(window as unknown as { __layerMediaDevices: (o: Record<string, unknown>) => void })
+      .__layerMediaDevices({ getUserMedia, getDisplayMedia })
+  })
+}
+
+/**
+ * Mock getUserMedia to return a fake video stream.
+ *
+ * Used to be an inert object literal shaped like a `MediaStream`
+ * (`getTracks()` etc. returning empty arrays) rather than a real one. That
+ * broke the instant any caller treated it as one: ESCAPECRAFT's preview does
+ * `previewRef.current.srcObject = previewStream` (`useMediaStreams.ts`),
+ * and assigning a plain object there throws `TypeError: Failed to set the
+ * 'srcObject' property on 'HTMLMediaElement': The provided value is not of
+ * type '(MediaSourceHandle or MediaStream)'` — synchronously, inside a
+ * passive effect, with no error boundary above it. `WebCodecsRecorder` then
+ * fails its own way on the same empty-tracks stream ("No video track
+ * available for recording"). Neither failure was what any of this mock's
+ * specs were testing for (ESCSUITE-207; see the Jira comment on the
+ * ESCSUITE-201 review that flagged the object-literal shape in the first
+ * place).
+ *
+ * Fixed by building on the same real track builders `mockSyntheticMedia`
+ * uses — a `canvas.captureStream()` video track and a silent `AudioContext`
+ * oscillator/`MediaStreamDestination` track when audio is requested — via
+ * `installSyntheticMediaBuilders`/`installSyntheticGetUserMedia` above, so a
+ * real `MediaStream` reaches `srcObject` and the recorder. This is NOT a
+ * synonym for `mockSyntheticMedia`: that helper additionally accepts a
+ * `width`/`height`/`painter` for benchmark-grade control over what gets
+ * painted, where this one takes no options and is meant for every other
+ * spec that just needs the recorder to not crash when it opens a camera.
+ */
+export async function mockGetUserMedia(page: Page) {
+  // A stream the app can open implies devices it can enumerate; without this
+  // the source toggles stay disabled on hardware-less runners.
+  await mockMediaDevices(page)
+  await installSyntheticMediaBuilders(page)
+  await installSyntheticGetUserMedia(page)
+}
+
+/**
+ * Mock MediaRecorder for recording tests
+ */
+export async function mockMediaRecorder(page: Page) {
+  await page.addInitScript(() => {
+    class MockMediaRecorder {
+      state = 'inactive'
+      ondataavailable: ((event: { data: Blob }) => void) | null = null
+      onstop: (() => void) | null = null
+      onerror: ((error: Error) => void) | null = null
+
+      constructor(_stream: MediaStream, _options?: MediaRecorderOptions) {
+        // Mock constructor
+      }
+
+      start(_timeslice?: number) {
+        this.state = 'recording'
+      }
+
+      stop() {
+        this.state = 'inactive'
+        // Emit a mock blob
+        if (this.ondataavailable) {
+          this.ondataavailable({ data: new Blob(['mock video data'], { type: 'video/webm' }) })
+        }
+        if (this.onstop) {
+          this.onstop()
+        }
+      }
+
+      pause() {
+        this.state = 'paused'
+      }
+
+      resume() {
+        this.state = 'recording'
+      }
+
+      static isTypeSupported(mimeType: string) {
+        return mimeType.includes('webm')
+      }
+    }
+
+    // @ts-expect-error — a deliberately partial stand-in for the real MediaRecorder class
+    window.MediaRecorder = MockMediaRecorder
+  })
+}
+
+/**
+ * Replace the capture APIs with *real* synthetic media, with control over
+ * what gets painted.
+ *
+ * `mockGetUserMedia` (above) now hands back the same kind of real track —
+ * since ESCSUITE-207 it is no longer the inert, trackless stub this comment
+ * used to contrast against — but takes no options. Reach for this one
+ * instead when a test needs a specific `width`/`height`/`painter`, or simply
+ * wants to say in its own `beforeEach` that it depends on a genuine,
+ * decodable recorded file (WebCodecs or MediaRecorder, whichever the app's
+ * `recorder-factory.ts` picks).
+ *
+ * Must be called BEFORE navigating.
+ */
+export async function mockSyntheticMedia(
+  page: Page,
+  options: { width?: number; height?: number; painter?: 'interval' | 'raf' } = {}
+) {
+  // Same reason as mockGetUserMedia: capture that works implies devices that
+  // enumerate, and hardware-less runners enumerate none.
+  await mockMediaDevices(page)
+  await installSyntheticMediaBuilders(page, options)
+  await installSyntheticGetUserMedia(page)
 }
 
 /**
