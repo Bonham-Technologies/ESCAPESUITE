@@ -299,18 +299,58 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     expect(distinctStops).toBeGreaterThan(5)
   })
 
-  // ESCSUITE-202: a real app defect, not fixed here (test-only ticket).
-  // `FileMenu.tsx`'s dropdown — the one `aria-haspopup="menu"` control in
-  // ESCAPEARTIST — wraps `role="menu"` around four plain `<button>`s with no
-  // `role="menuitem"` and no arrow-key handler at all; ArrowDown does
-  // nothing but whatever the browser's own default is (nothing, for a plain
-  // button). The APG expects a real `role="menu"` to implement roving
-  // tabindex and arrow-key navigation. "arrow keys navigate in menus" had no
-  // such behaviour to find — its only assertion sat behind an
-  // `if (isVisible)` and then asserted `toBeDefined()` on a string, which is
-  // true for `undefined` read back out of `document.activeElement
-  // ?.textContent` too — and is deleted rather than kept as a placeholder
-  // for it.
+  // ESCSUITE-202 surfaced this as a real app defect and left it for
+  // ESCSUITE-216, which fixed it: `FileMenu.tsx` wraps `role="menu"` around
+  // what are now four `role="menuitem"` buttons with a roving tabindex and
+  // the APG key model. The old "arrow keys navigate in menus" placeholder
+  // asserted `toBeDefined()` on a string behind an `if (isVisible)` — true
+  // for `undefined` too — and these two cases replace it.
+  test('arrow keys move focus inside the File menu', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: 'File menu' })
+    await trigger.focus()
+    await page.keyboard.press('Enter')
+
+    const menu = page.getByRole('menu', { name: 'File options' })
+    await expect(menu).toBeVisible()
+    await expect(trigger).toHaveAttribute('aria-expanded', 'true')
+
+    // Opening the menu puts focus on its first item, and it is the menu's
+    // only tab stop.
+    const focusedText = () => page.evaluate(() => document.activeElement?.textContent ?? '')
+    expect(await focusedText()).toContain('New Project')
+
+    await page.keyboard.press('ArrowDown')
+    expect(await focusedText()).toContain('Open Project...')
+
+    await page.keyboard.press('ArrowUp')
+    expect(await focusedText()).toContain('New Project')
+
+    // Wrapped past the first item round to the last one that can take focus.
+    // Export Video is disabled on an empty timeline, so the wrap steps over
+    // it and lands on Save Project — a `disabled` <button> is out of
+    // `.focus()`'s reach as well as out of the tab order.
+    await expect(page.getByRole('menuitem', { name: /Export Video/ })).toBeDisabled()
+    await page.keyboard.press('ArrowUp')
+    expect(await focusedText()).toContain('Save Project')
+
+    await page.keyboard.press('Home')
+    expect(await focusedText()).toContain('New Project')
+  })
+
+  test('Escape closes the File menu and gives focus back to its button', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: 'File menu' })
+    await trigger.focus()
+    await page.keyboard.press('Enter')
+
+    const menu = page.getByRole('menu', { name: 'File options' })
+    await expect(menu).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await expect(menu).toBeHidden()
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    await expect(trigger).toBeFocused()
+  })
 
   test('Space bar toggles play/pause', async ({ page }) => {
     // ESCSUITE-187: with no clip on the timeline `canPlay` is false and Space
