@@ -15,6 +15,12 @@
 // dangling. ESCAPECRAFT's disposes a live recorder; ESCAPEARTIST's is a
 // deliberate no-op — see `apps/craft/src/main.tsx` and
 // `apps/artist/src/main.tsx`.
+//
+// Like every React error boundary, this only catches a **render-time**
+// throw — in `render()`, a constructor, or a lifecycle method, on some
+// component below it. A throw from an event handler, a `setTimeout`/
+// `requestAnimationFrame` callback, an async function, a rejected promise,
+// or the fallback it renders itself, reaches none of this.
 import { Component, type ErrorInfo, type ReactNode } from 'react';
 
 export interface ErrorBoundaryProps {
