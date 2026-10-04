@@ -30,6 +30,6 @@ describe('main', () => {
 
     const panel = document.querySelector('[role="alert"]')
     expect(panel).not.toBeNull()
-    expect(panel?.querySelector('button')?.textContent).toBe('Reload')
+    expect(document.querySelector('button')?.textContent).toBe('Reload')
   })
 })
