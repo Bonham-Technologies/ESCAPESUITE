@@ -351,6 +351,30 @@ describe('sink readiness', () => {
       probeSpy.mockRestore()
     }
   })
+
+  // Review finding 4: ensureSinkReady used to run inside the parse try, ahead of the
+  // allow-list check -- so a server that does not even enable s3 still probed the SDK on its
+  // behalf and answered 400 instead of the documented 403. A sink the server refuses must
+  // never be probed for readiness at all.
+  it('answers 403 for a disallowed s3 job without probing the SDK', async () => {
+    const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')
+    try {
+      await start({ allowedSinks: ['volume', 'webhook'] })
+
+      const res = await postSpec(
+        validSpec('job-1', { output: { sink: 's3', config: { prefix: 'bucket/renders' } } }),
+      )
+
+      expect(res.status).toBe(403)
+      expect(await res.json()).toEqual({
+        error: 'sink "s3" is not enabled on this server (HEADLESS_SINKS)',
+      })
+      expect(probeSpy).not.toHaveBeenCalled()
+      expect(runJob).not.toHaveBeenCalled()
+    } finally {
+      probeSpy.mockRestore()
+    }
+  })
 })
 
 describe('run deps', () => {
