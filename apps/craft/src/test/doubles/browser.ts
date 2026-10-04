@@ -65,23 +65,30 @@ export function installBrowserStubs(): BrowserStubs {
 }
 
 /**
- * jsdom performs no layout, so `HTMLElement.offsetParent` is `null` on every
- * element — including elements that are plainly on screen. The dialog focus
- * trap (`useDialogBehaviour` in `@escapesuite/shared/hooks`) uses `offsetParent !== null` to skip
+ * jsdom performs no layout, so `HTMLElement.getClientRects()` returns an
+ * empty list for every element — including elements that are plainly on
+ * screen. The dialog focus trap (`useDialogBehaviour` in
+ * `@escapesuite/shared/hooks`) uses `getClientRects().length > 0` to skip
  * controls CSS has hidden, so under jsdom it would otherwise find nothing
  * focusable at all.
  *
- * Report `document.body` for every element instead, which is what a rendered
- * element's offsetParent would be, and hand back the undo.
+ * Report one rect for every element instead, which is what a rendered
+ * element's `getClientRects()` would return, and hand back the undo.
+ *
+ * ESCSUITE-208 (I-U3): this used to stub `offsetParent` instead, because the
+ * trap used to filter on `offsetParent !== null` — which a real browser also
+ * sets to `null` for any `position: fixed` control, dropping it from the trap
+ * entirely. The trap now reads `getClientRects()`, so the double moved onto
+ * the same property.
  */
-export function installOffsetParentStub(): () => void {
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
-  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+export function installGetClientRectsStub(): () => void {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getClientRects')
+  Object.defineProperty(HTMLElement.prototype, 'getClientRects', {
     configurable: true,
-    get: () => document.body,
+    value: () => [{} as DOMRect],
   })
   return () => {
-    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
-    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+    if (original) Object.defineProperty(HTMLElement.prototype, 'getClientRects', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'getClientRects')
   }
 }

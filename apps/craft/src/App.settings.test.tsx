@@ -17,7 +17,7 @@ import {
   flush,
   type BrowserStubs,
 } from './test/appHarness';
-import { installOffsetParentStub } from './test/doubles/browser';
+import { installGetClientRectsStub } from './test/doubles/browser';
 
 // Screen/camera capture, WebCodecs muxing, thumbnail decoding, editor
 // navigation and analytics delivery are all browser boundaries jsdom does not
@@ -360,15 +360,15 @@ describe('App header', () => {
 });
 
 describe('App help modal', () => {
-  let restoreOffsetParent: (() => void) | null = null;
+  let restoreGetClientRects: (() => void) | null = null;
 
-  // Two of these tests patch HTMLElement.prototype.offsetParent (jsdom does no
-  // layout, and the focus trap filters on it). Undo it here rather than at the
-  // end of the test body: an assertion that throws would otherwise leak the
-  // patch into every later test in the file.
+  // Two of these tests patch HTMLElement.prototype.getClientRects (jsdom does
+  // no layout, and the focus trap filters on it). Undo it here rather than at
+  // the end of the test body: an assertion that throws would otherwise leak
+  // the patch into every later test in the file.
   afterEach(() => {
-    restoreOffsetParent?.();
-    restoreOffsetParent = null;
+    restoreGetClientRects?.();
+    restoreGetClientRects = null;
   });
 
   it('opens from the header and closes from its own button', async () => {
@@ -396,7 +396,7 @@ describe('App help modal', () => {
   });
 
   it('closes on Escape, and hands focus back to the Help button', async () => {
-    restoreOffsetParent = installOffsetParentStub();
+    restoreGetClientRects = installGetClientRectsStub();
     const user = userEvent.setup();
     await renderApp();
 
@@ -413,7 +413,7 @@ describe('App help modal', () => {
   });
 
   it('does not let the recorder shortcuts fire behind it', async () => {
-    restoreOffsetParent = installOffsetParentStub();
+    restoreGetClientRects = installGetClientRectsStub();
     const user = userEvent.setup();
     await renderApp();
     await user.click(screen.getByRole('button', { name: 'Help - Recording Tips' }));

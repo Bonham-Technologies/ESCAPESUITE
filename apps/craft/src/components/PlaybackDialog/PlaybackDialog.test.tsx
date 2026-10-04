@@ -11,21 +11,21 @@ import userEvent from '@testing-library/user-event'
 import { PlaybackDialog } from './PlaybackDialog'
 import {
   installBrowserStubs,
-  installOffsetParentStub,
+  installGetClientRectsStub,
   type BrowserStubs,
 } from '../../test/doubles/browser'
 import styles from '../../App.module.css'
 
 let browser: BrowserStubs
-let restoreOffsetParent: () => void
+let restoreGetClientRects: () => void
 
 beforeEach(() => {
   browser = installBrowserStubs()
-  restoreOffsetParent = installOffsetParentStub()
+  restoreGetClientRects = installGetClientRectsStub()
 })
 
 afterEach(() => {
-  restoreOffsetParent()
+  restoreGetClientRects()
   browser.restore()
   vi.restoreAllMocks()
   document.body.innerHTML = ''
