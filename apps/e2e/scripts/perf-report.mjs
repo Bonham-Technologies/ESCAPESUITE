@@ -115,18 +115,84 @@ function warn(message) {
   console.warn(`perf-report: ${message}`)
 }
 
-function readJson(file) {
+/**
+ * Parse one benchmark result's raw JSON text.
+ *
+ * Returns `null` (with a warning, never a throw) both when `raw` fails to
+ * parse and when it parses to something that is not a plausible benchmark
+ * object — a bare string, number, boolean, `null`, or array. Every real
+ * result is a `{ name: string, runs: number, ... }` object (see
+ * `PerfBenchmark` in `apps/e2e/utils/perf.ts`); without this shape guard, a
+ * malformed-but-parseable result (e.g. a kit report that failed mid-write and
+ * landed as `null` or a bare number) would reach {@link mergeBenchmarks} and
+ * then {@link toMarkdown}'s `key in benchmark` check below, which throws a
+ * `TypeError` for any primitive right-hand side — turning one bad file into a
+ * crash of the whole report rather than one skipped row.
+ */
+export function parseBenchmarkResult(raw, label) {
+  let value
   try {
-    return JSON.parse(readFileSync(file, 'utf8'))
+    value = JSON.parse(raw)
+  } catch (error) {
+    warn(`skipping ${label} — ${error.message}`)
+    return null
+  }
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    typeof value.name !== 'string'
+  ) {
+    warn(`skipping ${label} — not a benchmark result (expected an object with a "name" string)`)
+    return null
+  }
+  return value
+}
+
+/**
+ * Merge already-read benchmark results into the order the report presents
+ * them in. Pure — no filesystem access — so this is what the tests drive
+ * directly; {@link collect} below is the thin wrapper that reads real files
+ * and calls it.
+ *
+ * `browserResults` is an array of `{ label, raw }` — `raw` being one
+ * `perf-results/*.json` file's text and `label` what to call it in a
+ * warning. `kitRaw` is the headless kit's `perf-report.json` text, or
+ * `undefined` when that file does not exist or could not be read — every
+ * input is optional, because a benchmark that did not run is simply absent.
+ */
+export function mergeBenchmarks(browserResults, kitRaw) {
+  const benchmarks = []
+  for (const { label, raw } of browserResults) {
+    const result = parseBenchmarkResult(raw, label)
+    if (result) benchmarks.push(result)
+  }
+
+  if (kitRaw !== undefined) {
+    const kit = parseBenchmarkResult(kitRaw, 'services/headless-artist/perf-report.json')
+    if (kit) benchmarks.push(kit)
+  }
+
+  return benchmarks.sort((a, b) => {
+    const rank = (x) => {
+      const index = ORDER.indexOf(x.name)
+      return index === -1 ? ORDER.length : index
+    }
+    return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name))
+  })
+}
+
+/** Read one file's text, or `undefined` (with a warning) if it cannot be read. */
+function readRawFile(file) {
+  try {
+    return readFileSync(file, 'utf8')
   } catch (error) {
     warn(`skipping ${path.relative(REPO_ROOT, file)} — ${error.message}`)
-    return null
+    return undefined
   }
 }
 
 function collect() {
-  const benchmarks = []
-
   let files = []
   try {
     files = readdirSync(BROWSER_RESULTS_DIR).filter(
@@ -138,21 +204,17 @@ function collect() {
   } catch {
     warn(`no browser results in ${path.relative(REPO_ROOT, BROWSER_RESULTS_DIR)}`)
   }
+
+  const browserResults = []
   for (const name of files.sort()) {
-    const result = readJson(path.join(BROWSER_RESULTS_DIR, name))
-    if (result) benchmarks.push(result)
+    const file = path.join(BROWSER_RESULTS_DIR, name)
+    const raw = readRawFile(file)
+    if (raw !== undefined) browserResults.push({ label: path.relative(REPO_ROOT, file), raw })
   }
 
-  const kit = readJson(KIT_RESULT)
-  if (kit) benchmarks.push(kit)
+  const kitRaw = readRawFile(KIT_RESULT)
 
-  return benchmarks.sort((a, b) => {
-    const rank = (x) => {
-      const index = ORDER.indexOf(x.name)
-      return index === -1 ? ORDER.length : index
-    }
-    return rank(a) - rank(b) || String(a.name).localeCompare(String(b.name))
-  })
+  return mergeBenchmarks(browserResults, kitRaw)
 }
 
 /** `.cpuprofile` basename → how the report heads its section. */
@@ -248,7 +310,7 @@ function encodeRate(benchmark) {
 }
 
 /** The one number each benchmark is really about, for the summary table. */
-function headline(benchmark) {
+export function headline(benchmark) {
   if (typeof benchmark.renderedFps === 'number') return `${benchmark.renderedFps} rendered fps`
   // Encode rate first, and only for a non-zero value. A PiP take encodes off the
   // main thread (MediaRecorder), so its `framesPerSecond` is 0 by construction
@@ -278,7 +340,7 @@ function headline(benchmark) {
   return '—'
 }
 
-function toMarkdown(benchmarks, profiles) {
+export function toMarkdown(benchmarks, profiles) {
   const lines = ['## Performance benchmarks', '']
 
   if (benchmarks.length === 0 && profiles.length === 0) {
@@ -381,8 +443,14 @@ function main() {
   }
 }
 
-try {
-  main()
-} catch (error) {
-  warn(`report generation failed — ${error?.message ?? error}`)
+// Guarded so `perf-report.test.mjs` can import this module's pure helpers
+// (parseBenchmarkResult, mergeBenchmarks, toMarkdown, headline) without
+// running the real CLI — writing perf-report.json, reading perf-results/ —
+// the same entry-point pattern `profile-top.mjs` and `serve-dist.mjs` use.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    main()
+  } catch (error) {
+    warn(`report generation failed — ${error?.message ?? error}`)
+  }
 }

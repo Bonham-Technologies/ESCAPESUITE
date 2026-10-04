@@ -545,8 +545,9 @@ jobs:
           echo "::error::playwright install-deps chromium failed after 2 attempts"
           exit 1
 
-      # services/headless-artist pins the same Playwright version (1.62.1) as
-      # apps/e2e, and the cache key above now hashes both package.json files, so the
+      # services/headless-artist pins the same @playwright/test range as apps/e2e —
+      # keep the two package.json entries identical (apps/e2e/scripts/playwright-version.test.mjs
+      # enforces this) — and the cache key above now hashes both package.json files, so the
       # browser cache above covers it too and it needs no separate install step. If the
       # two ever drift, this step will fail with "browserType.launch: Executable doesn't
       # exist" (the cached browser won't match the version this package resolves) rather
@@ -555,7 +556,7 @@ jobs:
         run: pnpm --filter=@escapesuite/headless-artist run test:e2e
 
       - name: Run E2E tests
-        run: pnpm --filter=@escapesuite/e2e exec playwright test --ignore-snapshots
+        run: pnpm --filter=@escapesuite/e2e exec playwright test
         env:
           CI: true
 
