@@ -116,7 +116,7 @@ test.describe('Cross-Session State Persistence', () => {
     // New Project confirms before discarding unsaved clips.
     page.once('dialog', (dialog) => dialog.accept())
     await page.getByRole('button', { name: 'File menu' }).click()
-    await page.getByRole('button', { name: /New Project/ }).click()
+    await page.getByRole('menuitem', { name: /New Project/ }).click()
 
     await expect(undoButton).toBeDisabled()
   })

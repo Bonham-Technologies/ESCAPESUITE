@@ -81,7 +81,7 @@ describe('App project lifecycle', () => {
 
       await openFileMenu(user)
 
-      expect(screen.getByRole('button', { name: /Export Video/ })).toBeDisabled()
+      expect(screen.getByRole('menuitem', { name: /Export Video/ })).toBeDisabled()
     })
 
     it('exports from the menu once there is a clip', async () => {
@@ -90,7 +90,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Export Video/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Export Video/ }))
 
       expect(await screen.findByRole('heading', { name: 'Export Video' })).toBeInTheDocument()
     })
@@ -102,7 +102,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /New Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
 
       expect(confirmSpy).not.toHaveBeenCalled()
       expect(clearSessionState).toHaveBeenCalled()
@@ -115,7 +115,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /New Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
 
       expect(confirmSpy).toHaveBeenCalledWith('Start a new project? Unsaved changes will be lost.')
       expect(store().project.timeline.clips).toHaveLength(0)
@@ -129,7 +129,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /New Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
 
       expect(store().project.timeline.clips).toHaveLength(1)
       expect(clearSessionState).not.toHaveBeenCalled()
@@ -152,7 +152,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Save Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Save Project/ }))
 
       await waitFor(() => expect(saveProject).toHaveBeenCalled())
     })
@@ -164,7 +164,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Open Project/ }))
 
       await waitFor(() => expect(showOpenProjectDialog).toHaveBeenCalled())
       expect(loadProject).not.toHaveBeenCalled()
@@ -181,7 +181,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Open Project/ }))
 
       await waitFor(() => expect(notification()).toBe('Project loaded successfully'))
       expect(loadProject).toHaveBeenCalledWith(file)
@@ -197,7 +197,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Open Project/ }))
 
       await waitFor(() => expect(notification()).toBe('Failed to load project'))
       expect(consoleError).toHaveBeenCalledWith('Load failed:', expect.any(Error))
@@ -211,7 +211,7 @@ describe('App project lifecycle', () => {
       vi.mocked(showOpenProjectDialog).mockResolvedValueOnce(projectFile())
       await renderApp()
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Open Project/ }))
       expect(await screen.findByTestId('project-load-dialog')).toBeInTheDocument()
     }
 
@@ -569,7 +569,7 @@ describe('App project lifecycle', () => {
       await renderApp()
 
       await openFileMenu(user)
-      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Open Project/ }))
 
       expect(await screen.findByText('Loading project...')).toBeInTheDocument()
 

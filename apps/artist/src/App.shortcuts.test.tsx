@@ -616,7 +616,7 @@ describe('App keyboard shortcuts', () => {
       await renderApp()
 
       await user.click(screen.getByRole('button', { name: 'File menu' }))
-      await user.click(screen.getByRole('button', { name: /Open Project/ }))
+      await user.click(screen.getByRole('menuitem', { name: /Open Project/ }))
       expect(await screen.findByTestId('project-load-dialog')).toBeInTheDocument()
 
       expectNoKeysTaken()

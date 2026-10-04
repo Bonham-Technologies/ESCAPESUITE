@@ -363,6 +363,28 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(seriousViolations).toHaveLength(0)
   })
 
+  test('the open File menu passes axe-core audit (ESCSUITE-216)', async ({ page }) => {
+    // Red before ESCSUITE-216 and never seen by any audit, because no audit
+    // had opened the menu: `role="menu"` over four plain `<button>`s is an
+    // `aria-required-children` violation of critical impact.
+    await page.getByRole('button', { name: 'File menu' }).click()
+    await expect(page.getByRole('menu', { name: 'File options' })).toBeVisible()
+    expect(await page.getByRole('menuitem').count()).toBe(4)
+
+    const results = await runAxeCheck(page, {
+      // Disable color-contrast for canvas-based timeline
+      disableRules: ['color-contrast'],
+    })
+
+    expect(results.violations.map((violation) => violation.id)).not.toContain(
+      'aria-required-children'
+    )
+    const seriousViolations = results.violations.filter(
+      (v) => v.impact === 'serious' || v.impact === 'critical'
+    )
+    expect(seriousViolations).toHaveLength(0)
+  })
+
   test('toolbar buttons have accessible names', async ({ page }) => {
     const toolbar = page.locator('[role="toolbar"], .toolbar, [class*="toolbar"]').first()
     await expect(toolbar).toBeVisible()
