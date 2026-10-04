@@ -13,6 +13,7 @@
     "./utils": "./src/utils/index.ts",
     "./config": "./src/config/index.ts",
     "./hooks": "./src/hooks/index.ts",
+    "./components": "./src/components/index.ts",
     "./bootstrap": "./src/bootstrap/index.tsx",
     "./test/setup": "./src/test/setup.ts"
   },

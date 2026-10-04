@@ -193,7 +193,8 @@ bootstrapApp({ App })
 ```
 
 **Exports:**
-- `bootstrapApp(config)` - Initialize and render the app (`{ App, rootId? }`)
+- `bootstrapApp(config)` - Initialize and render the app (`{ App, rootId?, onError? }`) — `onError` is
+  passed straight through to the shared `ErrorBoundary` wrapped around `App`
 
 ---
 

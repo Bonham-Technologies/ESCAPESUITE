@@ -132,6 +132,29 @@ export interface RecordingController {
   handleStartRecording: () => Promise<void>;
 }
 
+/**
+ * The currently-mounted controller's full teardown, or `null` when none is
+ * mounted. Set and cleared by the one `useRecordingController` instance a
+ * real app ever has — see the registration effect inside the hook below.
+ */
+let liveSessionDispose: (() => void) | null = null;
+
+/**
+ * Give back whatever the current take is holding — the recorder, every
+ * acquired track, the tickers, the meters — from outside React.
+ *
+ * `main.tsx` hands this to the app's `ErrorBoundary` as `onError`
+ * (ESCSUITE-212): a render-time throw anywhere in CRAFT's tree must not
+ * leave a live recorder capturing into a UI nobody can see or stop. A no-op
+ * when nothing is mounted — before the app has rendered once, or after it
+ * has already torn itself down — is the right answer rather than a thing to
+ * guard against upstream, since the `ErrorBoundary` cannot know which is
+ * true when it calls this.
+ */
+export function disposeLiveRecordingSession(): void {
+  liveSessionDispose?.();
+}
+
 export function useRecordingController({
   config,
   setState,
@@ -256,7 +279,22 @@ export function useRecordingController({
     setAudioLevels({ microphone: 0, system: 0 });
   }, [setAudioLevels]);
 
-  useEffect(() => () => {
+  /**
+   * Give back everything a live take is holding — the recorder, every
+   * acquired track, the two tickers, the meters — and drop the store back to
+   * idle. Shared by the unmount teardown below and by
+   * `disposeLiveRecordingSession` (ESCSUITE-212), which calls this directly,
+   * synchronously, from the app's `ErrorBoundary.onError`: a render-time
+   * throw anywhere in the tree unmounts this component too, which would run
+   * this same body as the effect's own cleanup, but that happens on React's
+   * schedule relative to `componentDidCatch`, not guaranteed to happen first
+   * — and a live recorder captures audio and video for every tick it is not
+   * disposed. Calling it twice is harmless: `disposeRecorder()` and
+   * `stopAllStreamsRef.current()` are each already idempotent (ESCSUITE-114 /
+   * ESCSUITE-116), so whichever of the two call sites runs first does the
+   * real work and the other finds nothing left to release.
+   */
+  const disposeSession = useCallback(() => {
     cancelledRef.current = true;
     // Whatever start is still in flight belongs to a screen that has gone: it
     // resumes into a component nobody can see, and must build nothing.
@@ -282,6 +320,19 @@ export function useRecordingController({
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
   }, [capturedThumbnailRef, clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
+
+  // Registered for as long as this component is mounted, so
+  // `disposeLiveRecordingSession` has something to call from outside React —
+  // there is exactly one `useRecordingController` instance in a real session
+  // (and at most one in a test), so a module-level slot is enough; see the
+  // export below.
+  useEffect(() => {
+    liveSessionDispose = disposeSession;
+    return () => {
+      liveSessionDispose = null;
+      disposeSession();
+    };
+  }, [disposeSession]);
 
   // Cancel countdown
   const cancelCountdown = useCallback(() => {
