@@ -239,15 +239,28 @@ manifest](#output-and-verification).
 ```
 
 Writes `<dir>/<jobId>.<mp4|webm|gif>` and `<dir>/<jobId>.manifest.json`. The directory is created
-if missing. Publication is **atomic and all-or-nothing**: each file is staged at a private,
-unique temp name inside `dir` and published with one same-directory rename, so a reader
-watching the directory only ever sees the old pair or the complete new one, never a
-half-written file. The **sidecar publishes first** — if it fails for any reason, the video is
-never published either, so a failed delivery can never leave a finished-looking video with no
-manifest beside it to verify it against (ESCSUITE-190); if the video then fails to publish, the
-sidecar that already landed is removed too. Both files **overwrite** anything already at those
+if missing. Publication is atomic **per file**: each is staged at a private, unique temp name
+inside `dir` and published with one same-directory rename, so a reader watching the directory
+only ever sees the old copy of that one file or the complete new one, never a half-written
+one. The **sidecar publishes first** — if it fails for any reason, the video is never published
+either, so a failed delivery can never leave a finished-looking video with no manifest beside
+it to verify it against (ESCSUITE-190). If the video then fails to publish, the sidecar that
+already landed is left in place rather than rolled back — a manifest with no video beside it
+is harmless to a consumer watching for the finished render, and an unconditional rollback could
+delete a *previous*, still-valid delivery's manifest (on a re-run that fails this late) or a
+concurrent delivery's just-published one. Both files **overwrite** anything already at those
 names on a clean re-run — which is what makes re-running a job id idempotent rather than
 duplicative. `outputLocation` and `manifestLocation` in the outcome are absolute paths.
+
+**Atomicity is per file, not per delivery.** Two deliveries of the *same* `jobId` running at
+the same time can still publish one job's manifest beside the other's video — the window is
+the gap between the two files' own renames — even though a single file is never a byte-level
+blend of two renders (that failure mode is closed outright; see ESCSUITE-190). A broker must
+therefore not start a retry while a previous attempt for that `jobId` may still be delivering;
+see [Broker integration](#broker-integration). A hard kill (`SIGKILL`) mid-delivery can also
+leave an orphaned `.<jobId>.<ext>.tmp-<hex>` (or `.<jobId>.manifest.json.tmp-<hex>`) dotfile in
+`dir` — safe to delete; nothing reads it, and the leading dot plus the `.tmp-…` suffix keep it
+out of a `*.mp4` glob.
 
 ### `command` — hand off to your own program
 
@@ -596,10 +609,14 @@ is a working loop; the contract it relies on is small:
 
 - **One process per job.** No warm-up to amortise, no shared state to corrupt, so you can run
   as many in parallel as the box has cores and memory for.
-- **Idempotent by `jobId`.** The `volume` and `s3` sinks write `<jobId>.<ext>` and
-  `<jobId>.manifest.json`, overwriting. Re-running a job that died halfway leaves one correct
-  output rather than a duplicate. The `volume` sink publishes both files atomically — see
-  [`volume`](#volume--write-to-a-directory) — so this holds across filesystems too, not only on one.
+- **Idempotent by `jobId` — for sequential retries.** The `volume` and `s3` sinks write
+  `<jobId>.<ext>` and `<jobId>.manifest.json`, overwriting. Re-running a job that died halfway,
+  *after* the first attempt has finished (or definitely failed), leaves one correct output
+  rather than a duplicate. **Do not start a retry while a previous attempt for the same `jobId`
+  may still be delivering**: the `volume` sink's two files publish atomically *individually*,
+  not as a pair, so two overlapping deliveries can leave one attempt's manifest beside the
+  other's video — see [`volume`](#volume--write-to-a-directory) for the window and why an
+  in-process lock does not close it for the documented one-process-per-job deployment.
 - **Retry on exit 1, never on exit 2.** Exit 1 is a failure that may be transient (a busy disk,
   a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
   those to a dead-letter queue instead of a retry loop.
@@ -890,7 +907,9 @@ Step 3 is bounded by `HEADLESS_TIMEOUT_MS` (Chromium launch included, not only t
 is up) **plus** the job's own delivery budget — not by the signal, and not by the render alone.
 The `webhook`, `command` and `s3` sinks each have their own `timeoutMs` (10 minutes, 5 minutes
 and 5 minutes by default), so a 30-minute render that then delivers over `webhook` means up to
-a 40-minute drain. **`volume` needs no budget of its own** — it is a local filesystem write.
+a 40-minute drain. **`s3` budgets each of its two puts separately** (the video, then the
+manifest), so its own contribution to that sum is up to **twice** `timeoutMs` — 10 minutes at
+the default, not 5. **`volume` needs no budget of its own** — it is a local filesystem write.
 Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent) against the sum you
 can actually bound, or a `SIGKILL` will land in the middle of an encode or a delivery and leave
 the scratch directory behind.
