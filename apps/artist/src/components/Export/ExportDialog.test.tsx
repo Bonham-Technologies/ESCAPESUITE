@@ -1401,6 +1401,35 @@ describe('ExportDialog', () => {
       await waitFor(() => expect(screen.getByText('Export complete!')).toBeInTheDocument())
       expect(screen.queryByRole('button', { name: /cancel/i })).not.toBeInTheDocument()
     })
+
+    // ESCSUITE-215: the bar was a styled <div> with a width on it and nothing
+    // else — no role, no value — so an export that can run for minutes was
+    // visual only.
+    it('gives the bar a progressbar role whose value follows the exporter', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+
+      const bar = screen.getByRole('progressbar')
+      expect(bar).toHaveAttribute('aria-label', 'Export progress')
+      expect(bar).toHaveAttribute('aria-valuemin', '0')
+      expect(bar).toHaveAttribute('aria-valuemax', '100')
+      expect(bar).toHaveAttribute('aria-valuenow', '0')
+
+      await scripted.report({ phase: 'encoding', progress: 42.4, message: 'Encoding frame 42/100' })
+
+      // Rounded, like the percentage printed beside it: a fractional
+      // aria-valuenow is read out digit by digit.
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '42')
+
+      await scripted.report({ phase: 'encoding', progress: 80, message: 'Encoding frame 80/100' })
+
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '80')
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
   })
 
   describe('failures', () => {

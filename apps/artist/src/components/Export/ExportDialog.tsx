@@ -585,7 +585,18 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 <span className={styles.progressPhase}>{progress.phase}</span>
                 <span className={styles.progressMessage}>{progress.message}</span>
               </div>
-              <div className={styles.progressBar}>
+              {/* ESCSUITE-215: the bar carried a width and nothing else, so
+                  an export that can run for minutes was visual only. The
+                  rounded value is the one printed beside it — a fractional
+                  `aria-valuenow` is read out digit by digit. */}
+              <div
+                className={styles.progressBar}
+                role="progressbar"
+                aria-label="Export progress"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(progress.progress)}
+              >
                 <div
                   className={styles.progressFill}
                   style={{ width: `${progress.progress}%` }}
