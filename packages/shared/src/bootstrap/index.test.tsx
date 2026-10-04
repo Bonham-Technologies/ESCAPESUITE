@@ -110,4 +110,49 @@ describe('bootstrapApp', () => {
     expect(root.querySelector('[data-testid="my-app"]')).not.toBeNull()
     expect(root.querySelector('[data-testid="vercel-analytics-marker"]')).toBeNull()
   })
+
+  // ESCSUITE-212: App is wrapped in the shared ErrorBoundary, not rendered bare.
+  describe('the ErrorBoundary wrapped around App', () => {
+    beforeEach(() => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+    })
+
+    it('shows the shared fallback panel and calls onError when App throws', async () => {
+      const root = document.createElement('div')
+      root.id = 'root'
+      document.body.appendChild(root)
+
+      const { bootstrapApp } = await import('./index')
+      const onError = vi.fn()
+      const Boom = () => {
+        throw new Error('boom')
+      }
+
+      act(() => {
+        bootstrapApp({ App: Boom, onError })
+      })
+
+      expect(root.querySelector('[role="alert"]')).not.toBeNull()
+      expect(onError).toHaveBeenCalledTimes(1)
+    })
+
+    it('still shows the fallback panel when no onError is given', async () => {
+      const root = document.createElement('div')
+      root.id = 'root'
+      document.body.appendChild(root)
+
+      const { bootstrapApp } = await import('./index')
+      const Boom = () => {
+        throw new Error('boom')
+      }
+
+      expect(() => {
+        act(() => {
+          bootstrapApp({ App: Boom })
+        })
+      }).not.toThrow()
+
+      expect(root.querySelector('[role="alert"]')).not.toBeNull()
+    })
+  })
 })
