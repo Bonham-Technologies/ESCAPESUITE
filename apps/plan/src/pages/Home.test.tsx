@@ -33,12 +33,16 @@ describe('Home (open-source landing)', () => {
     expect(screen.getByRole('button', { name: /open the editor/i })).toBeInTheDocument()
   })
 
-  it('links to GitHub and the offline build download', () => {
+  it('links to GitHub and the "all downloads" releases page from the hero', () => {
     renderHome()
     const github = screen.getAllByRole('link', { name: /github/i })[0]
     expect(github).toHaveAttribute('href', 'https://github.com/Bonham-Technologies/ESCAPESUITE')
-    const download = screen.getAllByRole('link', { name: /offline build/i })[0]
-    expect(download).toHaveAttribute(
+    // The hero's secondary link stays pointed at GitHub's bare "latest
+    // release" listing — it is the "browse everything" escape hatch, not the
+    // offline-build CTA, so a per-package release with no HTML attached is
+    // an acceptable (if unhelpful) destination for it (ESCSUITE-195).
+    const allDownloads = screen.getByRole('link', { name: /all downloads/i })
+    expect(allDownloads).toHaveAttribute(
       'href',
       'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest'
     )
@@ -71,9 +75,17 @@ describe('Home (open-source landing)', () => {
       expect(link).toHaveAttribute('href', 'https://github.com/Bonham-Technologies/ESCAPESUITE')
     }
 
-    expect(screen.getByRole('link', { name: 'Download offline build' })).toHaveAttribute(
+    // The open-source section's download CTA is per-app (ESCSUITE-195): a
+    // bare GitHub "latest release" link can resolve to a per-package release
+    // with no offline build attached, so each button names its app and
+    // points at that app's stable asset on the umbrella release instead.
+    expect(screen.getByRole('link', { name: 'Download ESCAPECRAFT' })).toHaveAttribute(
       'href',
-      'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest'
+      'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest/download/ESCAPECRAFT-latest.html'
+    )
+    expect(screen.getByRole('link', { name: 'Download ESCAPEARTIST' })).toHaveAttribute(
+      'href',
+      'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest/download/ESCAPEARTIST-latest.html'
     )
   })
 
@@ -105,7 +117,7 @@ describe('Home (open-source landing)', () => {
     expect(launchTool).toHaveBeenCalledWith('artist')
   })
 
-  it('tracks the offline build download from the hero link', async () => {
+  it('tracks the offline build download with no tool from the hero "all downloads" link', async () => {
     const user = userEvent.setup()
     renderHome()
     // The anchor navigates to a new tab (target="_blank"), so following it in
@@ -113,22 +125,37 @@ describe('Home (open-source landing)', () => {
     // of this test — only that the tracker fires before that navigation.
     const navError = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      await user.click(screen.getAllByRole('link', { name: /offline build/i })[0])
+      await user.click(screen.getByRole('link', { name: /all downloads/i }))
     } finally {
       navError.mockRestore()
     }
     expect(trackOfflineDownload).toHaveBeenCalledTimes(1)
+    expect(trackOfflineDownload).toHaveBeenCalledWith()
   })
 
-  it('tracks the offline build download from the footer CTA link', async () => {
+  it('tracks the offline build download naming craft from the footer "Download ESCAPECRAFT" link', async () => {
     const user = userEvent.setup()
     renderHome()
     const navError = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
-      await user.click(screen.getByRole('link', { name: 'Download offline build' }))
+      await user.click(screen.getByRole('link', { name: 'Download ESCAPECRAFT' }))
     } finally {
       navError.mockRestore()
     }
     expect(trackOfflineDownload).toHaveBeenCalledTimes(1)
+    expect(trackOfflineDownload).toHaveBeenCalledWith('craft')
+  })
+
+  it('tracks the offline build download naming artist from the footer "Download ESCAPEARTIST" link', async () => {
+    const user = userEvent.setup()
+    renderHome()
+    const navError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await user.click(screen.getByRole('link', { name: 'Download ESCAPEARTIST' }))
+    } finally {
+      navError.mockRestore()
+    }
+    expect(trackOfflineDownload).toHaveBeenCalledTimes(1)
+    expect(trackOfflineDownload).toHaveBeenCalledWith('artist')
   })
 })

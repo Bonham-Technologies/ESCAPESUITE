@@ -87,10 +87,19 @@ event before navigating.
 - Custom events in `src/lib/analytics.ts`:
   - `Tool Launched` (with tool: craft/artist) — `launchTool()` in `lib/launch.ts`, called from
     the hero and tools-section CTA buttons on `Home.tsx`
-  - `Offline Build Downloaded` — `trackOfflineDownload()` in `lib/launch.ts`, wired to the
-    `onClick` of both "Download the offline build" anchors on `Home.tsx` (the hero link and the
-    open-source section's CTA). Both anchors are `target="_blank"`, so there is no race between
-    firing the event and the browser following the link, unlike `launchTool`'s same-tab
+  - `Offline Build Downloaded` (with an optional `tool: craft/artist`) — `trackOfflineDownload()`
+    in `lib/launch.ts`, wired to the `onClick` of three anchors on `Home.tsx`: the hero's
+    secondary "All downloads" link (no `tool` — it names no single app, and points at GitHub's
+    bare `/releases/latest` listing) and the open-source section's two primary per-app links,
+    "Download ESCAPECRAFT" and "Download ESCAPEARTIST" (`tool: 'craft'` / `'artist'`
+    respectively). Those two point at `CRAFT_OFFLINE_BUILD_URL` / `ARTIST_OFFLINE_BUILD_URL` — the
+    umbrella GitHub Release's stable `ESCAPECRAFT-latest.html` / `ESCAPEARTIST-latest.html`
+    assets — rather than the bare releases listing, because that listing can resolve to a
+    per-package release (`@escapesuite/shared@…`, the headless-artist kit, …) with no offline
+    build attached at all; see the root `CLAUDE.md`'s "Release" / "Standalone Release" for how
+    `release.yml` and `standalone-release.yml` keep `/releases/latest` itself pointed at the
+    umbrella release (ESCSUITE-195). All three anchors are `target="_blank"`, so there is no race
+    between firing the event and the browser following the link, unlike `launchTool`'s same-tab
     `location.assign`
 
 ## Theme Support

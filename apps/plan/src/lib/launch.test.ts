@@ -7,15 +7,39 @@ vi.mock('./analytics', () => ({
 }))
 
 import { analytics } from './analytics'
-import { toolUrl, launchTool, trackOfflineDownload, GITHUB_URL, RELEASES_URL } from './launch'
+import {
+  toolUrl,
+  launchTool,
+  trackOfflineDownload,
+  GITHUB_URL,
+  RELEASES_URL,
+  CRAFT_OFFLINE_BUILD_URL,
+  ARTIST_OFFLINE_BUILD_URL,
+} from './launch'
 
 describe('constants', () => {
   it('GITHUB_URL points at the repository', () => {
     expect(GITHUB_URL).toBe('https://github.com/Bonham-Technologies/ESCAPESUITE')
   })
 
-  it('RELEASES_URL points at the latest release', () => {
+  it('RELEASES_URL points at the latest release (the "all downloads" link)', () => {
     expect(RELEASES_URL).toBe('https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest')
+  })
+
+  // These resolve against the umbrella release's stable asset names
+  // (ESCSUITE-195) rather than GitHub's bare `/releases/latest`, which can
+  // resolve to any per-package release a changesets publish creates —
+  // including one with no offline build attached at all.
+  it('CRAFT_OFFLINE_BUILD_URL points at the stable ESCAPECRAFT asset on the latest release', () => {
+    expect(CRAFT_OFFLINE_BUILD_URL).toBe(
+      'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest/download/ESCAPECRAFT-latest.html'
+    )
+  })
+
+  it('ARTIST_OFFLINE_BUILD_URL points at the stable ESCAPEARTIST asset on the latest release', () => {
+    expect(ARTIST_OFFLINE_BUILD_URL).toBe(
+      'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest/download/ESCAPEARTIST-latest.html'
+    )
   })
 })
 
@@ -94,8 +118,19 @@ describe('trackOfflineDownload', () => {
     vi.clearAllMocks()
   })
 
-  it('tracks an Offline Build Downloaded analytics event', () => {
+  it('tracks an Offline Build Downloaded analytics event with no tool for the "all downloads" link', () => {
     trackOfflineDownload()
     expect(analytics.offlineBuildDownloaded).toHaveBeenCalledTimes(1)
+    expect(analytics.offlineBuildDownloaded).toHaveBeenCalledWith(undefined)
+  })
+
+  it('names the tool for the ESCAPECRAFT download link', () => {
+    trackOfflineDownload('craft')
+    expect(analytics.offlineBuildDownloaded).toHaveBeenCalledWith('craft')
+  })
+
+  it('names the tool for the ESCAPEARTIST download link', () => {
+    trackOfflineDownload('artist')
+    expect(analytics.offlineBuildDownloaded).toHaveBeenCalledWith('artist')
   })
 })

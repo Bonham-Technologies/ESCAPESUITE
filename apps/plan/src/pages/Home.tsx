@@ -1,4 +1,11 @@
-import { launchTool, trackOfflineDownload, GITHUB_URL, RELEASES_URL } from '../lib/launch'
+import {
+  launchTool,
+  trackOfflineDownload,
+  GITHUB_URL,
+  RELEASES_URL,
+  CRAFT_OFFLINE_BUILD_URL,
+  ARTIST_OFFLINE_BUILD_URL,
+} from '../lib/launch'
 import { useSeo, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../lib/seo'
 import styles from './Home.module.css'
 
@@ -29,8 +36,12 @@ export default function Home() {
           <p className={styles.heroLinks}>
             <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">View on GitHub</a>
             {' · '}
-            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" onClick={trackOfflineDownload}>
-              Download the offline build
+            {/* GitHub's bare "latest release" listing — kept as the secondary
+                escape hatch, since it can land on a per-package release with
+                no offline build attached. The per-app downloads below are
+                the primary CTA (ESCSUITE-195). */}
+            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" onClick={() => trackOfflineDownload()}>
+              All downloads
             </a>
           </p>
         </div>
@@ -156,13 +167,22 @@ export default function Home() {
             View on GitHub
           </a>
           <a
-            className={styles.btnLink}
-            href={RELEASES_URL}
+            className={`${styles.btnLink} ${styles.btnLinkPrimary}`}
+            href={CRAFT_OFFLINE_BUILD_URL}
             target="_blank"
             rel="noopener noreferrer"
-            onClick={trackOfflineDownload}
+            onClick={() => trackOfflineDownload('craft')}
           >
-            Download offline build
+            Download ESCAPECRAFT
+          </a>
+          <a
+            className={`${styles.btnLink} ${styles.btnLinkPrimary}`}
+            href={ARTIST_OFFLINE_BUILD_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={() => trackOfflineDownload('artist')}
+          >
+            Download ESCAPEARTIST
           </a>
         </div>
       </section>
