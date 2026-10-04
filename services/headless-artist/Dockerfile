@@ -42,6 +42,13 @@ COPY dist/ ./dist/
 # Where the CLI finds the render bundle it drives.
 ENV HEADLESS_BUNDLE_PATH=/app/dist/headless.html
 
+# This image is built with --omit=optional (above), so it never has @aws-sdk/client-s3: an s3
+# job would otherwise be advertised by `serve`'s /healthz and accepted by POST /render, then
+# fail only once ensureSinkReady's probe runs. Narrowing the default here means `serve`
+# refuses an s3 job with 403 instead. Drop `--omit=optional` above and widen this back to
+# volume,webhook,s3 (cli.ts's own DEFAULT_SINKS) to use this image with the SDK installed.
+ENV HEADLESS_SINKS=volume,webhook
+
 # Running as a non-root user keeps Chromium's own sandbox usable, so HEADLESS_NO_SANDBOX
 # stays off. If you override this with USER root, set HEADLESS_NO_SANDBOX=true as well.
 USER pwuser

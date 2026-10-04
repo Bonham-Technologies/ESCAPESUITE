@@ -119,15 +119,20 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p`, `480p` and `360p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. All five are accepted for every format; ESCAPEARTIST's own export dialog offers `720p`, `480p` (its default) and `360p` for `gif`, because a GIF at 1080p is enormous and one at the project's own resolution is unpredictable. The kit applies no such narrowing and issues no size warning — ask for `{ "format": "gif", "resolution": "1080p" }` and you get exactly that, however large (see [Sizing and throughput](#sizing-and-throughput) on GIF memory, which grows with duration). |
 | `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both numbers, `start` strictly less than `end`. Omit to render the whole timeline. |
 | `output.sink` | yes | `volume`, `command`, `webhook` or `s3`. |
-| `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)). |
+| `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)), and is validated against that sink's own requirements as part of parsing. |
 
-Anything the spec gets wrong — an unknown format, a missing field, a `jobId` with a slash in it
-— is caught before Chromium launches and exits **2**.
+Anything the spec gets wrong — an unknown format, a missing field, a `jobId` with a slash in
+it, a sink config that could never work (no `config.dir`, an s3 prefix naming no bucket, ...)
+— is caught before Chromium launches, so `POST /render` answers **400** and `render` exits
+**2** without spending a render on a job that was never going to deliver. The one check that
+cannot run synchronously — whether the optional s3 SDK can even be loaded — runs as a second,
+still-pre-render step right after parsing.
 
 A field this table does not list is ignored rather than rejected, but the CLI says so on
 stderr — `warning: unknown field "options.resoluton"` — so a typo in an optional field does not
-quietly render something other than what you asked for. Keys under `output.config` belong to
-the sink and are not checked here.
+quietly render something other than what you asked for. Keys under `output.config` that the
+chosen sink's own validator does not recognise are not flagged this way — only the fields each
+sink actually requires or type-checks are enforced.
 
 ## Inputs
 
@@ -340,7 +345,11 @@ the render itself is still fully offline.
 ```
 
 Requires the optional dependency `@aws-sdk/client-s3`; without it the job fails with
-`s3 sink requires the optional dependency @aws-sdk/client-s3`.
+`s3 sink requires the optional dependency @aws-sdk/client-s3` before Chromium ever launches,
+not after a full render. **The reference [`Dockerfile`](Dockerfile) does not have it** — it
+installs with `--omit=optional` and sets `HEADLESS_SINKS=volume,webhook` for exactly this
+reason (see [Running in a container](#running-in-a-container)); drop `--omit=optional` and
+widen `HEADLESS_SINKS` back to build an image that can use this sink.
 
 `prefix` accepts `s3://bucket/key-prefix` or a bare `bucket/key-prefix` (a trailing slash is
 harmless), and a bucket with no prefix at all. Objects are written as
@@ -547,7 +556,7 @@ cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headles
 This image is built from `services/headless-artist` and smoke-tested (`render` and `--version`)
 in CI on every non-Dependabot pull request (the `kit-docker` job).
 
-Two things worth knowing:
+Three things worth knowing:
 
 - It runs as `pwuser`, not root, which keeps Chromium's own sandbox usable — so
   `HEADLESS_NO_SANDBOX` is *not* set. If you change the image to run as root you must set
@@ -555,6 +564,11 @@ Two things worth knowing:
   directory is writable by uid 1000.
 - Scratch space defaults to the container's `/tmp`. For long renders, mount real storage and
   set `HEADLESS_WORK_DIR` to it.
+- **This image cannot use the `s3` sink.** It installs with `--omit=optional`, so
+  `@aws-sdk/client-s3` is never there, and the `Dockerfile` sets `HEADLESS_SINKS=volume,webhook`
+  so `serve` refuses an s3 job with 403 (and `/healthz`'s `allowedSinks` never advertises it)
+  instead of accepting one it can only fail. Build your own image with `--omit=optional`
+  dropped and `HEADLESS_SINKS` widened to use it — see [`s3`](#s3--upload-to-s3-or-an-s3-compatible-store).
 
 `examples/k8s-job.yaml` is the same thing as a one-shot Kubernetes `Job` — `restartPolicy:
 Never`, `backoffLimit: 0`, input and output volumes, an `emptyDir` for scratch, and a commented
