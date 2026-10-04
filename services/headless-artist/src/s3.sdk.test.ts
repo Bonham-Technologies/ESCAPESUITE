@@ -206,6 +206,17 @@ describe('s3Sink object metadata', () => {
 // ESCSUITE-209: unlike every other sink, s3 set no budget of its own -- a stalled upload was
 // bounded only by the AWS SDK's own defaults (no timeout, with retries), so a drain waiting on
 // one had no bound this kit controlled at all.
+// Review finding 2: this is the "resolves" side of probeS3Sdk; s3.nosdk.test.ts's own direct
+// test is the "rejects" side. ensureSinkReady's own tests mock probeS3Sdk itself, so neither
+// side was ever reached by the real function before.
+describe('probeS3Sdk', () => {
+  it('resolves when the SDK loads', async () => {
+    const { probeS3Sdk } = await import('./s3')
+
+    await expect(probeS3Sdk()).resolves.toBeUndefined()
+  })
+})
+
 describe('s3Sink delivery timeout (ESCSUITE-209)', () => {
   it('rejects with a clear message when the upload hangs past config.timeoutMs', async () => {
     const { s3Sink } = await import('./s3')
