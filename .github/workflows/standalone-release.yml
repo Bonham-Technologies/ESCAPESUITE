@@ -250,6 +250,10 @@ jobs:
             # offline build attached. Re-mark this umbrella release latest
             # every time this job runs, not just the first, so ESCAPEPLAN's
             # download links never drift onto it (ESCSUITE-195).
+            # release.yml's mark-per-package-releases-not-latest job already
+            # does this same re-mark right after the per-package releases
+            # publish (ESCSUITE-218) — this is the second line of defence,
+            # for whenever this workflow runs after it.
             gh release edit "v${VERSION}" --repo "${REPO}" --latest
             exit 0
           fi
