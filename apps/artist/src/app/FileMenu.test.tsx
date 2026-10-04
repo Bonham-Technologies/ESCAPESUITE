@@ -1,6 +1,6 @@
 // The header's File dropdown on its own, driven entirely through its props.
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { FileMenu } from './FileMenu';
@@ -21,7 +21,9 @@ function renderMenu(overrides: Partial<ComponentProps<typeof FileMenu>> = {}) {
   };
   const merged = { ...props, ...overrides };
   const view = render(<FileMenu {...merged} />);
-  return { ...merged, ...view };
+  // `props` is the same object, handed back whole so a test can re-render the
+  // component with one value changed.
+  return { ...merged, ...view, props: merged };
 }
 
 describe('FileMenu', () => {
@@ -119,5 +121,61 @@ describe('FileMenu', () => {
     renderMenu({ canExport: true });
 
     expect(screen.getByText('Export Video...').closest('button')).toBeEnabled();
+  });
+});
+
+// ESCSUITE-216: the markup promised a menu (`aria-haspopup="menu"` over a
+// `role="menu"`) and delivered four plain buttons — an `aria-required-children`
+// violation, and no keyboard model at all. The APG menu pattern is below. The
+// artist package carries no axe runtime, so the structural half is asserted
+// directly here; the axe audit of the same open menu lives in
+// `apps/e2e/tests/accessibility/core.spec.ts`.
+describe('FileMenu as a real menu (ESCSUITE-216)', () => {
+  it('owns nothing but menuitems and a separator', () => {
+    renderMenu();
+
+    const menu = screen.getByRole('menu', { name: 'File options' });
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
+      'New ProjectCtrl+N',
+      'Open Project...Ctrl+O',
+      'Save ProjectCtrl+S',
+      'Export Video...Ctrl+E',
+    ]);
+    // Every child carries a role the `menu` role allows — which is what
+    // `aria-required-children` is really asking.
+    expect(Array.from(menu.children).map((child) => child.getAttribute('role'))).toEqual([
+      'menuitem',
+      'menuitem',
+      'menuitem',
+      'separator',
+      'menuitem',
+    ]);
+  });
+
+  it('puts focus on the first item when the menu opens', () => {
+    const { rerender, props } = renderMenu({ isOpen: false });
+    expect(screen.queryByRole('menuitem')).not.toBeInTheDocument();
+
+    rerender(<FileMenu {...props} isOpen />);
+
+    expect(screen.getAllByRole('menuitem')[0]).toHaveFocus();
+  });
+
+  it('keeps exactly one tab stop — the active item', () => {
+    renderMenu();
+
+    expect(screen.getAllByRole('menuitem').map((item) => item.tabIndex)).toEqual([0, -1, -1, -1]);
+  });
+
+  it('names the menu it controls while it is open, and names nothing while it is shut', () => {
+    const { rerender, props } = renderMenu({ isOpen: false });
+    const trigger = screen.getByRole('button', { name: 'File menu' });
+    expect(trigger).not.toHaveAttribute('aria-controls');
+
+    rerender(<FileMenu {...props} isOpen />);
+
+    const menu = screen.getByRole('menu', { name: 'File options' });
+    expect(menu.id).toBeTruthy();
+    expect(trigger).toHaveAttribute('aria-controls', menu.id);
   });
 });
