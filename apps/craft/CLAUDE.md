@@ -677,7 +677,10 @@ to `useRecordingController`'s own `disposeLiveRecordingSession` as its `onError`
 reachable from outside React through one module-level slot the mounted controller keeps current,
 because `onError` is bound once at bootstrap, before any component (and so any ref) exists. Both
 calls are idempotent, so this running once from `onError` and again from React's own unmount
-cleanup costs nothing twice over.
+cleanup costs nothing twice over. This is not a general safety net for a live take, only for a
+**render-time** throw: an exception out of an event handler (`handleStopRecording`, say), a
+`setTimeout`/`requestAnimationFrame` callback or a rejected promise reaches no React error
+boundary at all and leaves the recorder running exactly as before this ticket.
 
 The capture can also die on its own — the user hits the browser's "Stop sharing" — and the take
 is not always mid-recording when it does. Both recorders handle the video track's `ended` event
