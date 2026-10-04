@@ -2460,6 +2460,19 @@ test proves the child died through a pid file rather than trusting the timer, an
 asserted the defects would now be red; `renderDriver.ts` is untouched and the Chromium parity cases did not run.
 **No floor crossed**; the kit's floors stay 99 / 99 / 98 / 98.
 
+`@escapesuite/plan` was re-measured 2026-10-03 for ESCSUITE-195 (the landing page's offline-build buttons point at
+stable per-app asset URLs under GitHub's latest release rather than at `/releases/latest` itself, and the release
+workflows keep that pointer on the umbrella release: per-package releases are marked not-latest after they are
+published, the umbrella is created with `--latest` and re-marked on the path where its tag already exists, and the
+`*-latest.html` files the standalone workflow already built are uploaded beside the versioned names):
+100.00 / 100.00 / 100.00 / 100.00 on both trees — against `main` at `5ba05466`, lines 73 → 78, statements 74 → 79,
+branches 19 → 21 and functions 23 → 26, every new unit covered. The two new branches are `lib/analytics.ts`'s
+`tool ? { tool } : undefined` payload choice, reached with no tool by the hero's secondary link and with `'craft'`
+and `'artist'` by the two primaries; `lib/launch.ts` gains the two URL constants and the optional pass-through,
+and `pages/Home.tsx` three handlers, all statements. The workflow guard (`scripts/release-latest-guard.test.mjs`,
+four `node:test` cases red against the unmodified workflows) and the e2e pin are outside this package's
+measurement. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
