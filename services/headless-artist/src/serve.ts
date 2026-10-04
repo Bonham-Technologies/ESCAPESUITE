@@ -94,11 +94,9 @@ export interface ServeHandle {
   /**
    * Stops accepting, turns queued jobs away with 503, waits for the in-flight ones (bounded by
    * the render timeout plus whatever the job's own delivery sink budgets for itself — the
-   * `webhook` and `command` sinks' `timeoutMs` — not by this call, and not by the render alone).
-   * Exception: `s3` sets no timeout of its own, so a stalled upload is bounded only by the AWS
-   * SDK's own defaults (no timeout, with retries) — a follow-up, not something this covers.
-   * Also tears down, rather than waits on, any request whose body has not finished arriving.
-   * Resolves once all of that settles. Idempotent.
+   * `webhook`, `command` and `s3` sinks' `timeoutMs` — not by this call, and not by the render
+   * alone). Also tears down, rather than waits on, any request whose body has not finished
+   * arriving. Resolves once all of that settles. Idempotent.
    */
   close(): Promise<void>
 }

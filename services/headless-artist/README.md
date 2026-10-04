@@ -346,7 +346,8 @@ the render itself is still fully offline.
   "config": {
     "prefix": "s3://my-renders/outgoing",
     "region": "us-east-1",
-    "endpoint": "https://s3.us-east-1.amazonaws.com"
+    "endpoint": "https://s3.us-east-1.amazonaws.com",
+    "timeoutMs": 300000
   }
 }
 ```
@@ -364,6 +365,13 @@ harmless), and a bucket with no prefix at all. Objects are written as
 from disk rather than buffered, and tagged `video/mp4` / `video/webm` / `image/gif` (the manifest
 `application/json`) so a signed URL plays instead of downloading. `endpoint` and `region` are
 both optional — set `endpoint` for MinIO, Ceph, R2 and friends.
+
+`timeoutMs` (a positive integer, default **5 minutes**, same `2147483647` — 2^31-1 ms — bound
+as the webhook and command sinks') is this delivery's own budget, applied as an `AbortSignal`
+on each `send()` call (the video put and the manifest put separately). Unlike those two sinks,
+s3 previously had no budget of its own at all: a stalled upload was bounded only by the AWS
+SDK's own defaults (no timeout, with retries), so a drain waiting on one had no bound this kit
+controlled. A put that outruns it fails with `s3 sink timed out after <n> ms`.
 
 **Credentials come from the environment**, via the AWS SDK's standard chain:
 `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` (/ `AWS_SESSION_TOKEN`), `AWS_PROFILE`,
@@ -880,15 +888,12 @@ drop a render that is half encoded:
 
 Step 3 is bounded by `HEADLESS_TIMEOUT_MS` (Chromium launch included, not only the page once it
 is up) **plus** the job's own delivery budget — not by the signal, and not by the render alone.
-The `webhook` and `command` sinks each have their own
-`timeoutMs` (10 minutes and 5 minutes by default), so a 30-minute render that then delivers over
-`webhook` means up to a 40-minute drain. **`volume` needs no budget of its own — it is a local
-filesystem write — but `s3` has none either**: the sink sets no timeout of its own, so a stalled
-upload is bounded only by the AWS SDK's own defaults (no timeout, with retries), and a drain
-waiting on one has no bound this kit controls at all. An `s3` delivery budget is a follow-up, not
-something this ticket adds. Size `terminationGracePeriodSeconds` (or your orchestrator's
-equivalent) against the sum you can actually bound, or a `SIGKILL` will land in the middle of an
-encode or a delivery and leave the scratch directory behind.
+The `webhook`, `command` and `s3` sinks each have their own `timeoutMs` (10 minutes, 5 minutes
+and 5 minutes by default), so a 30-minute render that then delivers over `webhook` means up to
+a 40-minute drain. **`volume` needs no budget of its own** — it is a local filesystem write.
+Size `terminationGracePeriodSeconds` (or your orchestrator's equivalent) against the sum you
+can actually bound, or a `SIGKILL` will land in the middle of an encode or a delivery and leave
+the scratch directory behind.
 
 Step 2's new half is there so a client that never finishes sending cannot hold **this** drain
 open indefinitely — nothing used to bound that wait at all. The server's own `requestTimeout`
