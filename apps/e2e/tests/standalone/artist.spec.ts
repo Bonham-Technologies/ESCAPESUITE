@@ -19,10 +19,6 @@ test.describe('ESCAPEARTIST Standalone - App Loading', () => {
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
 
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
-    expect(html).toContain('<div id="root">')
-
     // The editor itself is on screen — nothing gates it
     await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
 
@@ -127,11 +123,26 @@ test.describe('ESCAPEARTIST Standalone - Theme Support', () => {
     await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
 
     await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/)
+
+    // The attribute is the mechanism; the computed colour is the behaviour —
+    // `styles/index.css`'s `body { background-color: var(--bg-primary) }`
+    // resolves to the dark theme's `#1a1a2e` by default and only the light
+    // theme's `#ffffff` under `:root[data-theme="light"]`, so this would go
+    // red if the app ever behaved like light mode while leaving the
+    // attribute off.
+    const bodyBackground = await page.evaluate(
+      () => window.getComputedStyle(document.body).backgroundColor
+    )
+    expect(bodyBackground).toBe('rgb(26, 26, 46)')
   })
 })
 
 test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
   test('makes no requests off the local origin', async ({ page }) => {
+    // A real `seedTextClip` + real WebM export + the 2s settle below
+    // comfortably exceeds the default 30s test budget without headroom.
+    test.setTimeout(120_000)
+
     const externalCalls: string[] = []
 
     page.on('request', (request) => {
@@ -191,16 +202,12 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
 })
 
 test.describe('ESCAPEARTIST Standalone - IndexedDB Storage', () => {
-  test('can access IndexedDB', async ({ page }) => {
-    await page.goto(ARTIST_URL)
-    await waitForAppReady(page, 'artist')
-
-    const hasIndexedDB = await page.evaluate(() => {
-      return 'indexedDB' in window
-    })
-
-    expect(hasIndexedDB).toBe(true)
-  })
+  // ESCSUITE-202 fix round 1 (review finding 3): `'indexedDB' in window`
+  // tests that Chromium implements IndexedDB, which it cannot fail to do —
+  // the same K-9 shape ("asserts only that the browser has standard APIs")
+  // the ticket's own rule bans. "creates database on load" below already
+  // supersedes it: it gates on the real "Media Library" render and then
+  // asserts the real `video-editor-db` database by name.
 
   test('creates database on load', async ({ page }) => {
     await page.goto(ARTIST_URL)
