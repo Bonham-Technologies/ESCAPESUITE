@@ -54,6 +54,90 @@ jobs:
         # defaults to ${{ github.token }}, and the action throws if a GITHUB_TOKEN
         # env var is set to anything other than that input's value.
 
+  # Every per-package release this run just published — craft, artist,
+  # shared, plan, headless-artist, whichever changesets bumped — must NOT
+  # become GitHub's "latest" release. That pointer is reserved for the
+  # umbrella `vX.Y.Z` release `standalone-release.yml` cuts afterwards: it is
+  # the only release carrying the offline single-file builds ESCAPEPLAN links
+  # to, and GitHub's `/releases/latest` otherwise resolves to whichever
+  # release was created most recently — including one with zero assets
+  # (ESCSUITE-195). `changesets/action`'s `create-github-releases` input has
+  # no way to set this at creation time, so this job sets it right after, for
+  # every tag the `release` job above just published.
+  mark-per-package-releases-not-latest:
+    name: Mark Per-Package Releases Not Latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Set make_latest=false on every release this run published
+        uses: actions/github-script@v9
+        with:
+          script: |
+            // Same eventual-consistency concern as the attach job below: the
+            // release the changesets step just created is not always visible
+            // to getReleaseByTag immediately (ESCSUITE-83).
+            const ATTEMPTS = 6;
+            const RETRY_MS = 10000;
+            const packages = JSON.parse('${{ needs.release.outputs.publishedPackages }}');
+
+            async function findRelease(tagName) {
+              for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+                try {
+                  const { data } = await github.rest.repos.getReleaseByTag({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    tag: tagName
+                  });
+                  return data;
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  console.log(`Release ${tagName} not visible yet (attempt ${attempt}/${ATTEMPTS})`);
+                  if (attempt < ATTEMPTS) {
+                    await new Promise((resolve) => setTimeout(resolve, RETRY_MS));
+                  }
+                }
+              }
+              return null;
+            }
+
+            const failed = [];
+
+            for (const pkg of packages) {
+              const tagName = `${pkg.name}@${pkg.version}`;
+              try {
+                const release = await findRelease(tagName);
+                if (!release) {
+                  // The tag exists but changesets/action created no release
+                  // for it (a missing CHANGELOG.md, say) — nothing to mark,
+                  // and not this job's problem: a release that does not
+                  // exist cannot be GitHub's "latest" either. The attach job
+                  // below is the one that fails the run for craft, artist
+                  // and headless-artist, where a missing release also means
+                  // a missing asset.
+                  console.log(`No release found for ${tagName}; nothing to mark.`);
+                  continue;
+                }
+                await github.rest.repos.updateRelease({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  make_latest: 'false'
+                });
+                console.log(`Marked ${tagName} make_latest=false`);
+              } catch (error) {
+                console.log(`Marking ${tagName} as not-latest failed: ${error.message}`);
+                failed.push(`${tagName} (${error.message})`);
+              }
+            }
+
+            if (failed.length > 0) {
+              core.setFailed(`Marking make_latest=false failed for ${failed.join('; ')} — re-run this job, or fix it by hand.`);
+            }
+
   # Attach standalone builds and the headless-artist kit to the GitHub Release
   # when craft, artist, or headless-artist is released
   upload-standalone:

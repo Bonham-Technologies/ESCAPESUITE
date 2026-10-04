@@ -2595,6 +2595,19 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
   pointing at the previous ESCAPEARTIST build. The HTML assets are named for their own app
   (`ESCAPECRAFT-<craft version>.html`, `ESCAPEARTIST-<artist version>.html`, matching the names
   `release.yml` attaches to the per-package releases); the kit tarball carries the umbrella version.
+- **GitHub's `/releases/latest` is reserved for the umbrella release** (ESCSUITE-195). Before this
+  ticket, both this workflow's `gh release create` and `changesets/action`'s per-package ones let
+  GitHub pick "latest" by creation time, so a kit-, shared- or plan-only publish (which cuts no
+  umbrella release — see below) could leave `/releases/latest` pointing at a release with no
+  offline build attached at all, for as long as it took the next craft/artist bump to land. Fixed
+  two ways: a `mark-per-package-releases-not-latest` job in `release.yml` runs right after
+  `changesets/action` and sets `make_latest: false` on every release that publish just created
+  (craft, artist, shared, plan, headless-artist — whichever changesets bumped), via
+  `updateRelease` rather than an option on the action itself, since `create-github-releases` has
+  none; and this workflow's `gh release create` always passes `--latest`, with the skip path (the
+  umbrella tag already exists because neither app bumped) now running
+  `gh release edit "v${VERSION}" --latest` before exiting, so a kit-only release re-asserts the
+  umbrella as latest rather than leaving it be.
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
@@ -2607,6 +2620,14 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
   for its own app's version — and the headless-artist kit tarball directly to it
 - No cloud storage step and no license injection — the downloads are plain HTML files (and one
   npm tarball), ready to run
+- Alongside each versioned HTML build, also attaches `ESCAPECRAFT-latest.html` /
+  `ESCAPEARTIST-latest.html` — the same build, under a name that never changes — so
+  `.../releases/latest/download/ESCAPECRAFT-latest.html` is a stable URL across every release.
+  ESCAPEPLAN's `apps/plan/src/lib/launch.ts` (`CRAFT_OFFLINE_BUILD_URL` /
+  `ARTIST_OFFLINE_BUILD_URL`) points its per-app "Download ESCAPECRAFT" / "Download ESCAPEARTIST"
+  CTAs at exactly those two URLs — which the `--latest` / `make_latest: false` split above keeps
+  pinned to this release's own build — rather than GitHub's bare `/releases/latest` listing page,
+  which is kept as the hero's secondary "All downloads" link instead (ESCSUITE-195).
 
 **Dependabot** (`.github/dependabot.yml`):
 - Weekly updates for all apps

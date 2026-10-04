@@ -242,15 +242,26 @@ jobs:
           COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
           if gh release view "v${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
-            echo "Release v${VERSION} already exists, skipping."
+            echo "Release v${VERSION} already exists, skipping asset upload."
+            # A kit-, shared- or plan-only push still runs release.yml, which
+            # publishes that package's own release with make_latest=false —
+            # but GitHub's /releases/latest otherwise falls back to whichever
+            # release is newest, which would then be THAT one, with no
+            # offline build attached. Re-mark this umbrella release latest
+            # every time this job runs, not just the first, so ESCAPEPLAN's
+            # download links never drift onto it (ESCSUITE-195).
+            gh release edit "v${VERSION}" --repo "${REPO}" --latest
             exit 0
           fi
 
           gh release create "v${VERSION}" \
             "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html" \
+            "dist/craft/ESCAPECRAFT-latest.html" \
             "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" \
+            "dist/artist/ESCAPEARTIST-latest.html" \
             "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" \
             --repo "${REPO}" \
             --target "${COMMIT}" \
             --title "ESCAPE Suite v${VERSION}" \
-            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports."
+            --latest \
+            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. The \`*-latest.html\` files are stable download links that always point at this release's build (used by escapesuite.io's own download buttons); the versioned files are kept for anyone who wants to pin a specific release. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports."
