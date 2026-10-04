@@ -1,7 +1,0 @@
----
-'@escapesuite/shared': patch
----
-
-Every dialog's keyboard trap now sees a pinned control, a rich-text field or a native media player the same way a real browser does, and two open dialogs can no longer both close on one Escape.
-
-The shared `useDialogBehaviour` hook (CRAFT's two modals, all five of ARTIST's) used `el.offsetParent !== null` to decide what a dialog could Tab to — which a real browser also reports `null` for a `position: fixed` control, dropping it from the trap entirely rather than merely skipping it as hidden. It now reads `el.getClientRects().length > 0`, which asks "is this actually rendered" without caring about positioning. The trap's selector was also missing several tabbable element types — `[contenteditable]`, `audio[controls]`, `video[controls]`, `iframe` and `summary` — so Tab from one of those walked straight out of an `aria-modal` dialog instead of wrapping back inside; all are now included. Finally, Escape used to call `stopPropagation()`, which does nothing when two dialogs are each listening on `document` — so a second, overlapping dialog's Escape used to close both. A tiny open-dialog stack now makes sure only the topmost dialog's close handler actually runs. No dialog in either app can reach a two-open state today (every overlay already blocks the page behind it), so this last one is hardening rather than a fix for something reachable yet — but the pinned-control and rich-text/media cases are real gaps a future dialog could hit.
