@@ -68,9 +68,9 @@ tests/
 ├── errors/                  # Permission, export, network, input failures
 ├── responsive/              # Mobile / tablet / desktop layouts
 ├── integration/             # Cross-app integration tests
-│   ├── craft-to-artist.spec.ts # CRAFT → ARTIST workflow
-│   ├── indexeddb-sharing.spec.ts
-│   └── workflows.spec.ts
+│   ├── host-embedding.spec.ts  # The real iframe host contract (READY, EXPORT_COMPLETE, UPLOAD_RECORDING, SEND_TO_EDITOR)
+│   ├── indexeddb-sharing.spec.ts # Same-name-not-same-origin: both dev servers open `video-editor-db`; real cross-app sharing is production/indexeddb-sharing.spec.ts
+│   └── workflows.spec.ts   # Each app's own controls on the dev-server layout: recording, export, project save, undo, URL params
 ├── standalone/              # Offline single-file build tests
 │   ├── craft.spec.ts        # ESCAPECRAFT offline build
 │   └── artist.spec.ts       # ESCAPEARTIST offline build
