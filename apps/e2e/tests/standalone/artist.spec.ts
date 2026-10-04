@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { seedTextClip } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -33,24 +34,27 @@ test.describe('ESCAPEARTIST Standalone - App Loading', () => {
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
 
+    // Prove the page actually rendered the editor before trusting the
+    // absence below — a gutted build would also show zero hub links
+    // (ESCSUITE-202 hunt K-U1).
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+
     // The hub link only renders in hosted mode (isStandaloneMode() gates it)
     expect(await page.getByRole('link', { name: '← ESCAPE Suite' }).count()).toBe(0)
   })
 
   test('has page title', async ({ page }) => {
     await page.goto(ARTIST_URL)
-    const title = await page.title()
-    expect(title.length).toBeGreaterThan(0)
+    await expect(page).toHaveTitle(/ESCAPEARTIST/)
   })
 
   test('app content is visible', async ({ page }) => {
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
-    await page.waitForTimeout(1000)
 
-    // App should show some content (not just loading or error)
-    const body = await page.locator('body').textContent()
-    expect(body?.length).toBeGreaterThan(0)
+    // A distinct real element from "opens straight into the editor" above:
+    // the app's header, always rendered.
+    await expect(page.locator('header')).toBeVisible()
   })
 })
 
@@ -58,62 +62,30 @@ test.describe('ESCAPEARTIST Standalone - Editor Interface', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
+    await seedTextClip(page)
   })
 
   test('shows editor UI elements', async ({ page }) => {
-    // Wait for React to fully mount
-    await page.waitForTimeout(1000)
-
-    // Should have some editor-related UI (check if any of these exist, don't fail if not)
-    const editorUI = page
-      .getByText(/timeline|import|upload|video|edit|add|media/i)
-      .first()
-
-    // For smoke tests, just verify the check runs - actual UI may vary
-    const isVisible = await editorUI.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByText('Media Library')).toBeVisible()
+    await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible()
   })
 
   test('has import/upload button', async ({ page }) => {
-    const importButton = page
-      .getByRole('button', { name: /import|upload|add video|add media|open/i })
-      .or(page.locator('[data-testid="import-button"]'))
-      .or(page.locator('[data-testid="upload-button"]'))
-      .first()
-
-    const isVisible = await importButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    // The real drop zone (`VideoUploader.tsx`) — its file `<input>` is
+    // `display: none`, so the visible affordance is its own text.
+    await expect(page.getByText('Drop media or click to browse')).toBeVisible()
   })
 
   test('has timeline component', async ({ page }) => {
-    const timeline = page
-      .locator('[data-testid="timeline"]')
-      .or(page.locator('.timeline'))
-      .or(page.locator('.Timeline'))
-      .or(page.locator('[class*="timeline"]'))
-
-    const isVisible = await timeline.first().isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.locator('[data-track-id]')).toHaveCount(1)
   })
 
   test('has preview area', async ({ page }) => {
-    const preview = page
-      .locator('canvas')
-      .or(page.locator('[data-testid="preview"]'))
-      .or(page.locator('[class*="preview"]'))
-
-    const count = await preview.count()
-    expect(count).toBeGreaterThanOrEqual(0)
+    await expect(page.locator('canvas')).toBeVisible()
   })
 
   test('has export button', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export|download|render/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
-
-    const isVisible = await exportButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeEnabled()
   })
 })
 
@@ -124,55 +96,37 @@ test.describe('ESCAPEARTIST Standalone - Playback Controls', () => {
   })
 
   test('has play button', async ({ page }) => {
-    const playButton = page
-      .getByRole('button', { name: /play/i })
-      .or(page.locator('[data-testid="play-button"]'))
-      .or(page.locator('[title*="Play"]'))
-
-    const isVisible = await playButton.first().isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
   })
 
   test('has playback controls', async ({ page }) => {
-    const controls = page
-      .locator('[class*="controls"]')
-      .or(page.locator('[class*="toolbar"]'))
-      .or(page.locator('[data-testid="playback-controls"]'))
-
-    const isVisible = await controls.first().isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByTitle('Go to start (Home)')).toBeVisible()
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+    await expect(page.getByTitle('Go to end (End)')).toBeVisible()
   })
 })
 
 test.describe('ESCAPEARTIST Standalone - Theme Support', () => {
-  test('has theme toggle', async ({ page }) => {
+  // There is no theme-toggle button anywhere in ESCAPEARTIST — the same
+  // ESCSUITE-201 finding for ESCAPECRAFT applies here, confirmed with the
+  // same grep (`ThemeToggle` has no importer in apps/artist/src). "has
+  // theme toggle" had no feature to find and is deleted rather than kept as
+  // a placeholder for a control that does not exist.
+
+  test('defaults to dark on a fresh load regardless of system color scheme', async ({
+    page,
+  }) => {
+    // `theme.ts`'s `DEFAULT_THEME` is 'dark', not 'system' — so a fresh load
+    // with no stored preference stays dark even when the OS prefers light.
+    await page.emulateMedia({ colorScheme: 'light' })
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
 
-    const themeToggle = page
-      .getByRole('button', { name: /theme|dark|light/i })
-      .or(page.locator('[data-testid="theme-toggle"]'))
-      .or(page.locator('[aria-label*="theme"]'))
-      .first()
+    // Prove the page actually rendered the editor before trusting the
+    // absence below.
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
 
-    const isVisible = await themeToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
-  })
-
-  test('respects system color scheme', async ({ page }) => {
-    await page.emulateMedia({ colorScheme: 'dark' })
-    await page.goto(ARTIST_URL)
-    await waitForAppReady(page, 'artist')
-
-    const isDark = await page.evaluate(() => {
-      return (
-        document.documentElement.classList.contains('dark') ||
-        document.body.classList.contains('dark') ||
-        document.documentElement.getAttribute('data-theme') === 'dark'
-      )
-    })
-
-    expect(typeof isDark).toBe('boolean')
+    await expect(page.locator('html')).not.toHaveAttribute('data-theme', /.*/)
   })
 })
 
@@ -189,10 +143,29 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
 
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
+
+    // A real export, so the app actually does something beyond an idle load
+    // — an idle page proves only that nothing fires on load, not that a
+    // real action stays silent.
+    await seedTextClip(page)
+    await page.getByRole('button', { name: 'Export video' }).click()
+    await page.getByRole('button', { name: 'Download WebM' }).first().click()
+    await expect(page.getByText('Export complete!')).toBeVisible({ timeout: 30_000 })
+
     await page.waitForTimeout(2000)
 
     // The offline build is air-gapped: no auth, no analytics, no phoning home
     expect(externalCalls).toHaveLength(0)
+
+    // And the reason is stronger than "the call was made and went nowhere":
+    // the analytics runtime is not in the bundle at all, so there is no
+    // queue for an event to sit in and no injected script to drain it.
+    const analyticsRuntime = await page.evaluate(() => ({
+      va: typeof (window as unknown as { va?: unknown }).va,
+      queue: typeof (window as unknown as { vaq?: unknown }).vaq,
+      scripts: document.querySelectorAll('script[src*="vercel"]').length,
+    }))
+    expect(analyticsRuntime).toEqual({ va: 'undefined', queue: 'undefined', scripts: 0 })
   })
 
   test('single HTML file contains all assets', async ({ page }) => {
@@ -200,6 +173,7 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
 
     page.on('request', (request) => {
       const url = request.url()
+      // Ignore data URLs and the initial page load
       if (!url.startsWith('data:') && !url.includes('localhost:5185')) {
         requests.push(url)
       }
@@ -231,15 +205,17 @@ test.describe('ESCAPEARTIST Standalone - IndexedDB Storage', () => {
   test('creates database on load', async ({ page }) => {
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
-    await page.waitForTimeout(2000)
+
+    // The media library reads the shared database on mount to list what is
+    // already stored — proof the app actually did something, not just that
+    // the check ran.
+    await expect(page.getByText('Media Library')).toBeVisible()
 
     const databases = await page.evaluate(async () => {
       const dbs = await indexedDB.databases()
       return dbs.map((db) => db.name)
     })
 
-    // Should have created the video-editor-db
-    const hasDb = databases.some((name) => name?.includes('video') || name?.includes('editor'))
-    expect(typeof hasDb).toBe('boolean')
+    expect(databases).toContain('video-editor-db')
   })
 })
