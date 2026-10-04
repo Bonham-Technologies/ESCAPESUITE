@@ -2691,6 +2691,32 @@ numeric value during the run and the region naming "Export complete" after (10 /
 `getByText` locators across three specs gain `.first()` because the words now exist twice, once for eyes
 and once for ears. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-04 for ESCSUITE-216 (the File menu is the menu its markup
+promised: each item a `menuitem` with one roving tab stop, the rule a `separator`; opening focuses the first
+item; ArrowDown and ArrowUp move and wrap, Home and End jump, all four stepping over a disabled item;
+Enter and Space are left to the native button; Escape closes, stops the `window`-level cascade and gives
+focus back to the trigger; Tab closes and lets focus move on; `aria-controls` names the menu only while it
+is open; the arithmetic is one pure `nextMenuIndex(current, key, count)`): 99.80 / **99.28** / **95.82** / 99.68
+against the 99.80 / 99.27 / 95.80 / 99.68 that `main` at `a12155ef` (the ESCSUITE-215 version-packages
+commit) measures in the same sitting — statements up a hundredth and branches two, lines and functions
+unmoved. Lines 7,795 / 7,810 → 7,826 / 7,841, statements 8,802 / 8,866 → 8,833 / 8,897,
+branches 4,981 / 5,199 → 5,004 / 5,222 and functions 1,890 / 1,896 → 1,893 / 1,899, every denominator growing by exactly what
+the numerator did; the same 15 / 64 / 218 / 6 uncovered. The twenty-three new branches are
+`app/menuNavigation.ts`'s five (one switch arm per key and the `null` default, each from both wrap
+directions by `menuNavigation.test.ts`'s fourteen cases) and `app/FileMenu.tsx`'s eighteen (2 → 20: the
+`aria-controls` open-or-shut ternary, the `flatMap` over enabled items, the `isOpen` focus effect, the
+Escape, Tab and `null`-key returns in the handler, the item ref callback's `if (el)`, the separator and the
+roving `tabIndex` ternary per item) — each reached from both sides by the FileMenu suite, which grew from
+twelve cases to thirty-two: a disabled Save and a disabled Export stepped over, a one-item wrap, an
+ignored key leaving focus and the tab stop alone, the closed and open renders of the trigger. The only
+arm written without a test is the trigger ref's `null!`, read solely from a keydown inside the menu that
+trigger opened. `role="menuitem"` replaces the implicit button role, so twelve `getByRole('button')`
+queries that reached a menu item became `menuitem` (eleven in the App suites, one e2e). The three
+rerender pins and all seven `*.perf.test.ts` files are byte-identical. Outside vitest's measurement,
+`apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` gains the two cases the ESCSUITE-202 rewrite left
+as a comment plus an axe audit of the open menu — red on the base with `aria-required-children` — and the
+five affected specs ran 100 / 100 on Chromium. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2698,7 +2724,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.77 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.27 | 95.80 | 99.68 |
+| `@escapesuite/artist` | 99.80 | 99.28 | 95.82 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.62 | 91.89 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
