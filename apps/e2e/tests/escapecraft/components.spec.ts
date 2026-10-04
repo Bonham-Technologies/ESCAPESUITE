@@ -1,198 +1,186 @@
 import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { mockSyntheticMedia, mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { recordATake, recordAndOpenPlayback } from '../../utils/craft'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('VideoPlayer Component', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockGetUserMedia(page)
-    await mockMediaRecorder(page)
+  test.beforeEach(async ({ page, browserName }) => {
+    // ESCSUITE-177: WebKit cannot store a Blob in IndexedDB in Playwright
+    // (`UnknownError: Error preparing Blob/File data to be stored in object
+    // store`), and every test below needs a saved take before there is a
+    // playback dialog to open.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+    test.setTimeout(120_000)
+
+    await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
   test('play/pause toggle works', async ({ page }) => {
-    const videoPlayer = page
-      .locator('[data-testid="video-player"]')
-      .or(page.locator('video'))
-      .first()
+    await recordAndOpenPlayback(page)
 
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
+    const toggle = page.getByTitle(/^(Play|Pause) \(Space\)$/)
+    const initialTitle = await toggle.getAttribute('title')
+    await toggle.click()
 
-    if (isVisible) {
-      const playButton = page
-        .getByRole('button', { name: /play|pause/i })
-        .first()
-
-      const buttonVisible = await playButton.isVisible().catch(() => false)
-
-      if (buttonVisible) {
-        await playButton.click()
-        await page.waitForTimeout(100)
-
-        // Button should change state
-        const html = await page.content()
-        expect(html).toContain('<div id="root">')
-      }
-    }
+    await expect(
+      page.getByTitle(initialTitle === 'Play (Space)' ? 'Pause (Space)' : 'Play (Space)')
+    ).toBeVisible()
   })
 
   test('seeking via progress bar works', async ({ page }) => {
-    const progressBar = page
-      .locator('[data-testid="progress-bar"]')
-      .or(page.locator('[class*="progress"]'))
-      .or(page.locator('input[type="range"]'))
-      .first()
+    await recordAndOpenPlayback(page)
 
-    const isVisible = await progressBar.isVisible().catch(() => false)
+    const video = page.locator('video')
+    await expect.poll(() => video.evaluate((el) => (el as HTMLVideoElement).duration)).toBeGreaterThan(0)
 
-    if (isVisible) {
-      const box = await progressBar.boundingBox()
-      if (box) {
-        // Click at 50% position
-        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
-        await page.waitForTimeout(100)
+    const progressBar = page.locator('[class*="progressContainer"]')
+    await expect(progressBar).toBeVisible()
+    const box = (await progressBar.boundingBox())!
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
 
-        const html = await page.content()
-        expect(html).toContain('<div id="root">')
-      }
-    }
+    await expect
+      .poll(() => video.evaluate((el) => (el as HTMLVideoElement).currentTime))
+      .toBeGreaterThan(0)
   })
 
   test('volume control works', async ({ page }) => {
-    const volumeControl = page
-      .getByRole('slider', { name: /volume/i })
-      .or(page.locator('[data-testid="volume-slider"]'))
-      .or(page.locator('[class*="volume"]'))
-      .first()
+    await recordAndOpenPlayback(page)
 
-    const isVisible = await volumeControl.isVisible().catch(() => false)
+    // The slider stays in the DOM always but is only interactive on hover or
+    // focus-within (`VideoPlayer.module.css`) — `.focus()` has no
+    // actionability checks, so it reaches the hidden-until-focused control
+    // and brings it on screen.
+    const volumeSlider = page.getByRole('slider', { name: 'Volume' })
+    await volumeSlider.focus()
+    await expect(volumeSlider).toBeVisible()
 
-    if (isVisible) {
-      await volumeControl.click()
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    const initialValue = await volumeSlider.inputValue()
+    await page.keyboard.press('ArrowLeft')
+    await expect.poll(() => volumeSlider.inputValue()).not.toBe(initialValue)
+
+    const video = page.locator('video')
+    await expect
+      .poll(() => video.evaluate((el) => (el as HTMLVideoElement).volume))
+      .not.toBe(1)
   })
 
   test('keyboard shortcuts work', async ({ page }) => {
-    const videoPlayer = page.locator('video').first()
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
+    await recordAndOpenPlayback(page)
 
-    if (isVisible) {
-      await videoPlayer.focus()
-
-      // Space for play/pause
-      await page.keyboard.press('Space')
-      await page.waitForTimeout(100)
-
-      // M for mute
-      await page.keyboard.press('m')
-      await page.waitForTimeout(100)
-
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
+    // Space toggles play/pause on the dialog body — the Close button claims
+    // Space for its own activation instead (ESCSUITE-185), so this focuses
+    // the dialog rather than the button.
+    const transportToggle = page.getByTitle(/^(Play|Pause) \(Space\)$/)
+    if ((await transportToggle.getAttribute('title')) === 'Play (Space)') {
+      await transportToggle.click()
     }
+    await expect(page.getByTitle('Pause (Space)')).toBeVisible()
+
+    await page.getByRole('dialog').focus()
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+
+    // M toggles mute
+    const video = page.locator('video')
+    expect(await video.evaluate((el) => (el as HTMLVideoElement).muted)).toBe(false)
+    await page.keyboard.press('m')
+    expect(await video.evaluate((el) => (el as HTMLVideoElement).muted)).toBe(true)
   })
 })
 
 test.describe('Download Menu', () => {
-  test.beforeEach(async ({ page }) => {
-    await mockGetUserMedia(page)
-    await mockMediaRecorder(page)
+  test.beforeEach(async ({ page, browserName }) => {
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+    test.setTimeout(120_000)
+
+    await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
-  test('download format menu opens', async ({ page }) => {
-    const downloadButton = page
-      .getByRole('button', { name: /download|save/i })
-      .or(page.locator('[data-testid="download-button"]'))
-      .first()
-
-    const isVisible = await downloadButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await downloadButton.click()
-      await page.waitForTimeout(300)
-
-      // Look for menu options
-      const webmOption = page.getByText(/webm/i).first()
-      const mp4Option = page.getByText(/mp4/i).first()
-
-      const webmVisible = await webmOption.isVisible().catch(() => false)
-      const mp4Visible = await mp4Option.isVisible().catch(() => false)
-
-      expect(webmVisible || mp4Visible).toBe(true)
-    }
-  })
+  // ESCSUITE-201: there is no dropdown "menu" to open at all — CRAFT shows a
+  // row of three download buttons (WebM, MP4, M4A) on each saved take, never
+  // a click-to-open menu. The two tests below assert the real row buttons;
+  // this one had no feature to find and is deleted rather than kept as a
+  // placeholder for a UI that does not exist.
 
   test('WebM instant download available', async ({ page }) => {
-    const downloadButton = page
-      .getByRole('button', { name: /download|save/i })
-      .first()
+    await recordATake(page)
 
-    const isVisible = await downloadButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await downloadButton.click()
-      await page.waitForTimeout(300)
-
-      const webmOption = page.getByText(/webm/i).first()
-      const webmVisible = await webmOption.isVisible().catch(() => false)
-
-      expect(typeof webmVisible).toBe('boolean')
-    }
+    const list = page.locator('section', { has: page.getByRole('heading', { name: 'Recordings' }) })
+    const webmButton = list.locator('button[title="Download WebM"]')
+    await expect(webmButton).toBeVisible()
+    await expect(webmButton).toBeEnabled()
   })
 
   test('MP4 conversion option available', async ({ page }) => {
-    const downloadButton = page
-      .getByRole('button', { name: /download|save/i })
-      .first()
+    await recordATake(page)
 
-    const isVisible = await downloadButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await downloadButton.click()
-      await page.waitForTimeout(300)
-
-      const mp4Option = page.getByText(/mp4/i).first()
-      const mp4Visible = await mp4Option.isVisible().catch(() => false)
-
-      expect(typeof mp4Visible).toBe('boolean')
-    }
+    const list = page.locator('section', { has: page.getByRole('heading', { name: 'Recordings' }) })
+    const mp4Button = list.getByRole('button', { name: /^Download .+ as MP4$/ })
+    await expect(mp4Button).toBeVisible()
+    await expect(mp4Button).toBeEnabled()
   })
 })
 
 test.describe('Recording Controls', () => {
   test.beforeEach(async ({ page }) => {
-    await mockGetUserMedia(page)
-    await mockMediaRecorder(page)
+    await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
   test('countdown display appears', async ({ page }) => {
-    // Look for countdown setting
-    const countdownSetting = page.getByText(/countdown|timer/i).first()
-    const isVisible = await countdownSetting.isVisible().catch(() => false)
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    expect(typeof isVisible).toBe('boolean')
+    await page.getByRole('button', { name: 'Start recording' }).click()
+
+    // `CountdownOverlay.tsx`'s real 3-2-1 overlay, which clicking "Start
+    // recording" always reaches before any track is actually recorded.
+    const countdown = page.locator('[class*="countdownNumber"]')
+    await expect(countdown).toBeVisible({ timeout: 10_000 })
+    await expect(countdown).toHaveText(/^[1-3]$/)
+
+    // Leave it running rather than cancel — the countdown finishing into a
+    // real take is exercised elsewhere; this test is only about the overlay.
+    await page.getByRole('button', { name: 'Pause recording' }).waitFor({ timeout: 10_000 })
+    await page.getByRole('button', { name: 'Stop recording' }).click()
   })
 
   test('recording timer updates during recording', async ({ page }) => {
-    // This would need actual recording simulation
-    // Check that timer element exists
-    const timerDisplay = page
-      .locator('[data-testid="recording-timer"]')
-      .or(page.locator('[class*="timer"]'))
-      .or(page.getByText(/\d{2}:\d{2}/))
-      .first()
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    const isVisible = await timerDisplay.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+
+    // `RecordingDurationReadout` ticks once a second off the store.
+    const timer = page.locator('[class*="timer"]').filter({ hasText: /\d:\d\d/ })
+    const initialText = await timer.textContent()
+
+    await expect.poll(() => timer.textContent(), { timeout: 10_000 }).not.toBe(initialText)
+
+    await page.getByRole('button', { name: 'Stop recording' }).click()
   })
 })
 
@@ -203,44 +191,47 @@ test.describe('PiP Controls', () => {
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
+    // The PiP settings panel (`WebcamOverlaySettings.tsx`) only draws once
+    // the webcam is on.
+    await page.getByRole('button', { name: 'Webcam' }).click()
   })
 
   test('PiP position controls exist', async ({ page }) => {
-    const positionControls = page
-      .getByText(/position|corner|top|bottom|left|right/i)
-      .or(page.locator('[data-testid="pip-position"]'))
-      .first()
-
-    const isVisible = await positionControls.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    const positionGroup = page.getByRole('group', { name: 'Webcam position' })
+    await expect(positionGroup).toBeVisible()
+    const buttons = positionGroup.getByRole('button')
+    await expect(buttons).toHaveCount(4)
+    // bottom-right is the stored default.
+    await expect(buttons.filter({ hasText: 'bottom right' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    )
   })
 
   test('PiP size slider works', async ({ page }) => {
-    const sizeSlider = page
-      .getByRole('slider', { name: /size|scale/i })
-      .or(page.locator('[data-testid="pip-size-slider"]'))
-      .first()
+    const sizeSlider = page.getByRole('slider', { name: 'Webcam overlay size' })
+    await expect(sizeSlider).toBeVisible()
 
-    const isVisible = await sizeSlider.isVisible().catch(() => false)
+    const initialValue = await sizeSlider.inputValue()
+    await sizeSlider.focus()
+    await page.keyboard.press('ArrowRight')
 
-    if (isVisible) {
-      const box = await sizeSlider.boundingBox()
-      if (box) {
-        await page.mouse.click(box.x + box.width * 0.7, box.y + box.height / 2)
-        const html = await page.content()
-        expect(html).toContain('<div id="root">')
-      }
-    }
+    await expect.poll(() => sizeSlider.inputValue()).not.toBe(initialValue)
   })
 
   test('webcam shape toggle exists', async ({ page }) => {
-    const shapeToggle = page
-      .getByRole('button', { name: /circle|square|shape/i })
-      .or(page.locator('[data-testid="webcam-shape"]'))
-      .first()
+    const shapeGroup = page.getByRole('group', { name: 'Webcam shape' })
+    await expect(shapeGroup).toBeVisible()
 
-    const isVisible = await shapeToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    const circle = shapeGroup.getByRole('button', { name: 'circle' })
+    const rectangle = shapeGroup.getByRole('button', { name: 'rectangle' })
+    await expect(circle).toHaveAttribute('aria-pressed', 'true')
+    await expect(rectangle).toHaveAttribute('aria-pressed', 'false')
+
+    await rectangle.click()
+
+    await expect(rectangle).toHaveAttribute('aria-pressed', 'true')
+    await expect(circle).toHaveAttribute('aria-pressed', 'false')
   })
 })
 
@@ -253,34 +244,47 @@ test.describe('Source Selection', () => {
     await waitForAppReady(page, 'craft')
   })
 
-  test('screen source option available', async ({ page }) => {
-    const screenOption = page
-      .getByRole('button', { name: /screen/i })
-      .or(page.getByText(/screen/i))
-      .first()
+  // ESCSUITE-201: CRAFT has no discrete "mode" buttons — a webcam-only or
+  // picture-in-picture take is reached by combining the Screen and Webcam
+  // toggles, not by choosing a named option. The three tests below assert
+  // that real combination instead of a button that does not exist.
 
-    const isVisible = await screenOption.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+  test('screen source option available', async ({ page }) => {
+    const screenToggle = page.getByRole('button', { name: 'Screen' })
+    await expect(screenToggle).toBeVisible()
+    // On by default.
+    await expect(screenToggle).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('webcam only option available', async ({ page }) => {
-    const webcamOption = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .or(page.getByText(/webcam|camera/i))
-      .first()
+    const screenToggle = page.getByRole('button', { name: 'Screen' })
+    // `exact: true` because turning the webcam on also reveals the "Record
+    // webcam as a separate track" button, whose accessible name contains
+    // "webcam" too — but only once Screen is also on (see the PiP test
+    // below), which is the one case this name would otherwise be ambiguous.
+    const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
 
-    const isVisible = await webcamOption.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await screenToggle.click()
+    await webcamToggle.click()
+
+    await expect(screenToggle).toHaveAttribute('aria-pressed', 'false')
+    await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('PiP mode option available', async ({ page }) => {
-    const pipOption = page
-      .getByRole('button', { name: /pip|picture/i })
-      .or(page.getByText(/pip|picture in picture/i))
-      .first()
+    const screenToggle = page.getByRole('button', { name: 'Screen' })
+    // `exact: true` — once Screen and Webcam are both on, the panel below
+    // also shows a "Record webcam as a separate track" button, whose name
+    // contains "webcam" and would otherwise make this locator ambiguous.
+    const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
 
-    const isVisible = await pipOption.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    // Screen is already on; turning the webcam on too is what PiP mode is.
+    await webcamToggle.click()
+
+    await expect(screenToggle).toHaveAttribute('aria-pressed', 'true')
+    await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
+    // The PiP-specific settings panel is the real signature of the mode.
+    await expect(page.getByRole('heading', { name: 'Webcam Overlay' })).toBeVisible()
   })
 })
 
@@ -294,31 +298,22 @@ test.describe('Audio Controls', () => {
   })
 
   test('microphone toggle works', async ({ page }) => {
-    const micToggle = page
-      .getByRole('button', { name: /mic|microphone/i })
-      .or(page.locator('[data-testid="mic-toggle"]'))
-      .first()
+    const micToggle = page.getByRole('button', { name: 'Microphone' })
+    await expect(micToggle).toBeVisible()
+    const initialState = await micToggle.getAttribute('aria-pressed')
+    expect(initialState).not.toBeNull()
 
-    const isVisible = await micToggle.isVisible().catch(() => false)
+    await micToggle.click()
 
-    if (isVisible) {
-      await micToggle.click()
-      await page.waitForTimeout(100)
-
-      const newState = await micToggle.getAttribute('aria-pressed')
-      // State may or may not change depending on permissions
-      expect(typeof newState).toBe('string')
-    }
+    await expect(micToggle).toHaveAttribute(
+      'aria-pressed',
+      initialState === 'true' ? 'false' : 'true'
+    )
   })
 
   test('system audio toggle available', async ({ page }) => {
-    const systemAudioToggle = page
-      .getByRole('button', { name: /system|audio/i })
-      .or(page.locator('[data-testid="system-audio-toggle"]'))
-      .or(page.getByText(/system audio/i))
-      .first()
-
-    const isVisible = await systemAudioToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    const systemAudioToggle = page.getByRole('button', { name: 'System Audio' })
+    await expect(systemAudioToggle).toBeVisible()
+    await expect(systemAudioToggle).toHaveAttribute('aria-pressed', 'false')
   })
 })

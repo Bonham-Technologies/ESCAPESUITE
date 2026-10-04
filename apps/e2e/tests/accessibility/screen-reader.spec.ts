@@ -25,14 +25,12 @@ test.describe('ARIA Live Regions', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    // Look for status indicators that should announce to screen readers
-    const statusElements = page.locator(
-      '[role="status"], [aria-live="polite"], .recording-status, [class*="status"]'
-    )
-    const count = await statusElements.count()
-
-    // Recording status should be announced
-    expect(count).toBeGreaterThanOrEqual(0)
+    // `AppHeader.tsx`'s one status region: `aria-live="polite"
+    // aria-atomic="true"`, always present even idle (the "Recording"/
+    // "Paused"/"Saving..." text is what comes and goes inside it).
+    const liveRegion = page.locator('[aria-live="polite"]')
+    await expect(liveRegion).toHaveCount(1)
+    await expect(liveRegion).toHaveAttribute('aria-atomic', 'true')
   })
 
   test('ESCAPEARTIST announces export progress', async ({ page }) => {
@@ -115,25 +113,20 @@ test.describe('Landmark Regions', () => {
     expect(hasMain || hasNav || hasHeader).toBe(true)
   })
 
-  test.skip('ESCAPECRAFT has proper landmarks', async ({ page }) => {
+  // ESCSUITE-201 K-8: `waitForAppReady` (ESCSUITE-177) already settles on
+  // React's first commit, which is what the removed
+  // `waitForSelector('#root')` + `waitForTimeout(500)` belt-and-braces was
+  // standing in for — and `App.tsx` always renders a real `<main>` and
+  // `AppHeader.tsx` a real `<header>`, so both are asserted directly rather
+  // than the weaker "one or the other" this used to fall back to.
+  test('ESCAPECRAFT has proper landmarks', async ({ page }) => {
     await mockGetUserMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    // Wait for React to render
-    await page.waitForSelector('#root', { timeout: 5000 }).catch(() => null)
-    await page.waitForTimeout(500)
-
-    const main = page.locator('main, [role="main"]')
-    const hasMain = (await main.count()) > 0
-
-    // Also check for header as fallback
-    const header = page.locator('header, [role="banner"]')
-    const hasHeader = (await header.count()) > 0
-
-    // Should have main or at least header landmark
-    expect(hasMain || hasHeader).toBe(true)
+    await expect(page.locator('main')).toBeVisible()
+    await expect(page.locator('header')).toBeVisible()
   })
 
   test.skip('ESCAPEARTIST has proper landmarks', async ({ page }) => {
@@ -231,6 +224,7 @@ test.describe('Button and Control Announcements', () => {
     // Find buttons that might only have icons
     const iconButtons = page.locator('button:has(svg), button:has(img), button:has([class*="icon"])')
     const count = await iconButtons.count()
+    expect(count).toBeGreaterThan(0)
 
     for (let i = 0; i < Math.min(count, 10); i++) {
       const button = iconButtons.nth(i)
@@ -258,6 +252,7 @@ test.describe('Button and Control Announcements', () => {
       '[role="switch"], [aria-pressed], button[class*="toggle"]'
     )
     const count = await toggles.count()
+    expect(count).toBeGreaterThan(0)
 
     for (let i = 0; i < Math.min(count, 5); i++) {
       const toggle = toggles.nth(i)
@@ -282,26 +277,26 @@ test.describe('Table and List Accessibility', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    // Check for recordings list
+    // The recordings library itself is plain `<div>` rows, not a semantic
+    // list — CRAFT's only real `<ul>`s are the four in the Help dialog
+    // (`HelpDialog.tsx`), closed by default.
+    await page.getByRole('button', { name: /help - recording tips/i }).click()
+    await expect(page.getByRole('dialog', { name: 'Recording Tips' })).toBeVisible()
+
     const lists = page.locator('ul, ol, [role="list"]')
     const count = await lists.count()
+    expect(count).toBeGreaterThan(0)
 
     for (let i = 0; i < Math.min(count, 3); i++) {
       const list = lists.nth(i)
-      const isVisible = await list.isVisible().catch(() => false)
+      await expect(list).toBeVisible()
 
-      if (isVisible) {
-        // Check for list items
-        const items = list.locator('li, [role="listitem"]')
-        const itemCount = await items.count()
+      const items = list.locator('li, [role="listitem"]')
+      const itemCount = await items.count()
+      expect(itemCount).toBeGreaterThan(0)
 
-        // Non-empty lists should have items
-        if (itemCount > 0) {
-          const firstItem = items.first()
-          const hasContent = await firstItem.textContent()
-          expect(hasContent).toBeTruthy()
-        }
-      }
+      const firstItemText = await items.first().textContent()
+      expect(firstItemText?.trim()).toBeTruthy()
     }
   })
 })

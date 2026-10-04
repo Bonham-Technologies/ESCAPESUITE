@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
-import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
+import { mockGetUserMedia, mockMediaRecorder, mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
+import { recordAndOpenPlayback } from '../../utils/craft'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPECRAFT Mobile Layout', () => {
@@ -13,46 +14,79 @@ test.describe('ESCAPECRAFT Mobile Layout', () => {
   })
 
   test('recording UI renders on mobile', async ({ page }) => {
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   })
 
+  // Not just visible — actually operable at this viewport: Enter on the
+  // focused button is the platform's own activation (the same native
+  // behaviour `keyboard-navigation.spec.ts`'s CRAFT cases assert), and
+  // reaching the countdown is the real, observable "accessible" the test's
+  // name promises, rather than repeating the visibility check above.
+  //
+  // Re-navigates with `mockSyntheticMedia`'s real stream instead of the
+  // describe's inert `mockGetUserMedia` one: assigning that inert,
+  // stream-shaped-but-not-a-`MediaStream` object to the preview `<video>`'s
+  // `srcObject` throws inside a passive effect with no error boundary
+  // around it, crashing the whole app before the countdown ever renders
+  // (`useMediaStreams.ts`).
   test('recording controls accessible on mobile', async ({ page }) => {
-    const recordButton = page
-      .getByRole('button', { name: /record|start/i })
-      .or(page.locator('[data-testid="record-button"]'))
-      .first()
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await waitForAppReady(page, 'craft')
 
-    const isVisible = await recordButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    const startButton = page.getByRole('button', { name: 'Start recording' })
+    await startButton.focus()
+    await page.keyboard.press('Enter')
+
+    await expect(page.getByRole('button', { name: 'Cancel countdown' })).toBeVisible({
+      timeout: 10_000,
+    })
   })
 
   test('source selection adapts to mobile', async ({ page }) => {
-    const sourceOptions = page.locator('[class*="source"], [class*="option"]')
-    const count = await sourceOptions.count()
-
-    // Should still have source options on mobile
-    expect(count).toBeGreaterThanOrEqual(0)
+    // The four source toggles (Screen/Webcam/Microphone/System Audio) are
+    // always rendered, mobile viewport or not. Scoped to the toggle buttons
+    // themselves — `[class*="sourceToggle"]` alone also matches the plural
+    // `sourceToggles` container that wraps all four rows.
+    const sourceOptions = page.locator('[class*="sourceToggle"] button[aria-pressed]')
+    await expect(sourceOptions).toHaveCount(4)
   })
 
+  // WCAG 2.2 AA 2.5.8 Target Size (Minimum) is 24x24 — the level this repo
+  // actually audits (`runAxeCheck(page, { includeTags: ['wcag2aa'] })`
+  // throughout `accessibility/core.spec.ts`). AAA's 2.5.5 (44x44) is a
+  // separate, unclaimed target: the source toggles (`SourceToggles.tsx`'s
+  // `.toggle`, App.module.css) are exactly 44x24, clearing AA by their
+  // height alone and falling short of AAA — see
+  // `ESCAPECRAFT VideoPlayer Responsive`'s "VideoPlayer controls accessible
+  // on mobile" below for the one control already known to miss AAA too.
   test('controls have touch-friendly size', async ({ page }) => {
-    const buttons = page.getByRole('button')
-    const count = await buttons.count()
+    const startButton = page.getByRole('button', { name: 'Start recording' })
+    await expect(startButton).toBeVisible()
+    const startBox = (await startButton.boundingBox())!
+    expect(startBox.height).toBeGreaterThanOrEqual(24)
 
-    for (let i = 0; i < Math.min(count, 5); i++) {
-      const button = buttons.nth(i)
-      const isVisible = await button.isVisible().catch(() => false)
-
-      if (isVisible) {
-        const box = await button.boundingBox()
-        if (box) {
-          // Touch targets should be at least 44px
-          expect(box.height).toBeGreaterThanOrEqual(40)
-        }
-      }
+    for (const name of ['Screen', 'Webcam', 'Microphone', 'System Audio']) {
+      const toggle = page.getByRole('button', { name, exact: true })
+      await expect(toggle).toBeVisible()
+      const box = (await toggle.boundingBox())!
+      expect(box.height).toBeGreaterThanOrEqual(24)
     }
   })
 })
+
+// ESCSUITE-201: there is no collapsible settings panel in CRAFT (verified:
+// no gear/settings control anywhere in apps/craft/src — the sidebar is
+// static) — a deleted `ESCAPECRAFT Settings Panel Responsive` describe
+// ("settings collapse on mobile", "settings toggle exists on mobile") used
+// to stand in for one here.
 
 test.describe('ESCAPECRAFT Tablet Layout', () => {
   test.beforeEach(async ({ page }) => {
@@ -65,57 +99,18 @@ test.describe('ESCAPECRAFT Tablet Layout', () => {
   })
 
   test('recording UI renders on tablet', async ({ page }) => {
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   })
 
   test('preview area sized appropriately', async ({ page }) => {
-    const preview = page
-      .locator('[class*="preview"], [class*="video-container"], video')
-      .first()
-
-    const isVisible = await preview.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await preview.boundingBox()
-      if (box) {
-        // Preview should have reasonable size
-        expect(box.width).toBeGreaterThan(200)
-        expect(box.height).toBeGreaterThan(100)
-      }
-    }
-  })
-})
-
-test.describe('ESCAPECRAFT Settings Panel Responsive', () => {
-  test('settings collapse on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockGetUserMedia(page)
-    await grantMediaPermissions(page)
-    await page.goto('http://localhost:5174')
-    await waitForAppReady(page, 'craft')
-
-    const settingsPanel = page.locator('[class*="settings"], [class*="panel"]').first()
-    const isVisible = await settingsPanel.isVisible().catch(() => false)
-
-    // Settings may be in a collapsible panel on mobile
-    expect(typeof isVisible).toBe('boolean')
-  })
-
-  test('settings toggle exists on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockGetUserMedia(page)
-    await grantMediaPermissions(page)
-    await page.goto('http://localhost:5174')
-    await waitForAppReady(page, 'craft')
-
-    const settingsToggle = page
-      .getByRole('button', { name: /settings|options|gear/i })
-      .or(page.locator('[data-testid="settings-toggle"]'))
-      .first()
-
-    const exists = (await settingsToggle.count()) > 0
-    expect(typeof exists).toBe('boolean')
+    // The preview stage (`RecordingPreview.tsx`) always renders one of three
+    // things — the compositor canvas, a mirrored stream, or the idle
+    // placeholder — so it is never genuinely absent.
+    const preview = page.locator('[class*="previewContainer"]').first()
+    await expect(preview).toBeVisible()
+    const box = (await preview.boundingBox())!
+    expect(box.width).toBeGreaterThan(200)
+    expect(box.height).toBeGreaterThan(100)
   })
 })
 
@@ -125,79 +120,96 @@ test.describe('ESCAPECRAFT Recording List Responsive', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    const recordingsList = page.locator('[class*="recordings"], [class*="list"]').first()
-    const isVisible = await recordingsList.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await recordingsList.boundingBox()
-      if (box) {
-        // List should be full width on mobile
-        expect(box.width).toBeGreaterThan(300)
-      }
-    }
+    // The library panel always renders its "Recordings" heading, empty or not.
+    const recordingsList = page.locator('section', {
+      has: page.getByRole('heading', { name: 'Recordings' }),
+    })
+    await expect(recordingsList).toBeVisible()
+    const box = (await recordingsList.boundingBox())!
+    expect(box.width).toBeGreaterThan(300)
   })
 
-  test('recording thumbnails resize on mobile', async ({ page }) => {
+  test('recording thumbnails resize on mobile', async ({ page, browserName }) => {
+    test.setTimeout(120_000)
+    // ESCSUITE-177: WebKit cannot store a Blob in IndexedDB in Playwright
+    // (`UnknownError: Error preparing Blob/File data to be stored in object
+    // store`), and this test needs a saved take before there is a thumbnail.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     await page.setViewportSize({ width: 375, height: 667 })
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    const thumbnails = page.locator('[class*="thumbnail"], [class*="preview"] img')
-    const count = await thumbnails.count()
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    if (count > 0) {
-      const firstThumb = thumbnails.first()
-      const box = await firstThumb.boundingBox()
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({
+      timeout: 30_000,
+    })
+    // This is the take's length, not a settle — two seconds of real frames
+    // so there is something to save and a thumbnail to measure.
+    await page.waitForTimeout(2000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
 
-      if (box) {
-        // Thumbnails should fit within mobile width
-        expect(box.width).toBeLessThanOrEqual(375)
-      }
-    }
+    const thumbnail = page.locator('[class*="recordingThumbnail"]').first()
+    await expect(thumbnail).toBeVisible({ timeout: 30_000 })
+    const box = (await thumbnail.boundingBox())!
+    expect(box.width).toBeLessThanOrEqual(375)
   })
 })
 
 test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
-  test('VideoPlayer fits mobile viewport', async ({ page }) => {
+  test.beforeEach(async ({ page, browserName }) => {
+    test.setTimeout(120_000)
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     await page.setViewportSize({ width: 375, height: 667 })
-    await mockGetUserMedia(page)
+    await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
+  })
+
+  test('VideoPlayer fits mobile viewport', async ({ page }) => {
+    await recordAndOpenPlayback(page)
 
     const videoPlayer = page.locator('video').first()
-    const isVisible = await videoPlayer.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await videoPlayer.boundingBox()
-      if (box) {
-        // Video should fit within viewport
-        expect(box.width).toBeLessThanOrEqual(375)
-      }
-    }
+    await expect(videoPlayer).toBeVisible()
+    const box = (await videoPlayer.boundingBox())!
+    expect(box.width).toBeLessThanOrEqual(375)
   })
 
   test('VideoPlayer controls accessible on mobile', async ({ page }) => {
-    await page.setViewportSize({ width: 375, height: 667 })
-    await mockGetUserMedia(page)
-    await grantMediaPermissions(page)
-    await page.goto('http://localhost:5174')
-    await waitForAppReady(page, 'craft')
+    await recordAndOpenPlayback(page)
 
-    const playButton = page
-      .getByRole('button', { name: /play/i })
-      .first()
+    // "Accessible" here means reachable and operable at this viewport, not a
+    // WCAG touch-target claim: `VideoPlayer.module.css`'s own
+    // `@media (max-width: 640px)` rule shrinks `.controlButton` to 32x32,
+    // which clears AA 2.5.8's 24x24 minimum but misses AAA 2.5.5's 44x44 —
+    // a real, pre-existing gap this ticket does not fix (see
+    // report-201.md). Assert what is actually true: the button is there,
+    // enabled, and clicking it still works.
+    const playButton = page.getByTitle(/^(Play|Pause) \(Space\)$/)
+    await expect(playButton).toBeVisible()
+    await expect(playButton).toBeEnabled()
 
-    const isVisible = await playButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await playButton.boundingBox()
-      if (box) {
-        // Play button should be touch-friendly
-        expect(box.width).toBeGreaterThanOrEqual(40)
-        expect(box.height).toBeGreaterThanOrEqual(40)
-      }
-    }
+    const initialTitle = await playButton.getAttribute('title')
+    await playButton.click()
+    await expect(
+      page.getByTitle(initialTitle === 'Play (Space)' ? 'Pause (Space)' : 'Play (Space)')
+    ).toBeVisible()
   })
 })
 
@@ -209,8 +221,7 @@ test.describe('ESCAPECRAFT Landscape Mode', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   })
 
   test('preview uses available width in landscape', async ({ page }) => {
@@ -220,15 +231,9 @@ test.describe('ESCAPECRAFT Landscape Mode', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
 
-    const preview = page.locator('video, [class*="preview"]').first()
-    const isVisible = await preview.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const box = await preview.boundingBox()
-      if (box) {
-        // Preview should use available width
-        expect(box.width).toBeGreaterThan(300)
-      }
-    }
+    const preview = page.locator('[class*="previewContainer"]').first()
+    await expect(preview).toBeVisible()
+    const box = (await preview.boundingBox())!
+    expect(box.width).toBeGreaterThan(300)
   })
 })

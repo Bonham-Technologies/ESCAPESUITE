@@ -31,46 +31,16 @@ test.describe('Camera Permission Denied', () => {
 
   // FIXME(ux): needs denied-device feedback — tracked in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289
   // Nothing is shown when a camera cannot be opened: the failure only reaches
-  // the console, at record time. This test matched no buttons until the source
-  // toggles gained accessible names, so it had never actually run.
-  test.fixme('shows error UI when camera denied', async ({ page }) => {
-    // Try to enable webcam
-    const webcamToggle = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .or(page.locator('[data-testid="webcam-toggle"]'))
-      .first()
-
-    const isVisible = await webcamToggle.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await webcamToggle.click()
-      await page.waitForTimeout(500)
-
-      // Should show error message or disabled state
-      const errorMessage = page.getByText(/denied|permission|blocked|not allowed/i).first()
-      const errorVisible = await errorMessage.isVisible().catch(() => false)
-
-      // Either show error or toggle should be disabled/inactive
-      const isDisabled = await webcamToggle.isDisabled().catch(() => false)
-      const ariaDisabled = await webcamToggle.getAttribute('aria-disabled')
-
-      expect(errorVisible || isDisabled || ariaDisabled === 'true').toBe(true)
-    }
-  })
+  // the console, at record time. Bodiless on purpose — the K-1-family shapes
+  // a real version of this test would need (isVisible().catch(), an
+  // isDisabled-or-error disjunction) must not survive even unexecuted.
+  test.fixme('shows error UI when camera denied', async () => {})
 
   test('app remains functional after camera denial', async ({ page }) => {
-    // Verify main UI is still working
-    const html = await page.content()
-    expect(html).toContain('<!DOCTYPE html>')
-    expect(html).toContain('<div id="root">')
-
-    // Other controls should still work
-    const micToggle = page
-      .getByRole('button', { name: /mic|audio|microphone/i })
-      .first()
-
-    const isVisible = await micToggle.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    // Other controls should still work — the camera denial must not take the
+    // rest of the recorder down with it.
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Microphone' })).toBeVisible()
   })
 })
 
@@ -97,18 +67,12 @@ test.describe('Microphone Permission Denied', () => {
   // so a refused prompt is only discovered at Start. A take STARTED with a
   // closed microphone is no longer this gap — ESCSUITE-184 gave that path the
   // notice the real case below proves.
-  test.fixme('shows error UI when the microphone is toggled on with a refused prompt', async ({ page }) => {
-    const micToggle = page.getByRole('button', { name: 'Microphone' })
-    await expect(micToggle).toBeEnabled()
-
-    // Default-on, so this turns it off, then on again — the toggle the gap
-    // is about.
-    await micToggle.click()
-    await micToggle.click()
-    await page.waitForTimeout(500)
-
-    await expect(page.getByText(/denied|permission|blocked/i).first()).toBeVisible()
-  })
+  // Bodiless on purpose — a real version needs the toggle-time notice
+  // issue #289 asks for, which does not exist yet to assert against.
+  test.fixme(
+    'shows error UI when the microphone is toggled on with a refused prompt',
+    async () => {}
+  )
 
   // ESCSUITE-184, proved in a real browser (ESCSUITE-187). Screen and
   // Microphone are both on by default (`recorderStore`'s initial config), so
@@ -140,6 +104,7 @@ test.describe('Microphone Permission Denied', () => {
     ).toBeVisible({ timeout: 30_000 })
     await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible()
 
+    // This is the take's length, not a settle.
     await page.waitForTimeout(2000)
     await page.getByRole('button', { name: 'Stop recording' }).click()
     await expect(page.getByRole('button', { name: /Open .+ in Editor/ })).toBeVisible({
@@ -149,13 +114,7 @@ test.describe('Microphone Permission Denied', () => {
 
   test('screen recording still works without mic', async ({ page }) => {
     // Should be able to record screen without mic
-    const screenButton = page
-      .getByRole('button', { name: /screen|record/i })
-      .or(page.locator('[data-testid="screen-button"]'))
-      .first()
-
-    const isVisible = await screenButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByRole('button', { name: 'Screen' })).toBeEnabled()
   })
 })
 
@@ -187,40 +146,35 @@ test.describe('Screen Share Permission Denied', () => {
   })
 
   test('shows error UI when screen share denied', async ({ page }) => {
-    const screenButton = page
-      .getByRole('button', { name: /screen|share|record/i })
-      .or(page.locator('[data-testid="screen-button"]'))
-      .first()
+    // Screen is on by default, so Start Recording is what actually calls
+    // `getDisplayMedia` — `mockScreenShareDenied` makes it reject with
+    // NotAllowedError. `requestScreenCapture` (`core/permissions.ts`)
+    // re-wraps that into a plain `Error('Screen capture permission
+    // denied')` with no `.name`, so `startFailureNotice` falls to its
+    // generic sentence rather than the NotAllowedError-specific one.
+    await page.getByRole('button', { name: 'Start recording' }).click()
 
-    const isVisible = await screenButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await screenButton.click()
-      await page.waitForTimeout(500)
-
-      // App should still be functional
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    await expect(page.getByText('The recording could not be started.')).toBeVisible({
+      timeout: 10_000,
+    })
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 
   test('can retry after denial', async ({ page }) => {
-    const screenButton = page
-      .getByRole('button', { name: /screen|share|record/i })
-      .or(page.locator('[data-testid="screen-button"]'))
-      .first()
+    const startButton = page.getByRole('button', { name: 'Start recording' })
 
-    const isVisible = await screenButton.isVisible().catch(() => false)
+    await startButton.click()
+    await expect(page.getByText('The recording could not be started.')).toBeVisible({
+      timeout: 10_000,
+    })
 
-    if (isVisible) {
-      // First attempt
-      await screenButton.click()
-      await page.waitForTimeout(300)
-
-      // Should be able to click again
-      const stillClickable = await screenButton.isEnabled().catch(() => true)
-      expect(stillClickable).toBe(true)
-    }
+    // Should be able to click again, and the second attempt fails the same
+    // way rather than hanging or crashing.
+    await expect(startButton).toBeEnabled()
+    await startButton.click()
+    await expect(page.getByText('The recording could not be started.')).toBeVisible({
+      timeout: 10_000,
+    })
   })
 })
 
@@ -232,16 +186,12 @@ test.describe('All Media Permissions Denied', () => {
   })
 
   test('shows appropriate error state', async ({ page }) => {
-    // App should load but show limited functionality
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
-
-    // May show permission banner or error state
-    const errorBanner = page.getByText(/permission|access|denied|enable|allow/i).first()
-    const hasError = await errorBanner.isVisible().catch(() => false)
-
-    // At minimum, app should not crash
-    expect(typeof hasError).toBe('boolean')
+    // `mockAllMediaPermissionsDenied` has `enumerateDevices()` report no
+    // devices at all — `permissions.ts` reads that as "no camera"/"no
+    // microphone" and disables the two toggles that need one, rather than
+    // crashing the app.
+    await expect(page.getByRole('button', { name: 'Webcam' })).toBeDisabled()
+    await expect(page.getByRole('button', { name: 'Microphone' })).toBeDisabled()
   })
 
   test('capability detection shows unavailable', async ({ page }) => {
@@ -251,63 +201,81 @@ test.describe('All Media Permissions Denied', () => {
     )
     const count = await unavailableIndicators.count()
 
-    // May have multiple unavailable features
-    expect(count).toBeGreaterThanOrEqual(0)
+    // The webcam and microphone rows both grey out with no device enumerated.
+    expect(count).toBeGreaterThan(0)
   })
 })
 
 test.describe('Device Not Found', () => {
   test.beforeEach(async ({ page }) => {
-    // The camera is listed but cannot be opened — without the device stub the
-    // toggle is disabled and never reaches the getUserMedia rejection.
-    await mockMediaDevices(page)
+    // `mockSyntheticMedia` first so Screen's `getDisplayMedia` is real and
+    // working (the device-mock layers replay on top of whatever is already
+    // layered, see `media-mocks.ts`'s `installMediaDevicesLayer`) —
+    // otherwise Start Recording would hang against headless Chromium's real,
+    // picker-less `getDisplayMedia` before ever reaching the webcam's own
+    // rejection this test is about. The camera is listed but cannot be
+    // opened — without the device stub the toggle is disabled and never
+    // reaches the getUserMedia rejection.
+    await mockSyntheticMedia(page)
     await mockDeviceNotFound(page)
+    await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
   test('shows device not found message', async ({ page }) => {
-    const webcamToggle = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .first()
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    const isVisible = await webcamToggle.isVisible().catch(() => false)
+    const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
+    await webcamToggle.click()
+    await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
 
-    if (isVisible) {
-      await webcamToggle.click()
-      await page.waitForTimeout(500)
+    await page.getByRole('button', { name: 'Start recording' }).click()
 
-      // App should remain functional
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    // `mockDeviceNotFound` throws `NotFoundError` for every `getUserMedia`
+    // call, which `startFailureNotice` reports as this sentence (not the
+    // NotAllowedError-specific one).
+    await expect(page.getByText('The recording could not be started.')).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 })
 
 test.describe('Device In Use', () => {
   test.beforeEach(async ({ page }) => {
-    // Listed, but held by another application — same reasoning as above.
-    await mockMediaDevices(page)
+    // Same reasoning as "Device Not Found" above: real screen capture, a
+    // webcam that is listed but cannot be opened.
+    await mockSyntheticMedia(page)
     await mockDeviceInUse(page)
+    await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
 
   test('shows device in use message', async ({ page }) => {
-    const webcamToggle = page
-      .getByRole('button', { name: /webcam|camera/i })
-      .first()
+    const screenSource = page
+      .locator('[class*="sourceToggle"]')
+      .filter({ hasText: 'Screen' })
+      .last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 
-    const isVisible = await webcamToggle.isVisible().catch(() => false)
+    const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
+    await webcamToggle.click()
+    await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
 
-    if (isVisible) {
-      await webcamToggle.click()
-      await page.waitForTimeout(500)
+    await page.getByRole('button', { name: 'Start recording' }).click()
 
-      // App should remain functional
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    // `mockDeviceInUse` throws `NotReadableError`, also reported as the
+    // generic start-failure sentence.
+    await expect(page.getByText('The recording could not be started.')).toBeVisible({
+      timeout: 15_000,
+    })
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 })
 
@@ -327,7 +295,6 @@ test.describe('Permission Recovery', () => {
     await waitForAppReady(page, 'craft')
 
     // Should work normally now
-    const html = await page.content()
-    expect(html).toContain('<div id="root">')
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   })
 })
