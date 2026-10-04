@@ -2,8 +2,9 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
-import type { Page } from 'playwright'
+import type { Browser, Page } from 'playwright'
 import type { LoadedJob } from './loaders'
+import { MAX_TIMEOUT_MS } from './timeouts'
 import type { RenderFileInput, RenderInput, RenderMeta } from './types'
 
 /** Selector of the hidden file input the bundle reads sources from. */
@@ -81,6 +82,14 @@ function launchArgs(opts: RenderDriverOptions): string[] {
 
 /** A promise that rejects once the budget is spent, plus the cancel that stops the timer. */
 function createDeadline(timeoutMs: number): { promise: Promise<never>; cancel: () => void } {
+  // The one bound `cli.ts`'s own HEADLESS_TIMEOUT_MS parser cannot enforce: this is also a
+  // programmatic surface (a library caller, or a test, can pass timeoutMs straight to
+  // renderInChromium). Node's timers silently clamp any delay above 2^31-1 to ~1 ms rather
+  // than refusing it, so a value past this bound would mean the opposite of what was asked —
+  // the deadline firing almost immediately instead of allowing almost no limit.
+  if (timeoutMs > MAX_TIMEOUT_MS) {
+    throw new Error(`timeoutMs must be at most ${MAX_TIMEOUT_MS}, got ${timeoutMs}`)
+  }
   let timer: NodeJS.Timeout | undefined
   const promise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error(`render timed out after ${timeoutMs} ms`)), timeoutMs)
@@ -179,22 +188,29 @@ export async function renderInChromium(
 ): Promise<DriverResult> {
   const log = opts.log ?? defaultLog
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
-
-  try {
-    await fs.access(bundleHtmlPath)
-  } catch {
-    throw new Error(`headless bundle not found at ${bundleHtmlPath}`)
-  }
-
   const startedAt = Date.now()
+  // Created before the bundle is even checked, so a timeoutMs the deadline timer cannot
+  // represent (ESCSUITE-206) is refused before anything else about the call is attempted.
   const deadline = createDeadline(timeoutMs)
 
   try {
-    // The launch itself is bounded by Playwright's own launch timeout, so it cannot
-    // outlive a wedged browser binary; from here on the deadline covers everything.
-    const browser = await chromium.launch({
+    try {
+      await fs.access(bundleHtmlPath)
+    } catch {
+      throw new Error(`headless bundle not found at ${bundleHtmlPath}`)
+    }
+
+    // The deadline now covers the launch too: `timeout: timeoutMs` is Playwright's own launch
+    // budget (its unconfigured default is 180 000 ms, not the 30 s this comment once implied —
+    // hunt-j verify V-3a measured a launch left to hang for the full three minutes on a 3 s
+    // render budget), and the race against `deadline.promise` is the backstop if that option
+    // ever doesn't cover a particular hang. If the deadline wins the race, the launch call
+    // itself is still running underneath — closing whatever it eventually produces so no
+    // Chromium process outlives this call.
+    const launching = chromium.launch({
       headless: true,
       args: launchArgs(opts),
+      timeout: timeoutMs,
       // Explicit rather than left to Playwright's defaults: see `handleSignals`. Whoever owns
       // the process's shutdown has to be the only one reacting to a signal.
       handleSIGINT: opts.handleSignals !== false,
@@ -202,6 +218,13 @@ export async function renderInChromium(
       handleSIGHUP: opts.handleSignals !== false,
       ...(opts.chromiumPath ? { executablePath: opts.chromiumPath } : {}),
     })
+    let browser: Browser
+    try {
+      browser = await Promise.race([launching, deadline.promise])
+    } catch (err) {
+      launching.then((late) => late.close().catch(() => {})).catch(() => {})
+      throw err
+    }
 
     try {
       const chromiumVersion = browser.version()

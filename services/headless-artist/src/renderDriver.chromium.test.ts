@@ -128,19 +128,29 @@ describe('renderInChromium launch deadline', () => {
       const timeoutMs = 2000
 
       const startedAt = Date.now()
-      await expect(
-        renderInChromium(BUNDLE, job, { format: 'mp4', quality: 'medium' }, outputPath, {
+      let message = ''
+      try {
+        await renderInChromium(BUNDLE, job, { format: 'mp4', quality: 'medium' }, outputPath, {
           chromiumPath: hangs,
           timeoutMs,
           log: quiet,
-        }),
-      ).rejects.toThrow(`render timed out after ${timeoutMs} ms`)
+        })
+        throw new Error('expected the launch to fail')
+      } catch (err) {
+        message = err instanceof Error ? err.message : String(err)
+      }
       const elapsed = Date.now() - startedAt
 
       // Bounded by the render budget, not by Playwright's own (measured 180 000 ms) launch
       // default; kept well under 5 s so this stays a fast test rather than a repeat of V-3a's
-      // own 180 s reproduction.
+      // own 180 s reproduction. `timeout: timeoutMs` (passed to chromium.launch) and the race
+      // against deadline.promise both fire at the same configured budget, so either message
+      // -- the driver's own "render timed out after 2000 ms" or Playwright's own
+      // "Timeout 2000ms exceeded" -- proves the fix; only the OLD unbounded default would fail
+      // this assertion.
       expect(elapsed).toBeLessThan(5000)
+      expect(message).toMatch(new RegExp(`${timeoutMs}\\s*ms`))
+      expect(message).not.toMatch(/180000\s*ms/)
     } finally {
       await fs.rm(scratch, { recursive: true, force: true })
     }

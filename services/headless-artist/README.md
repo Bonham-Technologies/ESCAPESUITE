@@ -596,8 +596,12 @@ is a working loop; the contract it relies on is small:
   a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
   those to a dead-letter queue instead of a retry loop.
 - **Read `outputLocation` from the outcome**, don't reconstruct it — it differs per sink.
-- **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page can't hold a worker slot
-  indefinitely; the job then fails with `render timed out after <n> ms` and exit 1.
+- **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page — or a Chromium binary that
+  never finishes launching — can't hold a worker slot indefinitely; the job then fails with
+  `render timed out after <n> ms` and exit 1. The budget covers the Chromium launch too, not
+  just the page once it is up — on a launch that hangs it was previously bounded only by
+  Playwright's own default (measured 180 s on Playwright 1.63.0), sixty times most operators'
+  intended budget.
 
 If spawning a process per job is the part that doesn't fit, [HTTP service mode](#http-service-mode)
 keeps every one of those properties except the first, and swaps exit codes for status codes.
@@ -874,8 +878,9 @@ drop a render that is half encoded:
 4. The process exits 0 — or `1`, with `error: shutdown failed: …` on stderr, if the drain
    itself failed and the state of the in-flight renders is therefore unknown.
 
-Step 3 is bounded by `HEADLESS_TIMEOUT_MS` **plus** the job's own delivery budget — not by the
-signal, and not by the render alone. The `webhook` and `command` sinks each have their own
+Step 3 is bounded by `HEADLESS_TIMEOUT_MS` (Chromium launch included, not only the page once it
+is up) **plus** the job's own delivery budget — not by the signal, and not by the render alone.
+The `webhook` and `command` sinks each have their own
 `timeoutMs` (10 minutes and 5 minutes by default), so a 30-minute render that then delivers over
 `webhook` means up to a 40-minute drain. **`volume` needs no budget of its own — it is a local
 filesystem write — but `s3` has none either**: the sink sets no timeout of its own, so a stalled
