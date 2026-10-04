@@ -38,9 +38,19 @@ describe('analytics', () => {
   })
 
   describe('analytics.offlineBuildDownloaded', () => {
-    it('tracks Offline Build Downloaded event', () => {
+    it('tracks Offline Build Downloaded event with no props when no tool is named', () => {
       analytics.offlineBuildDownloaded()
       expect(track).toHaveBeenCalledWith('Offline Build Downloaded', undefined)
+    })
+
+    it('tracks Offline Build Downloaded event with tool: craft', () => {
+      analytics.offlineBuildDownloaded('craft')
+      expect(track).toHaveBeenCalledWith('Offline Build Downloaded', { tool: 'craft' })
+    })
+
+    it('tracks Offline Build Downloaded event with tool: artist', () => {
+      analytics.offlineBuildDownloaded('artist')
+      expect(track).toHaveBeenCalledWith('Offline Build Downloaded', { tool: 'artist' })
     })
   })
 })
