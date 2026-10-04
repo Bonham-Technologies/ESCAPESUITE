@@ -477,8 +477,11 @@ export async function getSink(kind: string, config: Record<string, unknown>): Pr
     case 'webhook':
       return createWebhookSink(validateWebhookConfig(config))
     case 's3': {
-      // s3.ts loads `@aws-sdk/client-s3` itself, lazily, and throws the "optional
-      // dependency" error from inside s3Sink() when it can't — nothing to catch here.
+      // This dynamic import is no longer what keeps `@aws-sdk/client-s3` out of the module
+      // graph (`jobSpec.ts` already imports `./s3` statically, for `validateS3Config` and
+      // `ensureSinkReady`) — what actually does is `s3.ts` never importing the SDK itself at
+      // the top level: `loadS3ClientModule` loads it at call time, and throws the "optional
+      // dependency" error from inside `s3Sink()` when it can't — nothing to catch here.
       const { s3Sink, validateS3Config } = await import('./s3')
       return s3Sink(validateS3Config(config))
     }
