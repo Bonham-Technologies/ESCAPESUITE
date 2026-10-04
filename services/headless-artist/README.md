@@ -234,10 +234,15 @@ manifest](#output-and-verification).
 ```
 
 Writes `<dir>/<jobId>.<mp4|webm|gif>` and `<dir>/<jobId>.manifest.json`. The directory is created
-if missing. The video is moved into place with a rename (falling back to a copy across
-filesystems), and both files **overwrite** anything already at those names — which is what
-makes re-running a job id idempotent rather than duplicative. `outputLocation` and
-`manifestLocation` in the outcome are absolute paths.
+if missing. Publication is **atomic and all-or-nothing**: each file is staged at a private,
+unique temp name inside `dir` and published with one same-directory rename, so a reader
+watching the directory only ever sees the old pair or the complete new one, never a
+half-written file. The **sidecar publishes first** — if it fails for any reason, the video is
+never published either, so a failed delivery can never leave a finished-looking video with no
+manifest beside it to verify it against (ESCSUITE-190); if the video then fails to publish, the
+sidecar that already landed is removed too. Both files **overwrite** anything already at those
+names on a clean re-run — which is what makes re-running a job id idempotent rather than
+duplicative. `outputLocation` and `manifestLocation` in the outcome are absolute paths.
 
 ### `command` — hand off to your own program
 
@@ -564,9 +569,8 @@ is a working loop; the contract it relies on is small:
   as many in parallel as the box has cores and memory for.
 - **Idempotent by `jobId`.** The `volume` and `s3` sinks write `<jobId>.<ext>` and
   `<jobId>.manifest.json`, overwriting. Re-running a job that died halfway leaves one correct
-  output rather than a duplicate. On the `volume` sink the video is *renamed* into place, so on
-  one filesystem it appears atomically; across filesystems it falls back to a copy, which does
-  not.
+  output rather than a duplicate. The `volume` sink publishes both files atomically — see
+  [`volume`](#volume--write-to-a-directory) — so this holds across filesystems too, not only on one.
 - **Retry on exit 1, never on exit 2.** Exit 1 is a failure that may be transient (a busy disk,
   a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
   those to a dead-letter queue instead of a retry loop.

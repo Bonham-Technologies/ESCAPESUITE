@@ -1,6 +1,8 @@
-import { openAsBlob, promises as fs } from 'node:fs'
+import { createReadStream, createWriteStream, openAsBlob, promises as fs } from 'node:fs'
 import path from 'node:path'
+import crypto from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { pipeline } from 'node:stream/promises'
 import type { VerificationManifest } from './manifest'
 import { MAX_TIMEOUT_MS } from './timeouts'
 
@@ -49,6 +51,53 @@ function validateVolumeConfig(config: Record<string, unknown>): VolumeConfig {
   return { dir: requireString(config, 'dir', 'volume') }
 }
 
+/** A private, unique name inside `finalPath`'s own directory — never shared with any other
+ * delivery, including a concurrent one for the same jobId. */
+function tempNameFor(finalPath: string): string {
+  const unique = crypto.randomBytes(8).toString('hex')
+  return path.join(path.dirname(finalPath), `.${path.basename(finalPath)}.tmp-${unique}`)
+}
+
+/**
+ * Moves `sourcePath` to `tempPath` (a name inside the sink's target directory). Tries a
+ * rename first — free, and the common case when the job's scratch dir and the sink's `dir`
+ * share a filesystem — and falls back to a stream copy across a filesystem boundary.
+ *
+ * Never `fs.copyFile`: that call writes straight to the destination path it is given, so two
+ * concurrent deliveries racing the *same* destination (one jobId, one dir) can interleave at
+ * the byte level (hunt-j V-4b). `tempPath` is unique per call, so no concurrent delivery ever
+ * shares a destination during this slower part — only the final, same-directory rename in
+ * `publishAtomically` below can race, and a rename replaces a name outright; it cannot blend
+ * two files' bytes.
+ */
+async function moveIntoDir(sourcePath: string, tempPath: string): Promise<void> {
+  try {
+    await fs.rename(sourcePath, tempPath)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+    await pipeline(createReadStream(sourcePath), createWriteStream(tempPath))
+    await fs.rm(sourcePath, { force: true })
+  }
+}
+
+/**
+ * Publishes `finalPath` by writing it first to a private temp name in the same directory, via
+ * `write`, and then renaming that temp name onto `finalPath` — one atomic, same-filesystem
+ * rename, so a reader watching the directory only ever sees the old file or the complete new
+ * one, never a half-written one. On any failure the temp name is removed and the original
+ * error propagates (never masked by a cleanup failure).
+ */
+async function publishAtomically(finalPath: string, write: (tempPath: string) => Promise<void>): Promise<void> {
+  const tempPath = tempNameFor(finalPath)
+  try {
+    await write(tempPath)
+    await fs.rename(tempPath, finalPath)
+  } catch (err) {
+    await fs.rm(tempPath, { force: true }).catch(() => undefined)
+    throw err
+  }
+}
+
 function createVolumeSink(config: VolumeConfig): OutputSink {
   // Resolved once at construction so the returned locations are always absolute, regardless
   // of the process's current working directory at delivery time (or later).
@@ -60,30 +109,19 @@ function createVolumeSink(config: VolumeConfig): OutputSink {
       const destOutputPath = path.join(dir, `${jobId}.${ext}`)
       const destManifestPath = path.join(dir, `${jobId}.manifest.json`)
 
-      try {
-        await fs.rename(outputPath, destOutputPath)
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code === 'EXDEV') {
-          try {
-            await fs.copyFile(outputPath, destOutputPath)
-          } catch (copyErr) {
-            // A failed copy (ENOSPC, most likely) leaves a truncated file at the destination,
-            // which a consumer watching the directory would happily pick up as a finished
-            // render. Removing it unconditionally is safe: the path is `<dir>/<jobId>.<ext>`,
-            // so the most this can delete is an earlier render of the same jobId — which this
-            // delivery was overwriting anyway.
-            // Take it away before the failure propagates, and never let a cleanup failure
-            // mask the copy failure that caused it.
-            await fs.rm(destOutputPath, { force: true }).catch(() => undefined)
-            throw copyErr
-          }
-          await fs.rm(outputPath, { force: true })
-        } else {
-          throw err
-        }
-      }
+      // Sidecar first: if this fails for any reason, nothing has been published at all, so a
+      // consumer watching `dir` never sees a finished-looking video with no manifest beside it
+      // to verify it against (hunt-j J-3).
+      await publishAtomically(destManifestPath, (tmp) => fs.writeFile(tmp, manifestJson(manifest)))
 
-      await fs.writeFile(destManifestPath, manifestJson(manifest))
+      try {
+        await publishAtomically(destOutputPath, (tmp) => moveIntoDir(outputPath, tmp))
+      } catch (err) {
+        // The manifest already landed; a video that never follows must not be left behind
+        // signing a render that was never actually delivered.
+        await fs.rm(destManifestPath, { force: true }).catch(() => undefined)
+        throw err
+      }
 
       return { outputLocation: destOutputPath, manifestLocation: destManifestPath }
     },
