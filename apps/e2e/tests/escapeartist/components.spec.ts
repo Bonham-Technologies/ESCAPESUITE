@@ -491,19 +491,20 @@ test.describe('Toolbar', () => {
     await page.getByRole('button', { name: 'Add Text' }).click()
     await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible()
 
-    // Click each clip a third of the way in rather than at its centre or
-    // its ends: the playhead line can sit over the middle of a freshly added
-    // clip and intercept a centre click (CI, three attempts, ESCSUITE-202),
-    // and the clip's ends carry its trim handles, where a click starts a
-    // trim rather than a selection.
+    // The two clips occupy the same x range on neighbouring tracks, and the
+    // first click moves the playhead to the x it landed on — so a second
+    // click at the same fraction of the clip's width lands under the 2 px
+    // playhead line, which intercepts it (CI, six attempts, ESCSUITE-202).
+    // Click the two clips at different fractions, both clear of the trim
+    // handles at the clip's ends.
     const clips = page.locator('[data-clip-id]')
-    for (const index of [0, 1]) {
+    for (const [index, fraction] of [[0, 0.3], [1, 0.7]] as const) {
       const clip = clips.nth(index)
       const box = await clip.boundingBox()
       if (!box) throw new Error(`clip ${index} has no bounding box`)
       await clip.click({
         modifiers: ['Control'],
-        position: { x: Math.max(4, box.width * 0.3), y: box.height / 2 },
+        position: { x: Math.max(4, box.width * fraction), y: box.height / 2 },
       })
     }
 
