@@ -4,19 +4,11 @@ import { seedTextClip } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ARIA Live Regions', () => {
-  test('ESCAPEPLAN has status announcements', async ({ page }) => {
-    await page.goto('http://localhost:5173')
-    await waitForAppReady(page, 'plan')
-
-    // Check for ARIA live regions
-    const liveRegions = page.locator(
-      '[aria-live], [role="alert"], [role="status"], [role="log"]'
-    )
-    const count = await liveRegions.count()
-
-    // May not have visible live regions on static pages
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
+  // ESCSUITE-202: ESCAPEPLAN is a static marketing/legal site — three pages,
+  // no dynamic state, nothing that would ever need a live region
+  // (`grep -rn "aria-live" apps/plan/src` has no matches). "ESCAPEPLAN has
+  // status announcements" had no feature to find and is deleted rather than
+  // kept as a placeholder (`count >= 0`) for one.
 
   test('ESCAPECRAFT announces recording status', async ({ page }) => {
     await mockGetUserMedia(page)
@@ -33,18 +25,18 @@ test.describe('ARIA Live Regions', () => {
     await expect(liveRegion).toHaveAttribute('aria-atomic', 'true')
   })
 
-  test('ESCAPEARTIST announces export progress', async ({ page }) => {
-    await page.goto('http://localhost:5175')
-    await waitForAppReady(page, 'artist')
-
-    // Look for progress announcements
-    const progressElements = page.locator(
-      '[role="progressbar"], [role="status"], [aria-live]'
-    )
-    const count = await progressElements.count()
-
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
+  // ESCSUITE-202: a real app defect, not fixed here (test-only ticket). The
+  // export dialog's progress section (`components/Export/ExportDialog.tsx`,
+  // the `.progressInfo`/`.progressBar` block around line 583) carries no
+  // `role="progressbar"`, `aria-live` or `aria-busy` anywhere — the
+  // "Encoding frame N/M" text and the percentage are visual-only, so a
+  // screen-reader user gets no spoken update while an export runs. The
+  // dialog's handful of `role="status"` spans are all *after*-the-fact notes
+  // (an estimated size, a "no audio" summary once the export completes),
+  // never the live phase/percentage. "ESCAPEARTIST announces export
+  // progress" and "progressbar has proper attributes" below had no real
+  // `role="progressbar"` or live region to find and are deleted rather than
+  // kept as `count >= 0` placeholders for one.
 })
 
 test.describe('Dialog Announcements', () => {
@@ -85,32 +77,21 @@ test.describe('Dialog Announcements', () => {
 })
 
 test.describe('Landmark Regions', () => {
-  // Note: These tests verify landmark elements exist but are skipped in CI due to
-  // rendering timing issues. The apps DO have proper landmarks (main, nav, header)
-  // in their source code. Run locally to verify.
-  test.skip('ESCAPEPLAN has proper landmarks', async ({ page }) => {
+  // ESCSUITE-198/202 K-8: these three used to be `test.skip` under a stale
+  // "skipped in CI due to rendering timing issues" comment —
+  // ESCSUITE-177's `waitForAppReady` (React's first commit, not
+  // `networkidle`) already fixed the timing hazard the comment blamed, and
+  // the belt-and-braces `waitForSelector('#root')` + `waitForTimeout(500)`
+  // it stood in for is redundant with that. Unskipped, and each asserts the
+  // real landmarks its own app's source renders directly, rather than the
+  // weaker "main, nav, or header" fallback.
+  test('ESCAPEPLAN has proper landmarks', async ({ page }) => {
     await page.goto('http://localhost:5173')
     await waitForAppReady(page, 'plan')
 
-    // Wait for React to render
-    await page.waitForSelector('#root', { timeout: 5000 }).catch(() => null)
-    await page.waitForTimeout(500)
-
-    // Check for main landmark
-    const main = page.locator('main, [role="main"]')
-    const hasMain = (await main.count()) > 0
-
-    // Check for navigation landmark
-    const nav = page.locator('nav, [role="navigation"]')
-    const hasNav = (await nav.count()) > 0
-
-    // Check for header (fallback landmark)
-    const header = page.locator('header, [role="banner"]')
-    const hasHeader = (await header.count()) > 0
-
-    // Should have at least one landmark (main, nav, or header)
-    // In CI environments, page may render differently
-    expect(hasMain || hasNav || hasHeader).toBe(true)
+    await expect(page.locator('main')).toBeVisible()
+    await expect(page.locator('nav')).toBeVisible()
+    await expect(page.locator('header')).toBeVisible()
   })
 
   // ESCSUITE-201 K-8: `waitForAppReady` (ESCSUITE-177) already settles on
@@ -129,90 +110,29 @@ test.describe('Landmark Regions', () => {
     await expect(page.locator('header')).toBeVisible()
   })
 
-  test.skip('ESCAPEARTIST has proper landmarks', async ({ page }) => {
+  test('ESCAPEARTIST has proper landmarks', async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
-    // Wait for React to render
-    await page.waitForSelector('#root', { timeout: 5000 }).catch(() => null)
-    await page.waitForTimeout(500)
-
-    const main = page.locator('main, [role="main"]')
-    const hasMain = (await main.count()) > 0
-
-    // Also check for header as fallback
-    const header = page.locator('header, [role="banner"]')
-    const hasHeader = (await header.count()) > 0
-
-    // Should have main or at least header landmark
-    expect(hasMain || hasHeader).toBe(true)
+    await expect(page.locator('main')).toBeVisible()
+    await expect(page.locator('header')).toBeVisible()
   })
 })
 
-test.describe('Form Error Announcements', () => {
-  test('form errors are announced', async ({ page }) => {
-    await page.goto('http://localhost:5173')
-    await waitForAppReady(page, 'plan')
+// ESCSUITE-202: ESCAPEPLAN has no `<form>` anywhere (`grep -rln "<form"
+// apps/plan/src` has no matches — it is a static marketing/legal site, no
+// sign-up, no contact form). "Form Error Announcements" › "form errors are
+// announced" had no feature to find — wrapped in two nested `if`s around a
+// `count >= 0`, it could not have failed for any reason — and is deleted
+// rather than kept as a placeholder for a form that does not exist.
 
-    // Look for form with validation
-    const form = page.locator('form').first()
-    const hasForm = await form.isVisible().catch(() => false)
-
-    if (hasForm) {
-      // Try to submit empty form
-      const submitButton = form.getByRole('button', { name: /submit|sign|send/i }).first()
-      const hasSubmit = await submitButton.isVisible().catch(() => false)
-
-      if (hasSubmit) {
-        await submitButton.click()
-        await page.waitForTimeout(500)
-
-        // Check for error messages with proper ARIA
-        const errors = page.locator(
-          '[role="alert"], [aria-invalid="true"], .error, [class*="error"]'
-        )
-        const count = await errors.count()
-
-        // May have validation errors
-        expect(count).toBeGreaterThanOrEqual(0)
-      }
-    }
-  })
-})
-
-test.describe('Progress Indicator Announcements', () => {
-  test('loading states are announced', async ({ page }) => {
-    await page.goto('http://localhost:5175')
-    await waitForAppReady(page, 'artist')
-
-    // Check for loading indicators with proper ARIA
-    const loaders = page.locator(
-      '[role="progressbar"], [aria-busy="true"], [aria-label*="loading"]'
-    )
-    const count = await loaders.count()
-
-    // May not have active loaders
-    expect(count).toBeGreaterThanOrEqual(0)
-  })
-
-  test('progressbar has proper attributes', async ({ page }) => {
-    await page.goto('http://localhost:5175')
-    await waitForAppReady(page, 'artist')
-
-    const progressbar = page.locator('[role="progressbar"]').first()
-    const isVisible = await progressbar.isVisible().catch(() => false)
-
-    if (isVisible) {
-      // Check for value attributes
-      const valueNow = await progressbar.getAttribute('aria-valuenow')
-      const valueMin = await progressbar.getAttribute('aria-valuemin')
-      const valueMax = await progressbar.getAttribute('aria-valuemax')
-
-      // Should have at least aria-valuenow
-      expect(valueNow || valueMin || valueMax).toBeTruthy()
-    }
-  })
-})
+// ESCSUITE-202: "Progress Indicator Announcements" is the same real gap
+// `ARIA Live Regions`' deleted export-progress cases document above — no
+// `role="progressbar"` exists anywhere in ESCAPEARTIST, so both
+// "loading states are announced" and "progressbar has proper attributes"
+// were `count >= 0` / `if (isVisible)` placeholders for a control that was
+// never there to find. Not fixed here (test-only ticket); see the comment
+// above `ARIA Live Regions`' closing brace for the real defect.
 
 test.describe('Button and Control Announcements', () => {
   test('icon buttons have accessible names', async ({ page }) => {
