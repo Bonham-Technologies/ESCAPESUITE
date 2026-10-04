@@ -1,3 +1,5 @@
+import { dirname, resolve as resolvePath } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { test, expect } from '@playwright/test'
 import {
   mockWebCodecsUnavailable,
@@ -7,6 +9,12 @@ import {
 } from '../../utils/error-mocks'
 import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
+
+/** The same one-second fixture the integration and perf suites import. */
+const ARTIST_FIXTURE_MP4 = resolvePath(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../fixtures/headless/source.mp4'
+)
 
 test.describe('Export With No Clips', () => {
   test.beforeEach(async ({ page }) => {
@@ -28,21 +36,13 @@ test.describe('Export With No Clips', () => {
     await expect(exportButton).toBeEnabled()
   })
 
-  test('export button disabled for empty timeline', async ({ page }) => {
-    const exportButton = page
-      .getByRole('button', { name: /export/i })
-      .or(page.locator('[data-testid="export-button"]'))
-      .first()
-
-    const isVisible = await exportButton.isVisible().catch(() => false)
-
-    if (isVisible) {
-      const isDisabled = await exportButton.isDisabled().catch(() => false)
-
-      // Export may be disabled for empty projects
-      expect(typeof isDisabled).toBe('boolean')
-    }
-  })
+  // ESCSUITE-202 K-1/K-4: "export button disabled for empty timeline" used
+  // to wrap its only assertion in `if (isVisible)` around a bare
+  // `typeof isDisabled === 'boolean'` check — always true, and skipped
+  // outright if the locator somehow missed. The test directly above already
+  // makes the real claim (disabled, then enabled once a clip exists) with a
+  // real assertion, so the weaker sibling is deleted rather than kept
+  // alongside it.
 })
 
 test.describe('Export Cancellation', () => {
@@ -249,33 +249,54 @@ test.describe('Storage Quota Exceeded', () => {
   })
 
   test('shows storage full error', async ({ page }) => {
-    // Try to save or export
-    const saveButton = page.getByRole('button', { name: /save|export/i }).first()
-    const isVisible = await saveButton.isVisible().catch(() => false)
+    // ESCSUITE-202 K-5: this used to install the mock and then never write
+    // anything — `shows storage full error` with no write to fail.
+    //
+    // "Save Project" (Ctrl+S) is a file download, not an IndexedDB write —
+    // it does not touch `db.put` at all unless the project references a
+    // source video. The editor's autosave does write (`saveSessionState`,
+    // `db.put('settings', …)`), but its failure is swallowed into
+    // `console.error` with nothing shown to the user — a real, surfaced gap,
+    // not something this test can observe. Importing media is the one write
+    // path whose failure *is* reported: `VideoUploader.tsx`'s catch turns a
+    // `QuotaExceededError` from `db.put('videos', …)` into a visible row.
+    await page.locator('input[type="file"]').setInputFiles(ARTIST_FIXTURE_MP4)
 
-    if (isVisible) {
-      await saveButton.click()
-      await page.waitForTimeout(500)
-
-      // App should still function
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    await expect(
+      page.getByText('Storage quota exceeded. Remove some media to free up space.')
+    ).toBeVisible({ timeout: 30_000 })
   })
 })
 
 test.describe('Background Tab Export', () => {
   test('export continues in background', async ({ page }) => {
+    // ESCSUITE-202 K-9: `typeof Worker !== 'undefined'` tests that Chromium
+    // implements the Worker constructor, not that ESCAPEARTIST's export does
+    // anything with it. The real claim — the CLAUDE.md-documented "MP4
+    // exports run at full speed even in background tabs" — is that the
+    // export's frame loop (`core/exportMP4.ts`, a plain `for` loop with no
+    // rAF/rVFC in it) keeps running once the tab reports itself hidden,
+    // where a rAF-driven exporter would be throttled to near zero.
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+    await seedTextClip(page)
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
+    await page.getByRole('radio', { name: /MP4/ }).check()
 
-    // Background export uses Web Worker which should work
-    // This test verifies the feature is available
-    const hasWorker = await page.evaluate(() => {
-      return typeof Worker !== 'undefined'
+    await page.getByRole('button', { name: 'Download MP4' }).first().click()
+    await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
+
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true })
+      Object.defineProperty(document, 'visibilityState', {
+        value: 'hidden',
+        configurable: true,
+      })
+      document.dispatchEvent(new Event('visibilitychange'))
     })
 
-    expect(hasWorker).toBe(true)
+    await expect(page.getByText('Export complete!')).toBeVisible({ timeout: 30_000 })
   })
 
   test('background tab support is indicated', async ({ page }) => {
