@@ -156,6 +156,60 @@ describe('renderProject', () => {
     expect(((exportToMP4.mock.calls[0] as unknown[])[2] as { timeRange: unknown }).timeRange).toEqual({ start: 2, end: 5 })
   })
 
+  // ESCSUITE-191 / hunt-j J-9: `options.timeRange` reaches the exporter and the
+  // manifest UNCLAMPED. A one-second project asked for `{start: 0, end: 600}`
+  // used to encode ~599 seconds of black and report `durationSec: 600` — the
+  // signed verification manifest describing the request rather than the bytes.
+  it('clamps an end past the timeline instead of inflating the encode and the manifest', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'mp4', timeRange: { start: 0, end: 600 } } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBeLessThanOrEqual(1)
+    expect(((exportToMP4.mock.calls[0] as unknown[])[2] as { timeRange: unknown }).timeRange)
+      .toEqual({ start: 0, end: 1 })
+  })
+
+  it('clamps a negative start to zero instead of inflating the encode and the manifest', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'mp4', timeRange: { start: -5, end: 1 } } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBe(1)
+    expect(((exportToMP4.mock.calls[0] as unknown[])[2] as { timeRange: unknown }).timeRange)
+      .toEqual({ start: 0, end: 1 })
+  })
+
+  it('refuses a timeRange whose clamped intersection with the timeline is empty', async () => {
+    // Both bounds fall after the end of a one-second timeline: there is nothing
+    // left to clamp to, so this must fail the job rather than render 0 frames
+    // or silently keep the out-of-range request.
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 1
+    input.options = { format: 'mp4', timeRange: { start: 2, end: 5 } } as RenderInput['options']
+
+    await expect(renderProject(input)).rejects.toThrow(/options\.timeRange.*does not overlap the timeline/)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('refuses any timeRange on a timeline with no clips, naming the empty extent', async () => {
+    // Zero clips is a zero-second timeline, so every requested range misses it;
+    // the message should say so rather than render nothing or pass the request through.
+    const input = baseInput()
+    input.project.timeline.clips = []
+    input.options = { format: 'mp4', timeRange: { start: 0, end: 1 } } as RenderInput['options']
+
+    await expect(renderProject(input)).rejects.toThrow(/does not overlap the timeline \(0s-0s\)/)
+    expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
   it('rejects a clip whose sourceVideoId is not in sourceVideos instead of rendering black', async () => {
     const input = baseInput()
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).sourceVideoId = 'ghost'

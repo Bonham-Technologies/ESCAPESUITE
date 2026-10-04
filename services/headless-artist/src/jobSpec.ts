@@ -98,9 +98,18 @@ function parseOptions(value: unknown): JobSpec['options'] {
     if (
       !isRecord(timeRange) ||
       typeof timeRange.start !== 'number' ||
-      typeof timeRange.end !== 'number'
+      typeof timeRange.end !== 'number' ||
+      !Number.isFinite(timeRange.start) ||
+      !Number.isFinite(timeRange.end)
     ) {
-      throw new Error('options.timeRange must be an object with numeric "start" and "end"')
+      throw new Error('options.timeRange must be an object with finite numeric "start" and "end"')
+    }
+    // `typeof x === 'number'` alone lets NaN and Infinity through — both fail
+    // `start < end` differently (NaN fails every comparison, Infinity passes
+    // most of them) and neither is a timestamp the render engine can act on,
+    // so both are refused above before either bound is inspected further.
+    if (timeRange.start < 0) {
+      throw new Error('options.timeRange.start must be >= 0')
     }
     if (!(timeRange.start < timeRange.end)) {
       throw new Error('options.timeRange.start must be less than options.timeRange.end')

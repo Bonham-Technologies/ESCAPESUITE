@@ -161,6 +161,26 @@ describe('parseJobSpec', () => {
     ).toThrow(/options\.timeRange/)
   })
 
+  // ESCSUITE-191: `typeof` alone lets NaN and Infinity through as "numbers" —
+  // both reach the exporter and inflate the manifest's durationSec instead of
+  // being refused up front, the way the artist headless render path's own
+  // clamp (renderProject.ts) now refuses an intersection that cannot be made
+  // to work rather than rendering a silently wrong duration.
+  it('rejects a timeRange with a non-finite bound', () => {
+    expect(() =>
+      parseJobSpec(validSpec({ options: { format: 'mp4', timeRange: { start: NaN, end: 5 } } })),
+    ).toThrow(/options\.timeRange/)
+    expect(() =>
+      parseJobSpec(validSpec({ options: { format: 'mp4', timeRange: { start: 0, end: Infinity } } })),
+    ).toThrow(/options\.timeRange/)
+  })
+
+  it('rejects a negative timeRange.start', () => {
+    expect(() =>
+      parseJobSpec(validSpec({ options: { format: 'mp4', timeRange: { start: -5, end: 1 } } })),
+    ).toThrow(/options\.timeRange\.start must be >= 0/)
+  })
+
   it('rejects a missing output object', () => {
     const spec = validSpec()
     delete spec.output
