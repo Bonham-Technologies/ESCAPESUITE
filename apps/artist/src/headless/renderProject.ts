@@ -116,6 +116,28 @@ async function render(
   // `getResolution` and the exporters, instead of silently becoming 1080p.
   const resolution =
     (request.project as Partial<Project>).resolution === undefined ? undefined : project.resolution
+  // Clamp a requested range to the timeline BEFORE the exporter ever sees it: an
+  // `end` past the timeline's own duration (or a `start` before 0) used to reach
+  // the exporter and the manifest untouched, so a one-second project asked for
+  // `{start: 0, end: 600}` encoded ~599 seconds of black and the signed manifest
+  // agreed with the REQUEST rather than with the bytes (ESCSUITE-191 / hunt-j
+  // J-9). `options.timeRange` is replaced in place with the clamped range, so
+  // the exporter call below — unchanged — and the duration derived from it
+  // after that call both read the clamped values, never the raw request. An
+  // intersection that clamps to nothing (both bounds past the end, or both
+  // before 0) is a field-naming failure rather than a render of zero frames.
+  const fullDuration = calculateTimelineDuration(clips)
+  if (options.timeRange) {
+    const { start, end } = options.timeRange
+    const clampedStart = Math.min(Math.max(start, 0), fullDuration)
+    const clampedEnd = Math.min(Math.max(end, 0), fullDuration)
+    if (!(clampedStart < clampedEnd)) {
+      throw new Error(
+        `options.timeRange {start: ${start}, end: ${end}} does not overlap the timeline (0s-${fullDuration}s)`,
+      )
+    }
+    options.timeRange = { start: clampedStart, end: clampedEnd }
+  }
   const progress = onProgress
     ? (ep: { progress: number }) => onProgress(ep.progress)
     : () => {}
@@ -136,7 +158,8 @@ async function render(
   // the same way the engine does, so the manifest (Plan 2) matches the bytes.
   const base = getBaseDimensions(clips, tracks, sourceVideos)
   const out = getResolution(options.resolution, base.width, base.height, resolution)
-  const fullDuration = calculateTimelineDuration(clips)
+  // `options.timeRange`, if present, was already clamped to the timeline above —
+  // this reads the clamped values, never the caller's raw request.
   const rangeStart = options.timeRange?.start ?? 0
   const rangeEnd = options.timeRange?.end ?? fullDuration
   // A GIF plays for as long as its frame delays say, and the format stores those
