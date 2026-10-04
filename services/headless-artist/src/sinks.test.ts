@@ -529,8 +529,11 @@ describe('command sink delivery timeout', () => {
       'command sink timed out after 200 ms',
     )
     // Settling at all, well short of the 4 s sleep, is itself proof the child was killed rather
-    // than merely abandoned: nothing else would make `close` fire this early.
-    expect(Date.now() - startedAt).toBeLessThan(1500)
+    // than merely abandoned. The bound is the design's own: SIGTERM at the budget, SIGKILL
+    // COMMAND_KILL_GRACE_MS later, and the rejection no later than that second timer — a loaded
+    // CI runner has been seen taking the full escalation (2206 ms) where a quiet machine settles
+    // on `close` at ~250 ms, so the assertion allows the escalation plus a second of slack.
+    expect(Date.now() - startedAt).toBeLessThan(200 + 2000 + 1000)
   }, 10_000)
 
   it('does not time out a command that finishes well inside its budget', async () => {
