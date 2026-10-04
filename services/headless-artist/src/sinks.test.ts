@@ -1103,6 +1103,79 @@ describe('webhook sink refuses a redirect (ESCSUITE-205)', () => {
     // The render never reached the host the operator never configured.
     expect(targetHits).toBe(0)
   })
+
+  it('names only the status when the redirect carries no Location header', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-redirect-no-location' })
+
+    const intake = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        // A 3xx with no Location at all -- malformed, but the sink must still refuse it
+        // rather than crash constructing the message.
+        res.writeHead(302)
+        res.end()
+      })
+    })
+    cleanupServers.push(intake)
+    await new Promise<void>((resolve) => intake.listen(0, '127.0.0.1', () => resolve()))
+    const port = (intake.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/intake` })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      'webhook sink refused to follow a redirect (302)',
+    )
+  })
+})
+
+// Review finding 8 / coverage: drainBody's two conditionals (a response with no body at all,
+// and a body that errors partway through) each need a case reaching both their arms.
+describe('webhook sink body draining (ESCSUITE-205 / review finding 8)', () => {
+  it('succeeds against a 204 response, which has no body at all to drain', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-no-content' })
+
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(204)
+        res.end()
+      })
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/intake` })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toBeDefined()
+  })
+
+  it('still succeeds when the response body errors partway through the drain', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest({ jobId: 'job-body-error' })
+
+    // A Content-Length that promises more than is ever sent, then the socket is cut: the
+    // client's fetch resolves with a 200 (headers already arrived), but reading the body
+    // throws partway through. The drain's own try/catch must swallow that -- the delivery
+    // still succeeds on the status this response already answered with.
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200, { 'content-length': '1000' })
+        res.write('short')
+        setTimeout(() => res.socket?.destroy(), 20)
+      })
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${port}/intake`, timeoutMs: 5000 })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).resolves.toBeDefined()
+  })
 })
 
 describe('webhook sink transport failures', () => {

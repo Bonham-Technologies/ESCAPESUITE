@@ -386,6 +386,28 @@ function isTimeoutError(err: unknown): boolean {
   return false
 }
 
+/**
+ * Reads `response`'s body to completion without accumulating it anywhere, so undici can
+ * return the connection to its keep-alive pool (ESCSUITE-205 / hunt-j unverified / verify V-1)
+ * without buffering a misconfigured or hostile intake's response into memory first the way
+ * `response.arrayBuffer()` would. A response with no body (a 204, say) has `body: null` and
+ * needs nothing drained; a body that errors mid-read has nothing further to drain either way —
+ * the delivery's own status/redirect checks below still decide success or failure from the
+ * response already in hand, not from whether the drain itself finished cleanly.
+ */
+async function drainBody(response: Response): Promise<void> {
+  if (!response.body) return
+  try {
+    // DOM's ReadableStream type (this package's lib) does not declare Symbol.asyncIterator,
+    // but Node's actual implementation (and the one this runs on) supports it.
+    for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+      void chunk
+    }
+  } catch {
+    // See the doc comment above: nothing left to drain, and nothing this function decides.
+  }
+}
+
 function createWebhookSink(config: WebhookConfig): OutputSink {
   return {
     async deliver(jobId, outputPath, manifest) {
@@ -423,7 +445,7 @@ function createWebhookSink(config: WebhookConfig): OutputSink {
       // the connection to its keep-alive pool instead of holding it (and whatever bytes it
       // buffered) open until GC. An unread body meant one fresh TCP connection per delivery
       // (ESCSUITE-205 / hunt-j unverified / verify V-1).
-      await response.arrayBuffer().catch(() => undefined)
+      await drainBody(response)
 
       if (response.status >= 300 && response.status < 400) {
         const location = response.headers.get('location')
