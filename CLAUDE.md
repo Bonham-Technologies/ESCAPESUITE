@@ -2772,7 +2772,14 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
   none; and this workflow's `gh release create` always passes `--latest`, with the skip path (the
   umbrella tag already exists because neither app bumped) now running
   `gh release edit "v${VERSION}" --latest` before exiting, so a kit-only release re-asserts the
-  umbrella as latest rather than leaving it be.
+  umbrella as latest rather than leaving it be. `make_latest: false` only moves the pointer off a
+  release that is *becoming* not-latest, so it does nothing when the release it is marking is
+  already GitHub's "latest" (observed 2026-10-04: `/releases/latest` named a shared-only release
+  for ~25 minutes after the not-latest job succeeded) — `mark-per-package-releases-not-latest`
+  therefore marks the current umbrella `vX.Y.Z` release latest itself, right after the
+  per-package marking, so the pointer is never on a per-package release for longer than that job
+  takes (ESCSUITE-218); `standalone-release.yml`'s own `--latest` above repeats it as the second
+  line of defence.
 
 **Standalone Release** (`.github/workflows/standalone-release.yml`):
 - Runs after CI succeeds on `main` (and attaches preview builds as workflow artifacts for PRs)
