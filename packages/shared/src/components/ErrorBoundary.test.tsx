@@ -13,12 +13,20 @@ function Fine() {
   return <div data-testid="fine">all good</div>
 }
 
+// Captured fresh each test and restored in afterEach regardless of outcome
+// (ESCSUITE-212 R6) — the "reload the page" test below stubs this, and an
+// assertion failing between the stub and an inline restore would otherwise
+// leave window.location stubbed for every test after it in this file.
+let originalLocation: Location
+
 beforeEach(() => {
+  originalLocation = window.location
   vi.stubEnv('DEV', true)
   vi.spyOn(console, 'error').mockImplementation(() => {})
 })
 
 afterEach(() => {
+  Object.defineProperty(window, 'location', { configurable: true, value: originalLocation })
   vi.unstubAllEnvs()
   vi.restoreAllMocks()
 })
@@ -75,7 +83,6 @@ describe('ErrorBoundary', () => {
 
   it('reloads the page when the Reload button is clicked', () => {
     const reload = vi.fn()
-    const originalLocation = window.location
     Object.defineProperty(window, 'location', {
       configurable: true,
       value: { ...originalLocation, reload },
@@ -89,8 +96,6 @@ describe('ErrorBoundary', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
 
     expect(reload).toHaveBeenCalledTimes(1)
-
-    Object.defineProperty(window, 'location', { configurable: true, value: originalLocation })
   })
 
   it('calls onError exactly once, with the error and React info', () => {
