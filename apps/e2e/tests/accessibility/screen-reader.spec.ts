@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockGetUserMedia, mockMediaRecorder, grantMediaPermissions } from '../../utils/media-mocks'
-import { seedTextClip } from '../../utils/artist'
+import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ARIA Live Regions', () => {
@@ -25,18 +25,46 @@ test.describe('ARIA Live Regions', () => {
     await expect(liveRegion).toHaveAttribute('aria-atomic', 'true')
   })
 
-  // ESCSUITE-202: a real app defect, not fixed here (test-only ticket). The
-  // export dialog's progress section (`components/Export/ExportDialog.tsx`,
-  // the `.progressInfo`/`.progressBar` block around line 583) carries no
-  // `role="progressbar"`, `aria-live` or `aria-busy` anywhere — the
-  // "Encoding frame N/M" text and the percentage are visual-only, so a
-  // screen-reader user gets no spoken update while an export runs. The
-  // dialog's handful of `role="status"` spans are all *after*-the-fact notes
-  // (an estimated size, a "no audio" summary once the export completes),
-  // never the live phase/percentage. "ESCAPEARTIST announces export
-  // progress" and "progressbar has proper attributes" below had no real
-  // `role="progressbar"` or live region to find and are deleted rather than
-  // kept as `count >= 0` placeholders for one.
+  // ESCSUITE-215: the real case the ESCSUITE-202 comment that stood here said
+  // it had no feature to write against. That comment reported the defect —
+  // the export dialog's progress section carried no `role="progressbar"` and
+  // no live region, so an export that can run for minutes was visual only —
+  // and ESCSUITE-215 fixed it. A real MP4 export is the only way to see the
+  // progress view at all, and comfortably outruns the default 30s budget.
+  test('ESCAPEARTIST announces export progress', async ({ page }) => {
+    test.setTimeout(120_000)
+
+    await page.goto('http://localhost:5175')
+    await waitForAppReady(page, 'artist')
+
+    // Export is disabled until the timeline holds a clip.
+    await seedTextClip(page)
+    await openExportDialog(page)
+    await openExportAdvancedOptions(page)
+    await page.getByRole('radio', { name: /MP4/ }).check()
+
+    await page.getByRole('button', { name: 'Download MP4' }).first().click()
+
+    const dialog = page.getByRole('dialog')
+    const bar = dialog.getByRole('progressbar')
+    await expect(bar).toBeVisible({ timeout: 30_000 })
+    await expect(bar).toHaveAttribute('aria-label', 'Export progress')
+    await expect(bar).toHaveAttribute('aria-valuemin', '0')
+    await expect(bar).toHaveAttribute('aria-valuemax', '100')
+    // A number, not a template literal that rendered as one: an
+    // `aria-valuenow` of "NaN%" or "undefined" is the failure this guards.
+    await expect(bar).toHaveAttribute('aria-valuenow', /^\d+$/)
+
+    // One polite region for the whole progress view, throttled — so what is
+    // asserted is the end of the run, which is announced whatever the
+    // throttle would otherwise have said. Waited for in one assertion rather
+    // than after a separate "Export complete!" check: the dialog closes
+    // itself two seconds later.
+    const status = dialog.getByRole('status')
+    await expect(status).toHaveAttribute('aria-live', 'polite')
+    await expect(status).toHaveAttribute('aria-atomic', 'true')
+    await expect(status).toContainText('Export complete', { timeout: 60_000 })
+  })
 })
 
 test.describe('Dialog Announcements', () => {
@@ -126,13 +154,12 @@ test.describe('Landmark Regions', () => {
 // `count >= 0`, it could not have failed for any reason — and is deleted
 // rather than kept as a placeholder for a form that does not exist.
 
-// ESCSUITE-202: "Progress Indicator Announcements" is the same real gap
-// `ARIA Live Regions`' deleted export-progress cases document above — no
-// `role="progressbar"` exists anywhere in ESCAPEARTIST, so both
-// "loading states are announced" and "progressbar has proper attributes"
-// were `count >= 0` / `if (isVisible)` placeholders for a control that was
-// never there to find. Not fixed here (test-only ticket); see the comment
-// above `ARIA Live Regions`' closing brace for the real defect.
+// ESCSUITE-202/215: "Progress Indicator Announcements" was two `count >= 0` /
+// `if (isVisible)` placeholders for a `role="progressbar"` that did not exist
+// anywhere in ESCAPEARTIST. One does now, and the case that asserts its
+// attributes against a real export is `ARIA Live Regions` ›
+// "ESCAPEARTIST announces export progress" above, where the live region it
+// shares the progress view with is asserted too.
 
 test.describe('Button and Control Announcements', () => {
   test('icon buttons have accessible names', async ({ page }) => {

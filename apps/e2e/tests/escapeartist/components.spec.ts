@@ -69,7 +69,9 @@ test.describe('Export Dialog', () => {
     await page.getByRole('button', { name: 'Download WebM' }).first().click()
 
     // Encoding reports which frame it is on, so the user can tell it is moving
-    await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
+    // `.first()` since ESCSUITE-215: the progress view's live region carries
+    // the same words a second time, for ears rather than eyes.
+    await expect(page.getByText(/Encoding frame \d+\/\d+/).first()).toBeVisible({ timeout: 30_000 })
 
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()

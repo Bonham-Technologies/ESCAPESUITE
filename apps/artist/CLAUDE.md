@@ -3603,6 +3603,34 @@ the bitrate and no browser has been observed to accept a codec at one bitrate an
 another. A browser that did would pass the probe and fail at `configure()`, which is what the
 recovery screen is for.
 
+**The progress view speaks (ESCSUITE-215).** It used to be visual only: the bar was a styled
+`<div>` with a width on it and no role, and the per-frame "Encoding frame N/M" line and the
+percentage were text on screen and nothing more — so an export that can run for minutes reported
+nothing at all to a screen reader. The bar is now `role="progressbar"` with
+`aria-label="Export progress"`, `aria-valuemin="0"`, `aria-valuemax="100"` and an `aria-valuenow`
+rounded the way the percentage beside it already is (a fractional value is read out digit by
+digit). Beside it sits **one** `role="status"` (`aria-live="polite"`, `aria-atomic="true"`),
+rendered for the whole of the progress view and empty until there is something to say — a live
+region a reader first meets already populated is not a change, and is not announced. What it says
+is throttled by `components/Export/progressAnnouncement.ts`'s pure
+`shouldAnnounceProgress(previous, next, nowMs)`: the first report of a run, then each new
+ten-percentage-point band (`ANNOUNCE_STEP_PERCENT`) or every five seconds
+(`ANNOUNCE_INTERVAL_MS`), whichever comes first — the band keeps a fast export from interrupting
+itself once per encoded frame, the clock keeps a slow one from going silent inside a band. The
+completion report is the one exception that always speaks, because a throttle that swallowed it
+would leave the last thing heard being a frame count part-way through; the failure sentence is
+unchanged and still the `role="alert"` it has always been, so there are two channels and not
+three. The announced text is the progress message with the percentage appended
+(`Encoding frame 90/300 (30%)`), which makes each announcement a self-contained sentence and —
+deliberately — never the exact text of a visible node; the visible message keeps updating per
+frame and carries `aria-hidden="true"`, so the same words are not met twice. The throttle's
+bookkeeping and the announced text are **refs**, written immediately before the `setProgress`
+every report already makes: there is no second piece of state and so no extra render per encoded
+frame. Two consequences outside this file: a Playwright `getByText` of "Encoding frame N/M" or
+"Export complete!" now matches twice and needs `.first()` (four call sites carry that note), and
+`apps/e2e/tests/accessibility/screen-reader.spec.ts` › "ESCAPEARTIST announces export progress"
+is the end-to-end pin, driving a real MP4 export.
+
 ### Black Flash Prevention (`src/core/elementFrames.ts`, `src/core/canvasRenderer.ts`)
 To prevent black frames during export:
 - **Seek timeout**: 500ms for reliable seeking. One-shot, and since ESCSUITE-159 the two

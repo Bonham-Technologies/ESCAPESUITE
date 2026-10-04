@@ -161,7 +161,9 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
     await seedTextClip(page)
     await page.getByRole('button', { name: 'Export video' }).click()
     await page.getByRole('button', { name: 'Download WebM' }).first().click()
-    await expect(page.getByText('Export complete!')).toBeVisible({ timeout: 30_000 })
+    // `.first()` since ESCSUITE-215: the progress view's live region carries
+    // the same words a second time, for ears rather than eyes.
+    await expect(page.getByText('Export complete!').first()).toBeVisible({ timeout: 30_000 })
 
     await page.waitForTimeout(2000)
 

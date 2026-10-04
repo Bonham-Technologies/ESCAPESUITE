@@ -54,7 +54,9 @@ test.describe('Export Cancellation', () => {
 
     // Encoding reports live progress; cancelling mid-encode has to tear the
     // export down and hand the editor back.
-    await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
+    // `.first()` since ESCSUITE-215: the progress view's live region carries
+    // the same words a second time, for ears rather than eyes.
+    await expect(page.getByText(/Encoding frame \d+\/\d+/).first()).toBeVisible({ timeout: 30_000 })
     await page.getByRole('button', { name: 'Cancel', exact: true }).click()
 
     await expect(page.getByRole('heading', { name: 'Export Video' })).toBeHidden()
@@ -310,8 +312,10 @@ test.describe('Background Tab Export', () => {
     await page.getByRole('radio', { name: /MP4/ }).check()
 
     await page.getByRole('button', { name: 'Download MP4' }).first().click()
-    await expect(page.getByText(/Encoding frame \d+\/\d+/)).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText('Export complete!')).toBeVisible({ timeout: 60_000 })
+    // `.first()` since ESCSUITE-215: the progress view's live region carries
+    // the same words a second time, for ears rather than eyes.
+    await expect(page.getByText(/Encoding frame \d+\/\d+/).first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText('Export complete!').first()).toBeVisible({ timeout: 60_000 })
   })
 
   test('background tab support is indicated', async ({ page }) => {

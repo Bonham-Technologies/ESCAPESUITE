@@ -2666,6 +2666,31 @@ ESCSUITE-202 rewrite left as a comment — the link off-screen, the first Tab la
 focused, Enter moving focus into `main` — red on `main`, 21 / 21 on Chromium with the change, and
 `core.spec.ts`'s 32 axe cases unaffected. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-04 for ESCSUITE-215 (the export dialog's progress is no longer
+visual-only: the bar is a `role="progressbar"` with an integer `aria-valuenow`, a label and its bounds, and
+one `role="status"` live region — rendered empty with the progress view and populated by the throttle in
+`progressAnnouncement.ts`: the first report of a run, then each new ten-point band or five seconds, whichever
+comes first, with the completion sentence always spoken — carries "Encoding frame N/M (30%)" at a rate a
+screen reader can finish saying, while the visible per-frame line is `aria-hidden`; both the bookkeeping and
+the words are refs written before the `setProgress` each report already makes, so no render is added per
+encoded frame): 99.80 / 99.27 / 95.80 / 99.68, byte-identical on every percentage to the 99.80 / 99.27 / 95.80 / 99.68
+that `main` at `5ebfccbe` (the ESCSUITE-217 version-packages commit) measures in the same sitting. Lines 7,779 / 7,794 → 7,795 / 7,810, statements
+8,784 / 8,848 → 8,802 / 8,866, branches 4,973 / 5,191 → 4,981 / 5,199 and functions 1,888 / 1,894 →
+1,890 / 1,896, every denominator
+growing by exactly what the numerator did; the same 15 / 64 / 218 / 6 uncovered. The eight new branches are
+`progressAnnouncement.ts`'s four (`previous === null`, the band comparison and the interval floor, each from
+both sides by that module's cases — 10 and 10.1 cross a band, 9.9 and 4 do not, 50 → 20 does not, the floor
+at exactly 5,000 ms and at 4,999) and `ExportDialog.tsx`'s four (the `'complete'` exemption against an
+encoding report, and the throttle's verdict in both directions — the first report and the 10.2 % report
+spoken, the 5 % report not), with the file's one pre-existing uncovered arm untouched. Mutations the
+implementer ran: dropping the `'complete'` operand reds the completion case alone; `if (true)` reds the
+band case alone; deleting the per-run reset reds "starts each run's announcements over". The
+`ExportDialog.rerender` pins and every `*.perf.test.ts` are byte-identical. Outside vitest's measurement,
+`apps/e2e/tests/accessibility/screen-reader.spec.ts` gains a real MP4 export asserting the progressbar's
+numeric value during the run and the region naming "Export complete" after (10 / 10 on Chromium), and four
+`getByText` locators across three specs gain `.first()` because the words now exist twice, once for eyes
+and once for ears. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
