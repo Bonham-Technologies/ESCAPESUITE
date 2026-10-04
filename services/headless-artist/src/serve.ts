@@ -398,23 +398,32 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     let spec
     try {
       spec = parseJobSpec(json)
-      // The one sink-config check parseJobSpec cannot run synchronously: whether the
-      // optional s3 SDK can even be loaded. Still before the job is queued (ESCSUITE-192 /
-      // hunt-j J-4).
-      await ensureSinkReady(spec.output)
     } catch (err) {
       send(res, 400, withWarnings({ error: messageOf(err) }))
       return 400
     }
 
-    // Decided before anything is queued: a sink this server does not enable is a refusal, not
-    // a job that fails later. The caller picks the sink, so this is the whole security boundary
-    // between "renders video" and "runs the program you named".
+    // Decided before anything else, allow-list included: a sink this server does not enable
+    // is a refusal, not a job that fails later -- and not a sink probed for readiness on its
+    // behalf either (review finding 4: probing first meant a disallowed s3 job answered 400,
+    // from the SDK-missing check, rather than the documented 403). The caller picks the sink,
+    // so this is the whole security boundary between "renders video" and "runs the program
+    // you named".
     if (!allowedSinks.includes(spec.output.sink)) {
       send(res, 403, withWarnings({
         error: `sink "${spec.output.sink}" is not enabled on this server (HEADLESS_SINKS)`,
       }))
       return 403
+    }
+
+    try {
+      // The one sink-config check parseJobSpec cannot run synchronously: whether the
+      // optional s3 SDK can even be loaded. Still before the job is queued (ESCSUITE-192 /
+      // hunt-j J-4), and now only for a sink this server actually allows.
+      await ensureSinkReady(spec.output)
+    } catch (err) {
+      send(res, 400, withWarnings({ error: messageOf(err) }))
+      return 400
     }
 
     // The response is written inside the limiter slot so that "the job finished" and "the
