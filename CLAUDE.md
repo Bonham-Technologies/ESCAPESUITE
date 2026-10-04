@@ -2473,6 +2473,29 @@ and `pages/Home.tsx` three handlers, all statements. The workflow guard (`script
 four `node:test` cases red against the unmodified workflows) and the e2e pin are outside this package's
 measurement. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
 
+`@escapesuite/shared` was re-measured 2026-10-03 for ESCSUITE-208 (`useDialogBehaviour`'s focus trap decides "rendered"
+by `getClientRects().length > 0` rather than `offsetParent !== null`, so a `position: fixed` control inside a dialog takes
+initial focus and sits in the Tab cycle; the focusable selector gains `[contenteditable]:not([contenteditable="false"])`,
+`audio[controls]`, `video[controls]`, `iframe` and `summary`, so a click into such an element followed by Tab can no longer
+leave an `aria-modal` dialog; and Escape acts only in the topmost of the open dialogs through a module-level stack, chosen
+over `stopImmediatePropagation()` because capture listeners on one node fire in registration order and the bottom dialog
+would have acted first): 100.00 / **98.56** / **91.66** / 100.00 against the 100.00 / 98.52 / 91.54 / 100.00 that `main` at
+`5ba05466` measures in the same sitting — statements up four hundredths, branches up twelve, lines and functions still
+exactly 100. The base gives 130 / 142 branches and this branch 132 / 144: two new branches, two covered, the same 12
+uncovered as before (lines 255 → 260, statements 268 / 272 → 274 / 278, functions 69 on both; the same 4 statements
+uncovered). The two are `openDialogs[openDialogs.length - 1] !== id` — the topmost-only gate on Escape, reached by the
+two-dialog case (the inner closes, the outer does not) and by every single-dialog Escape case — and the gate's own false
+side; the visibility filter is a comparison, not an Istanbul branch, and its exclusion side is pinned by behaviour (one
+button whose `getClientRects()` is empty is skipped by initial focus and by the forward wrap), as is the stack's
+`indexOf`-addressed removal (the outer dialog closing first leaves the inner closable — red under a `pop()` mutant). The
+review's one ruling on the selector deleted a sixth arm, `area[href]`: redundant with the bare `[href]` arm and unreachable
+anyway, since `area` is `display: none` in every UA stylesheet and the new filter drops it. The jsdom doubles that had
+stubbed `offsetParent` so the trap found anything — the hook's own, craft's `browser.ts`, artist's `layout.ts` and an
+undocumented private copy in `ExportDialog.test.tsx` — stub `getClientRects` instead, with craft (1,314) and artist
+(4,383) unchanged; a new `apps/e2e/tests/accessibility/dialog-trap.spec.ts` pins the fixed-control and contenteditable
+cases against CRAFT's help dialog on Chromium, Firefox and WebKit, outside this measurement. **No floor crossed**;
+shared's floors stay 100 / 98 / 91 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2481,7 +2504,7 @@ never above what the suite actually achieves:
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.52 | 97.77 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.27 | 95.79 | 99.68 |
-| `@escapesuite/shared` | 100.00 | 98.52 | 91.54 | 100.00 |
+| `@escapesuite/shared` | 100.00 | 98.56 | 91.66 | 100.00 |
 | `@escapesuite/headless-artist` | 99.51 | 99.42 | 98.36 | 98.62 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down

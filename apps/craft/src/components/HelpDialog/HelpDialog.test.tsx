@@ -8,17 +8,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HelpDialog } from './HelpDialog'
-import { installOffsetParentStub } from '../../test/doubles/browser'
+import { installGetClientRectsStub } from '../../test/doubles/browser'
 import styles from '../../App.module.css'
 
-let restoreOffsetParent: () => void
+let restoreGetClientRects: () => void
 
 beforeEach(() => {
-  restoreOffsetParent = installOffsetParentStub()
+  restoreGetClientRects = installGetClientRectsStub()
 })
 
 afterEach(() => {
-  restoreOffsetParent()
+  restoreGetClientRects()
   document.body.innerHTML = ''
 })
 

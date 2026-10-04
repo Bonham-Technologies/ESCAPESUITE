@@ -9,6 +9,7 @@ import {
   noAudioNote,
 } from '../../core/exportTypes'
 import { installWebCodecsDoubles } from '../../test/doubles/webcodecs'
+import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import { useEditorStore } from '../../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
 import type { ExportProgress } from '../../store/types'
@@ -124,22 +125,6 @@ async function settle() {
     await Promise.resolve()
     await Promise.resolve()
   })
-}
-
-/**
- * jsdom leaves offsetParent null on every element, which the dialog's focus
- * trap reads as "not visible". Make the tree look laid out.
- */
-function pretendElementsAreVisible(): () => void {
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
-  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
-    configurable: true,
-    get: () => document.body,
-  })
-  return () => {
-    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
-    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
-  }
 }
 
 describe('ExportDialog', () => {

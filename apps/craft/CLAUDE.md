@@ -315,12 +315,34 @@ Stopping Escape is not enough on its own, because R, P and S never reach the dia
 `App` computes it as `showHelpModal || playbackUrl !== null`. Before that gate, pressing R inside
 the Help dialog put a screen-capture prompt up from behind it.
 
-**The hook assumes one dialog at a time**, and today that holds: each backdrop is
+**No dialog in either app can reach a two-open state today**: each backdrop is
 `position: fixed; inset: 0` at `z-index: 1000`, so a click aimed at the Help button while
 playback is open lands on the playback backdrop and closes it instead, and the focus trap keeps
-that button out of Tab's reach. Two mounted at once would bind two capture listeners, and one
-Escape would close both and fire two focus restores. A third dialog, or a dialog opened from
-inside another, has to keep that property or the hook needs a stack.
+that button out of Tab's reach. But the hook no longer *assumes* one dialog at a time either
+(ESCSUITE-208): two mounted at once each bind their own capture listener on `document`, and
+`stopPropagation()` does nothing for a second listener on the same node — so one Escape used to
+close both and fire two focus restores. A module-level stack of open dialogs now means only the
+topmost instance's `onClose` actually runs; every instance still claims the key first (so the
+app's own shortcuts behind it still see nothing), it is only *acting* on it that is now
+exclusive to the top of the stack. `stopImmediatePropagation()` would have picked the *wrong*
+one: capture listeners on one node fire in the order they were added, so the earliest-opened
+(bottommost) dialog's listener runs first, and unconditionally stopping there would close the
+dialog underneath instead of the one on top.
+
+The focus trap itself also used to miss two things a real browser exposes that jsdom's test
+doubles were hiding (ESCSUITE-208, hunt-i I-U2/I-U3): `getFocusable()` filtered on
+`el.offsetParent !== null`, which a real browser also sets `null` for any `position: fixed`
+control — dropping it from the trap entirely rather than treating it as merely hidden — so it
+now reads `el.getClientRects().length > 0` instead, which means "is this actually rendered"
+without caring what positioning scheme put it there. And the focusable-element selector only
+named the control types the seven dialogs across both apps happen to use; it now also matches
+`[contenteditable]`, `audio[controls]`, `video[controls]`, `iframe` and `summary`, so a rich-text
+field or a native media player inside a future dialog can no longer walk Tab straight out of an
+`aria-modal` dialog. Neither gap is reachable through either app's dialogs as shipped today —
+none contains such a control — so both are hardening, pinned in
+`packages/shared/src/hooks/useDialogBehaviour.test.tsx` and in
+`apps/e2e/tests/accessibility/dialog-trap.spec.ts` (against this app's own Recording Tips
+dialog, since CRAFT's modals are the simplest ones to inject a probe element into).
 
 **What axe covers.** `apps/e2e/tests/accessibility/core.spec.ts` audits CRAFT in four states,
 not one: idle, Help open, the playback dialog open over a real saved take, and a take in

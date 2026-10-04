@@ -40,25 +40,33 @@ export function setRects(boxes: Array<[Element, Box]>): void {
 }
 
 /**
- * Make every element report a layout box for `offsetParent`.
+ * Make every element report a non-empty `getClientRects()`.
  *
- * jsdom performs no layout, so `HTMLElement.offsetParent` is `null` even on
- * elements plainly on screen. The shared focus trap (`useDialogBehaviour` in
- * `@escapesuite/shared/hooks`) uses `offsetParent !== null` to skip controls CSS
- * has hidden, so under jsdom it would otherwise find nothing focusable in any
- * dialog at all.
+ * jsdom performs no layout, so `HTMLElement.getClientRects()` returns an
+ * empty list even for elements plainly on screen. The shared focus trap
+ * (`useDialogBehaviour` in `@escapesuite/shared/hooks`) uses
+ * `getClientRects().length > 0` to skip controls CSS has hidden, so under
+ * jsdom it would otherwise find nothing focusable in any dialog at all.
  *
- * Report `document.body` for every element instead — what a rendered element's
- * offsetParent would be — and hand back the undo.
+ * Report one rect for every element instead — what a rendered element's
+ * `getClientRects()` would return — and hand back the undo.
+ *
+ * ESCSUITE-208 (I-U3): this used to stub `offsetParent` instead, because the
+ * trap used to filter on `offsetParent !== null` — which a real browser also
+ * sets to `null` for any `position: fixed` control, dropping it from the trap
+ * entirely rather than merely treating it as hidden. The trap now reads
+ * `getClientRects()`, so this double moved onto the same property; the name
+ * stays the same because callers only care that it makes elements visible to
+ * the trap, not which DOM property it does that through.
  */
 export function pretendElementsAreVisible(): () => void {
-  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent')
-  Object.defineProperty(HTMLElement.prototype, 'offsetParent', {
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'getClientRects')
+  Object.defineProperty(HTMLElement.prototype, 'getClientRects', {
     configurable: true,
-    get: () => document.body,
+    value: () => [{} as DOMRect],
   })
   return () => {
-    if (original) Object.defineProperty(HTMLElement.prototype, 'offsetParent', original)
-    else Reflect.deleteProperty(HTMLElement.prototype, 'offsetParent')
+    if (original) Object.defineProperty(HTMLElement.prototype, 'getClientRects', original)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'getClientRects')
   }
 }
