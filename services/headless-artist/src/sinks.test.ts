@@ -926,6 +926,130 @@ describe('webhook sink', () => {
   })
 })
 
+// ESCSUITE-205 (hunt-j unverified / verify V-1): the response was checked for `ok` and
+// dropped without ever being read or cancelled, so undici could not return the connection to
+// its keep-alive pool -- every delivery opened a fresh TCP connection to the intake endpoint
+// instead of reusing one.
+describe('webhook sink drains the response body (ESCSUITE-205)', () => {
+  it('reuses the keep-alive connection across deliveries instead of opening one per delivery', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest()
+
+    // A large keep-alive body: big enough that undici cannot have it buffered and done with,
+    // so an unread body is what blocks the connection from going back to the pool.
+    const body = 'x'.repeat(256 * 1024)
+    let connections = 0
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200, {
+          'content-type': 'text/plain',
+          'content-length': String(body.length),
+          connection: 'keep-alive',
+        })
+        res.end(body)
+      })
+    })
+    server.keepAliveTimeout = 30_000
+    server.on('connection', () => {
+      connections++
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+    const url = `http://127.0.0.1:${port}/upload`
+
+    const sink = await getSink('webhook', { url })
+    const N = 8
+    for (let i = 0; i < N; i++) {
+      await sink.deliver(`job-${i}`, outputPath, manifest)
+    }
+
+    // A sink that reads or cancels the body reuses undici's pooled connection; the defect was
+    // one socket per delivery.
+    expect(connections).toBeLessThan(4)
+  }, 30_000)
+
+  it('drains the body on a failure response too', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('bytes'))
+    const manifest = fakeManifest()
+
+    const body = 'x'.repeat(256 * 1024)
+    let connections = 0
+    const server = http.createServer((req, res) => {
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(500, { 'content-length': String(body.length), connection: 'keep-alive' })
+        res.end(body)
+      })
+    })
+    server.keepAliveTimeout = 30_000
+    server.on('connection', () => {
+      connections++
+    })
+    cleanupServers.push(server)
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+    const port = (server.address() as AddressInfo).port
+    const url = `http://127.0.0.1:${port}/upload`
+
+    const sink = await getSink('webhook', { url })
+    for (let i = 0; i < 4; i++) {
+      await expect(sink.deliver(`job-${i}`, outputPath, manifest)).rejects.toThrow(/webhook sink failed: 500/)
+    }
+
+    expect(connections).toBeLessThan(4)
+  }, 30_000)
+})
+
+// ESCSUITE-205 (hunt-j unverified / verify V-2): `fetch` followed a redirect by default, so a
+// 307/308 from the configured intake endpoint re-POSTed the whole render and the caller's own
+// headers to a host the operator never named.
+describe('webhook sink refuses a redirect (ESCSUITE-205)', () => {
+  it('fails the delivery naming the Location, and the render never reaches the redirect target', async () => {
+    const srcDir = await makeTempDir()
+    const outputPath = await makeOutputFile(srcDir, Buffer.from('THE-WHOLE-RENDER-BYTES'))
+    const manifest = fakeManifest({ jobId: 'job-redirect' })
+
+    let targetHits = 0
+    const target = http.createServer((req, res) => {
+      targetHits++
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(200)
+        res.end('ok')
+      })
+    })
+    cleanupServers.push(target)
+    await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', () => resolve()))
+    const targetPort = (target.address() as AddressInfo).port
+    const targetUrl = `http://127.0.0.1:${targetPort}/stolen`
+
+    let redirectHits = 0
+    const intake = http.createServer((req, res) => {
+      redirectHits++
+      req.on('data', () => {})
+      req.on('end', () => {
+        res.writeHead(307, { location: targetUrl })
+        res.end()
+      })
+    })
+    cleanupServers.push(intake)
+    await new Promise<void>((resolve) => intake.listen(0, '127.0.0.1', () => resolve()))
+    const intakePort = (intake.address() as AddressInfo).port
+
+    const sink = await getSink('webhook', { url: `http://127.0.0.1:${intakePort}/intake` })
+    await expect(sink.deliver(manifest.jobId, outputPath, manifest)).rejects.toThrow(
+      new RegExp(`refused to follow a redirect.*${targetUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`),
+    )
+
+    expect(redirectHits).toBe(1)
+    // The render never reached the host the operator never configured.
+    expect(targetHits).toBe(0)
+  })
+})
+
 describe('webhook sink transport failures', () => {
   /** A port nothing is listening on: bind one, read it back, then give it up. */
   async function closedPort(): Promise<number> {
