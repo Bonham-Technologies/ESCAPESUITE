@@ -164,6 +164,15 @@
   background: var(--bg-hover);
 }
 
+.menuItem:focus-visible {
+  /* ESCSUITE-216: the menu has one tab stop and the arrows move focus
+     between items, so the focus ring is how a keyboard user reads where
+     they are. Drawn inside the row — the dropdown clips at its own edge. */
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+  background: var(--bg-hover);
+}
+
 .menuItem:disabled {
   color: var(--text-muted);
   cursor: not-allowed;

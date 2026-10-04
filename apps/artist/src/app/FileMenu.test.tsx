@@ -263,3 +263,60 @@ describe('FileMenu arrow-key navigation (ESCSUITE-216)', () => {
     expect(screen.getAllByRole('menuitem')[2]).toHaveFocus();
   });
 });
+
+describe('FileMenu Escape, Tab and activation (ESCSUITE-216)', () => {
+  it('closes on Escape and gives focus back to the File button', async () => {
+    const user = userEvent.setup();
+    const { onClose } = renderMenu();
+    expect(screen.getAllByRole('menuitem')[0]).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'File menu' })).toHaveFocus();
+  });
+
+  it('keeps Escape from reaching the editor behind it', async () => {
+    // The editor's own Escape cascade (`useAppKeyboardShortcuts`) is a window
+    // listener; closing the menu must not also clear a crop mode, the in/out
+    // points or the selection behind it. The 'a' proves the spy is wired.
+    const user = userEvent.setup();
+    const seen: string[] = [];
+    const spy = (e: KeyboardEvent) => seen.push(e.key);
+    window.addEventListener('keydown', spy);
+    renderMenu();
+
+    await user.keyboard('a{Escape}');
+
+    window.removeEventListener('keydown', spy);
+    expect(seen).toEqual(['a']);
+  });
+
+  it('closes on Tab and leaves the focus move to the browser', async () => {
+    const user = userEvent.setup();
+    const seen: Array<[string, boolean]> = [];
+    const spy = (e: KeyboardEvent) => seen.push([e.key, e.defaultPrevented]);
+    window.addEventListener('keydown', spy);
+    const { onClose } = renderMenu();
+
+    await user.keyboard('{Tab}');
+
+    window.removeEventListener('keydown', spy);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(seen).toEqual([['Tab', false]]);
+  });
+
+  it.each([
+    ['Enter', '{Enter}'],
+    ['Space', '[Space]'],
+  ])('activates the focused item on %s', async (_key, keys) => {
+    const user = userEvent.setup();
+    const { onLoadProject, onClose } = renderMenu();
+    await user.keyboard('{ArrowDown}');
+
+    await user.keyboard(keys);
+
+    expect(onLoadProject).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});

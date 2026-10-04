@@ -72,6 +72,11 @@ export function FileMenu({
   // array stays non-nullable and reading one back costs no branch. Every entry
   // is rewritten on the next open, before the effect below reads it.
   const itemRefs = useRef<HTMLButtonElement[]>([]);
+  // `null!` rather than `null`: the trigger renders unconditionally and the
+  // only thing that reads this is a keydown handler inside the menu the
+  // trigger opened, so it is always set by then. A `?.` here would be a
+  // branch no test could reach.
+  const triggerRef = useRef<HTMLButtonElement>(null!);
 
   const items: FileMenuItem[] = [
     {
@@ -120,6 +125,26 @@ export function FileMenu({
   }, [isOpen]);
 
   const handleKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') {
+      // The menu owns Escape while it is open. The editor's own Escape
+      // cascade is a `window` listener (`useAppKeyboardShortcuts`), and
+      // closing the menu must not also leave crop mode, clear the in/out
+      // points or drop the selection behind it — the same bargain
+      // `useDialogBehaviour` strikes for every modal.
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+      triggerRef.current.focus();
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      // Not `preventDefault`ed: Tab's job is to move focus on, and the menu
+      // only has to get out of the way.
+      onClose();
+      return;
+    }
+
     const next = nextMenuIndex(focusable.indexOf(activeIndex), e.key, focusable.length);
     // A key the menu does not navigate on is the browser's: Enter and Space
     // are a <button>'s own activation, and anything else belongs to whatever
@@ -135,6 +160,7 @@ export function FileMenu({
   return (
     <div className={styles.menuContainer}>
       <button
+        ref={triggerRef}
         className={styles.headerButton}
         onClick={onToggle}
         aria-expanded={isOpen}
