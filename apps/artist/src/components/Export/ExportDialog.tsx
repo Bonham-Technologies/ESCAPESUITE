@@ -31,6 +31,8 @@ import {
   GIF_LONG_RANGE_WARNING,
   TAB_VISIBLE_NOTE,
 } from '../../core/exportTypes';
+import { shouldAnnounceProgress } from './progressAnnouncement';
+import type { ProgressAnnouncement } from './progressAnnouncement';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
@@ -127,6 +129,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // one the user is looking at, so its own completion or cancellation never
   // makes it look current to itself again later.
   const latestExportRef = useRef<AbortController | null>(null);
+
+  // What the live region is saying, and what the throttle has already said
+  // (ESCSUITE-215). Refs rather than state on purpose: every progress report
+  // already calls setProgress, so the render that will show a new
+  // announcement is the one that report schedules anyway — a second piece of
+  // state would buy nothing and risk a second render per encoded frame, which
+  // is exactly what the export-dialog render pins exist to prevent. Both are
+  // written immediately before that setProgress, never during render.
+  const announcedRef = useRef<ProgressAnnouncement | null>(null);
+  const announcementRef = useRef('');
 
   // Both formats' support is a real codec probe (ESCSUITE-22/29 for WebM,
   // ESCSUITE-175 for MP4) rather than a boolean read of which globals exist, so
@@ -334,6 +346,12 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     setOfferMp4Fallback(false);
     setMp4FailedError(null);
     setExportedWithoutSound(null);
+    // A new run announces from scratch: both the words on screen and the
+    // bookkeeping behind them belong to the run that wrote them, so the first
+    // report of this one is announced however close it lands to the last
+    // thing the previous run said.
+    announcedRef.current = null;
+    announcementRef.current = '';
     setProgress({ phase: 'preparing', progress: 0, message: 'Preparing export...' });
 
     // Create new AbortController for this export. Cancelling one export and
@@ -371,9 +389,24 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       });
     }
 
+    // Every report the run on screen makes goes through here: the visual line
+    // and the bar follow every one of them, the live region only those the
+    // throttle lets through (ESCSUITE-215). 'complete' is the exception that
+    // always speaks — it is the end of the run, and a throttle that swallowed
+    // it would leave the last thing a screen-reader user heard being a frame
+    // count part-way through.
+    const report = (p: ExportProgress) => {
+      const now = Date.now();
+      if (p.phase === 'complete' || shouldAnnounceProgress(announcedRef.current, p.progress, now)) {
+        announcedRef.current = { progress: p.progress, atMs: now };
+        announcementRef.current = `${p.message} (${Math.round(p.progress)}%)`;
+      }
+      setProgress(p);
+    };
+
     try {
       const onProgress = (p: ExportProgress) => {
-        if (isCurrentRun()) setProgress(p);
+        if (isCurrentRun()) report(p);
       };
 
       let result: ExportResult;
@@ -444,7 +477,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             ? exportedWithoutSoundReason(soundFormat)
             : null
         );
-        setProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
+        report({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
         // Close dialog after a delay
         setTimeout(() => {
@@ -583,8 +616,24 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             <div className={styles.progressSection}>
               <div className={styles.progressInfo}>
                 <span className={styles.progressPhase}>{progress.phase}</span>
-                <span className={styles.progressMessage}>{progress.message}</span>
+                {/* Out of the accessibility tree, not off the screen: this
+                    line changes once per encoded frame, and the live region
+                    below carries the same words at a rate a screen reader can
+                    actually finish saying (ESCSUITE-215). */}
+                <span className={styles.progressMessage} aria-hidden="true">{progress.message}</span>
               </div>
+
+              {/* Rendered for the whole of the progress view and empty until
+                  there is something to say — a live region a screen reader
+                  first meets already populated is not a change, and is not
+                  announced. Its words are the per-frame message with the
+                  percentage appended, so one announcement is a whole
+                  self-contained sentence (`aria-atomic`) and so it is never
+                  the exact text of a visible node, which would read as a
+                  duplicate to anyone browsing the dialog. */}
+              <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+                {announcementRef.current}
+              </span>
               {/* ESCSUITE-215: the bar carried a width and nothing else, so
                   an export that can run for minutes was visual only. The
                   rounded value is the one printed beside it — a fractional

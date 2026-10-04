@@ -88,6 +88,12 @@ const advancedExport = () => {
   return buttons[buttons.length - 1]
 }
 const gifRadio = () => screen.getByRole('radio', { name: /gif/i })
+/**
+ * The dialog's one announcement channel (ESCSUITE-215). Visually hidden, and
+ * deliberately not the only place its text appears, so it is found by its
+ * class rather than by what it says.
+ */
+const liveRegion = () => document.querySelector<HTMLElement>(`.${styles.srOnly}`)
 const fpsSelect = () => screen.getByLabelText(/frames per second/i)
 /**
  * Replace the default media clip with one whose source is an image, so the
@@ -1133,6 +1139,30 @@ describe('ExportDialog', () => {
       }
     }
 
+    /**
+     * Like scriptedExport, but the run can also be *finished* — the
+     * completion report is the one the throttle must never swallow
+     * (ESCSUITE-215).
+     */
+    function scriptedRun() {
+      let report: (p: ExportProgress) => void = () => {}
+      let finishExport: () => void = () => {}
+      mockExportToWebM.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((resolve) => {
+            report = args[3] as (p: ExportProgress) => void
+            finishExport = () => resolve(exported(new Blob()))
+          })
+      )
+      return {
+        report: (p: ExportProgress) => act(() => report(p)),
+        finish: async () => {
+          finishExport()
+          await settle()
+        },
+      }
+    }
+
     it('shows the phase, message and percentage the exporter reports', async () => {
       const scripted = scriptedExport()
       render(<ExportDialog isOpen={true} onClose={onClose} />)
@@ -1428,6 +1458,124 @@ describe('ExportDialog', () => {
       expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '80')
 
       scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    // ESCSUITE-215. The per-frame message was visual only; this is the one
+    // channel that speaks it, and the visual copy leaves the accessibility
+    // tree so the same sentence is not met twice.
+    it('announces the first report through one polite live region', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+
+      // Present before it has anything to say: a live region a screen reader
+      // meets already populated is not a change, and is not announced.
+      expect(liveRegion()).toHaveAttribute('role', 'status')
+      expect(liveRegion()).toHaveAttribute('aria-live', 'polite')
+      expect(liveRegion()).toHaveAttribute('aria-atomic', 'true')
+      expect(liveRegion()?.textContent).toBe('')
+
+      await scripted.report({ phase: 'encoding', progress: 1, message: 'Encoding frame 3/300' })
+
+      expect(liveRegion()?.textContent).toBe('Encoding frame 3/300 (1%)')
+      // The visual line still updates per frame, and is out of the
+      // accessibility tree because the region above carries its words.
+      expect(screen.getByText('Encoding frame 3/300')).toBeInTheDocument()
+      expect(document.querySelector(`.${styles.progressMessage}`)).toHaveAttribute('aria-hidden', 'true')
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    it('says nothing more until the next ten-point band', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'encoding', progress: 1, message: 'Encoding frame 3/300' })
+
+      act(() => {
+        vi.advanceTimersByTime(1000)
+      })
+      await scripted.report({ phase: 'encoding', progress: 5, message: 'Encoding frame 15/300' })
+
+      // The frame count on screen has moved; the announcement has not.
+      expect(screen.getByText('Encoding frame 15/300')).toBeInTheDocument()
+      expect(liveRegion()?.textContent).toBe('Encoding frame 3/300 (1%)')
+
+      await scripted.report({ phase: 'encoding', progress: 10.2, message: 'Encoding frame 31/300' })
+
+      expect(liveRegion()?.textContent).toBe('Encoding frame 31/300 (10%)')
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    it('speaks anyway once five seconds have passed inside one band', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'encoding', progress: 1, message: 'Encoding frame 3/300' })
+
+      act(() => {
+        vi.advanceTimersByTime(5000)
+      })
+      await scripted.report({ phase: 'encoding', progress: 2, message: 'Encoding frame 6/300' })
+
+      expect(liveRegion()?.textContent).toBe('Encoding frame 6/300 (2%)')
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    // The end of the run is the one report the throttle must never swallow:
+    // here the last frame and the completion share a band and a second, so
+    // only the phase can be what lets it through.
+    it('announces the completion sentence through the same region', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const scripted = scriptedRun()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'encoding', progress: 100, message: 'Encoding frame 300/300' })
+      expect(liveRegion()?.textContent).toBe('Encoding frame 300/300 (100%)')
+
+      await scripted.finish()
+
+      expect(screen.getByText('Export complete!')).toBeInTheDocument()
+      expect(liveRegion()?.textContent).toBe('Export complete! (100%)')
+    })
+
+    // A second export must not open with the first one's last words still in
+    // the region — and must announce its own first report, band or no band.
+    it("starts each run's announcements over", async () => {
+      const first = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await first.report({ phase: 'encoding', progress: 55, message: 'Encoding frame 165/300' })
+      expect(liveRegion()?.textContent).toBe('Encoding frame 165/300 (55%)')
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      first.rejectExport(new ExportAbortedError())
+      await settle()
+
+      const second = scriptedExport()
+      fireEvent.click(primaryExport())
+      expect(liveRegion()?.textContent).toBe('')
+
+      // 51% is the same band the first run left off in, and would be refused
+      // if the bookkeeping had survived the run that wrote it.
+      await second.report({ phase: 'encoding', progress: 51, message: 'Encoding frame 153/300' })
+
+      expect(liveRegion()?.textContent).toBe('Encoding frame 153/300 (51%)')
+
+      second.rejectExport(new ExportAbortedError())
       await settle()
     })
   })
