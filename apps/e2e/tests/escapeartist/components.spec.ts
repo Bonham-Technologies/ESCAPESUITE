@@ -1,5 +1,13 @@
 import { test, expect } from '@playwright/test'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+  importMediaAndAddToTimeline,
+  makeToneWav,
+  keyframePanel,
+  inspector,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Export Dialog', () => {
@@ -109,45 +117,64 @@ test.describe('Keyframe Panel', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+    // The keyframe editor button lives in the clip inspector's Animation
+    // section, which only renders for a selected clip.
+    await seedTextClip(page)
   })
 
   test('keyframe panel opens', async ({ page }) => {
-    const keyframeButton = page
-      .getByRole('button', { name: /keyframe|animation/i })
-      .or(page.locator('[data-testid="keyframe-panel"]'))
-      .first()
+    const keyframeButton = page.getByRole('button', { name: 'Open Keyframe Editor' })
+    await expect(keyframeButton).toBeVisible()
+    await keyframeButton.click()
 
-    const isVisible = await keyframeButton.isVisible().catch(() => false)
+    const panel = keyframePanel(page)
+    await expect(panel).toBeVisible()
 
-    if (isVisible) {
-      await keyframeButton.click()
-      await page.waitForTimeout(300)
-
-      const panel = page.locator('[class*="keyframe"], [class*="animation"]').first()
-      const panelVisible = await panel.isVisible().catch(() => false)
-
-      expect(typeof panelVisible).toBe('boolean')
-    }
+    // ...and the button now reads "Close" and closes it.
+    await expect(page.getByRole('button', { name: 'Close Keyframe Editor' })).toBeVisible()
+    await page.getByRole('button', { name: 'Close Keyframe Editor' }).click()
+    await expect(panel).toBeHidden()
   })
 
   test('keyframe creation button exists', async ({ page }) => {
-    const addKeyframeButton = page
-      .getByRole('button', { name: /add keyframe|new keyframe/i })
-      .or(page.locator('[data-testid="add-keyframe"]'))
-      .first()
+    // There is no separate "add keyframe" button — a keyframe is created by
+    // double-clicking a property's row in the graph the Open Keyframe Editor
+    // button reveals.
+    await page.getByRole('button', { name: 'Open Keyframe Editor' }).click()
+    const panel = keyframePanel(page)
+    await panel.getByText('Opacity', { exact: true }).click()
 
-    const isVisible = await addKeyframeButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    const graph = page.getByRole('listbox', { name: 'Keyframes for Opacity' })
+    await expect(graph).toBeVisible()
+    // A text clip has no opacity keyframes yet.
+    await expect(graph.getByRole('option')).toHaveCount(0)
+
+    // Double-clicking adds one at the pointer, and the store seeds its own
+    // at 0s on a property's first keyframe (ESCSUITE-166), so the listbox
+    // ends up holding two real options — the same shape
+    // `accessibility/core.spec.ts`'s "keyframe graph passes axe-core audit"
+    // test pins.
+    await graph.dblclick()
+    await expect(graph.getByRole('option')).toHaveCount(2)
   })
 
   test('animation preset selection available', async ({ page }) => {
-    const presetSelector = page
-      .getByRole('combobox', { name: /preset|animation/i })
-      .or(page.getByText(/fade|slide|zoom/i))
+    // "Animate In" / "Animate Out" are the real preset selects, in the
+    // Animation section the keyframe button also lives in. Scoped to the
+    // "Animate In" group's own combobox: once a preset is chosen the group
+    // also grows a duration slider and an easing select, both labelled
+    // "Animate In <something>" via `aria-labelledby`, which would otherwise
+    // make the locator ambiguous.
+    const animateIn = page
+      .locator('[class*="animationGroup"]')
+      .filter({ hasText: 'Animate In' })
+      .getByRole('combobox')
       .first()
+    await expect(animateIn).toBeVisible()
+    await expect(animateIn.locator('option', { hasText: 'Fade' })).toHaveCount(1)
 
-    const isVisible = await presetSelector.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await animateIn.selectOption('fade')
+    await expect(animateIn).toHaveValue('fade')
   })
 })
 
@@ -155,51 +182,45 @@ test.describe('Overlay Tools', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+    // The overlay-creating buttons live in the inspector's empty state —
+    // visible only while no clip is selected.
+    await expect(page.getByText('Select a clip to edit')).toBeVisible()
   })
 
   test('shape tools available', async ({ page }) => {
-    const shapeTools = page
-      .getByRole('button', { name: /rectangle|circle|arrow|shape/i })
-      .or(page.locator('[data-testid*="shape"]'))
-
-    const count = await shapeTools.count()
-    expect(count).toBeGreaterThanOrEqual(0)
+    await expect(page.getByRole('button', { name: 'Rectangle' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Ellipse' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Arrow' })).toBeVisible()
   })
 
   test('text overlay tool works', async ({ page }) => {
-    const textTool = page
-      .getByRole('button', { name: /text/i })
-      .or(page.locator('[data-testid="text-tool"]'))
-      .first()
+    await page.getByRole('button', { name: 'Add Text' }).click()
 
-    const isVisible = await textTool.isVisible().catch(() => false)
-
-    if (isVisible) {
-      await textTool.click()
-      await page.waitForTimeout(200)
-
-      const html = await page.content()
-      expect(html).toContain('<div id="root">')
-    }
+    // A real clip landed on the timeline, selected, with the text inspector
+    // section open in front of it.
+    await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Text Content', exact: true })).toBeVisible()
   })
 
   test('blur overlay tool exists', async ({ page }) => {
-    const blurTool = page
-      .getByRole('button', { name: /blur/i })
-      .or(page.locator('[data-testid="blur-tool"]'))
-      .first()
+    await page.getByRole('button', { name: 'Blur' }).click()
 
-    const isVisible = await blurTool.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible()
+    // A blur is a shape overlay under the hood — ClipEditorHeader names it by
+    // the clip's own name, which `addShapeOverlayClip` sets to "Blur".
+    await expect(page.getByRole('heading', { name: 'Blur' })).toBeVisible()
   })
 
-  test('overlay transform handles appear on selection', async ({ page }) => {
-    // Transform handles would appear when an overlay is selected
-    const handles = page.locator('[class*="handle"], [class*="transform"]')
-    const count = await handles.count()
-
-    // May not have handles if no overlay selected
-    expect(count).toBeGreaterThanOrEqual(0)
+  test("the inspector's Transform section opens for a selected overlay", async ({ page }) => {
+    // The selection's transform handles are drawn directly on the preview
+    // canvas (`drawSelectionHandles`, `components/Preview/selectionOverlay.ts`),
+    // not as DOM elements a locator can see — there is nothing under
+    // `[class*="handle"]` for any clip, selected or not. What a locator *can*
+    // see, and what this test is actually named for, is the inspector's own
+    // Transform section, which opens for exactly the same reason: a clip is
+    // selected.
+    await page.getByRole('button', { name: 'Rectangle' }).click()
+    await expect(page.getByRole('button', { name: 'Transform', exact: true })).toBeVisible()
   })
 })
 
@@ -209,43 +230,51 @@ test.describe('Timeline Controls', () => {
     await waitForAppReady(page, 'artist')
   })
 
-  // Note: This test verifies zoom controls but is skipped in CI due to
-  // app loading/rendering timing issues. Run locally to verify.
-  test.skip('zoom controls work', async ({ page }) => {
-    const zoomIn = page
-      .getByRole('button', { name: /zoom in/i })
-      .or(page.locator('[data-testid="zoom-in"]'))
-      .first()
+  // ESCSUITE-198/201 K-8: this used to be `test.skip` under a stale "skipped
+  // in CI due to rendering timing issues" comment — ESCSUITE-177's
+  // `waitForAppReady` (React's first commit, not `networkidle`) already
+  // fixed the timing hazard the comment blamed. Unskipped, and the real
+  // consequence asserted: zoom changing the readout, both directions, not
+  // just "one of the two buttons is on screen". The weaker
+  // `timeline-editing.spec.ts` sibling this supersedes ("has zoom
+  // controls", a bare `count >= 0`) is deleted.
+  test('zoom controls work', async ({ page }) => {
+    const zoomIn = page.getByRole('button', { name: 'Zoom in timeline' })
+    const zoomOut = page.getByRole('button', { name: 'Zoom out timeline' })
+    await expect(zoomIn).toBeVisible()
+    await expect(zoomOut).toBeVisible()
 
-    const zoomOut = page
-      .getByRole('button', { name: /zoom out/i })
-      .or(page.locator('[data-testid="zoom-out"]'))
-      .first()
+    const zoomLabel = page.locator('[aria-label^="Zoom level"]')
+    await expect(zoomLabel).toHaveAttribute('aria-label', 'Zoom level 100%')
 
-    const zoomInVisible = await zoomIn.isVisible().catch(() => false)
-    const zoomOutVisible = await zoomOut.isVisible().catch(() => false)
+    await zoomIn.click()
+    const afterIn = await zoomLabel.getAttribute('aria-label')
+    expect(afterIn).not.toBe('Zoom level 100%')
 
-    expect(zoomInVisible || zoomOutVisible).toBe(true)
+    // Zoom out twice: once to undo the zoom-in above, once more to actually
+    // prove the button decreases the level rather than merely "does something".
+    await zoomOut.click()
+    await zoomOut.click()
+    const afterOut = await zoomLabel.getAttribute('aria-label')
+    expect(afterOut).not.toBe('Zoom level 100%')
+    expect(afterOut).not.toBe(afterIn)
   })
 
   test('playhead is visible', async ({ page }) => {
-    const playhead = page
-      .locator('[data-testid="playhead"]')
-      .or(page.locator('[class*="playhead"]'))
-      .first()
-
-    const isVisible = await playhead.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    // `data-playhead` is the real attribute `TimelinePlayhead.tsx` renders —
+    // the timeline always has a playhead, empty project or not.
+    await expect(page.locator('[data-playhead]')).toBeVisible()
   })
 
   test('time display updates', async ({ page }) => {
-    const timeDisplay = page
-      .getByText(/\d{2}:\d{2}/)
-      .or(page.locator('[data-testid="time-display"]'))
-      .first()
+    // The preview's own timecode readout (`PreviewTimecode.tsx`), real content
+    // and a real consequence of stepping the playhead with the transport.
+    const timecode = page.locator('[class*="timecode"]').first()
+    await expect(timecode).toHaveText('00:00.000')
 
-    const isVisible = await timeDisplay.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await seedTextClip(page)
+    await page.getByTitle('Play (Space)').click()
+    await expect(timecode).not.toHaveText('00:00.000', { timeout: 5_000 })
   })
 })
 
@@ -253,24 +282,54 @@ test.describe('Waveform Display', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+
+    // A real, decodable audio file — `extractWaveformData` decodes the
+    // blob's bytes itself (`app/takeImport.ts`), so seeding a fake/empty
+    // blob directly into storage would never produce peaks. A tiny
+    // synthesised WAV tone is the cheapest real audio there is.
+    await importMediaAndAddToTimeline(page, {
+      name: 'tone.wav',
+      mimeType: 'audio/wav',
+      buffer: makeToneWav(1),
+    })
   })
 
   test('waveform canvas exists', async ({ page }) => {
-    const waveform = page
-      .locator('canvas[class*="waveform"], [data-testid="waveform"]')
-      .or(page.locator('[class*="waveform"]'))
-      .first()
-
-    const exists = (await waveform.count()) > 0
-    expect(typeof exists).toBe('boolean')
+    await expect(page.locator('canvas[class*="waveform"]')).toBeVisible()
   })
 
   test('waveform color indicates selection', async ({ page }) => {
-    // Waveform should change appearance when selected
-    const waveformTrack = page.locator('[class*="audio-track"], [class*="waveform"]').first()
-    const isVisible = await waveformTrack.isVisible().catch(() => false)
+    const waveformCanvas = page.locator('canvas[class*="waveform"]')
+    await expect(waveformCanvas).toBeVisible()
 
-    expect(typeof isVisible).toBe('boolean')
+    // The first non-transparent pixel this canvas drew, sampled from the
+    // page: `AudioWaveform.tsx` strokes an unselected clip's peaks in one
+    // colour and a selected one's in another (`defaultColor` /
+    // `selectedColor`), so a real selection has to change what is on screen.
+    const samplePixel = () =>
+      page.evaluate(() => {
+        const el = document.querySelector('canvas[class*="waveform"]') as HTMLCanvasElement
+        const ctx = el.getContext('2d')!
+        const { width, height } = el
+        const { data } = ctx.getImageData(0, Math.floor(height / 2), width, 1)
+        for (let i = 0; i < data.length; i += 4) {
+          if (data[i + 3] > 0) return [data[i], data[i + 1], data[i + 2], data[i + 3]]
+        }
+        return null
+      })
+
+    const beforeSelection = await samplePixel()
+    expect(beforeSelection).not.toBeNull()
+
+    await page.locator('[data-clip-id]').first().click()
+    // Polled rather than a fixed sleep: the redraw is synchronous with the
+    // store write that flips `isSelected`, but still needs a paint, and a
+    // poll only waits as long as that actually takes.
+    await expect.poll(samplePixel).not.toEqual(beforeSelection)
+    // The poll above is satisfied by `null` too (it is simply "not equal" to
+    // the real array `beforeSelection`) — confirm the settled pixel is a
+    // real sample, not a transiently empty canvas read.
+    expect(await samplePixel()).not.toBeNull()
   })
 })
 
@@ -340,13 +399,18 @@ test.describe('Project Session', () => {
   })
 
   test('new project can be started', async ({ page }) => {
-    const newProjectButton = page
-      .getByRole('button', { name: /new|create|start/i })
-      .or(page.locator('[data-testid="new-project"]'))
-      .first()
+    await seedTextClip(page)
+    await expect(page.getByText(/^1 clip/).first()).toBeVisible()
 
-    const isVisible = await newProjectButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    // `handleNewProject` only confirms when the timeline holds a clip —
+    // which it does here, so accept the native confirm rather than letting
+    // Playwright's default auto-dismiss refuse it.
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: 'File menu' }).click()
+    await page.getByText('New Project').click()
+
+    await expect(page.getByText('Select a clip to edit')).toBeVisible()
+    await expect(page.getByText(/^0 clips/)).toBeVisible()
   })
 })
 
@@ -357,22 +421,19 @@ test.describe('Inspector Panel', () => {
   })
 
   test('inspector panel exists', async ({ page }) => {
-    const inspector = page
-      .locator('[class*="inspector"], [class*="properties"], [class*="panel"]')
-      .first()
-
-    const isVisible = await inspector.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await expect(inspector(page)).toBeVisible()
+    await expect(page.getByText('Inspector')).toBeVisible()
   })
 
   test('property controls appear for selected clip', async ({ page }) => {
-    // Properties would show when a clip is selected
-    const propertyInputs = page.locator(
-      '[class*="inspector"] input, [class*="properties"] input'
-    )
-    const count = await propertyInputs.count()
+    // The empty state has no `<input>` at all — five plain buttons.
+    await expect(inspector(page).locator('input')).toHaveCount(0)
 
-    expect(count).toBeGreaterThanOrEqual(0)
+    await seedTextClip(page)
+    // A selected text clip's open inspector carries real inputs (its name,
+    // the Transform section's position/scale fields once opened — Text
+    // Content's own text field is visible by default).
+    await expect(inspector(page).locator('input')).not.toHaveCount(0)
   })
 })
 
@@ -383,42 +444,61 @@ test.describe('Toolbar', () => {
   })
 
   test('undo button exists', async ({ page }) => {
-    const undoButton = page
-      .getByRole('button', { name: /undo/i })
-      .or(page.locator('[data-testid="undo-button"]'))
-      .first()
+    const undoButton = page.getByRole('button', { name: 'Undo (Ctrl+Z)' })
+    await expect(undoButton).toBeVisible()
+    // Nothing to undo yet.
+    await expect(undoButton).toBeDisabled()
 
-    const isVisible = await undoButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await seedTextClip(page)
+    await expect(undoButton).toBeEnabled()
   })
 
   test('redo button exists', async ({ page }) => {
-    const redoButton = page
-      .getByRole('button', { name: /redo/i })
-      .or(page.locator('[data-testid="redo-button"]'))
-      .first()
+    const redoButton = page.getByRole('button', { name: 'Redo (Ctrl+Y)' })
+    await expect(redoButton).toBeVisible()
+    await expect(redoButton).toBeDisabled()
 
-    const isVisible = await redoButton.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await seedTextClip(page)
+    await page.getByRole('button', { name: 'Undo (Ctrl+Z)' }).click()
+    await expect(page.getByText(/^0 clips/)).toBeVisible()
+    await expect(redoButton).toBeEnabled()
+
+    await redoButton.click()
+    await expect(page.getByText(/^1 clip/).first()).toBeVisible()
   })
 
   test('split clip tool exists', async ({ page }) => {
-    const splitTool = page
-      .getByRole('button', { name: /split|cut/i })
-      .or(page.locator('[data-testid="split-tool"]'))
-      .first()
+    // The Razor tool is ARTIST's split control — its title names what it
+    // does, and selecting it is a real, observable state change: the active
+    // tool flips from Selection to Razor (`Toolbar.tsx`'s `styles.active`).
+    const razor = page.getByRole('button', { name: /Razor Tool.*split/ })
+    const selection = page.getByRole('button', { name: 'Selection Tool (V)' })
+    await expect(razor).toBeVisible()
+    await expect(selection).toHaveClass(/active/)
 
-    const isVisible = await splitTool.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    await razor.click()
+    await expect(razor).toHaveClass(/active/)
+    await expect(selection).not.toHaveClass(/active/)
   })
 
   test('delete tool exists', async ({ page }) => {
-    const deleteTool = page
-      .getByRole('button', { name: /delete|remove/i })
-      .or(page.locator('[data-testid="delete-tool"]'))
-      .first()
+    // Delete only appears once more than one clip is multi-selected
+    // (`Toolbar.tsx`), which needs two clips: seed one, deselect, seed a
+    // second (a new, empty track — `findEmptyTrack` skips the occupied
+    // one), then Ctrl+click both to build the multi-selection.
+    await seedTextClip(page)
+    await page.keyboard.press('Escape')
+    await page.getByRole('button', { name: 'Add Text' }).click()
+    await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible()
 
-    const isVisible = await deleteTool.isVisible().catch(() => false)
-    expect(typeof isVisible).toBe('boolean')
+    const clips = page.locator('[data-clip-id]')
+    await clips.nth(0).click({ modifiers: ['Control'] })
+    await clips.nth(1).click({ modifiers: ['Control'] })
+
+    const deleteButton = page.getByRole('button', { name: 'Delete selected clips (Delete)' })
+    await expect(deleteButton).toBeVisible()
+
+    await deleteButton.click()
+    await expect(page.getByText(/^0 clips/)).toBeVisible()
   })
 })
