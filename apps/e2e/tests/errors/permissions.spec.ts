@@ -149,14 +149,15 @@ test.describe('Screen Share Permission Denied', () => {
     // Screen is on by default, so Start Recording is what actually calls
     // `getDisplayMedia` — `mockScreenShareDenied` makes it reject with
     // NotAllowedError. `requestScreenCapture` (`core/permissions.ts`)
-    // re-wraps that into a plain `Error('Screen capture permission
-    // denied')` with no `.name`, so `startFailureNotice` falls to its
-    // generic sentence rather than the NotAllowedError-specific one.
+    // re-wraps that into `Error('Screen capture permission denied', { cause })`
+    // with the NotAllowedError carried as `cause` — `startFailureNotice`
+    // (ESCSUITE-210) reads the name through `cause`, so this is the
+    // refusal-specific sentence, not the generic one.
     await page.getByRole('button', { name: 'Start recording' }).click()
 
-    await expect(page.getByText('The recording could not be started.')).toBeVisible({
-      timeout: 10_000,
-    })
+    await expect(
+      page.getByText('The browser refused the capture — nothing was recorded.')
+    ).toBeVisible({ timeout: 10_000 })
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 
@@ -164,17 +165,17 @@ test.describe('Screen Share Permission Denied', () => {
     const startButton = page.getByRole('button', { name: 'Start recording' })
 
     await startButton.click()
-    await expect(page.getByText('The recording could not be started.')).toBeVisible({
-      timeout: 10_000,
-    })
+    await expect(
+      page.getByText('The browser refused the capture — nothing was recorded.')
+    ).toBeVisible({ timeout: 10_000 })
 
     // Should be able to click again, and the second attempt fails the same
     // way rather than hanging or crashing.
     await expect(startButton).toBeEnabled()
     await startButton.click()
-    await expect(page.getByText('The recording could not be started.')).toBeVisible({
-      timeout: 10_000,
-    })
+    await expect(
+      page.getByText('The browser refused the capture — nothing was recorded.')
+    ).toBeVisible({ timeout: 10_000 })
   })
 })
 
