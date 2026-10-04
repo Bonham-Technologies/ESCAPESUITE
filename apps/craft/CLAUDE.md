@@ -174,7 +174,20 @@ Two related rules follow from it:
   separate-tracks take, its companions never written at all;
   `loadRecordings()` is caught in the bootstrap; a start that throws raises
   `CAPTURE_REFUSED` (the browser said no — a cancelled picker, a denied permission, an
-  expired user activation) or `START_FAILED`, and a start whose capture request is never
+  expired user activation) or `START_FAILED`. `startFailureNotice`
+  (`hooks/useRecordingController.ts`) tells the two apart by name, but the name is not
+  always on the error itself: `core/permissions.ts`'s `requestScreenCapture`/
+  `requestWebcam`/`requestMicrophone` each catch the browser's `DOMException` and rethrow
+  `new Error('…', { cause })`, so the wrapper's own `.name` is just `'Error'` and the
+  browser's real name — `NotAllowedError` for a refusal — is carried as `cause`.
+  `startFailureNotice` reads it through one helper, `failureName(error)`, which answers
+  `(error.cause ?? error).name` — the cause when the error was wrapped, the error's own
+  name otherwise (a bare `DOMException`, as the capture-deadline release path can still
+  produce, is unaffected). Reading `.name` straight off the error instead (as it did
+  before ESCSUITE-210) made `CAPTURE_REFUSED` dead code: every wrapped refusal fell
+  through to the generic sentence. A `NotFoundError` (no screen/camera/microphone to
+  capture) is left under `START_FAILED` too — a dedicated sentence for it is a product
+  call nobody has made — and a start whose capture request is never
   answered at all raises `CAPTURE_UNANSWERED` when its deadline expires (ESCSUITE-109) —
   a silence has to be reported too, because the alternative is a UI parked in
   `'preparing'` for good; `fixWebMMetadata()` failing still keeps the

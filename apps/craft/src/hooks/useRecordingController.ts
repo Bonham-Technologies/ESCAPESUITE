@@ -110,17 +110,36 @@ function releaseAcquired({ screen, webcam, mic }: AcquiredStreams): void {
 }
 
 /**
+ * The DOMException name behind a start failure.
+ *
+ * `core/permissions.ts`'s `requestScreenCapture`/`requestWebcam`/
+ * `requestMicrophone` each catch the browser's own error and rethrow
+ * `new Error('…', { cause })` — a plain `Error` whose own `.name` is just
+ * `'Error'`, with the browser's `DOMException` (and its real name) carried as
+ * `cause`. Reading `.name` off the error itself (ESCSUITE-210's bug) was
+ * therefore always reading the wrapper's name, never the browser's, and
+ * `CAPTURE_REFUSED` below could never fire. `error.cause ?? error` falls back
+ * to the error itself for anything that was not wrapped — a bare
+ * `DOMException`, as the deadline-release path above can still produce.
+ */
+function failureName(error: unknown): string | undefined {
+  const err = error as { name?: string; cause?: unknown } | null | undefined;
+  return ((err?.cause ?? err) as { name?: string } | null | undefined)?.name;
+}
+
+/**
  * Why a take never started, as far as the user needs to know.
  *
  * `NotAllowedError` is the browser refusing the capture — the picker was
  * cancelled, the permission is denied, or the click's user activation had
  * expired by the time `getDisplayMedia` ran. It is worth its own sentence
  * because "nothing happened" is otherwise indistinguishable from a bug.
+ * `NotFoundError` (no screen/camera/microphone to capture) is a different
+ * fact and is left under the generic `START_FAILED` sentence — a dedicated
+ * sentence for it is a product call this fix does not make.
  */
 function startFailureNotice(error: unknown): string {
-  return (error as { name?: string } | null)?.name === 'NotAllowedError'
-    ? CAPTURE_REFUSED
-    : START_FAILED;
+  return failureName(error) === 'NotAllowedError' ? CAPTURE_REFUSED : START_FAILED;
 }
 
 export interface RecordingController {

@@ -2532,6 +2532,29 @@ coverage-excluded, gained the straggling-launch case through a mocked `playwrigh
 parity suite ran 30 / 30 four times before the round and once after. **No floor crossed**; the kit's
 floors stay 99 / 99 / 98 / 98.
 
+`@escapesuite/craft` was re-measured 2026-10-04 for ESCSUITE-210 (the "capture refused" notice is
+reachable again: `permissions.ts`'s three wrappers rethrow a plain `Error` carrying the browser's
+`DOMException` as `cause`, so `startFailureNotice` had been comparing the wrapper's `name` — always
+`'Error'` — against `'NotAllowedError'` and answering the generic `START_FAILED` for every refusal;
+it now reads the name through one `failureName(error)` helper, `(error.cause ?? error).name`):
+100.00 / 99.52 / 97.77 / 100.00, byte-identical on every percentage to the 100.00 / 99.52 / 97.77 /
+100.00 that `main` at `63c695ed` (the ESCSUITE-201 squash) measures in the same sitting. Lines
+2,378 → 2,380, statements 2,537 / 2,549 → 2,539 / 2,551, branches 1,363 / 1,394 → 1,365 / 1,396 and
+functions 452 → 453, every denominator growing by exactly what the numerator did; the same 12
+statements and 31 branches uncovered, in the same four files. The two new branches are the `??` in
+`hooks/useRecordingController.ts`'s `failureName` — the `cause` side reached by the two new cases (a
+wrapped `NotAllowedError` → `CAPTURE_REFUSED`, red before the fix; a wrapped `NotFoundError` →
+`START_FAILED`) and the bare-error side by the two refusal cases that were already there; the
+review's one LOW, that no case rejected with a non-object at all, is the third new case, which
+exercises the helper's optional chains on `undefined` (v8 counts those as statements, not
+decisions, so it moves no figure). Mechanism (a)
+from the ticket — one reader rather than three wrappers preserving `name` — so `permissions.ts` is
+untouched; a `NotFoundError` sentence of its own is left as the product call the ticket named, and
+`apps/craft/CLAUDE.md` says so. Outside vitest's measurement, the three Playwright pins in
+`apps/e2e/tests/errors/permissions.spec.ts` moved from the generic sentence to the refused one and ran
+in Chromium: 10 passed / 2 skipped, twice. The `App.*rerender*` pins and every `*.perf.test.ts` are
+byte-identical. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
