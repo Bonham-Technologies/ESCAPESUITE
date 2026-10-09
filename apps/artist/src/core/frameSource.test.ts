@@ -3,6 +3,7 @@ import {
   WebCodecsFrameSource,
   HTMLVideoFrameSource,
   FrameSourceFactory,
+  MAX_WORKER_SOURCE_BYTES,
   isWebCodecsAvailable,
   type IFrameSource,
 } from './frameSource';
@@ -627,6 +628,37 @@ describe('frameSource', () => {
         expect(refused.requiresCleanup()).toBe(false);
         await expect(later.getFrame(0.1)).resolves.toBeInstanceOf(MockHTMLVideoElement);
         warn.mockRestore();
+      });
+
+      it('keeps a source too large to hold in the worker on the <video> path, without reading it', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const onFallback = vi.fn();
+        const huge = mp4();
+        Object.defineProperty(huge, 'size', { value: MAX_WORKER_SOURCE_BYTES + 1 });
+        const read = vi.spyOn(huge, 'arrayBuffer');
+
+        const source = await factory.createSource('a', huge, 'video/mp4', undefined, onFallback);
+
+        expect(source.requiresCleanup()).toBe(false);
+        expect(read).not.toHaveBeenCalled();
+        expect(managerOf(factory).loadSource).not.toHaveBeenCalled();
+        expect(onFallback).toHaveBeenCalledWith(
+          'a',
+          'The source is larger than the 512 MB the decode worker holds in memory'
+        );
+        warn.mockRestore();
+      });
+
+      it('hands a source of exactly the limit to the worker', async () => {
+        const factory = await factoryWithWorker();
+        const atLimit = mp4();
+        Object.defineProperty(atLimit, 'size', { value: MAX_WORKER_SOURCE_BYTES });
+
+        const source = await factory.createSource('a', atLimit, 'video/mp4', undefined, vi.fn());
+
+        expect(source.requiresCleanup()).toBe(true);
+        expect(managerOf(factory).loadSource).toHaveBeenCalled();
       });
 
       it('reports nothing when the worker takes the source', async () => {
