@@ -252,6 +252,58 @@ describe('VideoPlayer', () => {
       expect(mockPlay).toHaveBeenCalled();
     });
 
+    describe('browser chords pass through (ESCSUITE-223)', () => {
+      it.each([
+        ['0', { metaKey: true }],
+        ['0', { ctrlKey: true }],
+        ['ArrowLeft', { metaKey: true }],
+        ['ArrowLeft', { altKey: true }],
+        ['ArrowRight', { altKey: true }],
+        ['ArrowRight', { ctrlKey: true }],
+      ])('%s with %o is neither prevented nor acted on', (key, mods) => {
+        render(<VideoPlayer {...defaultProps} />);
+        const video = document.querySelector('video')!;
+        act(() => {
+          fireEvent.loadedMetadata(video);
+        });
+        video.currentTime = 30;
+        act(() => {
+          fireEvent.timeUpdate(video);
+        });
+        const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...mods });
+        act(() => {
+          window.dispatchEvent(e);
+        });
+        expect(e.defaultPrevented).toBe(false);
+        expect(video.currentTime).toBe(30);
+      });
+
+      it.each(['0', 'ArrowLeft'])('plain %s is still the player\'s (prevented)', (key) => {
+        render(<VideoPlayer {...defaultProps} />);
+        const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        act(() => {
+          window.dispatchEvent(e);
+        });
+        expect(e.defaultPrevented).toBe(true);
+      });
+
+      it('Shift+ArrowLeft is untouched and still skips', () => {
+        render(<VideoPlayer {...defaultProps} />);
+        const video = document.querySelector('video')!;
+        act(() => {
+          fireEvent.loadedMetadata(video);
+        });
+        video.currentTime = 30;
+        act(() => {
+          fireEvent.timeUpdate(video);
+        });
+        act(() => {
+          fireEvent.keyDown(window, { key: 'ArrowLeft', shiftKey: true });
+        });
+        expect(video.currentTime).toBe(25);
+      });
+    });
+
     it('should skip backward on ArrowLeft', async () => {
       render(<VideoPlayer {...defaultProps} />);
 
