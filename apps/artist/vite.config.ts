@@ -245,7 +245,7 @@ export default defineConfig({
         '**/types.ts',
         'src/main.tsx', // React bootstrap only; exercised by every Playwright suite
         'src/headless/main.ts', // headless-bundle bootstrap; covered by services/headless-artist Chromium tests
-        'src/workers/decodeWorker.ts', // runs only inside a Web Worker; covered by the e2e MP4 export tests
+        'src/workers/decodeWorker.ts', // runs only inside a Web Worker; covered by apps/e2e/tests/export/decode-worker.spec.ts (its logic lives in mp4Demux.ts, decoderConfig.ts and frameDecoder.ts, which are measured)
       ],
       // Coverage floors — these only go up. See CLAUDE.md's Testing section.
       thresholds: {

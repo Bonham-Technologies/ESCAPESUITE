@@ -167,6 +167,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 - Export formats: WebM (VP9+Opus), MP4 (H.264+AAC) and GIF (`gifenc`, 256 colours per frame, no
   audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
+  (ESCSUITE-254: before this, the worker threw on every source and the export silently decoded in
+  the page). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
+  decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab
+  in the foreground" once. See `apps/artist/CLAUDE.md`'s "Video Decode Worker"
 
 ### Data Flow
 ```
@@ -2899,8 +2903,10 @@ never above what the suite actually achieves:
   every importer. Six files beyond that are excluded, each with a comment in its
   package's `coverage.exclude` naming the suite that does cover it: the bootstrap entry points
   `src/main.tsx` (plan/craft/artist) and artist's `src/headless/main.ts`, artist's
-  `src/workers/decodeWorker.ts` (runs only inside a Web Worker; covered by the e2e MP4
-  export tests), and `services/headless-artist`'s `src/renderDriver.ts` (needs real
+  `src/workers/decodeWorker.ts` (runs only inside a Web Worker; covered by
+  `apps/e2e/tests/export/decode-worker.spec.ts` — its demux, decoder-configuration and
+  frame-feeding logic live in `mp4Demux.ts`, `decoderConfig.ts` and `frameDecoder.ts`, which are
+  measured), and `services/headless-artist`'s `src/renderDriver.ts` (needs real
   Chromium; covered by `src/renderDriver.chromium.test.ts`, which `test:coverage` does not
   run).
 - **Reading the report**: after `pnpm test:coverage`, run `pnpm coverage:report`

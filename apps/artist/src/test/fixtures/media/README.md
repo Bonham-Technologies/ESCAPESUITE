@@ -8,3 +8,7 @@ Each is a few kilobytes.
 | `h264-bframes.mp4` | 1 s, 25 frames, 64x48 solid red, H.264 High with B-frames, one IDR, `moov` after `mdat`, an edit list starting at media time 1024/12800 | a copy of `apps/e2e/fixtures/headless/source.mp4` |
 | `h264-faststart.mp4` | the same stream with `moov` before `mdat` | `ffmpeg -i h264-bframes.mp4 -c copy -movflags +faststart h264-faststart.mp4` |
 | `h264-rotated.mp4` | 1 s, 30 frames, 320x180 coded (red left half, blue right half), display matrix `[0, -1, 1, 0]` — shown as 180x320 with blue on top | `ffmpeg -display_rotation 90 -i plain.mp4 -c copy h264-rotated.mp4` (ffmpeg's counter-clockwise 90, WebCodecs' clockwise 270) |
+| `h264-fragmented.mp4` | the `h264-bframes.mp4` stream as a fragmented MP4 (moof/mdat pairs) — the demuxer refuses it | `ffmpeg -i h264-bframes.mp4 -c copy -movflags frag_keyframe+empty_moov h264-fragmented.mp4` |
+| `hevc.mp4` | 0.2 s, 2 frames, 64x48 HEVC tagged `hvc1` — carries an hvcC record | `ffmpeg -f lavfi -i color=c=red:s=64x48:d=0.2:r=10 -c:v libx265 -tag:v hvc1 -pix_fmt yuv420p hevc.mp4` |
+| `vp9.mp4` | 0.2 s, 2 frames, 64x48 VP9 in MP4 — no codec record the decoder needs | `ffmpeg -f lavfi -i color=c=red:s=64x48:d=0.2:r=10 -c:v libvpx-vp9 -pix_fmt yuv420p vp9.mp4` |
+| `audio-only.mp4` | AAC audio and no video track | an audio-only MP4 |

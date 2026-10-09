@@ -270,12 +270,63 @@ pnpm lint                # Run ESLint
 - `cropDrag.ts`: the crop **gesture's** arithmetic (ESCSUITE-157), kept out of `clipCrop.ts` because that module is read by the renderer on every media clip of every frame and none of this is. Eight handles (`CROP_HANDLES`/`CROP_HANDLE_LABELS`, compass points, reading order); `sourceDelta` un-rotates and un-scales a canvas displacement into source pixels, dividing by a scale floored at `MIN_SCALE` (ESCSUITE-173) rather than the UI's own 0.1 — `updateClipTransform` applies no floor at all, so a `.veditor`, a host `LOAD_PROJECT` payload or a headless job spec carrying `scaleX: 0` would otherwise divide by it; `parseProject` now also refuses such a transform outright (see `projectMigration.ts`, below), and this floor is this function's own backstop regardless; `cropForHandleMove(start, handle, delta, source, keepAspect?)` turns that into the next crop, always rebased from the crop the gesture **started** with (never the previous move's output — the ESCSUITE-110 trim-compounding trap in a different gesture) and clamped on the inset that moved, so the edge a handle does not own never drifts. Under `keepAspect` (Shift), `withAspect` additionally caps the region so no derived inset exceeds `MAX_CROP_INSET`: `normaliseCrop`'s own per-edge clamp would otherwise land the independent and dependent insets at different distances from the limit and break the ratio Shift is holding (NIT 8) — a plain `w` drag past 90% has no ratio to break, so its own over-limit inset is correctly left to that same per-edge clamp. The cap widens the region to the largest of what the pointer asked for and what each limited edge allows, so the handle SLIDES TO `MAX_CROP_INSET` and holds there — the same way an unlocked handle already stops at its own single-edge limit — rather than breaking the lock (ruling 2026-10-02, ESCSUITE-173; superseded a same-day interim ruling that refused the move outright and briefly made this function return `undefined`). `cropRegionAspect` reads the kept region's own ratio for Shift-lock. `cropCentreFor` is the compensating-centre arithmetic a crop write needs — cropping shrinks the picture about the clip's centre (ESCSUITE-6), so a crop written alone moves both edges of an axis and a dragged handle visibly lags — and `cropCompensatesCentre(animation)` is the one place that decides whether a write may apply it: false for a clip keyframed on `x`/`y`/`scaleX`/`scaleY` (a static centre would fight the keyframes and lose at playback), true for rotation/opacity/blur keyframes or none at all (operator ruling, 2026-10-02). `cropWriteFor` is the one function that builds the whole `Partial<Clip>` **every** crop write hands `updateClip` — `{ crop, transform }` or `{ crop }` — so there is exactly one history push and one locked-track check per write, and (since ESCSUITE-171) exactly one rule about where a crop leaves the picture, shared by the eight handles and by the inspector's sliders, presets and Reset. `CROP_NUDGE` (`{ fine: 1, coarse: 10 }` source pixels) is the arrow key's step and Shift's — the nudge hands its delta to `cropForHandleMove` directly in source pixels and in the clip's own LOCAL (unrotated) frame, unlike a drag's pointer displacement, which `sourceDelta` un-rotates first; each handle owns fixed insets in that frame, so on an unrotated clip a nudge moves the way the arrow points, and on a rotated one the arrow follows the clip's own axes rather than the screen's (ESCSUITE-173 correction: the design spec and this file both used to claim the former unconditionally). `cropsEqual` is why a nudge that cannot move (an arrow key already at the frame's edge, or one the handle owns no inset on) costs no undo entry, and `cropAnnouncement` is the live-region text, in source pixels rather than the inspector's percentages because a one-pixel nudge of a wide source would round to "0%". Pure throughout — no clip, no store, no canvas, no pointer event — consumed by `components/Preview/useCropHandleGesture.ts`, the hook that drives the eight on-canvas handles (`CropHandles.tsx`), both by mouse drag and by the keyboard
 
 ### Video Decode Worker (`src/workers/decodeWorker.ts`)
-Web Worker for WebCodecs-based video decoding, enabling full-speed exports in background tabs:
-- Uses `mp4box.js` for MP4 container demuxing
-- Uses WebCodecs `VideoDecoder` for frame decoding
-- Builds keyframe index for efficient seeking
-- LRU frame cache with configurable size
-- Returns `VideoFrame` objects (transferable) for zero-copy performance
+Web Worker for WebCodecs-based video decoding, enabling full-speed exports in background tabs.
+`decodeWorker.ts` is only the message-protocol glue (and the one file excluded from coverage — it
+runs only inside a worker); the decisions live in three modules vitest runs directly:
+- **`mp4Demux.ts`** — `mp4box.js` demuxing of the first video track: every sample in decode order,
+  timestamps in whole microseconds with the **edit list applied** (x264's B-frame files start
+  presentation two frames into the media; ignoring that put every frame two frames late against
+  `<video>`), the codec string and avcC/hvcC record, and the `tkhd` display matrix read as a
+  clockwise `rotation`. **The ordering constraint (ESCSUITE-254):** mp4box parses an in-memory file
+  *inside* `appendBuffer()` and fires `onReady` and `onSamples` from within that call, so
+  extraction must be armed — `setExtractionOptions()` then `start()` — **inside `onReady`, before
+  `appendBuffer()` returns**, then `flush()`. Armed after it returns (how the worker shipped in
+  #89, 2026-01-17), no sample is ever delivered: every source threw "No keyframes found in video",
+  `FrameSourceFactory` caught it with a `console.warn`, and every MP4 export for nine months decoded
+  in the page while logging "Using WebCodecs". Completion is the track's own `nb_samples`, with a
+  bounded wait that rejects naming the counts (a truncated file is a named failure, not a hang).
+- **`decoderConfig.ts`** — the `VideoDecoderConfig`, and the refusals. **H.264 only** (the only codec
+  compared against `<video>`; HEVC/VP9/AV1 in MP4 keep the `<video>` path). **Colour:** a stream
+  that does not fully describe its own colour (primaries, transfer and matrix all present) is
+  assumed BT.601 below 720 coded lines and BT.709 from 720 up — what Chromium's `<video>` assumes
+  (measured: 718 lines is 601, 720 is 709, width plays no part) — while a raw `VideoDecoder` assumes
+  BT.709 at every size, which put saturated colours up to ~20/255 off the preview. The guess goes in
+  `config.colorSpace`, which Chromium uses only to fill in what the bitstream leaves out (a fully
+  tagged stream keeps its own colours in both paths). **Rotation:** the matrix's quarter turn goes in
+  `config.rotation`; Chromium (verified in Playwright's Chromium 153, all four turns, against its
+  own `<video>`) stamps it on every output `VideoFrame`, whose `displayWidth`/`displayHeight` and
+  nine-argument `drawImage` (the crop's source rect) are then in the rotated orientation exactly as
+  `<video>`'s are. A browser that does not implement the member drops it from
+  `isConfigSupported()`'s echo, and the track is refused rather than decoded lying on its side.
+  `hardwareAcceleration` is `'no-preference'`: `'prefer-hardware'` is a requirement in Chromium and
+  refused every source on a machine with no hardware decoder.
+- **`frameDecoder.ts`** — returns the frame `<video>` shows at a time (the latest whose timestamp is
+  at or before it, within half a millisecond), from a small cache. It feeds chunks in decode order
+  up to the requested one, then one at a time while a reordering decoder holds the frame back,
+  resets only to go backwards, jumps straight to a later group's keyframe, flushes at the end of
+  the stream, keeps every frame ahead of the playhead (they are what an in-order export asks for
+  next) and evicts behind it to `maxCachedFramesPerSource` (8). Every wait is bounded: a decoder
+  error or a stall (no progress for 5 s) rejects the request, and every later one, by name.
+- **Refused by name, so the source falls back to `<video>`:** a fragmented file, more than one
+  sample description, an edit list other than one plain edit, a display matrix other than the four
+  rotations (a mirror, a scale), a non-H.264 codec, a codec the browser cannot decode, a rotated
+  track in a browser without `VideoDecoderConfig.rotation`, and — before anything is read — a source
+  larger than `MAX_WORKER_SOURCE_BYTES` (512 MB, `frameSource.ts`): the worker holds every encoded
+  sample for the whole export (mp4box copies them out of the file, which is read into memory
+  first), where `<video>` streams from the Blob.
+- **A fallback is visible (ESCSUITE-254):** `FrameSourceFactory.createSource(…, onFallback)` reports
+  a source the worker refused, and wraps the ones it took so that a frame the worker fails
+  mid-export hands that source to a `<video>` element for the rest of the export (reported the same
+  way) instead of leaving the clip missing. `exportMP4.ts` turns any report — and the worker not
+  starting at all (ESCSUITE-153) — into the progress line "Decoding in the page; keep this tab in
+  the foreground", **once per export**, at the progress the export has reached. The
+  `console.warn` keeps the detail.
+- Returns `VideoFrame` clones (transferable) for zero-copy performance; the exporter closes each.
+- Pinned end to end by `apps/e2e/tests/export/decode-worker.spec.ts` (Chromium): a real source
+  exports with the worker answering `FRAME_READY` and no fallback; the same project exported with
+  `Worker` forced off (the `<video>` path, the oracle) matches at mid-timeline frames within
+  1.5/255 (measured 0.05–0.27; the BT.709 mismatch above measured 3.7–8.1); and a rotated source
+  exports the way the preview shows it.
 
 ### Integration API (`src/utils/integration.ts`)
 The editor can be embedded in other applications via:
@@ -3215,10 +3266,10 @@ render, so switching projects or resizing the canvas updates every option's labe
 
 ### Export Performance Optimizations (`src/core/exportMP4.ts`, `src/core/exportWebM.ts`, `src/core/frameSource.ts`, `src/core/frameManager.ts`)
 The export pipeline includes several optimizations to improve performance:
-- **Background tab export (MP4)**: Uses WebCodecs `VideoDecoder` in a Web Worker for frame decoding, enabling full-speed exports even when the browser tab is in the background. Web Workers are not subject to browser throttling that affects `setTimeout` and `video.play()` on the main thread.
+- **Background tab export (MP4)**: Uses WebCodecs `VideoDecoder` in a Web Worker for frame decoding, enabling full-speed exports even when the browser tab is in the background. Web Workers are not subject to browser throttling that affects `setTimeout` and `video.play()` on the main thread. (ESCSUITE-254: before this, the worker threw on every source and the export silently decoded in the page — see "Video Decode Worker".)
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
-  - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for MP4 files (background-capable)
-  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM or unsupported browsers
+  - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for H.264 MP4 files (background-capable), wrapped so a frame the worker fails mid-export hands the source to `<video>`
+  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
 - **Encoder backpressure**: MP4's loop waits while `videoEncoder.encodeQueueSize > 5`, paired with
   the 30-second backpressure timeout below; WebM's own loop waits above `> 20`. Both exist to
@@ -3932,7 +3983,7 @@ outcome, not on the double.
 - WebCodecs API (exports) only works in Chrome/Edge
 - Video blobs stored in IndexedDB; large files may hit storage limits
 - MP4 decoding uses Web Worker with WebCodecs for background-capable export; WebM falls back to HTMLVideoElement on main thread
-- WebCodecs background export only works for MP4 source files; WebM sources use HTMLVideoElement seeking
+- WebCodecs background export only works for H.264 MP4 source files the worker can present exactly as `<video>` does (see "Video Decode Worker" for what it refuses); WebM sources and refused MP4s use HTMLVideoElement seeking, and an MP4 export says so once ("Decoding in the page; keep this tab in the foreground") — a WebM source does not trigger that line today
 
 ## Headless Render Bundle
 
