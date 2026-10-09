@@ -147,11 +147,14 @@ export type DecodeWorkerResponse =
  * Configuration for the decode worker
  */
 export interface DecodeWorkerConfig {
-  /** Maximum number of frames to cache per source */
+  /** Maximum number of decoded frames to keep per source for reuse */
   maxCachedFramesPerSource: number;
-  /** Number of frames to decode ahead of current request */
-  lookAheadFrames: number;
-  /** Whether to enable hardware acceleration hints */
+  /**
+   * Ask for a hardware decoder ('prefer-hardware'). In Chromium that is a
+   * requirement, not a hint — a machine without a hardware decoder for the
+   * codec refuses the configuration — so it is off by default and the
+   * browser picks ('no-preference').
+   */
   preferHardwareAcceleration: boolean;
 }
 
@@ -159,7 +162,9 @@ export interface DecodeWorkerConfig {
  * Default configuration values
  */
 export const DEFAULT_DECODE_WORKER_CONFIG: DecodeWorkerConfig = {
-  maxCachedFramesPerSource: 60, // ~2 seconds at 30fps
-  lookAheadFrames: 10,
-  preferHardwareAcceleration: true,
+  // A few frames ahead of the one an export asks for, never seconds of them:
+  // held VideoFrames are decoder output buffers, and a hardware decoder with
+  // too many of them outstanding stops producing more.
+  maxCachedFramesPerSource: 8,
+  preferHardwareAcceleration: false,
 };

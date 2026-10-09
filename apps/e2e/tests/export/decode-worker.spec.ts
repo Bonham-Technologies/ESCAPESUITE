@@ -64,7 +64,7 @@ const IN_PAGE_NOTICE = 'Decoding in the page; keep this tab in the foreground'
  * colour changes every 8 source frames), a missing one (black) or a flipped
  * one (the luma ramp reverses) differs by tens.
  */
-const PARITY_TOLERANCE = 4
+const PARITY_TOLERANCE = 1.5
 
 declare global {
   interface Window {
@@ -211,6 +211,9 @@ async function frameAt(
       const url = URL.createObjectURL(new Blob([array], { type: 'video/mp4' }))
       const video = document.createElement('video')
       video.muted = true
+      // Without 'auto', a detached element in headless Chromium can keep
+      // painting its first frame after a seek.
+      video.preload = 'auto'
       video.src = url
       await new Promise<void>((resolve, reject) => {
         video.onloadeddata = () => resolve()
@@ -351,10 +354,15 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
     // exported file's own frame boundaries cannot decide it.
     await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
     await waitForAppReady(page, 'artist')
+    // The 160x120 source sits at native size in the middle of the 1080p frame.
+    const centre = { width: 200, height: 160 }
+    // Not vacuous: the two sampled frames are in different colour segments,
+    // so a reader stuck on one frame (or an export that froze) cannot pass.
+    const early = await frameAt(page, withoutWorker.bytes, 25.5 / 30, centre)
+    const late = await frameAt(page, withoutWorker.bytes, 41.5 / 30, centre)
+    expect(meanAbsoluteDifference(early, late, sourceRegion(early))).toBeGreaterThan(20)
     for (const frameIndex of [25, 41]) {
       const time = (frameIndex + 0.5) / 30
-      // The 160x120 source sits at native size in the middle of the 1080p frame.
-      const centre = { width: 200, height: 160 }
       const a = await frameAt(page, withWorker.bytes, time, centre)
       const b = await frameAt(page, withoutWorker.bytes, time, centre)
       const region = sourceRegion(b)

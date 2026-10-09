@@ -7,11 +7,24 @@
  *
  * Architecture:
  * 1. Receives video data as ArrayBuffer
- * 2. Uses mp4box.js to demux the container and extract encoded chunks
- * 3. Builds a sample index for keyframe-aware seeking
- * 4. Uses VideoDecoder to decode frames on demand
- * 5. Caches decoded frames with LRU eviction
- * 6. Returns VideoFrame objects (transferable) for zero-copy performance
+ * 2. `mp4Demux.ts` demuxes the container with mp4box.js — every sample of the
+ *    first video track, in decode order, with the edit list applied to its
+ *    timestamps and the display matrix read as a rotation — and refuses, by
+ *    name, anything it cannot present exactly as `<video>` would
+ * 3. `decoderConfig.ts` builds the VideoDecoder configuration — H.264 only,
+ *    the display rotation, the colour space `<video>` assumes — and refuses a
+ *    track this browser cannot decode the way `<video>` would show it
+ * 4. `frameDecoder.ts` feeds a VideoDecoder chunk by chunk and returns the
+ *    frame `<video>` would show at a requested time, from a small cache
+ * 5. Returns VideoFrame objects (transferable) for zero-copy performance
+ *
+ * A source refused here (an INIT_SOURCE that answers ERROR) is decoded by the
+ * page's `<video>` path instead; `FrameSourceFactory` reports that so the
+ * export says it is decoding in the page (ESCSUITE-254).
+ *
+ * This file is only glue between the message protocol and those modules,
+ * and runs only inside a Web Worker; the e2e spec
+ * `apps/e2e/tests/export/decode-worker.spec.ts` covers it.
  */
 
 // Declare worker context for proper TypeScript typing
@@ -21,10 +34,6 @@ interface WorkerGlobalScopeExtended {
 }
 declare const self: WorkerGlobalScopeExtended;
 
-import { type MP4File, type MP4VideoTrack } from 'mp4box';
-
-import { demuxVideoTrack, type IndexedSample } from './mp4Demux';
-
 import {
   type DecodeWorkerRequest,
   type DecodeWorkerResponse,
@@ -32,32 +41,16 @@ import {
   type DecodeWorkerConfig,
   DEFAULT_DECODE_WORKER_CONFIG,
 } from './decodeWorker.types';
-
-/**
- * Cached decoded frame with metadata
- */
-interface CachedFrame {
-  frame: VideoFrame;
-  timestamp: number;
-  lastAccessed: number;
-}
+import { demuxVideoTrack } from './mp4Demux';
+import { decoderConfigFor } from './decoderConfig';
+import { FrameDecoder } from './frameDecoder';
 
 /**
  * State for a single video source being decoded
  */
 interface VideoSource {
-  sourceId: string;
   info: VideoSourceInfo;
-  mp4File: MP4File;
-  videoTrack: MP4VideoTrack;
-  decoder: VideoDecoder;
-  samples: IndexedSample[];
-  keyframeSamples: IndexedSample[];
-  frameCache: Map<number, CachedFrame>; // keyed by sample number
-  pendingRequests: Map<number, { timestamp: number; resolve: (frame: VideoFrame) => void }>;
-  decodingQueue: number[]; // sample numbers being decoded
-  isDecoding: boolean;
-  config: DecodeWorkerConfig;
+  decoder: FrameDecoder<VideoFrame>;
 }
 
 // Active video sources
@@ -112,38 +105,6 @@ function postProgress(
 }
 
 /**
- * Get codec string from mp4box track description
- */
-function getCodecString(track: MP4VideoTrack): string {
-  // Common codec mappings
-  const codecMap: Record<string, string> = {
-    avc1: 'avc1.640028', // H.264 High Profile Level 4.0
-    avc3: 'avc1.640028',
-    hvc1: 'hvc1.1.6.L93.B0', // H.265/HEVC
-    hev1: 'hvc1.1.6.L93.B0',
-    vp09: 'vp09.00.10.08', // VP9
-    av01: 'av01.0.04M.08', // AV1
-  };
-
-  const codecFamily = track.codec.substring(0, 4);
-  return codecMap[codecFamily] || track.codec;
-}
-
-/**
- * Create VideoDecoder configuration from track info
- */
-function createDecoderConfig(track: MP4VideoTrack): VideoDecoderConfig {
-  return {
-    codec: getCodecString(track),
-    codedWidth: track.video.width,
-    codedHeight: track.video.height,
-    hardwareAcceleration: globalConfig.preferHardwareAcceleration
-      ? 'prefer-hardware'
-      : 'prefer-software',
-  };
-}
-
-/**
  * Initialize a video source from ArrayBuffer data
  */
 async function initializeSource(
@@ -154,67 +115,37 @@ async function initializeSource(
   try {
     postProgress(sourceId, 'demuxing', 0);
 
-    const { mp4File, info, videoTrack, samples, keyframeSamples } = await demuxVideoTrack(
-      data,
-      () => postProgress(sourceId, 'demuxing', 50)
-    );
+    const video = await demuxVideoTrack(data);
 
     postProgress(sourceId, 'indexing', 75);
 
-    // Create the VideoDecoder
-    const decoderConfig = createDecoderConfig(videoTrack);
+    const config = await decoderConfigFor(
+      video,
+      (candidate) => VideoDecoder.isConfigSupported(candidate),
+      globalConfig.preferHardwareAcceleration
+    );
 
-    // Check if this codec is supported
-    const support = await VideoDecoder.isConfigSupported(decoderConfig);
-    if (!support.supported) {
-      throw new Error(`Codec not supported: ${decoderConfig.codec}`);
-    }
-
-    const frameCache = new Map<number, CachedFrame>();
-    const pendingRequests = new Map<
-      number,
-      { timestamp: number; resolve: (frame: VideoFrame) => void }
-    >();
-
-    const decoder = new VideoDecoder({
-      output: (frame: VideoFrame) => {
-        handleDecodedFrame(sourceId, frame);
-      },
-      error: (error: DOMException) => {
-        postError(`Decoder error: ${error.message}`, true, sourceId);
-      },
+    const decoder = new FrameDecoder<VideoFrame>({
+      samples: video.samples,
+      config,
+      createDecoder: (output, error) => new VideoDecoder({ output, error }),
+      createChunk: (init) => new EncodedVideoChunk(init),
+      maxCachedFrames: globalConfig.maxCachedFramesPerSource,
     });
 
-    decoder.configure(decoderConfig);
-
-    // Create source info
+    // Width and height as shown — after the display rotation, the same
+    // numbers <video>'s videoWidth/videoHeight report.
     const sourceInfo: VideoSourceInfo = {
       sourceId,
-      duration: info.duration / info.timescale,
-      width: videoTrack.video.width,
-      height: videoTrack.video.height,
-      codec: videoTrack.codec,
-      frameCount: samples.length,
-      keyframeCount: keyframeSamples.length,
+      duration: video.duration,
+      width: video.displayWidth,
+      height: video.displayHeight,
+      codec: video.codec,
+      frameCount: video.samples.length,
+      keyframeCount: video.keyframeCount,
     };
 
-    // Store source state
-    const source: VideoSource = {
-      sourceId,
-      info: sourceInfo,
-      mp4File,
-      videoTrack,
-      decoder,
-      samples,
-      keyframeSamples,
-      frameCache,
-      pendingRequests,
-      decodingQueue: [],
-      isDecoding: false,
-      config: { ...globalConfig },
-    };
-
-    sources.set(sourceId, source);
+    sources.set(sourceId, { info: sourceInfo, decoder });
 
     postProgress(sourceId, 'ready', 100);
 
@@ -231,143 +162,8 @@ async function initializeSource(
 }
 
 /**
- * Handle a decoded frame from the VideoDecoder
- */
-function handleDecodedFrame(sourceId: string, frame: VideoFrame): void {
-  const source = sources.get(sourceId);
-  if (!source) {
-    frame.close();
-    return;
-  }
-
-  // Find which sample this frame corresponds to (by timestamp)
-  const frameTimestamp = frame.timestamp / 1_000_000; // Convert from microseconds
-  const sampleIndex = source.samples.findIndex(
-    (s) => Math.abs(s.timestamp - frameTimestamp) < 0.001
-  );
-
-  if (sampleIndex === -1) {
-    // Can't match to sample, close and continue
-    frame.close();
-    processDecodingQueue(sourceId);
-    return;
-  }
-
-  const sample = source.samples[sampleIndex];
-
-  // Cache the frame
-  const cachedFrame: CachedFrame = {
-    frame,
-    timestamp: sample.timestamp,
-    lastAccessed: Date.now(),
-  };
-
-  source.frameCache.set(sample.number, cachedFrame);
-
-  // Check if there's a pending request for this timestamp
-  for (const [requestId, request] of source.pendingRequests.entries()) {
-    if (Math.abs(request.timestamp - sample.timestamp) < 0.001) {
-      // Clone the frame for the response (original stays in cache)
-      const responseFrame = frame.clone();
-      source.pendingRequests.delete(requestId);
-
-      postResponse(
-        {
-          type: 'FRAME_READY',
-          requestId,
-          sourceId,
-          timestamp: sample.timestamp,
-          frame: responseFrame,
-        },
-        [responseFrame]
-      );
-      break;
-    }
-  }
-
-  // Evict old frames if cache is full
-  evictFramesIfNeeded(source);
-
-  // Continue processing queue
-  source.decodingQueue = source.decodingQueue.filter((n) => n !== sample.number);
-  processDecodingQueue(sourceId);
-}
-
-/**
- * Evict old frames from cache if it exceeds the limit
- */
-function evictFramesIfNeeded(source: VideoSource): void {
-  while (source.frameCache.size > source.config.maxCachedFramesPerSource) {
-    // Find least recently accessed frame
-    let oldestKey: number | null = null;
-    let oldestTime = Infinity;
-
-    for (const [key, cached] of source.frameCache.entries()) {
-      if (cached.lastAccessed < oldestTime) {
-        oldestTime = cached.lastAccessed;
-        oldestKey = key;
-      }
-    }
-
-    if (oldestKey !== null) {
-      const cached = source.frameCache.get(oldestKey);
-      if (cached) {
-        cached.frame.close();
-        source.frameCache.delete(oldestKey);
-      }
-    } else {
-      break;
-    }
-  }
-}
-
-/**
- * Find the nearest keyframe at or before the given timestamp
- */
-function findNearestKeyframe(
-  source: VideoSource,
-  timestamp: number
-): IndexedSample | null {
-  let nearest: IndexedSample | null = null;
-
-  for (const keyframe of source.keyframeSamples) {
-    if (keyframe.timestamp <= timestamp) {
-      nearest = keyframe;
-    } else {
-      break;
-    }
-  }
-
-  return nearest;
-}
-
-/**
- * Find the sample closest to the given timestamp
- */
-function findSampleAtTimestamp(
-  source: VideoSource,
-  timestamp: number
-): IndexedSample | null {
-  let closest: IndexedSample | null = null;
-  let closestDiff = Infinity;
-
-  for (const sample of source.samples) {
-    const diff = Math.abs(sample.timestamp - timestamp);
-    if (diff < closestDiff) {
-      closestDiff = diff;
-      closest = sample;
-    }
-    // Early exit if we've passed the timestamp
-    if (sample.timestamp > timestamp && closestDiff < 0.1) {
-      break;
-    }
-  }
-
-  return closest;
-}
-
-/**
- * Request a frame at a specific timestamp
+ * Request a frame at a specific timestamp. Always answers: FRAME_READY with
+ * the frame, or ERROR carrying the requestId so the caller's promise settles.
  */
 async function requestFrame(
   sourceId: string,
@@ -380,121 +176,21 @@ async function requestFrame(
     return;
   }
 
-  // Clamp timestamp to valid range
-  const clampedTimestamp = Math.max(
-    0,
-    Math.min(timestamp, source.info.duration)
-  );
-
-  // Find the target sample
-  const targetSample = findSampleAtTimestamp(source, clampedTimestamp);
-  if (!targetSample) {
-    postError(`No sample found for timestamp: ${timestamp}`, false, sourceId, requestId);
-    return;
-  }
-
-  // Check if frame is already cached
-  const cached = source.frameCache.get(targetSample.number);
-  if (cached) {
-    cached.lastAccessed = Date.now();
-    const responseFrame = cached.frame.clone();
-
+  try {
+    const frame = await source.decoder.getFrame(timestamp);
     postResponse(
       {
         type: 'FRAME_READY',
         requestId,
         sourceId,
-        timestamp: targetSample.timestamp,
-        frame: responseFrame,
+        timestamp: frame.timestamp / 1_000_000,
+        frame,
       },
-      [responseFrame]
+      [frame]
     );
-    return;
-  }
-
-  // Store pending request
-  source.pendingRequests.set(requestId, {
-    timestamp: targetSample.timestamp,
-    resolve: () => {}, // Will be handled by handleDecodedFrame
-  });
-
-  // Queue samples for decoding from nearest keyframe to target
-  const keyframe = findNearestKeyframe(source, clampedTimestamp);
-  if (!keyframe) {
-    postError('No keyframe found', false, sourceId, requestId);
-    return;
-  }
-
-  // Find all samples from keyframe to target (plus look-ahead)
-  const samplesToQueue: number[] = [];
-  for (const sample of source.samples) {
-    if (
-      sample.number >= keyframe.number &&
-      sample.number <= targetSample.number + source.config.lookAheadFrames
-    ) {
-      // Skip if already cached or queued
-      if (
-        !source.frameCache.has(sample.number) &&
-        !source.decodingQueue.includes(sample.number)
-      ) {
-        samplesToQueue.push(sample.number);
-      }
-    }
-    if (sample.number > targetSample.number + source.config.lookAheadFrames) {
-      break;
-    }
-  }
-
-  // Add to queue
-  source.decodingQueue.push(...samplesToQueue);
-
-  // Start processing if not already
-  if (!source.isDecoding) {
-    processDecodingQueue(sourceId);
-  }
-}
-
-/**
- * Process the decoding queue for a source
- */
-function processDecodingQueue(sourceId: string): void {
-  const source = sources.get(sourceId);
-  if (!source || source.decodingQueue.length === 0) {
-    if (source) {
-      source.isDecoding = false;
-    }
-    return;
-  }
-
-  source.isDecoding = true;
-
-  // Get next sample to decode
-  const sampleNumber = source.decodingQueue[0];
-  const sample = source.samples.find((s) => s.number === sampleNumber);
-
-  if (!sample || !sample.data) {
-    // Skip this sample
-    source.decodingQueue.shift();
-    processDecodingQueue(sourceId);
-    return;
-  }
-
-  try {
-    // Create encoded chunk
-    const chunk = new EncodedVideoChunk({
-      type: sample.isKeyframe ? 'key' : 'delta',
-      timestamp: sample.timestamp * 1_000_000, // Convert to microseconds
-      duration: sample.duration * 1_000_000,
-      data: sample.data,
-    });
-
-    // Decode it
-    source.decoder.decode(chunk);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    console.warn(`Failed to decode sample ${sampleNumber}: ${message}`);
-    source.decodingQueue.shift();
-    processDecodingQueue(sourceId);
+    postError(message, false, sourceId, requestId);
   }
 }
 
@@ -502,45 +198,16 @@ function processDecodingQueue(sourceId: string): void {
  * Release a frame (remove from cache)
  */
 function releaseFrame(sourceId: string, timestamp: number): void {
-  const source = sources.get(sourceId);
-  if (!source) return;
-
-  // Find sample by timestamp
-  const sample = findSampleAtTimestamp(source, timestamp);
-  if (!sample) return;
-
-  const cached = source.frameCache.get(sample.number);
-  if (cached) {
-    cached.frame.close();
-    source.frameCache.delete(sample.number);
-  }
+  sources.get(sourceId)?.decoder.release(timestamp);
 }
 
 /**
  * Dispose of a video source and free all resources
  */
-async function disposeSource(sourceId: string): Promise<void> {
+function disposeSource(sourceId: string): void {
   const source = sources.get(sourceId);
   if (!source) return;
-
-  // Close all cached frames
-  for (const cached of source.frameCache.values()) {
-    cached.frame.close();
-  }
-  source.frameCache.clear();
-
-  // Close decoder
-  try {
-    await source.decoder.flush();
-    source.decoder.close();
-  } catch {
-    // Ignore errors during cleanup
-  }
-
-  // Stop mp4box
-  source.mp4File.stop();
-
-  // Remove from sources
+  source.decoder.dispose();
   sources.delete(sourceId);
 }
 
@@ -548,17 +215,11 @@ async function disposeSource(sourceId: string): Promise<void> {
  * Flush pending decode operations for a source
  */
 async function flushSource(sourceId: string): Promise<void> {
-  const source = sources.get(sourceId);
-  if (!source) return;
-
   try {
-    await source.decoder.flush();
+    await sources.get(sourceId)?.decoder.flush();
   } catch {
-    // Ignore flush errors
+    // Ignore flush errors: the next frame request reports the failure.
   }
-
-  source.decodingQueue = [];
-  source.isDecoding = false;
 }
 
 /**
@@ -569,14 +230,11 @@ function getStatus(): void {
   let cachedFrameCount = 0;
   let memoryUsage = 0;
 
-  for (const source of sources.values()) {
-    activeSources.push(source.sourceId);
-    cachedFrameCount += source.frameCache.size;
-
-    // Estimate memory usage from cached frames
-    for (const cached of source.frameCache.values()) {
+  for (const [sourceId, source] of sources) {
+    activeSources.push(sourceId);
+    for (const frame of source.decoder.cachedFrames) {
+      cachedFrameCount++;
       // Rough estimate: width * height * 4 bytes per pixel
-      const frame = cached.frame;
       memoryUsage += frame.displayWidth * frame.displayHeight * 4;
     }
   }
@@ -609,7 +267,7 @@ self.onmessage = async (event: MessageEvent<DecodeWorkerRequest>) => {
       break;
 
     case 'DISPOSE_SOURCE':
-      await disposeSource(request.sourceId);
+      disposeSource(request.sourceId);
       break;
 
     case 'FLUSH':

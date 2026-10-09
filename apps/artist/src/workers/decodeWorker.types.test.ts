@@ -21,9 +21,11 @@ import {
 describe('decodeWorker.types', () => {
   describe('DEFAULT_DECODE_WORKER_CONFIG', () => {
     it('has expected default values', () => {
-      expect(DEFAULT_DECODE_WORKER_CONFIG.maxCachedFramesPerSource).toBe(60);
-      expect(DEFAULT_DECODE_WORKER_CONFIG.lookAheadFrames).toBe(10);
-      expect(DEFAULT_DECODE_WORKER_CONFIG.preferHardwareAcceleration).toBe(true);
+      // ESCSUITE-254: a handful of held frames, not two seconds of them, and
+      // no hardware requirement — 'prefer-hardware' is a hard requirement in
+      // Chromium and would refuse every source on a machine without one.
+      expect(DEFAULT_DECODE_WORKER_CONFIG.maxCachedFramesPerSource).toBe(8);
+      expect(DEFAULT_DECODE_WORKER_CONFIG.preferHardwareAcceleration).toBe(false);
     });
 
     it('can be used as a DecodeWorkerConfig', () => {
