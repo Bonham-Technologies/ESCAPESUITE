@@ -1,5 +1,12 @@
 # @escapesuite/plan
 
+## 2.15.30
+
+### Patch Changes
+
+- Updated dependencies [e48f6c6]
+  - @escapesuite/shared@1.4.5
+
 ## 2.15.26
 
 ### Patch Changes
