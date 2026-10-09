@@ -83,10 +83,12 @@ export class ProjectTooLargeError extends Error {
     public readonly total: number,
     /** `MAX_PROJECT_FILE_BASE64_BYTES`. */
     public readonly limit: number,
-    largest: { name: string; size: number }
+    largest: { name: string; size: number },
+    /** The sources' and thumbnails' own bytes — what the sentence shows, rounded up. */
+    public readonly sourceTotal: number = sourceBytes(total)
   ) {
     super(
-      `This project is too large to save as a .veditor file: its sources add up to ${Math.round(sourceBytes(total) / MIB)} MiB ` +
+      `This project is too large to save as a .veditor file: its sources add up to ${Math.ceil(sourceTotal / MIB)} MiB ` +
         `and the format holds about ${Math.floor(sourceBytes(limit) / MIB)} MiB. Export the timeline instead, ` +
         `or remove the largest source (${largest.name}, ${formatMiB(largest.size)}).`
     );
@@ -159,19 +161,21 @@ export async function saveProject(
   // stored blobs are handles, so their sizes cost nothing.
   const stored: { video: SourceVideo; blob: Blob; thumbnail: Blob | undefined }[] = [];
   let total = 0;
+  let sourceTotal = 0;
   let largest: { name: string; size: number } | undefined;
   for (const video of usedVideos) {
     const videoData = await getVideo(video.id);
     if (!videoData) continue;
     const thumbnail = await getThumbnail(video.id);
     total += base64Length(videoData.blob.size) + (thumbnail ? base64Length(thumbnail.size) : 0);
+    sourceTotal += videoData.blob.size + (thumbnail?.size ?? 0);
     if (!largest || videoData.blob.size > largest.size) {
       largest = { name: video.name, size: videoData.blob.size };
     }
     stored.push({ video, blob: videoData.blob, thumbnail });
   }
   if (total > MAX_PROJECT_FILE_BASE64_BYTES) {
-    throw new ProjectTooLargeError(total, MAX_PROJECT_FILE_BASE64_BYTES, largest!);
+    throw new ProjectTooLargeError(total, MAX_PROJECT_FILE_BASE64_BYTES, largest!, sourceTotal);
   }
 
   // Export each video with its data
