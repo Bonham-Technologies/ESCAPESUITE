@@ -113,6 +113,8 @@ export function integrationDouble() {
 export function videoProcessorDouble() {
   return {
     processVideoFile: vi.fn(() => Promise.resolve({ ...sampleVideo })),
+    // ESCSUITE-255: the one entry the uploader and both host paths import through.
+    processMediaFile: vi.fn(() => Promise.resolve({ ...sampleVideo })),
     // The quiet case: a stored recording whose duration needs no recovery.
     resolveStoredDuration: vi.fn((_blob: Blob, metadata: SourceVideo) =>
       Promise.resolve(metadata.duration)

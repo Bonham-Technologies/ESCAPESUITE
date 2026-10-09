@@ -13,7 +13,7 @@ import { StrictMode } from 'react'
 import { act, renderHook } from '@testing-library/react'
 import { useHostIntegration, type HostIntegrationDeps } from './useHostIntegration'
 import { initIntegration, loadVideoFromUrl, sendMessage } from '../utils/integration'
-import { processVideoFile, resolveStoredDuration } from '../core/videoProcessor'
+import { processMediaFile, resolveStoredDuration } from '../core/videoProcessor'
 import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore'
@@ -61,7 +61,7 @@ beforeEach(() => {
   // the calls but keeps whatever implementation the last test installed.
   vi.mocked(initIntegration).mockReturnValue(() => {})
   vi.mocked(loadVideoFromUrl).mockResolvedValue({ blob: new Blob(), name: 'test.mp4' })
-  vi.mocked(processVideoFile).mockResolvedValue({ ...sampleVideo })
+  vi.mocked(processMediaFile).mockResolvedValue({ ...sampleVideo })
   vi.mocked(resolveStoredDuration).mockImplementation((_blob, metadata) =>
     Promise.resolve(metadata.duration)
   )
@@ -85,6 +85,16 @@ afterEach(async () => {
   vi.restoreAllMocks()
 })
 
+const micOnlyWebm = {
+  ...sampleVideo,
+  id: 'mic-only',
+  name: 'take.webm',
+  width: 0,
+  height: 0,
+  mimeType: 'video/webm',
+  mediaType: 'audio' as const,
+}
+
 describe('inbound messages', () => {
   it('LOAD_VIDEO fetches the url, probes it and reports it back', async () => {
     await mountIntegration()
@@ -92,12 +102,28 @@ describe('inbound messages', () => {
     await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/clip.mp4' } })
 
     expect(loadVideoFromUrl).toHaveBeenCalledWith('https://host.example/clip.mp4')
-    expect(processVideoFile).toHaveBeenCalledWith(expect.any(File))
+    expect(processMediaFile).toHaveBeenCalledWith(expect.any(File))
     expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
     expect(sendMessage).toHaveBeenCalledWith({
       type: 'VIDEO_LOADED',
       payload: { id: sampleVideo.id, name: sampleVideo.name },
     })
+  })
+
+  it('LOAD_VIDEO lands a video/webm that decodes no picture as audio (ESCSUITE-255)', async () => {
+    vi.mocked(loadVideoFromUrl).mockResolvedValue({
+      blob: new Blob(['x'], { type: 'video/webm' }),
+      name: 'take.webm',
+    })
+    vi.mocked(processMediaFile).mockResolvedValue(micOnlyWebm)
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/take.webm' } })
+
+    expect(processMediaFile).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/webm' }))
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'mic-only', mediaType: 'audio', width: 0, height: 0 })
+    )
   })
 
   it('LOAD_VIDEO reports a fetch it could not complete, in its own words (ESCSUITE-130)', async () => {
@@ -295,6 +321,21 @@ describe('the ?video= parameter', () => {
 
     expect(loadVideoFromUrl).toHaveBeenCalledWith('https://host.example/a.mp4')
     expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
+  })
+
+  it('lands a video/webm that decodes no picture as audio (ESCSUITE-255)', async () => {
+    vi.mocked(loadVideoFromUrl).mockResolvedValue({
+      blob: new Blob(['x'], { type: 'video/webm' }),
+      name: 'take.webm',
+    })
+    vi.mocked(processMediaFile).mockResolvedValue(micOnlyWebm)
+
+    await mountIntegration({ videos: ['https://host.example/take.webm'] })
+
+    expect(processMediaFile).toHaveBeenCalledWith(expect.objectContaining({ type: 'video/webm' }))
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'mic-only', mediaType: 'audio' })
+    )
   })
 
   it('adds to the library and places nothing', async () => {
