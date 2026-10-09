@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test'
+import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import {
   mockGetUserMedia,
   mockMediaRecorder,
@@ -260,5 +262,67 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
       (url) => url.endsWith('.js') || url.endsWith('.css')
     )
     expect(externalAssets).toHaveLength(0)
+  })
+})
+
+/**
+ * ESCSUITE-221: the released file is run from disk. `/artist/` there is
+ * `file:///artist/`, a browser error page, so both editor buttons are disabled
+ * with a reason instead. This is the one case that needs a real `file://`
+ * document — the other tests in this file run against the served build.
+ */
+test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
+  const REASON = "Open the offline ESCAPEARTIST file and import this recording's WebM."
+  const CRAFT_FILE = pathToFileURL(
+    path.join(path.dirname(new URL(import.meta.url).pathname), '../../../craft/dist/index.html')
+  ).href
+
+  test('both editor buttons are disabled with their reason, and nothing opens', async ({ page, context }) => {
+    const opened: string[] = []
+    context.on('page', (popup) => opened.push(popup.url()))
+
+    await page.goto(CRAFT_FILE)
+    expect(page.url().startsWith('file://')).toBe(true)
+    await waitForAppReady(page, 'craft')
+
+    // Seed one recording straight into the shared DB the app has just created.
+    await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res, rej) => {
+        const r = indexedDB.open('video-editor-db', 1)
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction('videos', 'readwrite')
+        tx.objectStore('videos').put({
+          id: 'take-1',
+          blob: new Blob(['x'], { type: 'video/webm' }),
+          metadata: {
+            id: 'take-1', name: 'Seeded take', source: 'recording', duration: 1,
+            width: 640, height: 360, size: 1, recordedAt: Date.now(), hasAudio: false,
+          },
+        })
+        tx.oncomplete = () => res()
+        tx.onerror = () => rej(tx.error)
+      })
+      db.close()
+    })
+    await page.reload()
+
+    const header = page.getByRole('button', { name: 'Open Editor in new window' })
+    const row = page.getByRole('button', { name: 'Open Seeded take in Editor' })
+    await expect(row).toBeVisible()
+    for (const button of [header, row]) {
+      await expect(button).toBeDisabled()
+      await expect(button).toHaveAttribute('title', REASON)
+      await expect(button).toHaveAccessibleDescription(REASON)
+    }
+    await expect(page.getByText(REASON).first()).toBeVisible()
+
+    // The hunter's probe, inverted: a click goes nowhere — no popup, no error page.
+    await header.click({ force: true }).catch(() => {})
+    await row.click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    expect(opened).toEqual([])
   })
 })
