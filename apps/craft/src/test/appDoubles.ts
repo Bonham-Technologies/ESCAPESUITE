@@ -201,7 +201,7 @@ export const converterModule = {
 
 export const sendToEditorModule = {
   EDITOR_FILE_ORIGIN_REASON:
-    "Open the offline ESCAPEARTIST file and import this recording's WebM.",
+    "Download this recording's WebM and import it into the offline ESCAPEARTIST file.",
   sendToEditor: vi.fn<(id: string) => 'posted' | 'opened'>(() => 'opened'),
 }
 

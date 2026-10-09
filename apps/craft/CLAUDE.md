@@ -1342,7 +1342,7 @@ the shared `editorUrl()` helper.
 user's, so there is no URL to reach. `isFileOrigin()` (`@escapesuite/shared/config`, beside
 `isEmbedded()`) decides; the header button and `RecordingsListPanel` (via `RecordingsList`'s
 `editorBlockedReason`) keep the button, disable it and show `EDITOR_FILE_ORIGIN_REASON`
-("Open the offline ESCAPEARTIST file and import this recording's WebM.") as its title, its
+("Download this recording's WebM and import it into the offline ESCAPEARTIST file.") as its title, its
 `aria-describedby` target and visible text. A *row's* button is disabled only when not embedded:
 embedded, it posts `SEND_TO_EDITOR` and works from any origin; the header button always opens
 the editor itself, so it is disabled from disk even embedded. The hosted build is unchanged.

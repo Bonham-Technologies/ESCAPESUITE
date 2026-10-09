@@ -15,7 +15,7 @@ import { analytics } from './analytics';
  * either way; the sentence names the way across.
  */
 export const EDITOR_FILE_ORIGIN_REASON =
-  "Open the offline ESCAPEARTIST file and import this recording's WebM.";
+  "Download this recording's WebM and import it into the offline ESCAPEARTIST file.";
 
 export const sendToEditor = (id: string): 'posted' | 'opened' => {
   analytics.recordingSentToEditor();

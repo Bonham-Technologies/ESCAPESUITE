@@ -272,7 +272,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
  * document — the other tests in this file run against the served build.
  */
 test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
-  const REASON = "Open the offline ESCAPEARTIST file and import this recording's WebM."
+  const REASON = "Download this recording's WebM and import it into the offline ESCAPEARTIST file."
   const CRAFT_FILE = pathToFileURL(
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../craft/dist/index.html')
   ).href
