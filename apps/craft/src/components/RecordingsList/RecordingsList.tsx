@@ -272,10 +272,10 @@ export function RecordingsList({
                   <button
                     className={styles.iconButton}
                     onClick={() => onSendToEditor(editorTargetId)}
-                    title={editorBlockedReason ?? 'Open in Editor'}
+                    title={editorBlockedReason || 'Open in Editor'}
                     aria-label={`Open ${recording.name} in Editor`}
                     aria-describedby={editorBlockedReason ? EDITOR_NOTE_ID : undefined}
-                    disabled={editorBlockedReason !== null}
+                    disabled={Boolean(editorBlockedReason)}
                   >
                     <EditIcon />
                   </button>

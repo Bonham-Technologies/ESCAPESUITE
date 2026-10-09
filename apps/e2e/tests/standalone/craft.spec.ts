@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import path from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   mockGetUserMedia,
   mockMediaRecorder,
@@ -274,7 +274,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
 test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
   const REASON = "Open the offline ESCAPEARTIST file and import this recording's WebM."
   const CRAFT_FILE = pathToFileURL(
-    path.join(path.dirname(new URL(import.meta.url).pathname), '../../../craft/dist/index.html')
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../craft/dist/index.html')
   ).href
 
   test('both editor buttons are disabled with their reason, and nothing opens', async ({ page, context }) => {
@@ -285,7 +285,21 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     expect(page.url().startsWith('file://')).toBe(true)
     await waitForAppReady(page, 'craft')
 
-    // Seed one recording straight into the shared DB the app has just created.
+    // Seed one recording straight into the shared DB — but only once the app's
+    // own `getDB()` has created it. Opening it first would create an empty v1
+    // database with no stores and break the app.
+    await page.waitForFunction(async () => {
+      const dbs = await indexedDB.databases()
+      if (!dbs.some((d) => d.name === 'video-editor-db')) return false
+      const db: IDBDatabase = await new Promise((res, rej) => {
+        const r = indexedDB.open('video-editor-db')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const ready = db.objectStoreNames.contains('videos')
+      db.close()
+      return ready
+    })
     await page.evaluate(async () => {
       const db: IDBDatabase = await new Promise((res, rej) => {
         const r = indexedDB.open('video-editor-db', 1)

@@ -1,6 +1,5 @@
 ---
 '@escapesuite/craft': patch
-'@escapesuite/shared': patch
 ---
 
 The offline recorder no longer offers editor buttons that open an error page

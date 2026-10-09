@@ -680,6 +680,15 @@ describe('RecordingsList editor button blocked reason (ESCSUITE-221)', () => {
     expect(open).not.toHaveAttribute('aria-describedby')
   })
 
+  it('treats an empty reason as no reason: enabled, default title, nothing described', () => {
+    renderList([makeRecording()], { editorBlockedReason: '' })
+
+    const open = screen.getByRole('button', { name: 'Open Standup Demo in Editor' })
+    expect(open).toBeEnabled()
+    expect(open).toHaveAttribute('title', 'Open in Editor')
+    expect(open).not.toHaveAttribute('aria-describedby')
+  })
+
   it('shows no reason for an empty library', () => {
     renderList([], { editorBlockedReason: REASON })
     expect(screen.queryByText(REASON)).not.toBeInTheDocument()
