@@ -8,7 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
-import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
+import { loadProject, saveProject, showOpenProjectDialog, ProjectTooLargeError } from '../core/projectManager'
+import { analytics } from '../utils/analytics'
 import { clearSessionState, revokeSourceThumbnails } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
@@ -93,6 +94,60 @@ describe('saving', () => {
     expect(consoleError).toHaveBeenCalledWith('Save failed:', expect.any(Error))
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to save project', 'error')
     expect(result.current.isSaving).toBe(false)
+  })
+})
+
+describe('a save the project is too large for (ESCSUITE-241)', () => {
+  const refusal = () => new ProjectTooLargeError('This project is too large to save as a .veditor file: 420 MiB.')
+
+  it('shows the refusal\'s own sentence, not the generic one, and does not count a save', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.spyOn(analytics, 'projectSaved').mockImplementation(() => {})
+    vi.mocked(saveProject).mockRejectedValue(refusal())
+    const { result } = mountActions()
+
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+
+    expect(deps.showNotification).toHaveBeenCalledWith(refusal().message, 'error')
+    expect(deps.showNotification).not.toHaveBeenCalledWith('Failed to save project', 'error')
+    expect(analytics.projectSaved).not.toHaveBeenCalled()
+    expect(result.current.isSaving).toBe(false)
+  })
+
+  it('counts a save that did land', async () => {
+    vi.spyOn(analytics, 'projectSaved').mockImplementation(() => {})
+    const { result } = mountActions()
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+    expect(analytics.projectSaved).toHaveBeenCalledTimes(1)
+  })
+
+  it('save-and-load shows the sentence, does not load, and keeps the dialog and file for another choice', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    const { result } = mountActions({ clipCount: 2 })
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+    expect(result.current.showProjectLoadDialog).toBe(true)
+    vi.mocked(saveProject).mockRejectedValue(refusal())
+
+    await act(async () => {
+      await result.current.handleProjectLoadSaveAndLoad()
+    })
+
+    expect(deps.showNotification).toHaveBeenCalledWith(refusal().message, 'error')
+    expect(loadProject).not.toHaveBeenCalled()
+    expect(result.current.showProjectLoadDialog).toBe(true)
+
+    // The file is still pending: discarding now loads it.
+    await act(async () => {
+      await result.current.handleProjectLoadDiscardAndLoad()
+    })
+    expect(loadProject).toHaveBeenCalledTimes(1)
   })
 })
 
