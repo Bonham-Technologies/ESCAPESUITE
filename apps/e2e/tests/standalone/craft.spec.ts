@@ -277,7 +277,43 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../craft/dist/index.html')
   ).href
 
-  test('both editor buttons are disabled with their reason, and nothing opens', async ({ page, context }) => {
+  const expectBlockedWithReason = async (button: import('@playwright/test').Locator) => {
+    await expect(button).toBeDisabled()
+    await expect(button).toHaveAttribute('title', REASON)
+    await expect(button).toHaveAccessibleDescription(REASON)
+  }
+
+  // Two cases rather than one: the header button needs no recording, so it is
+  // pinned on every standalone browser, while the row button needs a seeded
+  // take — a Blob in IndexedDB, which Playwright's WebKit cannot store.
+  test('the header "Open Editor" is disabled with its reason, and a click opens nothing', async ({ page, context }) => {
+    const opened: string[] = []
+    context.on('page', (popup) => opened.push(popup.url()))
+
+    await page.goto(CRAFT_FILE)
+    expect(page.url().startsWith('file://')).toBe(true)
+    await waitForAppReady(page, 'craft')
+
+    const header = page.getByRole('button', { name: 'Open Editor in new window' })
+    await expectBlockedWithReason(header)
+    await expect(page.getByText(REASON).first()).toBeVisible()
+
+    // The hunter's probe, inverted: a click goes nowhere — no popup, no error page.
+    await header.click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    expect(opened).toEqual([])
+  })
+
+  test('a recording\'s "Open in Editor" is disabled with the same reason, and a click opens nothing', async ({ page, context, browserName }) => {
+    // The seed below stores a Blob in IndexedDB, which Playwright's WebKit
+    // cannot do on this platform (`UnknownError: Error preparing Blob/File
+    // data to be stored in object store`) — the same gap the two cases above
+    // skip for. Whether shipping Safari has it under file:// is ESCSUITE-258.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
     const opened: string[] = []
     context.on('page', (popup) => opened.push(popup.url()))
 
@@ -323,18 +359,12 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     })
     await page.reload()
 
-    const header = page.getByRole('button', { name: 'Open Editor in new window' })
     const row = page.getByRole('button', { name: 'Open Seeded take in Editor' })
     await expect(row).toBeVisible()
-    for (const button of [header, row]) {
-      await expect(button).toBeDisabled()
-      await expect(button).toHaveAttribute('title', REASON)
-      await expect(button).toHaveAccessibleDescription(REASON)
-    }
-    await expect(page.getByText(REASON).first()).toBeVisible()
+    await expectBlockedWithReason(row)
+    // The row's note is the second copy of the sentence; the header's is the first.
+    await expect(page.getByText(REASON)).toHaveCount(2)
 
-    // The hunter's probe, inverted: a click goes nowhere — no popup, no error page.
-    await header.click({ force: true }).catch(() => {})
     await row.click({ force: true }).catch(() => {})
     await page.waitForTimeout(500)
     expect(opened).toEqual([])
