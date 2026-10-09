@@ -9,7 +9,7 @@ import {
   EncodedAudioPacketSource,
   EncodedPacket,
 } from 'mediabunny';
-import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
+import type { Clip, SourceVideo, Track, ExportOptions, ExportProgress } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
@@ -233,22 +233,30 @@ export async function exportToMP4(
   const frameManager = await createFrameManager(isWebCodecsAvailable(), signal);
   const imageElements: Map<string, HTMLImageElement> = new Map();
 
+  // Tell the user when any of this export decodes in the page: the dialog's
+  // own copy promises background-tab encoding, which only holds when
+  // WebCodecs decodes every video source. Said once per export, at the
+  // progress the export has reached, whichever way it happens — the decode
+  // worker could not start (ESCSUITE-153 / ESCSUITE-29 Mechanism 2),
+  // WebCodecs/Worker was never available, or the worker started but refused
+  // a source or gave up on one mid-export (ESCSUITE-254). Without this, the
+  // only signal of the degraded path is a console.warn nobody but a developer
+  // will see — which is how the worker went nine months without decoding a
+  // single source.
+  let inPageDecodingReported = false;
+  let reportedProgress: Pick<ExportProgress, 'phase' | 'progress'> = { phase: 'preparing', progress: 12 };
+  const reportInPageDecoding = () => {
+    if (inPageDecodingReported) return;
+    inPageDecodingReported = true;
+    onProgress({ ...reportedProgress, message: 'Decoding in the page; keep this tab in the foreground' });
+  };
+
   // Log which mode we're using
   if (frameManager.useWebCodecs) {
     console.log('[MP4 Export] Using WebCodecs for video decoding (background-capable)');
   } else {
     console.log('[MP4 Export] Using HTMLVideoElement for video decoding (standard mode)');
-    // Tell the user: the dialog's own copy promises background-tab encoding,
-    // which only holds when WebCodecs actually decoded this export — not when
-    // the decode worker could not start (ESCSUITE-153 / ESCSUITE-29
-    // Mechanism 2) or WebCodecs/Worker was never available in the first
-    // place. Without this, the only signal of the degraded path is a
-    // console.warn nobody but a developer will see.
-    onProgress({
-      phase: 'preparing',
-      progress: 12,
-      message: 'Decoding in the page; keep this tab in the foreground',
-    });
+    reportInPageDecoding();
   }
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
@@ -266,7 +274,7 @@ export async function exportToMP4(
       } else if (source?.mediaType !== 'audio') {
         // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
         try {
-          await loadFrameSource(frameManager, sourceId, blob, blob.type || 'video/mp4');
+          await loadFrameSource(frameManager, sourceId, blob, blob.type || 'video/mp4', reportInPageDecoding);
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
@@ -357,6 +365,7 @@ export async function exportToMP4(
   };
 
   onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+  reportedProgress = { phase: 'encoding', progress: 18 };
   log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
 
   try {
@@ -593,11 +602,8 @@ export async function exportToMP4(
       // Update progress periodically
       if (frameCount % 5 === 0 || frameCount === totalFrames) {
         const progress = 18 + (frameCount / totalFrames) * 70;
-        onProgress({
-          phase: 'encoding',
-          progress: Math.min(progress, 88),
-          message: `Encoding frame ${frameCount}/${totalFrames}...`,
-        });
+        reportedProgress = { phase: 'encoding', progress: Math.min(progress, 88) };
+        onProgress({ ...reportedProgress, message: `Encoding frame ${frameCount}/${totalFrames}...` });
 
         // Yield to prevent UI blocking (uses MessageChannel to avoid background tab throttling)
         await yieldToMain();

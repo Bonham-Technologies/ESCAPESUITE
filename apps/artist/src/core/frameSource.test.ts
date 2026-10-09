@@ -602,6 +602,33 @@ describe('frameSource', () => {
         warn.mockRestore();
       });
 
+      it('reports a refusal that was not an Error in its own words', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        managerOf(factory).loadSource.mockRejectedValue('NotReadableError');
+        const onFallback = vi.fn();
+
+        await factory.createSource('a', mp4(), 'video/mp4', undefined, onFallback);
+
+        expect(onFallback).toHaveBeenCalledWith('a', 'NotReadableError');
+        warn.mockRestore();
+      });
+
+      it('falls back without complaint when nobody asked to be told', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const manager = managerOf(factory);
+        manager.loadSource.mockRejectedValueOnce(new Error('refused'));
+
+        const refused = await factory.createSource('a', mp4(), 'video/mp4');
+        const later = await factory.createSource('b', mp4(), 'video/mp4');
+        manager.getFrame.mockRejectedValue(new Error('stalled'));
+
+        expect(refused.requiresCleanup()).toBe(false);
+        await expect(later.getFrame(0.1)).resolves.toBeInstanceOf(MockHTMLVideoElement);
+        warn.mockRestore();
+      });
+
       it('reports nothing when the worker takes the source', async () => {
         const factory = await factoryWithWorker();
         const onFallback = vi.fn();

@@ -4,6 +4,7 @@
 import type { DrawableMediaSource } from './exportTypes';
 import {
   FrameSourceFactory,
+  type FallbackCallback,
   type IFrameSource,
 } from './frameSource';
 
@@ -44,15 +45,19 @@ export async function createFrameManager(useWebCodecs: boolean, signal?: AbortSi
 }
 
 /**
- * Load a video source into the frame manager
+ * Load a video source into the frame manager.
+ *
+ * `onFallback` is told when an MP4 handed to the decode worker ends up on the
+ * HTMLVideoElement path — refused on load, or given up on mid-export.
  */
 export async function loadFrameSource(
   manager: FrameManager,
   sourceId: string,
   blob: Blob,
-  mimeType: string
+  mimeType: string,
+  onFallback?: FallbackCallback
 ): Promise<IFrameSource> {
-  const source = await manager.factory.createSource(sourceId, blob, mimeType);
+  const source = await manager.factory.createSource(sourceId, blob, mimeType, undefined, onFallback);
   manager.sources.set(sourceId, source);
   return source;
 }

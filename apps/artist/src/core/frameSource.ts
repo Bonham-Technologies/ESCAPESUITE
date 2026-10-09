@@ -36,6 +36,19 @@ export interface SourceInfo {
 export type LoadProgressCallback = (phase: string, progress: number) => void;
 
 /**
+ * Called when a source the WebCodecs worker was asked to decode ends up on
+ * the HTMLVideoElement path instead — refused when it was loaded, or given up
+ * on mid-export — with the worker's reason. The export uses it to say it is
+ * decoding in the page (ESCSUITE-254).
+ */
+export type FallbackCallback = (sourceId: string, reason: string) => void;
+
+/** The words of whatever a decode failure was rejected with. */
+function failureReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * Abstract frame source interface
  */
 export interface IFrameSource {
@@ -270,6 +283,62 @@ export class HTMLVideoFrameSource implements IFrameSource {
 }
 
 /**
+ * A WebCodecs source that hands itself over to the HTMLVideoElement path the
+ * first time the decode worker cannot produce a frame — a decoder error, a
+ * stall — instead of leaving that clip missing from every frame after it.
+ *
+ * The worker answers every request (it bounds its own waits), so a failure
+ * arrives as a rejection here. Requests already in flight when it happens are
+ * served by the same `<video>` source; the worker's copy is disposed.
+ */
+class FailoverFrameSource implements IFrameSource {
+  private fallback: Promise<IFrameSource> | null = null;
+
+  constructor(
+    private readonly primary: IFrameSource,
+    private readonly sourceId: string,
+    private readonly createFallback: () => Promise<IFrameSource>,
+    private readonly onFallback?: FallbackCallback
+  ) {}
+
+  async getFrame(timestamp: number): Promise<DrawableFrame> {
+    if (!this.fallback) {
+      try {
+        return await this.primary.getFrame(timestamp);
+      } catch (error) {
+        this.handOver(error);
+      }
+    }
+    return (await this.fallback!).getFrame(timestamp);
+  }
+
+  getInfo(): SourceInfo {
+    return this.primary.getInfo();
+  }
+
+  requiresCleanup(): boolean {
+    return true;
+  }
+
+  async dispose(): Promise<void> {
+    await this.primary.dispose();
+    if (this.fallback) await (await this.fallback).dispose();
+  }
+
+  /** Switch to the `<video>` path, once, however many requests failed together. */
+  private handOver(error: unknown): void {
+    if (this.fallback) return;
+    console.warn(
+      `WebCodecs failed for ${this.sourceId} mid-export, falling back to HTMLVideoElement:`,
+      error
+    );
+    this.onFallback?.(this.sourceId, failureReason(error));
+    this.fallback = this.createFallback();
+    void this.primary.dispose();
+  }
+}
+
+/**
  * Factory for creating frame sources
  * Automatically selects WebCodecs or HTMLVideoElement based on support
  */
@@ -326,31 +395,43 @@ export class FrameSourceFactory {
    * @param blob Video blob
    * @param mimeType MIME type (e.g., 'video/mp4')
    * @param onProgress Optional progress callback
+   * @param onFallback Told when an MP4 the worker was given ends up on the
+   *   HTMLVideoElement path — refused now, or given up on mid-export
    * @returns A frame source (WebCodecs or HTMLVideoElement based)
    */
   async createSource(
     sourceId: string,
     blob: Blob,
     mimeType: string,
-    onProgress?: LoadProgressCallback
+    onProgress?: LoadProgressCallback,
+    onFallback?: FallbackCallback
   ): Promise<IFrameSource> {
     // Use WebCodecs for MP4 files when supported
     if (this.useWebCodecs && this.manager && mimeType.includes('mp4')) {
       try {
         const data = await blob.arrayBuffer();
-        return await WebCodecsFrameSource.create(
+        const source = await WebCodecsFrameSource.create(
           this.manager,
           sourceId,
           data,
           mimeType,
           onProgress
         );
+        return new FailoverFrameSource(
+          source,
+          sourceId,
+          () => HTMLVideoFrameSource.create(sourceId, blob, onProgress),
+          onFallback
+        );
       } catch (error) {
-        // Fall back to HTMLVideoElement on error
+        // Fall back to HTMLVideoElement on error — and say so: before
+        // ESCSUITE-254 this warning was the only trace that every source
+        // fell back.
         console.warn(
           `WebCodecs failed for ${sourceId}, falling back to HTMLVideoElement:`,
           error
         );
+        onFallback?.(sourceId, failureReason(error));
       }
     }
 

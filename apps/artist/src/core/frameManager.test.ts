@@ -172,6 +172,9 @@ describe('frameManager', () => {
       const manager = await createFrameManager(true)
       await loadFrameSource(manager, 'clip-a', mp4(), 'video/mp4')
       decoder.getFrameError = new Error('decode failed')
+      // Since ESCSUITE-254 a worker failure hands the source to a <video>
+      // element; this is the case where that fails too.
+      media.script({ video: { fail: true } })
 
       expect(await getFrameAtTime(manager, 'clip-a', 2)).toBeNull()
       expect(warn).toHaveBeenCalledWith(
