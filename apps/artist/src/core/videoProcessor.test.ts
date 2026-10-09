@@ -751,7 +751,7 @@ describe('videoProcessor', () => {
       expect(metadata.mediaType).toBe('video')
       expect(metadata.width).toBe(640)
       expect(metadata.height).toBe(360)
-      expect(media.videos).toHaveLength(1)
+      expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
     })
 
     it('types a video/webm file that decodes no picture as audio (the regression)', async () => {

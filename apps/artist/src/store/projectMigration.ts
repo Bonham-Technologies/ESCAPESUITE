@@ -7,12 +7,60 @@ import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
 import { isValidCrop } from '../core/clipCrop';
 
+/**
+ * Repair a clip transform the app itself once wrote (ESCSUITE-255): a scale
+ * that is not finite and positive becomes 1, and an x, y, rotation or opacity
+ * that is not finite becomes its `DEFAULT_TRANSFORM` value. A session saved
+ * before the store refused such writes (a 0x0 "video"'s Fit to Canvas wrote
+ * `scaleX: Infinity`) restores usable instead of poisoning the project.
+ * Returns the very same transform when nothing needs repair.
+ */
+function repairTransform(transform: ClipTransform): ClipTransform {
+  let repaired: ClipTransform | null = null;
+  for (const key of ['scaleX', 'scaleY'] as const) {
+    const value = transform[key];
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+      repaired = { ...(repaired ?? transform), [key]: 1 };
+    }
+  }
+  for (const key of ['x', 'y', 'rotation', 'opacity'] as const) {
+    const value = transform[key];
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      repaired = { ...(repaired ?? transform), [key]: DEFAULT_TRANSFORM[key] };
+    }
+  }
+  return repaired ?? transform;
+}
+
+/**
+ * Repair every clip's transform; the project, timeline and each clip keep
+ * their identity when nothing was wrong, and one `console.warn` names each
+ * clip that was repaired. `parseProject` has already refused an untrusted
+ * file with such a transform (ESCSUITE-173), so this only ever touches the
+ * app's own state — the session restore and a `setProject` of its own.
+ */
+function repairClipTransforms(project: Project): Project {
+  const clips = project.timeline.clips;
+  let changed = false;
+  const repairedClips = clips.map((clip) => {
+    if (!clip.transform) return clip;
+    const transform = repairTransform(clip.transform);
+    if (transform === clip.transform) return clip;
+    console.warn(`Repaired a non-finite transform on clip ${clip.id}`);
+    changed = true;
+    return { ...clip, transform };
+  });
+  if (!changed) return project;
+  return { ...project, timeline: { ...project.timeline, clips: repairedClips } };
+}
+
 // Ensure timeline has tracks and overlays arrays (migration helper)
 function ensureTimelineHasTracks(project: Project): Project {
   // Ensure resolution exists (migration for older projects)
   if (!project.resolution) {
     project = { ...project, resolution: { width: 1920, height: 1080 } };
   }
+  project = repairClipTransforms(project);
 
   const timeline = project.timeline;
   let needsMigration = false;

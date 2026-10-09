@@ -683,6 +683,15 @@ describe('a session carrying a non-finite transform is repaired (ESCSUITE-255)',
     warn.mockRestore()
   })
 
+  it('repairs a scale the structured clone turned into null or a string', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    store().setProject(sessionWith({ scaleX: null, opacity: '1' }) as unknown as Project)
+
+    expect(store().project.timeline.clips[0].transform).toMatchObject({ scaleX: 1, opacity: 1 })
+    warn.mockRestore()
+  })
+
   it('leaves a healthy session untouched, the clip object included, and says nothing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const healthy = sessionWith({ scaleX: 0.5 })

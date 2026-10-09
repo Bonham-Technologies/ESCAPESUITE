@@ -78,11 +78,16 @@ export function overlayPositionValue(clip: Clip, axis: 'x' | 'y', isOverlay: boo
  * otherwise — never the uncropped source, so Fit to Canvas on a cropped clip
  * fills the frame with the picture the user is looking at rather than
  * reserving room for a part that is no longer drawn.
+ *
+ * A drawn size with a non-positive dimension — a source that decoded no
+ * picture (0x0) — has nothing to fit, so the answer is `1` rather than the
+ * `Infinity` the division gives (ESCSUITE-255).
  */
 export function fitToCanvasScale(
   resolution: { width: number; height: number },
   drawnSize: { width: number; height: number }
 ): number {
+  if (drawnSize.width <= 0 || drawnSize.height <= 0) return 1;
   return Math.min(
     resolution.width / drawnSize.width,
     resolution.height / drawnSize.height
