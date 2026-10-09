@@ -67,6 +67,9 @@ const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3);
 
 const formatMiB = (bytes: number): string => `${Math.ceil(bytes / MIB)} MiB`;
 
+/** Base64 length back to the source bytes it encodes (3 per 4 characters). */
+const sourceBytes = (base64Chars: number): number => (base64Chars * 3) / 4;
+
 /**
  * Thrown by `saveProject`, before it reads any bytes, when the project's
  * sources would not fit in one `.veditor` file. The message is meant to be
@@ -83,8 +86,8 @@ export class ProjectTooLargeError extends Error {
     largest: { name: string; size: number }
   ) {
     super(
-      `This project is too large to save as a .veditor file: its sources add up to ${formatMiB(total)} ` +
-        `and the format holds ${formatMiB(limit)}. Export the timeline instead, ` +
+      `This project is too large to save as a .veditor file: its sources add up to ${Math.round(sourceBytes(total) / MIB)} MiB ` +
+        `and the format holds about ${Math.floor(sourceBytes(limit) / MIB)} MiB. Export the timeline instead, ` +
         `or remove the largest source (${largest.name}, ${formatMiB(largest.size)}).`
     );
   }

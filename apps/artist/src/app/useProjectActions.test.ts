@@ -501,6 +501,22 @@ describe('the safety dialog', () => {
     expect(loadProject).not.toHaveBeenCalled()
   })
 
+  it('keeps the dialog mounted while the save is running', async () => {
+    let finishSave!: () => void
+    vi.mocked(saveProject).mockReturnValue(new Promise<void>((resolve) => { finishSave = resolve }))
+    const { result } = mountActions({ clipCount: 2 })
+    await openDialog(result)
+
+    let pending!: Promise<void>
+    act(() => { pending = result.current.handleProjectLoadSaveAndLoad() })
+    expect(result.current.showProjectLoadDialog).toBe(true)
+    expect(loadProject).not.toHaveBeenCalled()
+
+    await act(async () => { finishSave(); await pending })
+    expect(result.current.showProjectLoadDialog).toBe(false)
+    expect(loadProject).toHaveBeenCalled()
+  })
+
   it('saves before it loads when asked to', async () => {
     const { result } = mountActions({ clipCount: 2 })
     await openDialog(result)
@@ -516,7 +532,7 @@ describe('the safety dialog', () => {
     expect(saved).toBeLessThan(loaded)
   })
 
-  it('loads anyway when the save it was asked for fails', async () => {
+  it('does not load when the save it was asked for fails, and leaves the dialog open', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { result } = mountActions({ clipCount: 2 })
     await openDialog(result)
@@ -528,7 +544,8 @@ describe('the safety dialog', () => {
 
     expect(consoleError).toHaveBeenCalledWith('Failed to save current project:', expect.any(Error))
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to save project', 'error')
-    expect(loadProject).toHaveBeenCalled()
+    expect(loadProject).not.toHaveBeenCalled()
+    expect(result.current.showProjectLoadDialog).toBe(true)
   })
 
   it('discards the current work when asked to', async () => {

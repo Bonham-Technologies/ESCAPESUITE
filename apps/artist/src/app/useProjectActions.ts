@@ -188,25 +188,27 @@ export function useProjectActions({
   }, []);
 
   const handleProjectLoadSaveAndLoad = useCallback(async () => {
-    setShowProjectLoadDialog(false);
     const file = pendingProjectFile;
-    setPendingProjectFile(null);
-    if (!file) return;
+    if (!file) {
+      setShowProjectLoadDialog(false);
+      return;
+    }
+    // The dialog and its file stay put until the save settles: a save that
+    // fails for any reason did not happen, so the load must not either, and
+    // the user has to be able to choose again.
     try {
       await saveProject(project, sourceVideos);
-      showNotification('Project saved', 'success');
     } catch (error) {
       console.error('Failed to save current project:', error);
-      if (error instanceof ProjectTooLargeError) {
-        // The save the user chose did not happen, so neither does the load:
-        // put the dialog and its file back and let them choose again.
-        showNotification(error.message, 'error');
-        setPendingProjectFile(file);
-        setShowProjectLoadDialog(true);
-        return;
-      }
-      showNotification('Failed to save project', 'error');
+      showNotification(
+        error instanceof ProjectTooLargeError ? error.message : 'Failed to save project',
+        'error'
+      );
+      return;
     }
+    showNotification('Project saved', 'success');
+    setShowProjectLoadDialog(false);
+    setPendingProjectFile(null);
     await loadProjectFile(file);
   }, [pendingProjectFile, project, sourceVideos, loadProjectFile, showNotification]);
 

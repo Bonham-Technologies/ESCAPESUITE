@@ -178,6 +178,8 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
     expect(clickSpy).toHaveBeenCalledTimes(1)
   })
 
+  // onProgress(0, 'Preparing project data...') precedes the budget check by
+  // design; no export step does.
   it('refuses one source over the budget, naming the totals and the largest source, before reading anything', async () => {
     const id = uniqueId('big')
     fakeStored(id, 200 * MiB) // 4 x ceil(200 MiB / 3) is about 267 MiB of base64
@@ -189,7 +191,8 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
     expect(error.limit).toBe(MAX_PROJECT_FILE_BASE64_BYTES)
     expect(error.total).toBe(4 * Math.ceil((200 * MiB) / 3))
     expect(error.message).toContain('This project is too large to save as a .veditor file')
-    expect(error.message).toContain('256 MiB')
+    expect(error.message).toContain('the format holds about 192 MiB')
+    expect(error.message).toContain('its sources add up to 200 MiB')
     expect(error.message).toContain('Recording 3, 200 MiB')
     expect(readSpy).not.toHaveBeenCalled()
     expect(onProgress).not.toHaveBeenCalledWith(expect.any(Number), expect.stringContaining('Exporting'))
@@ -197,13 +200,24 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
     expect(createObjectURL).not.toHaveBeenCalled()
   })
 
-  it('a source just under the budget is not refused', async () => {
-    const id = uniqueId('edge')
-    // 4 x ceil(n / 3) <= 256 MiB  =>  n <= 192 MiB
-    fakeStored(id, 192 * MiB)
+  it('a source exactly at the budget is not refused, and one byte over is', async () => {
+    const at = uniqueId('edge')
+    // 4 x ceil(n / 3) = 256 MiB  =>  n = 192 MiB
+    fakeStored(at, 192 * MiB)
     vi.mocked(getThumbnail).mockImplementationOnce(async () => undefined)
-    const result = await saveProject(projectUsing([id]), [sourceVideo(id)]).catch((e) => e)
+    const progress: string[] = []
+    // The fake blob then fails the short-read check: what matters is that the
+    // export loop was entered, which is the only place 'Exporting' is reported.
+    const result = await saveProject(projectUsing([at]), [sourceVideo(at)], (_p, m) => progress.push(m)).catch((e) => e)
     expect(result).not.toBeInstanceOf(ProjectTooLargeError)
+    expect(progress).toContain('Exporting video 1/1...')
+
+    const over = uniqueId('over')
+    fakeStored(over, 192 * MiB + 1) // 4 x ceil((192 MiB + 1) / 3) is 4 bytes more
+    vi.mocked(getThumbnail).mockImplementationOnce(async () => undefined)
+    const refused = await saveProject(projectUsing([over]), [sourceVideo(over)]).catch((e) => e)
+    expect(refused).toBeInstanceOf(ProjectTooLargeError)
+    expect(refused.total).toBeGreaterThan(MAX_PROJECT_FILE_BASE64_BYTES)
   })
 
   it('counts every source together, not each on its own', async () => {
@@ -252,6 +266,12 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
       useReader('')
       await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
       expect(clickSpy).not.toHaveBeenCalled()
+    })
+
+    it('rejects a null result, which browsers report after an error', async () => {
+      const id = await store10()
+      useReader(null)
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
     })
 
     it('rejects a result with no base64 part', async () => {
