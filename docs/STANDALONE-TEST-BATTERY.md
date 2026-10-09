@@ -66,6 +66,7 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 - [ ] While one conversion runs, every other row's MP4 button is disabled and says why
 - [ ] Switching to another tab mid-conversion does not stall or cancel it
 - [ ] In a browser without WebCodecs the MP4 button is visible, disabled, and gives its reason; the WebM download still works
+- [ ] Opened from `file://`, the header's "Open Editor" and every row's "Open in Editor" are visible but disabled, with the visible reason "Download this recording's WebM and import it into the offline ESCAPEARTIST file." (no error page opens); served over http they open the editor as normal (ESCSUITE-221)
 
 #### ESCAPEARTIST (http://localhost:5185/ or file://)
 - [ ] App loads with no network requests (check DevTools Network tab)

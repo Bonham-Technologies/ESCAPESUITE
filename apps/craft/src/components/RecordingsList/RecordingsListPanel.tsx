@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { isEmbedded } from '@escapesuite/shared/config';
+import { isEmbedded, isFileOrigin } from '@escapesuite/shared/config';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
+import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor';
 import { uploadToHost } from '../../utils/uploadToHost';
 import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices';
 import { RecordingsList } from './RecordingsList';
@@ -75,6 +76,12 @@ export function RecordingsListPanel({
   // Standalone CRAFT has no one to post to, so the action does not exist
   // there — the prop is simply absent and the button is never drawn.
   const embedded = isEmbedded();
+  // Opened from disk and with no host to hand the id to, "Open in Editor" has
+  // nowhere to go (`/artist/` is `file:///artist/`). Embedded, it posts
+  // `SEND_TO_EDITOR` instead and works wherever the page came from
+  // (ESCSUITE-221).
+  const editorBlockedReason =
+    isFileOrigin() && !embedded ? EDITOR_FILE_ORIGIN_REASON : null;
   // The ids whose blobs are being read right now. A take can be a gigabyte,
   // so a second click before the first read returns would read it twice and
   // hand the host two copies of the same recording. Per id rather than one
@@ -146,6 +153,7 @@ export function RecordingsListPanel({
       mp4BlockedReason={blockedReason}
       m4aBlockedReason={m4aBlockedReason}
       mp4Note={note}
+      editorBlockedReason={editorBlockedReason}
       onPlay={onPlay}
       onDownload={onDownload}
       onDownloadMp4={(id, name) => void startMp4Download(id, name)}

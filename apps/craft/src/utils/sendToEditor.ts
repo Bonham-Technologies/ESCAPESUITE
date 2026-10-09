@@ -6,6 +6,17 @@
 import { isEmbedded, editorUrl, parseHostOrigin } from '@escapesuite/shared/config';
 import { analytics } from './analytics';
 
+/**
+ * Said, as a disabled editor button's title and visible description, when the
+ * app was opened from disk (`file:`). The released single-file CRAFT has no
+ * editor at a URL it can reach — `/artist/` resolves to `file:///artist/` — and
+ * the downloaded ESCAPEARTIST file's name is the user's, so there is nothing
+ * to navigate to (ESCSUITE-221). The recording is in the shared IndexedDB
+ * either way; the sentence names the way across.
+ */
+export const EDITOR_FILE_ORIGIN_REASON =
+  "Download this recording's WebM and import it into the offline ESCAPEARTIST file.";
+
 export const sendToEditor = (id: string): 'posted' | 'opened' => {
   analytics.recordingSentToEditor();
 

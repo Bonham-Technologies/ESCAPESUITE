@@ -1,4 +1,6 @@
 import { test, expect } from '@playwright/test'
+import path from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
   mockGetUserMedia,
   mockMediaRecorder,
@@ -260,5 +262,111 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
       (url) => url.endsWith('.js') || url.endsWith('.css')
     )
     expect(externalAssets).toHaveLength(0)
+  })
+})
+
+/**
+ * ESCSUITE-221: the released file is run from disk. `/artist/` there is
+ * `file:///artist/`, a browser error page, so both editor buttons are disabled
+ * with a reason instead. This is the one case that needs a real `file://`
+ * document — the other tests in this file run against the served build.
+ */
+test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
+  const REASON = "Download this recording's WebM and import it into the offline ESCAPEARTIST file."
+  const CRAFT_FILE = pathToFileURL(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../craft/dist/index.html')
+  ).href
+
+  const expectBlockedWithReason = async (button: import('@playwright/test').Locator) => {
+    await expect(button).toBeDisabled()
+    await expect(button).toHaveAttribute('title', REASON)
+    await expect(button).toHaveAccessibleDescription(REASON)
+  }
+
+  // Two cases rather than one: the header button needs no recording, so it is
+  // pinned on every standalone browser, while the row button needs a seeded
+  // take — a Blob in IndexedDB, which Playwright's WebKit cannot store.
+  test('the header "Open Editor" is disabled with its reason, and a click opens nothing', async ({ page, context }) => {
+    const opened: string[] = []
+    context.on('page', (popup) => opened.push(popup.url()))
+
+    await page.goto(CRAFT_FILE)
+    expect(page.url().startsWith('file://')).toBe(true)
+    await waitForAppReady(page, 'craft')
+
+    const header = page.getByRole('button', { name: 'Open Editor in new window' })
+    await expectBlockedWithReason(header)
+    await expect(page.getByText(REASON).first()).toBeVisible()
+
+    // The hunter's probe, inverted: a click goes nowhere — no popup, no error page.
+    await header.click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    expect(opened).toEqual([])
+  })
+
+  test('a recording\'s "Open in Editor" is disabled with the same reason, and a click opens nothing', async ({ page, context, browserName }) => {
+    // The seed below stores a Blob in IndexedDB, which Playwright's WebKit
+    // cannot do on this platform (`UnknownError: Error preparing Blob/File
+    // data to be stored in object store`) — the same gap the two cases above
+    // skip for. Whether shipping Safari has it under file:// is ESCSUITE-258.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
+    const opened: string[] = []
+    context.on('page', (popup) => opened.push(popup.url()))
+
+    await page.goto(CRAFT_FILE)
+    expect(page.url().startsWith('file://')).toBe(true)
+    await waitForAppReady(page, 'craft')
+
+    // Seed one recording straight into the shared DB — but only once the app's
+    // own `getDB()` has created it. Opening it first would create an empty v1
+    // database with no stores and break the app.
+    await page.waitForFunction(async () => {
+      const dbs = await indexedDB.databases()
+      if (!dbs.some((d) => d.name === 'video-editor-db')) return false
+      const db: IDBDatabase = await new Promise((res, rej) => {
+        const r = indexedDB.open('video-editor-db')
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      const ready = db.objectStoreNames.contains('videos')
+      db.close()
+      return ready
+    })
+    await page.evaluate(async () => {
+      const db: IDBDatabase = await new Promise((res, rej) => {
+        const r = indexedDB.open('video-editor-db', 1)
+        r.onsuccess = () => res(r.result)
+        r.onerror = () => rej(r.error)
+      })
+      await new Promise<void>((res, rej) => {
+        const tx = db.transaction('videos', 'readwrite')
+        tx.objectStore('videos').put({
+          id: 'take-1',
+          blob: new Blob(['x'], { type: 'video/webm' }),
+          metadata: {
+            id: 'take-1', name: 'Seeded take', source: 'recording', duration: 1,
+            width: 640, height: 360, size: 1, recordedAt: Date.now(), hasAudio: false,
+          },
+        })
+        tx.oncomplete = () => res()
+        tx.onerror = () => rej(tx.error)
+      })
+      db.close()
+    })
+    await page.reload()
+
+    const row = page.getByRole('button', { name: 'Open Seeded take in Editor' })
+    await expect(row).toBeVisible()
+    await expectBlockedWithReason(row)
+    // The row's note is the second copy of the sentence; the header's is the first.
+    await expect(page.getByText(REASON)).toHaveCount(2)
+
+    await row.click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    expect(opened).toEqual([])
   })
 })

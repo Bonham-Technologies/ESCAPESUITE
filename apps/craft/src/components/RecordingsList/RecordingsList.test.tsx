@@ -35,6 +35,7 @@ function renderList(
     mp4BlockedReason?: string | null
     m4aBlockedReason?: string | null
     mp4Note?: string | null
+    editorBlockedReason?: string | null
   } = {},
   // Absent by default, because that is what standalone CRAFT passes: no host,
   // no button. The panel is what decides; this component only draws.
@@ -56,6 +57,7 @@ function renderList(
       mp4BlockedReason={mp4.mp4BlockedReason ?? null}
       m4aBlockedReason={mp4.m4aBlockedReason ?? null}
       mp4Note={mp4.mp4Note ?? null}
+      editorBlockedReason={mp4.editorBlockedReason ?? null}
       onUploadToHost={onUploadToHost}
       {...calls}
     />
@@ -650,5 +652,45 @@ describe('a take recorded as separate tracks', () => {
     // Four rows, four chances to say something no longer true.
     expect(screen.queryByText(/not included yet/)).toBeNull()
     expect(screen.queryByText(/screen track only/)).toBeNull()
+  })
+})
+
+describe('RecordingsList editor button blocked reason (ESCSUITE-221)', () => {
+  const REASON = 'Open the offline ESCAPEARTIST file and import this recording\'s WebM.'
+
+  it('disables "Open in Editor" and shows the reason, described by it', async () => {
+    const user = userEvent.setup()
+    const { calls } = renderList([makeRecording()], { editorBlockedReason: REASON })
+
+    const open = screen.getByRole('button', { name: 'Open Standup Demo in Editor' })
+    expect(open).toBeDisabled()
+    expect(open).toHaveAttribute('title', REASON)
+    expect(open).toHaveAccessibleDescription(REASON)
+    expect(screen.getByText(REASON)).toBeVisible()
+    await user.click(open)
+    expect(calls.onSendToEditor).not.toHaveBeenCalled()
+  })
+
+  it('keeps the button enabled, titled and unexplained with no reason', () => {
+    renderList([makeRecording()])
+
+    const open = screen.getByRole('button', { name: 'Open Standup Demo in Editor' })
+    expect(open).toBeEnabled()
+    expect(open).toHaveAttribute('title', 'Open in Editor')
+    expect(open).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('treats an empty reason as no reason: enabled, default title, nothing described', () => {
+    renderList([makeRecording()], { editorBlockedReason: '' })
+
+    const open = screen.getByRole('button', { name: 'Open Standup Demo in Editor' })
+    expect(open).toBeEnabled()
+    expect(open).toHaveAttribute('title', 'Open in Editor')
+    expect(open).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('shows no reason for an empty library', () => {
+    renderList([], { editorBlockedReason: REASON })
+    expect(screen.queryByText(REASON)).not.toBeInTheDocument()
   })
 })

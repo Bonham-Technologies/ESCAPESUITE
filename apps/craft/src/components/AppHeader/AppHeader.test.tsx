@@ -9,18 +9,24 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AppHeader } from './AppHeader'
 import type { RecordingState } from '../../store/types'
+import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
 import styles from '../../App.module.css'
 
-const { isStandaloneMode } = vi.hoisted(() => ({ isStandaloneMode: vi.fn(() => false) }))
+const { isStandaloneMode, isFileOrigin } = vi.hoisted(() => ({
+  isStandaloneMode: vi.fn(() => false),
+  isFileOrigin: vi.fn(() => false),
+}))
 vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@escapesuite/shared/config')>()),
   isStandaloneMode,
+  isFileOrigin,
 }))
 
 let openSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   isStandaloneMode.mockReturnValue(false)
+  isFileOrigin.mockReturnValue(false)
   openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
 })
 
@@ -144,5 +150,32 @@ describe('AppHeader buttons', () => {
     await user.click(editor)
 
     expect(openSpy).toHaveBeenCalledWith('/artist/', 'escapeartist')
+  })
+})
+
+describe('AppHeader Open Editor under a file origin (ESCSUITE-221)', () => {
+  it('is disabled with a visible reason it is described by, and opens nothing', async () => {
+    isFileOrigin.mockReturnValue(true)
+    const user = userEvent.setup()
+    renderHeader()
+
+    const editor = screen.getByRole('button', { name: 'Open Editor in new window' })
+    expect(editor).toBeDisabled()
+    expect(editor).toHaveAttribute('title', EDITOR_FILE_ORIGIN_REASON)
+    expect(editor).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
+    expect(screen.getByText(EDITOR_FILE_ORIGIN_REASON)).toBeVisible()
+
+    await user.click(editor)
+    expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('is enabled, titled "Open Editor" and carries no reason on an http origin', () => {
+    renderHeader()
+
+    const editor = screen.getByRole('button', { name: 'Open Editor in new window' })
+    expect(editor).toBeEnabled()
+    expect(editor).toHaveAttribute('title', 'Open Editor')
+    expect(editor).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText(EDITOR_FILE_ORIGIN_REASON)).not.toBeInTheDocument()
   })
 })
