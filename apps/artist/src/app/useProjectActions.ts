@@ -16,7 +16,7 @@
 // callbacks that need it only ever read `clips.length`, and it is the
 // dependency both of them carried inline.
 import { useCallback, useState } from 'react';
-import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
+import { saveProject, loadProject, showOpenProjectDialog, ProjectTooLargeError } from '../core/projectManager';
 import { clearSessionState, revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
@@ -88,7 +88,10 @@ export function useProjectActions({
       showNotification('Project saved successfully', 'success');
     } catch (error) {
       console.error('Save failed:', error);
-      showNotification('Failed to save project', 'error');
+      showNotification(
+        error instanceof ProjectTooLargeError ? error.message : 'Failed to save project',
+        'error'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -194,6 +197,14 @@ export function useProjectActions({
       showNotification('Project saved', 'success');
     } catch (error) {
       console.error('Failed to save current project:', error);
+      if (error instanceof ProjectTooLargeError) {
+        // The save the user chose did not happen, so neither does the load:
+        // put the dialog and its file back and let them choose again.
+        showNotification(error.message, 'error');
+        setPendingProjectFile(file);
+        setShowProjectLoadDialog(true);
+        return;
+      }
       showNotification('Failed to save project', 'error');
     }
     await loadProjectFile(file);

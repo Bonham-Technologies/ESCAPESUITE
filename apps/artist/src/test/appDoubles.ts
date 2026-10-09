@@ -74,6 +74,13 @@ export function projectManagerDouble() {
   // the hook under test and in the test that throws it.
   class ProjectTooLargeError extends Error {
     name = 'ProjectTooLargeError';
+    constructor(
+      public total: number,
+      public limit: number,
+      public largest: { name: string; size: number }
+    ) {
+      super(`This project is too large to save as a .veditor file: ${total} / ${limit}.`);
+    }
   }
   return {
     ProjectTooLargeError,

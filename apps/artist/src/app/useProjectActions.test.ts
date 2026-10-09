@@ -98,7 +98,7 @@ describe('saving', () => {
 })
 
 describe('a save the project is too large for (ESCSUITE-241)', () => {
-  const refusal = () => new ProjectTooLargeError('This project is too large to save as a .veditor file: 420 MiB.')
+  const refusal = () => new ProjectTooLargeError(420, 256, { name: 'Recording 3', size: 400 })
 
   it('shows the refusal\'s own sentence, not the generic one, and does not count a save', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})

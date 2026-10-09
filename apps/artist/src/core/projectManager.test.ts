@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import {
   exportProjectMetadata,
   extractMetadataFromBlob,
@@ -129,7 +129,7 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
   let clickSpy: ReturnType<typeof vi.spyOn>
   let createObjectURL: ReturnType<typeof vi.spyOn>
   let fileReader: ReturnType<typeof installFileReaderDouble>
-  let readSpy: ReturnType<typeof vi.fn>
+  let readSpy: Mock<() => void>
 
   beforeEach(() => {
     clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
@@ -137,7 +137,7 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
     fileReader = installFileReaderDouble()
     // Count byte reads: the budget must be decided before any is made.
     const Installed = (globalThis as unknown as { FileReader: new () => { readAsDataURL(b: Blob): void } }).FileReader
-    readSpy = vi.fn()
+    readSpy = vi.fn<() => void>()
     const original = Installed.prototype.readAsDataURL
     Installed.prototype.readAsDataURL = function (this: unknown, b: Blob) {
       readSpy()
@@ -264,6 +264,21 @@ describe('saveProject size budget (ESCSUITE-241)', () => {
       const id = await store10()
       useReader('data:video/mp4;base64,AAAA') // 4 < 4 x floor(10 / 3) = 12
       await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
+    })
+
+    it('rejects an empty result for a blob too small to need any full base64 group', async () => {
+      const id = uniqueId('tiny')
+      await storeVideo(id, new Blob([new Uint8Array(2)], { type: 'video/mp4' }), sourceVideo(id))
+      useReader('data:video/mp4;base64,')
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/2 bytes/)
+    })
+
+    it('accepts an empty result for an empty blob', async () => {
+      const id = uniqueId('empty')
+      await storeVideo(id, new Blob([], { type: 'video/mp4' }), sourceVideo(id))
+      useReader('data:video/mp4;base64,')
+      await saveProject(createTestProject(id), [sourceVideo(id)])
+      expect(clickSpy).toHaveBeenCalledTimes(1)
     })
 
     it('accepts a complete result', async () => {
