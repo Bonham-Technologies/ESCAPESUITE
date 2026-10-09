@@ -40,6 +40,13 @@ interface RecordingsListProps {
    * could not complete.
    */
   onUploadToHost?: (id: string, name: string) => void;
+  /**
+   * Why "Open in Editor" cannot work right now, or null. The panel decides
+   * (it is a deployment fact — opened from disk, no host to post to — not a
+   * property of a recording); this component draws it as the button's title,
+   * its `aria-describedby` target and one visible note, like the MP4 note.
+   */
+  editorBlockedReason: string | null;
   onSendToEditor: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -55,6 +62,9 @@ interface RecordingsListProps {
  * is non-null, which is why the buttons point at it only then.
  */
 const MP4_NOTE_ID = 'mp4-note';
+
+/** The id the editor button's `aria-describedby` points at (ESCSUITE-221). */
+const EDITOR_NOTE_ID = 'editor-note';
 
 /** What each conversion is called on the row that is running it. */
 const FORMAT_LABELS: Record<Mp4Conversion['format'], string> = {
@@ -111,6 +121,7 @@ export function RecordingsList({
   mp4BlockedReason,
   m4aBlockedReason,
   mp4Note,
+  editorBlockedReason,
   onPlay,
   onDownload,
   onDownloadMp4,
@@ -261,8 +272,10 @@ export function RecordingsList({
                   <button
                     className={styles.iconButton}
                     onClick={() => onSendToEditor(editorTargetId)}
-                    title="Open in Editor"
+                    title={editorBlockedReason ?? 'Open in Editor'}
                     aria-label={`Open ${recording.name} in Editor`}
+                    aria-describedby={editorBlockedReason ? EDITOR_NOTE_ID : undefined}
+                    disabled={editorBlockedReason !== null}
                   >
                     <EditIcon />
                   </button>
@@ -312,6 +325,11 @@ export function RecordingsList({
       {mp4Note && recordings.length > 0 && (
         <p className={styles.mp4BlockedReason} id={MP4_NOTE_ID}>
           {mp4Note}
+        </p>
+      )}
+      {editorBlockedReason && recordings.length > 0 && (
+        <p className={styles.mp4BlockedReason} id={EDITOR_NOTE_ID}>
+          {editorBlockedReason}
         </p>
       )}
     </section>

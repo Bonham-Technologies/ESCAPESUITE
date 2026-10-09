@@ -17,13 +17,18 @@ import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices'
 import { converterModule, resetAppDoubles } from '../../test/appDoubles'
 import type { ConversionProgressLike } from '../../test/appDoubles'
 import { storeVideo } from '../../core/storage'
+import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
 import { clearAllRecordings } from '../../test/recordingsDb'
 import type { Recording } from '../../store/types'
 
-const { isEmbedded } = vi.hoisted(() => ({ isEmbedded: vi.fn(() => false) }))
+const { isEmbedded, isFileOrigin } = vi.hoisted(() => ({
+  isEmbedded: vi.fn(() => false),
+  isFileOrigin: vi.fn(() => false),
+}))
 vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@escapesuite/shared/config')>()),
   isEmbedded,
+  isFileOrigin,
 }))
 
 vi.mock('../../utils/uploadToHost', () => ({ uploadToHost: vi.fn() }))
@@ -61,6 +66,7 @@ function renderPanel(recordings: Recording[] = [baseRecording]) {
 beforeEach(async () => {
   resetAppDoubles()
   isEmbedded.mockReturnValue(false)
+  isFileOrigin.mockReturnValue(false)
   uploadToHostMock.mockResolvedValue('posted')
   useRecorderStore.setState({
     notice: null,
@@ -355,5 +361,31 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
     expect(
       screen.getByRole('button', { name: 'Cancel MP4 conversion of Take Seven' })
     ).toBeInTheDocument()
+  })
+})
+
+describe('RecordingsListPanel editor gate under a file origin (ESCSUITE-221)', () => {
+  const rowButton = () => screen.getByRole('button', { name: 'Open Take Seven in Editor' })
+
+  it('disables "Open in Editor" with the reason when opened from disk', () => {
+    isFileOrigin.mockReturnValue(true)
+    renderPanel()
+
+    expect(rowButton()).toBeDisabled()
+    expect(rowButton()).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
+  })
+
+  it('leaves it enabled on an http origin', () => {
+    renderPanel()
+
+    expect(rowButton()).toBeEnabled()
+  })
+
+  it('leaves it enabled when embedded, even from disk — the host receives SEND_TO_EDITOR', () => {
+    isFileOrigin.mockReturnValue(true)
+    isEmbedded.mockReturnValue(true)
+    renderPanel()
+
+    expect(rowButton()).toBeEnabled()
   })
 })

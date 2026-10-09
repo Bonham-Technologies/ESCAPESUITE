@@ -19,6 +19,14 @@ export const isStandaloneMode = (): boolean => BUILD_MODE === 'standalone'
 export const isEmbedded = (): boolean =>
   typeof window !== 'undefined' && window.parent !== window
 
+// True when the document was opened from disk (`file:`) — the released
+// single-file builds, run by double-click. A relative or root-absolute URL
+// such as the default `EDITOR_URL` (`/artist/`) resolves to `file:///artist/`
+// there, a browser error page, so anything that navigates to a sibling app
+// has to know. Safe to call where `window` does not exist.
+export const isFileOrigin = (): boolean =>
+  typeof window !== 'undefined' && window.location.protocol === 'file:'
+
 // Where CRAFT sends recordings for editing. Defaults to the co-hosted
 // ESCAPEARTIST build; can be overridden to point at a different host.
 // Always normalised to end with a single trailing slash.

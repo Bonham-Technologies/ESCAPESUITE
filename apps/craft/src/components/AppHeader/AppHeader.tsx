@@ -1,5 +1,6 @@
-import { isStandaloneMode, editorUrl } from '@escapesuite/shared/config';
+import { isStandaloneMode, isFileOrigin, editorUrl } from '@escapesuite/shared/config';
 import type { RecordingState } from '../../store/types';
+import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor';
 import styles from '../../App.module.css';
 
 interface AppHeaderProps {
@@ -37,6 +38,9 @@ interface AppHeaderProps {
  * shared" during a recording is exactly that case.
  */
 export function AppHeader({ state, notice, onOpenHelp }: AppHeaderProps) {
+  // Opened from disk, `/artist/` is `file:///artist/` — an error page — so the
+  // button stays but says why it cannot work (ESCSUITE-221).
+  const editorBlocked = isFileOrigin();
   return (
     <header className={styles.header}>
       <div className={styles.headerLeft}>
@@ -78,11 +82,18 @@ export function AppHeader({ state, notice, onOpenHelp }: AppHeaderProps) {
           </svg>
           Help
         </button>
+        {editorBlocked && (
+          <span className={styles.editorReason} id="editor-reason">
+            {EDITOR_FILE_ORIGIN_REASON}
+          </span>
+        )}
         <button
           className={`${styles.headerButton} ${styles.editorButton}`}
           onClick={() => window.open(editorUrl(), 'escapeartist')}
-          title="Open Editor"
+          title={editorBlocked ? EDITOR_FILE_ORIGIN_REASON : 'Open Editor'}
           aria-label="Open Editor in new window"
+          aria-describedby={editorBlocked ? 'editor-reason' : undefined}
+          disabled={editorBlocked}
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
             <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6" />

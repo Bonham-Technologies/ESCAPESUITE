@@ -88,6 +88,15 @@
   background: var(--accent-strong-hover);
 }
 
+/* Why Open Editor is disabled when the app is opened from disk. Text on the
+   header, so --text-secondary like the library's own blocked-reason note. */
+.editorReason {
+  max-width: 260px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-secondary);
+}
+
 /* Recording status indicators */
 .recordingIndicator {
   display: flex;

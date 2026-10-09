@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import {
   isEmbedded,
+  isFileOrigin,
   BUILD_MODE,
   isSaaSMode,
   isStandaloneMode,
@@ -64,6 +65,30 @@ describe('isEmbedded', () => {
     const { isEmbedded: isEmbeddedNoWindow } = await import('./index')
     expect(() => isEmbeddedNoWindow()).not.toThrow()
     expect(isEmbeddedNoWindow()).toBe(false)
+  })
+})
+
+describe('isFileOrigin', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('is false on an http origin', () => {
+    expect(isFileOrigin()).toBe(false)
+  })
+
+  it('is true when the document was opened from disk (file:)', () => {
+    vi.stubGlobal('location', { protocol: 'file:' })
+    expect(isFileOrigin()).toBe(true)
+  })
+
+  it('is false for https and does not throw when window is undefined', async () => {
+    vi.stubGlobal('location', { protocol: 'https:' })
+    expect(isFileOrigin()).toBe(false)
+    vi.resetModules()
+    vi.stubGlobal('window', undefined)
+    const { isFileOrigin: noWindow } = await import('./index')
+    expect(noWindow()).toBe(false)
   })
 })
 
