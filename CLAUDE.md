@@ -2737,15 +2737,56 @@ plain ← / → and `k` cases that were already there; the file's eight pre-exis
 untouched). The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor
 crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/craft` and `@escapesuite/shared` were re-measured 2026-10-09 for ESCSUITE-221 (the
+offline single-file ESCAPECRAFT opened from disk disables both editor buttons — the header's "Open
+Editor" and every row's "Open in Editor" — with one visible reason, "Download this recording's WebM
+and import it into the offline ESCAPEARTIST file.", carried as each button's `title` and
+`aria-describedby` target, instead of opening `file:///artist/`, a browser error page; the embedded
+case is untouched, because a host framing the file build still receives `SEND_TO_EDITOR`; and
+`isFileOrigin()` joins the shared config as the one reader of `window.location.protocol === 'file:'`).
+**Craft**: 100.00 / 99.53 / **97.80** / 100.00 against the 100.00 / 99.53 / 97.77 / 100.00 that `main`
+at `e48ba1fe` measures in the same sitting — branches up three hundredths, the other three unmoved at
+exactly 100, 99.53 and 100. The base gives 1,365 / 1,396 branches and this branch 1,382 / 1,413:
+seventeen new branches, seventeen covered, the same 31 uncovered as before (lines 2,387 → 2,391,
+statements 2,545 / 2,557 → 2,549 / 2,561, functions 456 on both; the same 12 statements uncovered, in
+the same four files). The seventeen are `components/AppHeader/AppHeader.tsx`'s six (10 → 16: the
+reason's render gate and the `title` and `aria-describedby` ternaries, each reached under `file:` and
+under `http:` by the header's own cases), `components/RecordingsList/RecordingsList.tsx`'s seven
+(51 → 58: the `title`'s `||`, the `aria-describedby` ternary and the three-operand render gate on the
+note — a reason, at least one row — reached with and without a reason and with an empty library) and
+`components/RecordingsList/RecordingsListPanel.tsx`'s four (16 → 20: `isFileOrigin() && !embedded`
+and the ternary it feeds, reached from both sides by the from-disk, from-disk-but-embedded and hosted
+cases); `utils/sendToEditor.ts` gains the sentence, one statement and no decision. **Shared**:
+100.00 / **98.63** / **92.00** / 100.00 against 100.00 / 98.62 / 91.89 / 100.00 — statements up a
+hundredth and branches up eleven, lines and functions still exactly 100: lines 272 → 274, statements
+286 / 290 → 288 / 292, branches 136 / 148 → 138 / 150 and functions 73 → 74, every new unit covered
+and the same 4 statements and 12 branches uncovered. The two new branches are `isFileOrigin`'s two
+`&&` operands in `config/index.ts` (20 / 22 → 22 / 24, the same two pre-existing arms uncovered),
+reached from both sides by the `file:`, `https:` and no-`window` cases. **Branches land on exactly
+92.00, so shared's branches floor goes 91 → 92** in `packages/shared/vitest.config.ts` and
+`scripts/coverage-report.mjs` — a floor is the achieved coverage rounded down, and 138 / 150 is a
+whole percent with nothing to spare, which on this package's small denominator is the design: the
+next untested branch in shared turns CI red rather than being absorbed. Its floors are now
+100 / 98 / 92 / 100. The review's round 1 (five items) and the L verifier's wording refinement are in
+these numbers; the e2e seed now waits for the app's own `videos` store before writing, so it cannot
+race `indexedDB.open` into an empty v1 database. Outside vitest's measurement: the new `file://` case
+in `apps/e2e/tests/standalone/craft.spec.ts` — two cases, the header button on every standalone
+browser and the seeded row's button with WebKit skipped for the Blob-in-IndexedDB gap the file's two
+earlier cases already skip for (whether shipping Safari shares it is ESCSUITE-258) — run against
+`pnpm build:standalone` on Chromium, Firefox and WebKit: 39 passed, 3 skipped, of 42; the first run
+had the row seed in the same case as the header and was red on WebKit alone, which is why there are
+two. The `App.*rerender*` pins and every `*.perf.test.ts` are
+byte-identical. **No floor crossed downward**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.53 | 97.79 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.80 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.28 | 95.82 | 99.68 |
-| `@escapesuite/shared` | 100.00 | 98.62 | 91.89 | 100.00 |
+| `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
