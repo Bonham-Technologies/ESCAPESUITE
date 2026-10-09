@@ -1,5 +1,11 @@
 # @escapesuite/shared
 
+## 1.4.5
+
+### Patch Changes
+
+- e48f6c6: Add `isFileOrigin()` to the shared config, true when the page was opened from disk (`file:`).
+
 ## 1.4.4
 
 ### Patch Changes
