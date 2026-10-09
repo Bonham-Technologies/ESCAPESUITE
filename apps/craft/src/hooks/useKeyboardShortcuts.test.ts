@@ -281,3 +281,49 @@ describe('useKeyboardShortcuts while a modal is open', () => {
     expect(keydownBindings()).toBe(1)
   })
 })
+
+describe('modifier chords and held keys are not recorder shortcuts (ESCSUITE-222)', () => {
+  function pressWith(key: string, init: KeyboardEventInit) {
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, ...init }))
+    })
+  }
+  const modifiers: Array<[string, KeyboardEventInit]> = [
+    ['Cmd', { metaKey: true }],
+    ['Ctrl', { ctrlKey: true }],
+    ['Alt', { altKey: true }],
+  ]
+  const keys: Array<[string, RecordingState, keyof ReturnType<typeof makeHandlers>]> = [
+    ['r', 'idle', 'handleStartRecording'],
+    ['p', 'recording', 'handlePauseRecording'],
+    ['p', 'paused', 'handleResumeRecording'],
+    ['s', 'recording', 'handleStopRecording'],
+    ['Escape', 'countdown', 'cancelCountdown'],
+    ['Escape', 'recording', 'handleCancelRecording'],
+  ]
+
+  for (const [key, state, handler] of keys) {
+    for (const [name, init] of modifiers) {
+      it(`${name}+${key} in ${state} does not reach ${handler}`, () => {
+        mountShortcuts(state)
+        pressWith(key, init)
+        expect(handlers[handler]).not.toHaveBeenCalled()
+      })
+    }
+    it(`${key} in ${state} still reaches ${handler} with no modifier`, () => {
+      mountShortcuts(state)
+      pressWith(key, {})
+      expect(handlers[handler]).toHaveBeenCalledTimes(1)
+    })
+    it(`Shift+${key} in ${state} is untouched and reaches ${handler}`, () => {
+      mountShortcuts(state)
+      pressWith(key, { shiftKey: true })
+      expect(handlers[handler]).toHaveBeenCalledTimes(1)
+    })
+    it(`a held ${key} in ${state} (repeat) does not reach ${handler}`, () => {
+      mountShortcuts(state)
+      pressWith(key, { repeat: true })
+      expect(handlers[handler]).not.toHaveBeenCalled()
+    })
+  }
+})

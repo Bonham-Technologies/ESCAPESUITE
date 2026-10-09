@@ -2717,13 +2717,33 @@ rerender pins and all seven `*.perf.test.ts` files are byte-identical. Outside v
 as a comment plus an axe audit of the open menu — red on the base with `aria-required-children` — and the
 five affected specs ran 100 / 100 on Chromium. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-09 for ESCSUITE-222 and ESCSUITE-223 (the recorder's
+R / P / S / Space shortcuts and the playback dialog's keys ignore a browser chord — ⌘ / Ctrl / Alt —
+and the recorder's also ignore a held key's auto-repeat, so ⌘S no longer stops a take, ⌘R no longer
+starts one on the way to a reload, ⌘0 reaches the browser's zoom reset instead of the player, and a
+held Space no longer pauses and resumes the take once per repeat; Shift is left alone on both, and
+`repeat` is kept for the player because holding ← / → to scrub is its documented behaviour):
+100.00 / 99.53 / **97.79** / 100.00 against the 100.00 / 99.53 / 97.77 / 100.00 that `main` at
+`e48ba1fe` measures in the same sitting — branches up two hundredths, the other three unmoved at
+exactly 100, 99.53 and 100. The base gives 1,365 / 1,396 branches and this branch 1,376 / 1,407:
+eleven new branches, eleven covered, the same 31 uncovered as before (lines 2,387 → 2,391,
+statements 2,545 / 2,557 → 2,549 / 2,561, functions 456 on both; the same 12 statements uncovered,
+in the same four files). The eleven are `hooks/useKeyboardShortcuts.ts`'s six (29 → 35: the early
+return and its four `||` operands, `metaKey`, `ctrlKey`, `altKey` and `repeat`, each reached from
+both sides by the per-modifier cases, the auto-repeat case and the plain-press pin that still
+starts the take) and `components/VideoPlayer/VideoPlayer.tsx`'s five (98 / 106 → 103 / 111: the
+same return with three operands, no `repeat`, reached by the ⌘0, Ctrl+←, Alt+← cases against the
+plain ← / → and `k` cases that were already there; the file's eight pre-existing uncovered arms
+untouched). The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor
+crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.53 | 97.77 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.79 | 100.00 |
 | `@escapesuite/artist` | 99.80 | 99.28 | 95.82 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.62 | 91.89 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |

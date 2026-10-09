@@ -257,6 +257,12 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
         return;
       }
 
+      // Cmd/Ctrl/Alt chords belong to the browser — Cmd+0 resets zoom,
+      // Cmd/Alt+Left is history back (ESCSUITE-223). Shift stays the player's.
+      if (e.metaKey || e.ctrlKey || e.altKey) {
+        return;
+      }
+
       // Space is the only key here with a competing meaning: it is how the
       // platform presses whatever has focus (ESCSUITE-185). K, the arrows and
       // M mean nothing to a button, so they stay the player's wherever focus

@@ -510,6 +510,9 @@ Reusable video player with full playback controls:
   `window`; the shared `useDialogBehaviour` binds Escape and Tab on `document` in the capture
   phase, so while the playback dialog is open the dialog's Escape runs first and the player's
   does not
+- **Browser chords pass through** (ESCSUITE-223): a keydown with Cmd, Ctrl or Alt held returns
+  before the switch, so Cmd/Ctrl+0 (reset zoom) and Cmd/Alt+Left (history back) are no longer
+  swallowed. Shift is left alone.
 - **Space belongs to the focused control, not the player** (ESCSUITE-185). Space is how the
   platform presses whatever has focus, and the listener used to `preventDefault()` it for
   everything that was not an `<input>` or a `<textarea>` — so Space on the playback dialog's
@@ -2123,6 +2126,10 @@ lifecycle".
 | P | Pause / Resume | `recording` / `paused` |
 | S | Stop recording | `recording`, `paused` |
 | Esc | Cancel the countdown, else cancel the take | `countdown`; `preparing`, `recording`, `paused` — never `idle` or `saving` |
+
+A keydown with Cmd, Ctrl or Alt held, or with `e.repeat` set, returns before the switch
+(ESCSUITE-222): Cmd/Ctrl+S used to stop a live take, +P pause it and +R start one as the page
+reloaded, and a held key repeated its action. Shift is left alone.
 
 Typing is never interrupted either: a keydown whose target is an `<input>` or `<textarea>`
 returns before the switch.

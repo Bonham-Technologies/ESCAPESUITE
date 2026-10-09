@@ -48,6 +48,13 @@ export function useKeyboardShortcuts({
         return;
       }
 
+      // A browser chord (Cmd/Ctrl+S save, +P print, +R reload) or a held key
+      // is not a recorder shortcut (ESCSUITE-222). Shift is left alone: no
+      // chord here uses it, and it must not disable a plain key.
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) {
+        return;
+      }
+
       // A modal is in front; the app behind it is not taking keys.
       if (modalOpen) {
         return;
