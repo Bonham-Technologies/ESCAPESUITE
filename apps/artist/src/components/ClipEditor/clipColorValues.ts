@@ -10,11 +10,6 @@
 // means.
 import { hasVisibleFill } from '../../core/canvasRenderer';
 
-/** Clamp a font-size input to a sane minimum, falling back to 48 if it doesn't parse. */
-export function clampFontSize(raw: string): number {
-  return Math.max(8, parseInt(raw) || 48);
-}
-
 /** A text background color at its fixed 80% (`cc`) opacity. */
 export function withBackgroundAlpha(rgb: string): string {
   return rgb + 'cc';

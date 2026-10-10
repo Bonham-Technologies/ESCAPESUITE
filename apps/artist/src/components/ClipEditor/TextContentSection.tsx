@@ -1,9 +1,14 @@
 import { useId } from 'react';
 import type { TextAlign, TextOverlayData } from '../../store/types';
-import { clampFontSize, withBackgroundAlpha } from './clipColorValues';
+import { hasVisibleFill } from '../../core/canvasRenderer';
+import { withBackgroundAlpha } from './clipColorValues';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { BurstGestureHandlers } from './useBurstGesture';
+import { useCommittedNumberInput } from './useCommittedNumberInput';
 import styles from './ClipEditor.module.css';
+
+/** What `canvasRenderer` treats as no background (and `DEFAULT_TEXT_OVERLAY_DATA` holds). */
+const NO_BACKGROUND = '#00000000';
 
 interface TextContentSectionProps {
   /** The selected text overlay's content and styling. */
@@ -52,6 +57,22 @@ export function TextContentSection({ textData, onChange, burstGesture, disabled 
    */
   const id = useId();
 
+  // The font size commits on blur or Enter (ESCSUITE-256). The committed write
+  // is still inside the typing burst (ESCSUITE-242): `onEdit` opens it just
+  // before the write, and the blur that committed it closes it.
+  const fontSize = useCommittedNumberInput({
+    value: textData.fontSize,
+    min: 8,
+    max: 200,
+    integer: true,
+    onCommit: (next) => {
+      burstGesture?.onEdit();
+      onChange({ fontSize: next });
+    },
+  });
+  // "No background" is whatever the renderer draws nothing for.
+  const hasBackground = hasVisibleFill(textData.backgroundColor);
+
   return (
     <CollapsibleSection title="Text Content" disabled={disabled}>
       <textarea
@@ -96,12 +117,13 @@ export function TextContentSection({ textData, onChange, burstGesture, disabled 
         <input
           type="number"
           className={styles.numberInput}
-          value={textData.fontSize}
-          onChange={(e) => {
-            burstGesture?.onEdit();
-            onChange({ fontSize: clampFontSize(e.target.value) });
+          value={fontSize.text}
+          onChange={fontSize.onChange}
+          onKeyDown={fontSize.onKeyDown}
+          onBlur={() => {
+            fontSize.onBlur();
+            burstGesture?.onBlur();
           }}
-          onBlur={burstGesture?.onBlur}
           min={8}
           max={200}
           title="Font size"
@@ -153,11 +175,25 @@ export function TextContentSection({ textData, onChange, burstGesture, disabled 
           />
         </div>
         <div className={styles.colorInput}>
+          <input
+            id={`${id}-has-background`}
+            aria-label="Background"
+            type="checkbox"
+            checked={hasBackground}
+            onChange={(e) =>
+              onChange({
+                backgroundColor: e.target.checked
+                  ? withBackgroundAlpha(textData.backgroundColor.substring(0, 7))
+                  : NO_BACKGROUND,
+              })
+            }
+          />
           <label htmlFor={`${id}-background`}>BG</label>
           <input
             id={`${id}-background`}
             aria-label="BG color"
             type="color"
+            disabled={!hasBackground}
             value={textData.backgroundColor.substring(0, 7)}
             onChange={(e) => {
               burstGesture?.onEdit();

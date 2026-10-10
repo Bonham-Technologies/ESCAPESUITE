@@ -217,8 +217,8 @@ describe('TransformSection', () => {
 
       expect(sliderValue(rowControl('Scale X'))).toBeCloseTo(at(1.5), 3)
       expect(sliderValue(rowControl('Scale Y'))).toBeCloseTo(at(0.5), 3)
-      expect(screen.getByText('150%')).toBeInTheDocument()
-      expect(screen.getByText('50%')).toBeInTheDocument()
+      expect(screen.getByText('1.50\u00d7')).toBeInTheDocument()
+      expect(screen.getByText('0.50\u00d7')).toBeInTheDocument()
 
       slide(rowControl('Scale Y'), at(0.8))
 

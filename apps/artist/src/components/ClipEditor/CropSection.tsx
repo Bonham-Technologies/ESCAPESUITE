@@ -134,6 +134,7 @@ export function CropSection({
           <button
             className={styles.resetButton}
             disabled={disabled}
+            aria-label="Reset crop"
             onClick={(e) => {
               e.stopPropagation();
               onCropChange(NO_CROP);
