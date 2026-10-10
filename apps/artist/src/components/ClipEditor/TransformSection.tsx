@@ -5,6 +5,29 @@ import { CollapsibleSection } from './CollapsibleSection';
 import type { SliderGestureHandlers } from './useSliderGesture';
 import styles from './ClipEditor.module.css';
 
+/**
+ * The scale sliders run over log10(scale), 0.1 to 10 (ESCSUITE-256): Fit to
+ * Canvas sets 6.0 for a small source, which the old linear 0.1-2 range could
+ * only show as its maximum, and a log axis spends the same travel on 0.5-1 as
+ * on 5-10. The conversion lives here, in the value and the handler, so the
+ * slider gesture's listeners are untouched.
+ */
+const SCALE_SLIDER = { min: -1, max: 1, step: 0.01 } as const;
+
+/** A stored scale's slider position — clamped to the track, never written back. */
+function scaleToSlider(scale: number): number {
+  return Math.min(1, Math.max(-1, Math.log10(scale)));
+}
+
+function sliderToScale(position: string): number {
+  return 10 ** parseFloat(position);
+}
+
+/** The real scale, whatever the slider can show. */
+function formatScale(scale: number): string {
+  return `${scale.toFixed(2)}\u00d7`;
+}
+
 interface TransformSectionProps {
   /** The selected clip, read for its transform and any overlay position data. */
   clip: Clip;
@@ -52,8 +75,9 @@ interface TransformSectionProps {
  * clips only — scale with its aspect-ratio lock and the two canvas buttons,
  * and opacity last.
  *
- * There are deliberately two Reset buttons with different jobs. The one in the
- * section header (distinguishable by having no `title`) resets position, scale
+ * There are deliberately two Reset buttons with different jobs, named apart
+ * (ESCSUITE-256) for anyone who hears only the name. The one in the
+ * section header ("Reset position, size and opacity") resets position, scale
  * and opacity *and* an overlay's own coordinates; the one beside Fit to Canvas
  * writes `DEFAULT_TRANSFORM` wholesale, rotation included, and only exists when
  * there is a source video.
@@ -93,6 +117,7 @@ export function TransformSection({
         <button
           className={styles.resetButton}
           disabled={disabled}
+          aria-label="Reset position, size and opacity"
           onClick={(e) => { e.stopPropagation(); onReset(); }}
         >
           Reset
@@ -186,14 +211,12 @@ export function TransformSection({
                 <input
                   id={`${id}-scale`}
                   type="range"
-                  min={0.1}
-                  max={2}
-                  step={0.01}
-                  value={clip.transform.scaleX}
+                  {...SCALE_SLIDER}
+                  value={scaleToSlider(clip.transform.scaleX)}
                   {...sliderGesture}
-                  onChange={(e) => onTransformChange('scaleX', parseFloat(e.target.value))}
+                  onChange={(e) => onTransformChange('scaleX', sliderToScale(e.target.value))}
                 />
-                <span>{Math.round(clip.transform.scaleX * 100)}%</span>
+                <span>{formatScale(clip.transform.scaleX)}</span>
               </div>
             ) : (
               <>
@@ -202,14 +225,12 @@ export function TransformSection({
                   <input
                     id={`${id}-scale-x`}
                     type="range"
-                    min={0.1}
-                    max={2}
-                    step={0.01}
-                    value={clip.transform.scaleX}
+                    {...SCALE_SLIDER}
+                    value={scaleToSlider(clip.transform.scaleX)}
                     {...sliderGesture}
-                    onChange={(e) => onTransformChange('scaleX', parseFloat(e.target.value))}
+                    onChange={(e) => onTransformChange('scaleX', sliderToScale(e.target.value))}
                   />
-                  <span>{Math.round(clip.transform.scaleX * 100)}%</span>
+                  <span>{formatScale(clip.transform.scaleX)}</span>
                 </div>
 
                 <div className={styles.transformRow}>
@@ -217,14 +238,12 @@ export function TransformSection({
                   <input
                     id={`${id}-scale-y`}
                     type="range"
-                    min={0.1}
-                    max={2}
-                    step={0.01}
-                    value={clip.transform.scaleY}
+                    {...SCALE_SLIDER}
+                    value={scaleToSlider(clip.transform.scaleY)}
                     {...sliderGesture}
-                    onChange={(e) => onTransformChange('scaleY', parseFloat(e.target.value))}
+                    onChange={(e) => onTransformChange('scaleY', sliderToScale(e.target.value))}
                   />
-                  <span>{Math.round(clip.transform.scaleY * 100)}%</span>
+                  <span>{formatScale(clip.transform.scaleY)}</span>
                 </div>
               </>
             )}
@@ -241,6 +260,7 @@ export function TransformSection({
                 <button
                   className={styles.fitToCanvasButton}
                   onClick={onResetToDefaults}
+                  aria-label="Reset transform including rotation"
                   title="Reset position, scale, and rotation to defaults"
                 >
                   Reset

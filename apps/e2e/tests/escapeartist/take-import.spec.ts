@@ -253,7 +253,7 @@ async function clipBox(page: Page, name: string | RegExp) {
   return box
 }
 
-/** The value beside one of the inspector's transform sliders, e.g. "88%". */
+/** The value beside one of the inspector's transform sliders, e.g. "88%" or "0.30x". */
 async function transformValue(page: Page, label: string): Promise<string> {
   const row = page
     .locator('label')
@@ -333,11 +333,11 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
 
     // 1920 x 0.2 = 384 wide, 16:9 so 216 high, inset 1920 x 20/1280 = 30px from
     // the bottom-right corner: centred at 1698/1920 = 88% across and
-    // 942/1080 = 87% down, drawn at 384/1280 = 30% of the camera's own pixels.
+    // 942/1080 = 87% down, drawn at 384/1280 = 0.30x of the camera's own pixels.
     await expect(page.getByText('00:00.500')).toBeVisible()
     expect(await transformValue(page, 'Pos X')).toBe('88%')
     expect(await transformValue(page, 'Pos Y')).toBe('87%')
-    expect(await transformValue(page, 'Scale')).toBe('30%')
+    expect(await transformValue(page, 'Scale')).toBe('0.30\u00d7')
   })
 
   test('measures the corner from the screen recording, not from a bigger canvas', async ({
@@ -367,14 +367,14 @@ test.describe('ESCAPEARTIST imports a multi-part take', () => {
     //   centre y      = 180 +  720 - 20 -  72 =  808 ->  808/1080 = 0.748148
     //   scale         = 256 / 640 = 0.4 (the camera's own pixels)
     //
-    // and the inspector prints `Math.round(value * 100)`% (`TransformSection`),
-    // so 0.75625 -> 76, 0.748148 -> 75, 0.4 -> 40. Measuring from the canvas
+    // and the inspector prints positions as `Math.round(value * 100)`% and the scale
+    // to two decimals (`TransformSection`), so 0.75625 -> 76, 0.748148 -> 75, 0.4 -> 0.40x. Measuring from the canvas
     // instead would read 88% / 87% at 60% (1920 x 0.2 = 384 wide, inset 30),
     // with the camera over the middle of the picture the user recorded — which
     // is what this test fails with if the frame is ever dropped.
     expect(await transformValue(page, 'Pos X')).toBe('76%')
     expect(await transformValue(page, 'Pos Y')).toBe('75%')
-    expect(await transformValue(page, 'Scale')).toBe('40%')
+    expect(await transformValue(page, 'Scale')).toBe('0.40\u00d7')
   })
 
   test('the webcam clip arrives with the circle it was recorded in (ESCSUITE-65)', async ({

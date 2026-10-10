@@ -5,39 +5,12 @@
 // shape fill data actually hold.
 import { describe, it, expect } from 'vitest';
 import {
-  clampFontSize,
   withBackgroundAlpha,
   withFillRgb,
   toggleFill,
   fillAlphaPercent,
   withFillAlphaPercent,
 } from './clipColorValues';
-
-describe('clampFontSize', () => {
-  it('parses a normal numeric string', () => {
-    expect(clampFontSize('24')).toBe(24);
-  });
-
-  it('parses "250" as-is above the floor (no upper clamp here)', () => {
-    expect(clampFontSize('250')).toBe(250);
-  });
-
-  it('falls back to 48 for an empty string', () => {
-    expect(clampFontSize('')).toBe(48);
-  });
-
-  it('parses a single digit below the floor and clamps to 8', () => {
-    expect(clampFontSize('4')).toBe(8);
-  });
-
-  it('falls back to 48 for a non-numeric string', () => {
-    expect(clampFontSize('abc')).toBe(48);
-  });
-
-  it('is unaffected by a value already above the floor', () => {
-    expect(clampFontSize('9')).toBe(9);
-  });
-});
 
 describe('withBackgroundAlpha', () => {
   it('appends the fixed cc alpha suffix', () => {

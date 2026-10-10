@@ -44,12 +44,10 @@ function slide(input: HTMLInputElement, value: number | string) {
 }
 
 /** The Reset in the section header — the only Reset button with no `title`. */
-const headerReset = () =>
-  screen.getAllByRole('button', { name: 'Reset' }).find((b) => !b.getAttribute('title'))!
+const headerReset = () => screen.getByRole('button', { name: 'Reset position, size and opacity' })
 
 /** The Reset beside Fit to Canvas, which explains itself with a `title`. */
-const defaultsReset = () =>
-  screen.getAllByRole('button', { name: 'Reset' }).find((b) => b.getAttribute('title'))!
+const defaultsReset = () => screen.getByRole('button', { name: 'Reset transform including rotation' })
 
 const textClip = (x: number, y: number): Clip =>
   makeClip({
@@ -151,6 +149,11 @@ describe('TransformSection', () => {
   })
 
   describe('the scale controls', () => {
+    /** The slider position a scale sits at: the sliders run over log10(scale). */
+    const at = (scale: number) => Math.log10(scale)
+    const sliderValue = (el: HTMLElement) => Number((el as HTMLInputElement).value)
+    const lastWrite = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls[fn.mock.calls.length - 1]
+
     it('offers one Scale row while the aspect ratio is locked', () => {
       const { onTransformChange } = renderSection({
         clip: makeClip({ transform: { x: 0.5, y: 0.5, scaleX: 1.5, scaleY: 0.5, rotation: 0, opacity: 1 } }),
@@ -159,12 +162,51 @@ describe('TransformSection', () => {
       expect(screen.queryByText('Scale X')).not.toBeInTheDocument()
       expect(screen.queryByText('Scale Y')).not.toBeInTheDocument()
       const scale = rowControl('Scale')
-      expect(scale).toHaveValue('1.5')
-      expect(screen.getByText('150%')).toBeInTheDocument()
+      expect(sliderValue(scale)).toBeCloseTo(at(1.5), 3)
+      expect(screen.getByText('1.50\u00d7')).toBeInTheDocument()
 
-      slide(scale, 1.2)
+      slide(scale, at(1.2))
 
-      expect(onTransformChange).toHaveBeenCalledWith('scaleX', 1.2)
+      expect(lastWrite(onTransformChange)[0]).toBe('scaleX')
+      expect(lastWrite(onTransformChange)[1]).toBeCloseTo(1.2, 6)
+    })
+
+    it('runs the slider over log10 of 0.1 to 10 (ESCSUITE-256)', () => {
+      renderSection()
+      const scale = rowControl('Scale')
+      expect(scale).toHaveAttribute('min', '-1')
+      expect(scale).toHaveAttribute('max', '1')
+      expect(scale).toHaveAttribute('step', '0.01')
+    })
+
+    it('shows a Fit-to-Canvas 6.0 as 6.00, and one step on is about 6.14, not 1.99', () => {
+      const { onTransformChange } = renderSection({
+        clip: makeClip({ transform: { x: 0.5, y: 0.5, scaleX: 6, scaleY: 6, rotation: 0, opacity: 1 } }),
+      })
+      const scale = rowControl('Scale')
+
+      expect(screen.getByText('6.00\u00d7')).toBeInTheDocument()
+      expect(sliderValue(scale)).toBeCloseTo(at(6), 3)
+
+      slide(scale, at(6) + 0.01)
+
+      expect(lastWrite(onTransformChange)[1]).toBeCloseTo(6.14, 2)
+    })
+
+    it('shows a scale beyond the range clamped on the slider, and writes nothing', () => {
+      const { onTransformChange } = renderSection({
+        clip: makeClip({ transform: { x: 0.5, y: 0.5, scaleX: 40, scaleY: 40, rotation: 0, opacity: 1 } }),
+      })
+      expect(sliderValue(rowControl('Scale'))).toBe(1)
+      expect(screen.getByText('40.00\u00d7')).toBeInTheDocument()
+      expect(onTransformChange).not.toHaveBeenCalled()
+    })
+
+    it('clamps a scale below the range to the slider minimum', () => {
+      renderSection({
+        clip: makeClip({ transform: { x: 0.5, y: 0.5, scaleX: 0.01, scaleY: 0.01, rotation: 0, opacity: 1 } }),
+      })
+      expect(sliderValue(rowControl('Scale'))).toBe(-1)
     })
 
     it('splits into Scale X and Scale Y once unlocked', () => {
@@ -173,14 +215,15 @@ describe('TransformSection', () => {
         clip: makeClip({ transform: { x: 0.25, y: 0.75, scaleX: 1.5, scaleY: 0.5, rotation: 0, opacity: 1 } }),
       })
 
-      expect(rowControl('Scale X')).toHaveValue('1.5')
-      expect(rowControl('Scale Y')).toHaveValue('0.5')
-      expect(screen.getByText('150%')).toBeInTheDocument()
-      expect(screen.getByText('50%')).toBeInTheDocument()
+      expect(sliderValue(rowControl('Scale X'))).toBeCloseTo(at(1.5), 3)
+      expect(sliderValue(rowControl('Scale Y'))).toBeCloseTo(at(0.5), 3)
+      expect(screen.getByText('1.50\u00d7')).toBeInTheDocument()
+      expect(screen.getByText('0.50\u00d7')).toBeInTheDocument()
 
-      slide(rowControl('Scale Y'), 0.8)
+      slide(rowControl('Scale Y'), at(0.8))
 
-      expect(onTransformChange).toHaveBeenCalledWith('scaleY', 0.8)
+      expect(lastWrite(onTransformChange)[0]).toBe('scaleY')
+      expect(lastWrite(onTransformChange)[1]).toBeCloseTo(0.8, 6)
     })
 
     it('toggles the lock, which is what the padlock button says it will do', async () => {
@@ -235,21 +278,19 @@ describe('TransformSection', () => {
 
       expect(screen.queryByRole('button', { name: 'Fit to Canvas' })).not.toBeInTheDocument()
       // The defaults Reset goes with it, leaving the header Reset alone.
-      expect(screen.getAllByRole('button', { name: 'Reset' })).toHaveLength(1)
+      expect(screen.queryByRole('button', { name: 'Reset transform including rotation' })).not.toBeInTheDocument()
       expect(headerReset()).toBeInTheDocument()
     })
   })
 
   describe('the two Reset buttons', () => {
-    it('are told apart by the title only the defaults one carries', () => {
+    it('read "Reset" but are named for what they reset (ESCSUITE-256)', () => {
       renderSection()
 
-      const resets = screen.getAllByRole('button', { name: 'Reset' })
-      expect(resets).toHaveLength(2)
-      expect(resets.map((b) => b.getAttribute('title'))).toEqual([
-        null,
-        'Reset position, scale, and rotation to defaults',
-      ])
+      expect(headerReset()).toHaveTextContent(/^Reset$/)
+      expect(defaultsReset()).toHaveTextContent(/^Reset$/)
+      expect(headerReset()).not.toBe(defaultsReset())
+      expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument()
     })
 
     it('run different handlers', async () => {

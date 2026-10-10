@@ -65,17 +65,20 @@ describe('ClipEditor text overlay', () => {
     expect(textData().fontFamily).toBe('Georgia')
 
     fireEvent.change(screen.getByTitle('Font size'), { target: { value: '72' } })
+    fireEvent.blur(screen.getByTitle('Font size'))
     expect(textData().fontSize).toBe(72)
   })
 
-  it('floors the font size at 8 and falls back to 48 when the field is emptied', () => {
+  it('floors the font size at 8 on blur and leaves an emptied field at its size', () => {
     render(<ClipEditor />)
 
     fireEvent.change(screen.getByTitle('Font size'), { target: { value: '4' } })
+    fireEvent.blur(screen.getByTitle('Font size'))
     expect(textData().fontSize).toBe(8)
 
     fireEvent.change(screen.getByTitle('Font size'), { target: { value: '' } })
-    expect(textData().fontSize).toBe(48)
+    fireEvent.blur(screen.getByTitle('Font size'))
+    expect(textData().fontSize).toBe(8)
   })
 
   it('toggles bold on and back off', async () => {
@@ -138,7 +141,7 @@ describe('ClipEditor text overlay', () => {
     render(<ClipEditor />)
     slide(rowControl('Pos X'), 0.9)
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    await user.click(screen.getByRole('button', { name: 'Reset position, size and opacity' }))
 
     expect(textData()).toMatchObject({ x: 0.5, y: 0.5 })
   })
@@ -254,7 +257,7 @@ describe('ClipEditor shape overlay', () => {
     slide(rowControl('Size W'), 0.9)
     slide(rowControl('Rotation'), 90)
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    await user.click(screen.getByRole('button', { name: 'Reset position, size and opacity' }))
 
     expect(shapeData()).toMatchObject({ x: 0.5, y: 0.5, width: 0.2, height: 0.2, rotation: 0 })
   })

@@ -3297,6 +3297,29 @@ approved both verdicts and both extensions; its two LOWs are in the third commit
 `exportMP4.perf.test.ts`, every other `*.perf.test.ts` and the rerender pins are byte-identical — one
 timer per load, none per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-256 (the font-size field commits on blur
+or Enter through one `useCommittedNumberInput` hook instead of clamping per keystroke; the scale
+slider is log-scaled over 0.1–10 with its label in `×`; the three Reset buttons carry distinct
+`aria-label`s; a Background checkbox switches a text background off through the renderer's own
+`#00000000`): 99.82 / 99.34 / **96.28** / 99.70 against the 99.82 / 99.34 / 96.27 / 99.70 that `main`
+at `74bb3de9` (the ESCSUITE-270 version-packages commit) measures in the same sitting — branches up a
+hundredth, the other three unmoved. The base gives 5,452 / 5,663 branches and this branch
+5,468 / 5,679: sixteen new branches, sixteen covered, the same 211 uncovered as before (lines
+8,432 / 8,447 → 8,453 / 8,468, statements 9,519 / 9,582 → 9,545 / 9,608, functions 2,012 / 2,018 →
+2,020 / 2,026, every denominator growing by exactly what the numerator did; the same 15 / 63 / 6
+uncovered). The net sixteen is three files: `components/ClipEditor/useCommittedNumberInput.ts`
+arrives at 16 / 16 (the focused-or-synced choice, the `Number()` parse, the clamp's two bounds, the
+integer rounding, the commit-only-on-change and empty / `NaN` / Escape reverts, and the no-draft
+guard on a blur with nothing typed — the one arm the first measurement found unreached, reached by
+the case the coverage round added), `TextContentSection.tsx` gains two (8 → 10, the Background
+checkbox's on / off write) and `clipColorValues.ts` loses two (8 → 6, `clampFontSize` deleted with
+no caller left); `TransformSection.tsx`'s log mapping and the Reset names add lines and functions
+and no decision. Each is reached from both sides by the thirty cases that were red with the source
+reverted. The review (sonnet) approved both verdicts; `take-import.spec.ts`'s two percent-label pins
+moved to the `×` form and ran on Chromium (6 / 6, twice). `ClipEditor.rerender.test.tsx` and every
+`*.perf.test.ts` are byte-identical — the draft text is local state with no store subscription. **No
+floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3304,7 +3327,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.29 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.28 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

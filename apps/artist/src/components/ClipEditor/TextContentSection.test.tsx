@@ -80,26 +80,72 @@ describe('TextContentSection', () => {
     expect(onChange).toHaveBeenCalledWith({ fontFamily: 'Georgia' })
   })
 
-  it('takes a font size within the input bounds', () => {
-    const { onChange } = renderSection()
+  it('declares the font size bounds', () => {
+    renderSection()
     const size = screen.getByTitle('Font size')
 
     expect(size).toHaveAttribute('min', '8')
     expect(size).toHaveAttribute('max', '200')
-
-    fireEvent.change(size, { target: { value: '72' } })
-
-    expect(onChange).toHaveBeenCalledWith({ fontSize: 72 })
   })
 
-  it('floors a too-small font size at 8 and falls back to 48 for nonsense', () => {
-    const { onChange } = renderSection()
+  describe('the font size field (ESCSUITE-256)', () => {
+    const size = () => screen.getByTitle('Font size')
 
-    fireEvent.change(screen.getByTitle('Font size'), { target: { value: '2' } })
-    expect(onChange).toHaveBeenLastCalledWith({ fontSize: 8 })
+    it('does not write while typing: "24" is 24, not the 84 a per-key clamp made', () => {
+      const { onChange } = renderSection()
 
-    fireEvent.change(screen.getByTitle('Font size'), { target: { value: '' } })
-    expect(onChange).toHaveBeenLastCalledWith({ fontSize: 48 })
+      fireEvent.change(size(), { target: { value: '2' } })
+      fireEvent.change(size(), { target: { value: '24' } })
+      expect(onChange).not.toHaveBeenCalled()
+
+      fireEvent.blur(size())
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(onChange).toHaveBeenCalledWith({ fontSize: 24 })
+    })
+
+    it('reads "1e2" as 100', () => {
+      const { onChange } = renderSection()
+      fireEvent.change(size(), { target: { value: '1e2' } })
+      fireEvent.blur(size())
+      expect(onChange).toHaveBeenCalledWith({ fontSize: 100 })
+    })
+
+    it('holds 5000 at the 200 maximum', () => {
+      const { onChange } = renderSection()
+      fireEvent.change(size(), { target: { value: '5000' } })
+      fireEvent.blur(size())
+      expect(onChange).toHaveBeenCalledWith({ fontSize: 200 })
+    })
+
+    it('floors 4 at 8', () => {
+      const { onChange } = renderSection()
+      fireEvent.change(size(), { target: { value: '4' } })
+      fireEvent.blur(size())
+      expect(onChange).toHaveBeenCalledWith({ fontSize: 8 })
+    })
+
+    it('reverts an emptied field without writing', () => {
+      const { onChange } = renderSection()
+      fireEvent.change(size(), { target: { value: '' } })
+      fireEvent.blur(size())
+      expect(onChange).not.toHaveBeenCalled()
+      expect(size()).toHaveValue(48)
+    })
+
+    it('commits on Enter', () => {
+      const { onChange } = renderSection()
+      fireEvent.change(size(), { target: { value: '72' } })
+      fireEvent.keyDown(size(), { key: 'Enter' })
+      expect(onChange).toHaveBeenCalledWith({ fontSize: 72 })
+    })
+
+    it('reverts on Escape without writing', () => {
+      const { onChange } = renderSection()
+      fireEvent.change(size(), { target: { value: '72' } })
+      fireEvent.keyDown(size(), { key: 'Escape' })
+      expect(onChange).not.toHaveBeenCalled()
+      expect(size()).toHaveValue(48)
+    })
   })
 
   it('turns bold on, and marks the button while it is on', async () => {
@@ -169,6 +215,35 @@ describe('TextContentSection', () => {
     fireEvent.change(rowColor('Text'), { target: { value: '#ff0000' } })
 
     expect(onChange).toHaveBeenCalledWith({ color: '#ff0000' })
+  })
+
+  describe('the background switch (ESCSUITE-256)', () => {
+    const background = () => screen.getByRole('checkbox', { name: 'Background' })
+
+    it('is on, with the picker live, while the text has a visible background', () => {
+      renderSection({ backgroundColor: '#00000080' })
+      expect(background()).toBeChecked()
+      expect(rowColor('BG')).toBeEnabled()
+    })
+
+    it('is off, with the picker disabled, for the renderer\'s no-background value', () => {
+      renderSection({ backgroundColor: '#00000000' })
+      expect(background()).not.toBeChecked()
+      expect(rowColor('BG')).toBeDisabled()
+    })
+
+    it('writes the no-background value when switched off', () => {
+      const { onChange } = renderSection({ backgroundColor: '#123456cc' })
+      fireEvent.click(background())
+      expect(onChange).toHaveBeenCalledWith({ backgroundColor: '#00000000' })
+    })
+
+    it('restores the picker colour at 80% when switched on', () => {
+      const { onChange } = renderSection({ backgroundColor: '#12345600' })
+      expect(rowColor('BG')).toHaveValue('#123456')
+      fireEvent.click(background())
+      expect(onChange).toHaveBeenCalledWith({ backgroundColor: '#123456cc' })
+    })
   })
 
   it('shows the background colour without its alpha and writes one back at 80%', () => {
@@ -285,7 +360,10 @@ describe('TextContentSection and the undo stack', () => {
     const before = past()
     const size = screen.getByTitle('Font size')
 
-    for (const value of ['49', '50', '51', '52', '53']) type(size, value)
+    for (const value of ['49', '50', '51', '52', '53']) {
+      type(size, value)
+      fireEvent.keyDown(size, { key: 'Enter' })
+    }
 
     expect(textNow().fontSize).toBe(53)
     expect(past() - before).toBe(1)
