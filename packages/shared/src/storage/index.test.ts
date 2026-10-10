@@ -40,9 +40,129 @@ describe('storage', () => {
     })
 
     it('returns the cached singleton on subsequent calls', async () => {
+      const openSpy = vi.spyOn(globalThis.indexedDB, 'open')
       const db1 = await storage.getDB()
       const db2 = await storage.getDB()
       expect(db1).toBe(db2)
+      expect(openSpy).toHaveBeenCalledTimes(1)
+    })
+
+    // ESCSUITE-226: the cache used to be written only after the open resolved,
+    // so two callers on first use each opened a connection and one leaked.
+    it('shares one open between two callers racing on first use', async () => {
+      const openSpy = vi.spyOn(globalThis.indexedDB, 'open')
+      const [db1, db2] = await Promise.all([storage.getDB(), storage.getDB()])
+      expect(db1).toBe(db2)
+      expect(openSpy).toHaveBeenCalledTimes(1)
+    })
+
+    // ESCSUITE-226: a delete (or a future upgrade) from another page fires
+    // `versionchange` on this connection; it must step aside, not block it.
+    it('steps aside for a deleteDatabase from elsewhere and reopens on the next call', async () => {
+      const first = await storage.getDB()
+      await storage.setSetting('theme', 'dark')
+
+      const deleted = new Promise<string>((resolve) => {
+        const request = globalThis.indexedDB.deleteDatabase(storage.DB_NAME)
+        request.onsuccess = () => resolve('deleted')
+        request.onerror = () => resolve('error')
+      })
+      const outcome = await Promise.race([
+        deleted,
+        new Promise<string>((resolve) => setTimeout(() => resolve('still blocked'), 500)),
+      ])
+      expect(outcome).toBe('deleted')
+
+      // The next call opens a fresh connection, the upgrade recreates the
+      // stores, and a write lands.
+      const second = await storage.getDB()
+      expect(second).not.toBe(first)
+      expect(second.objectStoreNames.contains('settings')).toBe(true)
+      expect(await storage.getSetting('theme')).toBeUndefined()
+      await storage.setSetting('theme', 'light')
+      expect(await storage.getSetting('theme')).toBe('light')
+    })
+  })
+
+  // The hooks `idb` hands to `openDB`, driven directly: fake-indexeddb cannot
+  // terminate a connection abnormally, and `blocked` needs two pages.
+  describe('getDB with idb mocked', () => {
+    type OpenOptions = {
+      upgrade?: unknown
+      blocked?: (currentVersion: number, blockedVersion: number | null, event: unknown) => void
+      blocking?: (currentVersion: number, blockedVersion: number | null, event: unknown) => void
+      terminated?: () => void
+    }
+    type FakeDB = { close: ReturnType<typeof vi.fn> }
+
+    let opens: Array<{ options: OpenOptions; db: FakeDB }>
+    let openDB: ReturnType<typeof vi.fn>
+    let mocked: typeof import('./index')
+
+    beforeEach(async () => {
+      opens = []
+      openDB = vi.fn((_name: string, _version: number, options: OpenOptions) => {
+        const db: FakeDB = { close: vi.fn() }
+        opens.push({ options, db })
+        return Promise.resolve(db)
+      })
+      vi.doMock('idb', () => ({ openDB }))
+      vi.resetModules()
+      mocked = await import('./index')
+    })
+
+    afterEach(() => {
+      vi.doUnmock('idb')
+    })
+
+    it('opens again after a rejected open instead of failing forever', async () => {
+      openDB.mockImplementationOnce(() => Promise.reject(new Error('open failed')))
+
+      await expect(mocked.getDB()).rejects.toThrow('open failed')
+      const db = await mocked.getDB()
+
+      expect(openDB).toHaveBeenCalledTimes(2)
+      expect(db).toBe(opens[0].db)
+    })
+
+    it('reopens after the browser terminates the connection', async () => {
+      const first = await mocked.getDB()
+      expect(await mocked.getDB()).toBe(first)
+
+      opens[0].options.terminated!()
+      const second = await mocked.getDB()
+
+      expect(openDB).toHaveBeenCalledTimes(2)
+      expect(second).toBe(opens[1].db)
+      expect(second).not.toBe(first)
+    })
+
+    it('closes the connection and reopens when another connection needs a version change', async () => {
+      const first = await mocked.getDB()
+
+      opens[0].options.blocking!(1, null, {})
+      const second = await mocked.getDB()
+
+      expect(opens[0].db.close).toHaveBeenCalledTimes(1)
+      expect(openDB).toHaveBeenCalledTimes(2)
+      expect(second).toBe(opens[1].db)
+      expect(second).not.toBe(first)
+    })
+
+    it('warns once, naming the database, when its open is blocked by another tab', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await mocked.getDB()
+
+      opens[0].options.blocked!(1, 2, {})
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toContain('video-editor-db')
+    })
+
+    it('does not warn when the open is not blocked', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      await mocked.getDB()
+      expect(warn).not.toHaveBeenCalled()
     })
   })
 
