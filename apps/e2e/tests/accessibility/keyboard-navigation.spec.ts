@@ -371,6 +371,37 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     await expect(page.getByTitle('Play (Space)')).toBeVisible()
   })
 
+  // ESCSUITE-270: a button the mouse clicked keeps focus; Space must play or
+  // pause, not press that button again. A keyboard-focused button keeps Space.
+  test('Space after a mouse-clicked track button plays; after Tab it presses the button', async ({
+    page,
+  }) => {
+    await seedTextClip(page)
+
+    await page.getByTitle('Mute', { exact: true }).first().click()
+    await expect(page.getByTitle('Unmute', { exact: true }).first()).toBeVisible()
+
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Pause (Space)')).toBeVisible()
+    // The mute button was not pressed a second time.
+    await expect(page.getByTitle('Unmute', { exact: true }).first()).toBeVisible()
+
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+
+    await page.click('body')
+    for (let i = 0; i < 80; i++) {
+      await page.keyboard.press('Tab')
+      const onMute = await page.evaluate(
+        () => document.activeElement?.getAttribute('title') === 'Unmute',
+      )
+      if (onMute) break
+    }
+    await page.keyboard.press('Space')
+    await expect(page.getByTitle('Mute', { exact: true }).first()).toBeVisible()
+    await expect(page.getByTitle('Play (Space)')).toBeVisible()
+  })
+
   test('keyboard shortcuts work without focus on inputs', async ({ page }) => {
     // Bare "z" is not a shortcut (undo is Ctrl/Cmd+Z) — the old version
     // pressed a key that does nothing and then asserted a doctype, which

@@ -4380,10 +4380,12 @@ transport in `components/Preview/PlaybackControls.tsx` (Space, the arrows, Home,
   matches `button, [role="button"], a[href]` (a select or contenteditable never gets that far: the typing guard returns first), so the browser's own click
   fires instead of a play/pause; it stays the transport's key on the canvas, the timeline and body. The
   twin of ESCAPECRAFT's `spaceBelongsToTarget` (ESCSUITE-185).
-  Only a control with `:focus-visible` keeps Space (ESCSUITE-270): a button the mouse last clicked holds focus
-  without it, so Space plays or pauses instead of pressing that button again; an engine that throws on the
-  selector is treated as keyboard focus. ESCAPECRAFT's player is left as it is: three buttons, no toolbar, and
-  its Space rule is ESCSUITE-185's own.
+  A control the mouse focused does not keep Space (ESCSUITE-270): a button clicked with the mouse holds focus,
+  and Space would press it a second time. `Preview/focusModality.ts` records the modality with three
+  capture-phase listeners on `window` (`pointerdown` arms, `keydown` disarms, `focusin` consumes), installed by
+  `PlaybackControls`; `:focus-visible` cannot be read because Chromium turns it on for the Space keystroke itself
+  before any handler runs. ESCAPECRAFT's player is left as it is: three buttons, no toolbar, and its Space rule is
+  ESCSUITE-185's own.
 
 **The shortcut sheet may list only keys something binds.** `BOUND_SINGLE_KEYS` (the hook) and
 `TRANSPORT_KEYS` (`Preview/transportKeys.ts`) are the key tables; `KeyboardShortcuts.test.tsx` fails
