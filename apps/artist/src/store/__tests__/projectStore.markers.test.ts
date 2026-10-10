@@ -18,7 +18,7 @@ describe('setMarkers (ESCSUITE-245)', () => {
     useEditorStore.getState().setMarkers(list)
 
     expect(useEditorStore.getState().markers).toEqual(list)
-    expect(useEditorStore.getState().canUndo).toBe(false)
+    expect(useEditorStore.getState().canUndo()).toBe(false)
   })
 
   it('an empty list clears the markers', () => {

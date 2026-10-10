@@ -124,7 +124,15 @@ export function useSessionAutosave({
 
     arm();
     const unsubscribe = useEditorStore.subscribe((state, previous) => {
-      if (state.currentTime !== previous.currentTime) arm();
+      // The playhead, and the in/out points and markers (ESCSUITE-245): none
+      // is an effect dependency, so none re-renders App, but each is part of
+      // what gets written and should re-arm the debounce all the same.
+      if (
+        state.currentTime !== previous.currentTime ||
+        state.inPoint !== previous.inPoint ||
+        state.outPoint !== previous.outPoint ||
+        state.markers !== previous.markers
+      ) arm();
     });
 
     return () => {

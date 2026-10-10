@@ -10,6 +10,8 @@
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
+import { repairEditorBlock } from '../store/projectMigration';
+import { applyEditorBlock } from './editorBlock';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -131,6 +133,11 @@ export function useSessionRestore({
     setCurrentTime(session.currentTime);
     setSelectedClipId(session.selectedClipId);
     setZoom(session.zoom);
+    // ESCSUITE-245: the app's own autosave is repaired, not refused — a block
+    // that fails the file's checks falls back to no range and no markers with
+    // one warning, and an old snapshot with no block clears whatever the
+    // editor held. Neither is an edit, so neither is undoable.
+    applyEditorBlock(repairEditorBlock(session.editor, session.project.timeline.clips));
     clearHistory();
     setShowSessionPrompt(false);
     setPendingSession(null);

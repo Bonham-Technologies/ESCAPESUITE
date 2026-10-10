@@ -453,13 +453,14 @@ describe('the editor block (ESCSUITE-245)', () => {
   }
 
   it('applies the saved range and markers, sorted, with no undo entry', async () => {
+    const undoableBefore = useEditorStore.getState().canUndo()
     await restore(sessionWithClip({ inPoint: 1, outPoint: 4, markers: [marker('b', 6), marker('a', 2)] }))
 
     const state = useEditorStore.getState()
     expect(state.inPoint).toBe(1)
     expect(state.outPoint).toBe(4)
     expect(state.markers).toEqual([marker('a', 2), marker('b', 6)])
-    expect(state.canUndo).toBe(false)
+    expect(state.canUndo()).toBe(undoableBefore)
   })
 
   it('clears a stale range and markers when the snapshot has no block', async () => {

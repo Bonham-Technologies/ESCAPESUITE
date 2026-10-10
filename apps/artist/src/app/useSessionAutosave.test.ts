@@ -71,6 +71,7 @@ describe('useSessionAutosave', () => {
       currentTime: 0,
       selectedClipId: null,
       zoom: 1,
+      editor: { inPoint: null, outPoint: null, markers: [] },
       timestamp: expect.any(Number),
     })
   })

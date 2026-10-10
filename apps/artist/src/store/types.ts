@@ -541,6 +541,18 @@ export interface Marker {
 }
 
 /**
+ * The editor state that lives outside `Project` but belongs in a saved file and
+ * in the session autosave (ESCSUITE-245): the in/out points and the markers.
+ * Deliberately not part of `Project` — that is the undoable document and the
+ * headless kit's input.
+ */
+export interface EditorBlock {
+  inPoint: number | null;
+  outPoint: number | null;
+  markers: Marker[];
+}
+
+/**
  * A clip's trim/position and animation as they stood when a timeline trim
  * gesture began — what `trimClip` (below) rebases every move of the gesture
  * from, rather than the clip's current, possibly-already-cropped state
@@ -845,6 +857,8 @@ export interface EditorState {
   removeMarker: (markerId: string) => void;
   updateMarker: (markerId: string, updates: Partial<Marker>) => void;
   clearMarkers: () => void;
+  /** Replace the whole list in one write — a restore, not an edit: no undo entry. */
+  setMarkers: (markers: Marker[]) => void;
   goToNextMarker: () => void;
   goToPreviousMarker: () => void;
 

@@ -664,13 +664,14 @@ describe('the editor block (ESCSUITE-245)', () => {
     deps.setProject = vi.fn(() => { order.push('setProject') })
     deps.clearHistory = vi.fn(() => { order.push(`clearHistory:${useEditorStore.getState().inPoint}`) })
 
+    const undoableBefore = useEditorStore.getState().canUndo()
     await open({ inPoint: 1, outPoint: 40, markers: [marker('b', 6), marker('a', 2)] })
 
     expect(useEditorStore.getState().inPoint).toBe(1)
     expect(useEditorStore.getState().outPoint).toBe(10)
     expect(useEditorStore.getState().markers).toEqual([marker('a', 2), marker('b', 6)])
     expect(order).toEqual(['setProject', 'clearHistory:1'])
-    expect(useEditorStore.getState().canUndo).toBe(false)
+    expect(useEditorStore.getState().canUndo()).toBe(undoableBefore)
   })
 
   it('leaves the reset defaults alone for a file with no block', async () => {

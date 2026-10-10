@@ -144,7 +144,12 @@ describe('App project lifecycle', () => {
       await user.click(screen.getByRole('button', { name: 'Save project' }))
 
       await waitFor(() => expect(notification()).toBe('Project saved successfully'))
-      expect(saveProject).toHaveBeenCalledWith(store().project, store().sourceVideos)
+      expect(saveProject).toHaveBeenCalledWith(
+        store().project,
+        store().sourceVideos,
+        undefined,
+        { inPoint: null, outPoint: null, markers: [] }
+      )
     })
 
     it('saves from the File menu', async () => {

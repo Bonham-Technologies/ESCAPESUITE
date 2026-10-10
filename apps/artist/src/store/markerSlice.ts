@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { StateCreator } from 'zustand';
 import type { EditorState } from './types';
 
-export type MarkerSlice = Pick<EditorState, 'markers' | 'addMarker' | 'removeMarker' | 'updateMarker' | 'clearMarkers' | 'goToNextMarker' | 'goToPreviousMarker'>;
+export type MarkerSlice = Pick<EditorState, 'markers' | 'addMarker' | 'removeMarker' | 'updateMarker' | 'clearMarkers' | 'setMarkers' | 'goToNextMarker' | 'goToPreviousMarker'>;
 
 export const createMarkerSlice: StateCreator<EditorState, [], [], MarkerSlice> = (set) => ({
   markers: [],
@@ -36,6 +36,8 @@ export const createMarkerSlice: StateCreator<EditorState, [], [], MarkerSlice> =
   })),
 
   clearMarkers: () => set({ markers: [] }),
+
+  setMarkers: (markers) => set({ markers }),
 
   goToNextMarker: () => set((state) => {
     const nextMarker = state.markers.find((m) => m.time > state.currentTime);

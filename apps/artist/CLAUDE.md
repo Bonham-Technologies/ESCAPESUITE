@@ -222,6 +222,28 @@ pnpm lint                # Run ESLint
   leaves the dialog and file for another choice. `blobToBase64` additionally rejects an empty or
   short result, the backstop for a browser whose own limit is lower. The session autosave stores
   `Blob`s by id and has no such limit. A binary `.veditor` v2 container is a separate follow-up.
+  **Editor block (ESCSUITE-245)**: `ProjectFile` and the session snapshot (`SessionState`) both carry
+  an optional `editor: { inPoint, outPoint, markers }` BESIDE `project` — the in/out points and the
+  markers live in the store outside `Project` (the undoable document and the headless kit's input,
+  which ignores the block), so before this ticket neither a save nor an autosave kept them.
+  `saveProject(project, sourceVideos, onProgress?, editor?)` is handed the block as it is handed the
+  sources (`useProjectActions` reads `currentEditorBlock()` from `app/editorBlock.ts` at save time);
+  `loadProject` returns the file's block as found. **A file is untrusted**: `parseProject(project,
+  editor?)` validates a present block by name (`validateEditorBlock`: each point `null` or a finite
+  number >= 0, an inverted OR equal pair refused rather than swapped, markers with unique string
+  ids, finite time >= 0, string label and colour; reason `editor.<field> ...`), sorts the markers by
+  time and returns `{ ok: true, project, editor? }`; an absent block returns none and the caller keeps
+  the defaults `resetProject` leaves (no range, no markers). **The autosave is the app's own state and
+  is repaired, not refused** (the ESCSUITE-173 / 255 split): `repairEditorBlock` drops a snapshot
+  block that fails the same checks to the defaults with one `console.warn`, and never blocks the
+  restore. **In/out points past the timeline are clamped, not refused**, on both paths, to the loaded
+  timeline's length (a range that collapses to nothing is dropped); a **marker past the end is kept**
+  — markers are annotations, not playback bounds. `applyEditorBlock` (clear the points, set each
+  non-null one, `setMarkers`) is a restore, not an edit: it pushes no undo entry, and it runs after
+  the project lands and before `clearHistory()` in both `loadProjectFile` and `handleRestoreSession`.
+  The host's `LOAD_PROJECT` passes no block and the kit ignores it. `ExportDialog` still derives its
+  `timeRange` from the store's points, so a restored range is honoured by the next export. The
+  autosave's store subscription re-arms on a point or marker change as it does on the playhead.
   **File format**: each entry in `ProjectFile.videos` carries the video's base64 bytes and,
   since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
   `duration`/`width`/`height`/`frameRate` plus whatever of `mediaType`, `source`, `recordedAt`,

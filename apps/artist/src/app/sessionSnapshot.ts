@@ -28,6 +28,7 @@ export function buildSessionSnapshot(state: EditorState, timestamp: number): Ses
     currentTime: state.currentTime,
     selectedClipId: state.selectedClipId,
     zoom: state.zoom,
+    editor: { inPoint: state.inPoint, outPoint: state.outPoint, markers: state.markers },
     timestamp,
   };
 }
