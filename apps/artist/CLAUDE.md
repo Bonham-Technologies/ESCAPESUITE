@@ -2200,8 +2200,19 @@ the edit arrived; and it does not close on a picker's own closing `change`, beca
 value tracker drops that event (it repeats the last `input`'s value) before any handler sees
 it — the pause and the blur end a sweep, which also coalesces a browser that reports each
 picker step as a `change`. The burst keeps a history of its own rather than sharing the
-slider's, so the textarea's blur when the user presses a slider cannot end the drag that press
-began; `useClipEditorActions`' `commitEdit` nests the two `commit`s and skips history when
+slider's, because a press fires its `pointerdown` *before* the blur of whatever had focus (focus
+moves on `mousedown`): sharing one history, the textarea's blur when the user presses a slider
+would end the drag that press had just begun. The inspector's sliders already have exactly that
+bug among themselves — pressing slider B while slider A still has focus ends B's scope at its
+start, so B's drag pushes one entry per move — because they share one history; it predates this
+ticket and is filed as **ESCSUITE-267**, and a separate burst history is how this ticket avoids
+adding a second instance of it (`TextContentSection.test.tsx` pins the caption's blur
+mid-drag leaving the slider's one entry intact). One merge case remains, and loses nothing: a
+press on the preview canvas that grabs a clip or a handle does not move focus
+(`Preview/useTransformHandles.ts` calls `preventDefault()` on that `mousedown`), so a burst stays
+open through it, and typing straight
+after a canvas drag — within the 600 ms — can fold two edits into one undo step.
+`useClipEditorActions`' `commitEdit` nests the two `commit`s and skips history when
 either gesture says to, and is what `handleTextDataChange`, `handleShapeDataChange` and
 `handleStrokeChange` write through — outside both gestures it hands the write `false`, so the
 bold/italic toggles, the selects and the no-fill toggle keep one entry each. Three scopes, then:

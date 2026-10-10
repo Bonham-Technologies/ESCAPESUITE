@@ -331,6 +331,34 @@ describe('TextContentSection and the undo stack', () => {
     expect(past() - before).toBe(3)
   })
 
+  it("leaves a slider drag's one entry intact when the caption blurs mid-drag", () => {
+    // A press on a slider fires `pointerdown` before the focused caption's
+    // `blur`. The burst has its own history, so that blur cannot end the drag
+    // (the shared-history version of this ordering is ESCSUITE-267).
+    function LiveWithSlider() {
+      const { selectedClip, handleTextDataChange, burstGesture, sliderGesture } = useClipEditorActions()
+      return (
+        <>
+          <TextContentSection textData={selectedClip!.textData!} onChange={handleTextDataChange} burstGesture={burstGesture} />
+          <input type="range" aria-label="Pos X" min={0} max={1} step={0.01} value={selectedClip!.textData!.x}
+            {...sliderGesture} onChange={(e) => handleTextDataChange({ x: parseFloat(e.target.value) })} />
+        </>
+      )
+    }
+    render(<LiveWithSlider />)
+    const slider = screen.getByLabelText('Pos X')
+    type(textarea(), 'Texta')
+    const before = past()
+
+    fireEvent.pointerDown(slider)
+    fireEvent.blur(textarea())
+    for (const value of ['0.2', '0.3', '0.4']) fireEvent.input(slider, { target: { value } })
+    fireEvent.pointerUp(slider)
+
+    expect(textNow().x).toBe(0.4)
+    expect(past() - before).toBe(1)
+  })
+
   it('ends an open burst and clears its timer when the panel unmounts', () => {
     const { unmount } = renderLive()
 
