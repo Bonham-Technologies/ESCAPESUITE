@@ -173,15 +173,17 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   (ESCSUITE-254: before this, the worker threw on every source and the export silently decoded in
   the page). Only in **Chromium and Firefox** — an allow-list (`core/workerDecodeEngine.ts`) of the
   engines whose worker output was measured against their own `<video>` (Chromium: export MAD
-  0.000–0.486/255 across untagged, BT.709-tagged, full-range and trimmed sources; Firefox:
-  0.000–0.920 on the untagged, tagged and full-range sources, its own `<video>` the one in error on
-  the trimmed clip (ESCSUITE-265), rotated sources refused to `<video>`); WebKit measured
+  0.000/255 at every compared frame across untagged, BT.709-tagged, full-range, matrix-only,
+  `colr`-only and trimmed sources; Firefox: 0.000–0.356 on the same sources, rotated sources
+  refused to `<video>` — both since ESCSUITE-265, below); WebKit measured
   4.46–17.45/255 apart and is refused, as is any engine not yet measured (admitting one is
   ESCSUITE-262). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
   decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
   the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s, which repeated about every other frame, is fixed by
-  ESCSUITE-263 (half a frame; the parity oracle is re-run for it). A worker killed outright, which may never fire `error`,
+  ESCSUITE-263 (half a frame; the parity oracle is re-run for it); and its seek to a frame's exact start, which both
+  Chromium and Firefox resolved to the previous frame on one start in three (their microsecond rounding), now goes
+  0.1 ms past it in the MP4, WebM and GIF element paths alike (`core/elementSeek.ts`, ESCSUITE-265). A worker killed outright, which may never fire `error`,
   is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
 
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it

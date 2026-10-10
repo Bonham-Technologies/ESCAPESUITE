@@ -7,6 +7,7 @@ import {
   isWebCodecsAvailable,
   type IFrameSource,
 } from './frameSource';
+import { elementSeekTarget } from './elementSeek';
 
 // A mutable slot a test can fill in before calling factory.initialize(), so
 // the *next* MockVideoDecodeManager's initialize() rejects once (ESCSUITE-29
@@ -364,7 +365,7 @@ describe('frameSource', () => {
         await vi.advanceTimersByTimeAsync(500);
 
         await expect(framePromise).resolves.toBe(element);
-        expect(element.currentTime).toBe(5);
+        expect(element.currentTime).toBe(elementSeekTarget(5));
         expect(element.removedListeners).toContain('seeked');
       } finally {
         vi.useRealTimers();
@@ -805,7 +806,7 @@ describe('frameSource', () => {
         const frame = await source.getFrame(0.25);
 
         expect(frame).toBe(created[0]);
-        expect(created[0].currentTime).toBe(0.25);
+        expect(created[0].currentTime).toBe(elementSeekTarget(0.25));
         await source.dispose();
         warn.mockRestore();
       });

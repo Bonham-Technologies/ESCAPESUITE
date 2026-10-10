@@ -18,6 +18,7 @@ import { exportToGIF, estimateGifBytes } from './exportGIF'
 import { ExportAbortedError, ExportError, type ExportResult } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
+import { elementSeekTarget } from './elementSeek'
 import {
   getLastCanvasContext,
   installCanvasDouble,
@@ -317,8 +318,9 @@ describe('exportToGIF frames', () => {
     // Half a second at 10 fps.
     expect(frames()).toHaveLength(5)
     // The first frame drew the clip at timeline time 0.5, which is the source's
-    // own 0.5 — so the element was seeked there rather than to 0.
-    expect(media.seeks).toContain(0.5)
+    // own 0.5 — so the element was seeked there (just past it, ESCSUITE-265)
+    // rather than to 0.
+    expect(media.seeks).toContain(elementSeekTarget(0.5))
   })
 
   it('clears each frame to black before compositing, and reads it back after', async () => {

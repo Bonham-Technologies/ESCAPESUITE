@@ -14,6 +14,7 @@ import {
 } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
+import { elementSeekTarget } from './elementSeek'
 import {
   fromEncodedChunk,
   getMediabunnyState,
@@ -566,8 +567,9 @@ describe('exportToMP4 rendering', () => {
     // The frame source leaves the element alone only while the request is within
     // half a frame of where it already is. Consecutive 1/30 s requests are a frame
     // apart, so every one seeks (ESCSUITE-263: the old one-frame window skipped every
-    // other frame and served the previous frame twice).
-    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => 2 + i / 30))
+    // other frame and served the previous frame twice), and each seek goes just past
+    // its frame's start (ESCSUITE-265).
+    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 30)))
   })
 
   it('draws an image source without a frame source', async () => {

@@ -40,23 +40,22 @@ import { waitForAppReady } from '../../utils/ready'
  * Which engines take the worker at all is decided by an allow-list,
  * `apps/artist/src/core/workerDecodeEngine.ts`: Chromium and Firefox, the two
  * whose worker output was measured against their own <video>. These cases run
- * in Chromium, the one CI runs. Firefox 155 was run here with the skip lifted
- * (ESCSUITE-254 fix round 1), and two cases are known to fail there:
- * - the trimmed clip: Firefox's own <video> export shows the previous colour
- *   segment at export frames 25-26 (68.3/255 from the source), while the
- *   worker export is within 2.3 of the source at every frame checked — the
- *   oracle is wrong, not the worker (ESCSUITE-265; not shown to be
- *   ESCSUITE-263's seek skip);
+ * in Chromium, the one CI runs. Firefox 155 was last run here with the skip
+ * lifted for ESCSUITE-265: every parity case matched (MAD 0.000, the
+ * full-range source 0.195-0.356), the trimmed clip included, and one case is
+ * known to fail there:
  * - the rotated source: Firefox's VideoDecoder drops `rotation`, so the source
  *   is refused to <video> by design and `expectWorkerDecoded` fails.
- * The untagged, BT.709-tagged and full-range cases matched there (MAD
- * 0.000-0.920, round 1); the matrix-only and the two colr-only cases added in
- * round 2 have NOT been run on Firefox (its decoder ignores the colour
- * setting and its <video> ignores the box, so both paths agree by
- * construction, but that is reasoning, not a measurement). WebKit is not on the list
+ * The trimmed clip's earlier failure (the previous colour segment at export
+ * frames 25-26, 68.3/255) was the <video> oracle, not the worker: frame 26 was
+ * ESCSUITE-263's seek skip, and frame 25 a seek to a frame's exact start, which
+ * both engines' <video> resolved to the frame before it on one start in three
+ * (ESCSUITE-265; the segment-start frames below are what catch it — with the
+ * fix removed, Chromium measured 70.5 at frame 8 and Firefox 66.8 at frame 25
+ * of the trimmed clip). WebKit is not on the list
  * (measured 4.46-17.45/255 apart) and cannot import media under Playwright
  * anyway (IndexedDB refuses the Blob). Lifting the skip for another engine is
- * ESCSUITE-262, which has to account for the two known Firefox failures.
+ * ESCSUITE-262, which has to account for the one known Firefox failure.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -479,12 +478,26 @@ interface ParityCase {
    * ignored, lands in the previous segment), and the last (the end-of-stream
    * flush). The middle two are in different segments, which is what proves a
    * reader is not stuck on one frame.
+   *
+   * Any further frames are the first frame of a colour segment whose start is
+   * not a whole number of microseconds (ESCSUITE-265): a reader that lands one
+   * microsecond short of a frame's start shows the previous frame, and only at
+   * a segment's first frame is that a different colour. Chromium's <video> did
+   * so on the starts whose fraction is .67 µs, Firefox's on the .33 ones.
    */
-  frames: [number, number, number, number]
+  frames: [number, number, number, number, ...number[]]
 }
 
 const PARITY_CASES: ParityCase[] = [
-  { name: 'an untagged 160x120 source', file: SEGMENTS_MP4, width: 160, height: 120, exportedFrames: 60, frames: [0, 25, 41, 59] },
+  {
+    // Frame 8 starts at 266666.67 µs, frame 16 at 533333.33 µs.
+    name: 'an untagged 160x120 source',
+    file: SEGMENTS_MP4,
+    width: 160,
+    height: 120,
+    exportedFrames: 60,
+    frames: [0, 25, 41, 59, 8, 16],
+  },
   {
     name: 'a BT.709-tagged 640x480 source, which must keep its own colours',
     file: TAGGED_709_480P_MP4,
@@ -529,14 +542,15 @@ const PARITY_CASES: ParityCase[] = [
   },
   {
     // Starts 15 frames in, so export frames 10, 26 and 44 are source frames
-    // 25, 41 and 59.
+    // 25, 41 and 59, and export frames 17 and 25 are source frames 32
+    // (1066666.67 µs) and 40 (1333333.33 µs), the first of their segments.
     name: 'a clip trimmed to start 0.5 s into its source',
     file: SEGMENTS_MP4,
     width: 160,
     height: 120,
     trimStart: 0.5,
     exportedFrames: 45,
-    frames: [0, 10, 26, 44],
+    frames: [0, 10, 26, 44, 17, 25],
   },
 ]
 
