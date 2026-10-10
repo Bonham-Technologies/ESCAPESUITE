@@ -3395,6 +3395,22 @@ untouched (the element exporters use `elementFrames.ts`'s own skip rule); `drawF
 `exportMP4.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's
 floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-269 (the shortcut sheet's File group and
+the File menu's hint no longer show Ctrl+N for New Project — the cascade binds no `n` chord and the
+browser reserves Ctrl+N for a new window — and the two surfaces cannot drift again:
+`app/useAppKeyboardShortcuts.ts` exports `BOUND_CHORDS` beside ESCSUITE-247's `BOUND_SINGLE_KEYS`, and
+tests pin every sheet chord row and every File-menu hint to that table): 99.82 / 99.34 / 96.33 / 99.70,
+byte-identical on every percentage to the 99.82 / 99.34 / 96.33 / 99.70 that `main` at `0da91d98` (the
+ESCSUITE-256 squash) measures in the same sitting. The base gives 5,490 / 5,699 branches and this
+branch 5,492 / 5,701: two new branches, two covered, the same 209 uncovered as before (lines
+8,499 / 8,514 → 8,500 / 8,515, statements 9,593 / 9,656 → 9,594 / 9,657, functions 2,027 / 2,033 on
+both, every denominator growing by exactly what the numerator did; the same 15 / 63 / 6 uncovered). The
+two are `app/FileMenu.tsx`'s (20 → 22): the hint rendered from the table or omitted, reached with a
+chord by New Project's siblings and without one by New Project itself — the four red cases — against the
+sheet and menu pins that were already there; the one new statement is the `BOUND_CHORDS` export. The
+review (sonnet) approved both verdicts with four LOWs needing no action. The three rerender pins and
+every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3402,7 +3418,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.29 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.33 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
