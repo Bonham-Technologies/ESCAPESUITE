@@ -14,6 +14,7 @@ import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
 import { pruneSelection } from './selectionPrune';
+import { isSaneTransformWrite } from './transformGuard';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -359,6 +360,9 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     // an edit that touched nothing. The crop handle gesture's unmount-mid-drag
     // flush is the real caller that reaches this (`useCropHandleGesture.ts`).
     if (!clips.some((c) => c.id === clipId)) return false;
+    // ESCSUITE-255: the crop gesture writes a transform through here, and a
+    // non-finite one must not reach the project (nor the undo history).
+    if (updates.transform && !isSaneTransformWrite(updates.transform)) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map((clip) => {
@@ -634,6 +638,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
     if (!clips.some((c) => c.id === clipId)) return false; // ESCSUITE-172
+    if (!isSaneTransformWrite(transformUpdates)) return false; // ESCSUITE-255
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {

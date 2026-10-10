@@ -9,7 +9,7 @@ import { installMediaPlaybackStubs } from './test/doubles/media'
 import { defaultUrlParams, sampleVideo } from './test/appDoubles'
 import { OBJECT_URL_PATTERN } from './test/objectUrls'
 import { initIntegration, loadVideoFromUrl, parseUrlParams, sendMessage } from './utils/integration'
-import { processVideoFile } from './core/videoProcessor'
+import { processMediaFile } from './core/videoProcessor'
 import { getAllVideoMetadata, getThumbnail, getVideo } from './core/storage'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 
@@ -67,7 +67,7 @@ describe('App inbound messages', () => {
       await dispatchToApp({ type: 'LOAD_VIDEO', payload: { url: 'https://host/clip.mp4' } })
 
       expect(loadVideoFromUrl).toHaveBeenCalledWith('https://host/clip.mp4')
-      expect(processVideoFile).toHaveBeenCalledWith(expect.any(File))
+      expect(processMediaFile).toHaveBeenCalledWith(expect.any(File))
       expect(store().sourceVideos.map((v) => v.id)).toContain(sampleVideo.id)
       expect(sendMessage).toHaveBeenCalledWith({
         type: 'VIDEO_LOADED',

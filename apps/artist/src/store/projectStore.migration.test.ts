@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useEditorStore } from './projectStore'
 import { parseProject } from './projectMigration'
 import { DEFAULT_ANIMATION } from './types'
@@ -626,5 +626,98 @@ describe('parseProject (ESCSUITE-102)', () => {
         expect(result.project.resolution).toEqual({ width: 1920, height: 1080 })
       }
     })
+  })
+})
+
+describe('a session carrying a non-finite transform is repaired (ESCSUITE-255)', () => {
+  beforeEach(resetStoreForTest)
+
+  const sessionWith = (transform: Record<string, unknown>) => ({
+    id: 'p',
+    name: 'Saved before the fix',
+    created: 1,
+    modified: 1,
+    resolution: { width: 1920, height: 1080 },
+    timeline: {
+      tracks: [
+        { id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 },
+      ],
+      clips: [
+        {
+          id: 'c1', sourceVideoId: 'v1', name: 'c1', startTime: 0, endTime: 2, duration: 2,
+          trackId: 't1', timelinePosition: 0, blendMode: 'normal',
+          transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1, ...transform },
+          effects: { blur: 0 }, transition: { type: 'none', duration: 0.5 },
+        },
+      ],
+      textOverlays: [],
+      shapeOverlays: [],
+      duration: 2,
+    },
+  })
+
+  it('replaces an infinite or non-positive scale with 1 and warns once, naming the clip', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    store().setProject(sessionWith({ scaleX: Infinity, scaleY: 0 }) as unknown as Project)
+
+    const t = store().project.timeline.clips[0].transform
+    expect(t.scaleX).toBe(1)
+    expect(t.scaleY).toBe(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toContain('c1')
+    warn.mockRestore()
+  })
+
+  it('replaces a non-finite x, y, rotation and opacity with the default, keeping the rest', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    store().setProject(
+      sessionWith({ x: NaN, y: Infinity, rotation: NaN, opacity: -Infinity, scaleX: 2 }) as unknown as Project
+    )
+
+    expect(store().project.timeline.clips[0].transform).toMatchObject({
+      x: 0.5, y: 0.5, rotation: 0, opacity: 1, scaleX: 2,
+    })
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+  })
+
+  it('repairs a scale the structured clone turned into null or a string', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    store().setProject(sessionWith({ scaleX: null, opacity: '1' }) as unknown as Project)
+
+    expect(store().project.timeline.clips[0].transform).toMatchObject({ scaleX: 1, opacity: 1 })
+    warn.mockRestore()
+  })
+
+  it('leaves a healthy session untouched, the clip object included, and says nothing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const healthy = sessionWith({ scaleX: 0.5 })
+
+    store().setProject(healthy as unknown as Project)
+
+    expect(store().project.timeline.clips[0]).toBe(healthy.timeline.clips[0])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('repairs on the migration path (a track-less project) as well', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const legacy = sessionWith({ scaleX: Infinity })
+    legacy.timeline.tracks = []
+
+    store().setProject(legacy as unknown as Project)
+
+    expect(store().project.timeline.clips[0].transform.scaleX).toBe(1)
+    warn.mockRestore()
+  })
+
+  it('still refuses the same project as a file: scaleX null is parseProject\'s refusal', () => {
+    const result = parseProject(sessionWith({ scaleX: null }))
+
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/transform/)
   })
 })

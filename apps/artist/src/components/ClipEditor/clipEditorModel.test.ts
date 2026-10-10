@@ -176,6 +176,17 @@ describe('fitToCanvasScale', () => {
     // width ratio: 2, height ratio: 0.4 -> min is 0.4
     expect(scale).toBe(0.4);
   });
+
+  // ESCSUITE-255: a source with no picture reports 0x0; dividing by it wrote
+  // scaleX: Infinity. "Nothing to fit" is 1.
+  it.each([
+    ['width', { width: 0, height: 500 }],
+    ['height', { width: 500, height: 0 }],
+    ['both', { width: 0, height: 0 }],
+    ['a negative width', { width: -4, height: 500 }],
+  ])('returns 1 — nothing to fit — for a drawn size with a zero dimension (%s)', (_l, size) => {
+    expect(fitToCanvasScale({ width: 1000, height: 1000 }, size)).toBe(1);
+  });
 });
 
 describe('keyframeCount', () => {

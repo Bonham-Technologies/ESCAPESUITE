@@ -11,6 +11,7 @@ import {
   isWebCodecsSupported,
   processAudioFile,
   processImageFile,
+  processMediaFile,
   processVideoFile,
   resolveStoredDuration,
 } from './videoProcessor'
@@ -725,6 +726,77 @@ describe('videoProcessor', () => {
       expect(warn).toHaveBeenCalledWith('Failed to generate audio thumbnail:', expect.any(Error))
       expect(await getVideo(metadata.id)).toBeDefined()
       warn.mockRestore()
+    })
+  })
+
+  // ESCSUITE-255: one media-type decision for every entry path, made by what
+  // the element decoded and not by the MIME type a browser guessed from an
+  // extension. A microphone-only .webm arrives as video/webm.
+  describe('processMediaFile', () => {
+    let audio: AudioContextDoubles
+
+    beforeEach(() => {
+      audio = installAudioContextDouble(createAudioBufferDouble([tone()]))
+    })
+
+    afterEach(() => {
+      audio.uninstall()
+    })
+
+    it('types a file whose <video> decodes a picture as video', async () => {
+      media.script({ video: { videoWidth: 640, videoHeight: 360, duration: 4 } })
+
+      const metadata = await processMediaFile(mediaFile(['v'], 'clip.mp4', 'video/mp4'))
+
+      expect(metadata.mediaType).toBe('video')
+      expect(metadata.width).toBe(640)
+      expect(metadata.height).toBe(360)
+      expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
+    })
+
+    it('types a video/webm file that decodes no picture as audio (the regression)', async () => {
+      media.script({ video: { videoWidth: 0, videoHeight: 0, duration: 7 }, audio: { duration: 7 } })
+
+      const metadata = await processMediaFile(mediaFile(['mic'], 'take.webm', 'video/webm'))
+
+      expect(metadata.mediaType).toBe('audio')
+      expect(metadata.width).toBe(0)
+      expect(metadata.height).toBe(0)
+      expect(metadata.duration).toBe(7)
+      expect(metadata.mimeType).toBe('video/webm')
+      expect((await getVideo(metadata.id))?.metadata.mediaType).toBe('audio')
+    })
+
+    it('treats a picture with only one zero dimension as no picture', async () => {
+      media.script({ video: { videoWidth: 640, videoHeight: 0 }, audio: { duration: 3 } })
+
+      const metadata = await processMediaFile(mediaFile(['x'], 'odd.mp4', 'video/mp4'))
+
+      expect(metadata.mediaType).toBe('audio')
+    })
+
+    it('sends an image/* file to the image path without a <video> probe', async () => {
+      const metadata = await processMediaFile(mediaFile(['png'], 'pic.png', 'image/png'))
+
+      expect(metadata.mediaType).toBe('image')
+      expect(media.videos).toHaveLength(0)
+    })
+
+    it('sends an audio/* file straight to the audio path without a <video> probe', async () => {
+      media.script({ audio: { duration: 30 } })
+
+      const metadata = await processMediaFile(mediaFile(['a'], 'song.webm', 'audio/webm'))
+
+      expect(metadata.mediaType).toBe('audio')
+      expect(media.videos).toHaveLength(0)
+    })
+
+    it('rejects, as the video path always did, when the file will not decode', async () => {
+      media.script({ video: { fail: true } })
+
+      await expect(
+        processMediaFile(mediaFile(['junk'], 'broken.mp4', 'video/mp4'))
+      ).rejects.toThrow('Failed to load video: broken.mp4')
     })
   })
 

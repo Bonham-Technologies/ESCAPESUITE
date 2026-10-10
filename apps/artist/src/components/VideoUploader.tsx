@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
-import { processVideoFile, processImageFile, processAudioFile } from '../core/videoProcessor';
+import { processMediaFile } from '../core/videoProcessor';
 import { getStorageEstimate, deleteVideo, resolveThumbnailUrl } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
@@ -277,18 +277,11 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
       ]);
 
       try {
-        const isImage = file.type.startsWith('image/');
-        const isAudio = file.type.startsWith('audio/');
-        let metadata;
-        if (isImage) {
-          metadata = await processImageFile(file);
-        } else if (isAudio) {
-          metadata = await processAudioFile(file);
-        } else {
-          metadata = await processVideoFile(file);
-        }
+        // ESCSUITE-255: the type is whatever the probe found, not what the
+        // extension suggested.
+        const metadata = await processMediaFile(file);
         addSourceVideo(metadata);
-        analytics.videoImported(isImage ? 'image' : isAudio ? 'audio' : 'video');
+        analytics.videoImported(metadata.mediaType ?? 'video');
 
         setUploads((prev) =>
           prev.map((u) =>

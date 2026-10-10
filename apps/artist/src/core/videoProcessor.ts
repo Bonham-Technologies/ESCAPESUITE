@@ -243,8 +243,11 @@ export async function generateThumbnail(
  * Process and store a video file
  */
 export async function processVideoFile(file: File): Promise<SourceVideo> {
-  // Extract metadata
-  const metadata = await extractVideoMetadata(file);
+  return finishVideoFile(file, await extractVideoMetadata(file));
+}
+
+/** The rest of `processVideoFile`, once the metadata is in hand. */
+async function finishVideoFile(file: File, metadata: SourceVideo): Promise<SourceVideo> {
   metadata.mediaType = 'video';
 
   // Generate thumbnail. The time is passed explicitly because generateThumbnail
@@ -536,6 +539,37 @@ export async function processAudioFile(file: File): Promise<SourceVideo> {
   await storeVideo(metadata.id, file, metadata);
 
   return metadata;
+}
+
+/**
+ * Process and store any media file, deciding its type once (ESCSUITE-255).
+ *
+ * A browser guesses `file.type` from the extension, and an ESCAPECRAFT
+ * microphone-only take downloads as `.webm` — `video/webm` — with no picture
+ * in it. Typed by that guess it became a 0x0 "video" whose Fit to Canvas wrote
+ * an infinite scale. So the type is decided by what decoded:
+ *
+ * - `image/*` goes to the image path (a `<video>` probe cannot mistake an
+ *   image for anything);
+ * - `audio/*` goes straight to the audio path (no picture a user expects);
+ * - anything else loads in a `<video>`: a picture (both dimensions above
+ *   zero) is video, no picture is audio whatever the MIME type says.
+ *
+ * The uploader and both host paths (`LOAD_VIDEO`, `?video=`) import through
+ * here; nothing else decides a type.
+ */
+export async function processMediaFile(file: File): Promise<SourceVideo> {
+  if (file.type.startsWith('image/')) {
+    return processImageFile(file);
+  }
+  if (file.type.startsWith('audio/')) {
+    return processAudioFile(file);
+  }
+  const probed = await extractVideoMetadata(file);
+  if (probed.width > 0 && probed.height > 0) {
+    return finishVideoFile(file, probed);
+  }
+  return processAudioFile(file);
 }
 
 /**

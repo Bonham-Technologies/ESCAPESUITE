@@ -13,17 +13,14 @@ import { lastObjectUrl } from '../test/objectUrls'
 
 // The metadata extractors need real media decoding, so they stay collaborators;
 // storage runs for real against fake-indexeddb.
-const { mockProcessVideoFile, mockProcessImageFile, mockProcessAudioFile, mockResolveThumbnailUrl } = vi.hoisted(() => ({
-  mockProcessVideoFile: vi.fn(),
-  mockProcessImageFile: vi.fn(),
-  mockProcessAudioFile: vi.fn(),
+const { mockProcessMediaFile, mockResolveThumbnailUrl } = vi.hoisted(() => ({
+  mockProcessMediaFile: vi.fn(),
   mockResolveThumbnailUrl: vi.fn<(id: string) => Promise<string | undefined>>(),
 }))
 
+// ESCSUITE-255: the one entry the uploader decides a media type through.
 vi.mock('../core/videoProcessor', () => ({
-  processVideoFile: mockProcessVideoFile,
-  processImageFile: mockProcessImageFile,
-  processAudioFile: mockProcessAudioFile,
+  processMediaFile: mockProcessMediaFile,
 }))
 
 const { mockAnalytics } = vi.hoisted(() => ({
@@ -114,9 +111,7 @@ describe('VideoUploader', () => {
     resetStoreForTest()
     store().removeSourceVideosPermanently(['video1'])
     scriptStorage(50 * MB, 500 * MB)
-    mockProcessVideoFile.mockResolvedValue(videoMeta)
-    mockProcessImageFile.mockResolvedValue(imageMeta)
-    mockProcessAudioFile.mockResolvedValue(audioMeta)
+    mockProcessMediaFile.mockResolvedValue(videoMeta)
     onProjectFile = vi.fn()
     showNotification = vi.fn()
     vi.stubGlobal('confirm', vi.fn(() => true))
@@ -225,30 +220,48 @@ describe('VideoUploader', () => {
       fireEvent.drop(dropZone(), { dataTransfer: { files: [dropped] } })
 
       expect(await screen.findByText('Complete')).toBeInTheDocument()
-      expect(mockProcessVideoFile).toHaveBeenCalledWith(dropped)
+      expect(mockProcessMediaFile).toHaveBeenCalledWith(dropped)
       expect(store().sourceVideos).toEqual([videoMeta])
       // ESCSUITE-31: declared and tested in isolation but never called before.
       expect(mockAnalytics.videoImported).toHaveBeenCalledWith('video')
     })
 
-    it('routes an image to the image processor', async () => {
+    // ESCSUITE-255: the uploader no longer branches on file.type — it hands
+    // every file to processMediaFile and reports the type that came back.
+    it('hands an image to the one media processor and reports an image', async () => {
+      mockProcessMediaFile.mockResolvedValue(imageMeta)
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const picked = file('test.png', 'image/png')
 
-      selectFiles([file('test.png', 'image/png')])
+      selectFiles([picked])
 
-      await waitFor(() => expect(mockProcessImageFile).toHaveBeenCalledTimes(1))
-      expect(mockProcessVideoFile).not.toHaveBeenCalled()
+      await waitFor(() => expect(mockProcessMediaFile).toHaveBeenCalledWith(picked))
       expect(store().sourceVideos).toEqual([imageMeta])
       expect(mockAnalytics.videoImported).toHaveBeenCalledWith('image')
     })
 
-    it('routes audio to the audio processor', async () => {
+    it('hands audio to the one media processor and reports audio', async () => {
+      mockProcessMediaFile.mockResolvedValue(audioMeta)
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
 
       selectFiles([file('test.mp3', 'audio/mp3')])
 
-      await waitFor(() => expect(mockProcessAudioFile).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(mockProcessMediaFile).toHaveBeenCalledTimes(1))
       expect(store().sourceVideos).toEqual([audioMeta])
+      expect(mockAnalytics.videoImported).toHaveBeenCalledWith('audio')
+    })
+
+    it('stores and reports as audio a video/webm file that decodes no picture (ESCSUITE-255)', async () => {
+      const micOnly = { ...audioMeta, id: 'mic1', name: 'take.webm', mimeType: 'video/webm' }
+      mockProcessMediaFile.mockResolvedValue(micOnly)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const picked = file('take.webm', 'video/webm')
+
+      selectFiles([picked])
+
+      await waitFor(() => expect(mockProcessMediaFile).toHaveBeenCalledWith(picked))
+      expect(store().sourceVideos).toEqual([micOnly])
+      expect(store().sourceVideos[0].mediaType).toBe('audio')
       expect(mockAnalytics.videoImported).toHaveBeenCalledWith('audio')
     })
 
@@ -267,7 +280,7 @@ describe('VideoUploader', () => {
 
       fireEvent.change(input)
 
-      await waitFor(() => expect(mockProcessVideoFile).toHaveBeenCalled())
+      await waitFor(() => expect(mockProcessMediaFile).toHaveBeenCalled())
       expect(valueWrites).toEqual([''])
     })
 
@@ -416,7 +429,7 @@ describe('VideoUploader', () => {
       await waitFor(() =>
         expect(globalThis.alert).toHaveBeenCalledWith('Please select video, image, or audio files')
       )
-      expect(mockProcessVideoFile).not.toHaveBeenCalled()
+      expect(mockProcessMediaFile).not.toHaveBeenCalled()
     })
 
     it('refuses a file that would not fit in the remaining quota', async () => {
@@ -430,11 +443,11 @@ describe('VideoUploader', () => {
           'Not enough storage space. Need 2.0 KB, only 5.0 MB available. Remove some media to free up space.'
         )
       ).toBeInTheDocument()
-      expect(mockProcessVideoFile).not.toHaveBeenCalled()
+      expect(mockProcessMediaFile).not.toHaveBeenCalled()
     })
 
     it('reports a processing failure against the file and lets it be dismissed', async () => {
-      mockProcessVideoFile.mockRejectedValue(new Error('Unsupported codec'))
+      mockProcessMediaFile.mockRejectedValue(new Error('Unsupported codec'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
@@ -454,7 +467,7 @@ describe('VideoUploader', () => {
     })
 
     it('translates a quota failure into advice about freeing space', async () => {
-      mockProcessVideoFile.mockRejectedValue(new Error('QuotaExceededError: no room'))
+      mockProcessMediaFile.mockRejectedValue(new Error('QuotaExceededError: no room'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
@@ -470,7 +483,7 @@ describe('VideoUploader', () => {
     })
 
     it('describes a thrown non-Error as an unknown failure', async () => {
-      mockProcessVideoFile.mockRejectedValue('kaboom')
+      mockProcessMediaFile.mockRejectedValue('kaboom')
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
         render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
@@ -527,7 +540,7 @@ describe('VideoUploader', () => {
       selectFiles([file('my.veditor', ''), file('test.mp4', 'video/mp4')])
 
       await waitFor(() => expect(onProjectFile).toHaveBeenCalledTimes(1))
-      expect(mockProcessVideoFile).not.toHaveBeenCalled()
+      expect(mockProcessMediaFile).not.toHaveBeenCalled()
     })
 
     it('leaves a file that is not a project to the media path', async () => {
@@ -535,7 +548,7 @@ describe('VideoUploader', () => {
 
       selectFiles([file('test.mp4', 'video/mp4')])
 
-      await waitFor(() => expect(mockProcessVideoFile).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(mockProcessMediaFile).toHaveBeenCalledTimes(1))
       expect(onProjectFile).not.toHaveBeenCalled()
     })
   })

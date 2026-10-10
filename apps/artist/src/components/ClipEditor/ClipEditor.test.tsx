@@ -261,6 +261,9 @@ describe('ClipEditor', () => {
 
       expect(screen.getByText('Audio')).toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Transform' })).not.toBeInTheDocument()
+      // ESCSUITE-255: Fit to Canvas lives in the Transform section, so a
+      // source with no picture has no way to ask for it.
+      expect(screen.queryByRole('button', { name: 'Fit to Canvas' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Blend Mode' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Mask & Stroke' })).not.toBeInTheDocument()
       expect(screen.queryByRole('button', { name: 'Crop' })).not.toBeInTheDocument()
@@ -391,6 +394,24 @@ describe('ClipEditor', () => {
       // 1280/1920 and 720/1080 are both 2/3, so that is the fit scale
       expect(clipNow().transform.scaleX).toBeCloseTo(2 / 3)
       expect(clipNow().transform.scaleY).toBeCloseTo(2 / 3)
+    })
+
+    it('leaves a finite scale when a 0x0 source is fitted (ESCSUITE-255)', async () => {
+      const user = userEvent.setup()
+      store().addSourceVideo({ ...video, id: 'zero', width: 0, height: 0 } as SourceVideo)
+      store().addClipToTimeline(
+        { id: 'zeroClip', sourceVideoId: 'zero', name: 'zeroClip', startTime: 0, endTime: 2, duration: 2 },
+        undefined,
+        10
+      )
+      store().setSelectedClipId('zeroClip')
+      render(<ClipEditor />)
+
+      await user.click(screen.getByRole('button', { name: 'Fit to Canvas' }))
+
+      const t = store().project.timeline.clips.find((c) => c.id === 'zeroClip')!.transform
+      expect(t.scaleX).toBe(1)
+      expect(t.scaleY).toBe(1)
     })
 
     it('resets position, scale and opacity from the section header', async () => {

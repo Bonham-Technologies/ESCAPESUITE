@@ -28,7 +28,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore, DEFAULT_PROJECT_NAME } from '../store/projectStore';
 import { initIntegration, loadVideoFromUrl, sendMessage, type UrlParams } from '../utils/integration';
-import { processVideoFile } from '../core/videoProcessor';
+import { processMediaFile } from '../core/videoProcessor';
 import { getVideo } from '../core/storage';
 import { parseProject } from '../store/projectMigration';
 import { importTake } from './takeImport';
@@ -152,7 +152,7 @@ export function useHostIntegration({
             try {
               const { blob, name } = await loadVideoFromUrl((message.payload as { url: string }).url);
               const file = new File([blob], name, { type: blob.type });
-              const metadata = await processVideoFile(file);
+              const metadata = await processMediaFile(file);
               addSourceVideo(metadata);
               sendMessage({ type: 'VIDEO_LOADED', payload: { id: metadata.id, name: metadata.name } });
             } catch (error) {
@@ -247,7 +247,7 @@ export function useHostIntegration({
         try {
           const { blob, name } = await loadVideoFromUrl(url);
           const file = new File([blob], name, { type: blob.type });
-          const metadata = await processVideoFile(file);
+          const metadata = await processMediaFile(file);
           addSourceVideo(metadata);
         } catch (error) {
           console.error('Failed to load video from URL:', error);
