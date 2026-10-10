@@ -430,3 +430,66 @@ describe('answering the prompt', () => {
     consoleError.mockRestore()
   })
 })
+
+describe('the editor block (ESCSUITE-245)', () => {
+  const clip = (duration: number) => ({
+    ...useEditorStore.getState().project.timeline,
+    clips: [{ id: 'c1', timelinePosition: 0, duration }],
+  })
+  const sessionWithClip = (editor: unknown, duration = 10) =>
+    savedSession({
+      project: { ...useEditorStore.getState().project, timeline: clip(duration) as never },
+      editor: editor as never,
+    })
+  const marker = (id: string, time: number) => ({ id, time, label: id, color: '#ffcc00' })
+
+  const restore = async (session: SessionState) => {
+    vi.mocked(getSessionState).mockResolvedValue(session)
+    const view = mountRestore()
+    await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
+    await act(async () => {
+      await view.result.current.handleRestoreSession(session)
+    })
+  }
+
+  it('applies the saved range and markers, sorted, with no undo entry', async () => {
+    await restore(sessionWithClip({ inPoint: 1, outPoint: 4, markers: [marker('b', 6), marker('a', 2)] }))
+
+    const state = useEditorStore.getState()
+    expect(state.inPoint).toBe(1)
+    expect(state.outPoint).toBe(4)
+    expect(state.markers).toEqual([marker('a', 2), marker('b', 6)])
+    expect(state.canUndo).toBe(false)
+  })
+
+  it('clears a stale range and markers when the snapshot has no block', async () => {
+    store().setInPoint(2)
+    store().addMarker(3)
+    await restore(savedSession())
+
+    expect(useEditorStore.getState().inPoint).toBeNull()
+    expect(useEditorStore.getState().outPoint).toBeNull()
+    expect(useEditorStore.getState().markers).toEqual([])
+  })
+
+  it('drops a malformed block to defaults with one warning and still restores the rest', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await restore(sessionWithClip({ inPoint: 4, outPoint: 1, markers: [marker('a', 1)] }))
+
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(useEditorStore.getState().inPoint).toBeNull()
+    expect(useEditorStore.getState().markers).toEqual([])
+    expect(deps.setProject).toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('Session restored', 'success')
+    warn.mockRestore()
+  })
+
+  it('clamps a range past the timeline and keeps a marker past the end', async () => {
+    await restore(sessionWithClip({ inPoint: 2, outPoint: 99, markers: [marker('late', 50)] }, 8))
+
+    expect(useEditorStore.getState().inPoint).toBe(2)
+    expect(useEditorStore.getState().outPoint).toBe(8)
+    expect(useEditorStore.getState().markers).toEqual([marker('late', 50)])
+  })
+})
+

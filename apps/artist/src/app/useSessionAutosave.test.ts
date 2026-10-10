@@ -284,3 +284,21 @@ describe('autosaveFailureNotice', () => {
     expect(autosaveFailureNotice(undefined)).toBe(AUTOSAVE_GENERIC_NOTICE)
   })
 })
+
+describe('the editor block re-arms the debounce (ESCSUITE-245)', () => {
+  it.each([
+    ['an in point', () => useEditorStore.getState().setInPoint(1)],
+    ['an out point', () => useEditorStore.getState().setOutPoint(2)],
+    ['a marker', () => useEditorStore.getState().addMarker(3)],
+  ])('writes the session after %s changes, without a render', (_label, change) => {
+    mountAutosave()
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY - 1)
+    change()
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY - 1)
+    expect(saveSessionState).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
+    expect(saveSessionState).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveSessionState).mock.calls[0][0].editor).toBeDefined()
+  })
+})
+

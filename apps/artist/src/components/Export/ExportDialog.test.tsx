@@ -1,3 +1,4 @@
+import { applyEditorBlock } from '../../app/editorBlock'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { ExportDialog } from './ExportDialog'
@@ -1869,6 +1870,16 @@ describe('ExportDialog', () => {
     it('offers section and full-video buttons once in and out points are set', async () => {
       store().setInPoint(1)
       store().setOutPoint(4)
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(screen.getByRole('button', { name: /Export Section \(0:01 - 0:04\)/ }))
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2].timeRange).toEqual({ start: 1, end: 4 })
+    })
+
+    it('a range restored from a session or a project file is the section the dialog offers (ESCSUITE-245)', async () => {
+      applyEditorBlock({ inPoint: 1, outPoint: 4, markers: [] })
       render(<ExportDialog isOpen={true} onClose={onClose} />)
 
       fireEvent.click(screen.getByRole('button', { name: /Export Section \(0:01 - 0:04\)/ }))
