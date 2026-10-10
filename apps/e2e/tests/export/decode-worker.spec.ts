@@ -49,7 +49,11 @@ import { waitForAppReady } from '../../utils/ready'
  *   ESCSUITE-263's seek skip);
  * - the rotated source: Firefox's VideoDecoder drops `rotation`, so the source
  *   is refused to <video> by design and `expectWorkerDecoded` fails.
- * The other parity cases matched (MAD 0.000-0.920). WebKit is not on the list
+ * The untagged, BT.709-tagged and full-range cases matched there (MAD
+ * 0.000-0.920, round 1); the matrix-only and the two colr-only cases added in
+ * round 2 have NOT been run on Firefox (its decoder ignores the colour
+ * setting and its <video> ignores the box, so both paths agree by
+ * construction, but that is reasoning, not a measurement). WebKit is not on the list
  * (measured 4.46-17.45/255 apart) and cannot import media under Playwright
  * anyway (IndexedDB refuses the Blob). Lifting the skip for another engine is
  * ESCSUITE-262, which has to account for the two known Firefox failures.
