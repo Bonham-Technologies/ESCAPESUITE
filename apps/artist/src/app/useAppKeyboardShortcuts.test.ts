@@ -12,7 +12,12 @@
 // rather than taking it as a parameter.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { fireEvent, renderHook } from '@testing-library/react'
-import { useAppKeyboardShortcuts, type AppKeyboardShortcutsDeps } from './useAppKeyboardShortcuts'
+import {
+  useAppKeyboardShortcuts,
+  isTextEntryTarget,
+  BOUND_SINGLE_KEYS,
+  type AppKeyboardShortcutsDeps,
+} from './useAppKeyboardShortcuts'
 import { useEditorStore } from '../store/projectStore'
 import { addClip, resetStoreForTest } from '../test/fixtures/projectStore'
 import type { Clip } from '../store/types'
@@ -119,14 +124,186 @@ describe('the typing guard', () => {
     expect(deps.setActiveTool).not.toHaveBeenCalled()
   })
 
-  it('ignores keys chosen in a select', () => {
+  it('does not ignore keys chosen in a select (ESCSUITE-247)', () => {
     mountShortcuts()
     const select = document.createElement('select')
     document.body.appendChild(select)
 
     pressInto(select, 'v')
 
+    expect(deps.setActiveTool).toHaveBeenCalledWith('select')
+  })
+
+  it('ignores keys typed into a contenteditable element', () => {
+    mountShortcuts()
+    const editable = document.createElement('div')
+    Object.defineProperty(editable, 'isContentEditable', { value: true, configurable: true })
+    document.body.appendChild(editable)
+
+    pressInto(editable, 'v')
+
     expect(deps.setActiveTool).not.toHaveBeenCalled()
+  })
+
+  it.each(['range', 'checkbox', 'radio', 'color', 'file', 'button'])(
+    'Ctrl+Z undoes with focus on a %s input',
+    (type) => {
+      mountShortcuts()
+      const input = document.createElement('input')
+      input.type = type
+      document.body.appendChild(input)
+
+      pressInto(input, 'z', { ctrlKey: true })
+
+      expect(deps.undo).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(['text', 'search', 'url', 'email', 'password', 'number', 'tel'])(
+    'Ctrl+Z is left to a %s input',
+    (type) => {
+      mountShortcuts()
+      const input = document.createElement('input')
+      input.type = type
+      document.body.appendChild(input)
+
+      pressInto(input, 'z', { ctrlKey: true })
+
+      expect(deps.undo).not.toHaveBeenCalled()
+    },
+  )
+
+  it('Ctrl+Z is left to a textarea', () => {
+    mountShortcuts()
+    const textarea = document.createElement('textarea')
+    document.body.appendChild(textarea)
+
+    pressInto(textarea, 'z', { ctrlKey: true })
+
+    expect(deps.undo).not.toHaveBeenCalled()
+  })
+})
+
+describe('isTextEntryTarget', () => {
+  it('is true for textarea, contenteditable and text-like inputs, false for the rest', () => {
+    const input = (type?: string) => {
+      const el = document.createElement('input')
+      if (type) el.type = type
+      return el
+    }
+    const editable = document.createElement('div')
+    Object.defineProperty(editable, 'isContentEditable', { value: true, configurable: true })
+
+    expect(isTextEntryTarget(document.createElement('textarea'))).toBe(true)
+    expect(isTextEntryTarget(editable)).toBe(true)
+    expect(isTextEntryTarget(input())).toBe(true)
+    expect(isTextEntryTarget(input('number'))).toBe(true)
+    expect(isTextEntryTarget(input('range'))).toBe(false)
+    expect(isTextEntryTarget(input('checkbox'))).toBe(false)
+    expect(isTextEntryTarget(document.createElement('select'))).toBe(false)
+    expect(isTextEntryTarget(document.createElement('div'))).toBe(false)
+    expect(isTextEntryTarget(window)).toBe(false)
+    expect(isTextEntryTarget(null)).toBe(false)
+  })
+})
+
+describe('letter case (ESCSUITE-247)', () => {
+  it('Ctrl+Z arriving as Z (Caps Lock) undoes', () => {
+    mountShortcuts()
+    press('Z', { ctrlKey: true })
+    expect(deps.undo).toHaveBeenCalledTimes(1)
+    expect(deps.redo).not.toHaveBeenCalled()
+  })
+
+  it('Ctrl+Shift+Z arriving as Z (Windows, Linux) redoes and does not undo', () => {
+    mountShortcuts()
+    press('Z', { ctrlKey: true, shiftKey: true })
+    expect(deps.redo).toHaveBeenCalledTimes(1)
+    expect(deps.undo).not.toHaveBeenCalled()
+  })
+
+  it('Ctrl+Y arriving as Y redoes', () => {
+    mountShortcuts()
+    press('Y', { ctrlKey: true })
+    expect(deps.redo).toHaveBeenCalledTimes(1)
+  })
+
+  it('every other chord fires with the letter upper-cased', () => {
+    mountShortcuts({
+      selectedClipId: 'clip-1',
+      selectedClipIds: new Set(['clip-1']),
+      clipboard: [clip],
+    })
+    useEditorStore.getState().setCurrentTime(1)
+    for (const key of ['C', 'V', 'D', 'S', 'O', 'E', 'B', 'M']) {
+      press(key, { ctrlKey: true })
+    }
+    expect(deps.copySelectedClips).toHaveBeenCalledTimes(1)
+    expect(deps.pasteClips).toHaveBeenCalledTimes(1)
+    expect(deps.duplicateClip).toHaveBeenCalledWith('clip-1')
+    expect(deps.handleSaveProject).toHaveBeenCalledTimes(1)
+    expect(deps.handleLoadProject).toHaveBeenCalledTimes(1)
+    expect(deps.setShowExport).toHaveBeenCalledWith(true)
+    expect(deps.splitClip).toHaveBeenCalledTimes(1)
+    expect(deps.goToPreviousMarker).toHaveBeenCalledTimes(1)
+  })
+
+  it('Shift+M is still its own shortcut, distinct from M', () => {
+    mountShortcuts()
+    press('M', { shiftKey: true })
+    expect(deps.goToNextMarker).toHaveBeenCalledTimes(1)
+    expect(deps.addMarker).not.toHaveBeenCalled()
+    press('m')
+    expect(deps.addMarker).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not widen the lowercase-only single keys (K, S, C, M, I, O with Caps Lock)', () => {
+    mountShortcuts()
+    for (const key of ['K', 'S', 'C', 'I', 'O', 'M']) press(key)
+    expect(deps.setKeyframePanelOpen).not.toHaveBeenCalled()
+    expect(deps.setSnapEnabled).not.toHaveBeenCalled()
+    expect(deps.setActiveTool).not.toHaveBeenCalled()
+    expect(deps.setInPoint).not.toHaveBeenCalled()
+    expect(deps.setOutPoint).not.toHaveBeenCalled()
+    expect(deps.addMarker).not.toHaveBeenCalled()
+    expect(deps.goToNextMarker).not.toHaveBeenCalled()
+  })
+
+  it.each(['C', 'V', 'D', 'S', 'O', 'E', 'B', 'M'])(
+    'Ctrl+Shift+%s (arriving upper-case) is not claimed and does nothing',
+    (key) => {
+      mountShortcuts({
+        selectedClipId: 'clip-1',
+        selectedClipIds: new Set(['clip-1']),
+        clipboard: [clip],
+      })
+      useEditorStore.getState().setCurrentTime(1)
+
+      expect(press(key, { ctrlKey: true, shiftKey: true })).toBe(true)
+      expect(press(key, { metaKey: true, shiftKey: true })).toBe(true)
+
+      for (const fn of [
+        deps.copySelectedClips, deps.pasteClips, deps.duplicateClip, deps.handleSaveProject,
+        deps.handleLoadProject, deps.setShowExport, deps.splitClip, deps.goToPreviousMarker,
+        deps.goToNextMarker,
+      ]) {
+        expect(fn).not.toHaveBeenCalled()
+      }
+    },
+  )
+
+  it('Shift+M reaches next-marker even when Caps Lock reports a lower-case m', () => {
+    mountShortcuts()
+    press('m', { shiftKey: true })
+    expect(deps.goToNextMarker).toHaveBeenCalledTimes(1)
+    expect(deps.addMarker).not.toHaveBeenCalled()
+  })
+})
+
+describe('the key table the shortcut sheet is pinned to', () => {
+  it.each([...BOUND_SINGLE_KEYS])('%s is claimed by the cascade', (key) => {
+    mountShortcuts({ selectedClipId: 'clip-1', selectedClipIds: new Set(['clip-1']) })
+    expect(press(key)).toBe(false)
   })
 })
 

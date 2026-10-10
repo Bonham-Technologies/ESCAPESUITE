@@ -4,6 +4,8 @@ import userEvent from '@testing-library/user-event'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import styles from './KeyboardShortcuts.module.css'
+import { BOUND_SINGLE_KEYS } from '../../app/useAppKeyboardShortcuts'
+import { TRANSPORT_KEYS } from '../Preview/transportKeys'
 
 describe('KeyboardShortcuts', () => {
   it('renders nothing while closed', () => {
@@ -227,5 +229,42 @@ describe('KeyboardShortcuts', () => {
 
       expect(onClose).toHaveBeenCalledTimes(1)
     })
+  })
+})
+
+// ESCSUITE-247: the sheet once listed J / K / L playback keys and a loop toggle
+// that nothing implemented. The sheet may list only keys something binds.
+describe('KeyboardShortcuts matches the keys the app binds', () => {
+  const rows = () => {
+    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
+    return Array.from(document.querySelectorAll(`.${styles.shortcutRow}`)).map((row) => ({
+      keys: Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent ?? ''),
+      description: row.textContent ?? '',
+    }))
+  }
+
+  it('lists no J row, no L row and no Play Backward / Forward / Pause / Loop rows', () => {
+    const listed = rows()
+    expect(listed.filter((r) => r.keys.length === 1 && ['J', 'L'].includes(r.keys[0]))).toEqual([])
+    expect(screen.queryByText('Play Backward')).not.toBeInTheDocument()
+    expect(screen.queryByText('Play Forward')).not.toBeInTheDocument()
+    expect(screen.queryByText('Toggle Loop Playback')).not.toBeInTheDocument()
+    expect(screen.queryByText('Pause')).not.toBeInTheDocument()
+    expect(screen.getByText('Toggle Keyframe Panel')).toBeInTheDocument()
+  })
+
+  it('every single key outside the keyframe graph group is bound by the cascade or the transport', () => {
+    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
+    const bound = new Set([...BOUND_SINGLE_KEYS, ...TRANSPORT_KEYS].map((k) => k.toLowerCase()))
+    const unbound: string[] = []
+    for (const heading of screen.getAllByRole('heading', { level: 3 })) {
+      if (heading.textContent === 'Keyframe Graph') continue // owned by the focused graph, not the app cascade
+      const group = heading.parentElement!
+      for (const row of Array.from(group.querySelectorAll(`.${styles.shortcutRow}`))) {
+        const keys = Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent ?? '')
+        if (keys.length === 1 && !bound.has(keys[0].toLowerCase())) unbound.push(keys[0])
+      }
+    }
+    expect(unbound).toEqual([])
   })
 })

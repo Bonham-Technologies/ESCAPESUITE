@@ -10,7 +10,26 @@
 // playback from behind one.
 import { useCallback, useEffect } from 'react';
 import { useEditorStore } from '../../store/projectStore';
+import { isTextEntryTarget } from '../../app/useAppKeyboardShortcuts';
 import styles from './PreviewPlayer.module.css';
+
+/**
+ * What Space activates natively. ESCAPECRAFT's selector minus `select` and
+ * contenteditable, which the typing guard above already returns for.
+ */
+const SPACE_ACTIVATES = 'button, [role="button"], a[href]';
+
+/**
+ * Whether Space belongs to whatever has focus rather than to the transport
+ * (ESCSUITE-247, the twin of ESCAPECRAFT's ESCSUITE-185). Space is the
+ * browser's activation key for a focused control, and `preventDefault()` is
+ * what suppresses the click it synthesises, so the transport leaves the
+ * keydown alone when the target is something Space operates. Only Space is
+ * gated: the arrows, Home and End keep their targets.
+ */
+function spaceBelongsToTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement && target.matches(SPACE_ACTIVATES);
+}
 
 interface PlaybackControlsProps {
   /**
@@ -60,9 +79,12 @@ export function PlaybackControls({ modalOpen = false }: PlaybackControlsProps) {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Text entry (the shared predicate), plus every other form control: an
+      // arrow on a slider or a select moves that control, and Space on a
+      // checkbox or radio toggles it — they never were the transport's keys.
       if (
+        isTextEntryTarget(e.target) ||
         e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
         e.target instanceof HTMLSelectElement
       ) {
         return;
@@ -75,6 +97,7 @@ export function PlaybackControls({ modalOpen = false }: PlaybackControlsProps) {
 
       switch (e.code) {
         case 'Space':
+          if (spaceBelongsToTarget(e.target)) return;
           e.preventDefault();
           handlePlayPause();
           break;

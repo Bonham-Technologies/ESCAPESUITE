@@ -1991,10 +1991,10 @@ gesture regardless of key or pointer state — `ClipEditor.sliderHistory.test.ts
 moment playback starts, while the latch itself survives — so the mode returns on
 pause, on the clip the user left it on. Related, and not fixed: a focused handle
 claims only Escape and the four arrows, so `PlaybackControls`' own window listener
-(which skips only input/textarea/select targets) still takes **Space**, **Home**
-and **End** from it. Space therefore starts playback and unmounts the very control
-the user's focus was on. Arrow-stealing was fixed deliberately (spec §8); this is
-its sibling, left alone here.
+(which skips only input/textarea/select targets) still takes **Home** and **End**
+from it. Space was this note's third key and is fixed (ESCSUITE-247: the handles are
+`<button>`s, so Space is left to them); Home and End remain. Arrow-stealing was fixed
+deliberately (spec §8); this is its sibling, left alone here.
 
 **Known wrinkles, left as they are rather than fixed in this ticket.** The drag
 is **mouse events only** (`mousedown`/`mousemove`/`mouseup`), the same scope
@@ -3019,13 +3019,11 @@ resolutionConfirmOpen`
 — and hands it to *both* of the app's `window` cascades: `useAppKeyboardShortcuts` and
 `PlaybackControls` (which owns Space, the arrows, Home and End). Each returns from its handler immediately when it is true,
 below the typing check and above every other branch — the same shape, and the same
-comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). That typing check names
-`HTMLInputElement`, `HTMLTextAreaElement` **and `HTMLSelectElement`** in both cascades: until
-the select was added, ArrowLeft/ArrowRight in the resolution picker, the export dialog's
-dropdowns or the keyframe panel's easing `<select>` stepped the playhead a frame instead of
-changing the option, because a native select changes its option on those keys *and* lets the
-event bubble to `window`. Pinned by a test in each cascade's suite (keys pressed into a
-focused `<select>` reach neither handler). Before it, Space started playback,
+comment, as ESCAPECRAFT's `useKeyboardShortcuts` (PR #381). The typing checks differ on purpose (ESCSUITE-247, "Keyboard
+shortcuts" below): the transport still returns for every `input`, `textarea` and `select`, because a
+native select changes its option on ArrowLeft/ArrowRight (and a slider moves) *and* lets the event bubble
+to `window`, so the arrows would otherwise also step the playhead; the cascade returns only for text
+entry. Pinned by a test in each suite. Before it, Space started playback,
 Delete removed the selected clip and Ctrl+Z undid, all from behind a dialog the user could not
 see past.
 
@@ -4290,3 +4288,34 @@ autosave kept it, the saved `.veditor` serialised it as `null`, and reopening wa
   `parseProject` runs **before** the migration and still refuses a `.veditor` or host payload
   with a bad transform exactly as ESCSUITE-173 ruled (`scaleX: null` is still refused), so the
   repair adds no new acceptance there.
+
+## Keyboard shortcuts (ESCSUITE-247)
+
+Two `window` listeners own the editor's keys: the cascade in `app/useAppKeyboardShortcuts.ts` and the
+transport in `components/Preview/PlaybackControls.tsx` (Space, the arrows, Home, End). Three rules:
+
+- **The typing guard exempts text entry only.** `isTextEntryTarget(target)` (exported from the hook's
+  module and reused by `PlaybackControls`) is true for a `textarea`, a contenteditable element and an
+  `input` whose `type` is text-like (`text`, `search`, `url`, `email`, `password`, `number`, `tel`).
+  A range, checkbox, radio, colour, file or button input and a `select` no longer swallow the cascade,
+  so Ctrl+Z works right after a slider, select or checkbox edit (a focused select
+  therefore loses letter type-ahead to the tool keys). The transport additionally keeps
+  ignoring every `input` and `select` for the arrows and Space: an arrow on a slider moves the slider.
+- **Chords compare the letter case-insensitively** (`e.key.toLowerCase()`), because Caps Lock, and Shift
+  on Windows/Linux, report `'Z'`. Shift stays a separate discriminator, so every chord except redo also refuses it
+  (`!e.shiftKey`): Ctrl+Shift+C/V/D/S/O/E/B/M stay the browser's on every platform (on macOS Cmd+Shift+letter already
+  arrived lower-case, so this also makes them inert there, consistently). redo is `z` + Shift, and
+  `'M'` + Shift is its own shortcut (next marker) beside `m`, tested by `shiftKey` and not by the
+  letter's case. The single-key shortcuts keep exactly the
+  cases they accepted (`v`/`V`, `b`/`B`; `k`, `s`, `c`, `m`, `i`, `o` lowercase only) — widening them is a
+  product change.
+- **Space belongs to the focused control.** `PlaybackControls` leaves Space alone when the target
+  matches `button, [role="button"], a[href]` (a select or contenteditable never gets that far: the typing guard returns first), so the browser's own click
+  fires instead of a play/pause; it stays the transport's key on the canvas, the timeline and body. The
+  twin of ESCAPECRAFT's `spaceBelongsToTarget` (ESCSUITE-185).
+
+**The shortcut sheet may list only keys something binds.** `BOUND_SINGLE_KEYS` (the hook) and
+`TRANSPORT_KEYS` (`Preview/transportKeys.ts`) are the key tables; `KeyboardShortcuts.test.tsx` fails
+if a single-key row outside the Keyframe Graph group is in neither, and the hook's test proves every
+`BOUND_SINGLE_KEYS` entry is claimed. The sheet once listed J/K/L playback keys and a loop toggle that
+never existed. Known gap: the File group's `Ctrl+N` is the File menu's item, not a cascade binding.

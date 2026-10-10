@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PlaybackControls } from './PlaybackControls'
+import { TRANSPORT_KEYS } from './transportKeys'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -285,5 +286,109 @@ describe('PlaybackControls keyboard shortcuts', () => {
 
       expect(store().isPlaying).toBe(true)
     })
+  })
+})
+
+// ESCSUITE-247: Space belongs to the focused control (CRAFT's ESCSUITE-185 twin).
+describe('PlaybackControls Space handling', () => {
+  const press = (target: Element | Window, init: KeyboardEventInit) =>
+    fireEvent.keyDown(target, { bubbles: true, cancelable: true, ...init })
+
+  it('leaves Space to a focused transport button and does not toggle playback', () => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    const button = screen.getByTitle('Step forward (→)')
+
+    const notPrevented = press(button, { code: 'Space', key: ' ' })
+
+    expect(notPrevented).toBe(true)
+    expect(store().isPlaying).toBe(false)
+  })
+
+  it.each([
+    ['a role="button" element', () => { const e = document.createElement('div'); e.setAttribute('role', 'button'); return e }],
+    ['a link with an href', () => { const e = document.createElement('a'); e.setAttribute('href', '#x'); return e }],
+    ['a select', () => document.createElement('select')],
+    ['a range input', () => { const e = document.createElement('input'); e.type = 'range'; return e }],
+  ])('leaves Space to %s', (_label, make) => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    const el = make()
+    document.body.appendChild(el)
+
+    const notPrevented = press(el, { code: 'Space', key: ' ' })
+
+    expect(notPrevented).toBe(true)
+    expect(store().isPlaying).toBe(false)
+    el.remove()
+  })
+
+  it('leaves Space to a contenteditable element', () => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    const el = document.createElement('div')
+    Object.defineProperty(el, 'isContentEditable', { value: true, configurable: true })
+    document.body.appendChild(el)
+
+    expect(press(el, { code: 'Space', key: ' ' })).toBe(true)
+    expect(store().isPlaying).toBe(false)
+    el.remove()
+  })
+
+  it('still toggles playback from the body and from a plain element', () => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    const plain = document.createElement('div')
+    document.body.appendChild(plain)
+
+    expect(press(plain, { code: 'Space', key: ' ' })).toBe(false)
+    expect(store().isPlaying).toBe(true)
+    press(document.body, { code: 'Space', key: ' ' })
+    expect(store().isPlaying).toBe(false)
+    plain.remove()
+  })
+
+  it('still toggles playback when the target is the window itself', () => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+
+    expect(press(window, { code: 'Space', key: ' ' })).toBe(false)
+    expect(store().isPlaying).toBe(true)
+  })
+
+  it('keeps the arrows on a focused button (the gate is Space only)', () => {
+    addClip('clip1', 0, 10)
+    store().setCurrentTime(5)
+    render(<PlaybackControls />)
+
+    expect(press(screen.getByTitle('Step forward (→)'), { code: 'ArrowRight', key: 'ArrowRight' })).toBe(false)
+    expect(store().currentTime).toBe(6)
+  })
+
+  it('keeps ignoring the arrows on a slider and a text field', () => {
+    addClip('clip1', 0, 10)
+    store().setCurrentTime(5)
+    render(<PlaybackControls />)
+    const range = document.createElement('input')
+    range.type = 'range'
+    const text = document.createElement('input')
+    document.body.append(range, text)
+
+    expect(press(range, { code: 'ArrowRight', key: 'ArrowRight' })).toBe(true)
+    expect(press(text, { code: 'ArrowRight', key: 'ArrowRight' })).toBe(true)
+    expect(store().currentTime).toBe(5)
+    range.remove()
+    text.remove()
+  })
+})
+
+describe('PlaybackControls claims every key the sheet lists for the transport', () => {
+  it.each([
+    ['Space', 'Space'], ['←', 'ArrowLeft'], ['→', 'ArrowRight'], ['Home', 'Home'], ['End', 'End'],
+  ])('%s is claimed (code %s)', (label, code) => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    expect(TRANSPORT_KEYS).toContain(label)
+    expect(fireEvent.keyDown(window, { code, cancelable: true })).toBe(false)
   })
 })
