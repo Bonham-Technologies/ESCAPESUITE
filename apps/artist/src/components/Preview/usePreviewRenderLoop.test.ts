@@ -467,6 +467,318 @@ describe('usePreviewRenderLoop readiness paint (ESCSUITE-264)', () => {
   })
 })
 
+/**
+ * A <video> whose seeks report back only when the test says so, through
+ * {@link seeked}. `readyState` as the double scripts it unless one is given.
+ */
+function stalledVideo(readyState?: number): HTMLVideoElement {
+  doubles.media.script({ video: { stallSeek: true, ...(readyState === undefined ? {} : { readyState }) } })
+  const element = document.createElement('video')
+  doubles.media.script({ video: { stallSeek: false, readyState: 4 } })
+  return element
+}
+
+function seeked(element: HTMLVideoElement): void {
+  element.dispatchEvent(new Event('seeked'))
+}
+
+/** The 'seeked' listeners added to and removed from `element`. */
+function watchSeeked(element: HTMLVideoElement) {
+  const added = vi.spyOn(element, 'addEventListener')
+  const removed = vi.spyOn(element, 'removeEventListener')
+  const of = (spy: typeof added | typeof removed) =>
+    spy.mock.calls.filter(([type]) => type === 'seeked').map(([, listener]) => listener)
+  return { added: () => of(added), removed: () => of(removed) }
+}
+
+/**
+ * Two clips at the playhead, each off its own source, on two tracks — a
+ * picture-in-picture arrangement: `a` (video1, source 0-4) and `b` (video2,
+ * source 2-6), both at timeline 0-4. At timeline 1, `a` wants source 1 and `b`
+ * source 3. Both elements' seeks are stalled.
+ */
+function pausedOverTwoClips() {
+  addClip('a', 0, 4)
+  store().addClipToTimeline(
+    { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 2, endTime: 6, duration: 4 },
+    undefined,
+    0
+  )
+  const loop = harness([])
+  const a = stalledVideo()
+  const b = stalledVideo()
+  loop.deps.videoElementsRef.current.set(video.id, a)
+  loop.deps.videoElementsRef.current.set('video2', b)
+  return { ...loop, a, b }
+}
+
+describe('usePreviewRenderLoop seeks (ESCSUITE-275)', () => {
+  it('seeks a video that arrives while paused mid-clip, and paints after its seek', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness([])
+    seek(1)
+
+    // The clip is under the playhead before its source has an element at all.
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    const element = stalledVideo()
+    deps.videoElementsRef.current.set(video.id, element)
+    rerender({ ...deps, videoUrlsKey: video.id })
+    await settle(100)
+
+    // Seeked to the playhead's source time, not left at 0; and before the seek
+    // reports back, only the media-change paint 50 ms after the arrival.
+    expect(element.currentTime).toBe(1)
+    expect(drawnTimes(deps)).toEqual([1])
+
+    seeked(element)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+
+    // The seek landed, so the fallback has nothing left to paint.
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+  })
+
+  it('does not seek a video that arrives within 0.05 s of the playhead, and paints once', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness([])
+    seek(1)
+
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    const element = stalledVideo()
+    element.currentTime = 1.02
+    const seeksBefore = doubles.media.seeks.length
+    deps.videoElementsRef.current.set(video.id, element)
+    rerender({ ...deps, videoUrlsKey: video.id })
+    await settle(1000)
+
+    expect(doubles.media.seeks.length).toBe(seeksBefore)
+    expect(element.currentTime).toBe(1.02)
+    expect(drawnTimes(deps)).toEqual([1])
+  })
+
+  it.each([
+    ['loadeddata then seeked', ['loadeddata', 'seeked']],
+    ['seeked then loadeddata', ['seeked', 'loadeddata']],
+  ])('a video that arrives unready and off the playhead ends on a paint after both its readiness and its seek (%s)', async (_, order) => {
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness([])
+    seek(1)
+
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    const element = stalledVideo(0)
+    deps.videoElementsRef.current.set(video.id, element)
+    rerender({ ...deps, videoUrlsKey: video.id })
+    await settle(100)
+    expect(element.currentTime).toBe(1)
+    expect(drawnTimes(deps)).toEqual([1])
+
+    const deliver = (type: string) => {
+      if (type === 'loadeddata') becomeReady(element)
+      else seeked(element)
+    }
+
+    deliver(order[0])
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+
+    deliver(order[1])
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
+
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
+  })
+
+  it('waits for a seek still under way when the element set changes mid-scrub', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness([])
+    const element = stalledVideo()
+    deps.videoElementsRef.current.set(video.id, element)
+    const initialProps = { ...deps, videoUrlsKey: video.id }
+
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps,
+    })
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1])
+    // The browser has the seek in hand: currentTime already reads the target.
+    Object.defineProperty(element, 'seeking', { value: true, configurable: true })
+
+    // An unrelated source arrives before that seek reports back.
+    deps.videoElementsRef.current.set('video2', document.createElement('video'))
+    rerender({ ...initialProps, videoUrlsKey: `${video.id},video2` })
+    await settle(100)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+
+    Object.defineProperty(element, 'seeking', { value: false, configurable: true })
+    seeked(element)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
+  })
+
+  it.each([
+    ['a then b', (e: { a: HTMLVideoElement; b: HTMLVideoElement }) => [e.a, e.b]],
+    ['b then a', (e: { a: HTMLVideoElement; b: HTMLVideoElement }) => [e.b, e.a]],
+  ])('paints once after the last of two seeks, not the first (%s)', async (_, order) => {
+    const loop = pausedOverTwoClips()
+    const { deps, seek } = loop
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1)
+    await settle(FRAME_MS)
+    expect(loop.a.currentTime).toBe(1)
+    expect(loop.b.currentTime).toBe(3)
+    expect(drawnTimes(deps)).toEqual([1])
+
+    const [first, second] = order(loop)
+    seeked(first)
+    await settle(FRAME_MS)
+    // The other element still shows its old frame: no paint yet.
+    expect(drawnTimes(deps)).toEqual([1])
+
+    seeked(second)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+  })
+
+  it('waits for a transition\'s incoming video as well as its outgoing one', async () => {
+    const trackId = store().project.timeline.tracks[0].id
+    addClip('a', 0, 2, trackId)
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 1, endTime: 3, duration: 2 },
+      trackId,
+      2
+    )
+    store().updateClipTransition('a', { type: 'fade', duration: 1 })
+    const { deps, seek } = harness([])
+    const outgoing = stalledVideo()
+    const incoming = stalledVideo()
+    deps.videoElementsRef.current.set(video.id, outgoing)
+    deps.videoElementsRef.current.set('video2', incoming)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1.5)
+    await settle(FRAME_MS)
+    expect(outgoing.currentTime).toBe(1.5)
+    expect(incoming.currentTime).toBe(1)
+    expect(drawnTimes(deps)).toEqual([1.5])
+
+    seeked(outgoing)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1.5])
+
+    seeked(incoming)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1.5, 1.5])
+  })
+
+  it('paints once on the fallback when only one of two seeks reports back, and ignores the late one', async () => {
+    const loop = pausedOverTwoClips()
+    const { deps, seek, a, b } = loop
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1)
+    await settle(FRAME_MS)
+    seeked(a)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1])
+
+    // 300 ms after the scrub: the fallback paints, once.
+    await settle(300)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+
+    seeked(b)
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+  })
+
+  it('a playhead move before the seeks land ends the old cycle: its listeners go and it paints nothing', async () => {
+    const loop = pausedOverTwoClips()
+    const { deps, seek, a, b } = loop
+    const listenersA = watchSeeked(a)
+    const listenersB = watchSeeked(b)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1)
+    await settle(FRAME_MS)
+    const addedA = listenersA.added().length
+    const addedB = listenersB.added().length
+    expect(addedA).toBeGreaterThan(0)
+    expect(addedB).toBeGreaterThan(0)
+
+    // One seek lands, and the playhead moves on before the other does.
+    seeked(a)
+    seek(2)
+
+    // Every listener the first cycle armed has been taken off.
+    for (const listener of listenersA.added().slice(0, addedA)) {
+      expect(listenersA.removed()).toContain(listener)
+    }
+    for (const listener of listenersB.added().slice(0, addedB)) {
+      expect(listenersB.removed()).toContain(listener)
+    }
+
+    await settle(1000)
+    // Nothing at the old playhead: the immediate paint at 2 and its fallback.
+    expect(drawnTimes(deps)).toEqual([1, 2, 2])
+  })
+
+  it('a playhead move after both seeks land but before their paint drops that paint', async () => {
+    const loop = pausedOverTwoClips()
+    const { deps, seek, a, b } = loop
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1)
+    await settle(FRAME_MS)
+    seeked(a)
+    seeked(b)
+    // The final paint is an animation frame away; the playhead moves first.
+    seek(2)
+
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 2, 2])
+  })
+})
+
 describe('usePreviewRenderLoop display time', () => {
   /**
    * Subscribe to the readout and record every position it is told about.

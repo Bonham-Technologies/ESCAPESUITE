@@ -3430,6 +3430,37 @@ review (sonnet) approved both verdicts; its LOWs (two stale sentences, the point
 cleanup) are the third commit. Still one hook instance, so `ClipEditor.rerender.test.tsx` and every
 `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-275 (the paused preview's scrub effect
+re-runs when the element set changes, so a `<video>` created after the playhead moved — a source restored
+by undo mid-clip, a session opened with a non-zero playhead, a frame step pressed before the element
+existed — is seeked to the playhead instead of sitting at source time 0 under ESCSUITE-264's readiness
+paint; and a scrub that seeks several elements paints once after the **last** `seeked` rather than the
+first, the transition's incoming element now waited on too, with the immediate paint and the 300 ms
+fallback kept and the no-seek paused path allocating nothing): 99.82 / **99.35** / **96.31** / 99.70
+against the 99.82 / 99.34 / 96.29 / 99.70 that `main` at `02dde2f7` (the ESCSUITE-264 version-packages
+commit) measures in the same sitting — statements and branches each up a hundredth or two, lines and
+functions unmoved, and with *fewer* uncovered units: the base gives 5,461 / 5,671 branches and this branch
+5,466 / 5,675, four new branches and five more covered, so the uncovered column falls 210 → 209;
+statements 9,542 / 9,605 → 9,540 / 9,602 with 63 → 62 uncovered; lines 8,452 / 8,467 → 8,447 / 8,462 and
+functions 2,016 / 2,022 on both (the same 15 lines and 6 functions uncovered). All of the movement is
+`components/Preview/usePreviewRenderLoop.ts` (130 / 144 → 135 / 148 branches, 329 / 337 → 327 / 334
+statements): the net four new decisions are the `video.seeking` operand that counts an element still
+seeking from an earlier scrub as pending (so a set change mid-scrub cannot lose its after-seek paint),
+the lazily created `seeked` handler (`??=`, reached with one and with two pending elements) and the
+`if (!seekedHandler) return` that keeps the no-seek path free of any closure, and the pending count
+reaching zero on the last `seeked` — each reached from both sides by the eleven new cases (an element
+arriving mid-clip seeked and painted after its `seeked`, one arriving within 0.05 s not seeked, two
+elements landing A-then-B and B-then-A with one final paint after the second, one `seeked` inside the
+300 ms fallback and a late one ignored, cleanup mid-cycle removing every listener) against the single-
+element scrubs that were already there, nine of them red on the base; the `settled` flag's guards that
+the counter replaced went out, and the one pre-existing arm newly reached is in the same file. The
+review (opus) approved spec and code; its two MINORs — the closures the first version allocated on the
+no-seek path, and a docs overclaim that "whichever of `loadeddata` and `seeked` comes last paints" (a
+`seeked` after the fallback paints nothing) — are in these numbers. `drawFrame.perf.test.ts` and every
+rerender pin are byte-identical; the seek-before-data order the arrival path relies on is spec behaviour
+not measured in a real browser, and ESCSUITE-264's `preview-first-paint.spec.ts` ran three times on
+Chromium against this tree, 6 / 6. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3437,7 +3468,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.33 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.35 | 96.31 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
