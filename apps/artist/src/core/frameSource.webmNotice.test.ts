@@ -218,6 +218,7 @@ describe('an MP4 export says when a source the worker cannot take decodes in the
 
     expect(notices(progress)).toEqual([])
     expect(media.videos).toHaveLength(0)
+    expect(allFramesClosed()).toBe(true)
   })
 
   it('says it once when a WebM source is joined by a mid-export handover of an MP4', async () => {

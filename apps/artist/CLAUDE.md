@@ -413,8 +413,14 @@ probe):
   size, running the same terminate path, is ESCSUITE-273.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
-  export**, at the progress the export has reached. The `console.warn` keeps the detail. A WebM
-  source still decodes in the page with no such line (ESCSUITE-261).
+  export**, at the progress the export has reached. The `console.warn` keeps the detail. A source
+  that is not an MP4 — a WebM, which is every ESCAPECRAFT recording — is never offered to the
+  worker (it demuxes MP4 only), and `createSource` reports it through the same `onFallback` at
+  creation, with its MIME type in the reason, whenever the worker is running (ESCSUITE-261); a
+  factory with no worker has already raised the line at the export's start. Two WebM sources, or a
+  WebM beside an MP4 that is later handed over, still say it once. The export dialog's own up-front
+  copy still promises background-tab encoding and is left for the follow-up that either demuxes WebM
+  in the worker or rewords the dialog.
 - Returns `VideoFrame` clones (transferable) for zero-copy performance; the exporter closes each.
 - Pinned end to end by `apps/e2e/tests/export/decode-worker.spec.ts` (Chromium; Firefox run by hand):
   a real source exports with the worker answering `FRAME_READY` and no fallback; the same project
@@ -4226,7 +4232,7 @@ outcome, not on the double.
 
 - Video blobs stored in IndexedDB; large files may hit storage limits
 - MP4 decoding uses Web Worker with WebCodecs for background-capable export; WebM falls back to HTMLVideoElement on main thread
-- WebCodecs background export only works in Chromium and Firefox (the engines measured against their own `<video>`; ESCSUITE-262 admits others) and only for H.264 MP4 source files the worker can present exactly as `<video>` does (see "Video Decode Worker" for what it refuses); WebM sources and refused MP4s use HTMLVideoElement seeking, and an MP4 export says so once ("Decoding in the page; keep this tab in the foreground") — a WebM source does not trigger that line today (ESCSUITE-261)
+- WebCodecs background export only works in Chromium and Firefox (the engines measured against their own `<video>`; ESCSUITE-262 admits others) and only for H.264 MP4 source files the worker can present exactly as `<video>` does (see "Video Decode Worker" for what it refuses); WebM sources and refused MP4s use HTMLVideoElement seeking, and an MP4 export says so once ("Decoding in the page; keep this tab in the foreground"), a WebM source included (ESCSUITE-261)
 
 ## Headless Render Bundle
 
