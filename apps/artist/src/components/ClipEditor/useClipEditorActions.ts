@@ -54,6 +54,20 @@
 // panel, and a section rendered on its own in a test) pushes its own entry
 // exactly as before.
 //
+// **So do a typing burst and a colour-picker sweep** (ESCSUITE-242). The caption
+// textarea, the font-size field and the five colour pickers (text, background,
+// fill, shape stroke, mask stroke) write on every event too, and a pointer
+// gesture does not bound them, so they get `useBurstGesture` instead: a burst
+// opens on its first edit and closes on blur or after `BURST_PAUSE_MS` (600 ms)
+// with no edit. Its listeners are returned as `burstGesture`. Its history is its
+// own, not the slider's — so a blur that ends a burst cannot end a slider drag
+// the same press began — and the three handlers those controls reach
+// (`handleTextDataChange`, `handleShapeDataChange`, `handleStrokeChange`) run
+// their write through `commitEdit`, which nests the two `commit`s and skips
+// history when either gesture says to. Outside both, it hands the write `false`
+// exactly as `commit` alone did, so the toggles and selects on those sections
+// keep one entry each.
+//
 // The last two entries returned, `handleResetToDefaults` and
 // `handleKeyframePanelToggle`, are deliberately *not* memoised: they were
 // inline arrows in the JSX before this file existed, so a fresh function per
@@ -82,6 +96,8 @@ import { cropCompensatesCentre, cropWriteFor } from '../../core/cropDrag';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
+import { useBurstGesture } from './useBurstGesture';
+import type { BurstGestureHandlers } from './useBurstGesture';
 
 /** The store reads, derived values and handlers `ClipEditor` composes its sections from. */
 export interface ClipEditorActions {
@@ -118,6 +134,11 @@ export interface ClipEditorActions {
    * `<input type="range">`, so one drag is one undo step (ESCSUITE-75).
    */
   sliderGesture: SliderGestureHandlers;
+  /**
+   * What the caption, the font-size field and the colour pickers call, so one
+   * typing burst or one picker sweep is one undo step (ESCSUITE-242).
+   */
+  burstGesture: BurstGestureHandlers;
   handleSplitAtPlayhead: () => void;
   handleDeleteClip: () => void;
   handleGoToClip: () => void;
@@ -161,6 +182,16 @@ export function useClipEditorActions(): ClipEditorActions {
   // write a slider can reach runs through its `commit`. Refs only — see the note
   // above, and `useSliderGesture.ts` for the rule.
   const { handlers: sliderGesture, commit } = useSliderGesture();
+  // And one burst for the panel's typed and picked values (ESCSUITE-242): a user
+  // edits one field at a time, and leaving it — the blur — ends the burst.
+  const { handlers: burstGesture, commit: burstCommit } = useBurstGesture();
+  // A write either gesture may own: the burst's flag outside, the slider's
+  // inside, skipping history if either says so. Stable, as both commits are.
+  const commitEdit = useCallback(
+    (write: (skipHistory: boolean) => boolean) =>
+      burstCommit((skipBurst) => commit((skipSlider) => write(skipBurst || skipSlider))),
+    [burstCommit, commit]
+  );
 
   // Read scaleLocked from the selected clip's transform (default true for backwards compat)
   const scaleLocked = useEditorStore((state) => {
@@ -313,7 +344,8 @@ export function useClipEditorActions(): ClipEditorActions {
   const handleStrokeChange = useCallback(
     (stroke: ClipStroke) => {
       if (!selectedClip) return;
-      commit((skipHistory) =>
+      // `commitEdit`: the Width slider and the Stroke Color picker both land here.
+      commitEdit((skipHistory) =>
         updateClip(
           selectedClip.id,
           { stroke: stroke.width > 0 ? stroke : undefined },
@@ -321,7 +353,7 @@ export function useClipEditorActions(): ClipEditorActions {
         )
       );
     },
-    [selectedClip, updateClip, commit]
+    [selectedClip, updateClip, commitEdit]
   );
 
   // Every crop write in the app goes through the same two functions
@@ -558,23 +590,25 @@ export function useClipEditorActions(): ClipEditorActions {
 
   // Text overlay handlers. The gesture flag is here because the Transform
   // section's Pos X/Y sliders route through this for a text overlay; the text
-  // content controls also call it, and, having no gesture listeners on them,
-  // get `false` and their own undo entry per write exactly as before.
+  // content controls also call it — the caption, the font size and the two
+  // colours inside a burst (ESCSUITE-242), the toggles and selects outside any
+  // gesture, getting `false` and their own undo entry per write as before.
   const handleTextDataChange = useCallback(
     (updates: Partial<TextOverlayData>) => {
       if (!selectedClip) return;
-      commit((skipHistory) => updateTextOverlayData(selectedClip.id, updates, skipHistory));
+      commitEdit((skipHistory) => updateTextOverlayData(selectedClip.id, updates, skipHistory));
     },
-    [selectedClip, updateTextOverlayData, commit]
+    [selectedClip, updateTextOverlayData, commitEdit]
   );
 
-  // Shape overlay handlers — the Pos X/Y sliders' other destination, same rule.
+  // Shape overlay handlers — the Pos X/Y sliders' other destination, and the
+  // fill and stroke pickers', same rule.
   const handleShapeDataChange = useCallback(
     (updates: Partial<ShapeOverlayData>) => {
       if (!selectedClip) return;
-      commit((skipHistory) => updateShapeOverlayData(selectedClip.id, updates, skipHistory));
+      commitEdit((skipHistory) => updateShapeOverlayData(selectedClip.id, updates, skipHistory));
     },
-    [selectedClip, updateShapeOverlayData, commit]
+    [selectedClip, updateShapeOverlayData, commitEdit]
   );
 
   // Add overlay handlers
@@ -608,6 +642,7 @@ export function useClipEditorActions(): ClipEditorActions {
     frameWidth: resolution.width,
     keyframePanelOpen,
     sliderGesture,
+    burstGesture,
     handleSplitAtPlayhead,
     handleDeleteClip,
     handleGoToClip,

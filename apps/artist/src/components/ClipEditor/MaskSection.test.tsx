@@ -6,10 +6,12 @@
 // no children while it is closed. Normalising what gets *stored* is the hook's
 // job and is tested in `useClipEditorActions.test.ts`; this file asserts what
 // the user did.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MaskSection } from './MaskSection'
+import { useClipEditorActions } from './useClipEditorActions'
+import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
 import { CLIP_MASK_KINDS } from './clipEditorOptions'
 import { rowControl, rowColor } from '../../test/domQueries'
 import { inertSliderGesture } from '../../test/fixtures/clipFixtures'
@@ -210,5 +212,74 @@ describe('MaskSection', () => {
     await renderOpen({ stroke: { color: '#ffffff', width: 0.004 } })
 
     expect(rowColor('Stroke Color')).toBeEnabled()
+  })
+})
+
+// ESCSUITE-242: one sweep of the stroke colour picker is one undo step — the
+// same burst the text and shape swatches use (`useBurstGesture`), on the
+// panel's fifth colour picker. Run against the real store, wired the way
+// `ClipEditor` wires it.
+describe('MaskSection stroke colour and the undo stack', () => {
+  const past = () => store().history.past.length
+  const clipNow = () => store().project.timeline.clips[0]
+
+  function renderLive() {
+    function LiveSection() {
+      const { selectedClip, frameWidth, handleMaskChange, handleStrokeChange, sliderGesture, burstGesture } =
+        useClipEditorActions()
+      return (
+        <MaskSection
+          mask={selectedClip!.mask}
+          stroke={selectedClip!.stroke}
+          frameWidth={frameWidth}
+          onMaskChange={handleMaskChange}
+          onStrokeChange={handleStrokeChange}
+          sliderGesture={sliderGesture}
+          burstGesture={burstGesture}
+        />
+      )
+    }
+    render(<LiveSection />)
+    fireEvent.click(screen.getByRole('button', { name: 'Mask & Stroke' }))
+  }
+
+  beforeEach(() => {
+    resetStoreForTest()
+    const clip = addClip('clip1', 0, 4)
+    store().updateClip(clip.id, { stroke: { color: '#ffffff', width: 3 / 1280 } })
+    store().setSelectedClipId(clip.id)
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('records one entry for a sweep of the stroke colour picker', () => {
+    renderLive()
+    const before = past()
+    const swatch = rowColor('Stroke Color')
+
+    for (const value of ['#110000', '#220000', '#330000', '#440000']) {
+      fireEvent.input(swatch, { target: { value } })
+    }
+    fireEvent.change(swatch, { target: { value: '#440000' } })
+
+    expect(clipNow().stroke).toEqual({ color: '#440000', width: 3 / 1280 })
+    expect(past() - before).toBe(1)
+    store().undo()
+    expect(clipNow().stroke?.color).toBe('#ffffff')
+  })
+
+  it('starts a new entry for a sweep after blur', () => {
+    renderLive()
+    const before = past()
+    const swatch = rowColor('Stroke Color')
+
+    fireEvent.input(swatch, { target: { value: '#110000' } })
+    fireEvent.blur(swatch)
+    fireEvent.input(swatch, { target: { value: '#220000' } })
+
+    expect(past() - before).toBe(2)
   })
 })

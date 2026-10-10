@@ -4,6 +4,7 @@ import { hasVisibleFill } from '../../core/canvasRenderer';
 import { withFillRgb, toggleFill, fillAlphaPercent, withFillAlphaPercent } from './clipColorValues';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { SliderGestureHandlers } from './useSliderGesture';
+import type { BurstGestureHandlers } from './useBurstGesture';
 import styles from './ClipEditor.module.css';
 
 interface ShapeSectionProps {
@@ -21,6 +22,13 @@ interface ShapeSectionProps {
    * after the release, so a pointer gesture does not bound that interaction.
    */
   sliderGesture: SliderGestureHandlers;
+  /**
+   * What bounds the swatches instead (ESCSUITE-242): a sweep of the fill or
+   * stroke picker is one burst — opened by its first edit, closed on blur or
+   * after a pause — and so one undo entry. Optional, so the section renders on
+   * its own in a test; without it every write keeps its own entry.
+   */
+  burstGesture?: BurstGestureHandlers;
   /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
   disabled?: boolean;
 }
@@ -34,7 +42,7 @@ interface ShapeSectionProps {
  * colour picker, the no-fill toggle and the fill-opacity row all read and
  * rewrite the same eight-digit hex string through `clipColorValues`.
  */
-export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: ShapeSectionProps) {
+export function ShapeSection({ shapeData, onChange, sliderGesture, burstGesture, disabled }: ShapeSectionProps) {
   /**
    * One id for the section, one label wired to each control (ESCSUITE-89).
    *
@@ -95,10 +103,12 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
                 type="color"
                 value={shapeData.fillColor.substring(0, 7)}
                 onChange={(e) => {
+                  burstGesture?.onEdit();
                   // Preserve existing alpha when changing color
                   const fillColor = shapeData.fillColor || '#000000ff';
                   onChange({ fillColor: withFillRgb(fillColor, e.target.value) });
                 }}
+                onBlur={burstGesture?.onBlur}
                 disabled={!hasVisibleFill(shapeData.fillColor || '#000000ff')}
               />
               <button
@@ -120,7 +130,11 @@ export function ShapeSection({ shapeData, onChange, sliderGesture, disabled }: S
                 aria-label="Stroke color"
                 type="color"
                 value={shapeData.strokeColor}
-                onChange={(e) => onChange({ strokeColor: e.target.value })}
+                onChange={(e) => {
+                  burstGesture?.onEdit();
+                  onChange({ strokeColor: e.target.value });
+                }}
+                onBlur={burstGesture?.onBlur}
               />
             </div>
           </div>

@@ -1,9 +1,13 @@
 // The "Text Content" section of the clip inspector, rendered on its own with
 // explicit data so every control's onChange payload can be read directly.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TextContentSection } from './TextContentSection'
+import { useClipEditorActions } from './useClipEditorActions'
+import { BURST_PAUSE_MS } from './useBurstGesture'
+import { useEditorStore } from '../../store/projectStore'
+import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import { rowColor } from '../../test/domQueries'
 import type { TextOverlayData } from '../../store/types'
 import styles from './ClipEditor.module.css'
@@ -174,5 +178,194 @@ describe('TextContentSection', () => {
     fireEvent.change(rowColor('BG'), { target: { value: '#123456' } })
 
     expect(onChange).toHaveBeenCalledWith({ backgroundColor: '#123456cc' })
+  })
+})
+
+// ESCSUITE-242: one typing burst, or one colour-picker sweep, is one undo step.
+//
+// The textarea, the font-size field and the two swatches write on every event,
+// and each write used to push an undo entry — so a caption typed in full, or one
+// sweep of a picker, evicted the user's whole 50-entry history. A burst opens on
+// the first edit and closes on blur or after `BURST_PAUSE_MS` with no edit; the
+// store is still written on every event. These run the section against the real
+// store, wired the way `ClipEditor` wires it.
+describe('TextContentSection and the undo stack', () => {
+  const past = () => store().history.past.length
+  const textNow = () => store().project.timeline.clips[0].textData!
+
+  function renderLive() {
+    const writes = vi.spyOn(useEditorStore.getState(), 'updateTextOverlayData')
+    function LiveSection() {
+      const { selectedClip, handleTextDataChange, burstGesture } = useClipEditorActions()
+      return (
+        <TextContentSection
+          textData={selectedClip!.textData!}
+          onChange={handleTextDataChange}
+          burstGesture={burstGesture}
+        />
+      )
+    }
+    const view = render(<LiveSection />)
+    return { writes, unmount: view.unmount }
+  }
+
+  /** One keystroke's worth of `input`, then the gap a typist leaves before the next. */
+  function type(field: HTMLElement, value: string, gapMs = 80) {
+    fireEvent.input(field, { target: { value } })
+    vi.advanceTimersByTime(gapMs)
+  }
+
+  /** Twenty keystrokes appending to "Text" — a short caption typed in one go. */
+  function typeTwenty(field: HTMLElement, from = 'Text') {
+    let value = from
+    for (let i = 0; i < 20; i++) {
+      value += 'abcdefghijklmnopqrst'[i]
+      type(field, value)
+    }
+    return value
+  }
+
+  beforeEach(() => {
+    resetStoreForTest()
+    store().addTextOverlayClip()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('records one entry for a twenty-keystroke burst, writing the store on every keystroke', () => {
+    const { writes } = renderLive()
+    const before = past()
+
+    const typed = typeTwenty(textarea())
+
+    expect(writes).toHaveBeenCalledTimes(20)
+    expect(textNow().text).toBe(typed)
+    expect(past() - before).toBe(1)
+  })
+
+  it('undoes the whole burst in one step, back to the text before it', () => {
+    renderLive()
+
+    typeTwenty(textarea())
+    store().undo()
+
+    expect(textNow().text).toBe('Text')
+  })
+
+  it('starts a second entry for typing that resumes after a pause', () => {
+    renderLive()
+    const before = past()
+
+    const first = typeTwenty(textarea())
+    vi.advanceTimersByTime(BURST_PAUSE_MS)
+    typeTwenty(textarea(), first)
+
+    expect(past() - before).toBe(2)
+    store().undo()
+    expect(textNow().text).toBe(first)
+  })
+
+  it('closes the burst on blur', () => {
+    renderLive()
+    const before = past()
+
+    type(textarea(), 'Texta')
+    type(textarea(), 'Textab')
+    fireEvent.blur(textarea())
+    type(textarea(), 'Textabc')
+
+    expect(past() - before).toBe(2)
+  })
+
+  it('records one entry for a run of font-size changes', () => {
+    renderLive()
+    const before = past()
+    const size = screen.getByTitle('Font size')
+
+    for (const value of ['49', '50', '51', '52', '53']) type(size, value)
+
+    expect(textNow().fontSize).toBe(53)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a sweep of the text colour picker', () => {
+    const { writes } = renderLive()
+    const before = past()
+    const swatch = rowColor('Text')
+
+    for (let i = 0; i < 30; i++) {
+      fireEvent.input(swatch, { target: { value: `#${(i * 8).toString(16).padStart(2, '0')}0000` } })
+    }
+    // The native picker's closing `change` carries the last `input`'s value.
+    fireEvent.change(swatch, { target: { value: '#e80000' } })
+
+    expect(writes).toHaveBeenCalledTimes(30)
+    expect(textNow().color).toBe('#e80000')
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry for a sweep of the background picker, and a second sweep after blur', () => {
+    renderLive()
+    const before = past()
+    const swatch = rowColor('BG')
+
+    for (const value of ['#111111', '#222222', '#333333']) fireEvent.input(swatch, { target: { value } })
+    fireEvent.blur(swatch)
+    for (const value of ['#444444', '#555555']) fireEvent.input(swatch, { target: { value } })
+
+    expect(textNow().backgroundColor).toBe('#555555cc')
+    expect(past() - before).toBe(2)
+  })
+
+  it('keeps one entry per click of bold and one per choice of a select', () => {
+    renderLive()
+    const before = past()
+
+    fireEvent.click(screen.getByRole('button', { name: 'B' }))
+    fireEvent.click(screen.getByRole('button', { name: 'B' }))
+    fireEvent.change(fontSelect(), { target: { value: 'Georgia' } })
+
+    expect(past() - before).toBe(3)
+  })
+
+  it("leaves a slider drag's one entry intact when the caption blurs mid-drag", () => {
+    // A press on a slider fires `pointerdown` before the focused caption's
+    // `blur`. The burst has its own history, so that blur cannot end the drag
+    // (the shared-history version of this ordering is ESCSUITE-267).
+    function LiveWithSlider() {
+      const { selectedClip, handleTextDataChange, burstGesture, sliderGesture } = useClipEditorActions()
+      return (
+        <>
+          <TextContentSection textData={selectedClip!.textData!} onChange={handleTextDataChange} burstGesture={burstGesture} />
+          <input type="range" aria-label="Pos X" min={0} max={1} step={0.01} value={selectedClip!.textData!.x}
+            {...sliderGesture} onChange={(e) => handleTextDataChange({ x: parseFloat(e.target.value) })} />
+        </>
+      )
+    }
+    render(<LiveWithSlider />)
+    const slider = screen.getByLabelText('Pos X')
+    type(textarea(), 'Texta')
+    const before = past()
+
+    fireEvent.pointerDown(slider)
+    fireEvent.blur(textarea())
+    for (const value of ['0.2', '0.3', '0.4']) fireEvent.input(slider, { target: { value } })
+    fireEvent.pointerUp(slider)
+
+    expect(textNow().x).toBe(0.4)
+    expect(past() - before).toBe(1)
+  })
+
+  it('ends an open burst and clears its timer when the panel unmounts', () => {
+    const { unmount } = renderLive()
+
+    type(textarea(), 'Texta')
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    unmount()
+
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

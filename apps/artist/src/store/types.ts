@@ -663,7 +663,13 @@ export interface EditorState {
   // Actions - Tracks
   addTrack: (name?: string) => Track;
   removeTrack: (trackId: string) => void;
-  updateTrack: (trackId: string, updates: Partial<Track>) => void;
+  /**
+   * Merge `updates` into a track. `skipHistory` (ESCSUITE-242) is the gesture
+   * flag the volume slider's `useSliderGesture` hands it — a drag's first write
+   * pushes, the rest skip. Returns whether it wrote: an id that names no track
+   * is refused, with no write and no undo entry.
+   */
+  updateTrack: (trackId: string, updates: Partial<Track>, skipHistory?: boolean) => boolean;
   reorderTracks: (trackIds: string[]) => void;
 
   // Actions - Clips

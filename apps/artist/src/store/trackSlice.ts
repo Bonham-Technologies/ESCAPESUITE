@@ -82,19 +82,34 @@ export const createTrackSlice: StateCreator<EditorState, [], [], TrackSlice> = (
     };
   }),
 
-  updateTrack: (trackId: string, updates: Partial<Track>) => set((state) => ({
-    project: {
-      ...state.project,
-      modified: Date.now(),
-      timeline: {
-        ...state.project.timeline,
-        tracks: state.project.timeline.tracks.map(track =>
-          track.id === trackId ? { ...track, ...updates } : track
-        ),
+  // ESCSUITE-242: the track header's volume slider writes on every `input`
+  // event, and runs those writes through `useSliderGesture`'s `commit` — so
+  // this takes the trailing `skipHistory` flag every gesture-driven action
+  // takes, in the same position and shape, and reports whether it wrote (the
+  // ESCSUITE-87 boolean `commit` reads). An id that names no track is refused
+  // in front of the `set`, the way ESCSUITE-172 refuses an unknown clip: the
+  // `map` below would match nothing, and the `set` used to run anyway, spending
+  // an undo entry on no change at all. Every other caller passes two
+  // arguments and is one undo step exactly as before.
+  updateTrack: (trackId: string, updates: Partial<Track>, skipHistory?: boolean) => {
+    if (!get().project.timeline.tracks.some((t) => t.id === trackId)) return false;
+
+    set((state) => ({
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          tracks: state.project.timeline.tracks.map(track =>
+            track.id === trackId ? { ...track, ...updates } : track
+          ),
+        },
       },
-    },
-    history: pushToHistory(state),
-  })),
+      history: skipHistory ? state.history : pushToHistory(state),
+    }));
+
+    return true;
+  },
 
   reorderTracks: (trackIds: string[]) => set((state) => {
     const trackMap = new Map(state.project.timeline.tracks.map(t => [t.id, t]));

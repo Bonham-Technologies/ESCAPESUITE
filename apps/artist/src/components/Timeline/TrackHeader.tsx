@@ -1,5 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import type { Track } from '../../store/types';
+import { useSliderGesture } from '../ClipEditor/useSliderGesture';
 import styles from './Timeline.module.css';
 
 interface TrackHeaderProps {
@@ -12,7 +13,12 @@ interface TrackHeaderProps {
   index: number;
   /** How many tracks the timeline has; the last track cannot be deleted. */
   trackCount: number;
-  onUpdateTrack: (trackId: string, updates: Partial<Track>) => void;
+  /**
+   * The store's `updateTrack`. The volume slider hands it the gesture's
+   * `skipHistory` flag and reads its boolean (ESCSUITE-242); every other
+   * control here calls it with two arguments, one undo entry per call.
+   */
+  onUpdateTrack: (trackId: string, updates: Partial<Track>, skipHistory?: boolean) => boolean;
   onMoveTrackUp: (trackId: string) => void;
   onMoveTrackDown: (trackId: string) => void;
   onDeleteTrack: (trackId: string) => void;
@@ -39,6 +45,16 @@ interface TrackHeaderProps {
  * the whole headers column sits them out (`timelineGestures.perf.test.ts`).
  * Not through a trim: a trim writes the store every move, `clips` changes,
  * and `onDeleteTrack` changes identity with it, so the column re-renders.
+ *
+ * **One drag of the volume slider is one undo step** (ESCSUITE-242). It writes
+ * on every `input` event — so the preview and the meter follow the thumb — and
+ * each write used to push an undo entry, so one sweep evicted the whole
+ * 50-entry history. It now carries the inspector sliders' `useSliderGesture`
+ * (ESCSUITE-75/87): the drag's first write pushes, every later one passes
+ * `skipHistory`, and a held arrow key is one gesture too. One instance per
+ * header, refs only: no state, no subscription and no new prop, so the memo
+ * holds exactly as before. The mute, visibility and lock buttons and the
+ * rename are single changes and keep one entry each.
  */
 export const TrackHeader = React.memo(function TrackHeader({
   track,
@@ -51,6 +67,8 @@ export const TrackHeader = React.memo(function TrackHeader({
 }: TrackHeaderProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editingName, setEditingName] = useState('');
+  // The volume slider's gesture — see the note above.
+  const { handlers: volumeGesture, commit: commitVolume } = useSliderGesture();
 
   // Handle mute toggle with volume memory
   const handleMuteToggle = useCallback(() => {
@@ -105,14 +123,20 @@ export const TrackHeader = React.memo(function TrackHeader({
           max="1"
           step="0.01"
           value={track.volume ?? 1}
+          {...volumeGesture}
           onChange={(e) => {
             const newVolume = parseFloat(e.target.value);
-            // If adjusting volume while muted, unmute
-            if (track.muted && newVolume > 0) {
-              onUpdateTrack(track.id, { volume: newVolume, muted: false });
-            } else {
-              onUpdateTrack(track.id, { volume: newVolume, lastVolume: newVolume > 0 ? newVolume : track.lastVolume });
-            }
+            // One `commit` around the branch: both arms are one write.
+            commitVolume((skipHistory) =>
+              // If adjusting volume while muted, unmute
+              track.muted && newVolume > 0
+                ? onUpdateTrack(track.id, { volume: newVolume, muted: false }, skipHistory)
+                : onUpdateTrack(
+                    track.id,
+                    { volume: newVolume, lastVolume: newVolume > 0 ? newVolume : track.lastVolume },
+                    skipHistory
+                  )
+            );
           }}
           title={`Volume: ${Math.round((track.volume ?? 1) * 100)}%`}
           aria-label={`${track.name} volume`}
