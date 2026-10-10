@@ -2964,6 +2964,38 @@ companion (no thumbnail at all) and the cascade delete over a thumbnail-failed c
 green on arrival and are kept as pins. The `App.*rerender*` pins and every `*.perf.test.ts` are
 byte-identical. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/headless-artist` was re-measured 2026-10-10 for ESCSUITE-235 and ESCSUITE-236 (the
+reference container runs `tini` as PID 1, so the two `chrome-headless` helpers each render orphans
+under `serve` are reaped instead of accumulating as zombies until the pid limit; every document —
+the README, the CI comment, the k8s example — says the image runs as uid **1001** (`pwuser` in
+`playwright:v1.63.0-noble`; uid 1000 there is `ubuntu`), where all three said 1000 and an operator
+who followed them got a full render and then `EACCES` on delivery, exit 1, which the README told
+brokers to retry; and `ensureSinkReady` gains the `volume` arm — `probeVolumeDir` creates the
+directory if the sink would, writes and removes a private `.tmp-…` probe file in it, and refuses a
+directory the process cannot write with a sentence naming the directory and the uid, exit 2 from
+`render` and 400 from `serve`, before Chromium launches; CI's `kit-docker` job now chowns the smoke
+volume to 1001 instead of `chmod 777` and runs a second smoke under `serve` that asserts zero
+`Z`-state processes after three renders): 99.55 / 99.47 / 98.48 / **98.73** against the
+99.55 / 99.47 / 98.48 / 98.72 that `main` at `89bb28d3` (the ESCSUITE-257 version-packages commit)
+measures in the same sitting — functions up a hundredth, the other three unmoved. Lines
+889 / 893 → 899 / 903, statements 943 / 948 → 953 / 958, branches 585 / 594 → 587 / 596 and
+functions 155 / 157 → 156 / 158, every denominator growing by exactly what the numerator did; the
+same 4 / 5 / 9 / 2 uncovered, in the same places (`cli.ts`'s `isDirectRun` bootstrap and
+`serve.ts`'s three ledgered lines). The two new branches are `src/jobSpec.ts`'s (88 → 90): the
+`volume` case of `ensureSinkReady`'s per-sink dispatch, reached by a writable and an unwritable
+directory through `jobSpec`, `cli` (exit 2, no launch) and `serve` (400) alike, plus the directory
+that cannot be created. `src/sinks.ts` gains eight lines, eight statements and one function —
+`probeVolumeDir` — and **no branch**: its first version carried a `?? 'unknown error'` fallback on
+the `fs` error's `code` (87 / 88 on the first measurement — one arm no `fs` error can reach, since
+every one carries a `code`), deleted under the house rule rather than tested, which put the file
+back at 86 / 86. One measurement of the branch read `serve.ts` at 202 / 206 lines where the base
+and a second run both read 204 / 206 — a timing-dependent test path, the same drift ESCSUITE-91
+and 113 recorded, and not this change's — so the figures above are the run that agrees with the
+base on every untouched file. The Docker half is outside this measurement: built and run once here
+(`id` → `uid=1001(pwuser)`, the `render` smoke ok, three renders under `serve` → 0 zombies with tini
+as PID 1) and by CI's `kit-docker` job on every push. **No floor crossed**; the kit's floors stay
+99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2973,7 +3005,7 @@ never above what the suite actually achieves:
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
 | `@escapesuite/artist` | 99.81 | 99.31 | 96.09 | 99.69 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
-| `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
+| `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
