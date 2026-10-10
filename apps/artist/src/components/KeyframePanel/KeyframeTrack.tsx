@@ -29,7 +29,12 @@ interface KeyframeTrackProps {
    * derives it from the open row — no state of its own.
    */
   tabIndex: 0 | -1;
-  onSelect: () => void;
+  /**
+   * `fromKeyboard` is true when the click was a keyboard activation of the
+   * label button (`event.detail === 0`; a pointer click is >= 1) — the panel
+   * moves focus into the graph for those only.
+   */
+  onSelect: (fromKeyboard: boolean) => void;
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   /**
@@ -155,23 +160,25 @@ export function KeyframeTrack({
   const hasKeyframes = keyframes.length > 0;
 
   return (
-    // A real button (ESCSUITE-243), so Enter and Space open the graph with no
-    // key handler of ours. `aria-pressed`, not `aria-expanded`: the graph is
-    // not this row's own region — it renders in a block above all the rows.
-    // The label is `aria-label` because the row's text also holds the live
-    // value, and the diamonds' titles would otherwise leak into the name.
-    <button
-      type="button"
+    // The row is a container; only the label cell is the button
+    // (ESCSUITE-243), so the diamond track stays outside interactive content.
+    // One `onClick` on the container serves a click anywhere in the row — the
+    // button's own click (a pointer's or Enter/Space's) bubbles into it, so one
+    // activation calls `onSelect` once. `aria-pressed`, not `aria-expanded`:
+    // the graph is a block above all the rows, not this row's own region.
+    <div
       className={`${styles.track} ${isSelected ? styles.selected : ''} ${hasKeyframes ? styles.hasKeyframes : ''}`}
-      aria-label={PROPERTY_LABELS[property]}
-      aria-pressed={isSelected}
-      tabIndex={tabIndex}
-      data-property={property}
-      onClick={onSelect}
+      onClick={(e) => onSelect(e.detail === 0)}
     >
-      <div className={styles.label}>
+      <button
+        type="button"
+        className={styles.label}
+        aria-pressed={isSelected}
+        tabIndex={tabIndex}
+        data-property={property}
+      >
         {PROPERTY_LABELS[property]}
-      </div>
+      </button>
 
       <div
         className={styles.trackArea}
@@ -219,6 +226,6 @@ export function KeyframeTrack({
       <div className={styles.value}>
         {formatValue(currentValue)}
       </div>
-    </button>
+    </div>
   );
 }

@@ -1,13 +1,4 @@
 .track {
-  /* A <button> (ESCSUITE-243): undo the UA's button look, keep the row's. */
-  width: 100%;
-  box-sizing: border-box;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  font: inherit;
-  color: inherit;
-  text-align: left;
   display: flex;
   align-items: center;
   height: 28px;
@@ -16,11 +7,6 @@
   border-bottom: 1px solid #333;
   cursor: pointer;
   transition: background-color 0.1s;
-}
-
-.track:focus-visible {
-  outline: 2px solid #4a9eff;
-  outline-offset: -2px;
 }
 
 .track:hover {
@@ -44,6 +30,17 @@
 }
 
 .label {
+  /* The label cell is the row's <button> (ESCSUITE-243): undo the UA's button
+     look and keep the cell's. */
+  background: none;
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: inherit;
+  text-align: left;
+  cursor: inherit;
   width: 80px;
   flex-shrink: 0;
   font-size: 11px;
@@ -51,6 +48,11 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.label:focus-visible {
+  outline: 2px solid #4a9eff;
+  outline-offset: 0;
 }
 
 .trackArea {

@@ -406,10 +406,17 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     expect(serious).toHaveLength(0)
     expect(results.passes).toBeGreaterThan(0)
 
-    // Escape: the first spends itself on the active keyframe (the graph claims
-    // it), the second returns focus to the row that opened the graph.
+    // Escape: with a keyframe active the first spends itself on it (the graph
+    // claims it), the second returns focus to the row that opened the graph.
+    // A double-click adds a keyframe without activating it, so walk to one
+    // first; a second Escape pressed on the row would reach the editor's
+    // deselect-the-clip cascade.
     await graph.focus()
+    await page.keyboard.press('End')
+    await expect(graph).toHaveAttribute('aria-activedescendant', /.+/)
     await page.keyboard.press('Escape')
+    await expect(graph).not.toHaveAttribute('aria-activedescendant', /.+/)
+    await expect(graph).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(opacity).toBeFocused()
   })

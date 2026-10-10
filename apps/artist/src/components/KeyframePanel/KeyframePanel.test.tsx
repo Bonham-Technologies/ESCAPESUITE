@@ -773,7 +773,7 @@ describe('KeyframePanel', () => {
       render(<KeyframePanel />)
 
       const group = screen.getByRole('group', { name: 'Animated properties' })
-      const names = within(group).getAllByRole('button').map((b) => b.getAttribute('aria-label'))
+      const names = within(group).getAllByRole('button').map((b) => b.textContent)
       expect(names).toEqual(ROWS)
       for (const b of within(group).getAllByRole('button')) expect(b).toHaveAttribute('type', 'button')
     })
@@ -939,17 +939,42 @@ describe('KeyframePanel', () => {
       expect(document.activeElement).toBe(document.body)
     })
 
-    it('focuses the graph only when a row opened it, not when a row closed it', async () => {
+    it('focuses the graph only when a keyboard activation opened it, not when one closed it', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+      expect(document.activeElement).toBe(screen.getByRole('listbox'))
+
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(document.activeElement).toBe(row('Opacity'))
+    })
+
+    it('opens the graph on a mouse click without moving focus into it', async () => {
       const user = userEvent.setup()
       openPanelWithClip()
       render(<KeyframePanel />)
 
       await user.click(row('Opacity'))
-      expect(document.activeElement).toBe(screen.getByRole('listbox'))
 
-      await user.click(row('Opacity'))
-      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+      expect(document.activeElement).not.toBe(screen.getByRole('listbox'))
       expect(document.activeElement).toBe(row('Opacity'))
+    })
+
+    it('does not move focus for a click anywhere else in the row either', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      fireEvent.click(measureTrackArea('Opacity'), { detail: 1 })
+
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+      expect(document.activeElement).toBe(document.body)
     })
 
     it('does not pull focus into the graph when it is opened some other way later', () => {
@@ -967,7 +992,8 @@ describe('KeyframePanel', () => {
       const user = userEvent.setup()
       openPanelWithClip()
       render(<KeyframePanel />)
-      await user.click(row('Opacity'))
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
       const windowKeys = vi.fn()
       window.addEventListener('keydown', windowKeys)
 
@@ -986,7 +1012,8 @@ describe('KeyframePanel', () => {
       openPanelWithClip()
       store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
       render(<KeyframePanel />)
-      await user.click(row('Opacity'))
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
       const svg = screen.getByRole('listbox')
       await user.keyboard('{End}')
       expect(svg.getAttribute('aria-activedescendant')).not.toBeNull()
@@ -997,6 +1024,21 @@ describe('KeyframePanel', () => {
 
       await user.keyboard('{Escape}')
       expect(document.activeElement).toBe(row('Opacity'))
+    })
+
+    it('Escape in a graph whose property has no row returns focus to the rows\' tab stop', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('volume')
+      render(<KeyframePanel />)
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+
+      screen.getByRole('listbox').focus()
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(document.activeElement).toBe(row('Position X'))
+      expect(windowKeys).not.toHaveBeenCalled()
     })
 
     it('names the panel\'s close buttons', () => {

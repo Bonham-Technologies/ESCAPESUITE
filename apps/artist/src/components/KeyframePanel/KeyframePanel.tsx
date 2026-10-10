@@ -139,8 +139,10 @@ export function KeyframePanel() {
   }, [selectedProperty]);
 
   // Handle property selection
-  const handlePropertySelect = useCallback((property: AnimatableProperty) => {
-    focusGraphOnOpenRef.current = selectedProperty !== property;
+  const handlePropertySelect = useCallback((property: AnimatableProperty, fromKeyboard: boolean) => {
+    // Keyboard activation only: after a pointer click the graph would own
+    // ArrowLeft/Right/Home/End and Enter, taking them from the playhead.
+    focusGraphOnOpenRef.current = fromKeyboard && selectedProperty !== property;
     setKeyframePanelSelectedProperty(
       selectedProperty === property ? null : property
     );
@@ -272,9 +274,9 @@ export function KeyframePanel() {
     if (e.key !== 'Escape') return;
     e.stopPropagation();
     tracksRef.current
-      ?.querySelector<HTMLElement>(`button[data-property="${selectedProperty}"]`)
+      ?.querySelector<HTMLElement>(`button[data-property="${tabStopProperty}"]`)
       ?.focus();
-  }, [selectedProperty]);
+  }, [tabStopProperty]);
 
   // The one live region every property row's diamond drag shares
   // (ESCSUITE-167 / M6, review round 1 MINOR 6): only one diamond on one row
@@ -409,7 +411,7 @@ export function KeyframePanel() {
                   currentTime={clipRelativeTime}
                   playheadTime={playheadTime}
                   isSelected={selectedProperty === property}
-                  onSelect={() => handlePropertySelect(property)}
+                  onSelect={(fromKeyboard) => handlePropertySelect(property, fromKeyboard)}
                   tabIndex={rowTabIndex(property)}
                   locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
@@ -435,7 +437,7 @@ export function KeyframePanel() {
                       currentTime={clipRelativeTime}
                       playheadTime={playheadTime}
                       isSelected={selectedProperty === property}
-                      onSelect={() => handlePropertySelect(property)}
+                      onSelect={(fromKeyboard) => handlePropertySelect(property, fromKeyboard)}
                       tabIndex={rowTabIndex(property)}
                       locked={trackLocked}
                       onKeyframeMoved={handleKeyframeMoved}
