@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.15.35
+
+### Patch Changes
+
+- b251da3: A webcam track whose thumbnail could not be saved is no longer reported as lost
+  
+  A webcam track whose thumbnail could not be written is still listed in the library (with the placeholder tile) and still deleted with its take, instead of being reported as lost while its bytes stayed in storage.
+
 ## 2.15.30
 
 ### Patch Changes
