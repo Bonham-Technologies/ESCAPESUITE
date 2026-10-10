@@ -28,7 +28,8 @@ interface FileMenuProps {
 /** One row of the dropdown. */
 interface FileMenuItem {
   label: string;
-  shortcut: string;
+  /** Only a chord the cascade binds (`BOUND_CHORDS`); absent when none is. */
+  shortcut?: string;
   run: () => void | Promise<void>;
   disabled: boolean;
   /** Draw the hairline rule above this item. */
@@ -81,7 +82,6 @@ export function FileMenu({
   const items: FileMenuItem[] = [
     {
       label: 'New Project',
-      shortcut: 'Ctrl+N',
       run: onNewProject,
       disabled: false,
       separatorBefore: false,
@@ -202,7 +202,7 @@ export function FileMenu({
                   disabled={item.disabled}
                 >
                   <span className={styles.menuItemLabel}>{item.label}</span>
-                  <span className={styles.menuItemShortcut}>{item.shortcut}</span>
+                  {item.shortcut && <span className={styles.menuItemShortcut}>{item.shortcut}</span>}
                 </button>
               </Fragment>
             ))}

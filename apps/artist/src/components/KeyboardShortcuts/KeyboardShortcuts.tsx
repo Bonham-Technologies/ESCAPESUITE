@@ -104,7 +104,6 @@ const shortcutGroups: ShortcutGroup[] = [
       { keys: ['Ctrl', 'S'], description: 'Save Project' },
       { keys: ['Ctrl', 'O'], description: 'Open Project' },
       { keys: ['Ctrl', 'E'], description: 'Export Video' },
-      { keys: ['Ctrl', 'N'], description: 'New Project' },
     ],
   },
 ];
