@@ -453,6 +453,7 @@ describe('useRecordingSave for a take with no picture', () => {
       width: 0,
       height: 0,
       frameRate: 0,
+      frameRateSource: 'assumed',
     })
     // The recorder's own clock, exactly as an audio companion's duration is —
     // there is no file to probe one out of.
@@ -477,6 +478,8 @@ describe('useRecordingSave for a take with no picture', () => {
     const stored = await getRecordingsMetadata()
     expect(stored[0].mediaType).toBe('video')
     expect(stored[0].frameRate).toBe(30)
+    // ESCSUITE-276: the rate the recorder captured at, labelled as such.
+    expect(stored[0].frameRateSource).toBe('configured')
   })
 })
 
