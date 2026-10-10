@@ -3502,6 +3502,59 @@ post acceptable (about one message per exported frame per source; at worst sever
 a second during a seek burst). `exportMP4.perf.test.ts` and every rerender pin are byte-identical.
 **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist`, `@escapesuite/craft` and `@escapesuite/shared` were re-measured 2026-10-10 for
+ESCSUITE-276 (an imported video's frame rate is measured at import — `core/frameRateProbe.ts` plays the
+element muted at half speed for up to eight `requestVideoFrameCallback` frames or 500 ms and reads the
+rate from the span of presented `mediaTime`s over the compositor's own `presentedFrames` count, snapped
+to the nearest standard rate within 1.5 % — and `SourceVideo.frameRateSource` says where the number came
+from: `'measured'`, `'assumed'` (the 30 a file whose rate could not be measured, a `.veditor` load or the
+CRAFT handoff still carries) or `'configured'` (the rate every ESCAPECRAFT capture is set to, from one
+`CAPTURE_FRAME_RATE`); the measured rate reaches ESCSUITE-263's seek window, so a 120 fps source gets a
+1/240 s window where the placeholder gave 1/60 s), each in one sitting against `main` at `2d938e16` (the
+ESCSUITE-263 version-packages commit). **Artist**: 99.83 / 99.36 / **96.38** / 99.75 against
+99.83 / 99.36 / 96.36 / 99.75 — branches up two hundredths, the other three unmoved. That base reads above
+the table row the ESCSUITE-227 paragraph recorded (99.82 / 99.34 / 96.29 / 99.70): the seven wave-4 and
+wave-5 branches — 264, 261, 273, 256, 243, 227 and 263 — each measured against `74bb3de9` and landed one
+after another, the drift ESCSUITE-91 and 113 recorded, with the uncovered counts falling
+15 / 63 / 211 / 6 → 14 / 62 / 209 / 5 along the way; the row is corrected here to the direct
+measurement. The base gives 5,542 / 5,751 branches and this branch 5,578 / 5,787: thirty-six new branches,
+thirty-six covered, the same 209 uncovered (lines 8,570 / 8,584 → 8,635 / 8,649, statements
+9,678 / 9,740 → 9,753 / 9,815, functions 2,050 / 2,055 → 2,058 / 2,063, every denominator growing by
+exactly what the numerator did; the same 14 / 62 / 5 uncovered). The thirty-six are
+`core/frameRateProbe.ts`'s thirty (30 / 30 on arrival: `rateFromMediaTimes`' fewer-than-three-frames,
+zero-span and backwards-spacing refusals, the `presentedFrames` present-or-absent choice and the refusal
+of a counter that advanced fewer times than there were callbacks, the per-spacing interval count it
+falls back to, `snapFrameRate`'s within-1.5 %-or-two-decimals choice, and `measureFrameRate`'s no-rVFC,
+play-refused, budget-first and frames-first arms) and `core/videoProcessor.ts`'s six (62 → 68: the
+decoded-a-picture gate on the probe and the `'measured'`-or-`'assumed'` spread in `extractVideoMetadata`)
+— each reached from both sides by `frameRateProbe.test.ts`'s cases (24 / 29.97 / 60 / 120 fps series,
+millisecond-rounded WebM stamps, one and several dropped frames, a doubled spacing on a busy run read from
+the counter and read as 30 without it, a counter that did not move, no rVFC, a play that rejects, the
+500 ms budget arriving first, a 60 Hz display reading 120 and 119.88) and `videoProcessor.test.ts`'s (a
+0×0 and a one-zero-dimension element stored 30 `'assumed'` with no probe, a probed element stored
+`'measured'`, two frames before the budget → `'assumed'`, the object URL revoked once after the probe,
+and `resolveStoredDuration` recovering a length with no probe). `core/projectManager.ts` gained four
+statements and no decision — the field carried through save and load, `'assumed'` where an old file has
+none. The first measurement of the branch, on its pre-rebase base `74bb3de9`, could not include
+`frameSource.measuredRate.test.ts` (it imports 263's `seekToleranceFor`); it is on the branch now and
+adds no unit to any denominator. **Craft**: 100.00 / 99.53 / 97.82 / 100.00, byte-identical on every
+percentage to the base: lines 2,399 → 2,400, statements 2,556 / 2,568 → 2,557 / 2,569, branches
+1,393 / 1,424 → 1,395 / 1,426 and functions 456 on both, the same 12 statements and 31 branches uncovered.
+The two new branches are `utils/recordingMetadata.ts`'s `'assumed'`-or-`'configured'` ternary (28 → 30),
+reached by the audio-only and the picture-bearing takes; `core/captureFrameRate.ts` is one constant, and
+its three readers (`permissions.ts`'s two `ideal` constraints, `compositor.ts`'s capture defaults and
+`webcodecs-recorder.ts`) swapped a literal for it with no new decision. **Shared**:
+100.00 / 98.67 / 92.20 / 100.00, identical on every count to the base (lines 281, statements 298 / 302,
+branches 142 / 154, functions 79), the change there being the optional `frameRateSource` type alone.
+Tests: artist 4,999 → 5,081, craft 1,379 → 1,380, shared 177 on both. The `App.*rerender*` pins and every
+`*.perf.test.ts` are byte-identical — the probe runs once per import, after the metadata load, and never
+on the handoff or the `.veditor` path. Four review rounds (opus) are in these numbers: the span estimator
+and the snap, the half-speed probe and its budget, the drop-tolerant count and then the
+`presentedFrames` counter, and the one under-read the counter could still have (a frame decoded too late
+to be presented), filed as ESCSUITE-278 beside the committed-fixtures pin ESCSUITE-277. **No floor
+crossed**; artist's floors stay 99 / 99 / 96 / 99, craft's 100 / 99 / 97 / 100 and shared's
+100 / 98 / 92 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3509,7 +3562,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.32 | 99.70 |
+| `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

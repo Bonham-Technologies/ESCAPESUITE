@@ -162,9 +162,10 @@ export class WebCodecsFrameSource implements IFrameSource {
  * (ESCSUITE-263). The rate is floored at 30 because the export asks for frames
  * 1/30 s apart: below 15 fps a half-frame window would be wider than that spacing
  * and serve the previous frame across a boundary. A rate that is missing or not
- * finite and positive counts as 30 too — which is also what every stored
- * `SourceVideo.frameRate` is today (a placeholder; detecting the real one at
- * import is a follow-up).
+ * finite and positive counts as 30 too. An imported video's rate is measured
+ * at import (ESCSUITE-276, `frameRateSource: 'measured'`); a rate the probe
+ * could not measure, an ESCAPECRAFT take (`'configured'`) and every source
+ * imported before then carry 30, so they get the 1/60 s window.
  */
 export function seekToleranceFor(frameRate: number | undefined): number {
   const rate = frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30;

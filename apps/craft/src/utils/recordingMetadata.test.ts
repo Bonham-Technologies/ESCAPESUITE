@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildSourceVideo, buildRecordingEntry, resolveHasAudio } from './recordingMetadata'
+import { CAPTURE_FRAME_RATE } from '../core/captureFrameRate'
 
 describe('buildSourceVideo', () => {
   it('builds the SourceVideo literal from the blob and caller-supplied duration', () => {
@@ -24,6 +25,7 @@ describe('buildSourceVideo', () => {
       width: 1280,
       height: 720,
       frameRate: 30,
+      frameRateSource: 'configured',
       mimeType: 'video/webm',
       size: blob.size,
       mediaType: 'video',
@@ -32,6 +34,27 @@ describe('buildSourceVideo', () => {
       hasAudio: true,
       hasWebcam: false,
     })
+  })
+
+  // ESCSUITE-276. A take's rate is the one its recorder was configured to
+  // capture at — the same constant the capture constraints, the compositor and
+  // the WebCodecs encoder read — and is labelled as such, so ESCAPEARTIST can
+  // tell it from a rate it measured or one nothing knew.
+  it('writes the rate the recorder was configured to capture at, labelled configured', () => {
+    const sourceVideo = buildSourceVideo({
+      id: 'rec-rate',
+      now: 0,
+      blob: new Blob(['screen'], { type: 'video/webm' }),
+      duration: 6,
+      width: 1920,
+      height: 1080,
+      hasAudio: false,
+      hasWebcam: false,
+    })
+
+    expect(CAPTURE_FRAME_RATE).toBe(30)
+    expect(sourceVideo.frameRate).toBe(CAPTURE_FRAME_RATE)
+    expect(sourceVideo.frameRateSource).toBe('configured')
   })
 
   // ESCSUITE-60. The stored metadata is the only record of the take that
@@ -279,6 +302,7 @@ describe('buildSourceVideo for an audio companion', () => {
     expect(sourceVideo).toMatchObject({
       mediaType: 'audio',
       frameRate: 0,
+      frameRateSource: 'assumed',
       width: 0,
       height: 0,
       mimeType: 'audio/webm',
@@ -327,8 +351,10 @@ describe('buildSourceVideo for an audio companion', () => {
 
     expect(webcam.mediaType).toBe('video')
     expect(webcam.frameRate).toBe(30)
+    expect(webcam.frameRateSource).toBe('configured')
     expect(primary.mediaType).toBe('video')
     expect(primary.frameRate).toBe(30)
+    expect(primary.frameRateSource).toBe('configured')
   })
 })
 
@@ -352,6 +378,7 @@ describe('buildSourceVideo for a take with no picture', () => {
 
     expect(sourceVideo.mediaType).toBe('audio')
     expect(sourceVideo.frameRate).toBe(0)
+    expect(sourceVideo.frameRateSource).toBe('assumed')
     // No role at all — a plain take's primary never has one — and the take is
     // still named the same way a plain take's primary always is.
     expect('role' in sourceVideo).toBe(false)

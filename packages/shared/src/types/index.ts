@@ -29,6 +29,9 @@ export interface WaveformPeak {
  */
 export type RecordingRole = 'screen' | 'webcam' | 'mic' | 'system'
 
+/** Where a `SourceVideo.frameRate` came from. See that field. */
+export type FrameRateSource = 'measured' | 'assumed' | 'configured'
+
 /**
  * Where the webcam overlay sat while a take was recorded — written on the
  * take's primary part only.
@@ -61,7 +64,21 @@ export interface SourceVideo {
   duration: number
   width: number
   height: number
+  /**
+   * Frames per second. 0 for audio, 1 for a still image. How much to trust it
+   * is `frameRateSource`.
+   */
   frameRate: number
+  /**
+   * Where `frameRate` came from (ESCSUITE-276): `'measured'` from the file's
+   * own presented frames at import (ESCAPEARTIST), `'configured'` from the
+   * rate the recorder was configured to capture at (ESCAPECRAFT — an `ideal`
+   * constraint, so a capture can deliver fewer), `'assumed'` for a fallback
+   * value nothing measured — 30 for a video, 1 for an image, 0 for audio.
+   * Absent on every record written before the field existed, which reads the
+   * same as `'assumed'`: its rate was always a placeholder.
+   */
+  frameRateSource?: FrameRateSource
   mimeType: string
   size: number
   thumbnailUrl?: string
