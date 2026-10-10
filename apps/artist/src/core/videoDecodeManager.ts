@@ -51,9 +51,15 @@ export type ErrorCallback = (error: string, fatal: boolean) => void;
  * out-of-memory kill of a dedicated worker, say — is not guaranteed to fire
  * `error` on this thread, and the worker's own stall bound (5 s,
  * `workers/frameDecoder.ts`) dies with it, so without this an MP4 export
- * waited forever at the frame it was on. Fifteen seconds is generous, and three
- * times the worker's own bound, so the two cannot race: while the worker is
- * alive its own stall error always arrives first, with its own reason.
+ * waited forever at the frame it was on. Fifteen seconds is generous, but the
+ * two bounds answer different questions and can disagree: the worker's is per
+ * stall (it resets on every decoder output and fires only after 5 s with no
+ * progress at all), while this one is the request's total age. A live worker
+ * still making progress on one request — a long keyframe gap on a slow
+ * machine, a transition of a clip onto itself bouncing one decoder between two
+ * positions — can pass 15 s, and is then treated as dead: every source falls
+ * back to `<video>`, so the export finishes slower and in the page, but it
+ * finishes. A deadline that resets on worker progress is ESCSUITE-272.
  */
 export const FRAME_REQUEST_DEADLINE_MS = 15_000;
 
@@ -385,10 +391,12 @@ export class VideoDecodeManager {
    * @param onProgress - Optional progress callback
    * @returns Promise resolving to source info when ready
    *
-   * Unlike a frame request this has no deadline of its own (ESCSUITE-266): a
-   * legitimate load of a large file can take long, and a worker that dies
-   * during one is caught by the deadline of the first frame request after it
-   * — whose expiry rejects every load still in flight, this one included.
+   * Unlike a frame request this has no deadline (ESCSUITE-266), and that is a
+   * gap: `exportMP4.ts` awaits every source load before its frame loop makes a
+   * single frame request, so a worker killed mid-load — where its memory use
+   * peaks and an out-of-memory kill is likeliest — leaves the export waiting
+   * forever. A load deadline scaled to the file's size, running the same
+   * terminate path, is ESCSUITE-273.
    */
   async loadSource(
     sourceId: string,
