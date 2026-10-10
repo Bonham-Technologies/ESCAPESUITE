@@ -3320,6 +3320,32 @@ moved to the `×` form and ran on Chromium (6 / 6, twice). `ClipEditor.rerender.
 `*.perf.test.ts` are byte-identical — the draft text is local state with no store subscription. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-243 (the keyframe panel works from the
+keyboard: each animated-property row's label cell is a `<button>` with `aria-pressed` and a roving
+`tabIndex` in a group named "Animated properties" — the diamond track and the value cell stay
+siblings outside it — ArrowUp / ArrowDown / Home / End move between rows through ESCSUITE-216's
+`nextMenuIndex`, keyboard activation moves focus into the graph while a mouse click does not
+(`event.detail === 0`), Escape returns focus to the row, and the close and play buttons have names):
+**99.83** / **99.35** / **96.28** / **99.75** against the 99.82 / 99.34 / 96.27 / 99.70 that `main` at
+`74bb3de9` measures in the same sitting — every figure up, and with fewer uncovered units on three of
+the four: the base gives 5,452 / 5,663 branches and this branch 5,473 / 5,684, twenty-one new
+branches, twenty-one covered, the same 211 uncovered; lines 8,432 / 8,447 → 8,459 / 8,473 with
+15 → 14 uncovered, statements 9,519 / 9,582 → 9,551 / 9,613 with 63 → 62, and functions
+2,012 / 2,018 → 2,020 / 2,025 with 6 → 5. The twenty-one are `components/KeyframePanel/KeyframePanel.tsx`'s
+nineteen (44 / 54 → 63 / 73: the roving index, the open-row `aria-pressed`, the four arrow / Home /
+End arms, the keyboard-versus-mouse activation choice, the Escape return and the graph-region key
+gate) and `ClipPreview.tsx`'s two (12 / 14 → 14 / 16, the play / pause name by state), each reached
+from both sides by the thirty-two cases that were red across the two rounds; `KeyframeTrack.tsx`'s
+label button adds a line and a function and no decision. The three pre-existing units newly reached
+— a line, a statement and a function in `KeyframePanel.tsx` — are the audio Volume row's `onSelect`
+arrow and the Escape arm, driven by the coverage round's two cases (the first measurement had found
+them as this branch's own two unreached units, which they turned out not to be). Two review rounds
+(opus, then a scoped sonnet) moved the button from the whole row to its label cell. Outside vitest's
+measurement, the new axe-and-keyboard case in `keyboard-navigation.spec.ts` and `core.spec.ts`'s
+keyframe case ran 2 / 2 on Chromium on fresh dev servers. `App.*rerender*`,
+`keyframeGestures.perf.test.ts` and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
+artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3327,7 +3353,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.28 | 99.70 |
+| `@escapesuite/artist` | 99.83 | 99.35 | 96.28 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
