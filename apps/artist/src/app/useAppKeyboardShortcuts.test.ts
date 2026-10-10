@@ -16,6 +16,7 @@ import {
   useAppKeyboardShortcuts,
   isTextEntryTarget,
   BOUND_SINGLE_KEYS,
+  BOUND_CHORDS,
   type AppKeyboardShortcutsDeps,
 } from './useAppKeyboardShortcuts'
 import { useEditorStore } from '../store/projectStore'
@@ -304,6 +305,19 @@ describe('the key table the shortcut sheet is pinned to', () => {
   it.each([...BOUND_SINGLE_KEYS])('%s is claimed by the cascade', (key) => {
     mountShortcuts({ selectedClipId: 'clip-1', selectedClipIds: new Set(['clip-1']) })
     expect(press(key)).toBe(false)
+  })
+})
+
+describe('the chord table the sheet and the File menu are pinned to', () => {
+  it.each([...BOUND_CHORDS])('Ctrl+$key (shift: $shift) is claimed by the cascade', (chord) => {
+    mountShortcuts({ selectedClipId: 'clip-1', selectedClipIds: new Set(['clip-1']), clipboard: [clip] })
+    expect(press(chord.key, { ctrlKey: true, shiftKey: chord.shift })).toBe(false)
+  })
+
+  it('does not claim Ctrl+N, which the browser keeps for a new window', () => {
+    mountShortcuts({ selectedClipId: 'clip-1', selectedClipIds: new Set(['clip-1']), clipboard: [clip] })
+    expect(press('n', { ctrlKey: true })).toBe(true)
+    expect(BOUND_CHORDS.some((c) => c.key === 'n')).toBe(false)
   })
 })
 

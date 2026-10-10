@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import styles from './KeyboardShortcuts.module.css'
-import { BOUND_SINGLE_KEYS } from '../../app/useAppKeyboardShortcuts'
+import { BOUND_SINGLE_KEYS, BOUND_CHORDS } from '../../app/useAppKeyboardShortcuts'
 import { TRANSPORT_KEYS } from '../Preview/transportKeys'
 
 describe('KeyboardShortcuts', () => {
@@ -265,6 +265,22 @@ describe('KeyboardShortcuts matches the keys the app binds', () => {
         if (keys.length === 1 && !bound.has(keys[0].toLowerCase())) unbound.push(keys[0])
       }
     }
+    expect(unbound).toEqual([])
+  })
+
+  it('every Ctrl chord row is bound by the cascade (ESCSUITE-269)', () => {
+    render(<KeyboardShortcuts isOpen={true} onClose={vi.fn()} />)
+    const bound = new Set(BOUND_CHORDS.map((c) => `${c.key}${c.shift ? '+shift' : ''}`))
+    const chordRows: string[] = []
+    const unbound: string[] = []
+    for (const row of Array.from(document.querySelectorAll(`.${styles.shortcutRow}`))) {
+      const keys = Array.from(row.querySelectorAll('kbd')).map((k) => k.textContent ?? '')
+      if (keys[0] !== 'Ctrl') continue
+      const id = `${keys[keys.length - 1].toLowerCase()}${keys.includes('Shift') ? '+shift' : ''}`
+      chordRows.push(id)
+      if (!bound.has(id)) unbound.push(keys.join('+'))
+    }
+    expect(chordRows.length).toBeGreaterThan(5)
     expect(unbound).toEqual([])
   })
 })

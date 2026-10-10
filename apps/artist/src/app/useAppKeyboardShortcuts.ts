@@ -65,6 +65,29 @@ export const BOUND_SINGLE_KEYS: readonly string[] = [
   'v', 'c', 'b', 's', 'k', 'm', 'i', 'o', '+', '=', '-', '?', 'Delete', 'Backspace', 'Escape',
 ];
 
+/**
+ * Every Ctrl/Cmd chord this cascade binds: the letter as `e.key.toLowerCase()`
+ * reports it, and whether Shift is part of the chord (redo has two spellings,
+ * Ctrl+Y and Ctrl+Shift+Z). The shortcut sheet's Ctrl rows and the File menu's
+ * hints are pinned against this list, so a chord cannot be shown without being
+ * bound (ESCSUITE-269: Ctrl+N was shown for ten sweeps and the browser keeps it
+ * for a new window). Nothing enumerates the cascade's arms, so add a chord here
+ * when you bind one — and never one the browser reserves (N, T, W).
+ */
+export const BOUND_CHORDS: readonly { readonly key: string; readonly shift: boolean }[] = [
+  { key: 'z', shift: false },
+  { key: 'z', shift: true },
+  { key: 'y', shift: false },
+  { key: 'c', shift: false },
+  { key: 'v', shift: false },
+  { key: 'd', shift: false },
+  { key: 's', shift: false },
+  { key: 'o', shift: false },
+  { key: 'e', shift: false },
+  { key: 'b', shift: false },
+  { key: 'm', shift: false },
+];
+
 /** Everything the cascade reads or calls. */
 export interface AppKeyboardShortcutsDeps {
   canUndo: () => boolean;

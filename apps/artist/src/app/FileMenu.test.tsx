@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { FileMenu } from './FileMenu';
 import styles from '../App.module.css';
+import { BOUND_CHORDS } from './useAppKeyboardShortcuts';
 
 function renderMenu(overrides: Partial<ComponentProps<typeof FileMenu>> = {}) {
   const props = {
@@ -50,10 +51,25 @@ describe('FileMenu', () => {
   it('labels each item with its keyboard shortcut', () => {
     renderMenu();
 
-    expect(screen.getByText('Ctrl+N')).toBeInTheDocument();
+    expect(screen.queryByText('Ctrl+N')).not.toBeInTheDocument();
     expect(screen.getByText('Ctrl+O')).toBeInTheDocument();
     expect(screen.getByText('Ctrl+S')).toBeInTheDocument();
     expect(screen.getByText('Ctrl+E')).toBeInTheDocument();
+  });
+
+  it('every shortcut hint it shows is a chord the cascade binds (ESCSUITE-269)', () => {
+    renderMenu();
+
+    const hints = Array.from(document.querySelectorAll(`.${styles.menuItemShortcut}`)).map(
+      (el) => el.textContent ?? '',
+    );
+    expect(hints.length).toBeGreaterThan(0);
+    for (const hint of hints) {
+      const parts = hint.split('+');
+      expect(parts[0]).toBe('Ctrl');
+      const chord = { key: parts[parts.length - 1].toLowerCase(), shift: parts.includes('Shift') };
+      expect(BOUND_CHORDS).toContainEqual(chord);
+    }
   });
 
   it('asks to be toggled when the File button is pressed', async () => {
@@ -136,7 +152,7 @@ describe('FileMenu as a real menu (ESCSUITE-216)', () => {
 
     const menu = screen.getByRole('menu', { name: 'File options' });
     expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-      'New ProjectCtrl+N',
+      'New Project',
       'Open Project...Ctrl+O',
       'Save ProjectCtrl+S',
       'Export Video...Ctrl+E',
