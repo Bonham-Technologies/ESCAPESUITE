@@ -670,6 +670,29 @@ describe('VideoDecodeManager', () => {
       for (const request of requests) await expect(request).rejects.toThrow('Decode worker failed: Worker crashed');
     });
 
+    // Fix round 2, MINOR 5: a source still loading is waited on too.
+    it('rejects a source load in flight on an error', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const load = manager.loadSource('a', new ArrayBuffer(8), 'video/mp4');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      mockWorkerInstance!.simulateError('Worker crashed');
+
+      await expect(load).rejects.toThrow('Decode worker failed: Worker crashed');
+    });
+
+    it('rejects a source load in flight on a messageerror', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const load = manager.loadSource('a', new ArrayBuffer(8), 'video/mp4');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      mockWorkerInstance!.simulateMessageError();
+
+      await expect(load).rejects.toThrow('Decode worker failed: received an unparseable message');
+    });
+
     it('rejects every pending request on a messageerror', async () => {
       const manager = new VideoDecodeManager();
       await manager.initialize();
