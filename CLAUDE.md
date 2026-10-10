@@ -2882,6 +2882,50 @@ MEDIUM (a duplicated changeset sentence) and MINOR (the section button not gated
 are in these numbers. GIF's own frame-count guard, the export and preview `*.perf.test.ts` files and
 every rerender pin are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-254 (the MP4 decode worker decodes — it
+had never decoded a frame, because mp4box's extraction was armed after `appendBuffer` had already
+parsed the whole file, so every source threw "No keyframes found", every export silently fell back to
+the in-page `<video>` decoder and the background-tab promise had never held; the worker now arms
+extraction inside `onReady`, honours the edit list, sends the real codec string and avcC record, passes
+the display matrix as `rotation`, hands a `colr`-only colour description to the decoder and guesses
+BT.601/709 only for an untagged stream, refuses non-H.264, non-square pixels, an avcC with no SPS, a
+mirrored or scaled matrix and a `colr` that disagrees with the bitstream to `<video>`, runs behind a
+main-thread allow-list of the two engines whose parity with `<video>` was measured — Chromium and
+Firefox — hands a failing source alone to `<video>` mid-export with a once-per-export notice, and holds
+every sample under a per-export 512 MB budget): 99.81 / **99.31** / **96.09** / **99.69** against the
+99.81 / 99.28 / 95.87 / 99.68 that `main` at `89677418` measures in the same sitting (the direct base
+the ESCSUITE-257 paragraph above corrected the row to) — statements up three hundredths, branches up
+twenty-two, functions up one, lines unmoved. The base gives 5,071 / 5,289 branches and this branch
+5,292 / 5,507: 218 new branches, 221 more covered, so the uncovered column falls 218 → 215 (lines
+7,891 / 7,906 → 8,259 / 8,274, statements 8,909 / 8,973 → 9,324 / 9,388, functions 1,903 / 1,909 →
+1,973 / 1,979, every denominator growing by exactly what the numerator did; the same 15 / 64 / 6
+uncovered). The 218 are the five new modules at 100 — `workers/mp4Demux.ts` 78 / 78 (the `onReady`
+arming, the `nb_samples` completion and its bounded wait, the edit list, the codec, SAR, SPS and
+`colr`-agreement refusals), `workers/avcConfig.ts` 51 / 51 (the avcC and SPS VUI readers),
+`workers/decoderConfig.ts` 16 / 16 (the rotation echo, the three-shape colour rule), `workers/frameDecoder.ts`
+50 / 50 (every request settles, the 5 s stall bound from both sides, frames created == closed) and
+`core/workerDecodeEngine.ts` 6 / 6 (Chromium by `userAgentData.brands`, Firefox by UA, default false) —
+plus `core/frameSource.ts` 32 / 34 → 46 / 47 (the allow-list before `arrayBuffer()`, the per-source
+handover and its `onFallback`, the budget, the failed-fallback dispose that no longer rethrows; one
+pre-existing arm newly reached), `core/videoDecodeManager.ts` 55 / 66 → 59 / 68 (the post-ready
+`error` / `messageerror` rejecting pending requests and the in-flight load, orphan frames closed; two
+pre-existing arms newly reached) and `core/exportMP4.ts` 126 / 143 → 128 / 145 (the once-per-export
+notice; the same seventeen pre-existing arms uncovered). `src/workers/decodeWorker.ts` stays
+coverage-excluded — its behaviour lives in `apps/e2e/tests/export/decode-worker.spec.ts`, nine cases
+that export a real video project through the worker and compare it with the same project exported with
+`Worker` forced off: Chromium 153 MAD 0.000–0.486 of 255 across untagged, BT.709-tagged 480p, full-range,
+matrix-only and two `colr`-only sources at frames 0, 25, 41 and last plus a trimmed clip, rotation
+through all four quarter turns, identical over three runs; Firefox 155 0.336–0.920 on the round-1
+cases; WebKit 26.6 4.46–17.45 apart and therefore not admitted. Three review rounds (one full opus
+review, two scoped) put the allow-list, the colour rule, the per-source handover and the refusals there;
+the deliberate breakages that set the 1.5 tolerance measured 3.70 (the BT.709 mismatch) and 77.1 (the
+edit list ignored). `exportMP4.perf.test.ts`, `drawFrame.perf.test.ts`, every rerender pin and
+`perfScene.ts` are byte-identical; `exportMP4.decodeFrameLeak.test.ts` gains one `vi.mock` line because
+jsdom's user agent is not on the allow-list, and for the first time its created-equals-closed law counts
+decoded frames. **Branches cross a whole percent, so artist's branches floor goes 95 → 96** in
+`apps/artist/vite.config.ts` and `scripts/coverage-report.mjs` — a floor is the achieved coverage rounded
+down; artist's floors are now 99 / 99 / **96** / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2889,7 +2933,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.80 | 100.00 |
-| `@escapesuite/artist` | 99.81 | 99.28 | 95.92 | 99.68 |
+| `@escapesuite/artist` | 99.81 | 99.31 | 96.09 | 99.69 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
