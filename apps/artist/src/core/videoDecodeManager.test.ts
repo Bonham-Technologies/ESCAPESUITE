@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  FRAME_REQUEST_DEADLINE_MS,
   VideoDecodeManager,
   getVideoDecodeManager,
   resetVideoDecodeManager,
@@ -704,6 +705,145 @@ describe('VideoDecodeManager', () => {
       for (const request of requests) {
         await expect(request).rejects.toThrow('Decode worker failed: received an unparseable message');
       }
+    });
+  });
+
+  // ESCSUITE-266: a worker the browser kills outright (an out-of-memory kill
+  // of a dedicated worker, say) may fire neither `error` nor `messageerror`,
+  // and the worker's own 5 s stall bound dies with it — so a frame request it
+  // never answers used to leave the export waiting forever. Each request now
+  // has a main-thread deadline; missing it fails that request and, the worker
+  // presumed dead, everything else in flight with it.
+  describe('a frame request the worker never answers (ESCSUITE-266)', () => {
+    const DEADLINE_REASON = 'Decode worker did not answer within 15 s for a';
+
+    /** A ready manager under fake timers, with the worker's terminate() spied on. */
+    async function readyManager() {
+      vi.useFakeTimers();
+      const manager = new VideoDecodeManager();
+      const init = manager.initialize();
+      await vi.advanceTimersByTimeAsync(0);
+      await init;
+      const terminate = vi.spyOn(mockWorkerInstance!, 'terminate');
+      return { manager, terminate };
+    }
+
+    /** What a promise has settled to so far: 'pending', the value, or the error. */
+    function track<T>(promise: Promise<T>) {
+      const state: { outcome: unknown } = { outcome: 'pending' };
+      promise.then(
+        (value) => { state.outcome = value; },
+        (error: unknown) => { state.outcome = error; }
+      );
+      return state;
+    }
+
+    it('is fifteen seconds, three times the worker\'s own 5 s stall bound', () => {
+      expect(FRAME_REQUEST_DEADLINE_MS).toBe(15_000);
+    });
+
+    it('rejects the request at 15 s with the named reason, and terminates the worker', async () => {
+      const { manager, terminate } = await readyManager();
+      const request = track(manager.getFrame('a', 0.5));
+
+      await vi.advanceTimersByTimeAsync(14_999);
+      expect(request.outcome).toBe('pending');
+      expect(terminate).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1);
+      expect(request.outcome).toBeInstanceOf(Error);
+      expect((request.outcome as Error).message).toBe(DEADLINE_REASON);
+      expect(terminate).toHaveBeenCalledTimes(1);
+      // As after any terminate: not ready, and a later request is refused
+      // rather than sent to a worker that is gone.
+      expect(manager.ready).toBe(false);
+      await expect(manager.getFrame('a', 0.6)).rejects.toThrow('Manager not initialized');
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it("fails every other source's request, and a source load, at once with the deadline's reason", async () => {
+      const { manager } = await readyManager();
+      const fromA = track(manager.getFrame('a', 0.5));
+      await vi.advanceTimersByTimeAsync(5_000);
+      const fromB = track(manager.getFrame('b', 0.5));
+      const load = track(manager.loadSource('c', new ArrayBuffer(8), 'video/mp4'));
+      await vi.advanceTimersByTimeAsync(0);
+
+      // A's deadline, 10 s into B's own: B does not wait out its own 15 s.
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      for (const settled of [fromA, fromB, load]) {
+        expect(settled.outcome).toBeInstanceOf(Error);
+        expect((settled.outcome as Error).message).toBe(DEADLINE_REASON);
+      }
+      // B's own timer went with it: nothing fires at 20 s.
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('clears the deadline of a request answered at 14.9 s: no late rejection, no terminate', async () => {
+      const { manager, terminate } = await readyManager();
+      const request = track(manager.getFrame('a', 0.5));
+      await vi.advanceTimersByTimeAsync(14_900);
+
+      const answer = { close: vi.fn() } as unknown as VideoFrame;
+      mockWorkerInstance!.simulateMessage({ type: 'FRAME_READY', requestId: 1, sourceId: 'a', timestamp: 0.5, frame: answer });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(request.outcome).toBe(answer);
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(FRAME_REQUEST_DEADLINE_MS);
+      expect(request.outcome).toBe(answer);
+      expect(terminate).not.toHaveBeenCalled();
+      expect(manager.ready).toBe(true);
+    });
+
+    it("clears the deadline of a request the worker answers with an error", async () => {
+      const { manager, terminate } = await readyManager();
+      const request = track(manager.getFrame('a', 0.5));
+
+      mockWorkerInstance!.simulateMessage({ type: 'ERROR', requestId: 1, sourceId: 'a', error: 'Decoder stalled: no output for 5000ms', fatal: false });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((request.outcome as Error).message).toBe('Decoder stalled: no output for 5000ms');
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(FRAME_REQUEST_DEADLINE_MS);
+      expect(terminate).not.toHaveBeenCalled();
+    });
+
+    it("clears the deadline of a request its source's dispose cancels", async () => {
+      const { manager, terminate } = await readyManager();
+      const request = track(manager.getFrame('a', 0.5));
+
+      const disposed = manager.disposeSource('a');
+      await vi.advanceTimersByTimeAsync(50);
+      await disposed;
+
+      expect((request.outcome as Error).message).toBe('Source disposed');
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(FRAME_REQUEST_DEADLINE_MS);
+      expect(terminate).not.toHaveBeenCalled();
+    });
+
+    it('clears the deadlines of the requests a worker error rejects', async () => {
+      const { manager } = await readyManager();
+      const requests = [track(manager.getFrame('a', 0.5)), track(manager.getFrame('b', 0.5))];
+
+      mockWorkerInstance!.simulateError('Worker crashed');
+      await vi.advanceTimersByTimeAsync(0);
+
+      for (const request of requests) expect((request.outcome as Error).message).toBe('Decode worker failed: Worker crashed');
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('clears the deadline of a request terminate() rejects', async () => {
+      const { manager } = await readyManager();
+      const request = track(manager.getFrame('a', 0.5));
+
+      manager.terminate();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect((request.outcome as Error).message).toBe('Manager terminated');
+      expect(vi.getTimerCount()).toBe(0);
     });
   });
 
