@@ -370,7 +370,14 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
   `serve-dist.test.mjs`'s drift-guard test are the regression coverage, proving a genuine miss
   reaches `dist/404.html` with a real 404 instead of the hub SPA or a plain-text fallback. That
   is the only setup where CRAFT (`/craft/`) and ARTIST (`/artist/`) share `video-editor-db`,
-  so the cross-app IndexedDB tests live there: `pnpm build:deploy && pnpm test:e2e:production`
+  so the cross-app IndexedDB tests live there: `pnpm build:deploy && pnpm test:e2e:production`.
+  ESCSUITE-234: `vercel.json`'s `redirects` precede its `rewrites` (and the filesystem), and
+  `serve-dist.mjs` derives them the same way (308 for the bare paths, query string kept). `/craft` and `/artist` redirect
+  to the slashed document instead of being rewritten to it, because the single-file bundle resolves
+  its worker chunk against the document URL; a deep extensionless path (`/artist/foo/`) redirects to
+  the one document too (temporary, 307, so no browser caches it and a future real sub-route stays reachable), since neither app has client-side routes. Paths ending in a file extension
+  are excluded so `/artist/decodeWorker-<hash>.js` is still served as itself
+  (`tests/production/slashless-redirect.spec.ts`).
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.

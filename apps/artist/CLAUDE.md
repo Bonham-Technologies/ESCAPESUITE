@@ -693,7 +693,9 @@ skips there.
   predicate. ESCSUITE-153: before this, only `VITE_HEADLESS` was checked, so the standalone build
   shipped `dist/index.html` plus a second, un-inlined `decodeWorker-*.js` that
   `standalone-release.yml` never attaches to the release — a downloaded build's MP4 export had no
-  worker file to start at all. `singleFileBuild.js` is plain JS, not TypeScript, with a
+  worker file to start at all. The hosted worker chunk resolves against the document URL, so the
+  document must be `/artist/`: ESCSUITE-234 made `vercel.json` redirect `/artist` (308) instead of
+  rewriting it, where the slashless URL fetched `/decodeWorker-<hash>.js` from the hub. `singleFileBuild.js` is plain JS, not TypeScript, with a
   hand-written `singleFileBuild.d.ts` beside it: `vite.config.ts` is type-checked under
   `tsconfig.node.json`, which lacks `allowImportingTsExtensions`, so a `.ts`-suffixed import from
   it fails `tsc -b` (TS5097) — and an extensionless import instead trips Vite's

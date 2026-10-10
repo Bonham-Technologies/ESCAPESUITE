@@ -19,18 +19,16 @@
       ]
     }
   ],
+  "redirects": [
+    { "source": "/craft", "destination": "/craft/", "permanent": true },
+    { "source": "/craft/((?!.*\\.[A-Za-z0-9]+$).+)", "destination": "/craft/", "permanent": false },
+    { "source": "/artist", "destination": "/artist/", "permanent": true },
+    { "source": "/artist/((?!.*\\.[A-Za-z0-9]+$).+)", "destination": "/artist/", "permanent": false }
+  ],
   "rewrites": [
-    {
-      "source": "/craft",
-      "destination": "/craft/index.html"
-    },
     {
       "source": "/craft/(.*)",
       "destination": "/craft/index.html"
-    },
-    {
-      "source": "/artist",
-      "destination": "/artist/index.html"
     },
     {
       "source": "/artist/(.*)",
