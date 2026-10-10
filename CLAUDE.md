@@ -2933,13 +2933,39 @@ decoded frames. **Branches cross a whole percent, so artist's branches floor goe
 `apps/artist/vite.config.ts` and `scripts/coverage-report.mjs` — a floor is the achieved coverage rounded
 down; artist's floors are now 99 / 99 / **96** / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-10 for ESCSUITE-224 (a separate-tracks companion
+whose bytes were stored but whose thumbnail write rejected — a quota error, most likely, since the
+thumbnail is written right after the multi-MB video — is now listed in the library with the
+placeholder tile and deleted with its take, instead of being reported as "could not be saved"
+while its bytes stayed in storage and a later delete cascaded past it; the companion's
+`storeThumbnail` sits in its own `try/catch`, warned once per track, the ESCSUITE-107 shape the
+primary already had, and `SEPARATE_TRACK_NOT_SAVED` is reserved for a part whose *video* write,
+metadata probe or record build failed): 100.00 / 99.53 / 97.82 / 100.00, byte-identical on every
+percentage to the 100.00 / 99.53 / 97.82 / 100.00 that `main` at `89bb28d3` (the ESCSUITE-257
+version-packages commit) measures in the same sitting. That base reads two hundredths above the
+97.80 the ESCSUITE-221 paragraph recorded from its own tree — Istanbul drift of the kind
+ESCSUITE-91 and 113 noted, on the same 31 uncovered arms — and the row is corrected to the direct
+measurement. Lines 2,395 → 2,399 and statements 2,553 / 2,565 → 2,556 / 2,568, every new unit
+covered; branches 1,393 / 1,424 on both trees and functions 456 on both — the change adds no
+decision, because a `try` / `catch` is statements to Istanbul, as the primary's own thumbnail
+guard was in ESCSUITE-107 — and the same 12 statements and 31 branches uncovered, in the same
+four files. The four new lines are all `hooks/useRecordingSave.ts`'s (53 → 57): the guarded
+write and its `console.warn`, reached by the red case (a webcam companion whose thumbnail write
+rejects with a `QuotaExceededError`-shaped `DOMException` → the row added with no `thumbnailUrl`,
+`storeVideo` called for it, no notice, one warning naming the webcam track — selected by the
+companion's id rather than by call order after the review's one MINOR) against the ordinary
+companion save; the mirror (its `storeVideo` rejects → not listed, notice raised), the audio
+companion (no thumbnail at all) and the cascade delete over a thumbnail-failed companion were
+green on arrival and are kept as pins. The `App.*rerender*` pins and every `*.perf.test.ts` are
+byte-identical. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.53 | 97.80 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
 | `@escapesuite/artist` | 99.81 | 99.31 | 96.09 | 99.69 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
