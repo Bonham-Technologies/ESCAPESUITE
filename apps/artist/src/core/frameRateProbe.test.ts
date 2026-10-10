@@ -244,9 +244,10 @@ describe('measureFrameRate', () => {
     v.el.currentTime = 12.5
     v.seeks.length = 0
     const atPlay: number[] = []
-    v.play.mockImplementationOnce(function (this: unknown) {
+    const play = v.play.getMockImplementation() as () => Promise<void>
+    v.play.mockImplementationOnce(() => {
       atPlay.push(v.el.currentTime)
-      return v.play.getMockImplementation()!.call(this)
+      return play()
     })
 
     await measureFrameRate(v.el, FRAME_RATE_PROBE)
