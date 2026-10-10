@@ -1,7 +1,7 @@
 // The host integration surface: the inbound postMessage handler and the
 // startup work the URL parameters ask for.
 //
-// Its effect is the editor's **sixth and last**, so `App` calls this hook
+// Its effect is the editor's **seventh and last**, so `App` calls this hook
 // ninth.
 //
 // The deps array is `[]` — mount-only — even though the effect closes over

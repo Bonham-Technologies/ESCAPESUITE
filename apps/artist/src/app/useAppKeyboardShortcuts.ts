@@ -12,7 +12,8 @@
 // (`components/Preview/PlaybackControls.tsx`) carries the same gate, because
 // Space and the arrows live there rather than here.
 //
-// Its effect is the editor's **fourth**, so `App` calls this hook seventh.
+// Its effect is the editor's **fifth** (the autosave binds the third and the
+// fourth), so `App` calls this hook seventh.
 //
 // The deps array is the one the effect carried inline, character for
 // character. It lists `clips.length` while the Ctrl+B branch reads

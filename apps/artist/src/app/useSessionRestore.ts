@@ -3,7 +3,9 @@
 //
 // Its effect is the editor's **second**, so `App` calls this hook fourth —
 // after the theme, the toast and the project actions, and before the autosave,
-// which gates on the `sessionRestored` flag this hook owns and writes.
+// which gates on the `sessionRestored` flag this hook owns and writes — and
+// whose request for the session slot must come after this hook's probe of it
+// (ESCSUITE-227, `sessionLock.ts`).
 //
 // `suppressRestore` arrives as a boolean rather than the whole `urlParams`
 // object: it is the only field this concern reads, and the dependency the
@@ -12,8 +14,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
 import { repairEditorBlock } from '../store/projectMigration';
 import { applyEditorBlock } from './editorBlock';
+import { probeSessionOwner } from './sessionLock';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
+
+/**
+ * What a tab says when another live ESCAPEARTIST tab owns the session slot
+ * (ESCSUITE-227): it neither offers that tab's session nor writes over it.
+ */
+export const SESSION_HELD_NOTICE =
+  'Another ESCAPEARTIST tab is open. This tab will not offer or save a session until that tab closes.';
 
 /** What the session check and its two answers need from outside. */
 export interface SessionRestoreDeps {
@@ -75,6 +85,12 @@ export function useSessionRestore({
   //   that cannot go on does not leave every later attempt permanently
   //   blocked on a token nothing will ever match again.
   const restoreAttemptRef = useRef<object | null>(null);
+
+  // The startup check has been started. StrictMode runs the effect below
+  // twice on one instance (refs survive its cleanup-then-remount), and the
+  // second run's owner probe would find the first one's momentary hold on the
+  // session lock and call this tab's own startup "another tab" (ESCSUITE-227).
+  const checkStartedRef = useRef(false);
 
   // Restore session on app start. A saved `thumbnailUrl` is an
   // `URL.createObjectURL` handle from the previous document — dead the moment
@@ -167,8 +183,21 @@ export function useSessionRestore({
       return;
     }
 
+    if (checkStartedRef.current) return;
+    checkStartedRef.current = true;
+
     const checkSession = async () => {
       try {
+        // Requested synchronously, before this function's first await, so the
+        // probe is queued ahead of this tab's own ownership request — the
+        // autosave's effect, which runs after this one (see `sessionLock.ts`).
+        if ((await probeSessionOwner()) === 'held') {
+          // Another live tab owns the slot: what is in it is that tab's work
+          // in progress, not a session to resume — and not one to throw away.
+          showNotification(SESSION_HELD_NOTICE, 'info');
+          setSessionRestored(true);
+          return;
+        }
         const session = await getSessionState();
         if (session && session.sourceVideos.length > 0) {
           setPendingSession(session);
@@ -183,7 +212,7 @@ export function useSessionRestore({
     };
 
     checkSession();
-  }, [sessionRestored, suppressRestore]);
+  }, [sessionRestored, suppressRestore, showNotification]);
 
   return {
     sessionRestored,
