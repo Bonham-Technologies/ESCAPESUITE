@@ -3162,6 +3162,28 @@ snapshot holding its own library copy (the orphan again on undo) and the redo br
 import; the second approved; the third was docs. The three rerender pins and every `*.perf.test.ts`
 are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-267 (a slider gesture belongs to the
+slider that opened it: `useSliderGesture` records the `currentTarget` on `onPointerDown` / `onKeyDown`
+and lets only that owner's `blur`, `pointerup`, `pointercancel` and `keyup` end the gesture, so pressing
+slider B while slider A still holds focus no longer lets A's blur close B's scope and flood the undo
+stack with one entry per move; a press or key on another slider starts that slider's own gesture, and a
+key repeat continues a gesture only on its owner): 99.82 / **99.33** / 96.25 / 99.70 against the
+99.82 / 99.32 / 96.25 / 99.70 that `main` at `2411d6a8` (the ESCSUITE-244 version-packages commit)
+measures in the same sitting — statements up a hundredth, the other three unmoved. That base reads
+96.25 where the ESCSUITE-244 row recorded 96.18 on its own rebased tree: the four wave-2 branches
+each measured against `b586e904` and landed one after another, and the row is corrected here to the
+direct measurement. The base gives 5,444 / 5,656 branches and this branch 5,448 / 5,660: four new
+branches, four covered, the same 212 uncovered as before (lines 8,399 / 8,414 → 8,406 / 8,421,
+statements 9,485 / 9,549 → 9,492 / 9,556, functions 2,002 / 2,008 → 2,004 / 2,010, every denominator
+growing by exactly what the numerator did; the same 15 / 64 / 6 uncovered). All four are
+`components/ClipEditor/useSliderGesture.ts`'s (10 → 14): the owner test on the four ending listeners
+and the owner-or-other choice on a key repeat, each reached from both sides by the seven red cases
+(the panel-level one read "expected 20 to be 1" before the fix) — A's blur after B's press ignored, A's
+own blur ending A's own drag, B's press during A's gesture giving two entries, a repeat on the owner
+resuming and on another slider starting its own. Still one hook instance, so
+`ClipEditor.rerender.test.tsx` and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
+artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3169,7 +3191,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.81 | 99.32 | 96.18 | 99.69 |
+| `@escapesuite/artist` | 99.82 | 99.33 | 96.25 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
