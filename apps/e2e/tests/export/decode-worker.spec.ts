@@ -37,8 +37,13 @@ import { waitForAppReady } from '../../utils/ready'
  * 3. Rotation: a source whose `tkhd` display matrix rotates it exports in the
  *    orientation the preview shows.
  *
- * Chromium only. These are the measurements the ticket was verified against
- * (Playwright's Chromium 153); Firefox and WebKit are not part of CI's e2e job.
+ * Chromium only: Firefox and WebKit are not part of CI's e2e job. Run here
+ * once each with the skip lifted (ESCSUITE-254): Firefox 155 decodes in the
+ * worker and matches its own <video> export (MAD 0.34 and 0.92 at frames 25
+ * and 41), and keeps a rotated source on <video> because its VideoDecoder
+ * drops `rotation`; WebKit 26.6 cannot import media under Playwright at all
+ * (IndexedDB refuses the Blob), and its worker is refused by
+ * `workers/decoderConfig.ts` on a measured colour mismatch.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -378,44 +383,31 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
     }
   })
 
-  test('a rotated source exports in the orientation the preview shows', async ({ page }) => {
+  test('a rotated source exports in the orientation its <video> preview shows', async ({ page }) => {
     test.setTimeout(180_000)
     await installProbes(page)
     const logs = await openWithSource(page, ROTATED_MP4)
 
-    // The preview draws the source through a <video>, which honours the
-    // display matrix: the 320x180 red-left/blue-right picture stands up as
-    // 180x320 with blue on top. At native size in the 1920x1080 project it
-    // spans y 380..700 — 35% to 65% of the height — so 42% and 58% are well
-    // inside each half. Polled because the first preview paint can precede
-    // the first decoded frame.
-    const previewOrientation = () =>
-      page.evaluate(() => {
-        const canvas = [...document.querySelectorAll('canvas')].sort(
-          (a, b) => b.width * b.height - a.width * a.height
-        )[0]
-        const ctx = canvas.getContext('2d')!
-        return {
-          width: canvas.width,
-          height: canvas.height,
-          data: Array.from(ctx.getImageData(0, 0, canvas.width, canvas.height).data),
-        }
-      })
-    await expect
-      .poll(async () => {
-        const preview = await previewOrientation()
-        return { top: colourAt(preview, 0.5, 0.42), bottom: colourAt(preview, 0.5, 0.58) }
-      }, { timeout: 15_000 })
-      .toEqual({ top: 'blue', bottom: 'red' })
+    // The preview draws a source through a <video> element, which honours
+    // the display matrix: the 320x180 red-left/blue-right picture stands up
+    // as 180x320, blue on top. That element is the reference here, read the
+    // same way as the export below. The preview canvas itself is not sampled:
+    // its paused first paint can land before the source's first decoded
+    // frame and stay black (about one headless run in three, and every run
+    // after a frame step), which would make this pin flaky for a reason that
+    // has nothing to do with decoding.
+    const shown = await frameAt(page, readFileSync(ROTATED_MP4), 0.5)
+    expect([shown.width, shown.height]).toEqual([180, 320])
+    const shownOrientation = { top: colourAt(shown, 0.5, 0.25), bottom: colourAt(shown, 0.5, 0.75) }
+    expect(shownOrientation).toEqual({ top: 'blue', bottom: 'red' })
 
     const bytes = await exportMp4FromDialog(page, '480p')
 
     expectWorkerDecoded({ bytes, logs, ...(await readProbes(page)) })
     expectMp4(bytes)
+    // At native size in the 1920x1080 project the source spans y 380..700 —
+    // 35% to 65% of the height — so 42% and 58% are well inside each half.
     const exported = await frameAt(page, bytes, 0.5)
-    expect({ top: colourAt(exported, 0.5, 0.42), bottom: colourAt(exported, 0.5, 0.58) }).toEqual({
-      top: 'blue',
-      bottom: 'red',
-    })
+    expect({ top: colourAt(exported, 0.5, 0.42), bottom: colourAt(exported, 0.5, 0.58) }).toEqual(shownOrientation)
   })
 })
