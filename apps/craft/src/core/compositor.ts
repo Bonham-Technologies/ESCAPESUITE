@@ -1,6 +1,7 @@
 // Canvas-based compositor for Picture-in-Picture mode
 // Combines screen capture with webcam overlay
 
+import { CAPTURE_FRAME_RATE } from './captureFrameRate';
 import {
   COMPOSITOR_MAX_WIDTH,
   DEFAULT_OVERLAY_PADDING,
@@ -130,7 +131,7 @@ export class Compositor {
   /**
    * Start compositing and return the output stream.
    */
-  start(frameRate: number = 30): MediaStream {
+  start(frameRate: number = CAPTURE_FRAME_RATE): MediaStream {
     this.beginRender(frameRate);
     this.outputStream = this.canvas.captureStream(frameRate);
     return this.outputStream;
@@ -144,7 +145,7 @@ export class Compositor {
    * appends it to the preview container). Capturing a stream nothing records
    * would sample the canvas 30 times a second for no reader.
    */
-  startPreviewOnly(frameRate: number = 30): void {
+  startPreviewOnly(frameRate: number = CAPTURE_FRAME_RATE): void {
     this.beginRender(frameRate);
   }
 

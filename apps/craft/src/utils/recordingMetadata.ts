@@ -15,6 +15,7 @@ import type {
   OverlayPlacement,
 } from '../store/types';
 import { companionPartFor } from './companionParts';
+import { CAPTURE_FRAME_RATE } from '../core/captureFrameRate';
 
 /**
  * What the take was resolved to be, as opposed to what its config asked for.
@@ -184,8 +185,11 @@ export function buildSourceVideo({
     // An audio part has no frames to rate. 0 rather than 30 because that is
     // what ESCAPEARTIST's own audio importer writes (core/videoProcessor.ts),
     // and a part that arrived from a recording should be indistinguishable
-    // from one that arrived from a file.
-    frameRate: isAudioOnly ? 0 : 30,
+    // from one that arrived from a file — down to the 'assumed' label. A
+    // picture is stored at the rate every capture is configured at, and says
+    // so (ESCSUITE-276), so ARTIST can tell it from a rate it measured.
+    frameRate: isAudioOnly ? 0 : CAPTURE_FRAME_RATE,
+    frameRateSource: isAudioOnly ? 'assumed' : 'configured',
     mimeType: blob.type,
     size: blob.size,
     // Everything in ARTIST that decides whether to draw a clip, decode a

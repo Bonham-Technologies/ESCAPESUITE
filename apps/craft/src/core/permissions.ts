@@ -1,5 +1,6 @@
 // Permission and capability detection for recording features
 
+import { CAPTURE_FRAME_RATE } from './captureFrameRate';
 import type {
   EnvironmentCapabilities,
   DetailedCapabilities,
@@ -230,7 +231,7 @@ export async function requestScreenCapture(
   } = {
     width: { ideal: 1920 },
     height: { ideal: 1080 },
-    frameRate: { ideal: 30 },
+    frameRate: { ideal: CAPTURE_FRAME_RATE },
   };
 
   // Extended constraints for better capture source selection
@@ -276,7 +277,7 @@ export async function requestWebcam(): Promise<MediaStream> {
     video: {
       width: { ideal: 1280 },
       height: { ideal: 720 },
-      frameRate: { ideal: 30 },
+      frameRate: { ideal: CAPTURE_FRAME_RATE },
     },
     audio: false,
   };

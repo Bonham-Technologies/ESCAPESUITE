@@ -21,6 +21,7 @@ import type {
 } from '../store/types';
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
+import { CAPTURE_FRAME_RATE } from './captureFrameRate';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
 // muxer; re-exported here because this is where every caller imports it from.
@@ -306,7 +307,7 @@ export class WebCodecsRecorder {
   private mixedAudioStream: MediaStream | null = null;
 
   // Configuration
-  private readonly frameRate = 30;
+  private readonly frameRate = CAPTURE_FRAME_RATE;
   private readonly sampleRate = 48000;
   private width = 0;
   private height = 0;
