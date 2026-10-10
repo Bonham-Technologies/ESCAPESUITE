@@ -55,6 +55,13 @@ vi.mock('./videoDecodeManager', () => {
   };
 });
 
+// Every factory in this file is built in an engine the worker is admitted in,
+// unless a case says otherwise (jsdom's own user agent is not one).
+const engine = vi.hoisted(() => ({ measured: true }));
+vi.mock('./workerDecodeEngine', () => ({
+  isMeasuredWorkerDecodeEngine: () => engine.measured,
+}));
+
 // Import after mock is set up
 import { VideoDecodeManager } from './videoDecodeManager';
 
@@ -196,6 +203,7 @@ describe('frameSource', () => {
     vi.clearAllMocks();
     videoFactory = () => new MockHTMLVideoElement();
     nextInitializeRejection.error = null;
+    engine.measured = true;
   });
 
   describe('WebCodecsFrameSource', () => {
@@ -486,6 +494,40 @@ describe('frameSource', () => {
       // mid-export; useWebCodecs is now false, same as "disabled explicitly".
       await factory.initialize();
       expect(factory.isWebCodecsEnabled()).toBe(false);
+    });
+
+    // ESCSUITE-254 fix round 1, B1: the worker is admitted only in an engine
+    // whose output was measured against its own <video>; the decision is made
+    // here, on the main thread, before any source is read into memory.
+    it('never starts the worker in an engine whose worker decode was not measured', async () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      const factory = new FrameSourceFactory(true, { measuredEngine: false });
+      await factory.initialize();
+      const blob = new Blob(['x'], { type: 'video/mp4' });
+      const read = vi.spyOn(blob, 'arrayBuffer');
+
+      const source = await factory.createSource('a', blob, 'video/mp4');
+
+      expect(factory.isWebCodecsEnabled()).toBe(false);
+      expect((factory as unknown as { manager: unknown }).manager).toBeNull();
+      expect(source.requiresCleanup()).toBe(false);
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it('starts the worker in an engine whose worker decode was measured', async () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      const factory = new FrameSourceFactory(true, { measuredEngine: true });
+      await factory.initialize();
+
+      expect(factory.isWebCodecsEnabled()).toBe(true);
+    });
+
+    it('asks the engine predicate when the caller does not say', () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      engine.measured = false;
+      expect(new FrameSourceFactory(true).isWebCodecsEnabled()).toBe(false);
+      engine.measured = true;
+      expect(new FrameSourceFactory(true).isWebCodecsEnabled()).toBe(true);
     });
 
     it('falls back when WebCodecs not supported', () => {
