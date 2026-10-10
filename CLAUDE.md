@@ -3557,6 +3557,42 @@ to be presented), filed as ESCSUITE-278 beside the committed-fixtures pin ESCSUI
 crossed**; artist's floors stay 99 / 99 / 96 / 99, craft's 100 / 99 / 97 / 100 and shared's
 100 / 98 / 92 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-265 (the in-page export seeks a tenth of a
+millisecond past each frame's start: both measured engines resolve a seek at microsecond precision and, on a
+third of frame-aligned requests — the starts whose fractional microsecond is .67 in Chromium 153 and .33 in
+Firefox 155 — landed one microsecond short of the frame and drew the one before it, so every WebM and GIF
+export and every in-page MP4 export repeated one frame in three; the ticket had filed it as a Firefox lag of
+two frames, of which one was ESCSUITE-263's skipped seek, and waiting for `seeked`, for
+`requestVideoFrameCallback` or a further 100 ms changes nothing, Firefox's rVFC `mediaTime` echoing the
+request rather than the frame drawn; one `elementSeekTarget(time)` = `time + ELEMENT_SEEK_BIAS` (0.1 ms,
+`core/elementSeek.ts`) is now applied by `HTMLVideoFrameSource.getFrame()` and `elementFrames.ts`'s
+`syncVideoToTime`): 99.83 / 99.36 / 96.36 / 99.75, byte-identical on every percentage to the
+99.83 / 99.36 / 96.36 / 99.75 that `main` at `2d938e16` (the ESCSUITE-263 version-packages commit) measures
+in the same sitting — the same direct base the ESCSUITE-276 paragraph above corrected the table row to, so
+the row is left as that paragraph set it. The base gives 5,542 / 5,751 branches and this branch the same
+5,542 / 5,751: the change adds no decision at all — lines 8,570 / 8,584 → 8,572 / 8,586, statements
+9,678 / 9,740 → 9,680 / 9,742 and functions 2,050 / 2,055 → 2,051 / 2,056, the two statements and the one
+function being `core/elementSeek.ts` whole (the constant and its one-line helper, 2 / 2 and 1 / 1), every
+one covered, with the same 14 / 62 / 209 / 5 uncovered. Each call site swapped `time` for
+`elementSeekTarget(time)` inside an assignment that was already there. The behaviour is pinned by
+`frameSource.boundarySeek.test.ts` — a `<video>` double reproducing each engine's measured rounding, 30 and
+60 fps sources, from 0 and from a 0.5 s trim, eight cases red before the fix — and `elementFrames.test.ts`;
+the seek-count laws in `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts` and `exportGIF.perf.test.ts` are
+byte-identical, the bias sitting far inside both skip windows (1/60 s on the MP4 path, 0.4 of an output
+frame on the element exporters). Outside vitest's measurement, the ESCSUITE-254 parity oracle gained two
+compared frames per case chosen to land on the failing starts (8 and 16 untagged, 17 and 25 trimmed) and
+ran on Chromium 9 / 9 at MAD 0.000 at every compared frame (0.000–0.482 on 263; with the bias undone,
+70.49 and 44.73) and on Firefox, from a scratch copy with the skip lifted, 8 / 9 — the trimmed clip 0.000
+at all six frames, the one failure the rotated source Firefox refuses by design (with the bias undone,
+33.17 and 66.75). The review (opus) reproduced the Chromium red numbers to three decimals and approved the
+code outright; its fix round is docs — this paragraph, the sentence that a request within 0.1 ms before a
+frame's start is treated as that frame (the worker's `TIME_TOLERANCE_US` convention, narrower) and a
+`headless-artist` patch changeset, since the kit's WebM and GIF renders change with the bundle. Left alone
+on the review's ruling: the preview's own 0.05 s seek skip (the paused preview is not frame-accurate by
+design) and a Firefox WebM read-back that still shows 10 of 45 frames of a per-frame source off by six to
+fourteen, the same before and after, filed as ESCSUITE-279. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
