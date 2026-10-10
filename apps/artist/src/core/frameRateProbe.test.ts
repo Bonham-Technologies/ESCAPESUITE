@@ -141,8 +141,9 @@ describe('rateFromMediaTimes', () => {
   })
 
   it('leaves a repeated presentation time out of the spacing it counts by', () => {
-    // A zero spacing among three frames used to halve the median and double
-    // the rate; here the one real spacing counts the span as one interval.
+    // A zero spacing is not the smallest spacing — dividing by it would count
+    // without end — so here the one real spacing counts the span as one
+    // interval.
     expect(rateFromMediaTimes([0, 0, 1 / 30])).toBe(30)
     expect(rateFromMediaTimes([0, 1 / 30, 1 / 30, 2 / 30])).toBe(30)
   })

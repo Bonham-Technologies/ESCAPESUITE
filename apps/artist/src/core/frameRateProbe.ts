@@ -14,8 +14,12 @@
  * Half speed because `requestVideoFrameCallback` fires at most once per
  * *rendered* frame: at 1x on a 60 Hz display a 120 fps file shows every other
  * frame, and its callbacks describe a 60 fps file (review round 2). At 0.5x a
- * source up to twice the display's refresh rate is presented frame for frame;
- * one faster than that still under-reads.
+ * source up to twice the display's refresh rate can be sampled reliably; at
+ * exactly twice it is presented at the refresh rate with no headroom, so a
+ * missed refresh drops a frame — a real 120 fps run did — and
+ * `rateFromMediaTimes` counts each one as a missing interval. A source faster
+ * than twice the refresh rate drops a frame at every presentation and still
+ * under-reads.
  *
  * 500 ms rather than 400 because half speed halves the media the budget
  * covers. 500 ms of wall time is 250 ms of media: at 24 fps that is six
@@ -23,6 +27,9 @@
  * eight-frame cap (8 frames x 1/24 s = 333 ms of media = 667 ms of wall time)
  * but clears the three-frame floor with room; at 60 fps and above the cap
  * ends the probe first (8 frames at 60 fps = 133 ms of media, 267 ms of wall).
+ * The coordinator ratified 500 over the brief's 400 in review round 3: about
+ * seven frames at 24 fps rather than five, exact in the real 24 fps runs, for
+ * 100 ms more once per import.
  */
 export const FRAME_RATE_PROBE = { maxFrames: 8, maxMs: 500, playbackRate: 0.5 } as const;
 
@@ -47,8 +54,9 @@ const STANDARD_RATES: readonly number[] = [
  * How close, relative to a standard rate, a measurement must be to snap to it.
  * 1.5 % covers the millisecond rounding a WebM's timestamps carry over the
  * span of eight frames (about 0.4 % at 30, 0.9 % at 60). At 120 fps eight
- * frames span only 58 or 59 ms once rounded, which reads 120.69 or 118.64 —
- * both inside it, so a 120 fps WebM snaps too.
+ * frames with none dropped span only 58 or 59 ms once rounded, which reads
+ * 120.69 or 118.64 — both inside it. Dropped frames lengthen the span, which
+ * only shrinks the rounding's share of it, so they never push a reading out.
  */
 const SNAP_TOLERANCE = 0.015;
 
@@ -75,34 +83,49 @@ function snapFrameRate(rate: number): number {
 /**
  * The frame rate a run of presented frames' `mediaTime`s implies.
  *
- * Not one over the median spacing: a WebM stamps frames in whole milliseconds,
- * so a 30 fps file's spacings are 33, 34, 33… ms and any one of them reads as
- * 30.30 or 29.41 — about 3 % out, at every rate, and stored as `'measured'`.
- * The median spacing is used only to **count** the intervals the run spans,
- * `k = round(span / median)`, and the rate is `k / span`, so the millisecond of
- * rounding is spread over the whole span rather than one interval. The median
- * rather than the mean so a dropped frame raises `k` instead of skewing the
- * spacing; and of the positive spacings only, so a repeated or reordered
- * presentation time cannot halve it. Then `snapFrameRate`.
+ * Not one over a spacing: a WebM stamps frames in whole milliseconds, so a
+ * 30 fps file's spacings are 33, 34, 33… ms and any one of them reads as 30.30
+ * or 29.41 — about 3 % out, at every rate, and stored as `'measured'`. The
+ * spacings are used only to **count** the intervals the run spans, and the
+ * rate is `intervals / span`, so the millisecond of rounding is spread over the
+ * whole span rather than one interval. Then `snapFrameRate`.
  *
- * Fewer than three frames, a run that ends no later than it starts, or one too
- * short to hold a single interval answers `undefined`.
+ * Each spacing is counted on its own, as `round(spacing / smallest)` whole
+ * intervals, against the smallest positive spacing in the run. A dropped frame
+ * therefore adds one interval wherever it falls, and each spacing's rounding
+ * error stays inside that spacing — about 4 % of one interval at 120 fps with
+ * millisecond stamps, so a gap of up to about ten frames still counts exactly.
+ * Review round 2 (F1) found the count it replaced, `round(span / median)`,
+ * wrong once frames drop: with millisecond stamps the median of a 120 fps run
+ * is a rounded 8 ms against a true 8.33, and over a long span the difference
+ * becomes a whole interval (a real run read 126.87); and once half the
+ * spacings are doubled the median is a doubled one and the rate halves. The
+ * smallest spacing is the true interval unless every presentation dropped a
+ * frame — a source faster than twice the display's refresh rate, which nothing
+ * here can detect. A repeated presentation time (a zero spacing) counts
+ * nothing; a time that goes backwards means the run describes nothing, and it
+ * is refused.
+ *
+ * Fewer than three frames, a run that ends no later than it starts, or one
+ * whose presentation times go backwards answers `undefined`.
  */
 export function rateFromMediaTimes(mediaTimes: readonly number[]): number | undefined {
   if (mediaTimes.length < 3) return undefined;
   const span = mediaTimes[mediaTimes.length - 1] - mediaTimes[0];
   if (!(span > 0)) return undefined;
-  const spacings: number[] = [];
+  let smallest = Infinity;
   for (let i = 1; i < mediaTimes.length; i++) {
     const spacing = mediaTimes[i] - mediaTimes[i - 1];
-    if (spacing > 0) spacings.push(spacing);
+    if (spacing < 0) return undefined;
+    if (spacing > 0 && spacing < smallest) smallest = spacing;
   }
-  spacings.sort((a, b) => a - b);
-  const middle = spacings.length >> 1;
-  const median =
-    spacings.length % 2 === 1 ? spacings[middle] : (spacings[middle - 1] + spacings[middle]) / 2;
-  const intervals = Math.round(span / median);
-  if (intervals < 1) return undefined;
+  // `span > 0` with no spacing negative means at least one is positive, and
+  // that one counts at least one interval: `intervals` is never 0.
+  let intervals = 0;
+  for (let i = 1; i < mediaTimes.length; i++) {
+    const spacing = mediaTimes[i] - mediaTimes[i - 1];
+    if (spacing > 0) intervals += Math.round(spacing / smallest);
+  }
   return snapFrameRate(intervals / span);
 }
 
