@@ -9,7 +9,9 @@
 // without ever looking in storage.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
-import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
+import { StrictMode } from 'react'
+import { useSessionRestore, SESSION_HELD_NOTICE, type SessionRestoreDeps } from './useSessionRestore'
+import { probeSessionOwner } from './sessionLock'
 import { clearSessionState, getSessionState, getThumbnail, revokeSourceThumbnails, type SessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
@@ -17,6 +19,9 @@ import { sampleVideo } from '../test/appDoubles'
 import { lastObjectUrl } from '../test/objectUrls'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
+// The owner probe (ESCSUITE-227) answers 'free' unless a case says otherwise:
+// a lone tab, which is what every case before that ticket assumed.
+vi.mock('./sessionLock', () => ({ probeSessionOwner: vi.fn() }))
 
 let deps: SessionRestoreDeps
 
@@ -43,6 +48,7 @@ beforeEach(() => {
   vi.mocked(revokeSourceThumbnails).mockClear()
   vi.mocked(getSessionState).mockResolvedValue(undefined)
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
+  vi.mocked(probeSessionOwner).mockResolvedValue('free')
   deps = {
     suppressRestore: false,
     setProject: vi.fn(),
@@ -84,6 +90,11 @@ describe('the startup session check', () => {
 
     expect(result.current.sessionRestored).toBe(false)
     expect(result.current.showSessionPrompt).toBe(false)
+
+    // The read starts once the owner probe (ESCSUITE-227) has answered; the
+    // question is still open while it is out.
+    await waitFor(() => expect(getSessionState).toHaveBeenCalledTimes(1))
+    expect(result.current.sessionRestored).toBe(false)
 
     await act(async () => {
       answer(undefined)
@@ -139,6 +150,86 @@ describe('the startup session check', () => {
     rerender()
 
     expect(getSessionState).toHaveBeenCalledTimes(1)
+  })
+
+  it('only looks once under StrictMode, which runs the effect twice', async () => {
+    // A second probe would find the first one's momentary hold on the lock
+    // and call this tab's own startup "another tab" (ESCSUITE-227).
+    const { result } = renderHook(() => useSessionRestore(deps), { wrapper: StrictMode })
+
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    expect(probeSessionOwner).toHaveBeenCalledTimes(1)
+    expect(getSessionState).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ESCSUITE-227: two tabs share one session slot, so a tab that finds another
+// live tab owning it must neither offer that tab's session as one to resume
+// nor throw it away.
+describe('another tab owns the session', () => {
+  it('asks who owns the session as the effect runs, before any storage read', async () => {
+    // Synchronously, so the probe is queued ahead of this tab's own
+    // ownership request — the autosave's, an effect later.
+    let answer: (owner: 'free' | 'held') => void = () => {}
+    vi.mocked(probeSessionOwner).mockImplementation(
+      () => new Promise((resolve) => { answer = resolve })
+    )
+
+    mountRestore()
+
+    expect(probeSessionOwner).toHaveBeenCalledTimes(1)
+    expect(getSessionState).not.toHaveBeenCalled()
+    await act(async () => {
+      answer('free')
+    })
+    expect(getSessionState).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers nothing, throws nothing away, and says why once', async () => {
+    vi.mocked(probeSessionOwner).mockResolvedValue('held')
+    vi.mocked(getSessionState).mockResolvedValue(savedSession())
+
+    const { result, rerender } = mountRestore()
+
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    rerender()
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(result.current.pendingSession).toBeNull()
+    expect(getSessionState).not.toHaveBeenCalled()
+    expect(clearSessionState).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenCalledWith(SESSION_HELD_NOTICE, 'info')
+  })
+
+  it('offers the session as before when no other tab owns it', async () => {
+    const session = savedSession()
+    vi.mocked(getSessionState).mockResolvedValue(session)
+
+    const { result } = mountRestore()
+
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+    expect(probeSessionOwner).toHaveBeenCalledTimes(1)
+    expect(result.current.pendingSession).toBe(session)
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
+  it('does not probe at all when the host suppresses the question', async () => {
+    const { result } = mountRestore({ suppressRestore: true })
+
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    expect(probeSessionOwner).not.toHaveBeenCalled()
+    expect(deps.showNotification).not.toHaveBeenCalled()
+  })
+
+  it('settles the question when the probe itself fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(probeSessionOwner).mockRejectedValue(new Error('no lock manager'))
+
+    const { result } = mountRestore()
+
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(consoleError).toHaveBeenCalledWith('Failed to check session:', expect.any(Error))
   })
 })
 

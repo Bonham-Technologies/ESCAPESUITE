@@ -6,6 +6,7 @@ import { getSessionState, clearSessionState, saveSessionState } from './core/sto
 import { parseUrlParams, initIntegration, sendMessage } from './utils/integration'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
+import { sampleVideo } from './test/appDoubles'
 import type { SessionState } from './core/storage'
 
 // App's collaborators are replaced with the recording doubles shared by every
@@ -363,8 +364,15 @@ describe('App', () => {
       urlParams()
     })
 
-    /** Render, settle the mount-time session read, then run the debounce out. */
+    /**
+     * Render, settle the mount-time session read, then run the debounce out.
+     *
+     * The library holds a source first: an empty project is never written at
+     * all (ESCSUITE-227), so without one neither case below would be about
+     * the flag.
+     */
     const renderAndSettleAutosave = async () => {
+      useEditorStore.getState().addSourceVideo(sampleVideo)
       await renderApp()
       await act(async () => { await Promise.resolve() })
       await act(async () => { vi.advanceTimersByTime(2500) })

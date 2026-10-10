@@ -21,8 +21,10 @@ import {
 } from './useSessionAutosave'
 import { saveSessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
-import { resetStoreForTest } from '../test/fixtures/projectStore'
+import { resetStoreForTest, video } from '../test/fixtures/projectStore'
 import { AUTO_SAVE_DELAY } from './appConstants'
+import { SESSION_LOCK_NAME } from './sessionLock'
+import { createFakeLocks, flushLocks, type FakeLocks } from '../test/doubles/locks'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
 
@@ -303,3 +305,110 @@ describe('the editor block re-arms the debounce (ESCSUITE-245)', () => {
   })
 })
 
+
+// ESCSUITE-227: two tabs share one session slot. Only the tab that owns the
+// session lock writes, and an empty project never overwrites the slot at all.
+// jsdom has no `navigator.locks` — every case above runs as a lone tab that
+// owns the session at once — so these install the double for themselves.
+describe('one owner tab (ESCSUITE-227)', () => {
+  let fake: FakeLocks
+
+  beforeEach(() => {
+    fake = createFakeLocks()
+    Object.defineProperty(navigator, 'locks', { value: fake.locks, configurable: true })
+  })
+
+  afterEach(() => {
+    delete (navigator as { locks?: LockManager }).locks
+  })
+
+  /** Another tab owning the session: hold the lock from outside the hook. */
+  const anotherTabOwns = async () => {
+    let releaseHold: () => void = () => {}
+    void fake.locks.request(SESSION_LOCK_NAME, () => new Promise<void>((resolve) => { releaseHold = resolve }))
+    await flushLocks()
+    return () => releaseHold()
+  }
+
+  it('writes nothing while another tab owns the session', async () => {
+    await anotherTabOwns()
+    mountAutosave()
+    await flushLocks()
+
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY * 2)
+    movePlayhead(1)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY * 2)
+
+    expect(saveSessionState).not.toHaveBeenCalled()
+  })
+
+  it('writes from the next change once the owning tab closes', async () => {
+    const closeOwner = await anotherTabOwns()
+    mountAutosave()
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    expect(saveSessionState).not.toHaveBeenCalled()
+
+    closeOwner()
+    await flushLocks()
+    movePlayhead(2)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(saveSessionState).toHaveBeenCalledTimes(1)
+    expect(saveSessionState).toHaveBeenCalledWith(expect.objectContaining({ currentTime: 2 }))
+  })
+
+  it('writes once it owns the session', async () => {
+    mountAutosave()
+    await flushLocks()
+
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(fake.log).toEqual(['acquire'])
+    expect(saveSessionState).toHaveBeenCalledTimes(1)
+  })
+
+  it('lets the session go when it unmounts', async () => {
+    const { unmount } = mountAutosave()
+    await flushLocks()
+    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(true)
+
+    unmount()
+    await flushLocks()
+
+    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(false)
+  })
+
+  it('does not ask for the session at all when the host drives its own state', async () => {
+    // A host-driven editor writes nothing, so holding the lock would only
+    // stop a real tab from ever owning the slot.
+    mountAutosave({ suppressRestore: true })
+    await flushLocks()
+
+    expect(fake.log).toEqual([])
+    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(false)
+  })
+})
+
+describe('an empty project never overwrites the slot (ESCSUITE-227)', () => {
+  it('skips the write while the project has no sources and no clips', () => {
+    useEditorStore.getState().resetProject()
+    mountAutosave({ sourceVideos: useEditorStore.getState().sourceVideos })
+
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY * 2)
+
+    expect(saveSessionState).not.toHaveBeenCalled()
+  })
+
+  it('writes as soon as the project holds something again', () => {
+    useEditorStore.getState().resetProject()
+    const { rerender } = mountAutosave({ sourceVideos: useEditorStore.getState().sourceVideos })
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY)
+
+    useEditorStore.getState().addSourceVideo(video)
+    rerender({ ...deps, sourceVideos: useEditorStore.getState().sourceVideos })
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY)
+
+    expect(saveSessionState).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(saveSessionState).mock.calls[0][0].sourceVideos).toEqual([video])
+  })
+})
