@@ -122,7 +122,8 @@ async function initializeSource(
     const config = await decoderConfigFor(
       video,
       (candidate) => VideoDecoder.isConfigSupported(candidate),
-      globalConfig.preferHardwareAcceleration
+      globalConfig.preferHardwareAcceleration,
+      navigator.userAgent
     );
 
     const decoder = new FrameDecoder<VideoFrame>({

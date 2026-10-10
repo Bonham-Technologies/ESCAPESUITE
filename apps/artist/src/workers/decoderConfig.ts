@@ -35,10 +35,25 @@ export function assumedColorSpace(codedHeight: number): VideoColorSpaceInit {
 }
 
 /**
+ * A WebKit engine: Safari, and every iOS browser (Chrome there is `CriOS`,
+ * with no `Chrome/` token). Chromium-based browsers carry `AppleWebKit/` too,
+ * but always with `Chrome/` or `Chromium/`.
+ */
+function isWebKitEngine(userAgent: string): boolean {
+  return /AppleWebKit\//.test(userAgent) && !/(Chrome|Chromium)\//.test(userAgent);
+}
+
+/**
  * Build the decoder configuration for `video` and check it against the
  * browser. Throws a named error — so the source falls back to `<video>` —
  * when:
  *
+ * - the engine is WebKit. Decoding the same H.264 frames in a worker and
+ *   seeking the same file in `<video>`, then drawing both on a canvas, differs
+ *   by 0.00/255 in Chromium 153 and Firefox 155 and by 4.46-17.45/255 in
+ *   WebKit 26.6 — colour, not timing (ESCSUITE-254). Nothing WebKit's
+ *   isConfigSupported answers tells it apart from Firefox for an upright
+ *   track, so the user agent is what says so.
  * - the codec is not H.264. It is the only codec the worker's output was
  *   compared against `<video>`'s; HEVC, VP9 and AV1 in MP4 keep the path they
  *   always had.
@@ -51,8 +66,14 @@ export function assumedColorSpace(codedHeight: number): VideoColorSpaceInit {
 export async function decoderConfigFor(
   video: DemuxedVideo,
   isConfigSupported: ConfigSupportCheck,
-  preferHardwareAcceleration: boolean
+  preferHardwareAcceleration: boolean,
+  userAgent: string
 ): Promise<OrientedDecoderConfig> {
+  if (isWebKitEngine(userAgent)) {
+    throw new Error(
+      "WebKit's VideoDecoder output does not match its <video> (measured up to 17/255 apart); the <video> path decodes this source"
+    );
+  }
   if (!/^avc[13]\./.test(video.codec)) {
     throw new Error(`Only H.264 is decoded in the worker; ${video.codec} needs the <video> path`);
   }

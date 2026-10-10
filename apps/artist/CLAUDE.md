@@ -310,7 +310,12 @@ runs only inside a worker); the decisions live in three modules vitest runs dire
 - **Refused by name, so the source falls back to `<video>`:** a fragmented file, more than one
   sample description, an edit list other than one plain edit, a display matrix other than the four
   rotations (a mirror, a scale), a non-H.264 codec, a codec the browser cannot decode, a rotated
-  track in a browser without `VideoDecoderConfig.rotation`, and — before anything is read — a source
+  track in a browser without `VideoDecoderConfig.rotation` (Firefox 155 and WebKit 26.6 both drop
+  it), any source in a **WebKit** engine (Safari, every iOS browser — read from the user agent,
+  because nothing `isConfigSupported` answers tells WebKit from Firefox: the same H.264 frames
+  decoded in a worker and drawn beside the same file's `<video>` measured 0.00/255 apart in
+  Chromium 153 and Firefox 155 and 4.46–17.45/255 apart in WebKit 26.6, a colour difference, not a
+  timing one), and — before anything is read — a source
   larger than `MAX_WORKER_SOURCE_BYTES` (512 MB, `frameSource.ts`): the worker holds every encoded
   sample for the whole export (mp4box copies them out of the file, which is read into memory
   first), where `<video>` streams from the Blob.
