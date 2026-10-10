@@ -126,6 +126,19 @@ describe('videoProcessor', () => {
         expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER, 0, 0])
       })
 
+      // Review round 2, F1: the frames a real Chromium presented of a 120 fps
+      // WebM at half speed on 60 Hz — 1, 5, 6, 7, 11, 12, 13 and 17, the rest
+      // dropped, stamped in whole milliseconds — were stored as 126.87,
+      // 'measured'.
+      it('stores a 120 fps WebM that dropped frames during the probe as 120 or 119.88', async () => {
+        media.script({ video: { frameTimes: [8, 42, 50, 58, 92, 100, 108, 142].map((t) => t / 1000) } })
+
+        const metadata = await extractVideoMetadata(mediaFile(['webm'], 'hfr.webm', 'video/webm'))
+
+        expect([120, 119.88]).toContain(metadata.frameRate)
+        expect(metadata.frameRateSource).toBe('measured')
+      })
+
       it('measures 24 and 29.97 the same way', async () => {
         media.script({ video: { frameTimes: spaced(1 / 24, 8) } })
         await expect(extractVideoMetadata(mediaFile(['v'], 'film.mp4', 'video/mp4'))).resolves.toMatchObject({

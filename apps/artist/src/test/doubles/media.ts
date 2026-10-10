@@ -64,7 +64,9 @@ export interface VideoScript extends SeekScript {
    * rate probe answers nothing without playing. Set, each frame callback
    * asked for while the element is playing is answered a microtask later with
    * the next of these as `mediaTime`; when the list runs out, it stops
-   * answering, as a stalled element does.
+   * answering, as a stalled element does. The list is what was *presented*:
+   * a dropped frame is a gap in it, and millisecond stamps are written as
+   * such (review round 2, F1).
    */
   frameTimes?: number[]
 }
