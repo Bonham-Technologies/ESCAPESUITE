@@ -210,31 +210,35 @@ export class VideoDecodeManager {
       this.handleWorkerMessage(event.data);
     };
 
-    // Before ready these reject the startup wait; after it, every request in
-    // flight — an answer lost to a dead worker or an unreadable message is
-    // never coming, and an export must not wait for it (ESCSUITE-254).
+    // Before ready these reject the startup wait; after it, every frame
+    // request and source load in flight — an answer lost to a dead worker or
+    // an unreadable message is never coming, and an export must not wait for
+    // it (ESCSUITE-254). A worker killed outright may fire neither; a
+    // main-thread deadline per request is ESCSUITE-266.
     this.worker.onerror = (error) => {
       console.error('Decode worker error:', error);
       if (this.errorCallback) {
         this.errorCallback(`Worker error: ${error.message}`, true);
       }
       this.readyReject?.(new Error(`Decode worker failed to start: ${error.message || 'unknown error'}`));
-      this.rejectPendingRequests(new Error(`Decode worker failed: ${error.message || 'unknown error'}`));
+      this.rejectInFlight(new Error(`Decode worker failed: ${error.message || 'unknown error'}`));
     };
 
     this.worker.onmessageerror = () => {
       console.error('Decode worker message error: received an unparseable message');
       this.readyReject?.(new Error('Decode worker failed to start: received an unparseable message'));
-      this.rejectPendingRequests(new Error('Decode worker failed: received an unparseable message'));
+      this.rejectInFlight(new Error('Decode worker failed: received an unparseable message'));
     };
 
     return this.readyPromise;
   }
 
-  /** Reject, and forget, every frame request in flight. */
-  private rejectPendingRequests(error: Error): void {
+  /** Reject, and forget, every frame request and source load in flight. */
+  private rejectInFlight(error: Error): void {
     for (const pending of this.pendingRequests.values()) pending.reject(error);
     this.pendingRequests.clear();
+    for (const loadPromise of this.sourceLoadPromises.values()) loadPromise.reject(error);
+    this.sourceLoadPromises.clear();
   }
 
   /**
@@ -509,13 +513,7 @@ export class VideoDecodeManager {
     this.readyResolve = null;
     this.readyReject = null;
 
-    this.rejectPendingRequests(new Error('Manager terminated'));
-
-    // Reject all pending source loads
-    for (const loadPromise of this.sourceLoadPromises.values()) {
-      loadPromise.reject(new Error('Manager terminated'));
-    }
-    this.sourceLoadPromises.clear();
+    this.rejectInFlight(new Error('Manager terminated'));
 
     this.progressCallbacks.clear();
   }
