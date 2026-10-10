@@ -57,9 +57,19 @@ let dbPromise: Promise<IDBPDatabase<VideoEditorDB>> | null = null
  * - **`blocking`** — another connection asked for a version change or a delete
  *   (`versionchange` on this one). This connection closes itself and drops
  *   the cache, so a `deleteDatabase` or a future `DB_VERSION` bump is never
- *   blocked by an open tab; the next call here opens whatever is there then.
+ *   blocked by an open tab. After a delete the next call here recreates the
+ *   database; after an upgrade by a newer tab, calls here reject with
+ *   `VersionError` (reportably, each one) until the page is reloaded.
  * - **`blocked`** — this open is waiting on another tab's older connection.
  *   One `console.warn` names the database, so a stuck upgrade is diagnosable.
+ *
+ * `terminated` and `blocking` drop the cache only while it still holds *their*
+ * open: `close()` lets running transactions finish, so a connection `blocking`
+ * already let go of can still be force-closed (and fire `terminated`) after a
+ * newer open has replaced it, and must not drop the newer one.
+ *
+ * Never `close()` the returned connection: it is shared, and a regular close
+ * is not reported back here, so the cache would keep handing it out.
  */
 export async function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
   if (dbPromise) return dbPromise
@@ -92,13 +102,12 @@ export async function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
       )
     },
     blocking() {
-      // Only fires on a connection that opened, and while it is the cached
-      // one: a connection this module closed receives no further events.
-      dbPromise = null
+      if (dbPromise === opening) dbPromise = null
+      // `opening` has resolved: idb attaches this hook only to an open that did.
       void opening.then((db) => db.close())
     },
     terminated() {
-      dbPromise = null
+      if (dbPromise === opening) dbPromise = null
     },
   })
   dbPromise = opening
