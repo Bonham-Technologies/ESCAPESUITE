@@ -57,8 +57,8 @@ export function isTextEntryTarget(target: EventTarget | null): boolean {
  * Every unmodified key this cascade binds, as `e.key` reports it. The shortcut
  * sheet is pinned against this list (`KeyboardShortcuts.test.tsx`), and
  * `useAppKeyboardShortcuts.test.ts` proves each one is claimed, so a key
- * cannot be listed on the sheet — or added to the cascade — without the
- * other side noticing (ESCSUITE-247). Add a key here when you bind one.
+ * cannot be listed on the sheet without being bound (ESCSUITE-247). Nothing
+ * enumerates the cascade's arms, so add a key here when you bind one.
  */
 export const BOUND_SINGLE_KEYS: readonly string[] = [
   'v', 'c', 'b', 's', 'k', 'm', 'i', 'o', '+', '=', '-', '?', 'Delete', 'Backspace', 'Escape',
@@ -251,9 +251,11 @@ export function useAppKeyboardShortcuts({
       }
 
       // Every chord compares the letter case-insensitively (Caps Lock, and Shift on
-      // Windows/Linux, change what `e.key` reports); Shift stays a separate test.
+      // Windows/Linux, change what `e.key` reports) and refuses Shift outright:
+      // Shift is a separate discriminator, so Ctrl+Shift+<letter> stays the
+      // browser's. Redo is the one chord that asks for it.
       // Ctrl/Cmd + C = Copy selected clips
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'c') {
         if (selectedClipIds.size > 0) {
           e.preventDefault();
           copySelectedClips();
@@ -263,7 +265,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + V = Paste clips
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'v') {
         if (clipboard && clipboard.length > 0) {
           e.preventDefault();
           // The clones haven't landed on the timeline yet, so `lockedIn` (which
@@ -288,7 +290,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + D = Duplicate selected clip
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedClipId) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'd' && selectedClipId) {
         e.preventDefault();
         if (lockedIn([selectedClipId])) {
           showNotification('Track is locked', 'info');
@@ -300,21 +302,21 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + S = Save project
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSaveProject();
         return;
       }
 
       // Ctrl/Cmd + O = Open project
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         handleLoadProject();
         return;
       }
 
       // Ctrl/Cmd + E = Export
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e' && clips.length > 0) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'e' && clips.length > 0) {
         e.preventDefault();
         setShowExport(true);
         return;
@@ -375,7 +377,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl+B = Split clip at playhead
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && selectedClipId) {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'b' && selectedClipId) {
         e.preventDefault();
         if (lockedIn([selectedClipId])) {
           showNotification('Track is locked', 'info');
@@ -401,14 +403,14 @@ export function useAppKeyboardShortcuts({
       }
 
       // Shift+M = Go to next marker
-      if (e.key === 'M' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      if (e.key.toLowerCase() === 'm' && e.shiftKey && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
         goToNextMarker();
         return;
       }
 
       // Ctrl+M = Go to previous marker
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         goToPreviousMarker();
         return;

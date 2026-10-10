@@ -13,8 +13,11 @@ import { useEditorStore } from '../../store/projectStore';
 import { isTextEntryTarget } from '../../app/useAppKeyboardShortcuts';
 import styles from './PreviewPlayer.module.css';
 
-/** What Space activates natively; the same selector as ESCAPECRAFT's player. */
-const SPACE_ACTIVATES = 'button, [role="button"], a[href], select';
+/**
+ * What Space activates natively. ESCAPECRAFT's selector minus `select` and
+ * contenteditable, which the typing guard above already returns for.
+ */
+const SPACE_ACTIVATES = 'button, [role="button"], a[href]';
 
 /**
  * Whether Space belongs to whatever has focus rather than to the transport
@@ -25,8 +28,7 @@ const SPACE_ACTIVATES = 'button, [role="button"], a[href], select';
  * gated: the arrows, Home and End keep their targets.
  */
 function spaceBelongsToTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement
-    && (target.isContentEditable || target.matches(SPACE_ACTIVATES));
+  return target instanceof HTMLElement && target.matches(SPACE_ACTIVATES);
 }
 
 interface PlaybackControlsProps {
