@@ -115,7 +115,7 @@ await setSetting('theme-preference', 'dark')
 
 **Exports:**
 - `DB_NAME` / `DB_VERSION` - Database constants
-- `getDB()` - Get database connection
+- `getDB()` - Get the shared database connection (one cached open; reopens after the browser closes it, and closes itself for a version change or delete from another tab)
 - `storeVideo(id, blob, metadata)` - Store video blob and metadata
 - `getVideo(id)` - Retrieve video by ID
 - `deleteVideo(id)` - Delete video

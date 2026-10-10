@@ -101,7 +101,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 ### Shared Infrastructure
 - **pnpm workspaces**: Efficient dependency management with shared packages
 - **Turborepo**: Cached builds, parallel execution, smart rebuilds
-- **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer
+- **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer.
+  The connection is shared through one cached open in `getDB()` (`packages/shared/src/storage`) and
+  reopens itself after the browser closes it (Clear site data, an eviction), closing itself for a
+  version change or a delete from another tab rather than blocking it (ESCSUITE-226)
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
   (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)
