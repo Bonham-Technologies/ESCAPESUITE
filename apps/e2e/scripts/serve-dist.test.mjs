@@ -345,7 +345,9 @@ test('redirectFor: vercel.json redirects /craft and /artist (and deep paths) to 
 })
 
 test('redirectFor: the slashed documents, the hub and look-alikes are not redirected', () => {
-  for (const path of ['/', '/craft/', '/artist/', '/privacy', '/artist-guide', '/craftsmanship']) {
+  for (const path of ['/', '/craft/', '/artist/', '/privacy', '/artist-guide', '/craftsmanship',
+    // files under the app directory (the hosted worker chunk, index.html) are NOT deep paths
+    '/artist/decodeWorker-Cl2tg16F.js', '/artist/index.html', '/craft/index.html']) {
     assert.equal(serveDist.redirectFor?.(path, realVercelConfig.redirects ?? []), null, path)
   }
 })
