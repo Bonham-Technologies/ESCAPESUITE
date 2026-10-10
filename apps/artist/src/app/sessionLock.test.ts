@@ -34,6 +34,17 @@ describe('probeSessionOwner', () => {
     expect(isHeld(SESSION_LOCK_NAME)).toBe(false)
   })
 
+  it('answers free when the browser rejects the probe, and logs why', async () => {
+    // Same rule as a missing `navigator.locks`: unusable locks mean a lone tab,
+    // so the saved session is still offered rather than never at all.
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new DOMException('opaque origin', 'SecurityError')
+    const locks = { request: vi.fn(() => Promise.reject(error)) } as unknown as LockManager
+
+    await expect(probeSessionOwner(locks)).resolves.toBe('free')
+    expect(consoleError).toHaveBeenCalledWith('Failed to probe the session lock:', error)
+  })
+
   it('answers free where the browser has no Web Locks', async () => {
     // jsdom: `navigator.locks` is undefined, so the default argument is too.
     expect(navigator.locks).toBeUndefined()
@@ -116,16 +127,37 @@ describe('acquireSessionOwnership', () => {
     expect(() => release()).not.toThrow()
   })
 
-  it('logs a request the browser rejects rather than leaving it unhandled', async () => {
+  it('behaves as a lone tab when the browser rejects the request, and logs why', async () => {
+    // The Web Locks spec rejects with SecurityError on an opaque origin — a
+    // sandboxed frame, or `file://` in an engine that treats it as opaque.
+    // Locks are unusable there, so the tab behaves as if it had none: it owns
+    // the slot (ESCSUITE-227 fix round 1), instead of never saving at all.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const error = new DOMException('gone', 'AbortError')
+    const error = new DOMException('opaque origin', 'SecurityError')
     const locks = { request: vi.fn(() => Promise.reject(error)) } as unknown as LockManager
     const onAcquired = vi.fn()
 
     acquireSessionOwnership(onAcquired, locks)
     await flushLocks()
 
-    expect(onAcquired).not.toHaveBeenCalled()
+    expect(onAcquired).toHaveBeenCalledTimes(1)
     expect(consoleError).toHaveBeenCalledWith('Failed to acquire the session lock:', error)
+  })
+
+  it('does not call onAcquired for a rejection that lands after the request was released', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    let reject: (error: unknown) => void = () => {}
+    const locks = {
+      request: vi.fn(() => new Promise((_resolve, rej) => { reject = rej })),
+    } as unknown as LockManager
+    const onAcquired = vi.fn()
+
+    const release = acquireSessionOwnership(onAcquired, locks)
+    release()
+    reject(new DOMException('gone', 'AbortError'))
+    await flushLocks()
+
+    expect(onAcquired).not.toHaveBeenCalled()
+    expect(consoleError).toHaveBeenCalled()
   })
 })

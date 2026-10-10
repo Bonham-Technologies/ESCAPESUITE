@@ -221,15 +221,24 @@ describe('another tab owns the session', () => {
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 
-  it('settles the question when the probe itself fails', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.mocked(probeSessionOwner).mockRejectedValue(new Error('no lock manager'))
+  it('still offers the session when the browser rejects the lock request', async () => {
+    // A lock manager that rejects (SecurityError on an opaque origin) is
+    // treated as no lock manager at all: a lone tab, which is offered its
+    // session (ESCSUITE-227 fix round 1). Driven through the real probe.
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const actual = await vi.importActual<typeof import('./sessionLock')>('./sessionLock')
+    const rejecting = {
+      request: () => Promise.reject(new DOMException('opaque origin', 'SecurityError')),
+    } as unknown as LockManager
+    vi.mocked(probeSessionOwner).mockImplementation(() => actual.probeSessionOwner(rejecting))
+    const session = savedSession()
+    vi.mocked(getSessionState).mockResolvedValue(session)
 
     const { result } = mountRestore()
 
-    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
-    expect(result.current.showSessionPrompt).toBe(false)
-    expect(consoleError).toHaveBeenCalledWith('Failed to check session:', expect.any(Error))
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+    expect(result.current.pendingSession).toBe(session)
+    expect(deps.showNotification).not.toHaveBeenCalled()
   })
 })
 

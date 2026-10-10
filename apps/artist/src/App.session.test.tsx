@@ -306,4 +306,33 @@ describe('two tabs, one session slot (ESCSUITE-227)', () => {
 
     expect(await getSessionState()).toEqual(stored)
   })
+
+  it('a second tab\'s New Project starts over without deleting the first tab\'s session', async () => {
+    const stored = storedSession()
+    await saveSessionState(stored)
+    void fake.locks.request(SESSION_LOCK_NAME, () => new Promise<void>(() => {}))
+    await flushLocks()
+
+    await renderApp()
+    await flushStorage()
+    fireEvent.click(screen.getByRole('button', { name: 'File menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /New Project/ }))
+    await flushStorage()
+
+    expect(screen.getByText('New project created')).toBeInTheDocument()
+    expect(await getSessionState()).toEqual(stored)
+  })
+
+  it('the owning tab\'s New Project still clears the slot', async () => {
+    await renderApp()
+    await flushStorage()
+    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(true)
+    await saveSessionState(storedSession())
+
+    fireEvent.click(screen.getByRole('button', { name: 'File menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /New Project/ }))
+    await flushStorage()
+
+    expect(await getSessionState()).toBeUndefined()
+  })
 })

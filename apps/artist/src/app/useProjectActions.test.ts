@@ -49,6 +49,7 @@ beforeEach(() => {
     addSourceVideo: vi.fn(),
     clearHistory: vi.fn(),
     showNotification: vi.fn(),
+    ownsSession: () => true,
   }
 })
 
@@ -598,6 +599,40 @@ describe('starting a new project', () => {
 
     expect(confirmSpy).toHaveBeenCalledWith('Start a new project? Unsaved changes will be lost.')
     expect(deps.resetProject).toHaveBeenCalled()
+  })
+
+  // ESCSUITE-227: every tab shares one session slot, so only the tab that
+  // owns it may empty it. A second tab starting over resets its own editor
+  // and leaves the owning tab's saved session where it is.
+  it('clears the saved session when this tab owns the slot', () => {
+    const { result } = mountActions({ clipCount: 0, ownsSession: () => true })
+
+    act(() => result.current.handleNewProject())
+
+    expect(clearSessionState).toHaveBeenCalledTimes(1)
+  })
+
+  it('starts over without touching the saved session when another tab owns the slot', () => {
+    const { result } = mountActions({ clipCount: 0, ownsSession: () => false })
+
+    act(() => result.current.handleNewProject())
+
+    expect(deps.resetProject).toHaveBeenCalled()
+    expect(deps.clearHistory).toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('New project created', 'info')
+    expect(clearSessionState).not.toHaveBeenCalled()
+  })
+
+  it('asks whether it owns the slot when New Project runs, not when the hook rendered', () => {
+    // Ownership can arrive after mount (the owning tab closed), and the
+    // answer lives in a ref, so it must be read at click time.
+    let owns = false
+    const { result } = mountActions({ clipCount: 0, ownsSession: () => owns })
+
+    owns = true
+    act(() => result.current.handleNewProject())
+
+    expect(clearSessionState).toHaveBeenCalledTimes(1)
   })
 
   it('leaves everything alone when the answer is no', () => {

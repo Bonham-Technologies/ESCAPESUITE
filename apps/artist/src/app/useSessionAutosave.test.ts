@@ -378,12 +378,39 @@ describe('one owner tab (ESCSUITE-227)', () => {
     expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(false)
   })
 
+  it('says whether this tab owns the session, through a stable reader', async () => {
+    const closeOwner = await anotherTabOwns()
+    const { result, rerender } = mountAutosave()
+    const reader = result.current.ownsSession
+    await flushLocks()
+    expect(result.current.ownsSession()).toBe(false)
+
+    closeOwner()
+    await flushLocks()
+    rerender({ ...deps, zoom: 2 })
+
+    expect(result.current.ownsSession).toBe(reader)
+    expect(result.current.ownsSession()).toBe(true)
+  })
+
+  it('stops owning the session when it unmounts', async () => {
+    const { result, unmount } = mountAutosave()
+    await flushLocks()
+    const ownsSession = result.current.ownsSession
+    expect(ownsSession()).toBe(true)
+
+    unmount()
+
+    expect(ownsSession()).toBe(false)
+  })
+
   it('does not ask for the session at all when the host drives its own state', async () => {
     // A host-driven editor writes nothing, so holding the lock would only
     // stop a real tab from ever owning the slot.
-    mountAutosave({ suppressRestore: true })
+    const { result } = mountAutosave({ suppressRestore: true })
     await flushLocks()
 
+    expect(result.current.ownsSession()).toBe(false)
     expect(fake.log).toEqual([])
     expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(false)
   })
