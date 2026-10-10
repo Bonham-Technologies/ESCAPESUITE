@@ -18,6 +18,8 @@ const script = vi.hoisted(() => ({
   entries: 1,
   /** The sample entry's colr box, if any. */
   colr: undefined as undefined | Record<string, unknown>,
+  /** The sample entry's pasp box, if any. */
+  pasp: undefined as undefined | { hSpacing: number; vSpacing: number },
   /** Sample counts per onSamples call. */
   batches: [2] as number[],
 }))
@@ -35,7 +37,7 @@ vi.mock('mp4box', () => {
         onSamples: undefined as undefined | ((id: number, user: unknown, samples: unknown[]) => void),
         onError: undefined as undefined | ((error: string) => void),
         getTrackById: () => ({
-          mdia: { minf: { stbl: { stsd: { entries: Array.from({ length: script.entries }, () => ({ type: 'vp09', colr: script.colr })) } } } },
+          mdia: { minf: { stbl: { stsd: { entries: Array.from({ length: script.entries }, () => ({ type: 'vp09', colr: script.colr, pasp: script.pasp })) } } } },
         }),
         setExtractionOptions: vi.fn(),
         start: vi.fn(),
@@ -78,6 +80,7 @@ import { demuxVideoTrack } from './mp4Demux'
 
 beforeEach(() => {
   script.colr = undefined
+  script.pasp = undefined
   script.entries = 1
   script.batches = [2]
 })
@@ -130,5 +133,16 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
 
       expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false })
     })
+  })
+
+  // Fix round 1, MD1: a pasp box saying the pixels are not square.
+  it('refuses a pasp box whose spacings differ, and takes one whose spacings agree', async () => {
+    script.pasp = { hSpacing: 4, vSpacing: 3 }
+    await expect(demuxVideoTrack(new ArrayBuffer(8))).rejects.toThrow(
+      'Non-square pixels are not decoded in the worker; the <video> path draws this source'
+    )
+
+    script.pasp = { hSpacing: 1, vSpacing: 1 }
+    await expect(demuxVideoTrack(new ArrayBuffer(8))).resolves.toMatchObject({ samples: expect.any(Array) })
   })
 })

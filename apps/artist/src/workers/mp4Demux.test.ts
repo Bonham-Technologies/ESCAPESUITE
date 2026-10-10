@@ -176,6 +176,15 @@ describe('demuxVideoTrack', () => {
       )
     })
 
+    // Fix round 1, MD1: <video> draws a non-square pixel wider or narrower;
+    // whether a VideoDecoder's frame does was never measured, so the worker
+    // refuses it rather than guess.
+    it('a stream whose VUI gives a non-square sample aspect ratio', async () => {
+      await expect(demuxVideoTrack(fixture('h264-sar4x3.mp4'))).rejects.toThrow(
+        'Non-square pixels are not decoded in the worker; the <video> path draws this source'
+      )
+    })
+
     it('a track whose first sample is not a keyframe', async () => {
       // Point the sync-sample table's one entry at sample 2 instead of 1.
       const bytes = new Uint8Array(fixture('h264-bframes.mp4'))
