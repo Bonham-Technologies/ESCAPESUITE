@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.15.39
+
+### Patch Changes
+
+- 7a822f7: A host's LOAD_PROJECT no longer gets replaced by a restored session
+  
+  A host's `LOAD_PROJECT` that arrives while the editor is still asking whether to resume the previous session is applied once that question is answered, instead of being replaced by the restored session.
+
 ## 2.15.38
 
 ### Patch Changes
