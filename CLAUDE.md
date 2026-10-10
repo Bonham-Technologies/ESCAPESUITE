@@ -3231,6 +3231,29 @@ flipping the recorded value, uninstall). Outside vitest's measurement, the Playw
 24 / 24. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
 artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-264 (the paused preview repaints once
+when a drawn `<video>` decodes its first frame — one `loadeddata` listener per not-ready element,
+the transition's incoming clip included, removed by the cleanup when the clips, the playhead, the
+element set or playback change — so a newly placed clip no longer stays black until play; reproduced
+by a Playwright probe 2 / 20 headless and 1 / 20 headed before the fix, 0 / 90 after):
+99.82 / 99.34 / **96.29** / 99.70 against the 99.82 / 99.34 / 96.27 / 99.70 that `main` at `74bb3de9`
+(the ESCSUITE-270 version-packages commit) measures in the same sitting — branches up two hundredths,
+the other three unmoved, and with one *fewer* uncovered arm: the base gives 5,452 / 5,663 branches and
+this branch 5,461 / 5,671, eight new branches and nine more covered, so the uncovered column falls
+211 → 210 (lines 8,432 / 8,447 → 8,452 / 8,467, statements 9,519 / 9,582 → 9,542 / 9,605, functions
+2,012 / 2,018 → 2,016 / 2,022, every denominator growing by exactly what the numerator did; the same
+15 / 63 / 6 uncovered). All of the movement is `components/Preview/usePreviewRenderLoop.ts`
+(121 / 136 → 130 / 144 branches, 306 / 314 → 329 / 337 statements): the readiness effect's paused
+gate, the per-element `HAVE_CURRENT_DATA` test, the transition-incoming inclusion and the cleanup's
+pending-listener removal, each reached from both sides by the render-loop cases (not ready → one
+paint after `loadeddata`; ready at mount → no listener; playing → the listener removed; a frame
+step's last paint after `seeked`; the incoming clip not ready → one paint, ready → none), and the one
+pre-existing arm newly reached is the readiness predicate's own, driven for the first time by an
+element below `readyState` 2. Three of the six render-loop cases were red before the fix. Two review
+rounds (opus, then a scoped sonnet) put the incoming clip there. `drawFrame.perf.test.ts`,
+`App.*rerender*` and every `*.perf.test.ts` are byte-identical — the extra paint is on readiness, none
+per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3238,7 +3261,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.33 | 96.25 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.29 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

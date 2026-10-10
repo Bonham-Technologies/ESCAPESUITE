@@ -58,6 +58,12 @@ export interface PreviewRenderLoop {
 const DISPLAY_TIME_PUBLISH_MS = 100;
 
 /**
+ * `HTMLMediaElement.HAVE_CURRENT_DATA`: the element has decoded the frame at
+ * its current position, so `drawImage` has something to draw.
+ */
+const HAVE_CURRENT_DATA = 2;
+
+/**
  * Drive the preview canvas: redraw on media change, on scrub, and on play.
  */
 export function usePreviewRenderLoop({
@@ -262,6 +268,58 @@ export function usePreviewRenderLoop({
       }
     };
   }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
+
+  // Paint once more when a paused frame's video decodes its first frame
+  // (ESCSUITE-264).
+  //
+  // Every paint above draws whatever each element has. An element the
+  // preview created a moment ago — a clip just added, its source just loaded —
+  // can have metadata and no frame yet (`readyState` below HAVE_CURRENT_DATA),
+  // which `isDrawableVideo` lets through and `drawImage` paints as nothing, so
+  // the frame lands black. Playing, the next animation frame repaints; paused,
+  // nothing else would, and the canvas stayed black (2 of 20 headless Chromium
+  // runs). So each such element the frame draws gets one 'loadeddata' listener
+  // that paints this frame once, and the cleanup takes every listener still
+  // waiting off when the clips, the playhead, the elements or playback change.
+  //
+  // 'loadeddata' rather than requestVideoFrameCallback: 'loadeddata' is tied
+  // to the readiness state itself — the first time the element reaches the
+  // HAVE_CURRENT_DATA the paint lacked, once per load, in every engine —
+  // where rVFC is tied to presentation to the compositor, which an engine may
+  // throttle or skip for these elements, never inserted in the document. A seek is not
+  // this effect's: the scrub effect above already paints after 'seeked'.
+  useEffect(() => {
+    if (isPlaying) return;
+
+    // Every element the frame draws: the clips at the playhead, and the
+    // incoming side of a transition, whose clip has not started yet and so is
+    // not among them. An overlay has no element under its source id, so the
+    // lookup itself skips it.
+    const waiting = new Set<HTMLVideoElement>();
+    const watch = (sourceVideoId: string) => {
+      const video = videoElementsRef.current.get(sourceVideoId);
+      if (video && video.readyState < HAVE_CURRENT_DATA) waiting.add(video);
+    };
+    for (const { clip } of getClipsAtTime(clips, tracks, currentTime)) {
+      watch(clip.sourceVideoId);
+    }
+    const incomingClip = getActiveTransition(clips, tracks, currentTime)?.incomingClip;
+    if (incomingClip) watch(incomingClip.sourceVideoId);
+
+    const paint = () => {
+      drawFrame(currentTime);
+      drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
+    };
+    for (const video of waiting) {
+      video.addEventListener('loadeddata', paint, { once: true });
+    }
+    return () => {
+      for (const video of waiting) {
+        video.removeEventListener('loadeddata', paint);
+      }
+    };
+  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, videoElementsRef]);
 
   // Handle playback
   useEffect(() => {

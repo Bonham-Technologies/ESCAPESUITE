@@ -1285,7 +1285,7 @@ Hooks:
 | Hook | Owns |
 |------|------|
 | `usePreviewMedia.ts` | One object URL and one `<video>`/`<img>`/`<audio>` per source, reconciled as the timeline changes and released on unmount |
-| `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change; also the display-time publish/subscribe pair the timecode reads (below) |
+| `usePreviewRenderLoop.ts` | When the canvas repaints: the rAF playback loop, seek-driven redraws, the debounced redraw after a media change, the one paint when a paused frame's video decodes its first frame (ESCSUITE-264); also the display-time publish/subscribe pair the timecode reads (below) |
 | `useTransformHandles.ts` | The pointer state machine — drag/resize/rotate, marquee, double-click into the text editor — and the cursor it reports. A press on a clip whose track is locked **selects it and starts nothing** (no `gestureHistory.begin()`, no drag state, no window listeners), and the cursor over it is `not-allowed` — ESCSUITE-88, see "A locked track is locked for every component" below |
 
 **The canvas backing store follows the size it is displayed at, not the project's.**
@@ -1494,6 +1494,38 @@ painting the frame twice for one move of the playhead. The desired time is colle
 a `Map` keyed by element (later writes win, and the incoming side of a transition is
 applied after the clips, so the frame on screen is the one that was always drawn), then
 each element is compared and seeked at most once.
+
+**A paused frame repaints once when its video decodes its first frame** (ESCSUITE-264).
+`isDrawableVideo` (in `drawFrame.ts`) accepts a `<video>` at `readyState >= 1` — metadata, not
+yet a frame — so a paint that lands before a freshly created element (a clip just added, its
+source just loaded) has decoded anything draws nothing over the black fill. Playing, the next
+animation frame repaints; paused, nothing did, and the canvas stayed black until the playhead
+moved. In `apps/e2e/tests/escapeartist/preview-first-paint.spec.ts` (Chromium) the first paint
+stayed black in 2 of 20 headless runs and 1 of 20 headed before the fix (plus 2 headed step runs
+that failed at their frame-0 check, also a first paint); 0 of 90 runs after, headless and headed.
+`usePreviewRenderLoop.ts` now has a readiness effect: while paused, every element the frame
+draws — the clips at the playhead **and the transition's incoming clip**, which has not started
+yet and so is not among them — that is below `HAVE_CURRENT_DATA` gets one `{ once: true }`
+`loadeddata` listener that paints the frame once, and its cleanup takes every listener still waiting off when the clips, the playhead,
+the elements (`videoUrlsKey`) or playback change — so a clip that left before its video was
+ready is never painted for, and an element already ready gets no listener at all.
+`loadeddata` rather than `requestVideoFrameCallback`: `loadeddata` is tied to the readiness
+state itself — the first time the element reaches the `HAVE_CURRENT_DATA` the paint lacked, once
+per load, in every engine — where rVFC is tied to presentation to the compositor, which an
+engine may throttle or skip for these elements, never inserted in the document. It adds no
+paint per frame — `drawFrame.perf.test.ts` and `preview-playback`'s rAF count are untouched.
+**A step or scrub ends on a paint after `seeked`**: the scrub effect paints once at once (over
+whatever frame the element shows) and again on the first `seeked`, through one
+`requestAnimationFrame`, with the 300 ms fallback only for a seek that never reports back —
+that order was already in place and the probe's step case passed 20 / 20 before the fix. The
+"every run after a frame step" in the original report was the transport's one-second step on a
+one-second fixture: from 0 s it lands on 1.0 s, the clip's own end, where no clip is active and
+black is the correct frame; the probe steps a two-second source for that reason. Two known gaps
+remain, both older than this ticket and left to a follow-up: "the first `seeked`" is literal — with
+two different elements seeking at once (picture-in-picture, a transition's two sides) the one that
+finishes second is not repainted while paused — and an element created while paused is never
+seeked to the playhead (the scrub effect does not re-run on `videoUrlsKey`), so it shows its
+source's first frame until the playhead moves.
 
 **Loop-back seeks nothing itself** (ESCSUITE-129). `loopStart` is a timeline time; a media
 element's own position is `clip.startTime + (loopStart - clip.timelinePosition)`, which is

@@ -611,11 +611,14 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
     // The preview draws a source through a <video> element, which honours
     // the display matrix: the 320x180 red-left/blue-right picture stands up
     // as 180x320, blue on top. That element is the reference here, read the
-    // same way as the export below. The preview canvas itself is not sampled:
-    // its paused first paint can land before the source's first decoded
-    // frame and stay black (about one headless run in three, and every run
-    // after a frame step), which would make this pin flaky for a reason that
-    // has nothing to do with decoding.
+    // same way as the export below. The preview canvas itself is not sampled.
+    // It was left out because its paused first paint could land before the
+    // source's first decoded frame and stay black — fixed and pinned since by
+    // ESCSUITE-264 (`tests/escapeartist/preview-first-paint.spec.ts`; the
+    // "every run after a frame step" was the one-second step landing on this
+    // one-second source's own end, where black is correct). The element stays
+    // the reference: it is what the canvas draws from, read without the
+    // project's letterbox in the way.
     const shown = await frameAt(page, readFileSync(ROTATED_MP4), 0.5)
     expect([shown.width, shown.height]).toEqual([180, 320])
     const shownOrientation = { top: colourAt(shown, 0.5, 0.25), bottom: colourAt(shown, 0.5, 0.75) }
