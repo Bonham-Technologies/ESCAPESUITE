@@ -356,6 +356,65 @@ describe('PlaybackControls Space handling', () => {
     expect(store().isPlaying).toBe(true)
   })
 
+  // ESCSUITE-270: a button the mouse last clicked keeps focus but not
+  // `:focus-visible`, so Space is the transport's again.
+  describe('focus-visible decides (ESCSUITE-270)', () => {
+    type Mode = 'visible' | 'not-visible' | 'throws'
+    const stubFocusVisible = (mode: Mode) => {
+      const real = Element.prototype.matches
+      vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, sel: string) {
+        if (sel === ':focus-visible') {
+          if (mode === 'throws') throw new DOMException('unsupported selector', 'SyntaxError')
+          return mode === 'visible'
+        }
+        return real.call(this, sel)
+      })
+    }
+    afterEach(() => vi.restoreAllMocks())
+
+    it('toggles playback when the focused button is not focus-visible (mouse-focused)', () => {
+      stubFocusVisible('not-visible')
+      addClip('clip1', 0, 10)
+      render(<PlaybackControls />)
+      const button = screen.getByTitle('Step forward (→)')
+
+      expect(press(button, { code: 'Space', key: ' ' })).toBe(false)
+      expect(store().isPlaying).toBe(true)
+    })
+
+    it('leaves Space to the button when it is focus-visible (keyboard-focused)', () => {
+      stubFocusVisible('visible')
+      addClip('clip1', 0, 10)
+      render(<PlaybackControls />)
+      const button = screen.getByTitle('Step forward (→)')
+
+      expect(press(button, { code: 'Space', key: ' ' })).toBe(true)
+      expect(store().isPlaying).toBe(false)
+    })
+
+    it('leaves Space to the button when the engine does not support :focus-visible', () => {
+      stubFocusVisible('throws')
+      addClip('clip1', 0, 10)
+      render(<PlaybackControls />)
+      const button = screen.getByTitle('Step forward (→)')
+
+      expect(press(button, { code: 'Space', key: ' ' })).toBe(true)
+      expect(store().isPlaying).toBe(false)
+    })
+
+    it('still toggles from a plain element when focus-visible is false', () => {
+      stubFocusVisible('not-visible')
+      addClip('clip1', 0, 10)
+      render(<PlaybackControls />)
+      const plain = document.createElement('div')
+      document.body.appendChild(plain)
+
+      expect(press(plain, { code: 'Space', key: ' ' })).toBe(false)
+      expect(store().isPlaying).toBe(true)
+      plain.remove()
+    })
+  })
+
   it('keeps the arrows on a focused button (the gate is Space only)', () => {
     addClip('clip1', 0, 10)
     store().setCurrentTime(5)
