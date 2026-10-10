@@ -1,8 +1,8 @@
 // The "Resume Previous Session?" prompt: looking for a session on startup,
 // and the two answers to it.
 //
-// Its effect is the editor's **second**, so `App` calls this hook fourth —
-// after the theme, the toast and the project actions, and before the autosave,
+// Its effect is the editor's **second**, so `App` calls this hook third —
+// after the theme and the toast, and before the autosave,
 // which gates on the `sessionRestored` flag this hook owns and writes — and
 // whose request for the session slot must come after this hook's probe of it
 // (ESCSUITE-227, `sessionLock.ts`).

@@ -9,7 +9,8 @@
 // `handleProjectFile` is the entry that path now calls instead.
 //
 // Binds no effects, so its position in `App`'s hook order does not affect the
-// effect order; it sits third because the keyboard-shortcut hook takes
+// effect order; it sits after `useSessionAutosave`, whose `ownsSession` it
+// takes (ESCSUITE-227), and before the keyboard-shortcut hook, which takes
 // `handleSaveProject` and `handleLoadProject` as parameters.
 //
 // `clipCount` arrives as a number rather than the clips array: the two
@@ -37,6 +38,12 @@ export interface ProjectActionsDeps {
   addSourceVideo: (video: SourceVideo) => void;
   clearHistory: () => void;
   showNotification: ShowNotification;
+  /**
+   * This tab owns the shared session slot (ESCSUITE-227) — read when New
+   * Project runs, so a tab that does not own it never empties another tab's
+   * saved session.
+   */
+  ownsSession: () => boolean;
 }
 
 /** The project actions, and the two flags the chrome shows while they run. */
@@ -72,6 +79,7 @@ export function useProjectActions({
   addSourceVideo,
   clearHistory,
   showNotification,
+  ownsSession,
 }: ProjectActionsDeps): ProjectActions {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -236,10 +244,13 @@ export function useProjectActions({
     }
     resetProject();
     clearHistory();
-    clearSessionState();
+    // Every tab shares one session slot: only the owner empties it. Another
+    // tab's New Project starts its own editor over and leaves the owning
+    // tab's crash recovery where it is (ESCSUITE-227).
+    if (ownsSession()) clearSessionState();
     analytics.projectCreated();
     showNotification('New project created', 'info');
-  }, [clipCount, resetProject, clearHistory, showNotification]);
+  }, [clipCount, resetProject, clearHistory, showNotification, ownsSession]);
 
   return {
     isSaving,

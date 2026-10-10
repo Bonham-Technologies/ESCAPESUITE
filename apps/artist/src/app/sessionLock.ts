@@ -18,6 +18,10 @@
 // Both take `locks` as an argument so the tests can hand in a double. Where
 // the browser has no Web Locks at all (jsdom, a very old browser) both answer
 // as if the tab were alone — which is exactly how the editor behaved before.
+// A lock manager that *rejects* is treated the same way: the spec rejects with
+// `SecurityError` on an opaque origin (a sandboxed frame, or `file://` in an
+// engine that treats it as opaque — the offline build), and a tab there should
+// still be offered and save its session rather than silently doing neither.
 
 /** The one lock name every ESCAPEARTIST tab of an origin queues on. */
 export const SESSION_LOCK_NAME = 'escapeartist-session';
@@ -34,9 +38,15 @@ export function probeSessionOwner(
   locks: LockManager | undefined = navigator.locks
 ): Promise<SessionOwner> {
   if (!locks) return Promise.resolve('free');
-  return locks.request(SESSION_LOCK_NAME, { ifAvailable: true }, (lock) =>
-    lock ? 'free' : 'held'
-  );
+  return locks
+    .request(SESSION_LOCK_NAME, { ifAvailable: true }, (lock): SessionOwner =>
+      lock ? 'free' : 'held'
+    )
+    .catch((error: unknown): SessionOwner => {
+      // Unusable locks: answer as a lone tab, the same as no `navigator.locks`.
+      console.error('Failed to probe the session lock:', error);
+      return 'free';
+    });
 }
 
 /**
@@ -69,9 +79,10 @@ export function acquireSessionOwnership(
       return hold;
     })
     .catch((error: unknown) => {
-      // The tab simply never owns the slot, so it never autosaves — logged
-      // rather than left as an unhandled rejection.
+      // Unusable locks: own the slot as a lone tab would, the same as no
+      // `navigator.locks` — unless the request was already released.
       console.error('Failed to acquire the session lock:', error);
+      if (!released) onAcquired();
     });
 
   return () => {

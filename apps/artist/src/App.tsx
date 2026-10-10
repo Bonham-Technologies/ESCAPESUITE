@@ -99,6 +99,33 @@ function App() {
   const { notification, showNotification } = useNotification();
 
   const {
+    sessionRestored,
+    showSessionPrompt,
+    pendingSession,
+    handleRestoreSession,
+    handleDeclineSession,
+  } = useSessionRestore({
+    suppressRestore: urlParams.suppressRestore,
+    setProject,
+    addSourceVideo,
+    setCurrentTime,
+    setSelectedClipId,
+    setZoom,
+    clearHistory,
+    showNotification,
+  });
+
+  const { ownsSession } = useSessionAutosave({
+    sessionRestored,
+    suppressRestore: urlParams.suppressRestore,
+    project,
+    sourceVideos,
+    selectedClipId,
+    zoom,
+    showNotification,
+  });
+
+  const {
     isSaving,
     isLoading,
     showProjectLoadDialog,
@@ -118,33 +145,7 @@ function App() {
     addSourceVideo,
     clearHistory,
     showNotification,
-  });
-
-  const {
-    sessionRestored,
-    showSessionPrompt,
-    pendingSession,
-    handleRestoreSession,
-    handleDeclineSession,
-  } = useSessionRestore({
-    suppressRestore: urlParams.suppressRestore,
-    setProject,
-    addSourceVideo,
-    setCurrentTime,
-    setSelectedClipId,
-    setZoom,
-    clearHistory,
-    showNotification,
-  });
-
-  useSessionAutosave({
-    sessionRestored,
-    suppressRestore: urlParams.suppressRestore,
-    project,
-    sourceVideos,
-    selectedClipId,
-    zoom,
-    showNotification,
+    ownsSession,
   });
 
   const { handleZoomIn, handleZoomOut } = useTimelineZoom({ zoom, setZoom });

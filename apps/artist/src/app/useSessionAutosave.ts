@@ -1,15 +1,16 @@
 // The debounced session autosave.
 //
 // Its effects are the editor's **third** (the debounce) and **fourth** (the
-// request for the session slot, ESCSUITE-227), so `App` calls this hook fifth —
+// request for the session slot, ESCSUITE-227), so `App` calls this hook fourth —
 // immediately after `useSessionRestore`, whose `sessionRestored` flag gates it.
 // Registering it any earlier would change which render first arms the debounce,
 // and would queue this tab for the session lock before the restore check had
-// asked whether another tab owns it (see `sessionLock.ts`).
+// asked whether another tab owns it (see `sessionLock.ts`). `useProjectActions`
+// comes right after it, because New Project reads `ownsSession`.
 //
 // `suppressRestore` arrives as a boolean for the same reason it does in
 // `useSessionRestore`: `urlParams.suppressRestore` was the inline dependency.
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { saveSessionState, type SessionState } from '../core/storage';
 import { AUTO_SAVE_DELAY } from './appConstants';
@@ -71,6 +72,16 @@ export interface SessionAutosaveDeps {
   showNotification: ShowNotification;
 }
 
+/** What the autosave tells the rest of the editor. */
+export interface SessionAutosave {
+  /**
+   * This tab owns the session slot right now (ESCSUITE-227). A stable reader
+   * of a ref — never a render — read at the moment it matters: New Project
+   * only clears the slot when this answers `true`.
+   */
+  ownsSession: () => boolean;
+}
+
 export function useSessionAutosave({
   sessionRestored,
   suppressRestore,
@@ -79,7 +90,7 @@ export function useSessionAutosave({
   selectedClipId,
   zoom,
   showNotification,
-}: SessionAutosaveDeps): void {
+}: SessionAutosaveDeps): SessionAutosave {
   // The latch: raised the moment a write first fails, so a run of failing
   // ticks reports once rather than once per tick. It clears on the next
   // SUCCESSFUL write, so a later failure — a fresh run, not the same one —
@@ -172,4 +183,7 @@ export function useSessionAutosave({
       release();
     };
   }, [suppressRestore]);
+
+  const ownsSession = useCallback(() => ownsSessionRef.current, []);
+  return { ownsSession };
 }
