@@ -1,5 +1,13 @@
 # @escapesuite/shared
 
+## 1.4.7
+
+### Patch Changes
+
+- 9cf0fdc: `SourceVideo` gains an optional `frameRateSource` saying where its frame rate came from
+  
+  `frameRateSource` is `'measured'` when ESCAPEARTIST measured the rate from the file's own frames at import, `'configured'` when ESCAPECRAFT wrote the rate its recorder was configured to capture at, and `'assumed'` for a fallback nothing measured. It is additive and optional: every record written before it has no field, which reads the same as `'assumed'`, and the database version does not change.
+
 ## 1.4.6
 
 ### Patch Changes

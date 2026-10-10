@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.15.56
+
+### Patch Changes
+
+- 9cf0fdc: A saved take records the frame rate it was captured at
+  
+  A saved take records the frame rate its recorder was configured to capture at, read from the one setting every capture uses and labelled as configured, so ESCAPEARTIST can tell it from a rate it measured itself. A sound-only part still records no frame rate.
+- Updated dependencies [9cf0fdc]
+  - @escapesuite/shared@1.4.7
+
 ## 2.15.37
 
 ### Patch Changes
