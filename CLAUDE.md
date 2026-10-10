@@ -168,9 +168,15 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   audio, no WebCodecs — 10/15/20 fps, 720p/480p/360p; see `apps/artist/CLAUDE.md`'s "GIF Export")
 - Background tab export: MP4 exports run at full speed even in background tabs via Web Worker
   (ESCSUITE-254: before this, the worker threw on every source and the export silently decoded in
-  the page). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
-  decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab
-  in the foreground" once. See `apps/artist/CLAUDE.md`'s "Video Decode Worker"
+  the page). Only in **Chromium and Firefox** — an allow-list (`core/workerDecodeEngine.ts`) of the
+  engines whose worker output was measured against their own `<video>` (Chromium: export MAD
+  0.000–0.486/255 across untagged, BT.709-tagged, full-range and trimmed sources; Firefox:
+  0.000–0.920 on the untagged, tagged and full-range sources, its own `<video>` the one in error on
+  the trimmed clip, rotated sources refused to `<video>`); WebKit measured 4.46–17.45/255 apart and is
+  refused, as is any engine not yet measured (admitting one is ESCSUITE-262). H.264 MP4 sources
+  only; a source the worker refuses, or gives up on mid-export, is decoded by a `<video>` element
+  instead and the export says "Decoding in the page; keep this tab in the foreground" once. See
+  `apps/artist/CLAUDE.md`'s "Video Decode Worker"
 
 ### Data Flow
 ```

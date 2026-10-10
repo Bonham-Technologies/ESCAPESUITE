@@ -272,34 +272,60 @@ pnpm lint                # Run ESLint
 ### Video Decode Worker (`src/workers/decodeWorker.ts`)
 Web Worker for WebCodecs-based video decoding, enabling full-speed exports in background tabs.
 `decodeWorker.ts` is only the message-protocol glue (and the one file excluded from coverage — it
-runs only inside a worker); the decisions live in three modules vitest runs directly:
+runs only inside a worker); the decisions live in modules vitest runs directly.
+
+**Which engines use it at all — an allow-list (`core/workerDecodeEngine.ts`, ESCSUITE-254).** The
+`<video>` path is the oracle (it is what every MP4 export used before the worker decoded anything),
+so the worker is admitted only in an engine whose worker output was measured against that engine's
+own `<video>`; everything else — including the next engine nobody has measured — keeps the
+`<video>` path by default. The decision is made on the main thread by `FrameSourceFactory`
+(constructor option `measuredEngine`, defaulting to the predicate), before the worker is started or
+any source is read into memory; a refused engine's MP4 export says "Decoding in the page; keep this
+tab in the foreground" once, as it does when the worker cannot start. Admitting another engine is
+ESCSUITE-262. Measured (Playwright 1.63's browsers, parity spec and a direct decode-beside-`<video>`
+probe):
+
+| Engine | Detected by | Measured against its own `<video>` | Admitted |
+|---|---|---|---|
+| Chromium 153 | `navigator.userAgentData.brands` contains `"Chromium"` (secure contexts, `file://` included — the headless kit and standalone build) | export MAD 0.000–0.486/255 over frames 0/25/41/last of an untagged, a BT.709-tagged 480p, a full-range 480p and a trimmed source; probe decode 0.00; all four display rotations match | yes |
+| Firefox 155 | `Gecko/` and `Firefox/` in the user agent | export MAD 0.000–0.920 over frames 0/25/41/last of the untagged, BT.709-tagged and full-range sources; probe decode 0.00 on eight colour and size variants. On the trimmed clip the worker export matched the source itself at every frame checked, while Firefox's own `<video>` export showed the previous colour segment at export frames 25–26 (68.3/255 from the source) — a defect of the `<video>` path, not the worker (ESCSUITE-263's family). Its `VideoDecoder` drops `rotation`, so a rotated source is refused and keeps `<video>` (with the notice) | yes |
+| WebKit 26.6 | — | probe decode 4.46 / 17.45 — colour, not timing (neighbouring frames differ by the same) | no |
+| anything else, or no `navigator` | — | not measured | no |
+
 - **`mp4Demux.ts`** — `mp4box.js` demuxing of the first video track: every sample in decode order,
   timestamps in whole microseconds with the **edit list applied** (x264's B-frame files start
   presentation two frames into the media; ignoring that put every frame two frames late against
-  `<video>`), the codec string and avcC/hvcC record, and the `tkhd` display matrix read as a
-  clockwise `rotation`. **The ordering constraint (ESCSUITE-254):** mp4box parses an in-memory file
-  *inside* `appendBuffer()` and fires `onReady` and `onSamples` from within that call, so
-  extraction must be armed — `setExtractionOptions()` then `start()` — **inside `onReady`, before
-  `appendBuffer()` returns**, then `flush()`. Armed after it returns (how the worker shipped in
-  #89, 2026-01-17), no sample is ever delivered: every source threw "No keyframes found in video",
+  `<video>`), the avcC record, the stream's own colour description, and the `tkhd` display matrix
+  read as a clockwise `rotation`. **The ordering constraint (ESCSUITE-254):** mp4box parses an
+  in-memory file *inside* `appendBuffer()` and fires `onReady` and `onSamples` from within that call,
+  so extraction must be armed — `setExtractionOptions()` then `start()` — **inside `onReady`, before
+  `appendBuffer()` returns**, then `flush()`. Armed after it returns (how the worker shipped in #89,
+  2026-01-17), no sample is ever delivered: every source threw "No keyframes found in video",
   `FrameSourceFactory` caught it with a `console.warn`, and every MP4 export for nine months decoded
   in the page while logging "Using WebCodecs". Completion is the track's own `nb_samples`, with a
   bounded wait that rejects naming the counts (a truncated file is a named failure, not a hang).
-- **`decoderConfig.ts`** — the `VideoDecoderConfig`, and the refusals. **H.264 only** (the only codec
-  compared against `<video>`; HEVC/VP9/AV1 in MP4 keep the `<video>` path). **Colour:** a stream
-  that does not fully describe its own colour (primaries, transfer and matrix all present) is
-  assumed BT.601 below 720 coded lines and BT.709 from 720 up — what Chromium's `<video>` assumes
-  (measured: 718 lines is 601, 720 is 709, width plays no part) — while a raw `VideoDecoder` assumes
-  BT.709 at every size, which put saturated colours up to ~20/255 off the preview. The guess goes in
-  `config.colorSpace`, which Chromium uses only to fill in what the bitstream leaves out (a fully
-  tagged stream keeps its own colours in both paths). **Rotation:** the matrix's quarter turn goes in
-  `config.rotation`; Chromium (verified in Playwright's Chromium 153, all four turns, against its
-  own `<video>`) stamps it on every output `VideoFrame`, whose `displayWidth`/`displayHeight` and
-  nine-argument `drawImage` (the crop's source rect) are then in the rotated orientation exactly as
-  `<video>`'s are. A browser that does not implement the member drops it from
-  `isConfigSupported()`'s echo, and the track is refused rather than decoded lying on its side.
-  `hardwareAcceleration` is `'no-preference'`: `'prefer-hardware'` is a requirement in Chromium and
-  refused every source on a machine with no hardware decoder.
+  Every refusal below is decided in `onReady`, before extraction is armed, so a refused file has
+  none of its samples copied.
+- **`avcConfig.ts`** — the first SPS's VUI from the avcC (emulation-prevention bytes removed,
+  everything before the VUI skipped): the colour description, the full-range flag, and whether the
+  sample aspect ratio is 1:1.
+- **`decoderConfig.ts`** — the `VideoDecoderConfig`. **Colour:** a stream that leaves any of
+  primaries, transfer and matrix unspecified (in its `colr` box, else its VUI) is drawn by Chromium's
+  `<video>` with a size guess — BT.601 below 720 coded lines, BT.709 from 720 up (718 is 601, 720 is
+  709, width plays no part) — even when it tags its matrix alone (a 160x120 file tagged `bt709`
+  matrix-only is shown as BT.601), while a raw `VideoDecoder` assumes BT.709 at every size, up to
+  ~20/255 off. So such a stream gets the guess in `config.colorSpace`, with its own range when it
+  signals one. A stream with all three specified gets **no** `colorSpace`: measured in Chromium 153,
+  `<video>` and the decoder both draw it in its own colours whatever the config says, and a
+  full-range-only stream likewise. Firefox 155's decoder ignores the config and matched its
+  `<video>` in every case. **Rotation:** the matrix's quarter turn goes in `config.rotation`;
+  Chromium (all four turns, against its own `<video>`) stamps it on every output `VideoFrame`, whose
+  `displayWidth`/`displayHeight` and nine-argument `drawImage` (the crop's source rect) are then in
+  the rotated orientation exactly as `<video>`'s are. A browser that does not implement the member
+  drops it from `isConfigSupported()`'s echo and the track is refused. The echo proves the member is
+  known, not that it is drawn — enough only behind the allow-list. `hardwareAcceleration` is always
+  `'no-preference'`: `'prefer-hardware'` is a requirement in Chromium and would refuse every source
+  on a machine with no hardware decoder.
 - **`frameDecoder.ts`** — returns the frame `<video>` shows at a time (the latest whose timestamp is
   at or before it, within half a millisecond), from a small cache. It feeds chunks in decode order
   up to the requested one, then one at a time while a reordering decoder holds the frame back,
@@ -307,31 +333,41 @@ runs only inside a worker); the decisions live in three modules vitest runs dire
   the stream, keeps every frame ahead of the playhead (they are what an in-order export asks for
   next) and evicts behind it to `maxCachedFramesPerSource` (8). Every wait is bounded: a decoder
   error or a stall (no progress for 5 s) rejects the request, and every later one, by name.
-- **Refused by name, so the source falls back to `<video>`:** a fragmented file, more than one
-  sample description, an edit list other than one plain edit, a display matrix other than the four
-  rotations (a mirror, a scale), a non-H.264 codec, a codec the browser cannot decode, a rotated
-  track in a browser without `VideoDecoderConfig.rotation` (Firefox 155 and WebKit 26.6 both drop
-  it), any source in a **WebKit** engine (Safari, every iOS browser — read from the user agent,
-  because nothing `isConfigSupported` answers tells WebKit from Firefox: the same H.264 frames
-  decoded in a worker and drawn beside the same file's `<video>` measured 0.00/255 apart in
-  Chromium 153 and Firefox 155 and 4.46–17.45/255 apart in WebKit 26.6, a colour difference, not a
-  timing one), and — before anything is read — a source
-  larger than `MAX_WORKER_SOURCE_BYTES` (512 MB, `frameSource.ts`): the worker holds every encoded
-  sample for the whole export (mp4box copies them out of the file, which is read into memory
-  first), where `<video>` streams from the Blob.
+- **Refused by name, so the source falls back to `<video>`:** a codec other than H.264 (the only
+  codec compared against `<video>`; HEVC — the iPhone camera default — VP9 and AV1 in MP4 keep
+  `<video>`), a fragmented file, more than one sample description or one with no avcC, non-square
+  pixels (a VUI sample aspect ratio or a `pasp` box other than 1:1 — `<video>` draws those wider or
+  narrower, and a decoder frame's handling of them was never measured), an edit list other than one
+  plain edit, a display matrix other than the four rotations (a mirror, a scale), a codec the browser
+  cannot decode, a rotated track in a browser without `VideoDecoderConfig.rotation`, and — before
+  anything is read — a source that would take the export past `MAX_WORKER_SOURCE_BYTES` (512 MB,
+  `frameSource.ts`), **summed over the export's sources**: the worker holds every encoded sample of
+  every source it takes until the export ends (mp4box copies them out of the file, read into memory
+  first; the peak while one is demuxed is the budget plus that source again), where `<video>`
+  streams from the Blob. The figure is a judgement, not a measurement.
 - **A fallback is visible (ESCSUITE-254):** `FrameSourceFactory.createSource(…, onFallback)` reports
   a source the worker refused, and wraps the ones it took so that a frame the worker fails
-  mid-export hands that source to a `<video>` element for the rest of the export (reported the same
-  way) instead of leaving the clip missing. `exportMP4.ts` turns any report — and the worker not
-  starting at all (ESCSUITE-153) — into the progress line "Decoding in the page; keep this tab in
-  the foreground", **once per export**, at the progress the export has reached. The
-  `console.warn` keeps the detail.
+  mid-export hands **that** source to a `<video>` element for the rest of the export — at the
+  failing request's own time, reported the same way — instead of leaving the clip missing. The
+  handover is per source: `VideoDecodeManager.disposeSource` rejects only its own source's pending
+  requests, and a frame the worker sends back for a request already settled is `close()`d. A
+  `<video>` fallback that never loads skips its clip, as the oracle does, and never fails the
+  finished export at cleanup; `disposeFrameManager` disposes each source in its own `try`, so the
+  worker is always terminated. After the worker is ready, a worker `error` or `messageerror`
+  rejects every request in flight, so an export never waits for an answer that is not coming.
+  `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
+  into the progress line "Decoding in the page; keep this tab in the foreground", **once per
+  export**, at the progress the export has reached. The `console.warn` keeps the detail. A WebM
+  source still decodes in the page with no such line (ESCSUITE-261).
 - Returns `VideoFrame` clones (transferable) for zero-copy performance; the exporter closes each.
-- Pinned end to end by `apps/e2e/tests/export/decode-worker.spec.ts` (Chromium): a real source
-  exports with the worker answering `FRAME_READY` and no fallback; the same project exported with
-  `Worker` forced off (the `<video>` path, the oracle) matches at mid-timeline frames within
-  1.5/255 (measured 0.05–0.27; the BT.709 mismatch above measured 3.7–8.1); and a rotated source
-  exports the way the preview shows it.
+- Pinned end to end by `apps/e2e/tests/export/decode-worker.spec.ts` (Chromium; Firefox run by hand):
+  a real source exports with the worker answering `FRAME_READY` and no fallback; the same project
+  exported with `Worker` forced off (the `<video>` path, the oracle) matches at frames 0, 25, 41 and
+  the last — for an untagged, a BT.709-tagged 480p and a full-range 480p source, and a clip trimmed
+  0.5 s into its source — within 1.5/255 (measured 0.000–0.486; decoding the untagged source as
+  BT.709 measured 3.70); and a rotated source exports in the orientation its `<video>` shows. The
+  `<video>` path's own seek-skip within 1/30 s, which can repeat a frame, predates this and is
+  ESCSUITE-263; fixing it moves the oracle, so that ticket re-runs this spec.
 
 ### Integration API (`src/utils/integration.ts`)
 The editor can be embedded in other applications via:
@@ -3988,7 +4024,7 @@ outcome, not on the double.
 - WebCodecs API (exports) only works in Chrome/Edge
 - Video blobs stored in IndexedDB; large files may hit storage limits
 - MP4 decoding uses Web Worker with WebCodecs for background-capable export; WebM falls back to HTMLVideoElement on main thread
-- WebCodecs background export only works for H.264 MP4 source files the worker can present exactly as `<video>` does (see "Video Decode Worker" for what it refuses); WebM sources and refused MP4s use HTMLVideoElement seeking, and an MP4 export says so once ("Decoding in the page; keep this tab in the foreground") — a WebM source does not trigger that line today
+- WebCodecs background export only works in Chromium and Firefox (the engines measured against their own `<video>`; ESCSUITE-262 admits others) and only for H.264 MP4 source files the worker can present exactly as `<video>` does (see "Video Decode Worker" for what it refuses); WebM sources and refused MP4s use HTMLVideoElement seeking, and an MP4 export says so once ("Decoding in the page; keep this tab in the foreground") — a WebM source does not trigger that line today (ESCSUITE-261)
 
 ## Headless Render Bundle
 
