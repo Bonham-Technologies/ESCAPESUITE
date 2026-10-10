@@ -6,6 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PlaybackControls } from './PlaybackControls'
+import { TRANSPORT_KEYS } from './transportKeys'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
@@ -378,5 +379,16 @@ describe('PlaybackControls Space handling', () => {
     expect(store().currentTime).toBe(5)
     range.remove()
     text.remove()
+  })
+})
+
+describe('PlaybackControls claims every key the sheet lists for the transport', () => {
+  it.each([
+    ['Space', 'Space'], ['←', 'ArrowLeft'], ['→', 'ArrowRight'], ['Home', 'Home'], ['End', 'End'],
+  ])('%s is claimed (code %s)', (label, code) => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    expect(TRANSPORT_KEYS).toContain(label)
+    expect(fireEvent.keyDown(window, { code, cancelable: true })).toBe(false)
   })
 })

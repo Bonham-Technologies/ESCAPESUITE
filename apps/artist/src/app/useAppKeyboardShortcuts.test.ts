@@ -259,12 +259,44 @@ describe('letter case (ESCSUITE-247)', () => {
 
   it('does not widen the lowercase-only single keys (K, S, C, M, I, O with Caps Lock)', () => {
     mountShortcuts()
-    for (const key of ['K', 'S', 'C', 'I', 'O']) press(key)
+    for (const key of ['K', 'S', 'C', 'I', 'O', 'M']) press(key)
     expect(deps.setKeyframePanelOpen).not.toHaveBeenCalled()
     expect(deps.setSnapEnabled).not.toHaveBeenCalled()
     expect(deps.setActiveTool).not.toHaveBeenCalled()
     expect(deps.setInPoint).not.toHaveBeenCalled()
     expect(deps.setOutPoint).not.toHaveBeenCalled()
+    expect(deps.addMarker).not.toHaveBeenCalled()
+    expect(deps.goToNextMarker).not.toHaveBeenCalled()
+  })
+
+  it.each(['C', 'V', 'D', 'S', 'O', 'E', 'B', 'M'])(
+    'Ctrl+Shift+%s (arriving upper-case) is not claimed and does nothing',
+    (key) => {
+      mountShortcuts({
+        selectedClipId: 'clip-1',
+        selectedClipIds: new Set(['clip-1']),
+        clipboard: [clip],
+      })
+      useEditorStore.getState().setCurrentTime(1)
+
+      expect(press(key, { ctrlKey: true, shiftKey: true })).toBe(true)
+      expect(press(key, { metaKey: true, shiftKey: true })).toBe(true)
+
+      for (const fn of [
+        deps.copySelectedClips, deps.pasteClips, deps.duplicateClip, deps.handleSaveProject,
+        deps.handleLoadProject, deps.setShowExport, deps.splitClip, deps.goToPreviousMarker,
+        deps.goToNextMarker,
+      ]) {
+        expect(fn).not.toHaveBeenCalled()
+      }
+    },
+  )
+
+  it('Shift+M reaches next-marker even when Caps Lock reports a lower-case m', () => {
+    mountShortcuts()
+    press('m', { shiftKey: true })
+    expect(deps.goToNextMarker).toHaveBeenCalledTimes(1)
+    expect(deps.addMarker).not.toHaveBeenCalled()
   })
 })
 
