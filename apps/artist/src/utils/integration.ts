@@ -431,6 +431,15 @@ export function generateShareUrl(
  *   ESCAPEARTIST neither offers nor writes the saved session under this flag:
  *   the session autosave is off too, so a host-driven session leaves whatever
  *   was in storage exactly as it found it.
+ *   Without it, a LOAD_PROJECT that arrives while that question is still open
+ *   (the prompt, or the moments before it appears) is validated at once - an
+ *   invalid one gets its ERROR reply immediately - but applied only after the
+ *   question is answered, Restore or Start Fresh alike: the host's project is
+ *   the later, explicit instruction and wins over a restored session (the last
+ *   LOAD_PROJECT sent during the wait is the one applied). When ?loadVideo= is
+ *   also pending, the host's project is applied first and the take is placed
+ *   onto it. LOAD_VIDEO is not held: it only adds to the media library, which a
+ *   restore does not clear.
  * - title=<name> - Initial project name (trimmed, max 120 chars); applied only
  *   when the project has not been named by project data or a restored session
  * - hostOrigin=<origin> - The host's own origin, e.g. https://host.example.

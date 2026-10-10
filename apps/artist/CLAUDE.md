@@ -441,6 +441,20 @@ no guards. A payload that fails validation is answered with
 `{ type: 'ERROR', payload: { message, code: 'INVALID_PROJECT' } }` and the current project is left
 untouched, undo history included. An absent payload is still silently ignored, as it always was.
 
+**`LOAD_PROJECT` waits for the session question (ESCSUITE-225)**: without `?suppressRestore=1`,
+a project that arrives while "Resume Previous Session?" is open (or about to open —
+`sessionDecisionPending`, the same gate the `?loadVideo=` placement uses) is parsed at once, so
+an invalid payload still gets its `INVALID_PROJECT` reply immediately, but the parsed project is
+held in `pendingHostProject` and applied by the effect that drains the pending take once the
+question is settled. A second `LOAD_PROJECT` during the wait replaces the first. The host's
+project is applied *after* a restore or a decline, because it is the host's explicit, later
+instruction and the alternative was a host project silently replaced by "Restore"; when a
+`?loadVideo=` take is pending too, the host's project goes first and the take is placed onto it.
+With the question already settled it is applied on arrival, as before. `LOAD_VIDEO` is
+deliberately not held: it only adds to the media library, and a restore re-adds its own sources
+through `addSourceVideo`'s replace-in-place without removing others, so it survives either
+answer (pinned in `App.session.test.tsx`).
+
 **`LOAD_VIDEO` and `?video=` fetch through the page's own `connect-src` (ESCSUITE-130)**:
 `loadVideoFromUrl` (`utils/integration.ts`) is a plain `fetch(url)`, so both are bound by whatever
 Content-Security-Policy the deployment sets — on the hosted deployment (`connect-src 'self'

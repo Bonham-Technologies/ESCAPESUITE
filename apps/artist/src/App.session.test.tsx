@@ -196,7 +196,8 @@ describe('a host LOAD_PROJECT under the restore prompt (ESCSUITE-225)', () => {
   })
 
   const hostSends = async (message: { type: string; payload?: unknown }) => {
-    const handler = vi.mocked(initIntegration).mock.calls.at(-1)![0]
+    const calls = vi.mocked(initIntegration).mock.calls
+    const handler = calls[calls.length - 1][0]
     await act(async () => {
       await handler(message as never)
     })

@@ -89,6 +89,18 @@ export function useHostIntegration({
   // starts `true` on a cold load, which is what stops an import that beats the
   // session read to the finish from being placed and then replaced.
   const sessionDecisionPendingRef = useRef(sessionDecisionPending);
+  // ESCSUITE-225: a host's `LOAD_PROJECT` that arrives while the startup session
+  // question is open. Already parsed (an invalid payload is answered at once),
+  // held here, and applied after the answer — "Restore" runs `setProject` too,
+  // and would otherwise replace the host's project. A second message replaces
+  // the first: the host's latest instruction wins. The host's project is applied
+  // *after* a restore or a decline, whichever it was, and before the pending
+  // take, which is then placed onto it.
+  const pendingHostProject = useRef<Project | null>(null);
+  // `setProject` is read through a ref because the mount-only effect below
+  // closes over it (see the header comment) and the drain effect shares it.
+  const setProjectRef = useRef(setProject);
+  setProjectRef.current = setProject;
 
   /**
    * Put the waiting take on the timeline, and only then say so.
@@ -148,6 +160,12 @@ export function useHostIntegration({
     const cleanup = initIntegration(async (message) => {
       switch (message.type) {
         case 'LOAD_VIDEO':
+          // Not held behind the session question, unlike LOAD_PROJECT and the
+          // handoff's placement: this only adds a source to the library and
+          // writes nothing to the timeline, and a restore re-adds its own
+          // sources through `addSourceVideo`'s replace-in-place without removing
+          // the others, so a source added during the prompt survives either
+          // answer (ESCSUITE-225).
           if (message.payload && typeof message.payload === 'object' && 'url' in message.payload) {
             try {
               const { blob, name } = await loadVideoFromUrl((message.payload as { url: string }).url);
@@ -178,7 +196,13 @@ export function useHostIntegration({
             // a thrown exception silently leaving the project untouched.
             const parsed = parseProject(message.payload);
             if (parsed.ok) {
-              setProject(parsed.project);
+              // The startup session question is still open: hold the project
+              // until it is answered (ESCSUITE-225). Applied at once otherwise.
+              if (sessionDecisionPendingRef.current) {
+                pendingHostProject.current = parsed.project;
+              } else {
+                setProject(parsed.project);
+              }
             } else {
               sendMessage({
                 type: 'ERROR',
@@ -344,6 +368,13 @@ export function useHostIntegration({
   // there is nothing waiting, so this is a no-op both ways round.
   useEffect(() => {
     sessionDecisionPendingRef.current = sessionDecisionPending;
-    if (!sessionDecisionPending) placePendingTake();
+    if (sessionDecisionPending) return;
+    // The host's project first, then the take onto it (ESCSUITE-225).
+    const hostProject = pendingHostProject.current;
+    if (hostProject) {
+      pendingHostProject.current = null;
+      setProjectRef.current(hostProject);
+    }
+    placePendingTake();
   }, [sessionDecisionPending, placePendingTake]);
 }
