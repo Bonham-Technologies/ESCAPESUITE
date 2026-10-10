@@ -58,6 +58,12 @@ export interface PreviewRenderLoop {
 const DISPLAY_TIME_PUBLISH_MS = 100;
 
 /**
+ * `HTMLMediaElement.HAVE_CURRENT_DATA`: the element has decoded the frame at
+ * its current position, so `drawImage` has something to draw.
+ */
+const HAVE_CURRENT_DATA = 2;
+
+/**
  * Drive the preview canvas: redraw on media change, on scrub, and on play.
  */
 export function usePreviewRenderLoop({
@@ -262,6 +268,48 @@ export function usePreviewRenderLoop({
       }
     };
   }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
+
+  // Paint once more when a paused frame's video decodes its first frame
+  // (ESCSUITE-264).
+  //
+  // Every paint above draws whatever each element has. An element the
+  // preview created a moment ago — a clip just added, its source just loaded —
+  // can have metadata and no frame yet (`readyState` below HAVE_CURRENT_DATA),
+  // which `isDrawableVideo` lets through and `drawImage` paints as nothing, so
+  // the frame lands black. Playing, the next animation frame repaints; paused,
+  // nothing else would, and the canvas stayed black (about one headless
+  // Chromium run in ten). So each such element gets one 'loadeddata' listener
+  // that paints this frame once, and the cleanup takes every listener still
+  // waiting off when the clips, the playhead, the elements or playback change.
+  //
+  // 'loadeddata' rather than requestVideoFrameCallback: it is exactly the
+  // transition to the readiness the paint lacked, it fires once per load in
+  // every engine, and these elements are never in the document, where rVFC's
+  // presentation-driven callbacks are not something to rely on. A seek is not
+  // this effect's: the scrub effect above already paints after 'seeked'.
+  useEffect(() => {
+    if (isPlaying) return;
+
+    const waiting = new Set<HTMLVideoElement>();
+    for (const { clip } of getClipsAtTime(clips, tracks, currentTime)) {
+      const video = videoElementsRef.current.get(clip.sourceVideoId);
+      if (video && video.readyState < HAVE_CURRENT_DATA) waiting.add(video);
+    }
+
+    const paint = () => {
+      drawFrame(currentTime);
+      drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
+    };
+    for (const video of waiting) {
+      video.addEventListener('loadeddata', paint, { once: true });
+    }
+    return () => {
+      for (const video of waiting) {
+        video.removeEventListener('loadeddata', paint);
+      }
+    };
+  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, videoElementsRef]);
 
   // Handle playback
   useEffect(() => {
