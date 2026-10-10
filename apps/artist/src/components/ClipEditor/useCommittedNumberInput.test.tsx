@@ -42,6 +42,14 @@ describe('useCommittedNumberInput', () => {
     expect(onCommit).toHaveBeenCalledWith(24)
   })
 
+  it('does nothing on blur or Enter when nothing was typed', () => {
+    const { view, onCommit, key, blur } = setup()
+    blur()
+    key('Enter')
+    expect(onCommit).not.toHaveBeenCalled()
+    expect(view.result.current.text).toBe('48')
+  })
+
   it('commits on Enter', () => {
     const { onCommit, type, key } = setup()
     type('72')
