@@ -27,15 +27,32 @@ export type ConfigSupportCheck = (config: OrientedDecoderConfig) => Promise<{
  * saturated colour by up to ~20/255 against the preview and against the
  * `<video>` path.
  *
- * What was measured in Chromium 153, `<video>` beside the decoder
- * (ESCSUITE-254 fix round 1): a stream whose primaries, transfer and matrix
- * are all specified is drawn in its own colours by both, whatever the config
- * says; one that leaves any unspecified is drawn by `<video>` with this guess
- * — a 160x120 file tagging only its matrix as BT.709 is shown as BT.601 —
- * and by the decoder with the config's colour space. A full-range signal
- * alone was likewise kept by both. Firefox 155's VideoDecoder ignores the
- * config and matched its `<video>` in all of these. So the guess is given only
- * to a stream that is not fully tagged, with the stream's own range.
+ * Measured in Chromium 153, `<video>` beside a VideoDecoder given no colour
+ * space, the guess, and BT.709 (ESCSUITE-254 fix rounds 1 and 2), one shape
+ * at a time:
+ * - untagged (no colour description anywhere), nine sizes from 160x120 to
+ *   1920x544 and 1280x720 (718 lines is 601, 720 is 709):
+ *   `<video>` draws the size guess; the decoder draws whatever it is given.
+ * - VUI tagging only the matrix (BT.709; primaries and transfer
+ *   unspecified), 160x120: `<video>` draws BT.601, the guess — not the tag.
+ * - VUI tagging primaries, transfer and matrix as BT.709, 640x480 (and a
+ *   160x120 BT.709 and a 1280x720 BT.601 file): both draw the stream's own
+ *   colours whatever colour space the decoder is given.
+ * - VUI signalling full range and no colour description, 640x480: both draw
+ *   the same whatever the decoder is given.
+ * - `colr` box alone (6/6/6 or 1/1/1 over an untagged VUI): `<video>` follows
+ *   the box — BT.601 at 1280x720, where the guess says BT.709, and BT.709 at
+ *   160x120, where it says BT.601 — and the decoder, which cannot see the
+ *   box, draws what it is given.
+ * - `colr` box disagreeing with a fully tagged VUI: `<video>` draws the VUI's.
+ * Firefox 155's VideoDecoder ignores the config, its `<video>` ignores the
+ * `colr` box, and the two matched in every shape.
+ *
+ * Hence (mp4Demux.ts's `StreamColour`): no colour space for a fully tagged
+ * bitstream; the box's own values for a `colr`-only description; the guess,
+ * with the stream's own range, for anything else; and a `colr` box that
+ * disagrees with any colour description in the bitstream is refused rather
+ * than one of the two picked.
  */
 export function assumedColorSpace(codedHeight: number): VideoColorSpaceInit {
   const standard = codedHeight >= 720 ? 'bt709' : 'smpte170m';

@@ -288,7 +288,7 @@ probe):
 | Engine | Detected by | Measured against its own `<video>` | Admitted |
 |---|---|---|---|
 | Chromium 153 | `navigator.userAgentData.brands` contains `"Chromium"` (secure contexts, `file://` included — the headless kit and standalone build) | export MAD 0.000–0.486/255 over frames 0/25/41/last of an untagged, a BT.709-tagged 480p, a full-range 480p and a trimmed source; probe decode 0.00; all four display rotations match | yes |
-| Firefox 155 | `Gecko/` and `Firefox/` in the user agent | export MAD 0.000–0.920 over frames 0/25/41/last of the untagged, BT.709-tagged and full-range sources; probe decode 0.00 on eight colour and size variants. On the trimmed clip the worker export matched the source itself at every frame checked, while Firefox's own `<video>` export showed the previous colour segment at export frames 25–26 (68.3/255 from the source) — a defect of the `<video>` path, not the worker (ESCSUITE-263's family). Its `VideoDecoder` drops `rotation`, so a rotated source is refused and keeps `<video>` (with the notice) | yes |
+| Firefox 155 | `Gecko/` and `Firefox/` in the user agent | export MAD 0.000–0.920 over frames 0/25/41/last of the untagged, BT.709-tagged and full-range sources; probe decode 0.00 on eight colour and size variants. On the trimmed clip the worker export matched the source itself at every frame checked, while Firefox's own `<video>` export showed the previous colour segment at export frames 25–26 (68.3/255 from the source) — a defect of Firefox's `<video>` path, not the worker, and not shown to be ESCSUITE-263's seek skip (ESCSUITE-265). Its `VideoDecoder` drops `rotation`, so a rotated source is refused and keeps `<video>` (with the notice) | yes |
 | WebKit 26.6 | — | probe decode 4.46 / 17.45 — colour, not timing (neighbouring frames differ by the same) | no |
 | anything else, or no `navigator` | — | not measured | no |
 
@@ -309,16 +309,31 @@ probe):
 - **`avcConfig.ts`** — the first SPS's VUI from the avcC (emulation-prevention bytes removed,
   everything before the VUI skipped): the colour description, the full-range flag, and whether the
   sample aspect ratio is 1:1.
-- **`decoderConfig.ts`** — the `VideoDecoderConfig`. **Colour:** a stream that leaves any of
-  primaries, transfer and matrix unspecified (in its `colr` box, else its VUI) is drawn by Chromium's
-  `<video>` with a size guess — BT.601 below 720 coded lines, BT.709 from 720 up (718 is 601, 720 is
-  709, width plays no part) — even when it tags its matrix alone (a 160x120 file tagged `bt709`
-  matrix-only is shown as BT.601), while a raw `VideoDecoder` assumes BT.709 at every size, up to
-  ~20/255 off. So such a stream gets the guess in `config.colorSpace`, with its own range when it
-  signals one. A stream with all three specified gets **no** `colorSpace`: measured in Chromium 153,
-  `<video>` and the decoder both draw it in its own colours whatever the config says, and a
-  full-range-only stream likewise. Firefox 155's decoder ignores the config and matched its
-  `<video>` in every case. **Rotation:** the matrix's quarter turn goes in `config.rotation`;
+- **`decoderConfig.ts`** — the `VideoDecoderConfig`. **Colour.** A raw `VideoDecoder` given no colour
+  space draws a stream that does not describe its colour as BT.709 at every size, where Chromium's
+  `<video>` uses a size guess — BT.601 below 720 coded lines, BT.709 from 720 (718 is 601, 720 is
+  709, width plays no part) — up to ~20/255 apart on saturated colours. What was measured in
+  Chromium 153, `<video>` beside the decoder, shape by shape (ESCSUITE-254 fix rounds 1 and 2):
+  **untagged** (nine sizes) — `<video>` draws the guess; **VUI tagging only its matrix** (BT.709,
+  primaries and transfer unspecified, 160x120) — `<video>` draws BT.601, the guess, not the tag;
+  **VUI fully tagged** BT.709 (640x480, and 160x120 BT.709 and 1280x720 BT.601 files) — both draw the
+  stream's own colours whatever the decoder is given; **VUI full-range flag alone** (640x480) — both
+  draw the same whatever the decoder is given; **`colr` box alone** over an untagged VUI (6/6/6 and
+  1/1/1) — `<video>` follows the box (BT.601 at 1280x720 where the guess says BT.709, BT.709 at
+  160x120 where it says BT.601), and the decoder, which sees only the bitstream, draws what it is
+  given; **`colr` disagreeing with a fully tagged VUI** — `<video>` draws the VUI's. Firefox 155's
+  decoder ignores the config, its `<video>` ignores the `colr` box, and the two matched in every
+  shape. The rule implemented (`mp4Demux.ts`'s `StreamColour`): whether a stream is tagged is
+  decided by its **bitstream**, the only thing the decoder sees — a VUI with primaries, transfer and
+  matrix all specified gets **no** `colorSpace`; a description carried only in a `colr` box (all
+  three specified, over an untagged VUI) is handed to the decoder as its colour space; anything else
+  gets the guess, with the stream's own range when it signals one. A `colr` box whose code points
+  differ from any colour description in the bitstream (fully tagged or matrix-only), or that
+  `VideoColorSpaceInit` cannot name (wide gamut, HDR), is refused to `<video>` rather than one of the
+  two picked. Pinned at the demux level and in the e2e parity spec (the matrix-only and both
+  `colr`-only files are cases there: the matrix-only one is the shape where the rule changes
+  Chromium's pixels, and the `colr`-only BT.601 one measured 8.08/255 apart before the box was
+  handed over). **Rotation:** the matrix's quarter turn goes in `config.rotation`;
   Chromium (all four turns, against its own `<video>`) stamps it on every output `VideoFrame`, whose
   `displayWidth`/`displayHeight` and nine-argument `drawImage` (the crop's source rect) are then in
   the rotated orientation exactly as `<video>`'s are. A browser that does not implement the member
@@ -354,7 +369,10 @@ probe):
   `<video>` fallback that never loads skips its clip, as the oracle does, and never fails the
   finished export at cleanup; `disposeFrameManager` disposes each source in its own `try`, so the
   worker is always terminated. After the worker is ready, a worker `error` or `messageerror`
-  rejects every request in flight, so an export never waits for an answer that is not coming.
+  rejects every frame request and every source load in flight, so an export never waits for an
+  answer one of those events says is not coming. The known limit: a worker killed outright (an
+  out-of-memory kill, say) is not guaranteed to fire either, and there is no main-thread deadline
+  per request yet — ESCSUITE-266.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A WebM
@@ -363,9 +381,10 @@ probe):
 - Pinned end to end by `apps/e2e/tests/export/decode-worker.spec.ts` (Chromium; Firefox run by hand):
   a real source exports with the worker answering `FRAME_READY` and no fallback; the same project
   exported with `Worker` forced off (the `<video>` path, the oracle) matches at frames 0, 25, 41 and
-  the last — for an untagged, a BT.709-tagged 480p and a full-range 480p source, and a clip trimmed
-  0.5 s into its source — within 1.5/255 (measured 0.000–0.486; decoding the untagged source as
-  BT.709 measured 3.70); and a rotated source exports in the orientation its `<video>` shows. The
+  the last — for an untagged source, a BT.709-tagged 480p, a full-range 480p, a matrix-only-tagged
+  source, two `colr`-only sources (BT.601 and BT.709) and a clip trimmed 0.5 s into its source —
+  within 1.5/255 (measured 0.000–0.486; decoding the untagged source as BT.709 measured 3.70); and a
+  rotated source exports in the orientation its `<video>` shows. The
   `<video>` path's own seek-skip within 1/30 s, which can repeat a frame, predates this and is
   ESCSUITE-263; fixing it moves the oracle, so that ticket re-runs this spec.
 
@@ -4021,7 +4040,6 @@ outcome, not on the double.
 
 ## Key Constraints
 
-- WebCodecs API (exports) only works in Chrome/Edge
 - Video blobs stored in IndexedDB; large files may hit storage limits
 - MP4 decoding uses Web Worker with WebCodecs for background-capable export; WebM falls back to HTMLVideoElement on main thread
 - WebCodecs background export only works in Chromium and Firefox (the engines measured against their own `<video>`; ESCSUITE-262 admits others) and only for H.264 MP4 source files the worker can present exactly as `<video>` does (see "Video Decode Worker" for what it refuses); WebM sources and refused MP4s use HTMLVideoElement seeking, and an MP4 export says so once ("Decoding in the page; keep this tab in the foreground") — a WebM source does not trigger that line today (ESCSUITE-261)

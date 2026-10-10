@@ -172,11 +172,15 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   engines whose worker output was measured against their own `<video>` (Chromium: export MAD
   0.000–0.486/255 across untagged, BT.709-tagged, full-range and trimmed sources; Firefox:
   0.000–0.920 on the untagged, tagged and full-range sources, its own `<video>` the one in error on
-  the trimmed clip, rotated sources refused to `<video>`); WebKit measured 4.46–17.45/255 apart and is
-  refused, as is any engine not yet measured (admitting one is ESCSUITE-262). H.264 MP4 sources
-  only; a source the worker refuses, or gives up on mid-export, is decoded by a `<video>` element
-  instead and the export says "Decoding in the page; keep this tab in the foreground" once. See
-  `apps/artist/CLAUDE.md`'s "Video Decode Worker"
+  the trimmed clip (ESCSUITE-265), rotated sources refused to `<video>`); WebKit measured
+  4.46–17.45/255 apart and is refused, as is any engine not yet measured (admitting one is
+  ESCSUITE-262). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
+  decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
+  the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
+  (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
+  moves the parity oracle (ESCSUITE-263); a worker killed outright may never fire `error`, so a
+  main-thread per-request deadline is still to come (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
+  "Video Decode Worker"
 
 ### Data Flow
 ```

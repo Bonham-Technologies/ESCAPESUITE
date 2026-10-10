@@ -22,9 +22,11 @@
  * named error rather than decoded differently: the factory then falls back to
  * the `<video>` path for that source, and the export says so. That covers a
  * codec other than H.264, a fragmented file, more than one sample description
- * or one with no avcC, non-square pixels (a VUI sample aspect ratio or a
- * `pasp` box other than 1:1), an edit list other than a single plain one, and
- * a display matrix other than the four right-angle rotations. All of it is
+ * or one with no avcC or no SPS in its avcC, non-square pixels (a VUI sample
+ * aspect ratio or a `pasp` box other than 1:1), a `colr` box that disagrees
+ * with the bitstream's colour description or names a colour space
+ * VideoDecoder cannot be given, an edit list other than a single plain one,
+ * and a display matrix other than the four right-angle rotations. All of it is
  * decided inside `onReady`, before extraction is armed, so a refused file has
  * none of its samples copied.
  */

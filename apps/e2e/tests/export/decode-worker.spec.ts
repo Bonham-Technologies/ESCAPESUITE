@@ -41,12 +41,18 @@ import { waitForAppReady } from '../../utils/ready'
  * `apps/artist/src/core/workerDecodeEngine.ts`: Chromium and Firefox, the two
  * whose worker output was measured against their own <video>. These cases run
  * in Chromium, the one CI runs. Firefox 155 was run here with the skip lifted
- * (ESCSUITE-254): it decodes in the worker and matches its own <video> export
- * (MAD 0.34 and 0.92 at frames 25 and 41), and keeps a rotated source on
- * <video> because its VideoDecoder drops `rotation`. WebKit is not on the
- * list (measured 4.46-17.45/255 apart) and cannot import media under
- * Playwright anyway (IndexedDB refuses the Blob). Admitting another engine is
- * ESCSUITE-262.
+ * (ESCSUITE-254 fix round 1), and two cases are known to fail there:
+ * - the trimmed clip: Firefox's own <video> export shows the previous colour
+ *   segment at export frames 25-26 (68.3/255 from the source), while the
+ *   worker export is within 2.3 of the source at every frame checked — the
+ *   oracle is wrong, not the worker (ESCSUITE-265; not shown to be
+ *   ESCSUITE-263's seek skip);
+ * - the rotated source: Firefox's VideoDecoder drops `rotation`, so the source
+ *   is refused to <video> by design and `expectWorkerDecoded` fails.
+ * The other parity cases matched (MAD 0.000-0.920). WebKit is not on the list
+ * (measured 4.46-17.45/255 apart) and cannot import media under Playwright
+ * anyway (IndexedDB refuses the Blob). Lifting the skip for another engine is
+ * ESCSUITE-262, which has to account for the two known Firefox failures.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
