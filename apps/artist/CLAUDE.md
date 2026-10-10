@@ -444,8 +444,7 @@ probe):
   source, two `colr`-only sources (BT.601 and BT.709) and a clip trimmed 0.5 s into its source —
   within 1.5/255 (measured 0.000–0.486; decoding the untagged source as BT.709 measured 3.70); and a
   rotated source exports in the orientation its `<video>` shows. The
-  `<video>` path's own seek-skip within 1/30 s, which can repeat a frame, predates this and is
-  ESCSUITE-263; fixing it moves the oracle, so that ticket re-runs this spec.
+  `<video>` path's own seek-skip used to be a strict `> 1/30 s`, which repeated about every other frame at 30 fps (fixed by ESCSUITE-263, now half a frame with the rate floored at 30); that can move this oracle, so re-run this spec and record the MAD.
 
 ### Integration API (`src/utils/integration.ts`)
 The editor can be embedded in other applications via:
@@ -3628,7 +3627,7 @@ The export pipeline includes several optimizations to improve performance:
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for H.264 MP4 files (background-capable), wrapped so a frame the worker fails mid-export hands the source to `<video>`
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line
-- **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
+- **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek only when the request is within half a frame of the element's current time: `seekToleranceFor(frameRate)` = `0.5 / max(frameRate, 30)` (ESCSUITE-263). The old rule was a strict `> 1/30`, and because the export's requests are one 1/30 frame apart the float difference often came out just under it, so about every other frame of an in-page MP4 export (every ESCAPECRAFT WebM recording, Safari, any source the worker refuses) was a repeat of the previous one; that is fixed. The floor at 30 keeps the window under the request spacing for a low-rate source, and a missing or non-finite rate counts as 30. Every stored `SourceVideo.frameRate` is a placeholder 30 today, so the window is 1/60 s for every source; detecting the real rate at import is a follow-up. The rate is threaded `exportMP4` -> `loadFrameSource` -> `createSource` -> `HTMLVideoFrameSource` (also on the failover path)
 - **Encoder backpressure**: MP4's loop waits while `videoEncoder.encodeQueueSize > 5`, paired with
   the 30-second backpressure timeout below; WebM's own loop waits above `> 20`. Both exist to
   prevent memory exhaustion

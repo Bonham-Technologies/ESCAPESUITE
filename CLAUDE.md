@@ -180,8 +180,8 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   ESCSUITE-262). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
   decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
   the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
-  (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
-  moves the parity oracle (ESCSUITE-263). A worker killed outright, which may never fire `error`,
+  (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s, which repeated about every other frame, is fixed by
+  ESCSUITE-263 (half a frame; the parity oracle is re-run for it). A worker killed outright, which may never fire `error`,
   is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
   "Video Decode Worker"
 
@@ -3371,6 +3371,29 @@ one context) and every existing restore-and-reload case ran on Chromium (4 / 4 a
 and Firefox; the new spec skips WebKit because the shared import helper fails there on `main` too.
 `App.*rerender*` and every `*.perf.test.ts` are byte-identical — the ownership flag is a ref flipped
 from the lock callback. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-263 (the in-page video frame source
+seeks whenever the requested time is more than half a frame — `0.5 / max(frameRate, 30)` — from the
+current one: on the base the strict `> 1/30` test with floating-point spacing skipped the seek for
+about every other frame of *every* MP4 export decoded in the page at 30 fps, which `exportMP4.test.ts`'s
+trim case had been pinning as 3 seeks for 6 frames and which ESCSUITE-254's parity spec missed because
+its checked frames were seeked ones): 99.82 / 99.34 / 96.27 / 99.70, byte-identical on every
+percentage to the 99.82 / 99.34 / 96.27 / 99.70 that `main` at `74bb3de9` measures in the same
+sitting. The base gives 5,452 / 5,663 branches and this branch 5,457 / 5,668: five new branches, five
+covered, the same 211 uncovered as before (lines 8,432 / 8,447 → 8,434 / 8,449, statements
+9,519 / 9,582 → 9,521 / 9,584, functions 2,012 / 2,018 → 2,013 / 2,019, every denominator growing by
+exactly what the numerator did; the same 15 / 63 / 6 uncovered). All five are `core/frameSource.ts`'s
+(46 / 47 → 51 / 52): the rate's finite-and-positive fallback, the `max(rate, 30)` floor and the
+half-frame comparison, each reached from both sides by `frameSource.seekTolerance.test.ts` — a 60 fps
+double seeking for two 1/60-spaced requests, a 30 fps double seeking for two 1/30-spaced ones (at
+t = 2, where the float spacing made the base skip), the same time twice seeking once, a 10 fps rate
+still seeking for 1/30-spaced requests, an unknown rate on the fallback — ten of thirteen red before
+the fix; the file's one pre-existing uncovered arm is untouched. The parity oracle
+(`apps/e2e/tests/export/decode-worker.spec.ts`, Chromium) re-ran 9 / 9 with mean absolute differences
+0.000–0.482 of 255 against the 1.5 tolerance. `exportWebM.perf.test.ts`'s seeks-per-frame law is
+untouched (the element exporters use `elementFrames.ts`'s own skip rule); `drawFrame.perf.test.ts`,
+`exportMP4.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's
+floors stay 99 / 99 / 96 / 99.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
