@@ -9,6 +9,7 @@
 // that hook's `modalOpen` gate: a dialog is modal, and Space must not start
 // playback from behind one.
 import { useCallback, useEffect } from 'react';
+import { installFocusModalityTracker, wasFocusedByPointer } from './focusModality';
 import { useEditorStore } from '../../store/projectStore';
 import { isTextEntryTarget } from '../../app/useAppKeyboardShortcuts';
 import styles from './PreviewPlayer.module.css';
@@ -25,10 +26,15 @@ const SPACE_ACTIVATES = 'button, [role="button"], a[href]';
  * browser's activation key for a focused control, and `preventDefault()` is
  * what suppresses the click it synthesises, so the transport leaves the
  * keydown alone when the target is something Space operates. Only Space is
- * gated: the arrows, Home and End keep their targets.
+ * gated: the arrows, Home and End keep their targets. A control the mouse
+ * focused does not take Space (ESCSUITE-270; see `focusModality.ts`).
  */
 function spaceBelongsToTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches(SPACE_ACTIVATES);
+  return (
+    target instanceof HTMLElement &&
+    target.matches(SPACE_ACTIVATES) &&
+    !wasFocusedByPointer()
+  );
 }
 
 interface PlaybackControlsProps {
@@ -49,6 +55,8 @@ export function PlaybackControls({ modalOpen = false }: PlaybackControlsProps) {
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
   const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
+
+  useEffect(() => installFocusModalityTracker(), []);
 
   const canPlay = clips.length > 0 && currentTime < timelineDuration;
 
