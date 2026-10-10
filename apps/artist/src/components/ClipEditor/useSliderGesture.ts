@@ -31,6 +31,9 @@
 // here, and `commit` can wrap the write in the handler itself. A future throttle
 // on these writes would move it, not delete it.
 //
+// A gesture whose owner left the document mid-drag is closed at the next write
+// (ESCSUITE-271), since its own release events can no longer arrive.
+//
 // This hook is the gesture, and nothing else: one gesture history and the six
 // listeners that drive it. It holds no state, so a slider wired to it adds no
 // store subscription and no render — `ClipEditor.rerender.test.tsx`'s counts are

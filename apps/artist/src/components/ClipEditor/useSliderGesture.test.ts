@@ -9,7 +9,7 @@
 // — is `hooks/useGestureHistory.test.ts`. What this file adds is the mapping
 // from DOM events to `begin`/`resume`/`end`, and one refusal case to prove the
 // hook really delegates rather than keeping a flag of its own.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useSliderGesture } from './useSliderGesture'
 
@@ -381,6 +381,10 @@ describe('useSliderGesture', () => {
   })
 
   describe('an owner that left the document mid-gesture (ESCSUITE-271)', () => {
+    afterEach(() => {
+      document.body.replaceChildren()
+    })
+
     it('closes the gesture and lets the next write push its own entry when the owner is detached', () => {
       const { on, write } = gesture()
       const input = document.createElement('input')
@@ -406,7 +410,6 @@ describe('useSliderGesture', () => {
       expect(write()).toBe(false)
       expect(write()).toBe(true)
       expect(write()).toBe(true)
-      input.remove()
     })
 
     it('treats an owner that was never attached as detached', () => {
