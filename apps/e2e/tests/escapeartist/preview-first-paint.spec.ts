@@ -10,8 +10,8 @@ import { waitForAppReady } from '../../utils/ready'
  * changes. A `<video>` the preview has only just created has no decoded frame
  * yet, so that paint draws nothing over the black fill — and before this
  * ticket nothing painted again while the playhead stood still, so the canvas
- * stayed black (about one headless run in three). The same held for a frame
- * step: the canvas has to end on the frame the seek lands on.
+ * stayed black (2 of 20 headless Chromium runs, 1 of 20 headed). A frame step
+ * is pinned beside it: the canvas has to end on the frame the seek lands on.
  *
  * Neither case touches the playhead or the transport before it samples:
  * "Go to start", which `video-import.spec.ts` clicks first, is itself a
@@ -20,6 +20,10 @@ import { waitForAppReady } from '../../utils/ready'
  * The step uses a 2 s source, not the 1 s headless fixture: the transport's
  * step is one second, so from 0 s it lands on 1.0 s — the *end* of a 1 s
  * clip, where no clip is active and black is the right frame.
+ *
+ * Chromium only: it is what this was measured on (and what CI gates), and
+ * the 5 s polls and the fixture's decoded colours have not been checked in
+ * Firefox or WebKit.
  */
 
 /** 2 s, 30 fps; its colour changes every eight frames (fixtures/decode-worker/README.md). */
@@ -48,6 +52,11 @@ const isBlack = ([r, g, b]: Rgb) => r <= 10 && g <= 10 && b <= 10
 const distance = (a: Rgb, b: Rgb) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2])
 
 test.describe('ESCAPEARTIST preview first paint (ESCSUITE-264)', () => {
+  test.skip(
+    ({ browserName }) => browserName !== 'chromium',
+    'Measured and pinned on Chromium only; not yet run on Firefox or WebKit'
+  )
+
   test.beforeEach(async ({ page }) => {
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')

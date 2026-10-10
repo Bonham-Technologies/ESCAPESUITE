@@ -277,24 +277,34 @@ export function usePreviewRenderLoop({
   // can have metadata and no frame yet (`readyState` below HAVE_CURRENT_DATA),
   // which `isDrawableVideo` lets through and `drawImage` paints as nothing, so
   // the frame lands black. Playing, the next animation frame repaints; paused,
-  // nothing else would, and the canvas stayed black (about one headless
-  // Chromium run in ten). So each such element gets one 'loadeddata' listener
+  // nothing else would, and the canvas stayed black (2 of 20 headless Chromium
+  // runs). So each such element the frame draws gets one 'loadeddata' listener
   // that paints this frame once, and the cleanup takes every listener still
   // waiting off when the clips, the playhead, the elements or playback change.
   //
-  // 'loadeddata' rather than requestVideoFrameCallback: it is exactly the
-  // transition to the readiness the paint lacked, it fires once per load in
-  // every engine, and these elements are never in the document, where rVFC's
-  // presentation-driven callbacks are not something to rely on. A seek is not
+  // 'loadeddata' rather than requestVideoFrameCallback: 'loadeddata' is tied
+  // to the readiness state itself — the first time the element reaches the
+  // HAVE_CURRENT_DATA the paint lacked, once per load, in every engine —
+  // where rVFC is tied to presentation to the compositor, which an engine may
+  // throttle or skip for these elements, never inserted in the document. A seek is not
   // this effect's: the scrub effect above already paints after 'seeked'.
   useEffect(() => {
     if (isPlaying) return;
 
+    // Every element the frame draws: the clips at the playhead, and the
+    // incoming side of a transition, whose clip has not started yet and so is
+    // not among them. An overlay has no element under its source id, so the
+    // lookup itself skips it.
     const waiting = new Set<HTMLVideoElement>();
-    for (const { clip } of getClipsAtTime(clips, tracks, currentTime)) {
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
+    const watch = (sourceVideoId: string) => {
+      const video = videoElementsRef.current.get(sourceVideoId);
       if (video && video.readyState < HAVE_CURRENT_DATA) waiting.add(video);
+    };
+    for (const { clip } of getClipsAtTime(clips, tracks, currentTime)) {
+      watch(clip.sourceVideoId);
     }
+    const incomingClip = getActiveTransition(clips, tracks, currentTime)?.incomingClip;
+    if (incomingClip) watch(incomingClip.sourceVideoId);
 
     const paint = () => {
       drawFrame(currentTime);
