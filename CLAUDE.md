@@ -3209,6 +3209,28 @@ caught because the exporter awaits every load first — both now stated in the c
 other `*.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's floors
 stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-270 (after a mouse click on a toolbar
+or track button, Space plays or pauses instead of pressing that button again: a focus-modality tracker
+in `components/Preview/focusModality.ts` — capture-phase `pointerdown` marks a pointer pending,
+`keydown` clears it, `focusin` records whether the focus it announces was pointer-driven — and
+`spaceBelongsToTarget` leaves Space to a focused control only when it was not; the first version read
+`:focus-visible`, which the review's Chrome 154 probe showed is already true at the Space keydown
+itself): 99.82 / **99.33** / 96.25 / 99.70 against the 99.82 / 99.32 / 96.25 / 99.70 that `main` at
+`2411d6a8` measures in the same sitting — statements up a hundredth, the other three unmoved. The base
+gives 5,444 / 5,656 branches and this branch 5,446 / 5,658: two new branches, two covered, the same
+212 uncovered as before (lines 8,399 / 8,414 → 8,417 / 8,432, statements 9,485 / 9,549 → 9,504 / 9,568,
+functions 2,002 / 2,008 → 2,009 / 2,015, every denominator growing by exactly what the numerator did;
+the same 15 / 64 / 6 uncovered). The two are `focusModality.ts`'s one (1 / 1 on arrival, the
+`focusin` record) and `components/Preview/PlaybackControls.tsx`'s `wasFocusedByPointer()` operand
+(28 / 29 → 29 / 30, the file's one pre-existing uncovered arm untouched), each reached from both sides
+by the unstubbed component cases — pointerdown → focus → Space toggles playback with the button's
+handler uncalled, keydown → focus → Space left to the button, `<video>`, the dialog body and `window`
+still toggling — and the tracker's own five cases (a stale click cleared by a Tab, a Space keydown not
+flipping the recorded value, uninstall). Outside vitest's measurement, the Playwright pin in
+`apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` ran on Chromium: 1 / 1, and the whole spec
+24 / 24. The `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
+artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3216,7 +3238,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.27 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.33 | 96.25 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
