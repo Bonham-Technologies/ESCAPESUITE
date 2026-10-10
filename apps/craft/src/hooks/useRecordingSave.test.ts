@@ -692,6 +692,67 @@ describe('useRecordingSave for a separate-tracks take', () => {
     expect('thumbnailUrl' in webcamEntry).toBe(true)
   })
 
+  // ESCSUITE-224. A companion's thumbnail write is cosmetic too: its bytes are
+  // already in `videos` by then, so a rejection must not hide the row, report
+  // the part as lost or orphan the bytes. The primary's write (the first
+  // storeThumbnail call) is let through; the webcam's (the second) rejects.
+  describe('when a companion thumbnail write fails (ESCSUITE-224)', () => {
+    it('still lists the webcam, with no thumbnail, and raises no notice', async () => {
+      recorderTypeRef.current = 'webcodecs'
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      vi.mocked(storeThumbnail)
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new DOMException('quota', 'QuotaExceededError'))
+      const { result } = mountSave()
+
+      await result.current(RAW, 6, [companionPart])
+
+      expect(notices).toEqual([])
+      expect(consoleWarn).toHaveBeenCalledTimes(1)
+      expect(consoleWarn).toHaveBeenCalledWith(
+        'Webcam thumbnail could not be saved:',
+        expect.any(DOMException)
+      )
+      expect(vi.mocked(storeVideo).mock.calls.some(call => call[1] === COMPANION)).toBe(true)
+      const stored = await getRecordingsMetadata()
+      expect(stored.map(m => m.role).sort()).toEqual(['screen', 'webcam'])
+      expect(added.map(entry => entry.role)).toEqual(['webcam', 'screen'])
+      const webcamEntry = added.find(entry => entry.role === 'webcam')!
+      expect('thumbnailUrl' in webcamEntry).toBe(false)
+    })
+
+    it('still treats a rejected video write as a lost part, unlisted, with the notice', async () => {
+      recorderTypeRef.current = 'webcodecs'
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      // The primary's write (first call) is real; the webcam's (second) rejects.
+      const actual = await vi.importActual<typeof import('../core/storage')>('../core/storage')
+      vi.mocked(storeVideo)
+        .mockImplementationOnce(actual.storeVideo)
+        .mockRejectedValueOnce(new Error('quota exceeded'))
+      const { result } = mountSave()
+
+      await result.current(RAW, 6, [companionPart])
+
+      expect(added.map(entry => entry.role)).toEqual(['screen'])
+      expect(notices).toEqual([SEPARATE_TRACK_NOT_SAVED])
+      expect(consoleWarn).toHaveBeenCalledWith('Webcam track could not be saved:', expect.any(Error))
+      expect(consoleWarn).not.toHaveBeenCalledWith('Webcam thumbnail could not be saved:', expect.anything())
+    })
+
+    it('leaves an audio companion, which has no thumbnail to write, unchanged', async () => {
+      recorderTypeRef.current = 'webcodecs'
+      const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const { result } = mountSave()
+
+      await result.current(RAW, 6, [micPart])
+
+      expect(notices).toEqual([])
+      expect(consoleWarn).not.toHaveBeenCalled()
+      const micEntry = added.find(entry => entry.role === 'mic')!
+      expect('thumbnailUrl' in micEntry).toBe(false)
+    })
+  })
+
   it('stores four parts under one takeId, the audio parts as audio', async () => {
     recorderTypeRef.current = 'webcodecs'
     const { result } = mountSave()
