@@ -1,3 +1,6 @@
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import http from 'node:http'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -337,6 +340,32 @@ describe('sink readiness', () => {
       probeSpy.mockRestore()
     }
   })
+
+  // ESCSUITE-236: same shape as the parse refusals -- a permanent input error, not a queued job.
+  it.skipIf(process.getuid?.() === 0)(
+    'answers 400 naming the directory when a volume directory is unwritable',
+    async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'serve-ro-'))
+      await fs.chmod(dir, 0o555)
+      try {
+        await start()
+
+        const res = await postSpec(
+          validSpec('job-1', { output: { sink: 'volume', config: { dir } } }),
+        )
+
+        expect(res.status).toBe(400)
+        const body = (await res.json()) as { error: string }
+        expect(body.error).toContain(dir)
+        expect(body.error).toContain(`uid ${process.getuid?.()}`)
+        expect(runJob).not.toHaveBeenCalled()
+        await waitForHealth({ inFlight: 0, queued: 0 })
+      } finally {
+        await fs.chmod(dir, 0o755)
+        await fs.rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('does not probe the SDK for a non-s3 sink', async () => {
     const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')

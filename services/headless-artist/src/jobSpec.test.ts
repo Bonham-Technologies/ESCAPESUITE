@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
 import * as s3Module from './s3'
 
@@ -394,21 +397,60 @@ describe('ensureSinkReady', () => {
     }
   })
 
-  it('does nothing for every sink but s3', async () => {
+  it('does not probe the s3 SDK for any other sink', async () => {
     const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')
     try {
-      await expect(
-        ensureSinkReady({ sink: 'volume', config: { dir: '/tmp' } }),
-      ).resolves.toBeUndefined()
-      await expect(
-        ensureSinkReady({ sink: 'command', config: { command: '/bin/true' } }),
-      ).resolves.toBeUndefined()
-      await expect(
-        ensureSinkReady({ sink: 'webhook', config: { url: 'https://x/y' } }),
-      ).resolves.toBeUndefined()
+      await ensureSinkReady({ sink: 'volume', config: { dir: os.tmpdir() } })
+      await ensureSinkReady({ sink: 'command', config: { command: '/bin/true' } })
+      await ensureSinkReady({ sink: 'webhook', config: { url: 'https://x/y' } })
       expect(probeSpy).not.toHaveBeenCalled()
     } finally {
       probeSpy.mockRestore()
     }
+  })
+})
+
+// ESCSUITE-236: a volume whose directory the process cannot write used to render in full and
+// only then fail delivery with EACCES (which a broker reads as retryable). The probe creates
+// and removes a private temp file, because fs.access lies about ACLs and read-only mounts.
+describe('ensureSinkReady, volume sink', () => {
+  let root: string
+  beforeEach(async () => {
+    root = await fs.mkdtemp(path.join(os.tmpdir(), 'ready-'))
+  })
+  afterEach(async () => {
+    await fs.chmod(root, 0o755)
+    await fs.rm(root, { recursive: true, force: true })
+  })
+
+  it('resolves for a writable directory and leaves nothing behind', async () => {
+    await expect(ensureSinkReady({ sink: 'volume', config: { dir: root } })).resolves.toBeUndefined()
+    expect(await fs.readdir(root)).toEqual([])
+  })
+
+  it('creates a missing directory, as the sink itself would', async () => {
+    const dir = path.join(root, 'a', 'b')
+    await ensureSinkReady({ sink: 'volume', config: { dir } })
+    expect((await fs.stat(dir)).isDirectory()).toBe(true)
+    expect(await fs.readdir(dir)).toEqual([])
+  })
+
+  it.skipIf(process.getuid?.() === 0)(
+    'refuses an unwritable directory, naming it and the uid the process runs as',
+    async () => {
+      await fs.chmod(root, 0o555)
+      const attempt = ensureSinkReady({ sink: 'volume', config: { dir: root } })
+      await expect(attempt).rejects.toThrow(root)
+      await expect(attempt).rejects.toThrow(`uid ${process.getuid?.()}`)
+      await expect(attempt).rejects.toThrow(/EACCES/)
+    },
+  )
+
+  it('refuses a directory that cannot be created', async () => {
+    const file = path.join(root, 'file')
+    await fs.writeFile(file, 'x')
+    await expect(
+      ensureSinkReady({ sink: 'volume', config: { dir: path.join(file, 'sub') } }),
+    ).rejects.toThrow(/not writable by uid/)
   })
 })

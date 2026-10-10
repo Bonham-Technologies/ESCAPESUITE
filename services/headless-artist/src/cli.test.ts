@@ -464,6 +464,40 @@ describe('sink readiness', () => {
     }
   })
 
+  // ESCSUITE-236: an output directory the container's user cannot write is a permanent input
+  // error, found before Chromium launches rather than after a full render.
+  it.skipIf(process.getuid?.() === 0)(
+    'exits 2 naming the directory and the uid when a volume directory is unwritable',
+    async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cli-ro-'))
+      await fs.chmod(dir, 0o555)
+      try {
+        const jobFile = await writeJobSpec(validSpec({ output: { sink: 'volume', config: { dir } } }))
+
+        expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+        expect(stderrText()).toContain(dir)
+        expect(stderrText()).toContain(`uid ${process.getuid?.()}`)
+        expect(runJob).not.toHaveBeenCalled()
+      } finally {
+        await fs.chmod(dir, 0o755)
+        await fs.rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it('renders when the volume directory is writable', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cli-rw-'))
+    try {
+      const jobFile = await writeJobSpec(validSpec({ output: { sink: 'volume', config: { dir } } }))
+
+      expect(await main(['render', '--job', jobFile], {})).toBe(0)
+      expect(runJob).toHaveBeenCalledTimes(1)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('does not probe the SDK, and still renders, for a non-s3 sink', async () => {
     const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')
     try {
