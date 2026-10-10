@@ -166,8 +166,13 @@ describe('readAvcConfig on the rest of the SPS syntax', () => {
     ).toEqual({ squarePixels: true, fullRange: false, colour: { primaries: 2, transfer: 2, matrix: 1 } })
   })
 
-  it('reads nothing from an avcC with no SPS', () => {
-    expect(readAvcConfig(Uint8Array.from([1, 100, 0, 31, 0xff, 0xe0, 0]))).toEqual({ squarePixels: true })
+  // Fix round 2: an avcC with no SPS (avc3, parameter sets in-band) hides the
+  // colour description and the sample aspect ratio the worker checks, so it
+  // keeps the <video> path.
+  it('refuses an avcC with no SPS', () => {
+    expect(() => readAvcConfig(Uint8Array.from([1, 100, 0, 31, 0xff, 0xe0, 0]))).toThrow(
+      'The avcC record carries no sequence parameter set (in-band parameter sets); the <video> path draws this source'
+    )
   })
 
   it('refuses a parameter set that ends before its syntax does', () => {

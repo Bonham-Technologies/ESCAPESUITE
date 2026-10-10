@@ -31,10 +31,16 @@ vi.mock('mp4box', () => {
     static BIG_ENDIAN = false
     buffer = new ArrayBuffer(8)
   }
-  /** An avcC record with no SPS in it: square pixels, no colour description. */
+  /**
+   * An avcC record (behind an 8-byte box header) carrying one baseline SPS
+   * with no VUI: square pixels, no colour description in the bitstream.
+   */
   const avcC = {
     write(stream: DataStream) {
-      stream.buffer = Uint8Array.of(0, 0, 0, 15, 0x61, 0x76, 0x63, 0x43, 1, 100, 0, 31, 0xff, 0xe0, 0).buffer
+      stream.buffer = Uint8Array.of(
+        0, 0, 0, 26, 0x61, 0x76, 0x63, 0x43,
+        1, 66, 0, 31, 0xff, 0xe1, 0, 9, 0x67, 66, 0, 31, 0xda, 0x02, 0x80, 0xf6, 0x40, 0
+      ).buffer
     },
   }
   return {
@@ -117,7 +123,7 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
   })
 
   // Fix rounds 1 and 2: the colr shapes no ffmpeg fixture here produces. The
-  // scripted avcC carries no SPS, so the bitstream describes nothing.
+  // scripted SPS has no VUI, so the bitstream describes nothing.
   describe('colour from a colr box over an untagged bitstream', () => {
     it("hands an 'nclc' box's code points to the decoder, limited range", async () => {
       script.colr = { colour_type: 'nclc', colour_primaries: 1, transfer_characteristics: 1, matrix_coefficients: 1 }
