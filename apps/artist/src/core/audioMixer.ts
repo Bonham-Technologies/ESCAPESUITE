@@ -29,6 +29,11 @@ export async function extractAndMixAudio(
   const channels = 2;
   const totalSamples = Math.ceil(totalDuration * sampleRate);
 
+  // Nothing to mix (ESCSUITE-257): a zero or negative length would make the
+  // buffer and the context below throw a raw browser error. `!(>= 1)` also
+  // catches NaN.
+  if (!(totalSamples >= 1)) return null;
+
   // Create output buffer (stereo interleaved)
   const outputBuffer = new Float32Array(totalSamples * channels);
 

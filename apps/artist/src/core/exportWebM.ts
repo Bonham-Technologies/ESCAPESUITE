@@ -18,6 +18,7 @@ import {
   getResolution, getBaseDimensions,
   yieldToMain,
   calculateTimelineDuration,
+  assertExportableLength,
   findSupportedVideoConfig,
   webMVideoCodecConfigs,
   waitForEncoderBackpressure,
@@ -104,6 +105,10 @@ export async function exportToWebM(
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
+
+  // A timeline with no length cannot be mixed or encoded (ESCSUITE-257): refuse
+  // it before anything below spends work on it.
+  assertExportableLength(calculateTimelineDuration(clips), 'webm', exportLog);
 
   // Probe VP9, falling back to VP8, at the real output size and bitrate —
   // before loading any media or constructing any encoder (ESCSUITE-29

@@ -30,6 +30,8 @@ import {
   GIF_LONG_RANGE_SECONDS,
   GIF_LONG_RANGE_WARNING,
   TAB_VISIBLE_NOTE,
+  calculateTimelineDuration,
+  exportLengthReason,
 } from '../../core/exportTypes';
 import { shouldAnnounceProgress } from './progressAnnouncement';
 import type { ProgressAnnouncement } from './progressAnnouncement';
@@ -276,6 +278,14 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     return notes;
   })();
 
+  // ESCSUITE-257: a timeline (or a selected section) with no length cannot be
+  // exported, so every download says so instead of reaching the exporter's
+  // refusal. `clips.length === 0` keeps its own, older handling.
+  const wholeLengthReason = exportLengthReason(calculateTimelineDuration(clips));
+  const lengthReason = timeRange
+    ? exportLengthReason(timeRange.end - timeRange.start)
+    : wholeLengthReason;
+
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review
   // round 1, MAJOR 1): `handleExport` already falls back from 'mp4' to
@@ -293,7 +303,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       : advancedOptions.format === 'mp4' && mp4Supported
         ? 'mp4'
         : 'webm';
-  const advancedBlockedReason = effectiveAdvancedFormat === 'webm' ? webmBlockedReason : null;
+  const advancedBlockedReason =
+    lengthReason ?? (effectiveAdvancedFormat === 'webm' ? webmBlockedReason : null);
 
   // What a GIF export would actually produce, for the estimate and the warning.
   // Computed unconditionally (it is arithmetic over values already in scope) and
@@ -721,16 +732,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     <button
                       className={styles.primaryExportButton}
                       onClick={() => handleExport(undefined, false)}
-                      disabled={clips.length === 0 || !webmSupported}
-                      title={webmBlockedReason ?? undefined}
+                      disabled={clips.length === 0 || !webmSupported || lengthReason !== null}
+                      title={lengthReason ?? webmBlockedReason ?? undefined}
                     >
                       Export Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})
                     </button>
                     <button
                       className={styles.primaryExportButton}
                       onClick={() => handleExport(undefined, false, true)}
-                      disabled={clips.length === 0 || !webmSupported}
-                      title={webmBlockedReason ?? undefined}
+                      disabled={clips.length === 0 || !webmSupported || wholeLengthReason !== null}
+                      title={wholeLengthReason ?? webmBlockedReason ?? undefined}
                       style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)' }}
                     >
                       Export Full Video
@@ -740,8 +751,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   <button
                     className={styles.primaryExportButton}
                     onClick={() => handleExport(undefined, false)}
-                    disabled={clips.length === 0 || !webmSupported}
-                    title={webmBlockedReason ?? undefined}
+                    disabled={clips.length === 0 || !webmSupported || lengthReason !== null}
+                    title={lengthReason ?? webmBlockedReason ?? undefined}
                   >
                     Download WebM
                   </button>
