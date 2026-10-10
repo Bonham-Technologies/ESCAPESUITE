@@ -262,6 +262,166 @@ describe('usePreviewRenderLoop scrubbing', () => {
   })
 })
 
+/**
+ * A <video> as the preview creates it a moment before it has decoded anything:
+ * metadata may or may not be in, but no frame is (`readyState` below
+ * HAVE_CURRENT_DATA, 2). {@link becomeReady} is the browser getting there.
+ */
+function notReadyVideo(): HTMLVideoElement {
+  doubles.media.script({ video: { readyState: 0 } })
+  const element = document.createElement('video')
+  doubles.media.script({ video: { readyState: 4 } })
+  return element
+}
+
+function becomeReady(element: HTMLVideoElement): void {
+  Object.defineProperty(element, 'readyState', { value: 2, configurable: true, writable: true })
+  element.dispatchEvent(new Event('loadeddata'))
+}
+
+/**
+ * The 'loadeddata' listeners added to and removed from `element`, as spies
+ * that still pass through to the element.
+ */
+function watchLoadedData(element: HTMLVideoElement) {
+  const added = vi.spyOn(element, 'addEventListener')
+  const removed = vi.spyOn(element, 'removeEventListener')
+  const of = (spy: typeof added | typeof removed) =>
+    spy.mock.calls.filter(([type]) => type === 'loadeddata').map(([, listener]) => listener)
+  return { added: () => of(added), removed: () => of(removed) }
+}
+
+describe('usePreviewRenderLoop readiness paint (ESCSUITE-264)', () => {
+  it('paints once more when a paused clip\'s video decodes its first frame, and not before', async () => {
+    addClip('clip1', 0, 4)
+    const { deps } = harness([])
+    deps.videoElementsRef.current.set(video.id, notReadyVideo())
+    const element = deps.videoElementsRef.current.get(video.id)!
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    // The mount paint and the media-URL paint, both drawn over a video with
+    // nothing to draw — and nothing else is coming while the playhead is still.
+    await settle(1000)
+    const before = draws(deps).length
+    expect(before).toBeGreaterThan(0)
+
+    becomeReady(element)
+
+    expect(draws(deps).length).toBe(before + 1)
+    expect(last(draws(deps))).toEqual([store().currentTime])
+    expect(deps.drawSelectionHandles).toHaveBeenLastCalledWith(store().currentTime)
+    expect(deps.drawMultiSelectHandles).toHaveBeenLastCalledWith(store().currentTime)
+
+    // Exactly one: the element reporting data again paints nothing more.
+    element.dispatchEvent(new Event('loadeddata'))
+    await settle(1000)
+    expect(draws(deps).length).toBe(before + 1)
+  })
+
+  it('waits for a video that arrives after the clip, as a freshly added clip\'s does', async () => {
+    addClip('clip1', 0, 4)
+    const { deps } = harness([])
+
+    // The clip is on the timeline before its source has an element at all.
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+
+    const element = notReadyVideo()
+    deps.videoElementsRef.current.set(video.id, element)
+    rerender({ ...deps, videoUrlsKey: video.id })
+    await settle(1000)
+    const before = draws(deps).length
+
+    becomeReady(element)
+
+    expect(draws(deps).length).toBe(before + 1)
+  })
+
+  it('leaves no listener behind for a video that is ready already', async () => {
+    addClip('clip1', 0, 4)
+    const { deps } = harness()
+    const element = deps.videoElementsRef.current.get(video.id)!
+    const listeners = watchLoadedData(element)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const before = draws(deps).length
+
+    expect(listeners.added()).toEqual([])
+    element.dispatchEvent(new Event('loadeddata'))
+    expect(draws(deps).length).toBe(before)
+  })
+
+  it('drops the pending paint when the clip leaves before its video is ready', async () => {
+    const clip = addClip('clip1', 0, 4)
+    const { deps } = harness([])
+    const element = notReadyVideo()
+    deps.videoElementsRef.current.set(video.id, element)
+    const listeners = watchLoadedData(element)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    expect(listeners.added()).toHaveLength(1)
+    expect(listeners.removed()).toEqual([])
+
+    act(() => {
+      store().removeClipFromTimeline(clip.id)
+    })
+    await settle(1000)
+    // The one listener that was waiting is the one taken off.
+    expect(listeners.removed()).toEqual(listeners.added())
+    const before = draws(deps).length
+
+    becomeReady(element)
+
+    expect(draws(deps).length).toBe(before)
+  })
+
+  it('does not wait on readiness while playing — the next animation frame paints', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness([])
+    const element = notReadyVideo()
+    deps.videoElementsRef.current.set(video.id, element)
+    const listeners = watchLoadedData(element)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(FRAME_MS * 3)
+
+    // Attached while paused at mount, taken off the moment playback began.
+    expect(listeners.removed()).toEqual(listeners.added())
+  })
+
+  it('a frame step ends on a paint that follows the seek, not only the one before it', async () => {
+    doubles.media.script({ video: { stallSeek: true } })
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness([])
+    const element = document.createElement('video')
+    deps.videoElementsRef.current.set(video.id, element)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    seek(1)
+    await settle(FRAME_MS)
+    // Before the seek reports back: only the provisional paint, over the
+    // frame the element was showing.
+    expect(element.currentTime).toBe(1)
+    expect(drawnTimes(deps)).toEqual([1])
+
+    element.dispatchEvent(new Event('seeked'))
+    await settle(FRAME_MS)
+    // After it: the paint of the frame the seek landed on — and the fallback
+    // does not paint a third time.
+    expect(drawnTimes(deps)).toEqual([1, 1])
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1])
+  })
+})
+
 describe('usePreviewRenderLoop display time', () => {
   /**
    * Subscribe to the readout and record every position it is told about.
