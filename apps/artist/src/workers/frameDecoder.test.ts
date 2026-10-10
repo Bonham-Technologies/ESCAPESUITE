@@ -338,6 +338,56 @@ describe('FrameDecoder', () => {
     for (const frame of frames) frame.close()
   })
 
+  // ESCSUITE-272: the worker turns each call into a FRAME_PROGRESS for the
+  // request, so the main thread's deadline measures silence rather than age.
+  describe('reports each decoder output to the requests waiting on it', () => {
+    it('once per output while a request is served, and never after it settles', async () => {
+      const { frameDecoder } = engine({ reorderDelay: 0 })
+      let first = 0
+      // The keyframe alone: one chunk fed, one output, one call.
+      const frame = await frameDecoder.getFrame(0, () => first++)
+      frame.close()
+      expect(first).toBe(1)
+
+      let second = 0
+      const before = FakeFrame.created.length
+      const later = await frameDecoder.getFrame(0.2, () => second++)
+      const emitted = FakeFrame.created.length - before - 1 // less the clone handed back
+      later.close()
+
+      expect(emitted).toBe(6) // 3, 1, 2, 6, 4, 5 in decode order
+      expect(second).toBe(emitted)
+      // The first request's listener went when it settled.
+      expect(first).toBe(1)
+    })
+
+    it('says nothing to a request served from the cache', async () => {
+      const { frameDecoder } = engine()
+      await expectFrameAt(frameDecoder, 0.2, 5 * FRAME_US)
+      let calls = 0
+
+      const frame = await frameDecoder.getFrame(0.2, () => calls++)
+      frame.close()
+
+      expect(calls).toBe(0)
+    })
+
+    it('tells a request queued behind another about the outputs serving that one: its answer depends on them', async () => {
+      const { frameDecoder } = engine({ reorderDelay: 0 })
+      let served = 0
+      let queued = 0
+
+      const frames = await Promise.all([
+        frameDecoder.getFrame(0.2, () => served++),
+        frameDecoder.getFrame(0.24, () => queued++), // decoded on the way to 0.2: no outputs of its own
+      ])
+      for (const frame of frames) frame.close()
+
+      expect(served).toBe(6)
+      expect(queued).toBe(6)
+    })
+  })
+
   it('replaces a cached frame that is decoded again, closing the old copy', async () => {
     const { frameDecoder, decoder } = engine({ maxCachedFrames: 30 })
     for (let index = 0; index < 6; index++) {
