@@ -114,15 +114,24 @@ pnpm lint                # Run ESLint
   every import ("will be updated if we can detect it" — it never was), so nothing that read it —
   the in-page decoder's seek window first — was reading the file. `extractVideoMetadata` now
   measures it with `core/frameRateProbe.ts`'s `measureFrameRate(video, FRAME_RATE_PROBE)`, on the
-  same `<video>` it already loaded for the duration and dimensions: it plays the element muted,
-  collects `requestVideoFrameCallback`'s `mediaTime` for up to **8 presented frames or 400 ms**,
-  whichever comes first, then pauses it and seeks it back to 0. The rate is one over the
-  **median** spacing between consecutive frames (so one dropped frame does not halve it), snapped
-  to 23.976 / 29.97 / 59.94 when within 0.6 % of the exact 1000/1001 rate **and** nearer it than
-  the whole number beside it (0.6 % is wider than the 0.1 % between 29.97 and 30, so without that
-  second test a 24 or 30 fps source would be stored as its NTSC neighbour), else rounded to two
-  decimals. Fewer than three frames, no `requestVideoFrameCallback`, a refused `play()`, or
-  spacings that are no rate at all answer `undefined`, and the import stores `frameRate: 30` with
+  same `<video>` it already loaded for the duration and dimensions: it seeks the element to 0
+  (the duration probe leaves a headerless WebM at its end, where playing presents nothing), plays
+  it muted, collects `requestVideoFrameCallback`'s `mediaTime` for up to **8 presented frames or
+  400 ms**, whichever comes first, then pauses it and seeks it back to 0; the deadline is cleared
+  whichever way it finishes. The rate is **not** one over a spacing: a WebM stamps frames in whole
+  milliseconds, so a 30 fps file's spacings are 33, 34, 33… ms and any one of them reads 30.30 or
+  29.41 (60 read 58.82, 24 read 23.81, 120 read 125 — review round 1). The median of the
+  **positive** spacings (a repeated or reordered time is left out) only **counts** the intervals,
+  `k = round(span / median)` with `span` the last `mediaTime` minus the first, so a dropped frame
+  raises `k` instead of skewing the spacing, and the rate is `k / span` — the millisecond of
+  rounding spread over the whole span. That is snapped to the **nearest** of the standard rates
+  23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88 and 120 when within **1.5 %** of
+  it, else rounded to two decimals. "Nearest" is what keeps an exact 24 or 30 fps MP4 from being
+  stored as 23.976 or 29.97; from millisecond timestamps over eight frames a whole rate and its
+  NTSC neighbour, 0.1 % apart, cannot be told apart at all, so a 30 fps WebM is stored as 30 or
+  29.97 depending on where its frames fall — which no reader cares about. Fewer than three frames,
+  a run that ends no later than it starts or is too short to hold one interval, no
+  `requestVideoFrameCallback`, or a refused `play()` answer `undefined`, and the import stores `frameRate: 30` with
   `frameRateSource: 'assumed'`; a measured rate is stored with `'measured'`. **This adds up to
   400 ms to a video import** — it runs once, at import, and only for a file that decoded a picture
   (`videoWidth > 0 && videoHeight > 0`; the mic-only `.webm` that `processMediaFile` probes in a
@@ -130,7 +139,8 @@ pnpm lint                # Run ESLint
   already has a rate: the `.veditor` load (the file carries `frameRate` and `frameRateSource` in
   its `meta`; an old file without `meta` falls back to 30 `'assumed'` without playing the blob)
   and the `?loadVideo=` handoff (ESCAPECRAFT writes its recorder's configured rate,
-  `'configured'`). Images keep 1 and audio 0, both `'assumed'`. `frameRateSource` is an optional
+  `'configured'`). The media library imports files one after another, so dropping N videos at once
+  can add up to N × 400 ms. Images keep 1 and audio 0, both `'assumed'`. `frameRateSource` is an optional
   field on the shared `SourceVideo` (`packages/shared`); a record with none — everything written
   before this ticket — reads as `'assumed'`, and `DB_VERSION` did not change. The `<video>`
   double grows an optional `frameTimes` script that gives the element `requestVideoFrameCallback`;
