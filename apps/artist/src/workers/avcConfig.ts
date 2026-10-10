@@ -10,7 +10,8 @@
  * `<video>`; the worker refuses such a stream rather than guess).
  *
  * Everything before the VUI is parsed only to be skipped. A parameter set
- * that ends before the parser does is malformed, and throws.
+ * that ends before the parser does is malformed, and throws; so does a record
+ * with no SPS at all.
  */
 
 export interface AvcStreamInfo {
@@ -88,8 +89,14 @@ function skipScalingList(bits: BitReader, size: number): void {
 
 /** Read the VUI facts from the first SPS of an avcC record (the box's payload, no header). */
 export function readAvcConfig(avcC: Uint8Array): AvcStreamInfo {
-  const spsCount = avcC[5] & 0x1f;
-  if (spsCount === 0) return { squarePixels: true };
+  // With its parameter sets in-band (avc3) the record may carry none, and then
+  // nothing below can be checked: refused rather than assumed square and
+  // untagged.
+  if ((avcC[5] & 0x1f) === 0) {
+    throw new Error(
+      'The avcC record carries no sequence parameter set (in-band parameter sets); the <video> path draws this source'
+    );
+  }
   const length = (avcC[6] << 8) | avcC[7];
   // Skip the one-byte NAL unit header.
   const bits = new BitReader(unescapeRbsp(avcC.subarray(9, 8 + length)));
