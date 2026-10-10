@@ -19,6 +19,7 @@ function renderTrack(
     playheadTime?: number
     isSelected?: boolean
     locked?: boolean
+    tabIndex?: 0 | -1
   } = {}
 ) {
   const clip = currentClip()
@@ -39,6 +40,7 @@ function renderTrack(
       playheadTime={overrides.playheadTime ?? 0}
       isSelected={overrides.isSelected ?? false}
       locked={overrides.locked ?? false}
+      tabIndex={overrides.tabIndex ?? 0}
       onSelect={onSelect}
       onKeyframeMoved={onKeyframeMoved}
       onAddKeyframe={onAddKeyframe}
@@ -69,6 +71,45 @@ describe('KeyframeTrack', () => {
     renderTrack('scaleX')
 
     expect(screen.getByText('Scale X')).toBeInTheDocument()
+  })
+
+  describe('the row as a button (ESCSUITE-243)', () => {
+    it('is a real button named for its property, whatever else it shows', () => {
+      renderTrack('scaleX')
+
+      const row = screen.getByRole('button', { name: 'Scale X' })
+      expect(row.tagName).toBe('BUTTON')
+      expect(row).toHaveAttribute('type', 'button')
+      expect(row).toHaveAttribute('data-property', 'scaleX')
+    })
+
+    it('reports whether its graph is the open one through aria-pressed', () => {
+      const { unmount } = renderTrack('opacity', { isSelected: true })
+      expect(screen.getByRole('button', { name: 'Opacity' })).toHaveAttribute('aria-pressed', 'true')
+      unmount()
+
+      renderTrack('opacity', { isSelected: false })
+      expect(screen.getByRole('button', { name: 'Opacity' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('takes the tab index it is handed', () => {
+      const { unmount } = renderTrack('opacity', { tabIndex: 0 })
+      expect(screen.getByRole('button', { name: 'Opacity' }).tabIndex).toBe(0)
+      unmount()
+
+      renderTrack('opacity', { tabIndex: -1 })
+      expect(screen.getByRole('button', { name: 'Opacity' }).tabIndex).toBe(-1)
+    })
+
+    it('asks to select on Enter, with no key handler of its own', async () => {
+      const user = userEvent.setup()
+      const { onSelect } = renderTrack('opacity')
+
+      screen.getByRole('button', { name: 'Opacity' }).focus()
+      await user.keyboard('{Enter}')
+
+      expect(onSelect).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('shows no diamonds for a clip with no animation', () => {
