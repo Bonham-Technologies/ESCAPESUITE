@@ -138,7 +138,7 @@ function probeVideo(
   Object.defineProperty(el, 'cancelVideoFrameCallback', { value: cancel, configurable: true })
   Object.defineProperty(el, 'currentTime', {
     configurable: true,
-    get: () => seeks.at(-1) ?? 0,
+    get: () => (seeks.length > 0 ? seeks[seeks.length - 1] : 0),
     set: (t: number) => {
       seeks.push(t)
     },

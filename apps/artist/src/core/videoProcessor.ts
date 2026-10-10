@@ -5,6 +5,7 @@ import type { SourceVideo } from '../store/types';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { storeVideo, storeThumbnail } from './storage';
 import { extractWaveformData } from '../utils/waveform';
+import { FRAME_RATE_PROBE, measureFrameRate } from './frameRateProbe';
 
 /**
  * Seek target used to make a browser discover a duration it did not read from
@@ -52,6 +53,19 @@ export function loadMediaDuration(
   name: string,
   kind: 'video' | 'audio'
 ): Promise<number> {
+  return settleMediaDuration(element, name, kind).finally(() => URL.revokeObjectURL(objectUrl));
+}
+
+/**
+ * `loadMediaDuration` without the revoke, for the one caller that still needs
+ * the element's source once the length is known: `extractVideoMetadata` plays
+ * the element to measure its frame rate (ESCSUITE-276) and revokes after that.
+ */
+function settleMediaDuration(
+  element: HTMLMediaElement,
+  name: string,
+  kind: 'video' | 'audio'
+): Promise<number> {
   return new Promise((resolve, reject) => {
     // Replaced by the end-seek probe with its own teardown: a no-op before there
     // is a probe to stop, and again after one has been stopped. Kept as a
@@ -63,11 +77,10 @@ export function loadMediaDuration(
     // Everything that happens exactly once, on whichever path settles first.
     const release = () => {
       stopProbe();
-      // `src` still points at the URL about to be revoked, and some browsers
-      // fire 'error' on a dangling src — which would re-enter `fail` and revoke
-      // a second time.
+      // `src` still points at a URL the caller is about to revoke, and some
+      // browsers fire 'error' on a dangling src — which would re-enter `fail`
+      // and settle a second time.
       element.onerror = null;
-      URL.revokeObjectURL(objectUrl);
     };
 
     const succeed = (duration: number) => {
@@ -128,9 +141,14 @@ export function loadMediaDuration(
 /**
  * Extract metadata from a video file
  *
- * The length comes from `loadMediaDuration`, which probes for it when the
- * container declares none; the rest is read off the element once it has
- * settled.
+ * The length comes from the same probe `loadMediaDuration` runs, which seeks
+ * for it when the container declares none; the dimensions are read off the
+ * element once it has settled. The frame rate is measured by playing the
+ * element for up to eight frames or 400 ms (`measureFrameRate`, ESCSUITE-276)
+ * — but only when it decoded a picture, since a `<video>` with none presents
+ * no frames and would only spend the 400 ms. A rate that could not be measured
+ * is stored as 30, labelled `'assumed'`. The object URL is revoked once, after
+ * all of that, however it settles.
  */
 export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
   const video = document.createElement('video');
@@ -139,18 +157,28 @@ export async function extractVideoMetadata(file: File): Promise<SourceVideo> {
   const objectUrl = URL.createObjectURL(file);
   video.src = objectUrl;
 
-  const duration = await loadMediaDuration(video, objectUrl, file.name, 'video');
+  try {
+    const duration = await settleMediaDuration(video, file.name, 'video');
+    const measured =
+      video.videoWidth > 0 && video.videoHeight > 0
+        ? await measureFrameRate(video, FRAME_RATE_PROBE)
+        : undefined;
 
-  return {
-    id: uuidv4(),
-    name: file.name,
-    duration,
-    width: video.videoWidth,
-    height: video.videoHeight,
-    frameRate: 30, // Default, will be updated if we can detect it
-    mimeType: file.type,
-    size: file.size,
-  };
+    return {
+      id: uuidv4(),
+      name: file.name,
+      duration,
+      width: video.videoWidth,
+      height: video.videoHeight,
+      ...(measured === undefined
+        ? { frameRate: 30, frameRateSource: 'assumed' as const }
+        : { frameRate: measured, frameRateSource: 'measured' as const }),
+      mimeType: file.type,
+      size: file.size,
+    };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 /**
@@ -168,10 +196,14 @@ export async function resolveStoredDuration(blob: Blob, metadata: SourceVideo): 
   if (isUsableDuration(metadata.duration)) {
     return metadata.duration;
   }
-  const recovered = await extractVideoMetadata(
-    new File([blob], metadata.name, { type: blob.type })
-  );
-  return recovered.duration;
+  // The length alone, not `extractVideoMetadata`: both callers — the CRAFT
+  // handoff and the `.veditor` load — already carry a frame rate, and must not
+  // spend up to 400 ms measuring one (ESCSUITE-276).
+  const video = document.createElement('video');
+  video.preload = 'metadata';
+  const objectUrl = URL.createObjectURL(blob);
+  video.src = objectUrl;
+  return loadMediaDuration(video, objectUrl, metadata.name, 'video');
 }
 
 /**
@@ -294,6 +326,7 @@ export async function extractImageMetadata(file: File): Promise<SourceVideo> {
         width: img.naturalWidth,
         height: img.naturalHeight,
         frameRate: 1, // Static image
+        frameRateSource: 'assumed',
         mimeType: file.type,
         size: file.size,
         mediaType: 'image',
@@ -413,6 +446,7 @@ export async function extractAudioMetadata(file: File): Promise<SourceVideo> {
     width: 0, // Audio has no dimensions
     height: 0,
     frameRate: 0, // Not applicable for audio
+    frameRateSource: 'assumed',
     mimeType: file.type,
     size: file.size,
     mediaType: 'audio',

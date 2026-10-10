@@ -85,7 +85,9 @@ pnpm lint                # Run ESLint
   usable duration on `loadedmetadata` resolves immediately with no seek; nothing usable within 5 s
   rejects with `Could not determine the duration of <name>`, which `VideoUploader` shows verbatim
   in the file's upload row. One `release()` is the single settle path, so the probe is torn down
-  and the object URL revoked **exactly once** whichever way the promise settles — pinned by
+  exactly once, and the object URL is revoked **exactly once** whichever way the promise settles —
+  by `loadMediaDuration`'s own `finally`, or, for `extractVideoMetadata`, which still needs the
+  element's source to measure the frame rate, by its `finally` after that — pinned by
   `toHaveBeenCalledTimes(1)` on the success, timeout and error paths. `processVideoFile` passes the
   thumbnail time explicitly as `metadata.duration * 0.1`, because `generateThumbnail` loads its own
   element and would read the same `Infinity`.
@@ -100,12 +102,40 @@ pnpm lint                # Run ESLint
   `extractVideoMetadata`, and CRAFT stores `Infinity` in preference to its own wall clock (its
   guard is `duration > 0`, which `Infinity` passes). `resolveStoredDuration(blob, metadata)`
   returns the stored duration when it is usable and otherwise recovers it from the blob, so the
-  handoff cannot build an infinite clip either. The `<video>` double
+  handoff cannot build an infinite clip either. It recovers the length alone, through
+  `loadMediaDuration` — not through `extractVideoMetadata`, which would also measure a frame rate
+  its two callers (the handoff and the `.veditor` load) already carry. The `<video>` double
   (`src/test/doubles/media.ts`) models the discovery with `durationAfterSeek` /
   `durationStaysUnknown`, and throws on a non-finite `currentTime` the way a browser does, so this
   class of hang is caught by the unit suite rather than only in a browser. The `<audio>` double
   shares that one `currentTime` setter (`SeekScript`, which both `VideoScript` and `AudioScript`
   extend), so the two importers cannot drift apart in the tests either.
+  **Frame rate** (ESCSUITE-276): `SourceVideo.frameRate` used to be written as a constant 30 on
+  every import ("will be updated if we can detect it" — it never was), so nothing that read it —
+  the in-page decoder's seek window first — was reading the file. `extractVideoMetadata` now
+  measures it with `core/frameRateProbe.ts`'s `measureFrameRate(video, FRAME_RATE_PROBE)`, on the
+  same `<video>` it already loaded for the duration and dimensions: it plays the element muted,
+  collects `requestVideoFrameCallback`'s `mediaTime` for up to **8 presented frames or 400 ms**,
+  whichever comes first, then pauses it and seeks it back to 0. The rate is one over the
+  **median** spacing between consecutive frames (so one dropped frame does not halve it), snapped
+  to 23.976 / 29.97 / 59.94 when within 0.6 % of the exact 1000/1001 rate **and** nearer it than
+  the whole number beside it (0.6 % is wider than the 0.1 % between 29.97 and 30, so without that
+  second test a 24 or 30 fps source would be stored as its NTSC neighbour), else rounded to two
+  decimals. Fewer than three frames, no `requestVideoFrameCallback`, a refused `play()`, or
+  spacings that are no rate at all answer `undefined`, and the import stores `frameRate: 30` with
+  `frameRateSource: 'assumed'`; a measured rate is stored with `'measured'`. **This adds up to
+  400 ms to a video import** — it runs once, at import, and only for a file that decoded a picture
+  (`videoWidth > 0 && videoHeight > 0`; the mic-only `.webm` that `processMediaFile` probes in a
+  `<video>` would present no frames and only spend the 400 ms). It is kept off every path that
+  already has a rate: the `.veditor` load (the file carries `frameRate` and `frameRateSource` in
+  its `meta`; an old file without `meta` falls back to 30 `'assumed'` without playing the blob)
+  and the `?loadVideo=` handoff (ESCAPECRAFT writes its recorder's configured rate,
+  `'configured'`). Images keep 1 and audio 0, both `'assumed'`. `frameRateSource` is an optional
+  field on the shared `SourceVideo` (`packages/shared`); a record with none — everything written
+  before this ticket — reads as `'assumed'`, and `DB_VERSION` did not change. The `<video>`
+  double grows an optional `frameTimes` script that gives the element `requestVideoFrameCallback`;
+  left unset, as in every older test, the element has none, as jsdom's does not, and the probe
+  answers at once without playing.
 - `exporter.ts`: the barrel over **three** export paths — two through WebCodecs +
   `mediabunny` for muxing, and one through neither:
   - **WebM** (`exportWebM.ts`): VP9 video + Opus audio, frame-by-frame encoding with audio mixing
@@ -246,7 +276,8 @@ pnpm lint                # Run ESLint
   autosave's store subscription re-arms on a point or marker change as it does on the playhead.
   **File format**: each entry in `ProjectFile.videos` carries the video's base64 bytes and,
   since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
-  `duration`/`width`/`height`/`frameRate` plus whatever of `mediaType`, `source`, `recordedAt`,
+  `duration`/`width`/`height`/`frameRate` plus whatever of `frameRateSource` (ESCSUITE-276),
+  `mediaType`, `source`, `recordedAt`,
   `waveformData`, `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
   `hasWebcam` it had (`id`/`name`/`mimeType` are already the entry's own top-level fields, and
   `size` is always the restored blob's). `saveProject` writes it from the `SourceVideo` it was
@@ -4514,7 +4545,8 @@ autosave kept it, the saved `.veditor` serialised it as `null`, and reopening wa
 - **One decision, every entry path.** `core/videoProcessor.ts`'s `processMediaFile(file)` is the
   only place a file's type is chosen. `image/*` goes to `processImageFile`; `audio/*` goes
   straight to `processAudioFile` with no `<video>` probe; anything else loads in a `<video>`
-  through `extractVideoMetadata` (so `loadMediaDuration`), and a picture (`videoWidth > 0 &&
+  through `extractVideoMetadata` (so `loadMediaDuration`'s duration probe, and for a picture the
+  ESCSUITE-276 frame-rate probe), and a picture (`videoWidth > 0 &&
   videoHeight > 0`) finishes as video while no picture falls back to `processAudioFile`
   (`mediaType: 'audio'`, 0x0, the waveform strip), whatever the MIME type says. The media
   library's uploader and both host paths (`LOAD_VIDEO` and `?video=` in
