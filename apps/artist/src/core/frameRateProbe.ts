@@ -8,14 +8,31 @@
 // the element does: `requestVideoFrameCallback` reports each presented frame's
 // `mediaTime`, and the spacing between them is the rate.
 
-/** How long the import-time probe may play: eight frames or 400 ms, whichever first. */
-export const FRAME_RATE_PROBE = { maxFrames: 8, maxMs: 400 } as const;
+/**
+ * The import-time probe: eight frames or 500 ms, whichever first, at half speed.
+ *
+ * Half speed because `requestVideoFrameCallback` fires at most once per
+ * *rendered* frame: at 1x on a 60 Hz display a 120 fps file shows every other
+ * frame, and its callbacks describe a 60 fps file (review round 2). At 0.5x a
+ * source up to twice the display's refresh rate is presented frame for frame;
+ * one faster than that still under-reads.
+ *
+ * 500 ms rather than 400 because half speed halves the media the budget
+ * covers. 500 ms of wall time is 250 ms of media: at 24 fps that is six
+ * intervals, seven frames, so the slowest common rate never reaches the
+ * eight-frame cap (8 frames x 1/24 s = 333 ms of media = 667 ms of wall time)
+ * but clears the three-frame floor with room; at 60 fps and above the cap
+ * ends the probe first (8 frames at 60 fps = 133 ms of media, 267 ms of wall).
+ */
+export const FRAME_RATE_PROBE = { maxFrames: 8, maxMs: 500, playbackRate: 0.5 } as const;
 
 export interface FrameRateProbeOptions {
   /** Stop once this many frames have been presented. */
   maxFrames: number;
   /** Stop after this long whatever has been presented. */
   maxMs: number;
+  /** Play at this rate while probing; the element's own rate is put back after. */
+  playbackRate: number;
 }
 
 /**
@@ -29,9 +46,9 @@ const STANDARD_RATES: readonly number[] = [
 /**
  * How close, relative to a standard rate, a measurement must be to snap to it.
  * 1.5 % covers the millisecond rounding a WebM's timestamps carry over the
- * span of eight frames up to 60 fps (about 0.4 % at 30, 0.9 % at 60); at
- * 120 fps eight frames span 58 ms, ±1.7 %, and an unlucky reading rounds to
- * two decimals instead.
+ * span of eight frames (about 0.4 % at 30, 0.9 % at 60). At 120 fps eight
+ * frames span only 58 or 59 ms once rounded, which reads 120.69 or 118.64 —
+ * both inside it, so a 120 fps WebM snaps too.
  */
 const SNAP_TOLERANCE = 0.015;
 
@@ -92,10 +109,12 @@ export function rateFromMediaTimes(mediaTimes: readonly number[]): number | unde
 /**
  * Play `video` muted and read its frame rate off the frames it presents.
  *
- * Seeks it to 0, then collects `requestVideoFrameCallback`'s `mediaTime`
- * until `maxFrames` frames have been presented or `maxMs` has passed, then
- * pauses the element, seeks it back to 0 and answers `rateFromMediaTimes` of
- * what it saw. Answers
+ * Seeks it to 0, plays it at `playbackRate`, then collects
+ * `requestVideoFrameCallback`'s `mediaTime` until `maxFrames` frames have been
+ * presented or `maxMs` has passed, then pauses the element, puts its own
+ * playback rate back, seeks it to 0 and answers `rateFromMediaTimes` of what it
+ * saw. `mediaTime` is media time, so the rate it reads is the file's whatever
+ * speed it plays at. Answers
  * `undefined` — without playing — for an element with no
  * `requestVideoFrameCallback`, and `undefined` at once when the browser
  * refuses to play. The caller owns the element and its `src`, which must stay
@@ -107,7 +126,7 @@ export function rateFromMediaTimes(mediaTimes: readonly number[]): number | unde
  */
 export function measureFrameRate(
   video: HTMLVideoElement,
-  { maxFrames, maxMs }: FrameRateProbeOptions
+  { maxFrames, maxMs, playbackRate }: FrameRateProbeOptions
 ): Promise<number | undefined> {
   if (typeof video.requestVideoFrameCallback !== 'function') {
     return Promise.resolve(undefined);
@@ -117,6 +136,7 @@ export function measureFrameRate(
     const mediaTimes: number[] = [];
     let handle = 0;
     let finished = false;
+    const previousPlaybackRate = video.playbackRate;
 
     const finish = () => {
       if (finished) return;
@@ -124,6 +144,7 @@ export function measureFrameRate(
       clearTimeout(deadline);
       video.cancelVideoFrameCallback(handle);
       video.pause();
+      video.playbackRate = previousPlaybackRate;
       video.currentTime = 0;
       resolve(rateFromMediaTimes(mediaTimes));
     };
@@ -142,6 +163,7 @@ export function measureFrameRate(
     // From the first frame, wherever the element was left: the duration probe
     // leaves a headerless WebM at its end, where playing presents nothing.
     video.currentTime = 0;
+    video.playbackRate = playbackRate;
     handle = video.requestVideoFrameCallback(onFrame);
     video.play().catch(finish);
   });

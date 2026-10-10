@@ -76,6 +76,7 @@ describe('rateFromMediaTimes', () => {
       [24, [24, 23.976]],
       [25, [25]],
       [50, [50]],
+      [120, [120, 119.88]],
     ])('reads %s fps the same way from any starting point', (fps, accepted) => {
       for (let offset = 0; offset < 200; offset++) {
         expect(accepted).toContain(rateFromMediaTimes(ms(spaced(1 / fps, 8, 1 + offset * 0.00137))))

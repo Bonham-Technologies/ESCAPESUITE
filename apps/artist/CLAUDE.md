@@ -116,9 +116,24 @@ pnpm lint                # Run ESLint
   measures it with `core/frameRateProbe.ts`'s `measureFrameRate(video, FRAME_RATE_PROBE)`, on the
   same `<video>` it already loaded for the duration and dimensions: it seeks the element to 0
   (the duration probe leaves a headerless WebM at its end, where playing presents nothing), plays
-  it muted, collects `requestVideoFrameCallback`'s `mediaTime` for up to **8 presented frames or
-  400 ms**, whichever comes first, then pauses it and seeks it back to 0; the deadline is cleared
-  whichever way it finishes. The rate is **not** one over a spacing: a WebM stamps frames in whole
+  it muted **at half speed** (`playbackRate = 0.5`), collects `requestVideoFrameCallback`'s
+  `mediaTime` for up to **8 presented frames or 500 ms**, whichever comes first, then pauses it,
+  puts its own `playbackRate` back and seeks it back to 0; the deadline is cleared whichever way it
+  finishes. **Why half speed** (review round 2): `requestVideoFrameCallback` fires at most once per
+  *rendered* frame, so at 1x on a 60 Hz display (most external monitors, and headless Chromium) a
+  120 fps file shows every other frame and its callbacks describe a 60 fps file — 100 read 50, 90
+  read 49.18, all stored as `'measured'`, and ESCSUITE-263's seek window would have been a whole
+  frame for exactly the 120 fps source this ticket was opened for. `mediaTime` is media time, so
+  half speed changes nothing in the arithmetic and presents every frame of a source up to **twice
+  the display's refresh rate**. That is the honest limit: a source faster than that (240 fps on
+  60 Hz) still under-reads, as the source at its own speed would. The budget is 500 ms rather than
+  400 because half speed halves the media it covers: 500 ms of wall time is 250 ms of media, which
+  at 24 fps is six intervals and seven frames — the eight-frame cap (333 ms of media, 667 ms of
+  wall time) is not reached there, the three-frame floor is cleared with room — while 60 fps and
+  above end on the cap first. The unit double for this, `displayCappedVideo` in
+  `frameRateProbe.test.ts`, answers at most once per 1/60 s of wall time while media time advances
+  at `playbackRate` times wall time; the other doubles answer every frame asked for, which no
+  browser does. The rate is **not** one over a spacing: a WebM stamps frames in whole
   milliseconds, so a 30 fps file's spacings are 33, 34, 33… ms and any one of them reads 30.30 or
   29.41 (60 read 58.82, 24 read 23.81, 120 read 125 — review round 1). The median of the
   **positive** spacings (a repeated or reordered time is left out) only **counts** the intervals,
@@ -133,14 +148,14 @@ pnpm lint                # Run ESLint
   a run that ends no later than it starts or is too short to hold one interval, no
   `requestVideoFrameCallback`, or a refused `play()` answer `undefined`, and the import stores `frameRate: 30` with
   `frameRateSource: 'assumed'`; a measured rate is stored with `'measured'`. **This adds up to
-  400 ms to a video import** — it runs once, at import, and only for a file that decoded a picture
+  500 ms to a video import** — it runs once, at import, and only for a file that decoded a picture
   (`videoWidth > 0 && videoHeight > 0`; the mic-only `.webm` that `processMediaFile` probes in a
-  `<video>` would present no frames and only spend the 400 ms). It is kept off every path that
+  `<video>` would present no frames and only spend the 500 ms). It is kept off every path that
   already has a rate: the `.veditor` load (the file carries `frameRate` and `frameRateSource` in
   its `meta`; an old file without `meta` falls back to 30 `'assumed'` without playing the blob)
   and the `?loadVideo=` handoff (ESCAPECRAFT writes its recorder's configured rate,
   `'configured'`). The media library imports files one after another, so dropping N videos at once
-  can add up to N × 400 ms. Images keep 1 and audio 0, both `'assumed'`. `frameRateSource` is an optional
+  can add up to N × 500 ms. Images keep 1 and audio 0, both `'assumed'`. `frameRateSource` is an optional
   field on the shared `SourceVideo` (`packages/shared`); a record with none — everything written
   before this ticket — reads as `'assumed'`, and `DB_VERSION` did not change. The `<video>`
   double grows an optional `frameTimes` script that gives the element `requestVideoFrameCallback`;

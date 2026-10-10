@@ -144,9 +144,9 @@ function settleMediaDuration(
  * The length comes from the same probe `loadMediaDuration` runs, which seeks
  * for it when the container declares none; the dimensions are read off the
  * element once it has settled. The frame rate is measured by playing the
- * element for up to eight frames or 400 ms (`measureFrameRate`, ESCSUITE-276)
- * — but only when it decoded a picture, since a `<video>` with none presents
- * no frames and would only spend the 400 ms. A rate that could not be measured
+ * element at half speed for up to eight frames or 500 ms (`measureFrameRate`,
+ * ESCSUITE-276) — but only when it decoded a picture, since a `<video>` with none presents
+ * no frames and would only spend the 500 ms. A rate that could not be measured
  * is stored as 30, labelled `'assumed'`. The object URL is revoked once, after
  * all of that, however it settles.
  */
@@ -198,7 +198,7 @@ export async function resolveStoredDuration(blob: Blob, metadata: SourceVideo): 
   }
   // The length alone, not `extractVideoMetadata`: both callers — the CRAFT
   // handoff and the `.veditor` load — already carry a frame rate, and must not
-  // spend up to 400 ms measuring one (ESCSUITE-276).
+  // spend up to 500 ms measuring one (ESCSUITE-276).
   const video = document.createElement('video');
   video.preload = 'metadata';
   const objectUrl = URL.createObjectURL(blob);
