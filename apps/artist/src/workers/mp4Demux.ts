@@ -53,15 +53,20 @@ export interface DemuxedSample {
 }
 
 /**
- * What the stream says about its own colour (ESCSUITE-254 fix round 1, M1):
- * `fullyTagged` when its primaries, transfer and matrix are all specified,
- * from the sample entry's `colr` box or else the SPS VUI; `fullRange` when it
- * signals its range at all.
+ * Where the decoder's colour comes from (ESCSUITE-254 fix rounds 1 and 2). A
+ * VideoDecoder sees only the bitstream, so:
+ * - `bitstream`: the SPS VUI specifies primaries, transfer and matrix; the
+ *   decoder keeps them, and so does `<video>`.
+ * - `container`: the bitstream is untagged but the sample entry's `colr` box
+ *   specifies all three; Chromium's `<video>` follows the box, so it is handed
+ *   to the decoder as its colour space.
+ * - `unspecified`: neither specifies all three; the decoder is given the
+ *   size guess `<video>` makes, with the stream's own range when it says one.
  */
-export interface StreamColour {
-  fullyTagged: boolean;
-  fullRange?: boolean;
-}
+export type StreamColour =
+  | { kind: 'bitstream' }
+  | { kind: 'container'; colorSpace: VideoColorSpaceInit }
+  | { kind: 'unspecified'; fullRange?: boolean };
 
 /** H.264 / H.273 code point for "unspecified". */
 const UNSPECIFIED = 2;
@@ -167,17 +172,62 @@ function avcDescription(entry: SampleEntry): Uint8Array {
 type SampleEntry = MP4TrakBox['mdia']['minf']['stbl']['stsd']['entries'][number];
 
 /**
- * The stream's own colour description: a `colr` box with code points ('nclx',
- * 'nclc') speaks for it, else the SPS VUI does.
+ * H.273 code points VideoColorSpaceInit can name (the values TypeScript's DOM
+ * lib carries; a wide-gamut or HDR box is refused to `<video>`).
+ */
+const PRIMARIES: Readonly<Record<number, VideoColorPrimaries>> = { 1: 'bt709', 5: 'bt470bg', 6: 'smpte170m' };
+const TRANSFER: Readonly<Record<number, VideoTransferCharacteristics>> = {
+  1: 'bt709',
+  6: 'smpte170m',
+  13: 'iec61966-2-1',
+};
+const MATRIX: Readonly<Record<number, VideoMatrixCoefficients>> = {
+  0: 'rgb',
+  1: 'bt709',
+  5: 'bt470bg',
+  6: 'smpte170m',
+};
+
+const DISAGREEMENT =
+  'The colr box and the H.264 stream describe its colour differently; the <video> path draws this source';
+
+/** All three code points present and none of them "unspecified". */
+function fullySpecified(codes: ReadonlyArray<number | undefined>): codes is number[] {
+  return codes.every((code) => code !== undefined && code !== UNSPECIFIED);
+}
+
+/**
+ * Where the decoder's colour comes from — see StreamColour. A `colr` box that
+ * disagrees with a colour description in the bitstream is refused rather than
+ * one of the two picked; so is one whose code points VideoDecoder cannot be
+ * given.
  */
 function streamColour(entry: SampleEntry, vui: ReturnType<typeof readAvcConfig>): StreamColour {
   const colr = entry.colr?.colour_type === 'nclx' || entry.colr?.colour_type === 'nclc' ? entry.colr : undefined;
-  const codes = colr
-    ? [colr.colour_primaries, colr.transfer_characteristics, colr.matrix_coefficients]
-    : vui.colour && [vui.colour.primaries, vui.colour.transfer, vui.colour.matrix];
-  const fullyTagged = !!codes && codes.every((code) => code !== undefined && code !== UNSPECIFIED);
+  const colrCodes = colr && [colr.colour_primaries, colr.transfer_characteristics, colr.matrix_coefficients];
+  const vuiCodes = vui.colour && [vui.colour.primaries, vui.colour.transfer, vui.colour.matrix];
+  const colrSpecified = colrCodes && fullySpecified(colrCodes) ? colrCodes : undefined;
+  if (colrSpecified && vuiCodes && colrSpecified.join() !== vuiCodes.join()) throw new Error(DISAGREEMENT);
+  if (vuiCodes && fullySpecified(vuiCodes)) return { kind: 'bitstream' };
   const fullRange = colr?.colour_type === 'nclx' ? colr.full_range_flag === 1 : vui.fullRange;
-  return fullRange === undefined ? { fullyTagged } : { fullyTagged, fullRange };
+  if (colrSpecified) {
+    const [primaries, transfer, matrix] = colrSpecified;
+    if (!(primaries in PRIMARIES && transfer in TRANSFER && matrix in MATRIX)) {
+      throw new Error(
+        `The colr box describes a colour space VideoDecoder cannot be given (${colrSpecified.join('/')}); the <video> path draws this source`
+      );
+    }
+    return {
+      kind: 'container',
+      colorSpace: {
+        primaries: PRIMARIES[primaries],
+        transfer: TRANSFER[transfer],
+        matrix: MATRIX[matrix],
+        fullRange: fullRange ?? false,
+      },
+    };
+  }
+  return fullRange === undefined ? { kind: 'unspecified' } : { kind: 'unspecified', fullRange };
 }
 
 interface TrackHeader {

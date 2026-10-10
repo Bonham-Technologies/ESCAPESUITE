@@ -70,9 +70,12 @@ export async function decoderConfigFor(
     // VM) would refuse every source.
     hardwareAcceleration: 'no-preference',
   };
-  // Only for a stream that does not fully describe its own colour: one that
-  // does is drawn in its own colours by <video>, and keeps them here too.
-  if (!video.colour.fullyTagged) {
+  // A fully tagged bitstream keeps its own colours (no colorSpace); a colour
+  // description only the colr box carries is handed over, since the decoder
+  // cannot see the box; otherwise the guess <video> makes.
+  if (video.colour.kind === 'container') {
+    config.colorSpace = video.colour.colorSpace;
+  } else if (video.colour.kind === 'unspecified') {
     config.colorSpace = { ...assumedColorSpace(video.codedHeight), fullRange: video.colour.fullRange ?? false };
   }
   if (video.rotation !== 0) config.rotation = video.rotation;

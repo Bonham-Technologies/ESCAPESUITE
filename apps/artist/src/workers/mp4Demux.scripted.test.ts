@@ -131,15 +131,15 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
     it("hands an 'nclx' box's range over with its code points", async () => {
       script.colr = {
         colour_type: 'nclx',
-        colour_primaries: 9,
-        transfer_characteristics: 16,
-        matrix_coefficients: 9,
+        colour_primaries: 5,
+        transfer_characteristics: 13,
+        matrix_coefficients: 0,
         full_range_flag: 1,
       }
 
       expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({
         kind: 'container',
-        colorSpace: { primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl', fullRange: true },
+        colorSpace: { primaries: 'bt470bg', transfer: 'iec61966-2-1', matrix: 'rgb', fullRange: true },
       })
     })
 
@@ -167,12 +167,23 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
       expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ kind: 'unspecified' })
     })
 
-    it('refuses code points VideoDecoder has no name for', async () => {
-      script.colr = { colour_type: 'nclc', colour_primaries: 4, transfer_characteristics: 1, matrix_coefficients: 1 }
+    it('refuses code points VideoDecoder has no name for, whichever of the three it is', async () => {
+      for (const [primaries, transfer, matrix] of [
+        [9, 1, 1],
+        [1, 16, 1],
+        [1, 1, 9],
+      ]) {
+        script.colr = {
+          colour_type: 'nclc',
+          colour_primaries: primaries,
+          transfer_characteristics: transfer,
+          matrix_coefficients: matrix,
+        }
 
-      await expect(demuxVideoTrack(new ArrayBuffer(8))).rejects.toThrow(
-        'The colr box describes a colour space VideoDecoder cannot be given (4/1/1); the <video> path draws this source'
-      )
+        await expect(demuxVideoTrack(new ArrayBuffer(8))).rejects.toThrow(
+          `The colr box describes a colour space VideoDecoder cannot be given (${primaries}/${transfer}/${matrix}); the <video> path draws this source`
+        )
+      }
     })
   })
 
