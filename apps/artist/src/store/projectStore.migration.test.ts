@@ -574,6 +574,48 @@ describe('parseProject (ESCSUITE-102)', () => {
     })
   })
 
+  describe('duration and position validation (ESCSUITE-257)', () => {
+    it.each([
+      ['zero', 0],
+      ['negative', -1],
+      ['NaN', NaN],
+      ['Infinity', Infinity],
+      ['a string', '2'],
+      ['null', null],
+    ])('rejects a clip whose duration is %s, naming the clip', (_label, badDuration) => {
+      const bad = validProject()
+      bad.timeline.clips[0].duration = badDuration as never
+
+      expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid duration' })
+    })
+
+    it('accepts a positive duration', () => {
+      const good = validProject()
+      good.timeline.clips[0].duration = 0.001
+
+      expect(parseProject(good).ok).toBe(true)
+    })
+
+    it.each([
+      ['NaN', NaN],
+      ['a string', '1'],
+      ['null', null],
+      ['Infinity', Infinity],
+    ])('rejects a clip whose timelinePosition is %s, naming the clip', (_label, badPosition) => {
+      const bad = validProject()
+      bad.timeline.clips[0].timelinePosition = badPosition as never
+
+      expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid timelinePosition' })
+    })
+
+    it('accepts an absent timelinePosition, which migration defaults', () => {
+      const good = validProject()
+      delete (good.timeline.clips[0] as Partial<typeof good.timeline.clips[0]>).timelinePosition
+
+      expect(parseProject(good).ok).toBe(true)
+    })
+  })
+
   describe('resolution validation (ESCSUITE-152)', () => {
     it.each([
       ['null', null],

@@ -1055,6 +1055,35 @@ export function calculateTimelineDuration(clips: Clip[]): number {
   return Math.max(...clips.map(c => c.timelinePosition + c.duration));
 }
 
+/**
+ * Why a timeline of this many seconds cannot be exported, or `null` when it can
+ * (ESCSUITE-257). A length of zero or less — one zero-length clip at 0, or a
+ * clip placed so it ends before 0 — gives the audio mixer a zero or negative
+ * sample count, which the browser answers with a raw `OfflineAudioContext` or
+ * typed-array error. One sentence, shared by the exporters' refusal and the
+ * export dialog's disabled buttons, so they cannot drift apart.
+ */
+export function exportLengthReason(seconds: number): string | null {
+  if (!Number.isFinite(seconds)) return 'Cannot export: the timeline has no finite length';
+  if (seconds <= 0) return 'Cannot export: the timeline is empty';
+  return null;
+}
+
+/**
+ * Refuse a timeline with no exportable length before any work is spent on it:
+ * before the codec probe, the audio mix, the media load and the muxer.
+ */
+export function assertExportableLength(
+  seconds: number,
+  format: 'mp4' | 'webm',
+  exportLog: ExportLogEntry[]
+): void {
+  const reason = exportLengthReason(seconds);
+  if (reason === null) return;
+  exportLog.push({ phase: 'init', detail: `${format} refused: length ${seconds}s`, timestamp: performance.now() });
+  throw new ExportError(reason, exportLog);
+}
+
 // Animated values type for overlays
 export interface AnimatedOverlayValues {
   x: number;

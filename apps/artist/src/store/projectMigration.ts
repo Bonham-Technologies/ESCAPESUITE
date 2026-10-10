@@ -273,6 +273,19 @@ export function parseProject(input: unknown): ParseProjectResult {
       return { ok: false, reason: `Clip "${id}" has an invalid crop` };
     }
 
+    // ESCSUITE-257. A clip with no positive duration gives a timeline of zero
+    // or negative length, which the exporters cannot mix or encode. An absent
+    // `timelinePosition` is left to the migration's sequential default.
+    if (typeof candidate?.duration !== 'number' || !Number.isFinite(candidate.duration) || candidate.duration <= 0) {
+      return { ok: false, reason: `Clip "${id}" has an invalid duration` };
+    }
+    if (
+      candidate.timelinePosition !== undefined &&
+      (typeof candidate.timelinePosition !== 'number' || !Number.isFinite(candidate.timelinePosition))
+    ) {
+      return { ok: false, reason: `Clip "${id}" has an invalid timelinePosition` };
+    }
+
     // ESCSUITE-173. Checked here, against the RAW input, for the same reason
     // as `crop`: the migration branch that runs when `tracks` already exists
     // leaves a clip's `transform` untouched (only the trackless-migration

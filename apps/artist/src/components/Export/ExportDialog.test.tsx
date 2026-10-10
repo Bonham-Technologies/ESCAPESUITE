@@ -1793,6 +1793,78 @@ describe('ExportDialog', () => {
     })
   })
 
+  describe('a timeline with no length (ESCSUITE-257)', () => {
+    const SENTENCE = 'Cannot export: the timeline is empty'
+    // Written straight into the store: the editor's own actions would never
+    // make a zero-length clip, but a file or host payload once could.
+    const emptyTimeline = () => {
+      useEditorStore.setState((state) => ({
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            clips: state.project.timeline.clips.map((c) => ({ ...c, duration: 0 })),
+          },
+        },
+      }))
+    }
+
+    it('disables the download with the sentence when the clips end at or before 0', () => {
+      emptyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      const button = screen.getByRole('button', { name: 'Download WebM' })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', SENTENCE)
+    })
+
+    it('enables the download for a timeline with length', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      const button = screen.getByRole('button', { name: 'Download WebM' })
+      expect(button).toBeEnabled()
+      expect(button).not.toHaveAttribute('title', SENTENCE)
+    })
+
+    it('also disables the Advanced download', () => {
+      emptyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(screen.getByText(/Advanced/i))
+
+      const downloads = screen.getAllByRole('button', { name: /^Download (WebM|MP4|GIF)$/ })
+      expect(downloads.length).toBeGreaterThan(1)
+      for (const button of downloads) {
+        expect(button).toBeDisabled()
+        expect(button).toHaveAttribute('title', SENTENCE)
+      }
+    })
+
+    it('disables the section button when the range is fine but the timeline is empty', () => {
+      emptyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 1, end: 3 }} />)
+
+      const section = screen.getByRole('button', { name: /Export Section/ })
+      expect(section).toBeDisabled()
+      expect(section).toHaveAttribute('title', SENTENCE)
+    })
+
+    it('keeps the section button enabled for a positive range over a timeline with length', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 1, end: 3 }} />)
+
+      expect(screen.getByRole('button', { name: /Export Section/ })).toBeEnabled()
+    })
+
+    it('judges a selected section by its own length', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 3, end: 3 }} />)
+
+      const section = screen.getByRole('button', { name: /Export Section/ })
+      expect(section).toBeDisabled()
+      expect(section).toHaveAttribute('title', SENTENCE)
+      // The whole timeline still has length, so exporting it all stays possible.
+      expect(screen.getByRole('button', { name: 'Export Full Video' })).toBeEnabled()
+    })
+  })
+
   describe('exporting a section', () => {
     it('offers section and full-video buttons once in and out points are set', async () => {
       store().setInPoint(1)

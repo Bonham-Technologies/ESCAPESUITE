@@ -25,6 +25,7 @@ import {
   loadImageElement,
   yieldToMain,
   calculateTimelineDuration,
+  assertExportableLength,
   getActiveTransition,
   findSupportedVideoConfig,
   mp4VideoCodecConfigs,
@@ -127,6 +128,14 @@ export async function exportToMP4(
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
   const frameRate = 30;
   const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
+
+  // A timeline with no length cannot be mixed or encoded (ESCSUITE-257): refuse
+  // it before anything below spends work on it.
+  assertExportableLength(calculateTimelineDuration(clips), 'mp4', exportLog);
+  // And the length that will actually be encoded: a selected range's own.
+  if (options.timeRange) {
+    assertExportableLength(options.timeRange.end - options.timeRange.start, 'mp4', exportLog);
+  }
 
   // Ask both codecs before spending anything (ESCSUITE-175). The ladder walker
   // and the candidate list are the ones the export dialog's own up-front probe

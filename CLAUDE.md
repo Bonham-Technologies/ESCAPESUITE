@@ -2833,6 +2833,41 @@ arrival (the one finite-and-positive predicate both store writers share); `store
 approved both verdicts with no fix round. The rerender pins and every `*.perf.test.ts` are
 byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-257 (a timeline whose length is 0 or
+negative is refused instead of crashing the MP4 and WebM export with the browser's own
+`OfflineAudioContext` or typed-array error: `parseProject` refuses a clip `duration` that is not a
+finite number above 0 and a present `timelinePosition` that is not finite, each naming the clip, before
+migration, so the kit fails such a job at parse time; both video exporters refuse a length ≤ 0 or
+non-finite through one shared `assertExportableLength`, applied to the whole timeline and to a selected
+range's `end − start`, before the codec probe, the mix, the media load and the muxer; the dialog disables
+every download with the same sentence through the same `exportLengthReason`, the section button on both
+lengths; and `extractAndMixAudio` returns `null` for fewer than one sample without constructing a
+context): 99.81 / 99.28 / **95.92** / 99.68 against the 99.81 / 99.28 / 95.87 / 99.68 that `main` at
+`89677418` (the ESCSUITE-255 version-packages commit) measures in the same sitting — branches up five
+hundredths, the other three unmoved. That base reads two hundredths above the table row the ESCSUITE-255
+paragraph wrote from its own rebased tree (99.80 / 95.85): the same Istanbul drift ESCSUITE-91 and 113
+recorded, and the row is corrected here to the direct measurement. The base gives 5,071 / 5,289
+branches and this branch 5,106 / 5,323: thirty-four new branches, thirty-five more covered, so the
+uncovered column falls 218 → 217 — the one pre-existing arm newly reached is in
+`core/elementFrames.ts` (63 / 71 → 64 / 71), driven for the first time by the range-refusal cases
+(lines 7,891 / 7,906 → 7,911 / 7,926, statements 8,909 / 8,973 → 8,933 / 8,997, functions
+1,903 / 1,909 → 1,905 / 1,911, every denominator growing by exactly what the numerator did; the same
+15 / 64 / 6 uncovered). The thirty-four are `store/projectMigration.ts`'s ten (118 → 128: the
+`duration` finite-and-positive operands and the present-but-non-finite `timelinePosition` refusal, each
+from both sides by the 0, −1, `NaN`, `"2"`, absent and positive cases), `components/Export/ExportDialog.tsx`'s
+twelve (219 / 220 → 231 / 232: the whole-timeline and range reasons feeding the full-video, section and
+Advanced buttons, reached by the empty timeline, the empty range, the valid range over an empty timeline
+and the positive cases; the file's one pre-existing uncovered arm untouched), `core/exportTypes.ts`'s six
+(123 / 127 → 129 / 133: `assertExportableLength`'s non-finite and ≤ 0 arms and `exportLengthReason`'s
+null-or-sentence choice; the same four pre-existing arms uncovered), `core/exportMP4.ts`'s and
+`core/exportWebM.ts`'s two each (the whole-timeline and the range guard in each, reached by the
+zero-length clip, the clip ending before 0, `timeRange {2,2}` and `{3,1}` against the exports that already
+run; the same seventeen and two pre-existing arms uncovered) and `core/audioMixer.ts`'s two (31 / 33 →
+33 / 35: the `totalSamples < 1` return, with no `OfflineAudioContext` constructed). The review's one
+MEDIUM (a duplicated changeset sentence) and MINOR (the section button not gated on the whole timeline)
+are in these numbers. GIF's own frame-count guard, the export and preview `*.perf.test.ts` files and
+every rerender pin are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2840,7 +2875,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.80 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.28 | 95.85 | 99.68 |
+| `@escapesuite/artist` | 99.81 | 99.28 | 95.92 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 

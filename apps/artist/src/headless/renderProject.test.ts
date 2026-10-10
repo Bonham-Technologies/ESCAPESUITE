@@ -32,7 +32,7 @@ const legacyText = (): TextOverlay => ({
 const baseInput = (): RenderInput => ({
   project: {
     id: 'p', name: 'n', resolution: { width: 64, height: 48 },
-    timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0', trackId: 't0' }], textOverlays: [], shapeOverlays: [], duration: 1 },
+    timeline: { tracks: [{ id: 't0' }], clips: [{ id: 'c0', sourceVideoId: 's0', trackId: 't0', duration: 1 }], textOverlays: [], shapeOverlays: [], duration: 1 },
   } as unknown as RenderInput['project'],
   sourceVideos: [{ id: 's0', name: 's.mp4', mimeType: 'video/mp4', width: 1920, height: 1080 } as RenderInput['sourceVideos'][number]],
   sourceBlobs: { s0: new Uint8Array([1]).buffer },
@@ -240,6 +240,15 @@ describe('renderProject', () => {
     }
     await expect(renderProject(input)).rejects.toThrow(/invalid crop/i)
     expect(exportToMP4).not.toHaveBeenCalled()
+  })
+
+  it('rejects a clip with no positive duration through parseProject, before any export (ESCSUITE-257)', async () => {
+    vi.mocked(seedSources).mockClear()
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 0
+    await expect(renderProject(input)).rejects.toThrow(/Clip "c0" has an invalid duration/)
+    expect(exportToMP4).not.toHaveBeenCalled()
+    expect(seedSources).not.toHaveBeenCalled()
   })
 
   it('rejects a project with a duplicate clip id instead of rendering whichever one won (ESCSUITE-173)', async () => {

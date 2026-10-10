@@ -304,4 +304,14 @@ describe('extractAndMixAudio', () => {
 
     expect(onProgress.mock.calls.map((c) => Math.round(c[0]))).toEqual([33, 67, 100])
   })
+
+  it('returns null for a timeline with no samples, without building a context or buffer (ESCSUITE-257)', async () => {
+    const clip = makeClip({ duration: 0, endTime: 0 })
+
+    await expect(extractAndMixAudio([clip], [makeTrack()], 0, vi.fn())).resolves.toBeNull()
+    await expect(extractAndMixAudio([clip], [makeTrack()], -2, vi.fn())).resolves.toBeNull()
+
+    expect(offline.constructions).toHaveLength(0)
+    expect(offline.decodeCalls).toHaveLength(0)
+  })
 })
