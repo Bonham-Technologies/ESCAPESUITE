@@ -201,12 +201,19 @@ function readTrackHeader(info: MP4Info, sampleEntries: (trackId: number) => Samp
     throw new Error(`MP4 video track has ${entries.length} sample descriptions; the worker decodes one`);
   }
   const description = codecDescription(entries[0]);
+  const vui = entries[0].avcC ? readAvcConfig(description!) : undefined;
+  // <video> draws a non-square pixel wider or narrower; whether a
+  // VideoDecoder's frame is drawn the same was never measured (fix round 1).
+  const pasp = entries[0].pasp;
+  if (vui?.squarePixels === false || (pasp && pasp.hSpacing !== pasp.vSpacing)) {
+    throw new Error('Non-square pixels are not decoded in the worker; the <video> path draws this source');
+  }
   return {
     video,
     rotation: rotationFromMatrix(video.matrix),
     mediaTime: presentationStart(video.edits),
     description,
-    colour: streamColour(entries[0], entries[0].avcC ? readAvcConfig(description!) : undefined),
+    colour: streamColour(entries[0], vui),
     duration: info.duration / info.timescale,
   };
 }
