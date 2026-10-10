@@ -291,6 +291,22 @@ describe('PlaybackControls keyboard shortcuts', () => {
 
 // ESCSUITE-247: Space belongs to the focused control (CRAFT's ESCSUITE-185 twin).
 describe('PlaybackControls Space handling', () => {
+  type FocusMode = 'visible' | 'not-visible' | 'throws'
+  const realMatches = Element.prototype.matches
+  const stubFocusVisible = (mode: FocusMode) => {
+    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, sel: string) {
+      if (sel === ':focus-visible') {
+        if (mode === 'throws') throw new DOMException('unsupported selector', 'SyntaxError')
+        return mode === 'visible'
+      }
+      return realMatches.call(this, sel)
+    })
+  }
+  // jsdom answers `false` for :focus-visible (it does not throw); the ESCSUITE-247
+  // cases model a keyboard user, so they run with it true.
+  beforeEach(() => stubFocusVisible('visible'))
+  afterEach(() => vi.restoreAllMocks())
+
   const press = (target: Element | Window, init: KeyboardEventInit) =>
     fireEvent.keyDown(target, { bubbles: true, cancelable: true, ...init })
 
@@ -359,18 +375,6 @@ describe('PlaybackControls Space handling', () => {
   // ESCSUITE-270: a button the mouse last clicked keeps focus but not
   // `:focus-visible`, so Space is the transport's again.
   describe('focus-visible decides (ESCSUITE-270)', () => {
-    type Mode = 'visible' | 'not-visible' | 'throws'
-    const stubFocusVisible = (mode: Mode) => {
-      const real = Element.prototype.matches
-      vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, sel: string) {
-        if (sel === ':focus-visible') {
-          if (mode === 'throws') throw new DOMException('unsupported selector', 'SyntaxError')
-          return mode === 'visible'
-        }
-        return real.call(this, sel)
-      })
-    }
-    afterEach(() => vi.restoreAllMocks())
 
     it('toggles playback when the focused button is not focus-visible (mouse-focused)', () => {
       stubFocusVisible('not-visible')

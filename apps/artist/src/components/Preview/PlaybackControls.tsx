@@ -25,10 +25,31 @@ const SPACE_ACTIVATES = 'button, [role="button"], a[href]';
  * browser's activation key for a focused control, and `preventDefault()` is
  * what suppresses the click it synthesises, so the transport leaves the
  * keydown alone when the target is something Space operates. Only Space is
- * gated: the arrows, Home and End keep their targets.
+ * gated: the arrows, Home and End keep their targets. Only keyboard focus
+ * counts (ESCSUITE-270).
  */
 function spaceBelongsToTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && target.matches(SPACE_ACTIVATES);
+  return (
+    target instanceof HTMLElement &&
+    target.matches(SPACE_ACTIVATES) &&
+    hasVisibleFocus(target)
+  );
+}
+
+/**
+ * Whether the control's focus is one the keyboard put there (ESCSUITE-270). A
+ * button the mouse last clicked keeps focus but not `:focus-visible`, and Space
+ * pressed to mean "play" would otherwise press that button a second time. An
+ * engine that cannot answer the selector gets the keyboard-user behaviour: a
+ * wrong guess that way re-presses a button, the other way swallows a keyboard
+ * user's Space.
+ */
+function hasVisibleFocus(el: HTMLElement): boolean {
+  try {
+    return el.matches(':focus-visible');
+  } catch {
+    return true;
+  }
 }
 
 interface PlaybackControlsProps {
