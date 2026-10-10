@@ -4,7 +4,7 @@
 
 import type { StateCreator } from 'zustand';
 import type { EditorState, Project, SourceVideo } from './types';
-import { pushToHistory, scrubDeadThumbnails, scrubRemovedSources } from './storeHistory';
+import { graftAddedSource, pushToHistory, scrubDeadThumbnails, scrubRemovedSources } from './storeHistory';
 import { createEmptyProject, calculateTimelineDuration } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
@@ -88,7 +88,11 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
   // add let undo drop the source while its row stayed in the shared store, with
   // nothing in either app able to list or free it. The way to take an import out
   // is the library's Remove (ESCSUITE-154), which deletes the bytes. Modelled on
-  // ESCSUITE-149's clears, the same fact in reverse.
+  // ESCSUITE-149's clears, the same fact in reverse — and, like them, it has to
+  // reach backwards: every snapshot carries its own copy of the library, so the
+  // source is grafted into every past and future snapshot (`graftAddedSource`).
+  // Undoing an older edit therefore keeps the import, and an import made while a
+  // redo branch exists neither clears that branch nor is dropped by redoing it.
   // ESCSUITE-113: a replace-in-place is the one way a source's thumbnailUrl
   // changes without the source itself ever leaving the library — nothing
   // else would free the URL it is replacing, so this is the one place that
@@ -105,14 +109,16 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     const sourceVideos = existing === -1
       ? [...state.sourceVideos, video]
       : state.sourceVideos.map((v, i) => (i === existing ? video : v))
+    // Scrub the dead handle first (ESCSUITE-113), then graft the incoming entry
+    // into every snapshot (ESCSUITE-244), so a snapshot never ends up holding
+    // either the revoked URL or a library that lacks this source.
+    let history = state.history
     if (previous && previous.thumbnailUrl && previous.thumbnailUrl !== video.thumbnailUrl) {
       revokeSourceThumbnails([previous])
-      return {
-        sourceVideos,
-        history: scrubDeadThumbnails(state.history, [previous.thumbnailUrl]),
-      }
+      history = scrubDeadThumbnails(history, [previous.thumbnailUrl])
     }
-    return { sourceVideos }
+    history = graftAddedSource(history, video)
+    return history === state.history ? { sourceVideos } : { sourceVideos, history }
   }),
 
   // ESCSUITE-149: a storage clear (per-item Remove, Clear Unused or Clear

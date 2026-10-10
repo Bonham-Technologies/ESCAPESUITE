@@ -1,9 +1,10 @@
 // Undo/redo history for the editor store: the snapshot taken before a change and
 // the cap on how many are kept. Every mutating action pushes through here.
 
-import type { EditorState, UndoableState } from './types';
+import type { EditorState, SourceVideo, UndoableState } from './types';
 import { createUndoableSnapshot } from '../utils/deepClone';
 import { calculateTimelineDuration } from './projectFactory';
+import { sameSourceVideo } from './sourceVideoEquality';
 
 // Maximum history size to prevent memory issues
 const MAX_HISTORY_SIZE = 50;
@@ -44,9 +45,10 @@ function pushToHistory(state: EditorState): { past: UndoableState[]; future: Und
  * had a thumbnail already renders — and picks up a live one again the next
  * time it is genuinely reloaded into the library.
  *
- * Called from the same action that revokes, over its own returned history
- * (which already includes the entry it just pushed), so there is nothing for
- * `undo`/`redo` themselves to do.
+ * Called from the same action that revokes, over the history that action
+ * leaves behind (the entry it just pushed, or, for `addSourceVideo`'s
+ * replace-in-place arm, the existing stack — that add pushes nothing), so
+ * there is nothing for `undo`/`redo` themselves to do.
  */
 export function scrubDeadThumbnails(
   history: { past: UndoableState[]; future: UndoableState[] },
@@ -129,6 +131,50 @@ export function scrubRemovedSources(
   };
   const past = history.past.map(scrubOne);
   const future = history.future.map(scrubOne);
+  const sameElements = (a: UndoableState[], b: UndoableState[]) => a.every((s, i) => s === b[i]);
+  return sameElements(past, history.past) && sameElements(future, history.future)
+    ? history
+    : { past, future };
+}
+
+/**
+ * ESCSUITE-244: `scrubRemovedSources` in reverse. An import is not an edit —
+ * its bytes are already in IndexedDB and undo cannot un-write them — so it
+ * records no step of its own. But every snapshot holds its own copy of
+ * `sourceVideos` and undo/redo replace the live library with it wholesale, so
+ * a snapshot taken before the import would, on the next undo or redo that
+ * lands on it, drop the source and strand its bytes. The invariant is
+ * therefore "every snapshot's library includes every live source": this makes
+ * the imported source present in every past and future snapshot.
+ *
+ * Two properties follow, and both are deliberate:
+ *  - undoing an edit made *before* the import keeps the import in the library;
+ *  - an import made while a redo branch exists keeps that branch (nothing
+ *    clears `future` — an import is not an edit, and must not discard the
+ *    user's redo), and redo keeps the import.
+ *
+ * A snapshot that already holds the id has it replaced in place (the live
+ * library's replace-in-place arm, so order does not shuffle); one that does not
+ * gets it appended. Returns the identical `history` object when no snapshot
+ * changed (an empty stack, or every snapshot already holding an equal entry).
+ */
+export function graftAddedSource(
+  history: { past: UndoableState[]; future: UndoableState[] },
+  video: SourceVideo
+): { past: UndoableState[]; future: UndoableState[] } {
+  const graftOne = (snapshot: UndoableState): UndoableState => {
+    const at = snapshot.sourceVideos.findIndex((v) => v.id === video.id);
+    if (at === -1) {
+      return { ...snapshot, sourceVideos: [...snapshot.sourceVideos, video] };
+    }
+    if (sameSourceVideo(snapshot.sourceVideos[at], video)) return snapshot;
+    return {
+      ...snapshot,
+      sourceVideos: snapshot.sourceVideos.map((v, i) => (i === at ? video : v)),
+    };
+  };
+  const past = history.past.map(graftOne);
+  const future = history.future.map(graftOne);
   const sameElements = (a: UndoableState[], b: UndoableState[]) => a.every((s, i) => s === b[i]);
   return sameElements(past, history.past) && sameElements(future, history.future)
     ? history

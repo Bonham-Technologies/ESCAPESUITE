@@ -232,22 +232,28 @@ describe('VideoUploader', () => {
     // shared `videos` store with nothing in either app able to list or free it.
     // Now the add records nothing: undo has nothing to take back, and the one
     // way out is Remove, which deletes the bytes.
-    it('is not undoable: import, undo and an edit leave the tile and its bytes in place, and Remove frees them (ESCSUITE-244)', async () => {
+    it('is not undoable: edit, import, undo and another edit leave the tile and its bytes in place, and Remove frees them (ESCSUITE-244)', async () => {
       mockProcessMediaFile.mockImplementation(async (f: File) => {
         await storeVideo(videoMeta.id, f, videoMeta)
         return videoMeta
       })
+      // An edit made before the import, so the undo below lands on a real
+      // snapshot (one taken before the file existed) rather than doing nothing.
+      store().setProjectResolution(1920, 1080)
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
       const pastBefore = useEditorStore.getState().history.past.length
+      expect(pastBefore).toBeGreaterThan(0)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
       expect(await screen.findByText('Complete')).toBeInTheDocument()
 
       // The import itself is not a step...
       expect(useEditorStore.getState().history.past).toHaveLength(pastBefore)
-      // ...so the probe's sequence (undo, then an edit that prunes the redo
-      // branch) cannot orphan anything.
+      // ...and the snapshot undo lands on holds the import too, so the probe's
+      // sequence (undo, then an edit that prunes the redo branch) cannot orphan
+      // anything.
       act(() => useEditorStore.getState().undo())
+      expect(useEditorStore.getState().history.past).toHaveLength(pastBefore - 1)
       store().setProjectResolution(1280, 720)
       expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
       expect((await getAllVideoMetadata()).map((v) => v.id)).toEqual(['video1'])

@@ -565,6 +565,26 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       expect(inLibrary()).toEqual(expect.arrayContaining(['take-1', webcam.id]))
     })
 
+    it('a handoff into a session with an edit already on the stack: undoing past the placement keeps both parts in the library (ESCSUITE-244)', async () => {
+      seedTake()
+      useEditorStore.getState().setProjectResolution(1280, 720)
+
+      await mountIntegration(
+        { loadVideoId: 'take-1' },
+        { addSourceVideo: (v) => useEditorStore.getState().addSourceVideo(v) }
+      )
+      expect(useEditorStore.getState().history.past).toHaveLength(2)
+
+      act(() => useEditorStore.getState().undo())
+      act(() => useEditorStore.getState().undo())
+
+      expect(useEditorStore.getState().history.past).toHaveLength(0)
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+      expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(
+        expect.arrayContaining(['take-1', webcam.id])
+      )
+    })
+
     // The take is skipped whole when ANY of its parts is already held, not only
     // when the primary is: the user can delete the primary from the library and
     // then re-send the take from ESCAPECRAFT, which leaves the companion behind

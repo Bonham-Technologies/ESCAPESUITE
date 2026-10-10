@@ -109,13 +109,89 @@ describe('projectStore integration', () => {
         revoke.mockRestore()
       })
 
-      it('leaves the entries already on the stack alone, bar the dead handle scrubbed from them', () => {
-        useEditorStore.getState().addSourceVideo(make('a', { thumbnailUrl: 'blob:old' }))
+      const ids = () => useEditorStore.getState().sourceVideos.map((v) => v.id)
+      const undo = () => useEditorStore.getState().undo()
+      const redo = () => useEditorStore.getState().redo()
+
+      it('an add pushes no entry on a non-empty stack either', () => {
         useEditorStore.getState().setProjectResolution(1280, 720)
         const before = useEditorStore.getState().history.past.length
         useEditorStore.getState().addSourceVideo(make('b'))
 
         expect(useEditorStore.getState().history.past).toHaveLength(before)
+      })
+
+      // The snapshots carry their own copy of the library and undo replaces the
+      // live one wholesale, so the add has to reach backwards (graftAddedSource).
+      it('edit, import, undo: the import stays in the library', () => {
+        useEditorStore.getState().setProjectResolution(1280, 720)
+        useEditorStore.getState().addSourceVideo(make('a'))
+
+        undo()
+
+        expect(useEditorStore.getState().project.resolution).not.toEqual({ width: 1280, height: 720 })
+        expect(ids()).toEqual(['a'])
+        redo()
+        expect(ids()).toEqual(['a'])
+      })
+
+      it('import A, edit, import B, undo, undo, edit: both stay at every step', () => {
+        useEditorStore.getState().addSourceVideo(make('a'))
+        useEditorStore.getState().setProjectResolution(1280, 720)
+        useEditorStore.getState().addSourceVideo(make('b'))
+
+        undo()
+        expect(ids()).toEqual(['a', 'b'])
+        expect(useEditorStore.getState().canUndo()).toBe(false)
+        undo() // nothing left to undo
+        expect(ids()).toEqual(['a', 'b'])
+        redo()
+        expect(ids()).toEqual(['a', 'b'])
+        undo()
+        useEditorStore.getState().setProjectResolution(640, 360)
+        expect(ids()).toEqual(['a', 'b'])
+        undo()
+        expect(ids()).toEqual(['a', 'b'])
+      })
+
+      it('edit, undo, import, redo: the redo branch survives the import and redo keeps the import', () => {
+        useEditorStore.getState().setProjectResolution(1280, 720)
+        undo()
+        expect(useEditorStore.getState().history.future).toHaveLength(1)
+
+        useEditorStore.getState().addSourceVideo(make('c'))
+
+        // An import is not an edit: it must not discard the user's redo.
+        expect(useEditorStore.getState().history.future).toHaveLength(1)
+        redo()
+        expect(useEditorStore.getState().project.resolution).toEqual({ width: 1280, height: 720 })
+        expect(ids()).toEqual(['c'])
+      })
+
+      it('a replace-in-place import of an id a snapshot already holds replaces it there too', () => {
+        useEditorStore.getState().addSourceVideo(make('a', { name: 'old.mp4' }))
+        useEditorStore.getState().setProjectResolution(1280, 720)
+
+        useEditorStore.getState().addSourceVideo(make('a', { name: 'new.mp4' }))
+        undo()
+
+        expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
+        expect(useEditorStore.getState().sourceVideos[0].name).toBe('new.mp4')
+      })
+
+      it('a replace that changes the thumbnail scrubs the dead handle from the stack and grafts the live one', () => {
+        useEditorStore.getState().addSourceVideo(make('a', { thumbnailUrl: 'blob:old' }))
+        useEditorStore.getState().setProjectResolution(1280, 720)
+
+        useEditorStore.getState().addSourceVideo(make('a', { thumbnailUrl: 'blob:new' }))
+        undo()
+
+        expect(useEditorStore.getState().sourceVideos[0].thumbnailUrl).toBe('blob:new')
+        const urls = [
+          ...useEditorStore.getState().history.past,
+          ...useEditorStore.getState().history.future,
+        ].flatMap((snap) => snap.sourceVideos.map((v) => v.thumbnailUrl))
+        expect(urls).not.toContain('blob:old')
       })
     })
 
@@ -206,7 +282,7 @@ describe('projectStore integration', () => {
         // (Since ESCSUITE-244 the add itself records nothing, so the snapshot
         // carrying the old handle is the one an ordinary edit pushed between
         // the two adds.)
-        it('does not revoke again on undo, and undo brings the source back with no thumbnail rather than the dead handle', () => {
+        it('does not revoke again on undo, and undo lands on the live handle rather than the dead one', () => {
           useEditorStore.getState().addSourceVideo(sameVideo())
           useEditorStore.getState().setProjectResolution(1280, 720)
           useEditorStore.getState().addSourceVideo({ ...sameVideo(), thumbnailUrl: 'blob:newer' })
@@ -218,7 +294,9 @@ describe('projectStore integration', () => {
           expect(URL.revokeObjectURL).not.toHaveBeenCalled()
           const restored = useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')
           expect(restored).toBeDefined()
-          expect(restored?.thumbnailUrl).toBeUndefined()
+          // Never the dead handle: since ESCSUITE-244 the replace grafts the
+          // live entry into the snapshot the edit pushed.
+          expect(restored?.thumbnailUrl).toBe('blob:newer')
         })
       })
     })
@@ -463,7 +541,7 @@ describe('projectStore integration', () => {
       // make this vacuous — its only snapshot is the pre-add one, whose
       // `sourceVideos` is already `[]`, so `undo()` would land on an empty
       // library whether or not anything was scrubbed. The second edit
-      // (`addSourceVideo(made('video2'))`) is what makes it non-vacuous: it
+      // (the `setProjectResolution` after the two adds) is what makes it non-vacuous: it
       // pushes a snapshot taken *after* video1 was added — `sourceVideos:
       // ['video1']` — which is the one `undo()` below actually lands on, so
       // this fails without the scrub rather than merely happening to pass.
@@ -485,8 +563,8 @@ describe('projectStore integration', () => {
 
         useEditorStore.getState().undo()
 
-        // Without the scrub this lands back on the pre-video2 snapshot, which
-        // still carries 'video1' — the headline bug.
+        // Without the scrub this lands back on the pre-resolution snapshot,
+        // which still carries both sources — the headline bug.
         expect(useEditorStore.getState().sourceVideos.find((v) => v.id === 'video1')).toBeUndefined()
       })
 
@@ -499,13 +577,15 @@ describe('projectStore integration', () => {
         useEditorStore.getState().addSourceVideo(made('video1'))
         useEditorStore.getState().setProjectResolution(1280, 720)
         useEditorStore.getState().undo()
-        // The future snapshot names video1; take it out of the live library the
-        // way a teardown would, since undoing an add no longer can (ESCSUITE-244).
+        // The future snapshot names video1; take it out of the live library only.
+        // No store action does that without scrubbing the stack (and, since
+        // ESCSUITE-244, undo can no longer do it either), so this one write
+        // reaches past the actions to build the precondition.
         useEditorStore.setState({ sourceVideos: [] })
         expect(useEditorStore.getState().sourceVideos).toHaveLength(0)
         expect(useEditorStore.getState().history.future.length).toBeGreaterThan(0)
 
-        // 'video1' is gone from the *live* library already (the undo above
+        // 'video1' is gone from the *live* library already (the write above
         // took it out) — this exercises the MAJOR 1 branch, scrubbing a
         // snapshot that still names an id the live state has already lost.
         useEditorStore.getState().removeSourceVideosPermanently(['video1'])
