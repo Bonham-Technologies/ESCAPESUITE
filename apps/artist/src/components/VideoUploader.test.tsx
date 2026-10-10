@@ -1231,6 +1231,9 @@ describe('VideoLibrary', () => {
   it('is not undoable: undo after Remove brings back neither the source nor its bytes', async () => {
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
+    // An add records nothing (ESCSUITE-244); an edit gives the stack something
+    // for canUndo() to report.
+    store().setProjectResolution(1280, 720)
     const pastLengthBeforeRemove = useEditorStore.getState().history.past.length
     render(<VideoLibrary />)
 

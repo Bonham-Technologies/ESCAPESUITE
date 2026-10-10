@@ -83,6 +83,12 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
   // A re-add carrying identical metadata changes nothing, so it records nothing:
   // an undo step that restores an identical library reads to the user as an undo
   // that did nothing.
+  // ESCSUITE-244: and no add records a step at all. The caller has already
+  // written the bytes to IndexedDB, and undo cannot un-write them: an undoable
+  // add let undo drop the source while its row stayed in the shared store, with
+  // nothing in either app able to list or free it. The way to take an import out
+  // is the library's Remove (ESCSUITE-154), which deletes the bytes. Modelled on
+  // ESCSUITE-149's clears, the same fact in reverse.
   // ESCSUITE-113: a replace-in-place is the one way a source's thumbnailUrl
   // changes without the source itself ever leaving the library — nothing
   // else would free the URL it is replacing, so this is the one place that
@@ -99,12 +105,14 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     const sourceVideos = existing === -1
       ? [...state.sourceVideos, video]
       : state.sourceVideos.map((v, i) => (i === existing ? video : v))
-    let history = pushToHistory(state)
     if (previous && previous.thumbnailUrl && previous.thumbnailUrl !== video.thumbnailUrl) {
       revokeSourceThumbnails([previous])
-      history = scrubDeadThumbnails(history, [previous.thumbnailUrl])
+      return {
+        sourceVideos,
+        history: scrubDeadThumbnails(state.history, [previous.thumbnailUrl]),
+      }
     }
-    return { sourceVideos, history }
+    return { sourceVideos }
   }),
 
   // ESCSUITE-149: a storage clear (per-item Remove, Clear Unused or Clear

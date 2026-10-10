@@ -151,6 +151,31 @@ describe('answering the prompt', () => {
     return view
   }
 
+  // ESCSUITE-244: the restore adds its sources through the same action an
+  // import uses, which now records nothing; the history it ends with is empty
+  // on the real store, whatever stood on it before.
+  it('ends with an empty history on the real store, and the restored sources are not undoable (ESCSUITE-244)', async () => {
+    const session = savedSession()
+    store().setProjectResolution(1280, 720)
+    expect(store().history.past).toHaveLength(1)
+    vi.mocked(getSessionState).mockResolvedValue(session)
+    const view = mountRestore({
+      setProject: (p) => store().setProject(p),
+      addSourceVideo: (v) => store().addSourceVideo(v),
+      clearHistory: () => store().clearHistory(),
+    })
+    await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
+
+    await act(async () => {
+      await view.result.current.handleRestoreSession(session)
+    })
+
+    expect(useEditorStore.getState().history).toEqual({ past: [], future: [] })
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual([sampleVideo.id])
+    act(() => { store().undo() })
+    expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual([sampleVideo.id])
+  })
+
   it('restoring writes the whole session into the store and clears the history', async () => {
     const session = savedSession()
     const { result } = await mountWithPendingSession(session)

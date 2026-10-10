@@ -538,16 +538,31 @@ describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
       expect(webcamClip.transform.scaleX).toBeCloseTo(0.3, 10)
     })
 
-    it('is one undo step, and undo leaves both parts in the library', async () => {
+    it('the placement is the one undo step: undo removes both clips and leaves both sources in the library, redo places them again (ESCSUITE-244)', async () => {
       seedTake()
 
-      await mountIntegration({ loadVideoId: 'take-1' })
-      const pastBefore = useEditorStore.getState().history.past.length
+      // The real store's add, so a regression that made the library adds
+      // undoable again shows up as extra history entries.
+      await mountIntegration(
+        { loadVideoId: 'take-1' },
+        { addSourceVideo: (v) => useEditorStore.getState().addSourceVideo(v) }
+      )
+
+      // The library adds record nothing; the placement is the only entry.
+      expect(useEditorStore.getState().history.past).toHaveLength(1)
+      const inLibrary = () => useEditorStore.getState().sourceVideos.map((v) => v.id)
+      expect(inLibrary()).toEqual(expect.arrayContaining(['take-1', webcam.id]))
 
       act(() => useEditorStore.getState().undo())
 
       expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
-      expect(useEditorStore.getState().history.past).toHaveLength(pastBefore - 1)
+      expect(useEditorStore.getState().history.past).toHaveLength(0)
+      expect(inLibrary()).toEqual(expect.arrayContaining(['take-1', webcam.id]))
+
+      act(() => useEditorStore.getState().redo())
+
+      expect(useEditorStore.getState().project.timeline.clips).toHaveLength(2)
+      expect(inLibrary()).toEqual(expect.arrayContaining(['take-1', webcam.id]))
     })
 
     // The take is skipped whole when ANY of its parts is already held, not only

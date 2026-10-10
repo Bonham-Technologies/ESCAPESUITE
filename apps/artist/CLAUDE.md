@@ -508,9 +508,12 @@ The primary lands on the track a drop from the media library would take — `fin
 lowest-index empty one, or a new track at the top if there is none — and each companion on a
 new track **above** the one before it, in role order (`ROLE_ORDER` in `utils/takeParts.ts`:
 `screen`, `webcam`, `mic`, `system`, so slice 3's audio parts need no ARTIST change). The
-whole take is **one undo step**: `store/clipSlice.ts`'s `placeTakeOnTimeline` writes every
-track and every clip in a single `set` with a single `pushToHistory`, so one Ctrl+Z takes the
-take off the timeline and leaves its media in the library. Each clip sits at the take's start
+*placement* is **one undo step** (ESCSUITE-244 corrected this from "the whole take"): the
+library adds are not undoable at all, so the only entry a handoff records is
+`store/clipSlice.ts`'s `placeTakeOnTimeline`, which writes every track and every clip in a
+single `set` with a single `pushToHistory`. One Ctrl+Z takes the placed clips off the timeline
+and leaves every source in the library (Remove takes them out, bytes included); redo places
+them again. Each clip sits at the take's start
 plus its own `startOffset`, and the take's start is `calculateTimelineDuration` over the clips
 already there — so a handoff into a session that already holds work **appends at the end**
 rather than landing on top of it; an empty timeline measures 0, so the ordinary import still
@@ -2615,6 +2618,23 @@ so: Clear All's stays the fixed "including any clip that still uses it", but Rem
 actual count (ESCSUITE-154) — `Remove this video?` alone when nothing on the timeline uses it,
 and otherwise `Remove this video? This will also remove N clip(s) that use(s) it.` with the
 singular/plural chosen correctly at N=1.
+
+**An import is not an undo step either** (ESCSUITE-244) — the same fact as the clears, in reverse.
+`addSourceVideo` is called after the bytes are already in the shared `videos` store
+(`processMediaFile`, the `?loadVideo=` and `LOAD_VIDEO` paths, the session restore, a project
+file's sources), and undo cannot un-write them. While the add was undoable, Ctrl+Z took the source
+out of the library, the next edit pruned the redo branch, and the row stayed in IndexedDB with
+nothing able to list or free it: Clear All and Clear Unused iterate the project's library only
+(ESCSUITE-142, on purpose, because the database is shared with ESCAPECRAFT), ESCAPECRAFT lists only
+recordings, and the only remaining way to free the space was clearing site data, which also deletes
+every ESCAPECRAFT recording. So `addSourceVideo` pushes no history entry (it keeps its
+replace-in-place and thumbnail-handle rules; only a replace that revokes a handle still scrubs that
+handle from the existing snapshots), and the way to take an import out is the library's Remove,
+which deletes the bytes. Imports therefore join per-item Remove, Clear Unused / Clear All,
+`setSourceThumbnail`, the project load's `clearHistory()` (ESCSUITE-164) and the session restore's
+as writes that never sit on the undo stack. **Nothing deletes bytes on undo or redo**: the redo
+branch can hold a source another snapshot still references, and a stored row may belong to a
+project open in another tab. Storage orphans from before ESCSUITE-244 are not swept (a follow-up).
 
 `removeSourceVideo` — the per-id, undoable removal `removeSourceVideosPermanently` was modelled
 on — is gone (ESCSUITE-154): the per-item Remove button was its only caller anywhere in the app,
