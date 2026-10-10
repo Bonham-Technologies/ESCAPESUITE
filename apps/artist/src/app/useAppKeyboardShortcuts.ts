@@ -30,6 +30,18 @@ import { anyClipOnLockedTrack, lockedTrackIds } from '../store/trackLock';
 import type { Clip, ToolType } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
+/** STUB (red commit). */
+export function isTextEntryTarget(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement
+  );
+}
+
+/** STUB (red commit). */
+export const BOUND_SINGLE_KEYS: readonly string[] = ['v', 'c', 'b', 's', 'k', 'm', 'i', 'o', '+', '=', '-', '?', 'Delete', 'Backspace', 'Escape'];
+
 /** Everything the cascade reads or calls. */
 export interface AppKeyboardShortcutsDeps {
   canUndo: () => boolean;

@@ -12,6 +12,8 @@ import { useCallback, useEffect } from 'react';
 import { useEditorStore } from '../../store/projectStore';
 import styles from './PreviewPlayer.module.css';
 
+export const TRANSPORT_KEYS: readonly string[] = ['Space', '←', '→', 'Home', 'End'];
+
 interface PlaybackControlsProps {
   /**
    * True while a modal is on screen. The transport's keys stop; its buttons,
