@@ -1024,6 +1024,25 @@ Clips support animated properties via keyframes:
   (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
   keyframes default to `ease-in-out` and a value drag preserves the stored easing
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
+- **The panel works from the keyboard (ESCSUITE-243).** Each property row (`KeyframeTrack.tsx`) is a
+  real `<button type="button">` — it was a `<div onClick>`, so the graph's own keyboard model was
+  reachable only by a mouse. It carries `aria-label` = the property label (its text also holds the
+  live value, and the diamonds' titles would leak into a content-derived name) and `aria-pressed`
+  for the open row — `aria-pressed`, not `aria-expanded`, because the graph is a block above all
+  the rows, not the row's own region. Enter and Space are the native button's; no key handler of
+  ours. The rows sit in one `role="group"` named "Animated properties" (the audio header and the
+  Volume row included) with a **roving tab stop derived from the open row** — `tabIndex` 0 on it,
+  or on the first row when none is open or the open property has no row, -1 elsewhere — so there is
+  no state and no extra render. ArrowUp/ArrowDown wrap, Home/End jump, through `app/menuNavigation.ts`'s
+  `nextMenuIndex`; a ⌘/Ctrl/Alt chord is left to the browser. Opening a row from the row focuses the
+  graph (`focusGraphOnOpenRef`, consumed once by an effect on `selectedProperty` after the graph has
+  mounted — a graph open at mount or opened through the store does not take focus). Escape inside the
+  graph region hands focus back to the opening row; the graph claims and stops the Escape that clears
+  its active keyframe, so the first Escape spends itself there and the second returns focus, and the
+  region stops the key so the editor's deselect-the-clip Escape never sees it. The panel's close button
+  is "Close keyframe panel", the graph header's is "Close keyframe graph", and `ClipPreview`'s play
+  button is "Play clip preview" / "Pause clip preview". Pinned in a browser by the axe case in
+  `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts`.
 - **The diamond row drag cannot be dragged into an occupied neighbour's window at all, and does
   not even aim for one (ESCSUITE-167 / M6, reworked by ESCSUITE-183)**. `KeyframeTrack.tsx`'s
   diamonds are dragged through `hooks/useKeyframeDrag.ts`, which used to `findSnapTime` onto the

@@ -112,7 +112,12 @@ export function ClipPreview({ clip, playheadTime, onTimeChange }: ClipPreviewPro
       </div>
 
       <div className={styles.controls}>
-        <button className={styles.playButton} onClick={togglePlayback}>
+        <button
+          type="button"
+          className={styles.playButton}
+          onClick={togglePlayback}
+          aria-label={isPlaying ? 'Pause clip preview' : 'Play clip preview'}
+        >
           {isPlaying ? (
             <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="4" width="4" height="16" />

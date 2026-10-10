@@ -23,6 +23,12 @@ interface KeyframeTrackProps {
    * in silence.
    */
   locked: boolean;
+  /**
+   * The row's place in the panel's one tab stop (ESCSUITE-243): 0 on the open
+   * row (or the first, when none is open), -1 on every other. The panel
+   * derives it from the open row — no state of its own.
+   */
+  tabIndex: 0 | -1;
   onSelect: () => void;
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
@@ -57,6 +63,7 @@ export function KeyframeTrack({
   playheadTime,
   isSelected,
   locked,
+  tabIndex,
   onSelect,
   onKeyframeMoved,
   onAddKeyframe,
@@ -148,8 +155,18 @@ export function KeyframeTrack({
   const hasKeyframes = keyframes.length > 0;
 
   return (
-    <div
+    // A real button (ESCSUITE-243), so Enter and Space open the graph with no
+    // key handler of ours. `aria-pressed`, not `aria-expanded`: the graph is
+    // not this row's own region — it renders in a block above all the rows.
+    // The label is `aria-label` because the row's text also holds the live
+    // value, and the diamonds' titles would otherwise leak into the name.
+    <button
+      type="button"
       className={`${styles.track} ${isSelected ? styles.selected : ''} ${hasKeyframes ? styles.hasKeyframes : ''}`}
+      aria-label={PROPERTY_LABELS[property]}
+      aria-pressed={isSelected}
+      tabIndex={tabIndex}
+      data-property={property}
       onClick={onSelect}
     >
       <div className={styles.label}>
@@ -202,6 +219,6 @@ export function KeyframeTrack({
       <div className={styles.value}>
         {formatValue(currentValue)}
       </div>
-    </div>
+    </button>
   );
 }

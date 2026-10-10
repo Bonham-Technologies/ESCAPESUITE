@@ -1,4 +1,5 @@
-import { useMemo, useCallback, useState } from 'react';
+import { useMemo, useCallback, useState, useRef, useEffect } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useEditorStore } from '../../store/projectStore';
 import { clipOnLockedTrack } from '../../store/trackLock';
@@ -7,6 +8,7 @@ import { useDraggablePanel } from './hooks/useDraggablePanel';
 import { KeyframeTrack } from './KeyframeTrack';
 import { KeyframeGraph } from './KeyframeGraph';
 import { ClipPreview } from './ClipPreview';
+import { nextMenuIndex } from '../../app/menuNavigation';
 import styles from './KeyframePanel.module.css';
 
 // Visual properties - transforms and effects
@@ -121,8 +123,24 @@ export function KeyframePanel() {
     setKeyframePanelOpen(false);
   }, [setKeyframePanelOpen]);
 
+  // ESCSUITE-243: opening a row's graph from the row moves focus into it, so
+  // Enter on a row lands on the graph's own keyboard. A ref, not state: it is
+  // read once, by the effect below, after the graph it asks about has mounted,
+  // and a graph opened any other way (a persisted selection, the store) must
+  // not take focus.
+  const focusGraphOnOpenRef = useRef(false);
+  const tracksRef = useRef<HTMLDivElement>(null);
+  const graphRegionRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!focusGraphOnOpenRef.current) return;
+    focusGraphOnOpenRef.current = false;
+    graphRegionRef.current?.querySelector<SVGElement>('[role="listbox"]')?.focus();
+  }, [selectedProperty]);
+
   // Handle property selection
   const handlePropertySelect = useCallback((property: AnimatableProperty) => {
+    focusGraphOnOpenRef.current = selectedProperty !== property;
     setKeyframePanelSelectedProperty(
       selectedProperty === property ? null : property
     );
@@ -220,6 +238,44 @@ export function KeyframePanel() {
     return removeClipKeyframe(selectedClipId, property, time);
   }, [selectedClipId, removeClipKeyframe]);
 
+  // The rows' one tab stop and their arrow keys (ESCSUITE-243). The stop is
+  // derived from the open row — no state of its own — and falls back to the
+  // first row when none is open or the open property has no row (a volume
+  // graph left open on a clip that has no audio).
+  const rowProperties = useMemo(
+    () => (clipHasAudio ? ALL_PROPERTIES : VISUAL_PROPERTIES).map(p => p.property),
+    [clipHasAudio]
+  );
+  const tabStopProperty = rowProperties.includes(selectedProperty as AnimatableProperty)
+    ? selectedProperty
+    : rowProperties[0];
+  const rowTabIndex = (property: AnimatableProperty): 0 | -1 =>
+    property === tabStopProperty ? 0 : -1;
+
+  const handleRowsKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const rows = Array.from(
+      e.currentTarget.querySelectorAll<HTMLButtonElement>('button[data-property]')
+    );
+    const next = nextMenuIndex(rows.indexOf(e.target as HTMLButtonElement), e.key, rows.length);
+    if (next === null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    rows[next].focus();
+  }, []);
+
+  // Escape inside the graph (after it has spent itself clearing an active
+  // keyframe — the graph claims and stops that Escape) hands focus back to the
+  // row that opened it. The graph stays open; the editor's own Escape, which
+  // would deselect the clip, never sees the key.
+  const handleGraphKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'Escape') return;
+    e.stopPropagation();
+    tracksRef.current
+      ?.querySelector<HTMLElement>(`button[data-property="${selectedProperty}"]`)
+      ?.focus();
+  }, [selectedProperty]);
+
   // The one live region every property row's diamond drag shares
   // (ESCSUITE-167 / M6, review round 1 MINOR 6): only one diamond on one row
   // can ever be dragging at a time, so eight per-row regions would carry a
@@ -254,7 +310,12 @@ export function KeyframePanel() {
         {selectedClip && (
           <span className={styles.clipName}>{selectedClip.name}</span>
         )}
-        <button className={styles.closeButton} onClick={handleClose}>
+        <button
+          type="button"
+          className={styles.closeButton}
+          onClick={handleClose}
+          aria-label="Close keyframe panel"
+        >
           ×
         </button>
       </div>
@@ -285,13 +346,19 @@ export function KeyframePanel() {
 
             {/* Graph view when property selected */}
             {selectedProperty && (
-              <div className={styles.graphContainer}>
+              <div
+                className={styles.graphContainer}
+                ref={graphRegionRef}
+                onKeyDown={handleGraphKeyDown}
+              >
                 <div className={styles.graphHeader}>
                   <span className={styles.graphTitle}>
                     {ALL_PROPERTIES.find(p => p.property === selectedProperty)?.label}
                   </span>
                   <button
+                    type="button"
                     className={styles.graphClose}
+                    aria-label="Close keyframe graph"
                     onClick={() => setKeyframePanelSelectedProperty(null)}
                   >
                     ×
@@ -320,8 +387,15 @@ export function KeyframePanel() {
               </div>
             )}
 
-            {/* Visual property tracks */}
-            <div className={styles.tracks}>
+            {/* One group, one tab stop (ESCSUITE-243): the visual rows, the
+                audio header and the audio row, in the order the arrows walk. */}
+            <div
+              className={styles.tracks}
+              role="group"
+              aria-label="Animated properties"
+              ref={tracksRef}
+              onKeyDown={handleRowsKeyDown}
+            >
               {VISUAL_PROPERTIES.map(({ property, label }) => (
                 <KeyframeTrack
                   key={property}
@@ -336,19 +410,18 @@ export function KeyframePanel() {
                   playheadTime={playheadTime}
                   isSelected={selectedProperty === property}
                   onSelect={() => handlePropertySelect(property)}
+                  tabIndex={rowTabIndex(property)}
                   locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
                   onAddKeyframe={handleAddKeyframe}
                   onAnnounce={setKeyframeDragMessage}
                 />
               ))}
-            </div>
 
-            {/* Audio property tracks - only show if clip has audio */}
-            {clipHasAudio && (
-              <>
-                <div className={styles.sectionHeader}>Audio</div>
-                <div className={styles.tracks}>
+              {/* Audio property tracks - only show if clip has audio */}
+              {clipHasAudio && (
+                <>
+                  <div className={styles.sectionHeader}>Audio</div>
                   {AUDIO_PROPERTIES.map(({ property, label }) => (
                     <KeyframeTrack
                       key={property}
@@ -363,15 +436,16 @@ export function KeyframePanel() {
                       playheadTime={playheadTime}
                       isSelected={selectedProperty === property}
                       onSelect={() => handlePropertySelect(property)}
+                      tabIndex={rowTabIndex(property)}
                       locked={trackLocked}
                       onKeyframeMoved={handleKeyframeMoved}
                       onAddKeyframe={handleAddKeyframe}
                       onAnnounce={setKeyframeDragMessage}
                     />
                   ))}
-                </div>
-              </>
-            )}
+                </>
+              )}
+            </div>
 
             {/* Help text */}
             <div className={styles.helpText}>
