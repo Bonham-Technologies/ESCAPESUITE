@@ -58,6 +58,15 @@ export interface VideoScript extends SeekScript {
   readyState: number
   /** Fire 'error' instead of 'loadedmetadata'/'loadeddata' when src is set. */
   fail: boolean
+  /**
+   * Give the element `requestVideoFrameCallback` (ESCSUITE-276). Left unset —
+   * the default — the element has none, as jsdom's does not, and the frame
+   * rate probe answers nothing without playing. Set, each frame callback
+   * asked for while the element is playing is answered a microtask later with
+   * the next of these as `mediaTime`; when the list runs out, it stops
+   * answering, as a stalled element does.
+   */
+  frameTimes?: number[]
 }
 
 export interface ImageScript {
@@ -184,6 +193,51 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     })
   }
 
+  /**
+   * `requestVideoFrameCallback` / `cancelVideoFrameCallback` over a scripted
+   * list of presentation times, answered only while `play()` has been called
+   * and `pause()` has not. `play` and `pause` stay spies.
+   */
+  function defineFrameCallbacks(el: HTMLVideoElement, frameTimes: number[]): void {
+    const pending = new Map<number, VideoFrameRequestCallback>()
+    let nextHandle = 1
+    let delivered = 0
+    let playing = false
+    const answer = (handle: number) => {
+      queueMicrotask(() => {
+        const callback = pending.get(handle)
+        if (!callback || !playing || delivered >= frameTimes.length) return
+        pending.delete(handle)
+        callback(performance.now(), { mediaTime: frameTimes[delivered++] } as VideoFrameCallbackMetadata)
+      })
+    }
+    own(
+      el,
+      'play',
+      vi.fn(() => {
+        playing = true
+        for (const handle of pending.keys()) answer(handle)
+        return Promise.resolve()
+      })
+    )
+    own(
+      el,
+      'pause',
+      vi.fn(() => {
+        playing = false
+      })
+    )
+    own(el, 'requestVideoFrameCallback', (callback: VideoFrameRequestCallback) => {
+      const handle = nextHandle++
+      pending.set(handle, callback)
+      if (playing) answer(handle)
+      return handle
+    })
+    own(el, 'cancelVideoFrameCallback', (handle: number) => {
+      pending.delete(handle)
+    })
+  }
+
   function makeVideo(): HTMLVideoElement {
     const el = realCreateElement('video') as HTMLVideoElement
     const s = { ...video }
@@ -194,6 +248,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'play', vi.fn().mockResolvedValue(undefined))
     own(el, 'pause', vi.fn())
     own(el, 'load', vi.fn())
+    if (s.frameTimes) defineFrameCallbacks(el, s.frameTimes)
 
     defineCurrentTime(el, s)
 

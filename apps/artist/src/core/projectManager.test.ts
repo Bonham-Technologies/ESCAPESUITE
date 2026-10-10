@@ -724,6 +724,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
       width: 1280,
       height: 720,
       frameRate: 24, // not the extractMetadataFromBlob default of 30
+      frameRateSource: 'measured',
       mimeType: 'video/webm',
       size: 3,
       mediaType: 'video',
@@ -750,6 +751,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
       width: 1280,
       height: 720,
       frameRate: 24,
+      frameRateSource: 'measured',
       mediaType: 'video',
       source: 'recording',
       recordedAt: 1700000000000,
@@ -861,6 +863,34 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     expect(sourceVideos[0].duration).toBe(9)
     expect(Number.isFinite(sourceVideos[0].duration)).toBe(true)
     expect(sourceVideos[0].frameRate).toBe(30) // the hard-coded fallback, unchanged for an old file
+    expect(sourceVideos[0].frameRateSource).toBe('assumed')
+  })
+
+  // ESCSUITE-276: the probe belongs to an import, not to a reopen. A file
+  // with no meta falls back to 30 'assumed' rather than spending up to
+  // 400 ms playing the blob to measure it.
+  it('never plays a blob to measure its frame rate on load', async () => {
+    media.script({ video: { duration: 6, frameTimes: [0, 1 / 60, 2 / 60, 3 / 60] } })
+
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject('legacy-rate'),
+          videos: [
+            { id: 'legacy-rate', name: 'legacy.webm', mimeType: 'video/webm', data: base64Of([1, 2, 3]) },
+          ],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(media.videos).toHaveLength(1)
+    expect(media.videos[0].play).not.toHaveBeenCalled()
+    expect(sourceVideos[0]).toMatchObject({ frameRate: 30, frameRateSource: 'assumed' })
   })
 
   it('trusts a present row\'s own stored metadata for a meta-less file instead of re-probing the blob (ESCSUITE-151 round 2)', async () => {
@@ -1160,6 +1190,7 @@ describe('extractMetadataFromBlob', () => {
       width: 640,
       height: 480,
       frameRate: 1,
+      frameRateSource: 'assumed',
       mimeType: 'image/png',
       size: 4,
       mediaType: 'image',
@@ -1189,6 +1220,7 @@ describe('extractMetadataFromBlob', () => {
       width: 0,
       height: 0,
       frameRate: 0,
+      frameRateSource: 'assumed',
       mimeType: 'audio/mpeg',
       size: 2,
       mediaType: 'audio',
@@ -1215,6 +1247,7 @@ describe('extractMetadataFromBlob', () => {
       width: 1920,
       height: 1080,
       frameRate: 30,
+      frameRateSource: 'assumed',
       mimeType: 'video/webm',
       size: 3,
     })

@@ -82,11 +82,94 @@ describe('videoProcessor', () => {
       expect(metadata.width).toBe(1920)
       expect(metadata.height).toBe(1080)
       expect(metadata.duration).toBe(10.5)
+      // jsdom's <video> has no requestVideoFrameCallback, so nothing was
+      // measured and the rate is the fallback, labelled as one.
       expect(metadata.frameRate).toBe(30)
+      expect(metadata.frameRateSource).toBe('assumed')
       expect(metadata.size).toBe(file.size)
       expect(metadata.id).toBeDefined()
       // A container that declares its length is believed as-is: no end seek.
       expect(media.seeks).toEqual([])
+    })
+
+    describe('frame rate (ESCSUITE-276)', () => {
+      const spaced = (interval: number, count: number) =>
+        Array.from({ length: count }, (_, i) => i * interval)
+
+      it('measures 60 from a source whose frames are presented 1/60 s apart', async () => {
+        media.script({ video: { frameTimes: spaced(1 / 60, 8) } })
+
+        const metadata = await extractVideoMetadata(mediaFile(['v'], 'sixty.mp4', 'video/mp4'))
+
+        expect(metadata.frameRate).toBe(60)
+        expect(metadata.frameRateSource).toBe('measured')
+        const [video] = media.videos
+        expect(video.muted).toBe(true)
+        expect(video.play).toHaveBeenCalledTimes(1)
+        expect(video.pause).toHaveBeenCalledTimes(1)
+        // Paused and sought back to the start once the frames were counted.
+        expect(media.seeks).toEqual([0])
+      })
+
+      it('measures 24 and 29.97 the same way', async () => {
+        media.script({ video: { frameTimes: spaced(1 / 24, 8) } })
+        await expect(extractVideoMetadata(mediaFile(['v'], 'film.mp4', 'video/mp4'))).resolves.toMatchObject({
+          frameRate: 24,
+          frameRateSource: 'measured',
+        })
+
+        media.script({ video: { frameTimes: spaced(1001 / 30000, 8) } })
+        await expect(extractVideoMetadata(mediaFile(['v'], 'ntsc.mp4', 'video/mp4'))).resolves.toMatchObject({
+          frameRate: 29.97,
+          frameRateSource: 'measured',
+        })
+      })
+
+      it('assumes 30 when only two frames are presented before the probe gives up', async () => {
+        vi.useFakeTimers()
+        try {
+          media.script({ video: { frameTimes: spaced(1 / 60, 2) } })
+          const pending = extractVideoMetadata(mediaFile(['v'], 'stalls.mp4', 'video/mp4'))
+
+          await vi.advanceTimersByTimeAsync(400)
+
+          await expect(pending).resolves.toMatchObject({ frameRate: 30, frameRateSource: 'assumed' })
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
+      it('revokes the object URL once, only after the probe has played the element', async () => {
+        media.script({ video: { frameTimes: spaced(1 / 60, 8) } })
+        // What the element had been asked to do by the time its URL went away.
+        const atRevoke: number[] = []
+        const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {
+          atRevoke.push(vi.mocked(media.videos[0].play).mock.calls.length)
+        })
+        try {
+          await extractVideoMetadata(mediaFile(['v'], 'order.mp4', 'video/mp4'))
+        } finally {
+          revoke.mockRestore()
+        }
+        expect(atRevoke).toEqual([1])
+      })
+
+      it('does not probe a file that decoded no picture', async () => {
+        media.script({ video: { videoWidth: 0, videoHeight: 0, frameTimes: spaced(1 / 60, 8) } })
+
+        const metadata = await extractVideoMetadata(mediaFile(['mic'], 'take.webm', 'video/webm'))
+
+        expect(media.videos[0].play).not.toHaveBeenCalled()
+        expect(metadata.frameRateSource).toBe('assumed')
+      })
+
+      it('does not probe a picture with only one zero dimension either', async () => {
+        media.script({ video: { videoWidth: 640, videoHeight: 0, frameTimes: spaced(1 / 60, 8) } })
+
+        await extractVideoMetadata(mediaFile(['x'], 'odd.mp4', 'video/mp4'))
+
+        expect(media.videos[0].play).not.toHaveBeenCalled()
+      })
     })
 
     it('generates unique IDs for each video', async () => {
@@ -434,6 +517,22 @@ describe('videoProcessor', () => {
         resolveStoredDuration(new Blob(['webm'], { type: 'video/webm' }), stored(0))
       ).resolves.toBe(4)
     })
+
+    // It runs on the CRAFT handoff and the `.veditor` load, which already carry
+    // a rate; recovering a length must not spend up to 400 ms measuring one.
+    it('recovers a length without probing the frame rate (ESCSUITE-276)', async () => {
+      media.script({ video: { duration: Infinity, durationAfterSeek: 9, frameTimes: [0, 0.01, 0.02, 0.03] } })
+      const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+      await expect(
+        resolveStoredDuration(new Blob(['webm'], { type: 'video/webm' }), stored(Infinity))
+      ).resolves.toBe(9)
+
+      expect(media.videos[0].play).not.toHaveBeenCalled()
+      expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
+      expect(revoke).toHaveBeenCalledTimes(1)
+      revoke.mockRestore()
+    })
   })
 
   describe('extractImageMetadata', () => {
@@ -450,6 +549,7 @@ describe('videoProcessor', () => {
       expect(metadata.duration).toBe(DEFAULT_IMAGE_DURATION)
       expect(metadata.mediaType).toBe('image')
       expect(metadata.frameRate).toBe(1)
+      expect(metadata.frameRateSource).toBe('assumed')
     })
 
     it('rejects when the image will not decode', async () => {
@@ -537,6 +637,7 @@ describe('videoProcessor', () => {
       expect(metadata.width).toBe(0)
       expect(metadata.height).toBe(0)
       expect(metadata.frameRate).toBe(0)
+      expect(metadata.frameRateSource).toBe('assumed')
     })
 
     it('rejects when the audio will not decode', async () => {
