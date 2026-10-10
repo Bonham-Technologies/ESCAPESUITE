@@ -25,13 +25,12 @@
 
 /** The parts of `navigator` this reads; `userAgentData` is not in TypeScript's DOM lib. */
 export interface EngineNavigator {
-  userAgent?: string;
+  userAgent: string;
   userAgentData?: { brands?: ReadonlyArray<{ brand: string }> };
 }
 
 export function isMeasuredWorkerDecodeEngine(nav: EngineNavigator | undefined): boolean {
   if (!nav) return false;
   if (nav.userAgentData?.brands?.some(({ brand }) => brand === 'Chromium')) return true;
-  const userAgent = nav.userAgent ?? '';
-  return /Gecko\//.test(userAgent) && /Firefox\//.test(userAgent);
+  return /Gecko\//.test(nav.userAgent) && /Firefox\//.test(nav.userAgent);
 }

@@ -231,10 +231,28 @@ describe('exportToMP4 says when the decode worker hands sources back to the page
     expect(worker.requests.filter((r) => r.sourceId === 'video1')).toHaveLength(6)
     // ...and video2 for its first three only (the third failed).
     expect(worker.requests.filter((r) => r.sourceId === 'video2')).toHaveLength(3)
-    // Every VideoFrame the worker sent back, a late one included, was closed.
+    // Every VideoFrame the worker sent back was closed. (No frame arrives late
+    // here — the other source's requests are no longer rejected; closing an
+    // orphaned frame is pinned in videoDecodeManager.test.ts.)
     expect(allFramesClosed()).toBe(true)
     // MINOR 7: the <video> resumed at the failing request's own time.
     const failed = worker.requests.filter((r) => r.sourceId === 'video2')[2]
     expect(media.seeks[0]).toBeCloseTo(failed.timestamp, 6)
+  })
+
+  // Fix round 2, NIT 4 (MD2 at the exporter): the <video> the failing source
+  // is handed to never loads. Its clip is skipped from then on, as the oracle
+  // skips a source it cannot load, and the export still finishes.
+  it('finishes the export when the <video> a source is handed to never loads', async () => {
+    worker.failAfter = 2
+    media.script({ video: { fail: true } })
+
+    const progress = await exportTwoSources()
+
+    expect(progress[progress.length - 1]).toMatchObject({ phase: 'complete' })
+    expect(notices(progress)).toHaveLength(1)
+    expect(webcodecs.videoEncoders[0].encodes).toHaveLength(6)
+    expect(worker.requests.filter((r) => r.sourceId === 'video1')).toHaveLength(6)
+    expect(allFramesClosed()).toBe(true)
   })
 })
