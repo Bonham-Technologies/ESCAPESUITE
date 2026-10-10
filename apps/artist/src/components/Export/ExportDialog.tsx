@@ -282,9 +282,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // exported, so every download says so instead of reaching the exporter's
   // refusal. `clips.length === 0` keeps its own, older handling.
   const wholeLengthReason = exportLengthReason(calculateTimelineDuration(clips));
-  const lengthReason = timeRange
-    ? exportLengthReason(timeRange.end - timeRange.start)
-    : wholeLengthReason;
+  const lengthReason =
+    wholeLengthReason ?? (timeRange ? exportLengthReason(timeRange.end - timeRange.start) : null);
 
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review

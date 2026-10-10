@@ -1080,7 +1080,7 @@ export function assertExportableLength(
 ): void {
   const reason = exportLengthReason(seconds);
   if (reason === null) return;
-  exportLog.push({ phase: 'init', detail: `${format} export refused: timeline length ${seconds}s`, timestamp: performance.now() });
+  exportLog.push({ phase: 'init', detail: `${format} refused: length ${seconds}s`, timestamp: performance.now() });
   throw new ExportError(reason, exportLog);
 }
 

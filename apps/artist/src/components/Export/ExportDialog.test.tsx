@@ -1839,6 +1839,21 @@ describe('ExportDialog', () => {
       }
     })
 
+    it('disables the section button when the range is fine but the timeline is empty', () => {
+      emptyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 1, end: 3 }} />)
+
+      const section = screen.getByRole('button', { name: /Export Section/ })
+      expect(section).toBeDisabled()
+      expect(section).toHaveAttribute('title', SENTENCE)
+    })
+
+    it('keeps the section button enabled for a positive range over a timeline with length', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 1, end: 3 }} />)
+
+      expect(screen.getByRole('button', { name: /Export Section/ })).toBeEnabled()
+    })
+
     it('judges a selected section by its own length', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 3, end: 3 }} />)
 
