@@ -128,8 +128,14 @@ function cleanupCurrentFrames(manager: FrameManager): void {
 export async function disposeFrameManager(manager: FrameManager): Promise<void> {
   cleanupCurrentFrames(manager);
 
-  for (const source of manager.sources.values()) {
-    await source.dispose();
+  // One source failing to let go must not keep the rest, or the worker, alive
+  // (ESCSUITE-254).
+  for (const [sourceId, source] of manager.sources) {
+    try {
+      await source.dispose();
+    } catch (error) {
+      console.warn(`Failed to dispose frame source ${sourceId}:`, error);
+    }
   }
   manager.sources.clear();
 

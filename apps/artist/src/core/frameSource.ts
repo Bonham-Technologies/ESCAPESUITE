@@ -332,7 +332,17 @@ class FailoverFrameSource implements IFrameSource {
 
   async dispose(): Promise<void> {
     await this.primary.dispose();
-    if (this.fallback) await (await this.fallback).dispose();
+    if (!this.fallback) return;
+    // A <video> that never loaded skipped this clip, as the oracle does; it
+    // must not turn a finished export into a failed one at cleanup.
+    let fallback: IFrameSource;
+    try {
+      fallback = await this.fallback;
+    } catch (error) {
+      console.warn(`The <video> fallback for ${this.sourceId} never loaded:`, error);
+      return;
+    }
+    await fallback.dispose();
   }
 
   /** Switch to the `<video>` path, once, however many requests failed together. */
