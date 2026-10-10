@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.15.49
+
+### Patch Changes
+
+- 4243bc8: The keyframe panel works from the keyboard
+  
+  The keyframe panel works from the keyboard: Tab reaches the animated-property rows, arrows move between them, Enter opens a row's graph with focus on it, and the panel's close and play buttons have names.
+
 ## 2.15.48
 
 ### Patch Changes
