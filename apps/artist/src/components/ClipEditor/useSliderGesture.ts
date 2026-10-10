@@ -50,27 +50,34 @@ const RANGE_KEYS = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown',
 ]);
 
+/** What every listener reads: the slider the event came from (ESCSUITE-267). */
+interface SliderEvent {
+  currentTarget: EventTarget | null;
+}
+
 /**
  * The listeners to spread onto an `<input type="range">`, so the hook can see
  * where one gesture stops and the next begins.
  *
  * Deliberately typed against the property each one reads rather than against
  * React's event types: it keeps the hook testable without a DOM, and parameter
- * contravariance still makes the object assignable to an input's props.
+ * contravariance still makes the object assignable to an input's props. Every
+ * one of them reads `currentTarget`, because one instance serves every slider
+ * on the panel and the gesture belongs to the slider that opened it.
  */
 export interface SliderGestureHandlers {
-  onPointerDown: () => void;
-  onPointerUp: () => void;
+  onPointerDown: (event: SliderEvent) => void;
+  onPointerUp: (event: SliderEvent) => void;
   /**
    * A touch or pen gesture the browser took away — a scroll took over, the pen
    * left range — which gets no `pointerup` of its own. Without it the gesture
    * stayed open with its entry already pushed, and the next write swallowed its
    * own undo entry.
    */
-  onPointerCancel: () => void;
-  onKeyDown: (event: { repeat: boolean; key: string }) => void;
-  onKeyUp: (event: { key: string }) => void;
-  onBlur: () => void;
+  onPointerCancel: (event: SliderEvent) => void;
+  onKeyDown: (event: SliderEvent & { repeat: boolean; key: string }) => void;
+  onKeyUp: (event: SliderEvent & { key: string }) => void;
+  onBlur: (event: SliderEvent) => void;
 }
 
 export interface SliderGesture {
@@ -110,12 +117,29 @@ export interface SliderGesture {
  * `Preview/useCropHandleGesture.ts`'s mouse drag, which has its own document
  * listeners standing by to supply the eventual `mouseup` regardless of focus,
  * a slider's pointer drag has no such backstop — blur IS the substitute for a
- * `pointerup` that may never come — so it closes whatever is open regardless
- * of key or pointer state. It still has to reset `pointerDownRef` on its way
+ * `pointerup` that may never come — so it closes its own slider's gesture
+ * regardless of key or pointer state. It still has to reset `pointerDownRef` on its way
  * out, the same as `onPointerUp`/`onPointerCancel` do: leaving it stuck
  * `true` would hand every later keydown/keyup to the pointer guard above
  * instead of to the keyboard, closing the door a blur is supposed to open
  * (ESCSUITE-169 review round 1).
+ *
+ * **A gesture belongs to the slider that opened it** (ESCSUITE-267). One
+ * instance serves every slider on the panel, and pressing slider B while
+ * slider A still has focus delivers B's `pointerdown` and *then* A's `blur`:
+ * A's blur used to end the gesture B had just opened, so B's whole drag ran
+ * with no gesture and pushed one entry per move — ESCSUITE-75's flood, from a
+ * focused start. So the element that opens a gesture (`currentTarget` of its
+ * `pointerdown` or `keydown`) owns it, and `pointerup`, `pointercancel`,
+ * `keyup` and `blur` end it only when they come from that element; from any
+ * other slider they are ignored. A press on a *different* slider while a
+ * gesture is open needs no rule of its own: `begin()` forgets the push, which
+ * is `end()` then `begin()`, so the old slider's entry stays on the stack and
+ * the new one pushes its own. The one listener that had to learn the owner is
+ * a key **repeat**, which continues an open gesture only when it repeats on the
+ * slider that owns it — from another slider it is a press of its own. A's own
+ * blur still ends A's own drag. The owner is one ref write per gesture start,
+ * so nothing here allocates per move and no render count changes.
  */
 export function useSliderGesture(): SliderGesture {
   // Not state: this is read and written by DOM listeners and at write time,
@@ -124,46 +148,63 @@ export function useSliderGesture(): SliderGesture {
   const history = useGestureHistory();
   /** Whether a pointer drag is open — see the keyboard guard above. */
   const pointerDownRef = useRef(false);
+  /** The slider whose `pointerdown` or `keydown` opened the gesture (ESCSUITE-267). */
+  const ownerRef = useRef<EventTarget | null>(null);
 
-  const handlers = useMemo<SliderGestureHandlers>(() => ({
-    onPointerDown: () => {
-      pointerDownRef.current = true;
+  const handlers = useMemo<SliderGestureHandlers>(() => {
+    /** Open a gesture owned by `owner`, forgetting any push the last one made. */
+    const beginFor = (owner: EventTarget | null) => {
+      ownerRef.current = owner;
       history.begin();
-    },
-    onPointerUp: () => {
+    };
+    /**
+     * End the gesture — but only for the slider that owns it. A release, a
+     * cancel, a keyup or a blur from any other slider is about a gesture that
+     * is already over (ESCSUITE-267).
+     *
+     * Resets `pointerDownRef` on the way out, which `onBlur` needs as much as
+     * the pointer listeners do: leaving the flag stuck `true` made every later
+     * onKeyDown/onKeyUp short-circuit on the pointer guard before ever
+     * reaching `RANGE_KEYS` or `begin`/`resume` (ESCSUITE-169 review round 1).
+     */
+    const endFrom = (target: EventTarget | null) => {
+      if (target !== ownerRef.current) return;
+      ownerRef.current = null;
       pointerDownRef.current = false;
       history.end();
-    },
-    onPointerCancel: () => {
-      pointerDownRef.current = false;
-      history.end();
-    },
-    onKeyDown: (event) => {
-      if (pointerDownRef.current) return;
-      if (!RANGE_KEYS.has(event.key)) return;
-      // A repetition of a key that is already down continues the gesture it
-      // started; it must not reopen it, or a held arrow would push an entry
-      // per repeat.
-      if (event.repeat) {
-        history.resume();
-        return;
-      }
-      history.begin();
-    },
-    onKeyUp: (event) => {
-      if (pointerDownRef.current) return;
-      if (!RANGE_KEYS.has(event.key)) return;
-      history.end();
-    },
-    onBlur: () => {
-      // Give the gesture back to the keyboard too: leaving the flag stuck
-      // `true` made every later onKeyDown/onKeyUp short-circuit on the
-      // pointer guard above before ever reaching `RANGE_KEYS` or
-      // `begin`/`resume` (ESCSUITE-169 review round 1).
-      pointerDownRef.current = false;
-      history.end();
-    },
-  }), [history]);
+    };
+
+    return {
+      onPointerDown: (event) => {
+        pointerDownRef.current = true;
+        beginFor(event.currentTarget);
+      },
+      onPointerUp: (event) => endFrom(event.currentTarget),
+      onPointerCancel: (event) => endFrom(event.currentTarget),
+      onKeyDown: (event) => {
+        if (pointerDownRef.current) return;
+        if (!RANGE_KEYS.has(event.key)) return;
+        // A repetition of a key that is already down continues the gesture it
+        // started; it must not reopen it, or a held arrow would push an entry
+        // per repeat. Only on the slider that owns the gesture, though: a
+        // repeat on another one starts that slider's own gesture.
+        if (event.repeat && event.currentTarget === ownerRef.current) {
+          history.resume();
+          return;
+        }
+        beginFor(event.currentTarget);
+      },
+      onKeyUp: (event) => {
+        if (pointerDownRef.current) return;
+        if (!RANGE_KEYS.has(event.key)) return;
+        endFrom(event.currentTarget);
+      },
+      // Blur is the substitute for a `pointerup` that may never come, so it
+      // closes the gesture whatever the key or pointer state — but only its
+      // own slider's gesture.
+      onBlur: (event) => endFrom(event.currentTarget),
+    };
+  }, [history]);
 
   return { handlers, commit: history.commit };
 }

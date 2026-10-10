@@ -2198,6 +2198,24 @@ code. It holds refs and no state, so no slider adds a subscription and no render
 `ClipEditor.sliderHistory.test.tsx` (the real panel and the real store) and
 `useSliderGesture.test.ts` (the contract, without a DOM).
 
+**A slider's gesture belongs to the slider that opened it** (ESCSUITE-267). One instance for the
+whole panel had a hole: pressing slider B while slider A still has focus delivers B's
+`pointerdown` and *then* A's `blur`, and A's blur — the documented substitute for a `pointerup`
+that may never come — ended the gesture B had just opened, so B's drag ran with no gesture and
+pushed one entry per move (a 60-move drag filled the 50-entry stack). Now the element whose
+`pointerdown` or `keydown` opened the gesture (its `currentTarget`) owns it, and `pointerup`,
+`pointercancel`, `keyup` and `blur` end it only when they come from that element; from another
+slider they are ignored. A press on a different slider while a gesture is open simply begins a
+new one owned by it — `begin()` forgets the push, so the old slider's entry is already on the
+stack and the new one pushes its own — and a key repeat continues an open gesture only on its
+owner, a repeat on another slider being a press of its own. A's own blur still ends A's own drag
+(ESCSUITE-169 is untouched), and `commit` and `useGestureHistory` are unchanged. The fix keeps
+the **one** instance rather than one per slider: per-slider instances would add hooks and
+change `ClipEditor.rerender.test.tsx`, while the owner is one ref write per gesture start, so
+no render, subscription or per-move allocation moves. `SliderGestureHandlers`' event shapes
+widened by the one property they now read, `currentTarget: EventTarget | null`, which React's
+event types still satisfy.
+
 The flag reaches the store through the trailing optional `skipHistory` parameter on
 `updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData`,
 `updateShapeOverlayData`, `updateClipAnimation`, `updateClipTransition`,
