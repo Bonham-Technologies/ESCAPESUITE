@@ -88,26 +88,6 @@ describe('demuxVideoTrack', () => {
     })
   })
 
-  it('hands over the hvcC record for HEVC', async () => {
-    const video = await demuxVideoTrack(fixture('hevc.mp4'))
-
-    expect(video.codec).toMatch(/^hvc1\./)
-    expect(video.description![0]).toBe(1) // configurationVersion
-    expect(video.samples).toHaveLength(2)
-  })
-
-  it('gives no description for a codec that needs none (VP9)', async () => {
-    const video = await demuxVideoTrack(fixture('vp9.mp4'))
-
-    expect(video.codec).toBe('vp09.00.10.08')
-    expect(video.description).toBeUndefined()
-    expect(video.samples).toHaveLength(2)
-  })
-
-  // Fix round 1, M1: the decoder is given the size-based colour guess only
-  // where the stream does not fully describe its own colour, so the demuxer
-  // reads the description — from the sample entry's colr box, else from the
-  // SPS VUI in the avcC.
   describe("reads the stream's own colour description", () => {
     it('a stream with no colour description is not tagged', async () => {
       const { colour } = await demuxVideoTrack(fixture('h264-bframes.mp4'))
@@ -143,6 +123,18 @@ describe('demuxVideoTrack', () => {
   })
 
   describe('refuses, by name, what it cannot present the way <video> does', () => {
+    // Fix round 1, MD3: H.264 is the only codec compared against <video>,
+    // and the codec is known in onReady — so anything else is refused there,
+    // before a single sample is copied, rather than after the whole file was.
+    it('a codec other than H.264, before extracting anything', async () => {
+      await expect(demuxVideoTrack(fixture('hevc.mp4'))).rejects.toThrow(
+        /^Only H\.264 is decoded in the worker; hvc1\.[^ ]+ needs the <video> path$/
+      )
+      await expect(demuxVideoTrack(fixture('vp9.mp4'))).rejects.toThrow(
+        'Only H.264 is decoded in the worker; vp09.00.10.08 needs the <video> path'
+      )
+    })
+
     it('a fragmented file', async () => {
       await expect(demuxVideoTrack(fixture('h264-fragmented.mp4'))).rejects.toThrow(
         'Fragmented MP4 is not decoded in the worker'

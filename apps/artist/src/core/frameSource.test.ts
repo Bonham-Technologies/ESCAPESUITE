@@ -687,7 +687,32 @@ describe('frameSource', () => {
         expect(managerOf(factory).loadSource).not.toHaveBeenCalled();
         expect(onFallback).toHaveBeenCalledWith(
           'a',
-          'The source is larger than the 512 MB the decode worker holds in memory'
+          "This export's sources would hold more than the 512 MB the decode worker keeps in memory"
+        );
+        warn.mockRestore();
+      });
+
+      // Fix round 1, MD3: the budget is the export's, not each source's —
+      // every source the worker takes is held until the export ends.
+      it('refuses a source that would take the export past the budget, and takes one that fits', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const sized = (bytes: number) => {
+          const blob = mp4();
+          Object.defineProperty(blob, 'size', { value: bytes });
+          return blob;
+        };
+        const onFallback = vi.fn();
+        const third = MAX_WORKER_SOURCE_BYTES / 3;
+
+        const first = await factory.createSource('a', sized(2 * third), 'video/mp4', undefined, onFallback);
+        const second = await factory.createSource('b', sized(2 * third), 'video/mp4', undefined, onFallback);
+        const third_ = await factory.createSource('c', sized(third), 'video/mp4', undefined, onFallback);
+
+        expect([first, second, third_].map((source) => source.requiresCleanup())).toEqual([true, false, true]);
+        expect(onFallback).toHaveBeenCalledWith(
+          'b',
+          "This export's sources would hold more than the 512 MB the decode worker keeps in memory"
         );
         warn.mockRestore();
       });
