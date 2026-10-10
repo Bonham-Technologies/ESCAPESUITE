@@ -29,6 +29,16 @@
  * Every wait is bounded: a decoder that stops making progress for
  * `stallTimeoutMs` fails the request, and the decoder with it, with a named
  * error, so the caller falls back rather than hanging.
+ *
+ * ## Telling the page it is still working
+ *
+ * A request may carry an `onProgress` listener, called on every decoder output
+ * from the moment the request is made until it settles — while it is served,
+ * and while it is queued behind a request this decoder is serving, since its
+ * answer waits on that one. The worker turns each call into a FRAME_PROGRESS
+ * message, which re-arms the main thread's per-request deadline
+ * (`FRAME_REQUEST_DEADLINE_MS`, ESCSUITE-272), so that deadline measures
+ * silence, the way `stallTimeoutMs` does here, rather than the request's age.
  */
 
 import type { DemuxedSample } from './mp4Demux';
@@ -104,6 +114,8 @@ export class FrameDecoder<F extends FrameLike> {
   private disposed = false;
   /** Requests run one at a time, in arrival order. */
   private queue: Promise<unknown> = Promise.resolve();
+  /** The `onProgress` of every request not yet settled, served or queued. */
+  private readonly progressListeners = new Set<() => void>();
 
   constructor(options: FrameDecoderOptions<F>) {
     this.samples = options.samples;
@@ -134,9 +146,19 @@ export class FrameDecoder<F extends FrameLike> {
   /**
    * The frame shown at `seconds`, as a clone the caller owns and must close.
    * Rejects, rather than waiting forever, when the decoder fails or stalls.
+   * `onProgress`, if given, is called on each decoder output until the
+   * request settles (ESCSUITE-272).
    */
-  getFrame(seconds: number): Promise<F> {
-    return this.enqueue(() => this.produce(seconds));
+  getFrame(seconds: number, onProgress?: () => void): Promise<F> {
+    if (!onProgress) return this.enqueue(() => this.produce(seconds));
+    this.progressListeners.add(onProgress);
+    return this.enqueue(async () => {
+      try {
+        return await this.produce(seconds);
+      } finally {
+        this.progressListeners.delete(onProgress);
+      }
+    });
   }
 
   /** Drop the cached frame shown at `seconds`, if one is held. */
@@ -328,6 +350,7 @@ export class FrameDecoder<F extends FrameLike> {
     this.cache.set(frame.timestamp, frame);
     this.evict();
     this.progress();
+    for (const listener of this.progressListeners) listener();
   }
 
   /**

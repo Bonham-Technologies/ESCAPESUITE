@@ -383,8 +383,8 @@ describe('FrameDecoder', () => {
       ])
       for (const frame of frames) frame.close()
 
-      expect(served).toBe(6)
-      expect(queued).toBe(6)
+      expect(served).toBe(7) // 0, 3, 1, 2, 6, 4, 5 in decode order
+      expect(queued).toBe(7)
     })
   })
 

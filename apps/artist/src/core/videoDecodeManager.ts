@@ -46,20 +46,21 @@ export type ProgressCallback = (
 export type ErrorCallback = (error: string, fatal: boolean) => void;
 
 /**
- * How long a frame request waits for the worker's answer before the worker is
- * presumed dead (ESCSUITE-266). A worker the browser kills outright — an
- * out-of-memory kill of a dedicated worker, say — is not guaranteed to fire
- * `error` on this thread, and the worker's own stall bound (5 s,
- * `workers/frameDecoder.ts`) dies with it, so without this an MP4 export
- * waited forever at the frame it was on. Fifteen seconds is generous, but the
- * two bounds answer different questions and can disagree: the worker's is per
- * stall (it resets on every decoder output and fires only after 5 s with no
- * progress at all), while this one is the request's total age. A live worker
- * still making progress on one request — a long keyframe gap on a slow
- * machine, a transition of a clip onto itself bouncing one decoder between two
- * positions — can pass 15 s, and is then treated as dead: every source falls
- * back to `<video>`, so the export finishes slower and in the page, but it
- * finishes. A deadline that resets on worker progress is ESCSUITE-272.
+ * How long a frame request waits with no sign of life from the worker before
+ * the worker is presumed dead (ESCSUITE-266). A worker the browser kills
+ * outright — an out-of-memory kill of a dedicated worker, say — is not
+ * guaranteed to fire `error` on this thread, and the worker's own stall bound
+ * (5 s, `workers/frameDecoder.ts`) dies with it, so without this an MP4 export
+ * waited forever at the frame it was on. Like the worker's own bound, it
+ * measures silence, not age (ESCSUITE-272): the worker posts FRAME_PROGRESS
+ * for a request on each decoder output while that request is served or queued
+ * behind one its decoder is serving, and each one re-arms that request's
+ * timer — only that request's, so one busy request cannot keep a silent one
+ * alive. A live worker still decoding a hard request — a long keyframe gap on
+ * a slow machine, a transition of a clip onto itself bouncing one decoder
+ * between two positions — is therefore never mistaken for a dead one, however
+ * long the request takes; a request with no output at all for 15 s, three
+ * times the worker's own bound, means a worker that is gone.
  */
 export const FRAME_REQUEST_DEADLINE_MS = 15_000;
 
@@ -104,8 +105,13 @@ interface PendingRequest {
   timestamp: number;
   /** Whose request it is: a dispose rejects only its own source's (ESCSUITE-254). */
   sourceId: string;
-  /** Its FRAME_REQUEST_DEADLINE_MS timer, cleared wherever the request settles (ESCSUITE-266). */
+  /**
+   * Its FRAME_REQUEST_DEADLINE_MS timer, cleared wherever the request settles
+   * (ESCSUITE-266) and re-armed on each FRAME_PROGRESS for it (ESCSUITE-272).
+   */
   deadline: ReturnType<typeof setTimeout>;
+  /** What the deadline runs: made once per request, so a re-arm allocates only the handle. */
+  expire: () => void;
 }
 
 /**
@@ -360,6 +366,18 @@ export class VideoDecodeManager {
         break;
       }
 
+      case 'FRAME_PROGRESS': {
+        // The worker is still decoding toward this request: restart its
+        // deadline. One that has already settled (answered, disposed,
+        // terminated) has nothing to restart.
+        const pending = this.pendingRequests.get(message.requestId);
+        if (pending) {
+          clearTimeout(pending.deadline);
+          pending.deadline = setTimeout(pending.expire, FRAME_REQUEST_DEADLINE_MS);
+        }
+        break;
+      }
+
       case 'PROGRESS': {
         const response = message as ProgressResponse;
         const callback = this.progressCallbacks.get(response.sourceId);
@@ -513,11 +531,11 @@ export class VideoDecodeManager {
    * @param timestamp - Timestamp in seconds
    * @returns Promise resolving to VideoFrame (caller must call .close() when done)
    *
-   * Rejects if the worker has not answered within FRAME_REQUEST_DEADLINE_MS,
-   * and terminates it: a worker that missed one deadline is presumed dead, so
-   * every other request and load in flight fails at once with the same reason
-   * and each source falls back now, rather than after a deadline of its own
-   * (ESCSUITE-266).
+   * Rejects if the worker has gone FRAME_REQUEST_DEADLINE_MS without
+   * answering or reporting progress on it (ESCSUITE-272), and terminates it: a
+   * worker that missed one deadline is presumed dead, so every other request
+   * and load in flight fails at once with the same reason and each source
+   * falls back now, rather than after a deadline of its own (ESCSUITE-266).
    */
   async getFrame(sourceId: string, timestamp: number): Promise<VideoFrame> {
     if (!this.isReady) {
@@ -529,12 +547,13 @@ export class VideoDecodeManager {
     return new Promise((resolve, reject) => {
       // Cleared on every settle, so it fires only for a request still in
       // flight: terminate() rejects that one along with everything else.
-      const deadline = setTimeout(() => {
+      const expire = () => {
         this.terminate(
           new Error(`Decode worker did not answer within ${FRAME_REQUEST_DEADLINE_MS / 1000} s for ${sourceId}`)
         );
-      }, FRAME_REQUEST_DEADLINE_MS);
-      this.pendingRequests.set(requestId, { resolve, reject, timestamp, sourceId, deadline });
+      };
+      const deadline = setTimeout(expire, FRAME_REQUEST_DEADLINE_MS);
+      this.pendingRequests.set(requestId, { resolve, reject, timestamp, sourceId, deadline, expire });
 
       this.postRequest({
         type: 'REQUEST_FRAME',

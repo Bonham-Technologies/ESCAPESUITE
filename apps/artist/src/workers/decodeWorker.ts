@@ -176,7 +176,11 @@ async function requestFrame(
   }
 
   try {
-    const frame = await source.decoder.getFrame(timestamp);
+    // Each decoder output while this request waits re-arms its main-thread
+    // deadline, so a long decode is not taken for a dead worker (ESCSUITE-272).
+    const frame = await source.decoder.getFrame(timestamp, () =>
+      postResponse({ type: 'FRAME_PROGRESS', requestId })
+    );
     postResponse(
       {
         type: 'FRAME_READY',

@@ -401,12 +401,20 @@ probe):
   that request and every other request and source load in flight with "Decode worker did not
   answer within 15 s for <sourceId>", so every source the worker held falls back to `<video>` at
   once, through the same handover and the same once-per-export line, rather than each after a
-  deadline of its own. The deadline is generous, but it and the worker's 5 s bound answer
-  different questions: the worker's is per stall (reset on every decoder output), this one is the
-  request's total age, so a live worker still making progress on one request past 15 s — a long
-  keyframe gap on a slow machine, a transition of a clip onto itself bouncing one decoder between
-  two positions — is treated as dead too. The cost of that false positive is a slower in-page
-  finish, not a hang; a deadline that resets on worker progress is ESCSUITE-272. **Every source
+  deadline of its own. **Like the worker's own 5 s bound, it measures silence, not age
+  (ESCSUITE-272):** `FrameDecoder.getFrame(seconds, onProgress)` calls the request's listener on
+  every decoder output from the moment the request is made until it settles — while it is served,
+  and while it is queued behind a request the same decoder is serving (an export asks for two clips
+  of one source at once, and the second's answer waits on the first's decode) — and the worker
+  posts each call as `{ type: 'FRAME_PROGRESS', requestId }`. The manager re-arms **that request's**
+  timer on each one (clear and set, reusing a per-request `expire` callback, so a re-arm allocates
+  only the handle) and ignores one for a request it no longer holds (answered, disposed,
+  terminated, or never issued). So a live worker still decoding a hard request — a long keyframe
+  gap on a slow machine, a transition of a clip onto itself bouncing one decoder between two
+  positions — is never mistaken for a dead one however long the request takes, and progress on one
+  request cannot keep a silent one alive: a request with no decoder output on its behalf for 15 s
+  still terminates the worker as above. The cost is one small message per decoder output per
+  waiting request. **Every source
   load has a deadline too (ESCSUITE-273)**, because `exportMP4.ts` awaits every load before the
   frame loop makes a single request, so a worker killed mid-load — where its memory peaks and an
   out-of-memory kill is likeliest — never reached a frame deadline and hung the export.
