@@ -152,7 +152,7 @@ describe('TransformSection', () => {
     /** The slider position a scale sits at: the sliders run over log10(scale). */
     const at = (scale: number) => Math.log10(scale)
     const sliderValue = (el: HTMLElement) => Number((el as HTMLInputElement).value)
-    const lastWrite = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls.at(-1)!
+    const lastWrite = (fn: ReturnType<typeof vi.fn>) => fn.mock.calls[fn.mock.calls.length - 1]
 
     it('offers one Scale row while the aspect ratio is locked', () => {
       const { onTransformChange } = renderSection({
