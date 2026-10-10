@@ -558,14 +558,16 @@ describe('exportToMP4 rendering', () => {
     expect(ctx().argsFor('drawImage')[0][0]).toBe(media.videos[0])
   })
 
-  it('seeks the source to the clip trim offset, skipping seeks within one frame', async () => {
+  it('seeks the source to the clip trim offset, skipping seeks within half a frame', async () => {
     await run({
       clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION })],
     })
 
-    // The frame source leaves the element alone while the request is within one
-    // frame of where it already is, so only every other frame seeks.
-    expect(media.seeks).toEqual([2, 2 + 2 / 30, 2 + 4 / 30])
+    // The frame source leaves the element alone only while the request is within
+    // half a frame of where it already is. Consecutive 1/30 s requests are a frame
+    // apart, so every one seeks (ESCSUITE-263: the old one-frame window skipped every
+    // other frame and served the previous frame twice).
+    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => 2 + i / 30))
   })
 
   it('draws an image source without a frame source', async () => {

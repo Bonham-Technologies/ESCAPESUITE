@@ -274,7 +274,14 @@ export async function exportToMP4(
       } else if (source?.mediaType !== 'audio') {
         // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
         try {
-          await loadFrameSource(frameManager, sourceId, blob, blob.type || 'video/mp4', reportInPageDecoding);
+          await loadFrameSource(
+            frameManager,
+            sourceId,
+            blob,
+            blob.type || 'video/mp4',
+            reportInPageDecoding,
+            source?.frameRate
+          );
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback

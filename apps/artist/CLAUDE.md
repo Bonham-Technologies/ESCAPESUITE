@@ -444,8 +444,8 @@ probe):
   source, two `colr`-only sources (BT.601 and BT.709) and a clip trimmed 0.5 s into its source —
   within 1.5/255 (measured 0.000–0.486; decoding the untagged source as BT.709 measured 3.70); and a
   rotated source exports in the orientation its `<video>` shows. The
-  `<video>` path's own seek-skip within 1/30 s, which can repeat a frame, predates this and is
-  ESCSUITE-263; fixing it moves the oracle, so that ticket re-runs this spec.
+  `<video>` path's own seek-skip used to be a hard-coded 1/30 s, which could repeat a frame; ESCSUITE-263 made it half a frame
+  at the source's own rate, which can move this oracle, so re-run this spec and record the MAD.
 
 ### Integration API (`src/utils/integration.ts`)
 The editor can be embedded in other applications via:
@@ -3628,7 +3628,7 @@ The export pipeline includes several optimizations to improve performance:
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for H.264 MP4 files (background-capable), wrapped so a frame the worker fails mid-export hands the source to `<video>`
   - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line
-- **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is already within one frame (1/30s) of the element's current time
+- **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek entirely when the request is within half a frame of the element's current time, `seekToleranceFor(frameRate)` = `0.5 / frameRate` from the `SourceVideo`'s own rate (ESCSUITE-263), so a 60 fps source gets a seek per frame; a rate that is missing or not finite and positive falls back to `0.5 / 30`, the old 30 fps assumption. The rate is threaded `exportMP4` -> `loadFrameSource` -> `createSource` -> `HTMLVideoFrameSource` (also on the failover path)
 - **Encoder backpressure**: MP4's loop waits while `videoEncoder.encodeQueueSize > 5`, paired with
   the 30-second backpressure timeout below; WebM's own loop waits above `> 20`. Both exist to
   prevent memory exhaustion

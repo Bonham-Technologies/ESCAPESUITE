@@ -348,9 +348,9 @@ describe('frameSource', () => {
       element.currentTime = 5;
       const source = HTMLVideoFrameSource.fromElement('near', element as unknown as HTMLVideoElement);
 
-      // 0.02s away, under the 1/30s frame duration: no seek, so the stalled
+      // 0.01s away, under the half-frame (1/60s) fallback tolerance: no seek, so the stalled
       // seek never matters and the call resolves immediately.
-      await expect(source.getFrame(5.02)).resolves.toBe(element);
+      await expect(source.getFrame(5.01)).resolves.toBe(element);
       expect(element.currentTime).toBe(5);
     });
 

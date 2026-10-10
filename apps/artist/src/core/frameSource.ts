@@ -159,14 +159,33 @@ export class WebCodecsFrameSource implements IFrameSource {
  * HTMLVideoElement-based frame source
  * Fallback for unsupported formats or when WebCodecs is not available
  */
+/**
+ * How far from the element's current time a request may be before the `<video>`
+ * path seeks: half of one frame at the source's own rate, since anything closer
+ * is the frame already showing and anything further is a different one
+ * (ESCSUITE-263). A rate that is missing or not finite and positive falls back
+ * to a 30 fps frame, the assumption the path used to make for every source.
+ */
+export function seekToleranceFor(frameRate: number | undefined): number {
+  const rate = frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30;
+  return 0.5 / rate;
+}
+
 export class HTMLVideoFrameSource implements IFrameSource {
   private video: HTMLVideoElement;
+  private seekTolerance: number;
   private sourceId: string;
   private objectUrl: string | null = null;
   private disposed = false;
 
-  private constructor(video: HTMLVideoElement, sourceId: string, objectUrl: string | null) {
+  private constructor(
+    video: HTMLVideoElement,
+    sourceId: string,
+    objectUrl: string | null,
+    frameRate?: number
+  ) {
     this.video = video;
+    this.seekTolerance = seekToleranceFor(frameRate);
     this.sourceId = sourceId;
     this.objectUrl = objectUrl;
   }
@@ -177,7 +196,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
   static async create(
     sourceId: string,
     blob: Blob,
-    _onProgress?: LoadProgressCallback
+    _onProgress?: LoadProgressCallback,
+    frameRate?: number
   ): Promise<HTMLVideoFrameSource> {
     const video = document.createElement('video');
     video.playsInline = true;
@@ -196,14 +216,18 @@ export class HTMLVideoFrameSource implements IFrameSource {
       video.src = url;
     });
 
-    return new HTMLVideoFrameSource(video, sourceId, url);
+    return new HTMLVideoFrameSource(video, sourceId, url, frameRate);
   }
 
   /**
    * Create from an existing HTMLVideoElement (for compatibility)
    */
-  static fromElement(sourceId: string, video: HTMLVideoElement): HTMLVideoFrameSource {
-    return new HTMLVideoFrameSource(video, sourceId, null);
+  static fromElement(
+    sourceId: string,
+    video: HTMLVideoElement,
+    frameRate?: number
+  ): HTMLVideoFrameSource {
+    return new HTMLVideoFrameSource(video, sourceId, null, frameRate);
   }
 
   async getFrame(timestamp: number): Promise<HTMLVideoElement> {
@@ -217,9 +241,9 @@ export class HTMLVideoFrameSource implements IFrameSource {
     const currentTime = video.currentTime;
     const diff = timestamp - currentTime;
 
-    // Only seek if necessary (more than one frame away)
-    const frameDuration = 1 / 30; // Assume 30fps
-    if (Math.abs(diff) > frameDuration) {
+    // Only seek if necessary: a request within half a frame (at the source's own
+    // rate) of the current time is the frame already showing.
+    if (Math.abs(diff) > this.seekTolerance) {
       video.pause();
       video.currentTime = timestamp;
 
@@ -440,6 +464,7 @@ export class FrameSourceFactory {
    * @param onFallback Told when a source decodes on the HTMLVideoElement path while
    *   the worker is running — an MP4 refused now or given up on mid-export, or
    *   a source that is not an MP4 at all (ESCSUITE-261)
+   * @param frameRate The source's own frame rate, for the `<video>` path's seek tolerance
    * @returns A frame source (WebCodecs or HTMLVideoElement based)
    */
   async createSource(
@@ -447,7 +472,8 @@ export class FrameSourceFactory {
     blob: Blob,
     mimeType: string,
     onProgress?: LoadProgressCallback,
-    onFallback?: FallbackCallback
+    onFallback?: FallbackCallback,
+    frameRate?: number
   ): Promise<IFrameSource> {
     // Use WebCodecs for MP4 files when supported
     if (this.useWebCodecs && this.manager && mimeType.includes('mp4')) {
@@ -469,7 +495,7 @@ export class FrameSourceFactory {
         return new FailoverFrameSource(
           source,
           sourceId,
-          () => HTMLVideoFrameSource.create(sourceId, blob, onProgress),
+          () => HTMLVideoFrameSource.create(sourceId, blob, onProgress, frameRate),
           onFallback
         );
       } catch (error) {
@@ -490,15 +516,15 @@ export class FrameSourceFactory {
     }
 
     // Fall back to HTMLVideoElement
-    return HTMLVideoFrameSource.create(sourceId, blob, onProgress);
+    return HTMLVideoFrameSource.create(sourceId, blob, onProgress, frameRate);
   }
 
   /**
    * Create a frame source from an existing HTMLVideoElement
    * (for compatibility with existing code during transition)
    */
-  createFromElement(sourceId: string, video: HTMLVideoElement): IFrameSource {
-    return HTMLVideoFrameSource.fromElement(sourceId, video);
+  createFromElement(sourceId: string, video: HTMLVideoElement, frameRate?: number): IFrameSource {
+    return HTMLVideoFrameSource.fromElement(sourceId, video, frameRate);
   }
 
   /**

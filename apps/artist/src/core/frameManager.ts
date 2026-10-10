@@ -56,9 +56,17 @@ export async function loadFrameSource(
   sourceId: string,
   blob: Blob,
   mimeType: string,
-  onFallback?: FallbackCallback
+  onFallback?: FallbackCallback,
+  frameRate?: number
 ): Promise<IFrameSource> {
-  const source = await manager.factory.createSource(sourceId, blob, mimeType, undefined, onFallback);
+  const source = await manager.factory.createSource(
+    sourceId,
+    blob,
+    mimeType,
+    undefined,
+    onFallback,
+    frameRate
+  );
   manager.sources.set(sourceId, source);
   return source;
 }
