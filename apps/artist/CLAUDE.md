@@ -237,7 +237,7 @@ pnpm lint                # Run ESLint
   is repaired, not refused** (the ESCSUITE-173 / 255 split): `repairEditorBlock` drops a snapshot
   block that fails the same checks to the defaults with one `console.warn`, and never blocks the
   restore. **In/out points past the timeline are clamped, not refused**, on both paths, to the loaded
-  timeline's length (a range that collapses to nothing is dropped); a **marker past the end is kept**
+  timeline's length (a range that collapses to nothing is dropped, and so is a lone point past the end — an in point at or past it, an out point past it); a marker refusal names the entry, `editor.markers[2].time ...`; a **marker past the end is kept**
   — markers are annotations, not playback bounds. `applyEditorBlock` (clear the points, set each
   non-null one, `setMarkers`) is a restore, not an edit: it pushes no undo entry, and it runs after
   the project lands and before `clearHistory()` in both `loadProjectFile` and `handleRestoreSession`.

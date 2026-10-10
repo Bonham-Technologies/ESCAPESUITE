@@ -215,22 +215,26 @@ export function validateEditorBlock(
     return { ok: false, reason: 'editor.markers is not a list' };
   }
   const seen = new Set<string>();
-  for (const entry of markers) {
-    const m = entry as Partial<Marker> | null;
-    if (
-      !m || typeof m !== 'object' ||
-      typeof m.id !== 'string' ||
-      typeof m.time !== 'number' || !Number.isFinite(m.time) || m.time < 0 ||
-      typeof m.label !== 'string' ||
-      typeof m.color !== 'string'
-    ) {
-      return {
-        ok: false,
-        reason: 'editor.markers needs entries with a string id, a time of 0 or more, a label and a colour',
-      };
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i] as Partial<Marker> | null;
+    const at = `editor.markers[${i}]`;
+    if (!m || typeof m !== 'object') {
+      return { ok: false, reason: `${at} must be an object` };
+    }
+    if (typeof m.id !== 'string') {
+      return { ok: false, reason: `${at}.id must be a string` };
+    }
+    if (typeof m.time !== 'number' || !Number.isFinite(m.time) || m.time < 0) {
+      return { ok: false, reason: `${at}.time must be a number of seconds, 0 or more` };
+    }
+    if (typeof m.label !== 'string') {
+      return { ok: false, reason: `${at}.label must be a string` };
+    }
+    if (typeof m.color !== 'string') {
+      return { ok: false, reason: `${at}.color must be a string` };
     }
     if (seen.has(m.id)) {
-      return { ok: false, reason: `editor.markers has a duplicate id: ${m.id}` };
+      return { ok: false, reason: `${at}.id is a duplicate: ${m.id}` };
     }
     seen.add(m.id);
   }
@@ -244,9 +248,18 @@ export function validateEditorBlock(
  * Clamp the in/out points to the timeline's length (ESCSUITE-245): a file
  * saved with a range and then edited elsewhere is still openable. A range that
  * collapses to nothing once clamped is dropped. Markers are annotations, not
- * playback bounds, so one past the end is kept.
+ * playback bounds, so one past the end is kept. A one-sided point past the end
+ * (an in point at or past it, an out point past it) is dropped to `null`.
  */
 function clampEditorBlock(editor: EditorBlock, duration: number): EditorBlock {
+  // A lone point past the end has nothing to bound against: dropped, not
+  // clamped onto the end (an in point AT the end is a range the export refuses).
+  if (editor.outPoint === null && editor.inPoint !== null && editor.inPoint >= duration) {
+    return { ...editor, inPoint: null };
+  }
+  if (editor.inPoint === null && editor.outPoint !== null && editor.outPoint > duration) {
+    return { ...editor, outPoint: null };
+  }
   const inPoint = editor.inPoint === null ? null : Math.min(editor.inPoint, duration);
   const outPoint = editor.outPoint === null ? null : Math.min(editor.outPoint, duration);
   if (inPoint !== null && outPoint !== null && inPoint >= outPoint) {
