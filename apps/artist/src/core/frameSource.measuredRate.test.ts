@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { HTMLVideoFrameSource, seekToleranceFor } from './frameSource';
+import { elementSeekTarget } from './elementSeek';
 import { rateFromMediaTimes } from './frameRateProbe';
 
 /**
@@ -38,7 +39,9 @@ describe('a measured 120 fps source (ESCSUITE-276)', () => {
     const source = HTMLVideoFrameSource.fromElement('s', real as unknown as HTMLVideoElement, measured);
     await source.getFrame(2);
     await source.getFrame(2 + 1 / 120);
-    expect(real.seeks).toEqual([2, 2 + 1 / 120]);
+    // Each seek lands ELEMENT_SEEK_BIAS past its request (ESCSUITE-265); the
+    // point here is that there are two of them.
+    expect(real.seeks).toEqual([2, 2 + 1 / 120].map(elementSeekTarget));
 
     // The same two requests at the old placeholder rate: the second is inside
     // 1/60 s and is skipped, repeating the previous frame.
@@ -46,6 +49,6 @@ describe('a measured 120 fps source (ESCSUITE-276)', () => {
     const assumed = HTMLVideoFrameSource.fromElement('s', placeholder as unknown as HTMLVideoElement, 30);
     await assumed.getFrame(2);
     await assumed.getFrame(2 + 1 / 120);
-    expect(placeholder.seeks).toEqual([2]);
+    expect(placeholder.seeks).toEqual([elementSeekTarget(2)]);
   });
 });
