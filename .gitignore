@@ -59,3 +59,6 @@ tmpclaude-*
 
 # Subagent-driven-development scratch (ledgers, briefs, review packages)
 .superpowers/
+
+# Turborepo 2.11+ writes this agent-rules file on every build; it is generated, not ours
+AGENTS.md
