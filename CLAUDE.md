@@ -3346,6 +3346,32 @@ keyframe case ran 2 / 2 on Chromium on fresh dev servers. `App.*rerender*`,
 `keyframeGestures.perf.test.ts` and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
 artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-227 (one ESCAPEARTIST tab at a time
+owns the session slot through a Web Lock in `app/sessionLock.ts`: a second live tab is not offered
+the owner's session and says so once, only the owner autosaves or clears the slot on New Project, an
+empty project never overwrites a populated slot, and a missing or rejecting `navigator.locks` leaves
+the tab behaving as if alone): 99.82 / 99.34 / **96.29** / 99.70 against the
+99.82 / 99.34 / 96.27 / 99.70 that `main` at `74bb3de9` measures in the same sitting — branches up two
+hundredths, the other three unmoved. The base gives 5,452 / 5,663 branches and this branch
+5,478 / 5,689: twenty-six new branches, twenty-six covered, the same 211 uncovered as before (lines
+8,432 / 8,447 → 8,474 / 8,489, statements 9,519 / 9,582 → 9,570 / 9,633, functions 2,012 / 2,018 →
+2,026 / 2,032, every denominator growing by exactly what the numerator did; the same 15 / 63 / 6
+uncovered). The twenty-six are `app/sessionLock.ts`'s twelve on arrival (12 / 12: the probe's
+`'held'` on a `null` grant, the absent-`locks` and rejected-request arms of both functions, the
+release-before-grant check), `app/useSessionAutosave.ts`'s six (16 → 22: the ownership gate on the
+write, the empty-session skip, `ownsSession()`), `app/useSessionRestore.ts`'s four (14 → 18: the
+`'held'` arm and the once-per-mount guard), `app/useProjectActions.ts`'s two (22 → 24: New Project's
+owner-only clear) and `app/sessionSnapshot.ts`'s two (`isEmptySession`), each reached from both
+sides through the fake `locks` double — sixteen session cases red with the app files reverted. The
+first measurement of the rebased branch came back one function short: `releaseHold`'s placeholder
+arrow, which the Promise executor always replaces, deleted rather than tested (`let releaseHold!`).
+Two review rounds (opus, then a scoped sonnet) added the New Project gate and the rejection rule.
+Outside vitest's measurement, `apps/e2e/tests/escapeartist/session-ownership.spec.ts` (three tabs in
+one context) and every existing restore-and-reload case ran on Chromium (4 / 4 after the fix round)
+and Firefox; the new spec skips WebKit because the shared import helper fails there on `main` too.
+`App.*rerender*` and every `*.perf.test.ts` are byte-identical — the ownership flag is a ref flipped
+from the lock callback. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3353,7 +3379,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.35 | 96.28 | 99.75 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.29 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
