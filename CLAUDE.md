@@ -2806,6 +2806,33 @@ rounded up from the sources' real bytes rather than reconstructed from base64) a
 The rerender pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors
 stay 99 / 99 / 95 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-09 for ESCSUITE-255 (a file's media type is decided by what
+decodes, through one `processMediaFile` every entry path calls — the uploader, `?video=` and the host's
+`LOAD_VIDEO` — so an audio-only `.webm` or `.mp4` lands as audio instead of a 0×0 "video";
+`fitToCanvasScale` answers 1 for a drawn size with no picture; `updateClipTransform` and `updateClip`
+refuse a non-finite or non-positive transform before the `set`, with the ESCSUITE-87 `false`; and the
+migration repairs such a value in the app's own session with one warning while `parseProject` keeps
+refusing it in a file, the ESCSUITE-173 split): 99.80 / 99.28 / **95.85** / 99.68 against the
+99.80 / 99.28 / 95.82 / 99.68 that `main` at `3ea73c41` measures in the same sitting — branches up
+three hundredths, the other three unmoved. The base gives 5,004 / 5,222 branches and this branch
+5,047 / 5,265: forty-three new branches, forty-three covered, the same 218 uncovered as before (lines
+7,826 / 7,841 → 7,862 / 7,877, statements 8,833 / 8,897 → 8,877 / 8,941, functions 1,893 / 1,899 →
+1,899 / 1,905, every denominator growing by exactly what the numerator did; the same 15 / 64 / 6
+uncovered). The movement is spread across six files and nets forty-three because one of them shrank:
+`components/VideoUploader.tsx` 120 / 128 → 114 / 122 — its `audio/` / `image/` MIME branching moved into
+the shared decision, taking six covered arms with it and leaving its same eight pre-existing uncovered;
+`core/videoProcessor.ts` 54 → 62 (`processMediaFile`'s image-by-MIME, audio-by-MIME and
+has-a-picture choices, each from both sides by the 0×0, 640×360, `image/png`, `audio/webm` and
+`video/webm`-with-no-picture doubles); `store/projectMigration.ts` 97 → 118 (the repair of a non-finite
+or non-positive scale and of each other non-finite field, reached by the `Infinity`, `NaN` and `0`
+restores against the file still refused with `scaleX: null`); `store/transformGuard.ts` 10 / 10 on
+arrival (the one finite-and-positive predicate both store writers share); `store/clipSlice.ts`
+159 / 161 → 165 / 167 (the two writers' refusals, the same two pre-existing arms uncovered); and
+`components/ClipEditor/clipEditorModel.ts` 29 → 33 (the Fit guard and the no-picture gate).
+`app/useHostIntegration.ts` gained no branch — its two sites swapped one call for another. The review
+approved both verdicts with no fix round. The rerender pins and every `*.perf.test.ts` are
+byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2813,7 +2840,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.80 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.28 | 95.84 | 99.68 |
+| `@escapesuite/artist` | 99.80 | 99.28 | 95.85 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 
