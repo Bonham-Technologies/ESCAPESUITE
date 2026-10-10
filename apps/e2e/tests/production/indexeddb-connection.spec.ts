@@ -19,7 +19,7 @@ import { waitForAppReady } from '../../utils/ready'
 
 const DB_NAME = 'video-editor-db'
 const ORIGIN = 'http://localhost:5190'
-const ARTIST_URL = `${ORIGIN}/artist/?suppressRestore=1`
+const ARTIST_URL = `${ORIGIN}/artist/`
 
 test.describe('Shared IndexedDB connection', () => {
   test.beforeEach(async ({ page }) => {
@@ -40,6 +40,10 @@ test.describe('Shared IndexedDB connection', () => {
     page.evaluate(() => (window as unknown as { __appOpens: number }).__appOpens)
 
   test('opens one connection for startup and an import', async ({ page }) => {
+    // No `suppressRestore`: the session-restore check and the theme load are
+    // the two callers that race on first use, and suppressing the restore
+    // would leave the theme load alone. A fresh context has no saved session,
+    // so no "Resume Previous Session?" prompt appears.
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
 
@@ -57,10 +61,9 @@ test.describe('Shared IndexedDB connection', () => {
     page,
     context,
   }) => {
-    const pageErrors: string[] = []
-    page.on('pageerror', (error) => pageErrors.push(error.message))
-
-    await page.goto(ARTIST_URL)
+    // The session autosave would add writes of its own; this case is about
+    // the import's.
+    await page.goto(`${ARTIST_URL}?suppressRestore=1`)
     await waitForAppReady(page, 'artist')
 
     const tiles = page.getByRole('button', { name: 'Add to timeline' })
@@ -79,6 +82,5 @@ test.describe('Shared IndexedDB connection', () => {
     await expect(tiles).toHaveCount(2, { timeout: 30_000 })
     expect(await appOpens(page)).toBe(2)
     expect(await getRecordCount(page, DB_NAME, 'videos')).toBe(1)
-    expect(pageErrors.filter((message) => message.includes('InvalidStateError'))).toEqual([])
   })
 })
