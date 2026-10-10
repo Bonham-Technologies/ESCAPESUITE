@@ -181,8 +181,8 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
   the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
-  moves the parity oracle (ESCSUITE-263); a worker killed outright may never fire `error`, so a
-  main-thread per-request deadline is still to come (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
+  moves the parity oracle (ESCSUITE-263). A worker killed outright, which may never fire `error`,
+  is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
   "Video Decode Worker"
 
 ### Data Flow

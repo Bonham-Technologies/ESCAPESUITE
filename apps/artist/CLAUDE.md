@@ -392,9 +392,18 @@ probe):
   finished export at cleanup; `disposeFrameManager` disposes each source in its own `try`, so the
   worker is always terminated. After the worker is ready, a worker `error` or `messageerror`
   rejects every frame request and every source load in flight, so an export never waits for an
-  answer one of those events says is not coming. The known limit: a worker killed outright (an
-  out-of-memory kill, say) is not guaranteed to fire either, and there is no main-thread deadline
-  per request yet — ESCSUITE-266.
+  answer one of those events says is not coming. A worker killed outright (an out-of-memory kill,
+  say) is not guaranteed to fire either, and the worker's own 5 s stall bound dies with it, so
+  **every frame request also has a main-thread deadline (ESCSUITE-266)**:
+  `FRAME_REQUEST_DEADLINE_MS` (15 s — three times the worker's own bound, so while the worker is
+  alive its stall error always arrives first) in `VideoDecodeManager.getFrame`, one timer per
+  request, cleared wherever the request settles (an answer, an error reply, a dispose, a worker
+  `error`, `terminate()`). On expiry the manager terminates the worker, presumed dead, rejecting
+  that request and every other request and source load in flight with "Decode worker did not
+  answer within 15 s for <sourceId>", so every source the worker held falls back to `<video>` at
+  once, through the same handover and the same once-per-export line, rather than each after a
+  deadline of its own. A source load has no deadline of its own — a large file can legitimately
+  take long to demux, and a worker that dies during one is caught by the first frame request's.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A WebM
