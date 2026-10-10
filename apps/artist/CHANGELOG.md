@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.15.53
+
+### Patch Changes
+
+- 3e5ed50: Inspector sliders: a slider that disappears mid-drag no longer leaves its undo gesture open
+  
+  An inspector slider that disappears mid-drag no longer leaves its undo gesture open for the next edit to fall into.
+
 ## 2.15.52
 
 ### Patch Changes
