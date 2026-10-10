@@ -2778,6 +2778,34 @@ had the row seed in the same case as the header and was red on WebKit alone, whi
 two. The `App.*rerender*` pins and every `*.perf.test.ts` are
 byte-identical. **No floor crossed downward**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-09 for ESCSUITE-241 (a project whose sources would not fit
+in one `.veditor` file is refused before any byte is read — one budget, `MAX_PROJECT_FILE_BASE64_BYTES`
+of 256 MiB of base64 across every used source and thumbnail, computed from `blob.size` handles — with a
+`ProjectTooLargeError` whose sentence names the sources' own total, the format's limit in the same units
+and the largest source, instead of `readAsDataURL` answering an empty string past V8's string ceiling and
+the save writing an 897-byte file that can never be reopened; an empty or short read is a failure too;
+both callers show the sentence, `projectSaved` never fires on a refusal, and a save-and-load whose save
+fails for any reason keeps its dialog and never loads over the unsaved work): 99.80 / 99.28 / **95.84** /
+99.68 against the 99.80 / 99.28 / 95.82 / 99.68 that `main` at `3ea73c41` (the Dependabot-overrides
+merge) measures in the same sitting — branches up two hundredths, the other three unmoved. The base
+gives 5,004 / 5,222 branches and this branch 5,028 / 5,246: twenty-four new branches, twenty-four
+covered, the same 218 uncovered as before (lines 7,826 / 7,841 → 7,855 / 7,870, statements
+8,833 / 8,897 → 8,865 / 8,929, functions 1,893 / 1,899 → 1,897 / 1,903, every denominator growing by
+exactly what the numerator did; the same 15 / 64 / 6 uncovered). The twenty-four are
+`core/projectManager.ts`'s twenty (34 → 54: the pre-pass's missing-record `continue`, the
+thumbnail-or-not term in the total, the largest-source comparison, the `total > limit` refusal,
+`blobToBase64`'s result-is-a-string, has-a-comma and long-enough checks, `ProjectTooLargeError`'s
+default `sourceTotal` argument — reached without it by the hook suite's hand-built refusal and with it
+by the pre-pass — and the MiB formatting) and `app/useProjectActions.ts`'s four (16 → 20: the
+`instanceof ProjectTooLargeError` choice in `handleSaveProject` and in `handleProjectLoadSaveAndLoad`),
+each reached from both sides by the over-budget, two-sources-together, thumbnail-counted, exact-boundary
+and one-byte-over cases, the empty, short and `null` reads, the named and generic sentences, and the
+refused save-and-load that leaves the dialog open. The review's round 1 (a failed save-and-load never
+loads, sizes in source MiB, the `null`-read and boundary cases) and its re-review's one note (the total
+rounded up from the sources' real bytes rather than reconstructed from base64) are in these numbers.
+The rerender pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors
+stay 99 / 99 / 95 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -2785,7 +2813,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.80 | 100.00 |
-| `@escapesuite/artist` | 99.80 | 99.28 | 95.82 | 99.68 |
+| `@escapesuite/artist` | 99.80 | 99.28 | 95.84 | 99.68 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.72 |
 

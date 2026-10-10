@@ -211,6 +211,17 @@ pnpm lint                # Run ESLint
   `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
   by both exporters. See "Export Resolution" below
 - `projectManager.ts`: Project save/load to JSON files with embedded video references.
+  **Size limit (ESCSUITE-241)**: the whole `.veditor` is one JSON string of base64, and V8 cannot
+  hold a string past 2^29 - 24 characters (about 512 Mi) — `readAsDataURL` then fires `load` with an
+  empty result and no error, and `JSON.stringify` throws. `saveProject` therefore refuses, before
+  reading any bytes or reporting any progress, a project whose used sources' base64
+  (`4 x ceil(size / 3)`, thumbnails included, summed as a TOTAL) exceeds
+  `MAX_PROJECT_FILE_BASE64_BYTES` (256 MiB, half the engine limit): it throws `ProjectTooLargeError`
+  (`total`, `limit`, and a message naming the largest source) and nothing is downloaded.
+  `useProjectActions` shows that message; for "save and load" the refusal also skips the load and
+  leaves the dialog and file for another choice. `blobToBase64` additionally rejects an empty or
+  short result, the backstop for a browser whose own limit is lower. The session autosave stores
+  `Blob`s by id and has no such limit. A binary `.veditor` v2 container is a separate follow-up.
   **File format**: each entry in `ProjectFile.videos` carries the video's base64 bytes and,
   since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
   `duration`/`width`/`height`/`frameRate` plus whatever of `mediaType`, `source`, `recordedAt`,

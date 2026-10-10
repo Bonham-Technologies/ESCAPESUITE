@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import {
   exportProjectMetadata,
   extractMetadataFromBlob,
@@ -6,6 +6,8 @@ import {
   loadProject,
   saveProject,
   showOpenProjectDialog,
+  MAX_PROJECT_FILE_BASE64_BYTES,
+  ProjectTooLargeError,
   type ProjectFile,
 } from './projectManager'
 // The real storage layer, running on the fake-indexeddb installed by
@@ -15,6 +17,13 @@ import type { Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { lastObjectUrl } from '../test/objectUrls'
 import { installFileReaderDouble } from '../test/doubles/fileReader'
+
+// Pass-through spies so a test can see (and, for the budget cases, fake the
+// size of) what saveProject asks storage for. Everything else is the real layer.
+vi.mock('./storage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./storage')>()
+  return { ...actual, getVideo: vi.fn(actual.getVideo), getThumbnail: vi.fn(actual.getThumbnail) }
+})
 
 let idCounter = 0
 const uniqueId = (prefix: string) => `${prefix}-${Date.now()}-${idCounter++}`
@@ -112,6 +121,192 @@ describe('importProjectMetadata', () => {
     // An empty sourceVideoId must still be satisfiable — by a source with that id.
     const result = importProjectMetadata(json, [sourceVideo('')])
     expect(result.timeline.clips[0].overlayType).toBe('text')
+  })
+})
+
+describe('saveProject size budget (ESCSUITE-241)', () => {
+  const MiB = 1024 * 1024
+  let clickSpy: ReturnType<typeof vi.spyOn>
+  let createObjectURL: ReturnType<typeof vi.spyOn>
+  let fileReader: ReturnType<typeof installFileReaderDouble>
+  let readSpy: Mock<() => void>
+
+  beforeEach(() => {
+    clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    createObjectURL = vi.spyOn(URL, 'createObjectURL')
+    fileReader = installFileReaderDouble()
+    // Count byte reads: the budget must be decided before any is made.
+    const Installed = (globalThis as unknown as { FileReader: new () => { readAsDataURL(b: Blob): void } }).FileReader
+    readSpy = vi.fn<() => void>()
+    const original = Installed.prototype.readAsDataURL
+    Installed.prototype.readAsDataURL = function (this: unknown, b: Blob) {
+      readSpy()
+      return original.call(this, b)
+    }
+    vi.mocked(getVideo).mockClear()
+  })
+
+  afterEach(() => {
+    fileReader.uninstall()
+    clickSpy.mockRestore()
+    createObjectURL.mockRestore()
+  })
+
+  /** A Blob that reports a size without holding the bytes. */
+  const fakeBlob = (size: number) => {
+    const blob = new Blob([])
+    Object.defineProperty(blob, 'size', { value: size })
+    return blob
+  }
+  const fakeStored = (id: string, size: number) => {
+    vi.mocked(getVideo).mockImplementationOnce(async () => ({ blob: fakeBlob(size), metadata: sourceVideo(id) }))
+  }
+  const projectUsing = (ids: string[]): Project => {
+    const project = createTestProject(ids[0])
+    project.timeline.clips = ids.map((id, i) => ({ ...project.timeline.clips[0], id: `clip${i}`, sourceVideoId: id }))
+    return project
+  }
+
+  it('the budget is 256 MiB of base64', () => {
+    expect(MAX_PROJECT_FILE_BASE64_BYTES).toBe(256 * MiB)
+  })
+
+  it('writes the file as before when the sources are under the budget', async () => {
+    const id = uniqueId('small')
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }), sourceVideo(id))
+    await saveProject(createTestProject(id), [sourceVideo(id)])
+    expect(clickSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // onProgress(0, 'Preparing project data...') precedes the budget check by
+  // design; no export step does.
+  it('refuses one source over the budget, naming the totals and the largest source, before reading anything', async () => {
+    const id = uniqueId('big')
+    fakeStored(id, 200 * MiB) // 4 x ceil(200 MiB / 3) is about 267 MiB of base64
+    const onProgress = vi.fn()
+    const error = await saveProject(projectUsing([id]), [sourceVideo(id, 'Recording 3')], onProgress).catch((e) => e)
+
+    expect(error).toBeInstanceOf(ProjectTooLargeError)
+    expect(error.name).toBe('ProjectTooLargeError')
+    expect(error.limit).toBe(MAX_PROJECT_FILE_BASE64_BYTES)
+    expect(error.total).toBe(4 * Math.ceil((200 * MiB) / 3))
+    expect(error.message).toContain('This project is too large to save as a .veditor file')
+    expect(error.message).toContain('the format holds about 192 MiB')
+    expect(error.message).toContain('its sources add up to 200 MiB')
+    expect(error.message).toContain('Recording 3, 200 MiB')
+    expect(readSpy).not.toHaveBeenCalled()
+    expect(onProgress).not.toHaveBeenCalledWith(expect.any(Number), expect.stringContaining('Exporting'))
+    expect(clickSpy).not.toHaveBeenCalled()
+    expect(createObjectURL).not.toHaveBeenCalled()
+  })
+
+  it('a source exactly at the budget is not refused, and one byte over is', async () => {
+    const at = uniqueId('edge')
+    // 4 x ceil(n / 3) = 256 MiB  =>  n = 192 MiB
+    fakeStored(at, 192 * MiB)
+    vi.mocked(getThumbnail).mockImplementationOnce(async () => undefined)
+    const progress: string[] = []
+    // The fake blob then fails the short-read check: what matters is that the
+    // export loop was entered, which is the only place 'Exporting' is reported.
+    const result = await saveProject(projectUsing([at]), [sourceVideo(at)], (_p, m) => progress.push(m)).catch((e) => e)
+    expect(result).not.toBeInstanceOf(ProjectTooLargeError)
+    expect(progress).toContain('Exporting video 1/1...')
+
+    const over = uniqueId('over')
+    fakeStored(over, 192 * MiB + 1) // 4 x ceil((192 MiB + 1) / 3) is 4 bytes more
+    vi.mocked(getThumbnail).mockImplementationOnce(async () => undefined)
+    const refused = await saveProject(projectUsing([over]), [sourceVideo(over)]).catch((e) => e)
+    expect(refused).toBeInstanceOf(ProjectTooLargeError)
+    expect(refused.total).toBeGreaterThan(MAX_PROJECT_FILE_BASE64_BYTES)
+  })
+
+  it('counts every source together, not each on its own', async () => {
+    const a = uniqueId('a')
+    const b = uniqueId('b')
+    fakeStored(a, 120 * MiB)
+    fakeStored(b, 100 * MiB)
+    const error = await saveProject(projectUsing([a, b]), [sourceVideo(a, 'First'), sourceVideo(b, 'Second')]).catch((e) => e)
+
+    expect(error).toBeInstanceOf(ProjectTooLargeError)
+    expect(error.total).toBe(4 * Math.ceil((120 * MiB) / 3) + 4 * Math.ceil((100 * MiB) / 3))
+    expect(error.message).toContain('First, 120 MiB')
+    expect(readSpy).not.toHaveBeenCalled()
+  })
+
+  it('counts the thumbnail in the total', async () => {
+    const id = uniqueId('thumb')
+    fakeStored(id, 190 * MiB) // under on its own
+    vi.mocked(getThumbnail).mockImplementationOnce(async () => fakeBlob(10 * MiB))
+    const error = await saveProject(projectUsing([id]), [sourceVideo(id)]).catch((e) => e)
+
+    expect(error).toBeInstanceOf(ProjectTooLargeError)
+    expect(error.total).toBe(4 * Math.ceil((190 * MiB) / 3) + 4 * Math.ceil((10 * MiB) / 3))
+  })
+
+  describe('a short read from the browser', () => {
+    const useReader = (result: string | null) => {
+      class Reader {
+        result = result
+        onloadend: (() => void) | null = null
+        onerror: (() => void) | null = null
+        readAsDataURL() {
+          queueMicrotask(() => this.onloadend?.())
+        }
+      }
+      ;(globalThis as unknown as { FileReader: unknown }).FileReader = Reader
+    }
+    const store10 = async () => {
+      const id = uniqueId('short')
+      await storeVideo(id, new Blob([new Uint8Array(10)], { type: 'video/mp4' }), sourceVideo(id))
+      return id
+    }
+
+    it('rejects an empty result instead of writing a file with no video', async () => {
+      const id = await store10()
+      useReader('')
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
+      expect(clickSpy).not.toHaveBeenCalled()
+    })
+
+    it('rejects a null result, which browsers report after an error', async () => {
+      const id = await store10()
+      useReader(null)
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
+    })
+
+    it('rejects a result with no base64 part', async () => {
+      const id = await store10()
+      useReader('data:video/mp4;base64,')
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
+    })
+
+    it('rejects a truncated result', async () => {
+      const id = await store10()
+      useReader('data:video/mp4;base64,AAAA') // 4 < 4 x floor(10 / 3) = 12
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
+    })
+
+    it('rejects an empty result for a blob too small to need any full base64 group', async () => {
+      const id = uniqueId('tiny')
+      await storeVideo(id, new Blob([new Uint8Array(2)], { type: 'video/mp4' }), sourceVideo(id))
+      useReader('data:video/mp4;base64,')
+      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/2 bytes/)
+    })
+
+    it('accepts an empty result for an empty blob', async () => {
+      const id = uniqueId('empty')
+      await storeVideo(id, new Blob([], { type: 'video/mp4' }), sourceVideo(id))
+      useReader('data:video/mp4;base64,')
+      await saveProject(createTestProject(id), [sourceVideo(id)])
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('accepts a complete result', async () => {
+      const id = await store10()
+      useReader('data:video/mp4;base64,' + 'A'.repeat(16))
+      await saveProject(createTestProject(id), [sourceVideo(id)])
+      expect(clickSpy).toHaveBeenCalledTimes(1)
+    })
   })
 })
 

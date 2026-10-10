@@ -70,7 +70,20 @@ export function storageDouble() {
 }
 
 export function projectManagerDouble() {
+  // A real class, so `error instanceof ProjectTooLargeError` means the same in
+  // the hook under test and in the test that throws it.
+  class ProjectTooLargeError extends Error {
+    name = 'ProjectTooLargeError';
+    constructor(
+      public total: number,
+      public limit: number,
+      public largest: { name: string; size: number }
+    ) {
+      super(`This project is too large to save as a .veditor file: ${total} / ${limit}.`);
+    }
+  }
   return {
+    ProjectTooLargeError,
     saveProject: vi.fn(() => Promise.resolve()),
     loadProject: vi.fn(() => Promise.resolve({ project: {}, sourceVideos: [] })),
     showOpenProjectDialog: vi.fn(() => Promise.resolve(null)),

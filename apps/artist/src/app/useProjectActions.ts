@@ -16,7 +16,7 @@
 // callbacks that need it only ever read `clips.length`, and it is the
 // dependency both of them carried inline.
 import { useCallback, useState } from 'react';
-import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
+import { saveProject, loadProject, showOpenProjectDialog, ProjectTooLargeError } from '../core/projectManager';
 import { clearSessionState, revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
@@ -88,7 +88,10 @@ export function useProjectActions({
       showNotification('Project saved successfully', 'success');
     } catch (error) {
       console.error('Save failed:', error);
-      showNotification('Failed to save project', 'error');
+      showNotification(
+        error instanceof ProjectTooLargeError ? error.message : 'Failed to save project',
+        'error'
+      );
     } finally {
       setIsSaving(false);
     }
@@ -185,17 +188,27 @@ export function useProjectActions({
   }, []);
 
   const handleProjectLoadSaveAndLoad = useCallback(async () => {
-    setShowProjectLoadDialog(false);
     const file = pendingProjectFile;
-    setPendingProjectFile(null);
-    if (!file) return;
+    if (!file) {
+      setShowProjectLoadDialog(false);
+      return;
+    }
+    // The dialog and its file stay put until the save settles: a save that
+    // fails for any reason did not happen, so the load must not either, and
+    // the user has to be able to choose again.
     try {
       await saveProject(project, sourceVideos);
-      showNotification('Project saved', 'success');
     } catch (error) {
       console.error('Failed to save current project:', error);
-      showNotification('Failed to save project', 'error');
+      showNotification(
+        error instanceof ProjectTooLargeError ? error.message : 'Failed to save project',
+        'error'
+      );
+      return;
     }
+    showNotification('Project saved', 'success');
+    setShowProjectLoadDialog(false);
+    setPendingProjectFile(null);
     await loadProjectFile(file);
   }, [pendingProjectFile, project, sourceVideos, loadProjectFile, showNotification]);
 

@@ -243,7 +243,7 @@ describe('App project lifecycle', () => {
       )
     })
 
-    it('still loads when that save fails', async () => {
+    it('does not load, and keeps the dialog open, when that save fails', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       const user = userEvent.setup()
       vi.mocked(saveProject).mockRejectedValueOnce(new Error('disk full'))
@@ -251,11 +251,14 @@ describe('App project lifecycle', () => {
 
       await user.click(screen.getByTestId('project-load-save'))
 
-      await waitFor(() => expect(loadProject).toHaveBeenCalled())
-      expect(consoleError).toHaveBeenCalledWith(
-        'Failed to save current project:',
-        expect.any(Error)
+      await waitFor(() =>
+        expect(consoleError).toHaveBeenCalledWith(
+          'Failed to save current project:',
+          expect.any(Error)
+        )
       )
+      expect(loadProject).not.toHaveBeenCalled()
+      expect(screen.getByTestId('project-load-save')).toBeInTheDocument()
       consoleError.mockRestore()
     })
 
