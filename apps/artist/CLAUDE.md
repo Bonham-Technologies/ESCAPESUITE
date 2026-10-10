@@ -4536,4 +4536,9 @@ transport in `components/Preview/PlaybackControls.tsx` (Space, the arrows, Home,
 `TRANSPORT_KEYS` (`Preview/transportKeys.ts`) are the key tables; `KeyboardShortcuts.test.tsx` fails
 if a single-key row outside the Keyframe Graph group is in neither, and the hook's test proves every
 `BOUND_SINGLE_KEYS` entry is claimed. The sheet once listed J/K/L playback keys and a loop toggle that
-never existed. Known gap: the File group's `Ctrl+N` is the File menu's item, not a cascade binding.
+never existed. The same rule covers chords (ESCSUITE-269): `BOUND_CHORDS` (the hook) lists every
+Ctrl/Cmd chord the cascade binds, redo's Shift spelling as its own entry; the sheet test fails on a
+`Ctrl` row outside it and `FileMenu.test.tsx` fails on a menu hint outside it, and the hook's test proves
+each entry is claimed. The sheet and the menu once showed `Ctrl+N` for New Project, which nothing bound and
+which Chromium/Edge keep for a new window (a page cannot claim it), so both lost it; the menu item keeps its
+label and shows no hint. Add a chord to the table when you bind one, and never one the browser reserves.
