@@ -154,6 +154,36 @@ describe('exportToWebM preconditions', () => {
   })
 })
 
+describe('exportToWebM timeline length (ESCSUITE-257)', () => {
+  it.each([
+    ['a zero-length clip at 0', makeClip({ duration: 0, endTime: 0 }), 'Cannot export: the timeline is empty'],
+    ['a clip that ends before 0', makeClip({ timelinePosition: -5, duration: 2, endTime: 2 }), 'Cannot export: the timeline is empty'],
+    ['a NaN duration', makeClip({ duration: NaN }), 'Cannot export: the timeline has no finite length'],
+  ])('refuses %s before any work', async (_label, clip, sentence) => {
+    const error = await run({ clips: [clip] }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toBe(sentence)
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(media.videos).toHaveLength(0)
+    expect(getMediabunnyState().outputs).toHaveLength(0)
+  })
+
+  it('still exports a zero-length clip that sits after 0, because the timeline has length', async () => {
+    const clips = [
+      makeClip({ id: 'a', duration: 0, endTime: 0, timelinePosition: 2 }),
+    ]
+
+    await expect(run({ clips })).resolves.toBeDefined()
+  })
+
+  it('exports a positive length as before', async () => {
+    await expect(run()).resolves.toBeDefined()
+    expect(mixAudio).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('exportToWebM muxing', () => {
   it('produces a WebM blob carrying the muxed bytes, and keeps the sound', async () => {
     const { blob, audio } = await run()
