@@ -3136,6 +3136,32 @@ precedent; `components/Preview/transportKeys.ts` is one constant with no decisio
 pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-244 (importing a file is not an undo step:
+`addSourceVideo` pushes no history and instead grafts the added source into every past and future
+snapshot through `graftAddedSource`, the inverse of ESCSUITE-149's `scrubRemovedSources`, so undoing an
+edit made before an import keeps the import, an import made while a redo branch exists keeps that
+branch, and redo keeps the import; the replace-in-place arm still revokes and scrubs the old `blob:`
+handle): 99.81 / 99.32 / **96.18** / 99.69 against the 99.81 / 99.32 / 96.14 / 99.69 that `main` at
+`b586e904` measures in the same sitting — branches up four hundredths, the other three unmoved. The base
+gives 5,335 / 5,549 branches and this branch 5,349 / 5,561: twelve new branches, fourteen more covered,
+so the uncovered column falls 214 → 212 — the two pre-existing arms newly reached are in
+`components/VideoUploader.tsx` (114 / 122 → 116 / 122), driven by the import → undo → edit → Remove case
+over real fake-indexeddb bytes (lines 8,305 / 8,320 → 8,317 / 8,332, statements 9,380 / 9,444 →
+9,396 / 9,460, functions 1,985 / 1,991 → 1,991 / 1,997, every denominator growing by exactly what the
+numerator did; the same 15 / 64 / 6 uncovered). The twelve are `store/storeHistory.ts`'s ten (24 → 34:
+`graftAddedSource`'s append-or-replace choice, the equal-entry identity return, the per-index
+replacement and the "nothing changed" identity return on both stacks, each reached from both sides by
+`storeHistory.graft.test.ts`'s seven cases) and `store/projectSlice.ts`'s two (39 → 41: the replace
+arm's scrub-then-graft against the plain add). The first measurement of the branch came back at
+29 / 34 for that file — five *pre-existing* arms unreached: `scrubDeadThumbnails`'s "carries no dead
+URL" return and `scrubRemovedSources`'s clip-only and "carries nothing" sides, whose reachers had been
+the ESCSUITE-113 / 149 store cases that used `addSourceVideo` as their undoable edit and were rightly
+rewritten onto other edits — and `storeHistory.scrub.test.ts`'s five pure cases are why the file reads
+34 / 34, 41 / 41, 52 / 52 and 22 / 22. Three review rounds put the graft there: the first found each
+snapshot holding its own library copy (the orphan again on undo) and the redo branch dropping the
+import; the second approved; the third was docs. The three rerender pins and every `*.perf.test.ts`
+are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3143,7 +3169,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.81 | 99.32 | 96.15 | 99.69 |
+| `@escapesuite/artist` | 99.81 | 99.32 | 96.18 | 99.69 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
