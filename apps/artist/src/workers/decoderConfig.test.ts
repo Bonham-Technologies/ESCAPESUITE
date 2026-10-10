@@ -38,7 +38,7 @@ describe('assumedColorSpace', () => {
 
 describe('decoderConfigFor', () => {
   it('configures the track as demuxed, with the colour space <video> would assume and no hardware requirement', async () => {
-    const config = await decoderConfigFor(video({ codedHeight: 480, displayHeight: 480 }), echoes, false)
+    const config = await decoderConfigFor(video({ codedHeight: 480, displayHeight: 480 }), echoes)
 
     expect(config).toEqual({
       codec: 'avc1.64001f',
@@ -50,20 +50,14 @@ describe('decoderConfigFor', () => {
     })
   })
 
-  it('asks for a hardware decoder only when configured to', async () => {
-    const config = await decoderConfigFor(video(), echoes, true)
-
-    expect(config.hardwareAcceleration).toBe('prefer-hardware')
-  })
-
   it('refuses a configuration the browser cannot decode', async () => {
     const unsupported = async () => ({ supported: false })
 
-    await expect(decoderConfigFor(video(), unsupported, false)).rejects.toThrow('Codec not supported: avc1.64001f')
+    await expect(decoderConfigFor(video(), unsupported)).rejects.toThrow('Codec not supported: avc1.64001f')
   })
 
   it('asks for the display rotation, and keeps it when the browser applies it', async () => {
-    const config = await decoderConfigFor(video({ rotation: 270 }), echoes, false)
+    const config = await decoderConfigFor(video({ rotation: 270 }), echoes)
 
     expect(config.rotation).toBe(270)
   })
@@ -74,17 +68,17 @@ describe('decoderConfigFor', () => {
       config,
     })
 
-    await expect(decoderConfigFor(video({ rotation: 90 }), ignoresRotation, false)).rejects.toThrow(
+    await expect(decoderConfigFor(video({ rotation: 90 }), ignoresRotation)).rejects.toThrow(
       "This browser's VideoDecoder cannot rotate its output; the source's 90° display rotation needs the <video> path"
     )
     // An upright track is not affected by the missing member.
-    await expect(decoderConfigFor(video(), ignoresRotation, false)).resolves.not.toHaveProperty('rotation')
+    await expect(decoderConfigFor(video(), ignoresRotation)).resolves.not.toHaveProperty('rotation')
   })
 
   it('refuses a rotated track when the browser echoes nothing back', async () => {
     const noEcho = async () => ({ supported: true })
 
-    await expect(decoderConfigFor(video({ rotation: 180 }), noEcho, false)).rejects.toThrow(/cannot rotate/)
+    await expect(decoderConfigFor(video({ rotation: 180 }), noEcho)).rejects.toThrow(/cannot rotate/)
   })
 
   // Fix round 1, M1. Measured in Chromium 153 (ESCSUITE-254): a stream whose
@@ -99,15 +93,14 @@ describe('decoderConfigFor', () => {
     it('gives a fully tagged stream no colour space, so its own tags stand', async () => {
       const config = await decoderConfigFor(
         video({ codedHeight: 480, colour: { fullyTagged: true, fullRange: false } }),
-        echoes,
-        false
+        echoes
       )
 
       expect(config).not.toHaveProperty('colorSpace')
     })
 
     it('guesses for a stream that tags only part of its colour', async () => {
-      const config = await decoderConfigFor(video({ codedHeight: 480, colour: { fullyTagged: false } }), echoes, false)
+      const config = await decoderConfigFor(video({ codedHeight: 480, colour: { fullyTagged: false } }), echoes)
 
       expect(config.colorSpace).toEqual(assumedColorSpace(480))
     })
@@ -115,8 +108,7 @@ describe('decoderConfigFor', () => {
     it("keeps a stream's own full-range signal in the guess", async () => {
       const config = await decoderConfigFor(
         video({ codedHeight: 480, colour: { fullyTagged: false, fullRange: true } }),
-        echoes,
-        false
+        echoes
       )
 
       expect(config.colorSpace).toEqual({ ...assumedColorSpace(480), fullRange: true })

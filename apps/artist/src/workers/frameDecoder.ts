@@ -136,9 +136,7 @@ export class FrameDecoder<F extends FrameLike> {
    * Rejects, rather than waiting forever, when the decoder fails or stalls.
    */
   getFrame(seconds: number): Promise<F> {
-    const result = this.queue.then(() => this.produce(seconds));
-    this.queue = result.catch(() => undefined);
-    return result;
+    return this.enqueue(() => this.produce(seconds));
   }
 
   /** Drop the cached frame shown at `seconds`, if one is held. */
@@ -153,7 +151,12 @@ export class FrameDecoder<F extends FrameLike> {
 
   /** Drain the decoder, after any queued requests. */
   flush(): Promise<void> {
-    const result = this.queue.then(() => this.drain());
+    return this.enqueue(() => this.drain());
+  }
+
+  /** Run `task` after every queued one; a failure is the caller's, never the queue's. */
+  private enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const result = this.queue.then(task);
     this.queue = result.catch(() => undefined);
     return result;
   }

@@ -788,6 +788,28 @@ describe('frameSource', () => {
         warn.mockRestore();
       });
 
+      // Fix round 1, MINOR 7: the <video> is asked for the very time the
+      // worker failed on, so the source resumes where it stopped.
+      it('asks the <video> it hands over to for the failing request\'s own time', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());
+        managerOf(factory).getFrame.mockRejectedValue(new Error('Decoder stalled'));
+        const created: MockHTMLVideoElement[] = [];
+        videoFactory = () => {
+          const element = new MockHTMLVideoElement();
+          created.push(element);
+          return element;
+        };
+
+        const frame = await source.getFrame(0.25);
+
+        expect(frame).toBe(created[0]);
+        expect(created[0].currentTime).toBe(0.25);
+        await source.dispose();
+        warn.mockRestore();
+      });
+
       it('disposes a source that never needed the <video> path without creating one', async () => {
         const factory = await factoryWithWorker();
         const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());

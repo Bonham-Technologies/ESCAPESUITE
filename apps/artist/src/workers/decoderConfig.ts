@@ -51,12 +51,14 @@ export function assumedColorSpace(codedHeight: number): VideoColorSpaceInit {
  * - the track is rotated and the browser's VideoDecoder does not apply
  *   `rotation` to its output. A browser that implements the member echoes it
  *   back from isConfigSupported; one that does not drops it, and would hand
- *   back frames lying on their side.
+ *   back frames lying on their side. The echo proves the member is known, not
+ *   that `drawImage` honours `VideoFrame.rotation` — that was measured, in
+ *   Chromium — so it is enough only behind `core/workerDecodeEngine.ts`'s
+ *   allow-list, never as the only guard in an unmeasured engine.
  */
 export async function decoderConfigFor(
   video: DemuxedVideo,
-  isConfigSupported: ConfigSupportCheck,
-  preferHardwareAcceleration: boolean
+  isConfigSupported: ConfigSupportCheck
 ): Promise<OrientedDecoderConfig> {
   const config: OrientedDecoderConfig = {
     codec: video.codec,
@@ -66,7 +68,7 @@ export async function decoderConfigFor(
     // 'prefer-hardware' is a requirement in Chromium, not a preference: a
     // machine without a hardware decoder for the codec (a Linux CI runner, a
     // VM) would refuse every source.
-    hardwareAcceleration: preferHardwareAcceleration ? 'prefer-hardware' : 'no-preference',
+    hardwareAcceleration: 'no-preference',
   };
   // Only for a stream that does not fully describe its own colour: one that
   // does is drawn in its own colours by <video>, and keeps them here too.
