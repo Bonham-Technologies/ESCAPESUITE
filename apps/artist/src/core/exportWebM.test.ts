@@ -170,6 +170,23 @@ describe('exportToWebM timeline length (ESCSUITE-257)', () => {
     expect(getMediabunnyState().outputs).toHaveLength(0)
   })
 
+  it.each([
+    ['an empty range', { start: 2, end: 2 }],
+    ['a reversed range', { start: 3, end: 1 }],
+  ])('refuses %s before any work', async (_label, timeRange) => {
+    const error = await run({ options: { timeRange } }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toBe('Cannot export: the timeline is empty')
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(media.videos).toHaveLength(0)
+  })
+
+  it('still exports a positive range', async () => {
+    await expect(run({ options: { timeRange: { start: 0, end: 0.1 } } })).resolves.toBeDefined()
+  })
+
   it('still exports a zero-length clip that sits after 0, because the timeline has length', async () => {
     const clips = [
       makeClip({ id: 'a', duration: 0, endTime: 0, timelinePosition: 2 }),
