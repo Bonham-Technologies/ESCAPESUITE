@@ -27,6 +27,7 @@ import {
   resolveFile,
   resolveRequestPath,
 } from './serve-dist.mjs'
+import * as serveDist from './serve-dist.mjs'
 import realVercelConfig from '../../../vercel.json' with { type: 'json' }
 
 test('matchesSource anchors the pattern at both ends', () => {
@@ -315,6 +316,76 @@ test('HTTP: falls back to plain text 404 when dist/404.html is itself missing', 
     assert.equal(response.status, 404)
     assert.equal(response.headers.get('content-type'), 'text/plain; charset=utf-8')
     assert.equal(await response.text(), 'Not found')
+  } finally {
+    server.close()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ESCSUITE-234: `/artist` and `/craft` used to be REWRITTEN to their index.html,
+// so the document URL stayed slashless and a relative URL (the hosted worker
+// chunk) resolved against the site root. They are redirected now, and this
+// server derives that from `vercel.json`'s `redirects` array the way it derives
+// rewrites. `redirectFor` is looked up through the namespace so a missing export
+// fails these cases rather than the whole file.
+const REDIRECT_CASES = [
+  ['/craft', '/craft/'],
+  ['/artist', '/artist/'],
+  ['/craft/foo/', '/craft/'],
+  ['/artist/foo/', '/artist/'],
+  ['/artist/foo', '/artist/'],
+  ['/artist/deep/er/path', '/artist/'],
+]
+
+test('redirectFor: vercel.json redirects /craft and /artist (and deep paths) to the slashed document, 308', () => {
+  for (const [from, to] of REDIRECT_CASES) {
+    const hit = serveDist.redirectFor?.(from, realVercelConfig.redirects ?? [])
+    assert.deepEqual(hit, { destination: to, statusCode: 308 }, from)
+  }
+})
+
+test('redirectFor: the slashed documents, the hub and look-alikes are not redirected', () => {
+  for (const path of ['/', '/craft/', '/artist/', '/privacy', '/artist-guide', '/craftsmanship']) {
+    assert.equal(serveDist.redirectFor?.(path, realVercelConfig.redirects ?? []), null, path)
+  }
+})
+
+test('redirectFor: honours permanent flag and statusCode, and substitutes captures', () => {
+  const redirects = [
+    { source: '/a', destination: '/b', permanent: false },
+    { source: '/c/(.+)', destination: '/d/$1', statusCode: 301 },
+  ]
+  assert.deepEqual(serveDist.redirectFor?.('/a', redirects), { destination: '/b', statusCode: 307 })
+  assert.deepEqual(serveDist.redirectFor?.('/c/x', redirects), { destination: '/d/x', statusCode: 301 })
+})
+
+test('HTTP: redirects answer 308 with Location, keeping the query string', async () => {
+  const { dir } = buildTempDist()
+  const server = createServer(dir)
+  try {
+    await new Promise((resolveListen, rejectListen) => {
+      server.once('error', rejectListen)
+      server.listen(0, '127.0.0.1', resolveListen)
+    })
+    const { port } = server.address()
+    const get = (path) => fetch(`http://127.0.0.1:${port}${path}`, { redirect: 'manual' })
+
+    for (const [from, to] of REDIRECT_CASES) {
+      const response = await get(from)
+      assert.equal(response.status, 308, from)
+      assert.equal(response.headers.get('location'), to, from)
+    }
+
+    const withQuery = await get('/artist?loadVideo=abc&x=1')
+    assert.equal(withQuery.status, 308)
+    assert.equal(withQuery.headers.get('location'), '/artist/?loadVideo=abc&x=1')
+    const deepQuery = await get('/artist/foo/?loadVideo=abc')
+    assert.equal(deepQuery.headers.get('location'), '/artist/?loadVideo=abc')
+
+    // The slashed document is served, not redirected.
+    const doc = await get('/artist/?loadVideo=abc')
+    assert.equal(doc.status, 200)
+    assert.match(await doc.text(), /ARTIST/)
   } finally {
     server.close()
     rmSync(dir, { recursive: true, force: true })
