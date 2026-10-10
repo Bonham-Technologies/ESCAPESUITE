@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
@@ -224,6 +224,40 @@ describe('VideoUploader', () => {
       expect(store().sourceVideos).toEqual([videoMeta])
       // ESCSUITE-31: declared and tested in isolation but never called before.
       expect(mockAnalytics.videoImported).toHaveBeenCalledWith('video')
+    })
+
+    // ESCSUITE-244: an import writes bytes to IndexedDB, and undo cannot
+    // un-write them. When the add was undoable, undo took the source out of the
+    // library, the next edit pruned the redo branch, and the row stayed in the
+    // shared `videos` store with nothing in either app able to list or free it.
+    // Now the add records nothing: undo has nothing to take back, and the one
+    // way out is Remove, which deletes the bytes.
+    it('is not undoable: import, undo and an edit leave the tile and its bytes in place, and Remove frees them (ESCSUITE-244)', async () => {
+      mockProcessMediaFile.mockImplementation(async (f: File) => {
+        await storeVideo(videoMeta.id, f, videoMeta)
+        return videoMeta
+      })
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const pastBefore = useEditorStore.getState().history.past.length
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
+      expect(await screen.findByText('Complete')).toBeInTheDocument()
+
+      // The import itself is not a step...
+      expect(useEditorStore.getState().history.past).toHaveLength(pastBefore)
+      // ...so the probe's sequence (undo, then an edit that prunes the redo
+      // branch) cannot orphan anything.
+      act(() => useEditorStore.getState().undo())
+      store().setProjectResolution(1280, 720)
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toEqual(['video1'])
+
+      // Remove is the way out, and it deletes the bytes.
+      cleanup()
+      render(<VideoLibrary />)
+      fireEvent.click(screen.getByTitle('Remove media'))
+      await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+      expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('video1')
     })
 
     // ESCSUITE-255: the uploader no longer branches on file.type — it hands

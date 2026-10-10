@@ -77,6 +77,48 @@ describe('projectStore integration', () => {
       expect(useEditorStore.getState().sourceVideos[1].name).toBe('b-again.mp4')
     })
 
+    // ESCSUITE-244: an import is not an undo step. The bytes are already in
+    // IndexedDB when this runs, and undo cannot un-write them; an undoable add
+    // let undo drop the source while its row stayed behind, unreachable.
+    describe('adding a source records no undo step (ESCSUITE-244)', () => {
+      const make = (id: string, extra: Partial<SourceVideo> = {}): SourceVideo => ({
+        id, name: `${id}.mp4`, duration: 10, width: 1920, height: 1080,
+        frameRate: 30, mimeType: 'video/mp4', size: 1000, ...extra,
+      })
+
+      it('a new source adds nothing to the history, and undo of the next edit leaves it in the library', () => {
+        useEditorStore.getState().addSourceVideo(make('a'))
+
+        expect(useEditorStore.getState().history.past).toHaveLength(0)
+        expect(useEditorStore.getState().canUndo()).toBe(false)
+
+        useEditorStore.getState().setProjectResolution(1280, 720)
+        useEditorStore.getState().undo()
+
+        expect(useEditorStore.getState().sourceVideos.map((v) => v.id)).toEqual(['a'])
+      })
+
+      it('a replace-in-place adds nothing to the history either, and still revokes the old handle', () => {
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+        useEditorStore.getState().addSourceVideo(make('a', { thumbnailUrl: 'blob:old' }))
+        useEditorStore.getState().addSourceVideo(make('a', { thumbnailUrl: 'blob:new' }))
+
+        expect(useEditorStore.getState().history.past).toHaveLength(0)
+        expect(useEditorStore.getState().sourceVideos[0].thumbnailUrl).toBe('blob:new')
+        expect(revoke).toHaveBeenCalledWith('blob:old')
+        revoke.mockRestore()
+      })
+
+      it('leaves the entries already on the stack alone, bar the dead handle scrubbed from them', () => {
+        useEditorStore.getState().addSourceVideo(make('a', { thumbnailUrl: 'blob:old' }))
+        useEditorStore.getState().setProjectResolution(1280, 720)
+        const before = useEditorStore.getState().history.past.length
+        useEditorStore.getState().addSourceVideo(make('b'))
+
+        expect(useEditorStore.getState().history.past).toHaveLength(before)
+      })
+    })
+
     describe('a re-add that changes nothing', () => {
       // A restored session overlapping the library re-adds media the store
       // already holds, field for field. That is not an edit, so it must not
