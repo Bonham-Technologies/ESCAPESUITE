@@ -700,12 +700,21 @@ describe('useRecordingSave for a separate-tracks take', () => {
     it('still lists the webcam, with no thumbnail, and raises no notice', async () => {
       recorderTypeRef.current = 'webcodecs'
       const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-      vi.mocked(storeThumbnail)
-        .mockResolvedValueOnce(undefined)
-        .mockRejectedValueOnce(new DOMException('quota', 'QuotaExceededError'))
+      // Keyed on the part, not on call order: the write rejects exactly when
+      // its id is the one storeVideo was given the webcam's blob under.
+      const actual = await vi.importActual<typeof import('../core/storage')>('../core/storage')
+      vi.mocked(storeThumbnail).mockImplementation(async (id, thumb) => {
+        const webcamId = vi.mocked(storeVideo).mock.calls.find(call => call[1] === COMPANION)?.[0]
+        if (id === webcamId) throw new DOMException('quota', 'QuotaExceededError')
+        return actual.storeThumbnail(id, thumb)
+      })
       const { result } = mountSave()
 
-      await result.current(RAW, 6, [companionPart])
+      try {
+        await result.current(RAW, 6, [companionPart])
+      } finally {
+        vi.mocked(storeThumbnail).mockImplementation(actual.storeThumbnail)
+      }
 
       expect(notices).toEqual([])
       expect(consoleWarn).toHaveBeenCalledTimes(1)
