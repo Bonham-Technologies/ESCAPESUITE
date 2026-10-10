@@ -406,11 +406,24 @@ probe):
   request's total age, so a live worker still making progress on one request past 15 s — a long
   keyframe gap on a slow machine, a transition of a clip onto itself bouncing one decoder between
   two positions — is treated as dead too. The cost of that false positive is a slower in-page
-  finish, not a hang; a deadline that resets on worker progress is ESCSUITE-272. **A source load
-  has no deadline, and that is a gap:** `exportMP4.ts` awaits every load before the frame loop
-  makes a single request, so a worker killed mid-load — where its memory peaks and an
-  out-of-memory kill is likeliest — still hangs the export. A load deadline scaled to the file's
-  size, running the same terminate path, is ESCSUITE-273.
+  finish, not a hang; a deadline that resets on worker progress is ESCSUITE-272. **Every source
+  load has a deadline too (ESCSUITE-273)**, because `exportMP4.ts` awaits every load before the
+  frame loop makes a single request, so a worker killed mid-load — where its memory peaks and an
+  out-of-memory kill is likeliest — never reached a frame deadline and hung the export.
+  `loadDeadlineMs(byteLength)` in `VideoDecodeManager.loadSource` is `LOAD_DEADLINE_FLOOR_MS`
+  (30 s) plus `LOAD_DEADLINE_PER_MIB_MS` (250 ms) per MiB, scaled because a load's honest duration
+  grows with the file (mp4box parses all of it): a 20 MiB ESCAPECRAFT take gets 35 s, a 512 MiB
+  source — the whole per-export budget — 158 s. One timer per load, sized before the post
+  transfers (and detaches) the buffer, stored beside the load's entry and cleared wherever the load
+  settles (`SOURCE_READY`, the worker's error reply, a dispose of that source — which now rejects
+  its load with "Source disposed", so its deadline cannot terminate a worker the other sources
+  still use — a worker `error`, `terminate()`). On expiry the manager runs the same terminate path
+  a missed frame deadline does, rejecting that load and everything else in flight with "Decode
+  worker did not finish loading <sourceId> (<n> MiB) within <s> s", and refuses every later load
+  with that reason instead of starting another worker. `FrameSourceFactory.createSource` already
+  hands a source whose load rejects to `<video>` with the reason, so the source that missed its
+  deadline and every source after it fall back there, a source the worker already held hands
+  itself over at its next frame, and the export continues with the same once-per-export line.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A source

@@ -63,6 +63,38 @@ export type ErrorCallback = (error: string, fatal: boolean) => void;
  */
 export const FRAME_REQUEST_DEADLINE_MS = 15_000;
 
+const MIB = 1024 * 1024;
+
+/**
+ * The fixed part of a source load's deadline (ESCSUITE-273). `exportMP4.ts`
+ * awaits every source's load before its frame loop makes a single frame
+ * request, so a worker killed mid-load — where its memory peaks, holding the
+ * file and the samples it is copying out of it, and an out-of-memory kill is
+ * likeliest — never reaches a FRAME_REQUEST_DEADLINE_MS and used to leave the
+ * export waiting forever. Unlike a frame, a load's honest duration grows with
+ * the file (mp4box parses all of it and copies out every sample), so its
+ * deadline is this floor plus LOAD_DEADLINE_PER_MIB_MS per MiB: a 20 MiB
+ * ESCAPECRAFT take gets 35 s, a 512 MiB source — the whole per-export budget,
+ * `MAX_WORKER_SOURCE_BYTES` — 158 s. Both figures are generous judgements, not
+ * measurements: a live demux runs at hundreds of MiB a second, so a load that
+ * misses this is a worker that is gone, and the cost of a false positive is a
+ * slower in-page export, not a hang.
+ */
+export const LOAD_DEADLINE_FLOOR_MS = 30_000;
+
+/** What each MiB of a source adds to its load deadline; see LOAD_DEADLINE_FLOOR_MS. */
+export const LOAD_DEADLINE_PER_MIB_MS = 250;
+
+/** How long a load of `byteLength` bytes waits for SOURCE_READY (ESCSUITE-273). */
+export function loadDeadlineMs(byteLength: number): number {
+  return Math.round(LOAD_DEADLINE_FLOOR_MS + (byteLength / MIB) * LOAD_DEADLINE_PER_MIB_MS);
+}
+
+/** A count of MiB or seconds as the deadline's reason prints it: at most one decimal. */
+function oneDecimal(value: number): number {
+  return Number(value.toFixed(1));
+}
+
 /**
  * Pending frame request
  */
@@ -107,8 +139,18 @@ export class VideoDecodeManager {
     {
       resolve: (info: VideoSourceInfo) => void;
       reject: (error: Error) => void;
+      /** Its loadDeadlineMs() timer, cleared wherever the load settles (ESCSUITE-273). */
+      deadline: ReturnType<typeof setTimeout>;
     }
   >();
+
+  /**
+   * Set when a load missed its deadline and terminated the worker, presumed
+   * dead: every later load is refused with the same reason rather than
+   * starting another worker, so the rest of the export's sources go straight
+   * to `<video>` (ESCSUITE-273).
+   */
+  private loadDeadlineMissed: Error | null = null;
 
   // Callbacks
   private progressCallbacks = new Map<string, ProgressCallback>();
@@ -234,7 +276,8 @@ export class VideoDecodeManager {
     // request and source load in flight — an answer lost to a dead worker or
     // an unreadable message is never coming, and an export must not wait for
     // it (ESCSUITE-254). A worker killed outright may fire neither; that is
-    // what each frame request's FRAME_REQUEST_DEADLINE_MS is for (ESCSUITE-266).
+    // what each frame request's FRAME_REQUEST_DEADLINE_MS (ESCSUITE-266) and
+    // each source load's loadDeadlineMs() (ESCSUITE-273) are for.
     this.worker.onerror = (error) => {
       console.error('Decode worker error:', error);
       if (this.errorCallback) {
@@ -260,7 +303,10 @@ export class VideoDecodeManager {
       pending.reject(error);
     }
     this.pendingRequests.clear();
-    for (const loadPromise of this.sourceLoadPromises.values()) loadPromise.reject(error);
+    for (const loadPromise of this.sourceLoadPromises.values()) {
+      clearTimeout(loadPromise.deadline);
+      loadPromise.reject(error);
+    }
     this.sourceLoadPromises.clear();
   }
 
@@ -286,6 +332,7 @@ export class VideoDecodeManager {
         const response = message as SourceReadyResponse;
         const loadPromise = this.sourceLoadPromises.get(response.sourceId);
         if (loadPromise) {
+          clearTimeout(loadPromise.deadline);
           loadPromise.resolve(response.info);
           this.sourceLoadPromises.delete(response.sourceId);
         }
@@ -347,6 +394,7 @@ export class VideoDecodeManager {
     if (error.sourceId) {
       const loadPromise = this.sourceLoadPromises.get(error.sourceId);
       if (loadPromise) {
+        clearTimeout(loadPromise.deadline);
         loadPromise.reject(new Error(error.error));
         this.sourceLoadPromises.delete(error.sourceId);
         return;
@@ -391,12 +439,14 @@ export class VideoDecodeManager {
    * @param onProgress - Optional progress callback
    * @returns Promise resolving to source info when ready
    *
-   * Unlike a frame request this has no deadline (ESCSUITE-266), and that is a
-   * gap: `exportMP4.ts` awaits every source load before its frame loop makes a
-   * single frame request, so a worker killed mid-load — where its memory use
-   * peaks and an out-of-memory kill is likeliest — leaves the export waiting
-   * forever. A load deadline scaled to the file's size, running the same
-   * terminate path, is ESCSUITE-273.
+   * Rejects if the worker has not answered within loadDeadlineMs() of the
+   * file's size, and terminates it, as a missed frame deadline does
+   * (ESCSUITE-266): every other load and request in flight fails at once with
+   * "Decode worker did not finish loading <sourceId> (<n> MiB) within <s> s",
+   * and every later load is refused with the same reason instead of starting
+   * another worker, so each source falls back to `<video>` (ESCSUITE-273).
+   * `exportMP4.ts` awaits every load before its frame loop makes a single
+   * frame request, so without this a worker killed mid-load hung the export.
    */
   async loadSource(
     sourceId: string,
@@ -404,14 +454,30 @@ export class VideoDecodeManager {
     mimeType: string,
     onProgress?: ProgressCallback
   ): Promise<VideoSourceInfo> {
+    if (this.loadDeadlineMissed) {
+      throw this.loadDeadlineMissed;
+    }
+
     await this.initialize();
 
     if (onProgress) {
       this.progressCallbacks.set(sourceId, onProgress);
     }
 
+    // Read before the post: transferring `data` to the worker detaches it here.
+    const byteLength = data.byteLength;
+    const deadlineMs = loadDeadlineMs(byteLength);
+
     return new Promise((resolve, reject) => {
-      this.sourceLoadPromises.set(sourceId, { resolve, reject });
+      // Cleared on every settle, so it fires only for a load still in flight:
+      // terminate() rejects that one along with everything else.
+      const deadline = setTimeout(() => {
+        this.loadDeadlineMissed = new Error(
+          `Decode worker did not finish loading ${sourceId} (${oneDecimal(byteLength / MIB)} MiB) within ${oneDecimal(deadlineMs / 1000)} s`
+        );
+        this.terminate(this.loadDeadlineMissed);
+      }, deadlineMs);
+      this.sourceLoadPromises.set(sourceId, { resolve, reject, deadline });
 
       this.postRequest({
         type: 'INIT_SOURCE',
@@ -534,6 +600,15 @@ export class VideoDecodeManager {
       }
     }
 
+    // And its load, if it is still loading: its deadline must not terminate
+    // a worker the other sources still use (ESCSUITE-273).
+    const loadPromise = this.sourceLoadPromises.get(sourceId);
+    if (loadPromise) {
+      clearTimeout(loadPromise.deadline);
+      loadPromise.reject(new Error('Source disposed'));
+      this.sourceLoadPromises.delete(sourceId);
+    }
+
     this.postRequest({
       type: 'DISPOSE_SOURCE',
       sourceId,
@@ -545,7 +620,7 @@ export class VideoDecodeManager {
 
   /**
    * Terminate the worker and free all resources, rejecting everything still in
-   * flight with `reason` — a missed frame deadline names itself here.
+   * flight with `reason` — a missed frame or load deadline names itself here.
    */
   terminate(reason: Error = new Error('Manager terminated')): void {
     this.clearReadyWait();
