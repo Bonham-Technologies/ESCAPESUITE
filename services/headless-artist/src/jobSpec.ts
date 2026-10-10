@@ -1,4 +1,4 @@
-import { validateCommandConfig, validateVolumeConfig, validateWebhookConfig } from './sinks'
+import { probeVolumeDir, validateCommandConfig, validateVolumeConfig, validateWebhookConfig } from './sinks'
 import { probeS3Sdk, validateS3Config } from './s3'
 import type { JobSpec } from './types'
 
@@ -146,14 +146,17 @@ export function validateSinkConfig(sink: JobSpec['output']['sink'], config: Reco
 }
 
 /**
- * The one sink-config check that cannot run inside `parseJobSpec` itself: whether the optional
- * `@aws-sdk/client-s3` dependency can even be loaded. That is a dynamic import, so it is async,
- * and a caller awaits it right after `parseJobSpec` -- still before any render -- rather than
- * having it folded into parsing. A no-op for every sink but `s3`.
+ * The sink-config checks that cannot run inside `parseJobSpec` itself because they touch the
+ * world: for `s3`, whether the optional `@aws-sdk/client-s3` dependency can even be loaded (a
+ * dynamic import); for `volume`, whether the directory can be written by this process
+ * (ESCSUITE-236). A caller awaits it right after `parseJobSpec` -- still before any render --
+ * rather than having it folded into parsing. A no-op for `webhook` and `command`.
  */
 export async function ensureSinkReady(output: JobSpec['output']): Promise<void> {
   if (output.sink === 's3') {
     await probeS3Sdk()
+  } else if (output.sink === 'volume') {
+    await probeVolumeDir(output.config.dir as string)
   }
 }
 

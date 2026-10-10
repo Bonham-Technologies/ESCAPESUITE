@@ -102,6 +102,29 @@ async function publishTemp(tempPath: string, finalPath: string): Promise<void> {
   }
 }
 
+/**
+ * Pre-flight for the volume sink (ESCSUITE-236): creates the directory the way `deliver` will,
+ * then proves it is writable by creating and removing a private temp file in it -- never by
+ * `fs.access`, which cannot see ACLs or a read-only mount. Rejects with the directory and the
+ * uid the process runs as, because "EACCES" alone does not tell an operator whom to chown to.
+ */
+export async function probeVolumeDir(configuredDir: string): Promise<void> {
+  const dir = path.resolve(configuredDir)
+  const probePath = tempNameFor(path.join(dir, 'preflight'))
+  try {
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(probePath, '', { flag: 'wx' })
+    await fs.rm(probePath, { force: true })
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code ?? 'unknown error'
+    throw new Error(
+      `volume sink directory "${dir}" is not writable by uid ${process.getuid?.()} (${code}); ` +
+        'make it writable by that user',
+      { cause: err },
+    )
+  }
+}
+
 function createVolumeSink(config: VolumeConfig): OutputSink {
   // Resolved once at construction so the returned locations are always absolute, regardless
   // of the process's current working directory at delivery time (or later).
