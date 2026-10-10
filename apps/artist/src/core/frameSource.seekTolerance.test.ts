@@ -35,7 +35,12 @@ function sourceFor(frameRate?: number) {
 describe('seekToleranceFor', () => {
   it('is half a frame at a usable rate', () => {
     expect(seekToleranceFor(60)).toBeCloseTo(0.5 / 60, 12);
-    expect(seekToleranceFor(24)).toBeCloseTo(0.5 / 24, 12);
+    expect(seekToleranceFor(120)).toBeCloseTo(0.5 / 120, 12);
+  });
+
+  it('floors a rate below 30 at 30 so the window never exceeds the 1/30 s request spacing', () => {
+    expect(seekToleranceFor(10)).toBeCloseTo(0.5 / 30, 12);
+    expect(seekToleranceFor(24)).toBeCloseTo(0.5 / 30, 12);
   });
 
   it.each([undefined, 0, -30, NaN, Infinity])('falls back to half a 30 fps frame for %s', (rate) => {
@@ -53,8 +58,17 @@ describe('HTMLVideoFrameSource seek tolerance (ESCSUITE-263)', () => {
 
   it('seeks for each of two consecutive frames of a 30 fps source', async () => {
     const { el, source } = sourceFor(30);
-    await source.getFrame(1);
-    await source.getFrame(1 + 1 / 30);
+    // At t = 2 the float difference is 0.033333333333333215 < 1/30: the old strict
+    // `> 1/30` test skipped this seek and drew the previous frame again.
+    await source.getFrame(2);
+    await source.getFrame(2 + 1 / 30);
+    expect(el.seeks).toEqual([2, 2 + 1 / 30]);
+  });
+
+  it('seeks for 1/30-spaced requests even when the rate is far below 30 fps', async () => {
+    const { el, source } = sourceFor(10);
+    await source.getFrame(2);
+    await source.getFrame(2 + 1 / 30);
     expect(el.seeks).toHaveLength(2);
   });
 

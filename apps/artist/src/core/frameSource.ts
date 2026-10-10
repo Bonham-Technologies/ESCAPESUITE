@@ -156,21 +156,25 @@ export class WebCodecsFrameSource implements IFrameSource {
 }
 
 /**
- * HTMLVideoElement-based frame source
- * Fallback for unsupported formats or when WebCodecs is not available
- */
-/**
  * How far from the element's current time a request may be before the `<video>`
  * path seeks: half of one frame at the source's own rate, since anything closer
  * is the frame already showing and anything further is a different one
- * (ESCSUITE-263). A rate that is missing or not finite and positive falls back
- * to a 30 fps frame, the assumption the path used to make for every source.
+ * (ESCSUITE-263). The rate is floored at 30 because the export asks for frames
+ * 1/30 s apart: below 15 fps a half-frame window would be wider than that spacing
+ * and serve the previous frame across a boundary. A rate that is missing or not
+ * finite and positive counts as 30 too — which is also what every stored
+ * `SourceVideo.frameRate` is today (a placeholder; detecting the real one at
+ * import is a follow-up).
  */
 export function seekToleranceFor(frameRate: number | undefined): number {
   const rate = frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30;
-  return 0.5 / rate;
+  return 0.5 / Math.max(rate, 30);
 }
 
+/**
+ * HTMLVideoElement-based frame source
+ * Fallback for unsupported formats or when WebCodecs is not available
+ */
 export class HTMLVideoFrameSource implements IFrameSource {
   private video: HTMLVideoElement;
   private seekTolerance: number;

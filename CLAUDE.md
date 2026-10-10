@@ -180,8 +180,8 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   ESCSUITE-262). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
   decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
   the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
-  (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
-  moves the parity oracle (ESCSUITE-263). A worker killed outright, which may never fire `error`,
+  (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s, which repeated about every other frame, is fixed by
+  ESCSUITE-263 (half a frame; the parity oracle is re-run for it). A worker killed outright, which may never fire `error`,
   is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
   "Video Decode Worker"
 
