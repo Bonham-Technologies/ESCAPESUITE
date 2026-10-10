@@ -4290,3 +4290,30 @@ autosave kept it, the saved `.veditor` serialised it as `null`, and reopening wa
   `parseProject` runs **before** the migration and still refuses a `.veditor` or host payload
   with a bad transform exactly as ESCSUITE-173 ruled (`scaleX: null` is still refused), so the
   repair adds no new acceptance there.
+
+## Keyboard shortcuts (ESCSUITE-247)
+
+Two `window` listeners own the editor's keys: the cascade in `app/useAppKeyboardShortcuts.ts` and the
+transport in `components/Preview/PlaybackControls.tsx` (Space, the arrows, Home, End). Three rules:
+
+- **The typing guard exempts text entry only.** `isTextEntryTarget(target)` (exported from the hook's
+  module and reused by `PlaybackControls`) is true for a `textarea`, a contenteditable element and an
+  `input` whose `type` is text-like (`text`, `search`, `url`, `email`, `password`, `number`, `tel`).
+  A range, checkbox, radio, colour, file or button input and a `select` no longer swallow the cascade,
+  so Ctrl+Z works right after a slider, select or checkbox edit. The transport additionally keeps
+  ignoring every `input` and `select` for the arrows and Space: an arrow on a slider moves the slider.
+- **Chords compare the letter case-insensitively** (`e.key.toLowerCase()`), because Caps Lock, and Shift
+  on Windows/Linux, report `'Z'`. Shift stays a separate discriminator: redo is `z` + Shift, and
+  `'M'` + Shift is its own shortcut (next marker) beside `m`. The single-key shortcuts keep exactly the
+  cases they accepted (`v`/`V`, `b`/`B`; `k`, `s`, `c`, `m`, `i`, `o` lowercase only) — widening them is a
+  product change.
+- **Space belongs to the focused control.** `PlaybackControls` leaves Space alone when the target
+  matches `button, [role="button"], a[href], select` or is contenteditable, so the browser's own click
+  fires instead of a play/pause; it stays the transport's key on the canvas, the timeline and body. The
+  twin of ESCAPECRAFT's `spaceBelongsToTarget` (ESCSUITE-185).
+
+**The shortcut sheet may list only keys something binds.** `BOUND_SINGLE_KEYS` (the hook) and
+`TRANSPORT_KEYS` (`Preview/transportKeys.ts`) are the key tables; `KeyboardShortcuts.test.tsx` fails
+if a single-key row outside the Keyframe Graph group is in neither, and the hook's test proves every
+`BOUND_SINGLE_KEYS` entry is claimed. The sheet once listed J/K/L playback keys and a loop toggle that
+never existed. Known gap: the File group's `Ctrl+N` is the File menu's item, not a cascade binding.

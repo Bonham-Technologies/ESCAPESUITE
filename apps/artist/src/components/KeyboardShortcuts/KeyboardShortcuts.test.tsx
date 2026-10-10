@@ -5,7 +5,7 @@ import { KeyboardShortcuts } from './KeyboardShortcuts'
 import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import styles from './KeyboardShortcuts.module.css'
 import { BOUND_SINGLE_KEYS } from '../../app/useAppKeyboardShortcuts'
-import { TRANSPORT_KEYS } from '../Preview/PlaybackControls'
+import { TRANSPORT_KEYS } from '../Preview/transportKeys'
 
 describe('KeyboardShortcuts', () => {
   it('renders nothing while closed', () => {

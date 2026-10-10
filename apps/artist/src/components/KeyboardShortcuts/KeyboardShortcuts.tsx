@@ -41,9 +41,6 @@ const shortcutGroups: ShortcutGroup[] = [
     title: 'Playback',
     shortcuts: [
       { keys: ['Space'], description: 'Play / Pause' },
-      { keys: ['J'], description: 'Play Backward' },
-      { keys: ['K'], description: 'Pause' },
-      { keys: ['L'], description: 'Play Forward' },
       { keys: ['←'], description: 'Previous Frame' },
       { keys: ['→'], description: 'Next Frame' },
       { keys: ['Home'], description: 'Go to Start' },
@@ -68,7 +65,6 @@ const shortcutGroups: ShortcutGroup[] = [
       { keys: ['+'], description: 'Zoom In' },
       { keys: ['-'], description: 'Zoom Out' },
       { keys: ['S'], description: 'Toggle Snapping' },
-      { keys: ['L'], description: 'Toggle Loop Playback' },
       { keys: ['M'], description: 'Add Marker' },
       { keys: ['Shift', 'M'], description: 'Go to Next Marker' },
       { keys: ['Ctrl', 'M'], description: 'Go to Previous Marker' },

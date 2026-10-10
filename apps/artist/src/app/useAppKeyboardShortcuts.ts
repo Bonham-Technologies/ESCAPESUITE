@@ -30,17 +30,39 @@ import { anyClipOnLockedTrack, lockedTrackIds } from '../store/trackLock';
 import type { Clip, ToolType } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
-/** STUB (red commit). */
+const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'password', 'number', 'tel']);
+
+/**
+ * Whether a keystroke aimed at `target` is text being typed (ESCSUITE-247).
+ *
+ * Only these targets need the shortcuts' exemption: a `textarea`, a
+ * contenteditable element and an `input` that takes text. A range, checkbox,
+ * radio, colour, file or button input and a `select` have no text to protect,
+ * and focus sits on exactly those right after a slider, select or checkbox
+ * edit — where Ctrl+Z has to keep working. `input.type` reads `'text'` for an
+ * absent or unknown `type` attribute, so those count as text entry too.
+ *
+ * `PlaybackControls`' own typing guard uses this predicate so the two window
+ * listeners cannot disagree about what typing is.
+ */
 export function isTextEntryTarget(target: EventTarget | null): boolean {
+  if (target instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(target.type);
   return (
-    target instanceof HTMLInputElement ||
     target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement
+    (target instanceof HTMLElement && target.isContentEditable === true)
   );
 }
 
-/** STUB (red commit). */
-export const BOUND_SINGLE_KEYS: readonly string[] = ['v', 'c', 'b', 's', 'k', 'm', 'i', 'o', '+', '=', '-', '?', 'Delete', 'Backspace', 'Escape'];
+/**
+ * Every unmodified key this cascade binds, as `e.key` reports it. The shortcut
+ * sheet is pinned against this list (`KeyboardShortcuts.test.tsx`), and
+ * `useAppKeyboardShortcuts.test.ts` proves each one is claimed, so a key
+ * cannot be listed on the sheet — or added to the cascade — without the
+ * other side noticing (ESCSUITE-247). Add a key here when you bind one.
+ */
+export const BOUND_SINGLE_KEYS: readonly string[] = [
+  'v', 'c', 'b', 's', 'k', 'm', 'i', 'o', '+', '=', '-', '?', 'Delete', 'Backspace', 'Escape',
+];
 
 /** Everything the cascade reads or calls. */
 export interface AppKeyboardShortcutsDeps {
@@ -152,12 +174,8 @@ export function useAppKeyboardShortcuts({
   // Global keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Skip if typing in input fields
-      if (
-        e.target instanceof HTMLInputElement ||
-        e.target instanceof HTMLTextAreaElement ||
-        e.target instanceof HTMLSelectElement
-      ) {
+      // Skip if typing text (a slider, select or checkbox is not typing)
+      if (isTextEntryTarget(e.target)) {
         return;
       }
 
@@ -178,7 +196,7 @@ export function useAppKeyboardShortcuts({
       };
 
       // Ctrl/Cmd + Z = Undo
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
         if (canUndo()) {
           undo();
@@ -188,7 +206,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + Shift + Z or Ctrl/Cmd + Y = Redo
-      if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey))) {
         e.preventDefault();
         if (canRedo()) {
           redo();
@@ -232,8 +250,10 @@ export function useAppKeyboardShortcuts({
         }
       }
 
+      // Every chord compares the letter case-insensitively (Caps Lock, and Shift on
+      // Windows/Linux, change what `e.key` reports); Shift stays a separate test.
       // Ctrl/Cmd + C = Copy selected clips
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         if (selectedClipIds.size > 0) {
           e.preventDefault();
           copySelectedClips();
@@ -243,7 +263,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + V = Paste clips
-      if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
         if (clipboard && clipboard.length > 0) {
           e.preventDefault();
           // The clones haven't landed on the timeline yet, so `lockedIn` (which
@@ -268,7 +288,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + D = Duplicate selected clip
-      if ((e.ctrlKey || e.metaKey) && e.key === 'd' && selectedClipId) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd' && selectedClipId) {
         e.preventDefault();
         if (lockedIn([selectedClipId])) {
           showNotification('Track is locked', 'info');
@@ -280,21 +300,21 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl/Cmd + S = Save project
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
         handleSaveProject();
         return;
       }
 
       // Ctrl/Cmd + O = Open project
-      if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         handleLoadProject();
         return;
       }
 
       // Ctrl/Cmd + E = Export
-      if ((e.ctrlKey || e.metaKey) && e.key === 'e' && clips.length > 0) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'e' && clips.length > 0) {
         e.preventDefault();
         setShowExport(true);
         return;
@@ -355,7 +375,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl+B = Split clip at playhead
-      if ((e.ctrlKey || e.metaKey) && e.key === 'b' && selectedClipId) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b' && selectedClipId) {
         e.preventDefault();
         if (lockedIn([selectedClipId])) {
           showNotification('Track is locked', 'info');
@@ -388,7 +408,7 @@ export function useAppKeyboardShortcuts({
       }
 
       // Ctrl+M = Go to previous marker
-      if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         goToPreviousMarker();
         return;
