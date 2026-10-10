@@ -1041,6 +1041,33 @@ describe('KeyframePanel', () => {
       expect(windowKeys).not.toHaveBeenCalled()
     })
 
+    it('leaves every other key in the graph region to the graph and the editor', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+      const svg = screen.getByRole('listbox')
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'a' })
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(windowKeys).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(svg)
+    })
+
+    it('opens the Volume graph from the audio row', async () => {
+      const user = userEvent.setup()
+      withAudioClip()
+      render(<KeyframePanel />)
+
+      await user.click(row('Volume'))
+
+      expect(store().keyframePanelState.selectedProperty).toBe('volume')
+      expect(screen.getByRole('listbox', { name: 'Keyframes for Volume' })).toBeInTheDocument()
+    })
+
     it('names the panel\'s close buttons', () => {
       openPanelWithClip()
       store().setKeyframePanelSelectedProperty('opacity')
