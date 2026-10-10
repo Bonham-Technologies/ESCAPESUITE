@@ -1,16 +1,21 @@
 // The debounced session autosave.
 //
-// Its effect is the editor's **third**, so `App` calls this hook fifth —
+// Its effects are the editor's **third** (the debounce) and **fourth** (the
+// request for the session slot, ESCSUITE-227), so `App` calls this hook fourth —
 // immediately after `useSessionRestore`, whose `sessionRestored` flag gates it.
-// Registering it any earlier would change which render first arms the debounce.
+// Registering it any earlier would change which render first arms the debounce,
+// and would queue this tab for the session lock before the restore check had
+// asked whether another tab owns it (see `sessionLock.ts`). `useProjectActions`
+// comes right after it, because New Project reads `ownsSession`.
 //
 // `suppressRestore` arrives as a boolean for the same reason it does in
 // `useSessionRestore`: `urlParams.suppressRestore` was the inline dependency.
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { saveSessionState, type SessionState } from '../core/storage';
 import { AUTO_SAVE_DELAY } from './appConstants';
-import { buildSessionSnapshot } from './sessionSnapshot';
+import { buildSessionSnapshot, isEmptySession } from './sessionSnapshot';
+import { acquireSessionOwnership } from './sessionLock';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -67,6 +72,16 @@ export interface SessionAutosaveDeps {
   showNotification: ShowNotification;
 }
 
+/** What the autosave tells the rest of the editor. */
+export interface SessionAutosave {
+  /**
+   * This tab owns the session slot right now (ESCSUITE-227). A stable reader
+   * of a ref — never a render — read at the moment it matters: New Project
+   * only clears the slot when this answers `true`.
+   */
+  ownsSession: () => boolean;
+}
+
 export function useSessionAutosave({
   sessionRestored,
   suppressRestore,
@@ -75,7 +90,7 @@ export function useSessionAutosave({
   selectedClipId,
   zoom,
   showNotification,
-}: SessionAutosaveDeps): void {
+}: SessionAutosaveDeps): SessionAutosave {
   // The latch: raised the moment a write first fails, so a run of failing
   // ticks reports once rather than once per tick. It clears on the next
   // SUCCESSFUL write, so a later failure — a fresh run, not the same one —
@@ -83,6 +98,12 @@ export function useSessionAutosave({
   // re-running on every edit (the dependency array below) without itself
   // causing a render.
   const hasReportedFailureRef = useRef(false);
+
+  // This tab owns the session slot (ESCSUITE-227): flipped by the lock
+  // callback in the ownership effect below and read when a write fires, so a
+  // tab that becomes the owner later — the owning tab closed — writes from its
+  // next change, and the flag never renders anything.
+  const ownsSessionRef = useRef(false);
 
   // Auto-save session on state changes (debounced)
   //
@@ -105,8 +126,13 @@ export function useSessionAutosave({
     const arm = () => {
       clearTimeout(timeoutId);
       timeoutId = setTimeout(() => {
+        // Another live tab owns the slot: what is in it is that tab's work.
+        if (!ownsSessionRef.current) return;
         const state = useEditorStore.getState();
         const session: SessionState = buildSessionSnapshot(state, Date.now());
+        // An empty project never overwrites a slot, whoever owns it — Start
+        // Fresh's own clear is the one way the slot is emptied on purpose.
+        if (isEmptySession(session)) return;
         saveSessionState(session).then(
           () => {
             hasReportedFailureRef.current = false;
@@ -140,4 +166,24 @@ export function useSessionAutosave({
       unsubscribe();
     };
   }, [sessionRestored, suppressRestore, project, sourceVideos, selectedClipId, zoom, showNotification]);
+
+  // Queue for the session slot, held for the life of the editor. Registered
+  // after the debounce, and — the part that matters — after
+  // `useSessionRestore`'s startup check, whose owner probe must be requested
+  // before this tab's own request or it would answer "held" against itself.
+  // A host-driven editor (`?suppressRestore=1`) writes nothing, so it does not
+  // queue: holding the lock would only keep a real tab from ever owning it.
+  useEffect(() => {
+    if (suppressRestore) return;
+    const release = acquireSessionOwnership(() => {
+      ownsSessionRef.current = true;
+    });
+    return () => {
+      ownsSessionRef.current = false;
+      release();
+    };
+  }, [suppressRestore]);
+
+  const ownsSession = useCallback(() => ownsSessionRef.current, []);
+  return { ownsSession };
 }

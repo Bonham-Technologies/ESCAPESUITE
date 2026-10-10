@@ -1,7 +1,7 @@
 // The timeline panel's height: the drag that resizes it, the double-click
 // that resets it, and the value persisted between sessions.
 //
-// Its effect is the editor's **fifth**, so `App` calls this hook eighth.
+// Its effect is the editor's **sixth**, so `App` calls this hook eighth.
 //
 // The effect's deps are `[isResizing, timelineHeight]`, so both `document`
 // listeners and both `document.body.style` writes are torn down and redone on

@@ -21,6 +21,9 @@ import {
   saveSessionState,
   type SessionState,
 } from './core/storage'
+import { SESSION_HELD_NOTICE } from './app/useSessionRestore'
+import { SESSION_LOCK_NAME } from './app/sessionLock'
+import { createFakeLocks, flushLocks, type FakeLocks } from './test/doubles/locks'
 
 vi.mock('./core/projectManager', async () =>
   (await import('./test/appDoubles')).projectManagerDouble()
@@ -242,5 +245,94 @@ describe('a host LOAD_PROJECT under the restore prompt (ESCSUITE-225)', () => {
 
     expect(store().project.name).toBe('From Storage')
     expect(store().sourceVideos.map((v) => v.id)).toContain('host-video')
+  })
+})
+
+// ESCSUITE-227: every tab of an origin shares one session slot. These install
+// a Web Locks double (jsdom has none, so every case above is a lone tab) and
+// drive the editor as the second tab, against real storage.
+describe('two tabs, one session slot (ESCSUITE-227)', () => {
+  let fake: FakeLocks
+
+  beforeEach(async () => {
+    resetStoreForTest()
+    store().clearHistory()
+    installCanvasDouble()
+    urlParams()
+    await clearSessionState()
+    fake = createFakeLocks()
+    Object.defineProperty(navigator, 'locks', { value: fake.locks, configurable: true })
+  })
+
+  afterEach(async () => {
+    delete (navigator as { locks?: LockManager }).locks
+    uninstallCanvasDouble()
+    vi.useRealTimers()
+    await clearSessionState()
+    vi.clearAllMocks()
+  })
+
+  it('asks who owns the session before it queues for the session itself', async () => {
+    // The order is the behaviour: asked the other way round, the probe would
+    // find this tab's own queued request and call the tab "another tab".
+    await renderApp()
+    await flushStorage()
+
+    expect(fake.log).toEqual(['probe', 'acquire'])
+    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(true)
+    expect(screen.queryByText(SESSION_HELD_NOTICE)).not.toBeInTheDocument()
+  })
+
+  it('a second tab is not offered the first tab\'s live session and leaves it in the slot', async () => {
+    const stored = storedSession()
+    await saveSessionState(stored)
+    // The first tab, still open: it owns the session and never lets go.
+    void fake.locks.request(SESSION_LOCK_NAME, () => new Promise<void>(() => {}))
+    await flushLocks()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+
+    await renderApp()
+    await flushStorage()
+
+    expect(screen.getByText(SESSION_HELD_NOTICE)).toBeInTheDocument()
+    expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
+
+    // Well past the debounce: this tab holds a source, so only the lock is
+    // keeping it from writing over the first tab's session.
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+    await flushStorage()
+
+    expect(await getSessionState()).toEqual(stored)
+  })
+
+  it('a second tab\'s New Project starts over without deleting the first tab\'s session', async () => {
+    const stored = storedSession()
+    await saveSessionState(stored)
+    void fake.locks.request(SESSION_LOCK_NAME, () => new Promise<void>(() => {}))
+    await flushLocks()
+
+    await renderApp()
+    await flushStorage()
+    fireEvent.click(screen.getByRole('button', { name: 'File menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /New Project/ }))
+    await flushStorage()
+
+    expect(screen.getByText('New project created')).toBeInTheDocument()
+    expect(await getSessionState()).toEqual(stored)
+  })
+
+  it('the owning tab\'s New Project still clears the slot', async () => {
+    await renderApp()
+    await flushStorage()
+    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(true)
+    await saveSessionState(storedSession())
+
+    fireEvent.click(screen.getByRole('button', { name: 'File menu' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /New Project/ }))
+    await flushStorage()
+
+    expect(await getSessionState()).toBeUndefined()
   })
 })

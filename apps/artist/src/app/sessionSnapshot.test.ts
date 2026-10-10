@@ -3,7 +3,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useEditorStore } from '../store/projectStore';
 import { resetStoreForTest, store, addClip, video } from '../test/fixtures/projectStore';
-import { buildSessionSnapshot } from './sessionSnapshot';
+import { buildSessionSnapshot, isEmptySession } from './sessionSnapshot';
 
 beforeEach(() => {
   resetStoreForTest();
@@ -90,5 +90,33 @@ describe('buildSessionSnapshot', () => {
 
     const restoredClip = snapshot.project.timeline.clips[0];
     expect(restoredClip.crop).toEqual(crop);
+  });
+});
+
+// ESCSUITE-227: an empty project never overwrites a populated slot, so the
+// autosave asks this before it writes. "Empty" is both lists empty — a clip
+// with no source (a text overlay) is work, and so is a source with no clip.
+describe('isEmptySession', () => {
+  const emptyState = () => {
+    store().resetProject();
+    return useEditorStore.getState();
+  };
+
+  it('is empty with no sources and no clips', () => {
+    expect(isEmptySession(buildSessionSnapshot(emptyState(), 1))).toBe(true);
+  });
+
+  it('is not empty with a source and no clip', () => {
+    // resetStoreForTest leaves the fixture's one source in the library.
+    expect(useEditorStore.getState().sourceVideos).toHaveLength(1);
+    expect(isEmptySession(buildSessionSnapshot(useEditorStore.getState(), 1))).toBe(false);
+  });
+
+  it('is not empty with a clip and no source', () => {
+    addClip('clip1', 0);
+    const withClip = { ...buildSessionSnapshot(useEditorStore.getState(), 1), sourceVideos: [] };
+
+    expect(withClip.project.timeline.clips).toHaveLength(1);
+    expect(isEmptySession(withClip)).toBe(false);
   });
 });

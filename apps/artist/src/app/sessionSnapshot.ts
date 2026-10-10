@@ -32,3 +32,14 @@ export function buildSessionSnapshot(state: EditorState, timestamp: number): Ses
     timestamp,
   };
 }
+
+/**
+ * The snapshot holds no work at all: no source in the library and no clip on
+ * the timeline (ESCSUITE-227). The autosave never writes such a snapshot, so a
+ * tab with nothing in it — a second tab, a tab that pressed Start Fresh — can
+ * never overwrite a slot that holds someone's work. A clip with no source (a
+ * text overlay) is work, and so is a source with no clip.
+ */
+export function isEmptySession(session: SessionState): boolean {
+  return session.sourceVideos.length === 0 && session.project.timeline.clips.length === 0;
+}
