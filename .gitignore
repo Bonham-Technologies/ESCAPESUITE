@@ -62,3 +62,5 @@ tmpclaude-*
 
 # Turborepo 2.11+ writes this agent-rules file on every build; it is generated, not ours
 AGENTS.md
+# TypeScript incremental build state (`tsc -b`); never committed
+*.tsbuildinfo

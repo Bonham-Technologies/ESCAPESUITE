@@ -101,7 +101,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 ### Shared Infrastructure
 - **pnpm workspaces**: Efficient dependency management with shared packages
 - **Turborepo**: Cached builds, parallel execution, smart rebuilds
-- **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer
+- **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer.
+  The connection is shared through one cached open in `getDB()` (`packages/shared/src/storage`) and
+  reopens itself after the browser closes it (Clear site data, an eviction), closing itself for a
+  version change or a delete from another tab rather than blocking it (ESCSUITE-226)
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
   (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)
@@ -3029,6 +3032,38 @@ MEDIUM (naming ESCSUITE-267, the pre-existing slider-to-slider case on the slide
 two MINORs are in these numbers. `ClipEditor.rerender.test.tsx`, `timelineGestures.perf.test.ts` and
 every other pin are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/shared` was re-measured 2026-10-10 for ESCSUITE-226 (the one `video-editor-db`
+connection both apps and the kit share: `getDB()` caches the *promise* of its open rather than the
+opened connection, so two callers racing on first use share one `openDB` instead of opening two
+and leaking one; a rejected open is forgotten so the next call retries; and `idb`'s own hooks are
+wired — `terminated` drops the cache when the browser closes the connection (clearing site data, a
+storage eviction) so the next call reopens instead of every later save failing with
+`InvalidStateError` until a reload, `blocking` closes the connection and drops the cache so a
+database upgrade or deletion from another tab is never blocked by an open one, and `blocked`
+warns once naming the database — each of the two cache drops guarded on the connection still being
+the cached one, because `db.close()` is deferred while that connection's transactions run and an
+old connection's `terminated` can land after a new open has replaced it): 100.00 / **98.67** /
+**92.20** / 100.00 against the 100.00 / 98.63 / 92.00 / 100.00 that `main` at `89bb28d3` (the
+ESCSUITE-257 version-packages commit) measures in the same sitting — statements up four hundredths
+and branches up twenty, lines and functions still exactly 100. The base gives 138 / 150 branches and
+this branch 142 / 154: four new branches, four covered, the same 12 uncovered as before (lines
+274 → 281, statements 288 / 292 → 298 / 302 with the same 4 uncovered, functions 74 → 79, every
+denominator growing by exactly what the numerator did). All four are `storage/index.ts`'s
+(16 / 20 → 20 / 24): the cached-promise check in `getDB()` and the `dbPromise === opening` identity
+guard in each of the two hooks, each reached from both sides by the concurrent-open, sequential-pair,
+rejected-then-retried, `terminated`-for-the-cached-connection, `terminated`-for-a-stale-one,
+`blocking` and `blocked` cases — the hooks driven through a `vi.mock('idb')` that captures
+`openDB`'s option callbacks, the opens through the real fake-indexeddb path. The five new functions
+are the three hook bodies, the rejection reset and the `console.warn` arrow. The review's one MAJOR
+was in the Playwright pin, not the module: the "one open at startup" case ran ARTIST at
+`?suppressRestore=1`, which skips the session-restore caller, so the unfixed code also opened once
+and the case could not go red; with that flag dropped it was run against the old storage module
+(2 failed: two opens at startup, and a second import after `Storage.clearDataForOrigin` that never
+saved) and against the fix (2 / 2), on Chromium against `pnpm build:deploy` —
+`apps/e2e/tests/production/indexeddb-connection.spec.ts`, outside this measurement. Both apps'
+suites and the kit's `test:run` are green unchanged; no app source moved, and the apps' figures do
+not move. **No floor crossed**; shared's floors stay 100 / 98 / 92 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3037,7 +3072,7 @@ never above what the suite actually achieves:
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
 | `@escapesuite/artist` | 99.81 | 99.32 | 96.14 | 99.69 |
-| `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
+| `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down

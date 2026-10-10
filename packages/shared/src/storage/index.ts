@@ -35,16 +35,46 @@ export interface VideoEditorDB extends DBSchema {
   }
 }
 
-// Singleton database instance
-let dbInstance: IDBPDatabase<VideoEditorDB> | null = null
+// The one opening of the shared database, cached as a promise so callers
+// racing on first use share it rather than each opening a connection.
+let dbPromise: Promise<IDBPDatabase<VideoEditorDB>> | null = null
 
 /**
- * Get the shared database instance
+ * Get the shared database connection.
+ *
+ * Both apps and the headless kit call this per operation and never hold the
+ * result, so the connection lives here and nowhere else (ESCSUITE-226):
+ *
+ * - **One open, shared.** The *promise* of the open is cached, not its result,
+ *   so two callers on first use get the same connection instead of opening
+ *   two. An open that rejects is dropped from the cache, so the next call
+ *   tries again rather than failing forever.
+ * - **`terminated`** — the browser closed the connection abnormally (DevTools
+ *   "Clear site data", `Storage.clearDataForOrigin`, a storage eviction).
+ *   The cache is dropped, so the next call reopens and `upgrade` recreates the
+ *   stores; without this every later call failed with `InvalidStateError`
+ *   until the page was reloaded.
+ * - **`blocking`** — another connection asked for a version change or a delete
+ *   (`versionchange` on this one). This connection closes itself and drops
+ *   the cache, so a `deleteDatabase` or a future `DB_VERSION` bump is never
+ *   blocked by an open tab. After a delete the next call here recreates the
+ *   database; after an upgrade by a newer tab, calls here reject with
+ *   `VersionError` (reportably, each one) until the page is reloaded.
+ * - **`blocked`** — this open is waiting on another tab's older connection.
+ *   One `console.warn` names the database, so a stuck upgrade is diagnosable.
+ *
+ * `terminated` and `blocking` drop the cache only while it still holds *their*
+ * open: `close()` lets running transactions finish, so a connection `blocking`
+ * already let go of can still be force-closed (and fire `terminated`) after a
+ * newer open has replaced it, and must not drop the newer one.
+ *
+ * Never `close()` the returned connection: it is shared, and a regular close
+ * is not reported back here, so the cache would keep handing it out.
  */
 export async function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
-  if (dbInstance) return dbInstance
+  if (dbPromise) return dbPromise
 
-  dbInstance = await openDB<VideoEditorDB>(DB_NAME, DB_VERSION, {
+  const opening = openDB<VideoEditorDB>(DB_NAME, DB_VERSION, {
     upgrade(db) {
       // Videos store - holds the actual video blobs
       if (!db.objectStoreNames.contains('videos')) {
@@ -66,9 +96,27 @@ export async function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
         db.createObjectStore('settings')
       }
     },
+    blocked() {
+      console.warn(
+        `[storage] Opening ${DB_NAME} is waiting for another tab to close its connection.`,
+      )
+    },
+    blocking() {
+      if (dbPromise === opening) dbPromise = null
+      // `opening` has resolved: idb attaches this hook only to an open that did.
+      void opening.then((db) => db.close())
+    },
+    terminated() {
+      if (dbPromise === opening) dbPromise = null
+    },
+  })
+  dbPromise = opening
+  // The caller sees the rejection through `opening`; this only forgets it.
+  opening.catch(() => {
+    dbPromise = null
   })
 
-  return dbInstance
+  return opening
 }
 
 // Video operations
