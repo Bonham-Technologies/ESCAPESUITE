@@ -482,13 +482,10 @@ export class FrameSourceFactory {
         );
         onFallback?.(sourceId, failureReason(error));
       }
-    }
-
-    // The worker is running but this source is not an MP4: it was never
-    // offered to the worker, so nothing above reported it. Say so with the
-    // format named (ESCSUITE-261); a factory with no worker has already
-    // told the export once, at its own start.
-    else if (this.useWebCodecs && this.manager) {
+    } else if (this.useWebCodecs && this.manager) {
+      // Running worker, non-MP4 source: never offered to the worker, so nothing
+      // above reported it. A factory with no worker already told the export
+      // once, at its own start (ESCSUITE-261).
       onFallback?.(sourceId, `${mimeType} sources decode in the page; only MP4 sources use the decode worker`);
     }
 

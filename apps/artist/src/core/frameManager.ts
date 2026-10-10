@@ -47,8 +47,9 @@ export async function createFrameManager(useWebCodecs: boolean, signal?: AbortSi
 /**
  * Load a video source into the frame manager.
  *
- * `onFallback` is told when an MP4 handed to the decode worker ends up on the
- * HTMLVideoElement path — refused on load, or given up on mid-export.
+ * `onFallback` is told when a source decodes on the HTMLVideoElement path while
+ * the decode worker is running: an MP4 refused on load or given up on
+ * mid-export, or a source that is not an MP4 at all (ESCSUITE-261).
  */
 export async function loadFrameSource(
   manager: FrameManager,

@@ -5,6 +5,7 @@
 // the same channel and the same once-per-export latch.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToMP4 } from './exportMP4'
+import { FrameSourceFactory } from './frameSource'
 import { storeVideo } from './storage'
 import { resetMediabunnyDouble } from '../test/doubles/mediabunny'
 import {
@@ -242,5 +243,19 @@ describe('an MP4 export says when a source the worker cannot take decodes in the
     const progress = await exportSources(['video1', 'video2'])
 
     expect(notices(progress)).toHaveLength(1)
+  })
+})
+
+describe('the reason a non-MP4 source reports (ESCSUITE-261)', () => {
+  it('names the source\'s MIME type', async () => {
+    const factory = new FrameSourceFactory(true, { measuredEngine: true })
+    await factory.initialize()
+    const onFallback = vi.fn()
+
+    await factory.createSource('v', new Blob([new Uint8Array(8)], { type: 'video/webm' }), 'video/webm', undefined, onFallback)
+
+    expect(onFallback).toHaveBeenCalledTimes(1)
+    expect(onFallback).toHaveBeenCalledWith('v', 'video/webm sources decode in the page; only MP4 sources use the decode worker')
+    factory.dispose()
   })
 })
