@@ -319,6 +319,11 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `volume`, `command`, `webhook`, `s3` — each producing a verification manifest (hash, dimensions,
   duration) alongside the render. `services/headless-artist/README.md` is the protocol reference,
   the way the Integration API section above links `apps/artist/src/utils/integration.ts`.
+- The reference container (`services/headless-artist/Dockerfile`) runs `tini` as PID 1, so the Chromium helper
+  processes a `serve` render orphans are reaped instead of accumulating as zombies; it runs as `pwuser`,
+  **uid 1001** (not 1000 — that is `ubuntu` in the Playwright base image); and a `volume` job whose output
+  directory the process cannot write is refused before Chromium launches (`ensureSinkReady` writes and removes a
+  private temp file) — exit 2, or 400 under `serve` — instead of failing delivery after a full render.
 - Drives the same `dist-headless/headless.html` bundle ESCAPEARTIST builds for the browser
   (`window.__renderProject` / `window.__renderProjectToFile` — see `apps/artist/CLAUDE.md`).
 - Scripts: `build` assembles the kit (`dist/cli.js`, `dist/headless.html`, `dist/kit.json`);

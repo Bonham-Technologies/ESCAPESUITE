@@ -49,18 +49,18 @@ spec:
               cpu: "8"
               memory: "8Gi"
           securityContext:
-            # The image runs as pwuser (uid 1000), which keeps Chromium's own sandbox
+            # The image runs as pwuser (uid 1001), which keeps Chromium's own sandbox
             # usable. If you must run as root, set HEADLESS_NO_SANDBOX=true.
             # runAsUser must be spelled out: `runAsNonRoot: true` alone makes the kubelet
             # check the image's USER, and it cannot prove a *name* ("pwuser") is non-root —
             # the Pod fails with CreateContainerConfigError before it ever starts.
             runAsNonRoot: true
-            runAsUser: 1000
+            runAsUser: 1001
             allowPrivilegeEscalation: false
       # fsGroup makes the kubelet chown the mounted volumes to this gid, without which
-      # uid 1000 cannot write the render into the /out PVC.
+      # uid 1001 cannot write the render into the /out PVC.
       securityContext:
-        fsGroup: 1000
+        fsGroup: 1001
       volumes:
         - name: input
           persistentVolumeClaim:

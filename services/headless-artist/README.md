@@ -525,6 +525,10 @@ need `ffmpeg` and `ffprobe` on `PATH` and skip themselves (loudly) when the bina
 | `1` | The job ran and failed (bad input file, encoder error, sink refused it, timeout). | One JSON `RenderOutcome` line with `"ok": false` and an `error` string. |
 | `2` | Usage or job-spec error — the job never started. Retrying identically will fail identically. | Empty. |
 
+An exit `2` also covers a `volume` job whose output directory cannot be created or written by
+the user the process runs as (checked by writing and removing a private temp file before Chromium
+launches; the message names the directory and the uid). Fix the mount's ownership; do not retry.
+
 `serve` uses the same three, one step removed: `0` when it shut down cleanly on a signal, `2`
 for a bad flag or environment variable (checked before anything binds), and `1` when it could
 not listen at all — `EADDRINUSE`, `EACCES` on a privileged port — which, unlike a `2`, may well
@@ -573,7 +577,7 @@ docker run --rm \
 docker run --rm headless-artist --version
 ```
 
-The image's entrypoint is `node dist/cli.js`, so the arguments you pass are the CLI's own —
+The image's entrypoint is `tini -- node dist/cli.js`, so the arguments you pass are the CLI's own —
 `render --job …` or `--version`, same as running the CLI outside a container. With no arguments
 at all it falls back to the default command, which reads the job spec from stdin:
 
@@ -584,12 +588,18 @@ cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headles
 This image is built from `services/headless-artist` and smoke-tested (`render` and `--version`)
 in CI on every non-Dependabot pull request (the `kit-docker` job).
 
-Three things worth knowing:
+Four things worth knowing:
 
 - It runs as `pwuser`, not root, which keeps Chromium's own sandbox usable — so
   `HEADLESS_NO_SANDBOX` is *not* set. If you change the image to run as root you must set
-  `HEADLESS_NO_SANDBOX=true`, or Chromium refuses to start. Make sure the mounted output
-  directory is writable by uid 1000.
+  `HEADLESS_NO_SANDBOX=true`, or Chromium refuses to start. `pwuser` is **uid 1001, gid 1001**
+  (uid 1000 is `ubuntu` in the Playwright base image), so make the mounted output directory
+  writable by 1001: `chown 1001:1001 out`, or `fsGroup: 1001` on Kubernetes. A `volume` job
+  whose directory the process cannot write is refused up front — exit 2, or HTTP 400 under
+  `serve`, with a sentence naming the directory and the uid — instead of after a full render.
+- [`tini`](https://github.com/krallin/tini) is PID 1. Under `serve`, each render leaves
+  Chromium's helper processes orphaned when the browser closes; without an init they stay
+  zombies until the container's pid limit. `docker run --init` is now redundant, but harmless.
 - Scratch space defaults to the container's `/tmp`. For long renders, mount real storage and
   set `HEADLESS_WORK_DIR` to it.
 - **This image cannot use the `s3` sink.** It installs with `--omit=optional`, so
