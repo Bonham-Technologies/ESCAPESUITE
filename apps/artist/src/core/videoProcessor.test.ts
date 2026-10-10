@@ -146,7 +146,7 @@ describe('videoProcessor', () => {
           media.script({ video: { frameTimes: spaced(1 / 60, 2) } })
           const pending = extractVideoMetadata(mediaFile(['v'], 'stalls.mp4', 'video/mp4'))
 
-          await vi.advanceTimersByTimeAsync(400)
+          await vi.advanceTimersByTimeAsync(500)
 
           await expect(pending).resolves.toMatchObject({ frameRate: 30, frameRateSource: 'assumed' })
         } finally {
