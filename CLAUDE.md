@@ -3092,6 +3092,23 @@ review's follow-ups (the lone-point rules, the marker refusals naming `editor.ma
 in these numbers. The three rerender pins and every `*.perf.test.ts` are byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-225 (a host's `LOAD_PROJECT` that
+arrives while "Resume Previous Session?" is open is parsed at once — an invalid payload gets its
+`ERROR` reply and nothing is held — and the parsed project is held until the prompt is answered either
+way, the latest message winning and applied once, with a pending `?loadVideo=` take placed on it
+afterwards; a message after the decision is applied at once, as before): 99.81 / 99.32 / 96.14 / 99.69,
+byte-identical on every percentage to the 99.81 / 99.32 / 96.14 / 99.69 that `main` at `b586e904`
+measures in the same sitting. The base gives 5,335 / 5,549 branches and this branch 5,339 / 5,553: four
+new branches, four covered, the same 214 uncovered as before (lines 8,305 / 8,320 → 8,315 / 8,330,
+statements 9,380 / 9,444 → 9,390 / 9,454, functions 1,985 / 1,991 on both, every denominator growing by
+exactly what the numerator did; the same 15 / 64 / 6 uncovered). All four are
+`app/useHostIntegration.ts`'s (51 → 55): the hold-or-apply choice on arrival and the drain effect's
+"is a host project pending" gate, each reached from both sides by the seven hook cases (hold, latest
+wins, applied once, settled-applies-at-once, invalid payload held nowhere, project then take,
+`LOAD_VIDEO` not held) and the three `App.session` cases, four of which were red against the unfixed
+hook. The review approved both verdicts with no fix round. The rerender pins and every
+`*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

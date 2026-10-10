@@ -7,13 +7,14 @@
 // src/test/setup.ts). Only the debounce timer is faked, so fake-indexeddb's own
 // setImmediate scheduling keeps working.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, screen } from '@testing-library/react'
+import { act, fireEvent, screen } from '@testing-library/react'
 import { store, resetStoreForTest } from './test/fixtures/projectStore'
 import { renderApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
 import { defaultUrlParams, sampleVideo } from './test/appDoubles'
-import { parseUrlParams } from './utils/integration'
+import { initIntegration, loadVideoFromUrl, parseUrlParams } from './utils/integration'
+import { processMediaFile } from './core/videoProcessor'
 import {
   clearSessionState,
   getSessionState,
@@ -175,5 +176,71 @@ describe('App session storage', () => {
 
     expect(await screen.findByText('Resume Previous Session?')).toBeInTheDocument()
     expect(screen.getByText('From Storage')).toBeInTheDocument()
+  })
+})
+
+// ESCSUITE-225: a host project that arrives under the "Resume Previous Session?"
+// prompt is the host's later, explicit instruction and survives either answer.
+describe('a host LOAD_PROJECT under the restore prompt (ESCSUITE-225)', () => {
+  beforeEach(async () => {
+    resetStoreForTest()
+    store().clearHistory()
+    installCanvasDouble()
+    urlParams()
+    await clearSessionState()
+  })
+  afterEach(async () => {
+    uninstallCanvasDouble()
+    await clearSessionState()
+    vi.clearAllMocks()
+  })
+
+  const hostSends = async (message: { type: string; payload?: unknown }) => {
+    const calls = vi.mocked(initIntegration).mock.calls
+    const handler = calls[calls.length - 1][0]
+    await act(async () => {
+      await handler(message as never)
+    })
+  }
+
+  const openPrompt = async () => {
+    await saveSessionState(storedSession())
+    await renderApp()
+    await flushStorage()
+    expect(await screen.findByText('Resume Previous Session?')).toBeInTheDocument()
+  }
+
+  it('keeps the host project after Restore Session', async () => {
+    await openPrompt()
+    await hostSends({ type: 'LOAD_PROJECT', payload: { ...store().project, name: 'From Host' } })
+    expect(store().project.name).not.toBe('From Host')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Session' }))
+    await flushStorage()
+
+    expect(store().project.name).toBe('From Host')
+  })
+
+  it('keeps the host project after Start Fresh', async () => {
+    await openPrompt()
+    await hostSends({ type: 'LOAD_PROJECT', payload: { ...store().project, name: 'From Host' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Fresh' }))
+    await flushStorage()
+
+    expect(store().project.name).toBe('From Host')
+  })
+
+  it('keeps a LOAD_VIDEO source in the library through Restore Session', async () => {
+    vi.mocked(loadVideoFromUrl).mockResolvedValue({ blob: new Blob(), name: 'host.mp4' })
+    vi.mocked(processMediaFile).mockResolvedValue({ ...sampleVideo, id: 'host-video', name: 'host.mp4' })
+    await openPrompt()
+
+    await hostSends({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/host.mp4' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Session' }))
+    await flushStorage()
+
+    expect(store().project.name).toBe('From Storage')
+    expect(store().sourceVideos.map((v) => v.id)).toContain('host-video')
   })
 })

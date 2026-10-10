@@ -1042,3 +1042,127 @@ describe('the effect\'s cleanup', () => {
     expect(initIntegration).toHaveBeenCalledTimes(1)
   })
 })
+
+// ESCSUITE-225: a host's LOAD_PROJECT that arrives while the startup session
+// question is open waits for the answer, the way the ?loadVideo= handoff does,
+// so "Restore" cannot replace it.
+describe('LOAD_PROJECT and the session question (ESCSUITE-225)', () => {
+  type Props = { sessionDecisionPending: boolean }
+
+  const mountPending = async (urlParams: Partial<ReturnType<typeof defaultUrlParams>> = {}) => {
+    deps = { ...deps, urlParams: { ...defaultUrlParams(), ...urlParams } }
+    const view = renderHook(
+      ({ sessionDecisionPending }: Props) => useHostIntegration({ ...deps, sessionDecisionPending }),
+      { initialProps: { sessionDecisionPending: true } }
+    )
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    return view
+  }
+
+  const answer = async (view: { rerender: (p: Props) => void }) => {
+    await act(async () => {
+      view.rerender({ sessionDecisionPending: false })
+      await Promise.resolve()
+    })
+  }
+
+  const hostProject = (name: string) => ({ ...useEditorStore.getState().project, name })
+
+  it('holds a project that arrives while the question is open, and applies it once answered', async () => {
+    const view = await mountPending()
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject('From Host') })
+    expect(deps.setProject).not.toHaveBeenCalled()
+
+    await answer(view)
+
+    expect(deps.setProject).toHaveBeenCalledTimes(1)
+    expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'From Host' }))
+  })
+
+  it('applies the second of two projects and never the first', async () => {
+    const view = await mountPending()
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject('First') })
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject('Second') })
+    await answer(view)
+
+    expect(deps.setProject).toHaveBeenCalledTimes(1)
+    expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'Second' }))
+  })
+
+  it('applies the held project once, however many renders follow the answer', async () => {
+    const view = await mountPending()
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject('From Host') })
+
+    await answer(view)
+    await answer(view)
+
+    expect(deps.setProject).toHaveBeenCalledTimes(1)
+  })
+
+  it('applies a project at once when the question is already settled', async () => {
+    const view = await mountPending()
+    await answer(view)
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject('Late Host') })
+
+    expect(deps.setProject).toHaveBeenCalledTimes(1)
+    expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'Late Host' }))
+  })
+
+  it('answers an invalid project with ERROR immediately and holds nothing', async () => {
+    const view = await mountPending()
+
+    await dispatch({ type: 'LOAD_PROJECT', payload: { timeline: {} } })
+
+    expect(sendMessage).toHaveBeenCalledWith({
+      type: 'ERROR',
+      payload: { message: expect.any(String), code: 'INVALID_PROJECT' },
+    })
+    await answer(view)
+    expect(deps.setProject).not.toHaveBeenCalled()
+  })
+
+  it('applies the host project first and then places the pending take onto it', async () => {
+    const take = {
+      ...sampleVideo,
+      id: 'take-1',
+      name: 'Screen recording',
+      duration: 6,
+      width: 1920,
+      height: 1080,
+      takeId: 'take-1',
+      role: 'screen' as const,
+      startOffset: 0,
+    }
+    vi.mocked(getAllVideoMetadata).mockResolvedValue([take])
+    vi.mocked(getVideo).mockResolvedValue({
+      blob: new Blob(['bytes'], { type: 'video/webm' }),
+      metadata: take,
+    } as never)
+    // The real action, so the take lands on whatever the host's project made.
+    deps = { ...deps, setProject: (project) => useEditorStore.getState().setProject(project) }
+    const view = await mountPending({ loadVideoId: 'take-1' })
+    await dispatch({ type: 'LOAD_PROJECT', payload: hostProject('From Host') })
+    expect(useEditorStore.getState().project.name).not.toBe('From Host')
+    expect(useEditorStore.getState().project.timeline.clips).toHaveLength(0)
+
+    await answer(view)
+
+    const state = useEditorStore.getState()
+    expect(state.project.name).toBe('From Host')
+    expect(state.project.timeline.clips.map((c) => c.sourceVideoId)).toEqual(['take-1'])
+  })
+
+  it('LOAD_VIDEO is not held: its source joins the library while the question is open', async () => {
+    await mountPending()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload: { url: 'https://host.example/clip.mp4' } })
+
+    expect(deps.addSourceVideo).toHaveBeenCalledWith(expect.objectContaining({ id: sampleVideo.id }))
+  })
+})
