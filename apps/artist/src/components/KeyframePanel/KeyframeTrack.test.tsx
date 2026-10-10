@@ -19,6 +19,7 @@ function renderTrack(
     playheadTime?: number
     isSelected?: boolean
     locked?: boolean
+    tabIndex?: 0 | -1
   } = {}
 ) {
   const clip = currentClip()
@@ -39,6 +40,7 @@ function renderTrack(
       playheadTime={overrides.playheadTime ?? 0}
       isSelected={overrides.isSelected ?? false}
       locked={overrides.locked ?? false}
+      tabIndex={overrides.tabIndex ?? 0}
       onSelect={onSelect}
       onKeyframeMoved={onKeyframeMoved}
       onAddKeyframe={onAddKeyframe}
@@ -69,6 +71,62 @@ describe('KeyframeTrack', () => {
     renderTrack('scaleX')
 
     expect(screen.getByText('Scale X')).toBeInTheDocument()
+  })
+
+  describe('the label as a button (ESCSUITE-243)', () => {
+    it('is a real button whose name is the visible label', () => {
+      renderTrack('scaleX')
+
+      const button = screen.getByRole('button', { name: 'Scale X' })
+      expect(button.tagName).toBe('BUTTON')
+      expect(button).toHaveAttribute('type', 'button')
+      expect(button).toHaveAttribute('data-property', 'scaleX')
+      expect(button).not.toHaveAttribute('aria-label')
+    })
+
+    it('keeps the diamond track and the value outside the button', () => {
+      const { container } = renderTrack('opacity')
+
+      const button = screen.getByRole('button', { name: 'Opacity' })
+      expect(button.contains(container.querySelector(`.${styles.trackArea}`))).toBe(false)
+      expect(button.contains(container.querySelector(`.${styles.value}`))).toBe(false)
+    })
+
+    it('reports whether its graph is the open one through aria-pressed', () => {
+      const { unmount } = renderTrack('opacity', { isSelected: true })
+      expect(screen.getByRole('button', { name: 'Opacity' })).toHaveAttribute('aria-pressed', 'true')
+      unmount()
+
+      renderTrack('opacity', { isSelected: false })
+      expect(screen.getByRole('button', { name: 'Opacity' })).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('takes the tab index it is handed', () => {
+      const { unmount } = renderTrack('opacity', { tabIndex: 0 })
+      expect(screen.getByRole('button', { name: 'Opacity' }).tabIndex).toBe(0)
+      unmount()
+
+      renderTrack('opacity', { tabIndex: -1 })
+      expect(screen.getByRole('button', { name: 'Opacity' }).tabIndex).toBe(-1)
+    })
+
+    it('calls onSelect once per activation: a label click, a track click and Enter', async () => {
+      const user = userEvent.setup()
+      const { container, onSelect } = renderTrack('opacity')
+
+      await user.click(screen.getByRole('button', { name: 'Opacity' }))
+      expect(onSelect).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenLastCalledWith(false)
+
+      await user.click(container.querySelector<HTMLElement>(`.${styles.trackArea}`)!)
+      expect(onSelect).toHaveBeenCalledTimes(2)
+      expect(onSelect).toHaveBeenLastCalledWith(false)
+
+      screen.getByRole('button', { name: 'Opacity' }).focus()
+      await user.keyboard('{Enter}')
+      expect(onSelect).toHaveBeenCalledTimes(3)
+      expect(onSelect).toHaveBeenLastCalledWith(true)
+    })
   })
 
   it('shows no diamonds for a clip with no animation', () => {

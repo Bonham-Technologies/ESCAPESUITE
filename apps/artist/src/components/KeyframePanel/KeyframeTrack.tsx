@@ -23,7 +23,18 @@ interface KeyframeTrackProps {
    * in silence.
    */
   locked: boolean;
-  onSelect: () => void;
+  /**
+   * The row's place in the panel's one tab stop (ESCSUITE-243): 0 on the open
+   * row (or the first, when none is open), -1 on every other. The panel
+   * derives it from the open row — no state of its own.
+   */
+  tabIndex: 0 | -1;
+  /**
+   * `fromKeyboard` is true when the click was a keyboard activation of the
+   * label button (`event.detail === 0`; a pointer click is >= 1) — the panel
+   * moves focus into the graph for those only.
+   */
+  onSelect: (fromKeyboard: boolean) => void;
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number) => void;
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
   /**
@@ -57,6 +68,7 @@ export function KeyframeTrack({
   playheadTime,
   isSelected,
   locked,
+  tabIndex,
   onSelect,
   onKeyframeMoved,
   onAddKeyframe,
@@ -148,13 +160,25 @@ export function KeyframeTrack({
   const hasKeyframes = keyframes.length > 0;
 
   return (
+    // The row is a container; only the label cell is the button
+    // (ESCSUITE-243), so the diamond track stays outside interactive content.
+    // One `onClick` on the container serves a click anywhere in the row — the
+    // button's own click (a pointer's or Enter/Space's) bubbles into it, so one
+    // activation calls `onSelect` once. `aria-pressed`, not `aria-expanded`:
+    // the graph is a block above all the rows, not this row's own region.
     <div
       className={`${styles.track} ${isSelected ? styles.selected : ''} ${hasKeyframes ? styles.hasKeyframes : ''}`}
-      onClick={onSelect}
+      onClick={(e) => onSelect(e.detail === 0)}
     >
-      <div className={styles.label}>
+      <button
+        type="button"
+        className={styles.label}
+        aria-pressed={isSelected}
+        tabIndex={tabIndex}
+        data-property={property}
+      >
         {PROPERTY_LABELS[property]}
-      </div>
+      </button>
 
       <div
         className={styles.trackArea}

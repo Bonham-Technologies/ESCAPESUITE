@@ -1024,6 +1024,30 @@ Clips support animated properties via keyframes:
   (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
   keyframes default to `ease-in-out` and a value drag preserves the stored easing
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
+- **The panel works from the keyboard (ESCSUITE-243).** Each property row (`KeyframeTrack.tsx`) was a
+  `<div onClick>`, so the graph's own keyboard model was reachable only by a mouse. The row stays a
+  container `<div>` — one `onClick` serves a click anywhere in it — and only its **label cell** is a
+  real `<button type="button">` (visible text is the name, no `aria-label`) carrying `aria-pressed`
+  for the open row, the roving `tabIndex` and `data-property`. Never put the diamond track inside the
+  button: a button admits no interactive content, every diamond click and double-click would also
+  activate it, and assistive technology would lose the diamonds and the value readout. `aria-pressed`,
+  not `aria-expanded`, because the graph is a block above all the rows, not the row's own region.
+  Enter and Space are the native button's; no key handler of ours, and one activation calls
+  `onSelect` once. The rows sit in one `role="group"` named "Animated properties" (the audio header and
+  the Volume row included) with a **roving tab stop derived from the open row** — 0 on it, or on the
+  first row when none is open or the open property has no row, -1 elsewhere — so there is no state and
+  no extra render. ArrowUp/ArrowDown wrap, Home/End jump, through `app/menuNavigation.ts`'s
+  `nextMenuIndex`; a ⌘/Ctrl/Alt chord is left to the browser. **Keyboard** activation of a row opens
+  its graph and focuses it (`onSelect(event.detail === 0)`, `focusGraphOnOpenRef`, consumed once by an
+  effect on `selectedProperty` after the graph has mounted); a mouse click opens it and leaves focus
+  alone, because a focused graph owns ArrowLeft/Right/Home/End and Enter and would take them from the
+  playhead, and a graph open at mount or opened through the store does not take focus either. Escape
+  inside the graph region hands focus back to the rows' tab stop (the open row); the graph claims and
+  stops the Escape that clears its active keyframe, so with one active the first Escape spends itself
+  there and the second returns focus, and the region stops the key so the editor's deselect-the-clip
+  Escape never sees it. The panel's close button is "Close keyframe panel", the graph header's is
+  "Close keyframe graph", and `ClipPreview`'s play button is "Play clip preview" / "Pause clip preview".
+  Pinned in a browser by the axe case in `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts`.
 - **The diamond row drag cannot be dragged into an occupied neighbour's window at all, and does
   not even aim for one (ESCSUITE-167 / M6, reworked by ESCSUITE-183)**. `KeyframeTrack.tsx`'s
   diamonds are dragged through `hooks/useKeyframeDrag.ts`, which used to `findSnapTime` onto the

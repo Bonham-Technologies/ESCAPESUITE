@@ -5,8 +5,8 @@ import {
   mockSyntheticMedia,
   grantMediaPermissions,
 } from '../../utils/media-mocks'
-import { checkFocusOrder } from '../../utils/accessibility'
-import { seedTextClip } from '../../utils/artist'
+import { checkFocusOrder, runAxeCheck } from '../../utils/accessibility'
+import { seedTextClip, keyframePanel } from '../../utils/artist'
 import { recordAndOpenPlayback } from '../../utils/craft'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -350,6 +350,75 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     await expect(menu).toBeHidden()
     await expect(trigger).toHaveAttribute('aria-expanded', 'false')
     await expect(trigger).toBeFocused()
+  })
+
+  // ESCSUITE-243: the keyframe panel's rows were `<div onClick>`, so the
+  // graph's own keyboard model (arrows, Enter, Delete, easing cycling) could
+  // only be reached with a mouse. The rows are now buttons in one labelled
+  // group with a roving tab stop, Enter opens a row's graph with focus on it,
+  // and Escape hands focus back.
+  test('the keyframe panel is operable from the keyboard and passes axe', async ({ page }) => {
+    await seedTextClip(page)
+    await page.keyboard.press('k')
+    const panel = keyframePanel(page)
+    await expect(panel).toBeVisible()
+
+    const group = panel.getByRole('group', { name: 'Animated properties' })
+    const opacity = group.getByRole('button', { name: 'Opacity' })
+    const blur = group.getByRole('button', { name: 'Blur' })
+
+    // One tab stop for the rows: from the play button a single Tab lands on
+    // the first row, and a second leaves them all.
+    await panel.getByRole('button', { name: 'Play clip preview' }).focus()
+    await page.keyboard.press('Tab')
+    await expect(group.getByRole('button', { name: 'Position X' })).toBeFocused()
+    await page.keyboard.press('Tab')
+    expect(
+      await group.evaluate((el) => el.contains(document.activeElement))
+    ).toBe(false)
+
+    // Arrows walk the rows and wrap; End jumps.
+    await group.getByRole('button', { name: 'Position X' }).focus()
+    await page.keyboard.press('ArrowUp')
+    await expect(blur).toBeFocused()
+    await page.keyboard.press('Home')
+    await expect(group.getByRole('button', { name: 'Position X' })).toBeFocused()
+
+    // Enter opens the row's graph and puts focus on it.
+    await opacity.focus()
+    await page.keyboard.press('Enter')
+    await expect(opacity).toHaveAttribute('aria-pressed', 'true')
+    const graph = page.getByRole('listbox', { name: 'Keyframes for Opacity' })
+    await expect(graph).toBeFocused()
+
+    // The open panel — rows, graph, close buttons, play button — audits clean.
+    // Colour contrast is carved out for the same reason the graph audit in
+    // core.spec.ts carves it out: SVG over the app's dark chrome.
+    await graph.dblclick()
+    await expect(graph.getByRole('option')).toHaveCount(2)
+    const results = await runAxeCheck(page, {
+      includeSelector: 'body > div:not(#root)',
+      disableRules: ['color-contrast'],
+    })
+    const serious = results.violations.filter(
+      (v) => v.impact === 'serious' || v.impact === 'critical'
+    )
+    expect(serious).toHaveLength(0)
+    expect(results.passes).toBeGreaterThan(0)
+
+    // Escape: with a keyframe active the first spends itself on it (the graph
+    // claims it), the second returns focus to the row that opened the graph.
+    // A double-click adds a keyframe without activating it, so walk to one
+    // first; a second Escape pressed on the row would reach the editor's
+    // deselect-the-clip cascade.
+    await graph.focus()
+    await page.keyboard.press('End')
+    await expect(graph).toHaveAttribute('aria-activedescendant', /.+/)
+    await page.keyboard.press('Escape')
+    await expect(graph).not.toHaveAttribute('aria-activedescendant', /.+/)
+    await expect(graph).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(opacity).toBeFocused()
   })
 
   test('Space bar toggles play/pause', async ({ page }) => {

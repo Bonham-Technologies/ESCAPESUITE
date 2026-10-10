@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { act, render, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { KeyframePanel } from './KeyframePanel'
@@ -158,7 +158,7 @@ describe('KeyframePanel', () => {
     openPanelWithClip()
     render(<KeyframePanel />)
 
-    await user.click(screen.getByRole('button', { name: '×' }))
+    await user.click(screen.getByRole('button', { name: 'Close keyframe panel' }))
 
     expect(store().keyframePanelState.isOpen).toBe(false)
     expect(screen.queryByText('Keyframe Editor')).not.toBeInTheDocument()
@@ -748,6 +748,333 @@ describe('KeyframePanel', () => {
       fireEvent.mouseUp(window)
 
       expect(store().keyframePanelState.size).toEqual({ width, height })
+    })
+  })
+  // ESCSUITE-243: the rows were `<div onClick>`, so the graph's whole keyboard
+  // model was reachable only by a mouse.
+  describe('keyboard access (ESCSUITE-243)', () => {
+    const ROWS = ['Position X', 'Position Y', 'Scale X', 'Scale Y', 'Rotation', 'Opacity', 'Blur']
+    const row = (name: string) => screen.getByRole('button', { name })
+    const withAudioClip = () => {
+      store().addSourceVideo({ ...video, id: 'withAudio', name: 'talk.mp4', hasAudio: true })
+      const clip = addClip('clip1', 0, CLIP_DURATION)
+      useEditorStore.setState({
+        project: {
+          ...store().project,
+          timeline: { ...store().project.timeline, clips: [{ ...clip, sourceVideoId: 'withAudio' }] },
+        },
+      })
+      store().setSelectedClipId('clip1')
+      store().setKeyframePanelOpen(true)
+    }
+
+    it('draws every property as a named button inside one labelled group', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      const group = screen.getByRole('group', { name: 'Animated properties' })
+      const names = within(group).getAllByRole('button').map((b) => b.textContent)
+      expect(names).toEqual(ROWS)
+      for (const b of within(group).getAllByRole('button')) expect(b).toHaveAttribute('type', 'button')
+    })
+
+    it('puts the audio row in the same group and the same tab order', () => {
+      withAudioClip()
+      render(<KeyframePanel />)
+
+      const group = screen.getByRole('group', { name: 'Animated properties' })
+      expect(within(group).getByRole('button', { name: 'Volume' })).toBeInTheDocument()
+    })
+
+    it('marks only the open row as pressed', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      expect(row('Opacity')).toHaveAttribute('aria-pressed', 'false')
+      await user.click(row('Opacity'))
+
+      expect(row('Opacity')).toHaveAttribute('aria-pressed', 'true')
+      expect(row('Blur')).toHaveAttribute('aria-pressed', 'false')
+    })
+
+    it('makes the first row the single tab stop while no row is open', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      expect(ROWS.map((r) => row(r).tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1])
+    })
+
+    it('moves the tab stop to the open row', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+
+      expect(ROWS.map((r) => row(r).tabIndex)).toEqual([-1, -1, -1, -1, -1, 0, -1])
+    })
+
+    it('falls back to the first row when the open property has no row', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('volume')
+      render(<KeyframePanel />)
+
+      expect(ROWS.map((r) => row(r).tabIndex)).toEqual([0, -1, -1, -1, -1, -1, -1])
+    })
+
+    it('lets Tab reach the rows exactly once', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      screen.getByRole('button', { name: 'Play clip preview' }).focus()
+      await user.tab()
+      expect(document.activeElement).toBe(row('Position X'))
+
+      await user.tab()
+      expect(ROWS.map((r) => row(r))).not.toContain(document.activeElement)
+    })
+
+    it('moves between rows with ArrowDown and ArrowUp, wrapping at both ends', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      row('Position X').focus()
+      await user.keyboard('{ArrowDown}')
+      expect(document.activeElement).toBe(row('Position Y'))
+
+      await user.keyboard('{ArrowUp}{ArrowUp}')
+      expect(document.activeElement).toBe(row('Blur'))
+
+      await user.keyboard('{ArrowDown}')
+      expect(document.activeElement).toBe(row('Position X'))
+    })
+
+    it('walks into the audio row and back', async () => {
+      const user = userEvent.setup()
+      withAudioClip()
+      render(<KeyframePanel />)
+
+      row('Blur').focus()
+      await user.keyboard('{ArrowDown}')
+      expect(document.activeElement).toBe(row('Volume'))
+    })
+
+    it('jumps to the first and last row with Home and End', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      row('Scale X').focus()
+      await user.keyboard('{End}')
+      expect(document.activeElement).toBe(row('Blur'))
+      await user.keyboard('{Home}')
+      expect(document.activeElement).toBe(row('Position X'))
+    })
+
+    it('leaves a key the rows do not use, and a browser chord, alone', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+
+      row('Scale X').focus()
+      fireEvent.keyDown(row('Scale X'), { key: 'a' })
+      fireEvent.keyDown(row('Scale X'), { key: 'ArrowDown', ctrlKey: true })
+      fireEvent.keyDown(row('Scale X'), { key: 'ArrowDown', metaKey: true })
+      fireEvent.keyDown(row('Scale X'), { key: 'ArrowDown', altKey: true })
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(document.activeElement).toBe(row('Scale X'))
+      expect(windowKeys).toHaveBeenCalledTimes(4)
+    })
+
+    it('keeps the arrows away from the editor shortcuts', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+
+      row('Position X').focus()
+      await user.keyboard('{ArrowDown}')
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(windowKeys).not.toHaveBeenCalled()
+    })
+
+    it('opens the graph on Enter and puts focus on it', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+      expect(document.activeElement).toBe(
+        screen.getByRole('listbox', { name: 'Keyframes for Opacity' })
+      )
+    })
+
+    it('opens the graph on Space the same way', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      row('Rotation').focus()
+      await user.keyboard(' ')
+
+      expect(document.activeElement).toBe(
+        screen.getByRole('listbox', { name: 'Keyframes for Rotation' })
+      )
+    })
+
+    it('does not move focus into a graph that was already open when the panel mounted', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+
+      expect(screen.getByRole('listbox', { name: 'Keyframes for Opacity' })).toBeInTheDocument()
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    it('focuses the graph only when a keyboard activation opened it, not when one closed it', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+      expect(document.activeElement).toBe(screen.getByRole('listbox'))
+
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(document.activeElement).toBe(row('Opacity'))
+    })
+
+    it('opens the graph on a mouse click without moving focus into it', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      await user.click(row('Opacity'))
+
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+      expect(document.activeElement).not.toBe(screen.getByRole('listbox'))
+      expect(document.activeElement).toBe(row('Opacity'))
+    })
+
+    it('does not move focus for a click anywhere else in the row either', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+
+      fireEvent.click(measureTrackArea('Opacity'), { detail: 1 })
+
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+      expect(document.activeElement).toBe(document.body)
+    })
+
+    it('does not pull focus into the graph when it is opened some other way later', () => {
+      openPanelWithClip()
+      render(<KeyframePanel />)
+      screen.getByRole('button', { name: 'Play clip preview' }).focus()
+
+      act(() => store().setKeyframePanelSelectedProperty('blur'))
+
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+      expect(document.activeElement).not.toBe(screen.getByRole('listbox'))
+    })
+
+    it('Escape in the graph returns focus to the row that opened it, and stops there', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      render(<KeyframePanel />)
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+
+      await user.keyboard('{Escape}')
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(document.activeElement).toBe(row('Opacity'))
+      // The graph stays open, and the editor's own Escape (deselect the clip)
+      // never saw the key.
+      expect(screen.getByRole('listbox')).toBeInTheDocument()
+      expect(windowKeys).not.toHaveBeenCalled()
+    })
+
+    it('spends the first Escape on the graph\'s active keyframe, the second on the focus return', async () => {
+      const user = userEvent.setup()
+      openPanelWithClip()
+      store().setClipKeyframe('clip1', 'opacity', { time: 1, value: 0.5, easing: 'linear' })
+      render(<KeyframePanel />)
+      row('Opacity').focus()
+      await user.keyboard('{Enter}')
+      const svg = screen.getByRole('listbox')
+      await user.keyboard('{End}')
+      expect(svg.getAttribute('aria-activedescendant')).not.toBeNull()
+
+      await user.keyboard('{Escape}')
+      expect(svg.getAttribute('aria-activedescendant')).toBeNull()
+      expect(document.activeElement).toBe(svg)
+
+      await user.keyboard('{Escape}')
+      expect(document.activeElement).toBe(row('Opacity'))
+    })
+
+    it('Escape in a graph whose property has no row returns focus to the rows\' tab stop', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('volume')
+      render(<KeyframePanel />)
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+
+      screen.getByRole('listbox').focus()
+      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(document.activeElement).toBe(row('Position X'))
+      expect(windowKeys).not.toHaveBeenCalled()
+    })
+
+    it('leaves every other key in the graph region to the graph and the editor', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      const windowKeys = vi.fn()
+      window.addEventListener('keydown', windowKeys)
+      const svg = screen.getByRole('listbox')
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'a' })
+
+      window.removeEventListener('keydown', windowKeys)
+      expect(windowKeys).toHaveBeenCalledTimes(1)
+      expect(document.activeElement).toBe(svg)
+    })
+
+    it('opens the Volume graph from the audio row', async () => {
+      const user = userEvent.setup()
+      withAudioClip()
+      render(<KeyframePanel />)
+
+      await user.click(row('Volume'))
+
+      expect(store().keyframePanelState.selectedProperty).toBe('volume')
+      expect(screen.getByRole('listbox', { name: 'Keyframes for Volume' })).toBeInTheDocument()
+    })
+
+    it('names the panel\'s close buttons', () => {
+      openPanelWithClip()
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+
+      expect(screen.getByRole('button', { name: 'Close keyframe panel' })).toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Close keyframe graph' })).toBeInTheDocument()
     })
   })
 })

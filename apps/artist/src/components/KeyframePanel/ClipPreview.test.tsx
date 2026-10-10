@@ -47,6 +47,18 @@ describe('ClipPreview', () => {
     expect(container.querySelector<HTMLElement>(`.${styles.scrubberHandle}`)!.style.left).toBe('25%')
   })
 
+  it('names the play button for what it will do, and flips with the state (ESCSUITE-243)', () => {
+    vi.useFakeTimers({
+      toFake: ['requestAnimationFrame', 'cancelAnimationFrame', 'performance', 'setTimeout', 'clearTimeout'],
+    })
+    renderPreview(clip, 0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play clip preview' }))
+
+    expect(screen.getByRole('button', { name: 'Pause clip preview' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Play clip preview' })).not.toBeInTheDocument()
+  })
+
   describe('playback', () => {
     beforeEach(() => {
       vi.useFakeTimers({

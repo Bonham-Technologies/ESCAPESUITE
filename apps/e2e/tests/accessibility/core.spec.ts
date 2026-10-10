@@ -838,7 +838,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(results.passes).toBeGreaterThan(0)
 
     // Reachable by Tab from inside the panel — not just focusable by script.
-    await panel.getByRole('button', { name: '×' }).first().focus()
+    await panel.getByRole('button', { name: 'Close keyframe panel' }).focus()
     let reached = false
     for (let i = 0; i < 20 && !reached; i++) {
       await page.keyboard.press('Tab')
