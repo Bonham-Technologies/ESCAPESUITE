@@ -2302,12 +2302,20 @@ slider they are ignored. A press on a different slider while a gesture is open s
 new one owned by it — `begin()` forgets the push, so the old slider's entry is already on the
 stack and the new one pushes its own — and a key repeat continues an open gesture only on its
 owner, a repeat on another slider being a press of its own. A's own blur still ends A's own drag
-(ESCSUITE-169 is untouched), and `commit` and `useGestureHistory` are unchanged. The fix keeps
+(ESCSUITE-169 is untouched), and `useGestureHistory` is unchanged (`commit` gained the dead-owner check of ESCSUITE-271, below). The fix keeps
 the **one** instance rather than one per slider: per-slider instances would add hooks and
 change `ClipEditor.rerender.test.tsx`, while the owner is one ref write per gesture start, so
 no render, subscription or per-move allocation moves. `SliderGestureHandlers`' event shapes
 widened by the one property they now read, `currentTarget: EventTarget | null`, which React's
 event types still satisfy.
+
+**An owner that leaves the document mid-gesture closes it at the next write** (ESCSUITE-271). An
+`<input type="range">` unmounted mid-drag (its section re-rendered away, the selected clip changed
+under the drag) never delivers its `pointerup` / `keyup` / `blur`, so the gesture stayed open with
+the detached node as its owner until the next slider press. `commit` now checks the owner first: if
+it is a `Node` with `isConnected === false` it ends the gesture and clears the owner, and the write
+proceeds as a write belonging to no gesture, pushing its own entry. One property read per write, no
+listener, and the pointer-drag flag is reset with it so later keyboard nudges are not mistaken for a pointer drag; an owner without `isConnected` (a plain `EventTarget`) counts as connected.
 
 The flag reaches the store through the trailing optional `skipHistory` parameter on
 `updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData`,

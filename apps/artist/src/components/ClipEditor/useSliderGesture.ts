@@ -31,11 +31,14 @@
 // here, and `commit` can wrap the write in the handler itself. A future throttle
 // on these writes would move it, not delete it.
 //
+// A gesture whose owner left the document mid-drag is closed at the next write
+// (ESCSUITE-271), since its own release events can no longer arrive.
+//
 // This hook is the gesture, and nothing else: one gesture history and the six
 // listeners that drive it. It holds no state, so a slider wired to it adds no
 // store subscription and no render — `ClipEditor.rerender.test.tsx`'s counts are
 // unchanged by design, not by luck.
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import { useGestureHistory } from '../../hooks';
 
 /**
@@ -206,5 +209,26 @@ export function useSliderGesture(): SliderGesture {
     };
   }, [history]);
 
-  return { handlers, commit: history.commit };
+  /**
+   * `history.commit`, after one check (ESCSUITE-271): an owner that was removed
+   * from the document mid-gesture never gets its `pointerup` / `keyup` / `blur`,
+   * so the gesture would stay open until the next press. Detect that here, at
+   * write time — one property read per write, no listener, no section wiring —
+   * and close it, so this write belongs to no gesture and pushes its own entry.
+   * An owner that is an `EventTarget` without `isConnected` counts as connected.
+   */
+  const commit = useCallback<SliderGesture['commit']>(
+    (write) => {
+      const owner = ownerRef.current;
+      if (owner && (owner as Partial<Node>).isConnected === false) {
+        ownerRef.current = null;
+        pointerDownRef.current = false;
+        history.end();
+      }
+      return history.commit(write);
+    },
+    [history],
+  );
+
+  return { handlers, commit };
 }

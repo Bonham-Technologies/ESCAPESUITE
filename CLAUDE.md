@@ -3411,6 +3411,25 @@ sheet and menu pins that were already there; the one new statement is the `BOUND
 review (sonnet) approved both verdicts with four LOWs needing no action. The three rerender pins and
 every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-271 (a slider gesture whose owner unmounts
+mid-drag no longer stays open for the next edit: ESCSUITE-267 made the gesture end only on its owner's own
+`pointerup`, `pointercancel`, `keyup` or `blur`, so an owning range input that re-rendered away or lost
+its clip mid-gesture left the gesture open and every later write inside it; `useSliderGesture`'s `commit`
+now reads the owner's `isConnected` once per write and, for an owner that has left the document, ends the
+gesture and clears the owner before the write proceeds as one belonging to no gesture):
+99.82 / 99.34 / 96.33 / 99.70, byte-identical on every percentage to the 99.82 / 99.34 / 96.33 / 99.70
+that `main` at `0da91d98` measures in the same sitting. The base gives 5,490 / 5,699 branches and this
+branch 5,494 / 5,703: four new branches, four covered, the same 209 uncovered as before (lines
+8,499 / 8,514 → 8,506 / 8,521, statements 9,593 / 9,656 → 9,600 / 9,663, functions 2,027 / 2,033 →
+2,028 / 2,034, every denominator growing by exactly what the numerator did; the same 15 / 63 / 6
+uncovered). All four are `components/ClipEditor/useSliderGesture.ts`'s (14 → 18): the owner-is-a-`Node`
+test and the `isConnected` choice at `commit`, each reached from both sides by the three red cases (a
+detached `<input>` owner → the write pushes its own entry and the gesture closes) against the two
+connected-owner cases that are green on both trees; the one new function is the dead-owner check. The
+review (sonnet) approved both verdicts; its LOWs (two stale sentences, the pointer flag, test-node
+cleanup) are the third commit. Still one hook instance, so `ClipEditor.rerender.test.tsx` and every
+`*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

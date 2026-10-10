@@ -9,7 +9,7 @@
 // — is `hooks/useGestureHistory.test.ts`. What this file adds is the mapping
 // from DOM events to `begin`/`resume`/`end`, and one refusal case to prove the
 // hook really delegates rather than keeping a flag of its own.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
 import { useSliderGesture } from './useSliderGesture'
 
@@ -376,6 +376,68 @@ describe('useSliderGesture', () => {
       on().onKeyDown({ repeat: true, key: 'ArrowRight', currentTarget: B })
       expect(write()).toBe(false)
       on().onKeyDown({ repeat: true, key: 'ArrowRight', currentTarget: B })
+      expect(write()).toBe(true)
+    })
+  })
+
+  describe('an owner that left the document mid-gesture (ESCSUITE-271)', () => {
+    afterEach(() => {
+      document.body.replaceChildren()
+    })
+
+    it('closes the gesture and lets the next write push its own entry when the owner is detached', () => {
+      const { on, write } = gesture()
+      const input = document.createElement('input')
+      document.body.appendChild(input)
+
+      on().onPointerDown({ currentTarget: input })
+      expect(write()).toBe(false)
+      expect(write()).toBe(true)
+
+      input.remove()
+      expect(write()).toBe(false)
+      // The gesture is closed, not reopened: the write after it is a write of
+      // no gesture and keeps pushing its own entry.
+      expect(write()).toBe(false)
+    })
+
+    it('keeps the write inside the gesture while the owner is still in the document', () => {
+      const { on, write } = gesture()
+      const input = document.createElement('input')
+      document.body.appendChild(input)
+
+      on().onPointerDown({ currentTarget: input })
+      expect(write()).toBe(false)
+      expect(write()).toBe(true)
+      expect(write()).toBe(true)
+    })
+
+    it('treats an owner that was never attached as detached', () => {
+      const { on, write } = gesture()
+      const input = document.createElement('input')
+
+      on().onPointerDown({ currentTarget: input })
+      expect(write()).toBe(false)
+      expect(write()).toBe(false)
+    })
+
+    it('leaves an owner with no isConnected (a plain event target) as an open gesture', () => {
+      const { on, write } = gesture()
+
+      on().onPointerDown(at(A))
+      expect(write()).toBe(false)
+      expect(write()).toBe(true)
+    })
+
+    it('lets a keyboard gesture start afresh after a detached owner was cleared', () => {
+      const { on, write } = gesture()
+      const input = document.createElement('input')
+
+      on().onPointerDown({ currentTarget: input })
+      write()
+      write() // detached: closes, clears the pointer flag
+      on().onKeyDown({ repeat: false, key: 'ArrowRight', currentTarget: A })
+      expect(write()).toBe(false)
       expect(write()).toBe(true)
     })
   })
