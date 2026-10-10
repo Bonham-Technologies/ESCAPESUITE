@@ -181,8 +181,8 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
   the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
-  moves the parity oracle (ESCSUITE-263); a worker killed outright may never fire `error`, so a
-  main-thread per-request deadline is still to come (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
+  moves the parity oracle (ESCSUITE-263). A worker killed outright, which may never fire `error`,
+  is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
   "Video Decode Worker"
 
 ### Data Flow
@@ -3184,6 +3184,31 @@ resuming and on another slider starting its own. Still one hook instance, so
 `ClipEditor.rerender.test.tsx` and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
 artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-266 (a frame request the decode worker
+never answers fails at a 15 s main-thread deadline — `FRAME_REQUEST_DEADLINE_MS`, one timer per request
+cleared on every settle path — after which the worker is terminated, every other pending request and
+in-flight load rejects at once naming the deadline, and `FailoverFrameSource`'s existing handover moves
+each source to `<video>` with the once-per-export notice, so a worker Chromium killed outright no longer
+leaves an export waiting forever): 99.82 / **99.34** / **96.27** / 99.70 against the
+99.82 / 99.32 / 96.25 / 99.70 that `main` at `2411d6a8` measures in the same sitting — statements up
+two hundredths and branches up two, lines and functions unmoved, and with *fewer* uncovered units:
+the base gives 5,444 / 5,656 branches and this branch 5,446 / 5,657, one new branch and two more
+covered, so the uncovered column falls 212 → 211; statements 9,485 / 9,549 → 9,493 / 9,556 with
+64 → 63 uncovered; lines 8,399 / 8,414 → 8,407 / 8,422 and functions 2,002 / 2,008 → 2,003 / 2,009,
+every new unit covered (the same 15 lines and 6 functions uncovered). All of the movement is
+`core/videoDecodeManager.ts` (59 / 68 → 61 / 69 branches, 167 / 170 → 175 / 177 statements): the
+deadline's expiry arm and the one pre-existing arm it newly reaches — the terminate path's rejection
+of in-flight work, which no test had driven after `ready` before the silent-worker doubles — each from
+both sides by the red cases (three manager cases and one `frameSource` handover case that sat
+`'pending'` at 15 s before the fix) and the 14.9 s resolve that clears its timer and does not
+terminate; the file's remaining uncovered arms predate the ticket. The review (opus) approved the code
+outright and found two false premises in the brief's docs — the 15 s deadline *can* outlive a live
+worker still making progress (its 5 s bound resets on output), and a worker killed mid-load is not
+caught because the exporter awaits every load first — both now stated in the code and in
+`apps/artist/CLAUDE.md` and filed as ESCSUITE-272 and ESCSUITE-273. `exportMP4.perf.test.ts`, every
+other `*.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's floors
+stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3191,7 +3216,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.33 | 96.25 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.27 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

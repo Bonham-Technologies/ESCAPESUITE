@@ -392,9 +392,25 @@ probe):
   finished export at cleanup; `disposeFrameManager` disposes each source in its own `try`, so the
   worker is always terminated. After the worker is ready, a worker `error` or `messageerror`
   rejects every frame request and every source load in flight, so an export never waits for an
-  answer one of those events says is not coming. The known limit: a worker killed outright (an
-  out-of-memory kill, say) is not guaranteed to fire either, and there is no main-thread deadline
-  per request yet — ESCSUITE-266.
+  answer one of those events says is not coming. A worker killed outright (an out-of-memory kill,
+  say) is not guaranteed to fire either, and the worker's own 5 s stall bound dies with it, so
+  **every frame request also has a main-thread deadline (ESCSUITE-266)**:
+  `FRAME_REQUEST_DEADLINE_MS` (15 s) in `VideoDecodeManager.getFrame`, one timer per
+  request, cleared wherever the request settles (an answer, an error reply, a dispose, a worker
+  `error`, `terminate()`). On expiry the manager terminates the worker, presumed dead, rejecting
+  that request and every other request and source load in flight with "Decode worker did not
+  answer within 15 s for <sourceId>", so every source the worker held falls back to `<video>` at
+  once, through the same handover and the same once-per-export line, rather than each after a
+  deadline of its own. The deadline is generous, but it and the worker's 5 s bound answer
+  different questions: the worker's is per stall (reset on every decoder output), this one is the
+  request's total age, so a live worker still making progress on one request past 15 s — a long
+  keyframe gap on a slow machine, a transition of a clip onto itself bouncing one decoder between
+  two positions — is treated as dead too. The cost of that false positive is a slower in-page
+  finish, not a hang; a deadline that resets on worker progress is ESCSUITE-272. **A source load
+  has no deadline, and that is a gap:** `exportMP4.ts` awaits every load before the frame loop
+  makes a single request, so a worker killed mid-load — where its memory peaks and an
+  out-of-memory kill is likeliest — still hangs the export. A load deadline scaled to the file's
+  size, running the same terminate path, is ESCSUITE-273.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A WebM

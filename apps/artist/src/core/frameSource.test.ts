@@ -822,6 +822,118 @@ describe('frameSource', () => {
       });
     });
 
+    // ESCSUITE-266: a worker the browser kills outright may fire no `error`
+    // at all, and the stall bound inside it dies with it. Behind the REAL
+    // decode manager (this file mocks it everywhere else), a worker that
+    // takes the sources and then never answers a frame request must still
+    // hand each source to <video> — at the manager's 15 s deadline, every
+    // source at once — instead of leaving the export waiting forever.
+    describe('a worker that stops answering without an error (ESCSUITE-266)', () => {
+      /** Answers INIT_SOURCE, then never answers a frame and never fires `error`. */
+      class SilentDecodeWorker {
+        static last: SilentDecodeWorker | null = null;
+        onmessage: ((event: MessageEvent) => void) | null = null;
+        onerror: ((event: ErrorEvent) => void) | null = null;
+        onmessageerror: ((event: MessageEvent) => void) | null = null;
+        terminated = false;
+
+        constructor() {
+          SilentDecodeWorker.last = this;
+          setTimeout(() => this.reply({ type: 'WORKER_READY' }), 0);
+        }
+
+        postMessage(request: { type: string; sourceId: string }) {
+          if (request.type !== 'INIT_SOURCE') return;
+          const info = { sourceId: request.sourceId, duration: 10, width: 1920, height: 1080, codec: 'avc1.640028', frameCount: 300, keyframeCount: 10 };
+          this.reply({ type: 'SOURCE_READY', sourceId: request.sourceId, info });
+        }
+
+        terminate() {
+          this.terminated = true;
+        }
+
+        private reply(data: unknown) {
+          this.onmessage?.(new MessageEvent('message', { data }));
+        }
+      }
+
+      // Restored by hand, not with vi.unstubAllGlobals(), which would drop
+      // this file's own URL and VideoFrame stubs too (ESCSUITE-119).
+      const saved = { Worker: globalThis.Worker, VideoDecoder: globalThis.VideoDecoder, URL: globalThis.URL };
+
+      beforeEach(() => {
+        const stubbedURL = saved.URL;
+        // The real manager builds its worker from `new URL(...)`, which this
+        // file's object-literal URL stub cannot construct.
+        class ConstructibleURL {
+          static createObjectURL = stubbedURL.createObjectURL;
+          static revokeObjectURL = stubbedURL.revokeObjectURL;
+          constructor(readonly href: string) {}
+        }
+        globalThis.URL = ConstructibleURL as unknown as typeof URL;
+        globalThis.Worker = SilentDecodeWorker as unknown as typeof Worker;
+        globalThis.VideoDecoder = class {} as unknown as typeof VideoDecoder;
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+        globalThis.URL = saved.URL;
+        globalThis.Worker = saved.Worker;
+        globalThis.VideoDecoder = saved.VideoDecoder;
+        SilentDecodeWorker.last = null;
+      });
+
+      it('hands every waiting source to <video> at the 15 s deadline, each reported once with the reason', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const { VideoDecodeManager: RealManager } =
+          await vi.importActual<typeof import('./videoDecodeManager')>('./videoDecodeManager');
+        const manager = new RealManager();
+        const ready = manager.initialize();
+        await vi.advanceTimersByTimeAsync(0);
+        await ready;
+        (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+        const factory = new FrameSourceFactory(true);
+        (factory as unknown as { manager: unknown }).manager = manager;
+        const onFallback = vi.fn();
+        const mp4 = () => new Blob(['x'], { type: 'video/mp4' });
+        const a = await factory.createSource('a', mp4(), 'video/mp4', undefined, onFallback);
+        const b = await factory.createSource('b', mp4(), 'video/mp4', undefined, onFallback);
+
+        const frames: Record<string, unknown> = { a: 'pending', b: 'pending' };
+        void a.getFrame(0.5).then((frame) => { frames.a = frame; });
+        await vi.advanceTimersByTimeAsync(5_000);
+        void b.getFrame(0.5).then((frame) => { frames.b = frame; });
+
+        await vi.advanceTimersByTimeAsync(9_999);
+        expect(frames).toEqual({ a: 'pending', b: 'pending' });
+        expect(onFallback).not.toHaveBeenCalled();
+
+        // A's deadline: A falls back, and B with it, 10 s short of its own.
+        await vi.advanceTimersByTimeAsync(1);
+        await vi.advanceTimersByTimeAsync(10);
+
+        expect(frames.a).toBeInstanceOf(MockHTMLVideoElement);
+        expect(frames.b).toBeInstanceOf(MockHTMLVideoElement);
+        expect(onFallback.mock.calls).toEqual([
+          ['a', 'Decode worker did not answer within 15 s for a'],
+          ['b', 'Decode worker did not answer within 15 s for a'],
+        ]);
+        expect(SilentDecodeWorker.last!.terminated).toBe(true);
+        // Later frames come from <video> without asking the dead worker again.
+        const later = a.getFrame(1);
+        await vi.advanceTimersByTimeAsync(10);
+        await expect(later).resolves.toBeInstanceOf(MockHTMLVideoElement);
+        expect(onFallback).toHaveBeenCalledTimes(2);
+
+        const disposed = Promise.all([a.dispose(), b.dispose()]);
+        await vi.advanceTimersByTimeAsync(50);
+        await disposed;
+        factory.dispose();
+        warn.mockRestore();
+      });
+    });
+
     it('uses HTMLVideoElement for non-MP4 formats', async () => {
       (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
 

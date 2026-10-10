@@ -46,6 +46,24 @@ export type ProgressCallback = (
 export type ErrorCallback = (error: string, fatal: boolean) => void;
 
 /**
+ * How long a frame request waits for the worker's answer before the worker is
+ * presumed dead (ESCSUITE-266). A worker the browser kills outright — an
+ * out-of-memory kill of a dedicated worker, say — is not guaranteed to fire
+ * `error` on this thread, and the worker's own stall bound (5 s,
+ * `workers/frameDecoder.ts`) dies with it, so without this an MP4 export
+ * waited forever at the frame it was on. Fifteen seconds is generous, but the
+ * two bounds answer different questions and can disagree: the worker's is per
+ * stall (it resets on every decoder output and fires only after 5 s with no
+ * progress at all), while this one is the request's total age. A live worker
+ * still making progress on one request — a long keyframe gap on a slow
+ * machine, a transition of a clip onto itself bouncing one decoder between two
+ * positions — can pass 15 s, and is then treated as dead: every source falls
+ * back to `<video>`, so the export finishes slower and in the page, but it
+ * finishes. A deadline that resets on worker progress is ESCSUITE-272.
+ */
+export const FRAME_REQUEST_DEADLINE_MS = 15_000;
+
+/**
  * Pending frame request
  */
 interface PendingRequest {
@@ -54,6 +72,8 @@ interface PendingRequest {
   timestamp: number;
   /** Whose request it is: a dispose rejects only its own source's (ESCSUITE-254). */
   sourceId: string;
+  /** Its FRAME_REQUEST_DEADLINE_MS timer, cleared wherever the request settles (ESCSUITE-266). */
+  deadline: ReturnType<typeof setTimeout>;
 }
 
 /**
@@ -213,8 +233,8 @@ export class VideoDecodeManager {
     // Before ready these reject the startup wait; after it, every frame
     // request and source load in flight — an answer lost to a dead worker or
     // an unreadable message is never coming, and an export must not wait for
-    // it (ESCSUITE-254). A worker killed outright may fire neither; a
-    // main-thread deadline per request is ESCSUITE-266.
+    // it (ESCSUITE-254). A worker killed outright may fire neither; that is
+    // what each frame request's FRAME_REQUEST_DEADLINE_MS is for (ESCSUITE-266).
     this.worker.onerror = (error) => {
       console.error('Decode worker error:', error);
       if (this.errorCallback) {
@@ -235,7 +255,10 @@ export class VideoDecodeManager {
 
   /** Reject, and forget, every frame request and source load in flight. */
   private rejectInFlight(error: Error): void {
-    for (const pending of this.pendingRequests.values()) pending.reject(error);
+    for (const pending of this.pendingRequests.values()) {
+      clearTimeout(pending.deadline);
+      pending.reject(error);
+    }
     this.pendingRequests.clear();
     for (const loadPromise of this.sourceLoadPromises.values()) loadPromise.reject(error);
     this.sourceLoadPromises.clear();
@@ -273,6 +296,7 @@ export class VideoDecodeManager {
         const response = message as FrameReadyResponse;
         const pending = this.pendingRequests.get(response.requestId);
         if (pending) {
+          clearTimeout(pending.deadline);
           pending.resolve(response.frame);
           this.pendingRequests.delete(response.requestId);
         } else {
@@ -312,6 +336,7 @@ export class VideoDecodeManager {
     if (error.requestId !== undefined) {
       const pending = this.pendingRequests.get(error.requestId);
       if (pending) {
+        clearTimeout(pending.deadline);
         pending.reject(new Error(error.error));
         this.pendingRequests.delete(error.requestId);
         return;
@@ -365,6 +390,13 @@ export class VideoDecodeManager {
    * @param mimeType - MIME type of the video (e.g., 'video/mp4')
    * @param onProgress - Optional progress callback
    * @returns Promise resolving to source info when ready
+   *
+   * Unlike a frame request this has no deadline (ESCSUITE-266), and that is a
+   * gap: `exportMP4.ts` awaits every source load before its frame loop makes a
+   * single frame request, so a worker killed mid-load — where its memory use
+   * peaks and an out-of-memory kill is likeliest — leaves the export waiting
+   * forever. A load deadline scaled to the file's size, running the same
+   * terminate path, is ESCSUITE-273.
    */
   async loadSource(
     sourceId: string,
@@ -396,6 +428,12 @@ export class VideoDecodeManager {
    * @param sourceId - Source to get frame from
    * @param timestamp - Timestamp in seconds
    * @returns Promise resolving to VideoFrame (caller must call .close() when done)
+   *
+   * Rejects if the worker has not answered within FRAME_REQUEST_DEADLINE_MS,
+   * and terminates it: a worker that missed one deadline is presumed dead, so
+   * every other request and load in flight fails at once with the same reason
+   * and each source falls back now, rather than after a deadline of its own
+   * (ESCSUITE-266).
    */
   async getFrame(sourceId: string, timestamp: number): Promise<VideoFrame> {
     if (!this.isReady) {
@@ -405,7 +443,14 @@ export class VideoDecodeManager {
     const requestId = this.nextRequestId++;
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, { resolve, reject, timestamp, sourceId });
+      // Cleared on every settle, so it fires only for a request still in
+      // flight: terminate() rejects that one along with everything else.
+      const deadline = setTimeout(() => {
+        this.terminate(
+          new Error(`Decode worker did not answer within ${FRAME_REQUEST_DEADLINE_MS / 1000} s for ${sourceId}`)
+        );
+      }, FRAME_REQUEST_DEADLINE_MS);
+      this.pendingRequests.set(requestId, { resolve, reject, timestamp, sourceId, deadline });
 
       this.postRequest({
         type: 'REQUEST_FRAME',
@@ -483,6 +528,7 @@ export class VideoDecodeManager {
     // still in flight (ESCSUITE-254).
     for (const [requestId, pending] of this.pendingRequests.entries()) {
       if (pending.sourceId === sourceId) {
+        clearTimeout(pending.deadline);
         pending.reject(new Error('Source disposed'));
         this.pendingRequests.delete(requestId);
       }
@@ -498,9 +544,10 @@ export class VideoDecodeManager {
   }
 
   /**
-   * Terminate the worker and free all resources
+   * Terminate the worker and free all resources, rejecting everything still in
+   * flight with `reason` — a missed frame deadline names itself here.
    */
-  terminate(): void {
+  terminate(reason: Error = new Error('Manager terminated')): void {
     this.clearReadyWait();
 
     if (this.worker) {
@@ -513,7 +560,7 @@ export class VideoDecodeManager {
     this.readyResolve = null;
     this.readyReject = null;
 
-    this.rejectInFlight(new Error('Manager terminated'));
+    this.rejectInFlight(reason);
 
     this.progressCallbacks.clear();
   }
