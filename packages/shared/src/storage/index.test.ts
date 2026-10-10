@@ -67,10 +67,14 @@ describe('storage', () => {
         request.onsuccess = () => resolve('deleted')
         request.onerror = () => resolve('error')
       })
+      let timer: ReturnType<typeof setTimeout> | undefined
       const outcome = await Promise.race([
         deleted,
-        new Promise<string>((resolve) => setTimeout(() => resolve('still blocked'), 500)),
+        new Promise<string>((resolve) => {
+          timer = setTimeout(() => resolve('still blocked'), 500)
+        }),
       ])
+      clearTimeout(timer)
       expect(outcome).toBe('deleted')
 
       // The next call opens a fresh connection, the upgrade recreates the
@@ -147,6 +151,38 @@ describe('storage', () => {
       expect(openDB).toHaveBeenCalledTimes(2)
       expect(second).toBe(opens[1].db)
       expect(second).not.toBe(first)
+    })
+
+    // ESCSUITE-226 review: `close()` waits for running transactions, so a
+    // browser-forced close can still reach a connection `blocking` already let
+    // go of — after a newer open has replaced it in the cache.
+    it('keeps the newer connection cached when a replaced one terminates late', async () => {
+      await mocked.getDB()
+      opens[0].options.blocking!(1, null, {})
+      const second = await mocked.getDB()
+
+      opens[0].options.terminated!()
+
+      expect(await mocked.getDB()).toBe(second)
+      expect(openDB).toHaveBeenCalledTimes(2)
+    })
+
+    // The spec sends `versionchange` only to connections not already closing,
+    // so this order is not expected from a browser; the guard is kept
+    // symmetric with `terminated` so neither hook can drop a cache it does
+    // not own.
+    it('keeps the newer connection cached when a replaced one is asked to step aside', async () => {
+      await mocked.getDB()
+      opens[0].options.terminated!()
+      const second = await mocked.getDB()
+
+      opens[0].options.blocking!(1, null, {})
+
+      expect(await mocked.getDB()).toBe(second)
+      expect(openDB).toHaveBeenCalledTimes(2)
+      // The replaced connection still closes itself; only the cache is spared.
+      expect(opens[0].db.close).toHaveBeenCalledTimes(1)
+      expect(opens[1].db.close).not.toHaveBeenCalled()
     })
 
     it('warns once, naming the database, when its open is blocked by another tab', async () => {
