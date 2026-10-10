@@ -143,7 +143,7 @@ describe('CropSection', () => {
       crop: { left: 0.25, top: 0, right: 0, bottom: 0 },
     })
 
-    await user.click(screen.getByRole('button', { name: 'Reset' }))
+    await user.click(screen.getByRole('button', { name: 'Reset crop' }))
 
     // The same write as the None preset, deliberately: "no crop" has one
     // meaning, and `normaliseCrop` turns it into `crop: undefined`.
@@ -159,7 +159,7 @@ describe('CropSection', () => {
     expect(screen.getByLabelText('Left')).toBeDisabled()
     expect(screen.getByLabelText('Left crop percent')).toBeDisabled()
     expect(screen.getByRole('button', { name: '1:1' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Reset crop' })).toBeDisabled()
   })
 
   it('offers a Crop on canvas toggle in its header, pressed when crop mode is on', () => {

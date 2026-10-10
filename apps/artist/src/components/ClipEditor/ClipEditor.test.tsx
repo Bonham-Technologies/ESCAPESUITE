@@ -193,8 +193,8 @@ describe('ClipEditor', () => {
       expect(screen.getByRole('button', { name: 'Duplicate' })).toBeDisabled()
       // Both Resets, including Transform's header one — it writes the
       // transform but sits outside the section's fieldset.
-      for (const reset of screen.getAllByRole('button', { name: 'Reset' })) {
-        expect(reset).toBeDisabled()
+      for (const name of ['Reset position, size and opacity', 'Reset transform including rotation', 'Reset crop']) {
+        expect(screen.getByRole('button', { name })).toBeDisabled()
       }
       expect(screen.getByTitle('Delete clip')).toBeDisabled()
       expect(
@@ -325,7 +325,7 @@ describe('ClipEditor', () => {
       expect(clipNow().crop).toEqual({ left: 0.2, top: 0, right: 0, bottom: 0 })
 
       const cropSection = screen.getByRole('button', { name: 'Crop' }).closest(`.${styles.collapsible}`) as HTMLElement
-      await user.click(within(cropSection).getByRole('button', { name: 'Reset' }))
+      await user.click(within(cropSection).getByRole('button', { name: 'Reset crop' }))
       expect(clipNow().crop).toBeUndefined()
     })
   })
@@ -348,9 +348,10 @@ describe('ClipEditor', () => {
     it('changes both scale axes together while the aspect ratio is locked', () => {
       render(<ClipEditor />)
 
-      slide(rowControl('Scale'), 1.5)
+      slide(rowControl('Scale'), Math.log10(1.5))
 
-      expect(clipNow().transform).toMatchObject({ scaleX: 1.5, scaleY: 1.5 })
+      expect(clipNow().transform.scaleX).toBeCloseTo(1.5, 6)
+      expect(clipNow().transform.scaleY).toBeCloseTo(1.5, 6)
     })
 
     it('unlocks the aspect ratio and scales each axis on its own', async () => {
@@ -360,10 +361,11 @@ describe('ClipEditor', () => {
       await user.click(screen.getByTitle('Unlock aspect ratio'))
       expect(clipNow().transform.scaleLocked).toBe(false)
 
-      slide(rowControl('Scale X'), 1.2)
-      slide(rowControl('Scale Y'), 0.4)
+      slide(rowControl('Scale X'), Math.log10(1.2))
+      slide(rowControl('Scale Y'), Math.log10(0.4))
 
-      expect(clipNow().transform).toMatchObject({ scaleX: 1.2, scaleY: 0.4 })
+      expect(clipNow().transform.scaleX).toBeCloseTo(1.2, 6)
+      expect(clipNow().transform.scaleY).toBeCloseTo(0.4, 6)
     })
 
     it('re-locks the aspect ratio', async () => {
@@ -419,9 +421,7 @@ describe('ClipEditor', () => {
       store().updateClipTransform('clip1', { x: 0.1, y: 0.2, scaleX: 1.7, scaleY: 1.7, opacity: 0.4 })
       render(<ClipEditor />)
 
-      const headerReset = screen
-        .getAllByRole('button', { name: 'Reset' })
-        .find((button) => !button.getAttribute('title'))!
+      const headerReset = screen.getByRole('button', { name: 'Reset position, size and opacity' })
       await user.click(headerReset)
 
       expect(clipNow().transform).toMatchObject({ x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, opacity: 1 })
