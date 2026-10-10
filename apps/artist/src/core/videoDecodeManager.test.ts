@@ -616,6 +616,74 @@ describe('VideoDecodeManager', () => {
     });
   });
 
+  // ESCSUITE-254 fix round 1, M2: a mid-export handover disposes one source.
+  // Rejecting every source's in-flight request cascaded the handover to every
+  // active source, and the frames the worker still sent back for them were
+  // dropped without close().
+  describe('disposeSource with several sources in flight', () => {
+    const frame = () => ({ close: vi.fn() }) as unknown as VideoFrame & { close: ReturnType<typeof vi.fn> };
+
+    it("rejects only the disposed source's pending requests", async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const fromA = manager.getFrame('a', 0.5);
+      const fromB = manager.getFrame('b', 0.5);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      const disposed = manager.disposeSource('a');
+      await expect(fromA).rejects.toThrow('Source disposed');
+      const answer = frame();
+      mockWorkerInstance!.simulateMessage({ type: 'FRAME_READY', requestId: 2, sourceId: 'b', timestamp: 0.5, frame: answer });
+
+      await expect(fromB).resolves.toBe(answer);
+      await disposed;
+    });
+
+    it('closes a frame that arrives for a request already settled', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const fromA = manager.getFrame('a', 0.5);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const disposed = manager.disposeSource('a');
+      await expect(fromA).rejects.toThrow('Source disposed');
+
+      const late = frame();
+      mockWorkerInstance!.simulateMessage({ type: 'FRAME_READY', requestId: 1, sourceId: 'a', timestamp: 0.5, frame: late });
+
+      expect(late.close).toHaveBeenCalledTimes(1);
+      await disposed;
+    });
+  });
+
+  // Fix round 1, MINOR 1: once the worker is up, a worker error or an
+  // unreadable message settles every request in flight; an export must never
+  // wait for an answer that is not coming.
+  describe('a worker that fails after it is ready', () => {
+    it('rejects every pending request on an error', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const requests = [manager.getFrame('a', 0.5), manager.getFrame('b', 0.5)];
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      mockWorkerInstance!.simulateError('Worker crashed');
+
+      for (const request of requests) await expect(request).rejects.toThrow('Decode worker failed: Worker crashed');
+    });
+
+    it('rejects every pending request on a messageerror', async () => {
+      const manager = new VideoDecodeManager();
+      await manager.initialize();
+      const requests = [manager.getFrame('a', 0.5), manager.getFrame('b', 0.5)];
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      mockWorkerInstance!.simulateMessageError();
+
+      for (const request of requests) {
+        await expect(request).rejects.toThrow('Decode worker failed: received an unparseable message');
+      }
+    });
+  });
+
   describe('terminate', () => {
     it('terminates the worker', async () => {
       const manager = new VideoDecodeManager();

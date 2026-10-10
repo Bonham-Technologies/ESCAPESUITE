@@ -48,49 +48,96 @@ vi.mock('./workerDecodeEngine', () => ({ isMeasuredWorkerDecodeEngine: () => tru
 
 const IN_PAGE_NOTICE = 'Decoding in the page; keep this tab in the foreground'
 
-/** What the stand-in decode manager does with each source. */
+/** What the scripted decode worker does with each source. */
 const worker = vi.hoisted(() => ({
-  /** loadSource rejects with this, for every source. */
-  refuse: null as Error | null,
-  /** getFrame rejects with this once this many frames have been served. */
+  /** INIT_SOURCE is answered with this error, for every source. */
+  refuse: null as string | null,
+  /** REQUEST_FRAME for `failSource` is answered with an error once it has served this many frames. */
+  failSource: 'video2',
   failAfter: Infinity,
-  failure: new Error('Decoder stalled: no output for 5000ms'),
-  served: 0,
+  failure: 'Decoder stalled: no output for 5000ms',
+  served: new Map<string, number>(),
+  /** Every REQUEST_FRAME, in order. */
+  requests: [] as Array<{ sourceId: string; timestamp: number }>,
 }))
 
-vi.mock('./videoDecodeManager', () => ({
-  VideoDecodeManager: class {
-    static isSupported = () => true
+/**
+ * Stands in for `workers/decodeWorker.ts` behind the real VideoDecodeManager,
+ * so the manager's own bookkeeping — which requests a dispose rejects, what
+ * it does with a frame that arrives for a request it already settled — is
+ * what the export runs through (fix round 1, M2: a stand-in for the manager
+ * itself could not see either). Answers are asynchronous, the failing
+ * source's first: so the other source's request is still in flight when the
+ * failing source is handed over and disposed.
+ */
+class ScriptedDecodeWorker {
+  onmessage: ((event: MessageEvent) => void) | null = null
+  onerror: ((event: ErrorEvent) => void) | null = null
+  onmessageerror: ((event: MessageEvent) => void) | null = null
+  private timers = new Set<ReturnType<typeof setTimeout>>()
 
-    async initialize() {}
+  constructor() {
+    this.later(0, () => this.reply({ type: 'WORKER_READY' }))
+  }
 
-    async loadSource(sourceId: string) {
-      if (worker.refuse) throw worker.refuse
-      return { sourceId, duration: 10, width: 640, height: 360, codec: 'avc1.64001f', frameCount: 300, keyframeCount: 10 }
+  /** Answer after `ms`, unless terminated first — as a real worker's pending work dies with it. */
+  private later(ms: number, answer: () => void) {
+    const timer = setTimeout(() => {
+      this.timers.delete(timer)
+      answer()
+    }, ms)
+    this.timers.add(timer)
+  }
+
+  postMessage(request: { type: string; sourceId: string; timestamp: number; requestId: number }) {
+    if (request.type === 'INIT_SOURCE') {
+      this.later(0, () => {
+        if (worker.refuse) {
+          this.reply({ type: 'ERROR', error: worker.refuse, fatal: true, sourceId: request.sourceId })
+          return
+        }
+        const info = { sourceId: request.sourceId, duration: 10, width: 640, height: 360, codec: 'avc1.64001f', frameCount: 300, keyframeCount: 10 }
+        this.reply({ type: 'SOURCE_READY', sourceId: request.sourceId, info })
+      })
+    } else if (request.type === 'REQUEST_FRAME') {
+      worker.requests.push({ sourceId: request.sourceId, timestamp: request.timestamp })
+      const served = worker.served.get(request.sourceId) ?? 0
+      if (request.sourceId === worker.failSource && served >= worker.failAfter) {
+        this.later(0, () => this.reply({ type: 'ERROR', error: worker.failure, fatal: false, sourceId: request.sourceId, requestId: request.requestId }))
+        return
+      }
+      worker.served.set(request.sourceId, served + 1)
+      this.later(5, () => {
+        const Frame = (globalThis as unknown as { VideoFrame: typeof VideoFrameDouble }).VideoFrame
+        const frame = new Frame({ timestamp: request.timestamp * 1e6 })
+        this.reply({ type: 'FRAME_READY', requestId: request.requestId, sourceId: request.sourceId, timestamp: request.timestamp, frame })
+      })
     }
+  }
 
-    async getFrame(_sourceId: string, timestamp: number) {
-      if (worker.served >= worker.failAfter) throw worker.failure
-      worker.served++
-      const Frame = (globalThis as unknown as { VideoFrame: typeof VideoFrameDouble }).VideoFrame
-      return new Frame({ timestamp })
-    }
+  terminate() {
+    for (const timer of this.timers) clearTimeout(timer)
+    this.timers.clear()
+  }
 
-    async disposeSource() {}
-
-    terminate() {}
-  },
-}))
+  private reply(data: unknown) {
+    this.onmessage?.(new MessageEvent('message', { data }))
+  }
+}
 
 let webcodecs: WebCodecsDoubles
 let offscreen: OffscreenCanvasDouble
 let media: MediaDoubles
 let spies: Array<ReturnType<typeof vi.spyOn>>
+/** Restored by hand, not with vi.unstubAllGlobals(), which would drop src/test/setup.ts's stubs too (ESCSUITE-119). */
+const realWorker = globalThis.Worker
 
 beforeEach(async () => {
   worker.refuse = null
   worker.failAfter = Infinity
-  worker.served = 0
+  worker.served = new Map()
+  worker.requests = []
+  globalThis.Worker = ScriptedDecodeWorker as unknown as typeof Worker
   resetMediabunnyDouble()
   resetFrameRegistry()
   installCanvasDouble()
@@ -108,6 +155,7 @@ beforeEach(async () => {
 })
 
 afterEach(() => {
+  globalThis.Worker = realWorker
   webcodecs.uninstall()
   media.uninstall()
   offscreen.uninstall()
@@ -138,7 +186,7 @@ const notices = (progress: ExportProgress[]) => progress.filter((p) => p.message
 
 describe('exportToMP4 says when the decode worker hands sources back to the page (ESCSUITE-254)', () => {
   it('reports the in-page notice exactly once when two sources fall back', async () => {
-    worker.refuse = new Error('Unsupported display matrix')
+    worker.refuse = 'Unsupported display matrix'
 
     const progress = await exportTwoSources()
 
@@ -155,8 +203,8 @@ describe('exportToMP4 says when the decode worker hands sources back to the page
     expect(allFramesClosed()).toBe(true)
   })
 
-  it('reports once, at the current encoding progress, when the worker gives up mid-export, and still draws every frame', async () => {
-    worker.failAfter = 4 // two export frames of two sources each
+  it('reports once, at the current encoding progress, when the worker gives up on one source mid-export', async () => {
+    worker.failAfter = 2 // video2's third frame fails
 
     const progress = await exportTwoSources()
 
@@ -167,11 +215,26 @@ describe('exportToMP4 says when the decode worker hands sources back to the page
     const index = progress.indexOf(said[0])
     expect(said[0].progress).toBeGreaterThanOrEqual(progress[index - 1].progress)
     expect(progress[index + 1].progress).toBeGreaterThanOrEqual(said[0].progress)
-    // The rest of the export was decoded by <video> elements, which were seeked.
-    expect(media.videos).toHaveLength(2)
-    expect(media.seeks.length).toBeGreaterThan(0)
     // Every frame of the 0.2 s export still reached the encoder.
     expect(webcodecs.videoEncoders[0].encodes).toHaveLength(6)
+  })
+
+  // Fix round 1, M2: handing one source over must not hand over the others.
+  it('hands over only the failing source: the other keeps decoding in the worker, and every frame is closed', async () => {
+    worker.failAfter = 2
+
+    await exportTwoSources()
+
+    // One <video>, for video2 — not one for each source.
+    expect(media.videos).toHaveLength(1)
+    // video1 was asked for all six export frames through the worker...
+    expect(worker.requests.filter((r) => r.sourceId === 'video1')).toHaveLength(6)
+    // ...and video2 for its first three only (the third failed).
+    expect(worker.requests.filter((r) => r.sourceId === 'video2')).toHaveLength(3)
+    // Every VideoFrame the worker sent back, a late one included, was closed.
     expect(allFramesClosed()).toBe(true)
+    // MINOR 7: the <video> resumed at the failing request's own time.
+    const failed = worker.requests.filter((r) => r.sourceId === 'video2')[2]
+    expect(media.seeks[0]).toBeCloseTo(failed.timestamp, 6)
   })
 })
