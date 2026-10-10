@@ -40,6 +40,12 @@ vi.mock('./audioMixer', () => ({
   extractAndMixAudio: vi.fn(async () => null),
 }))
 
+// The decode worker is admitted only in an engine whose worker output was
+// measured against its own <video> (ESCSUITE-254 fix round 1, B1); jsdom's
+// user agent is not one, so this file, which exists to drive the WebCodecs
+// path, says it is.
+vi.mock('./workerDecodeEngine', () => ({ isMeasuredWorkerDecodeEngine: () => true }))
+
 const IN_PAGE_NOTICE = 'Decoding in the page; keep this tab in the foreground'
 
 /** What the stand-in decode manager does with each source. */

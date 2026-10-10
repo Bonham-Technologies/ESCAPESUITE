@@ -11,6 +11,7 @@
  */
 
 import { VideoDecodeManager } from './videoDecodeManager';
+import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -347,6 +348,11 @@ class FailoverFrameSource implements IFrameSource {
   }
 }
 
+export interface FrameSourceFactoryOptions {
+  /** Whether the worker's output was measured against this engine's `<video>`; see `workerDecodeEngine.ts`. */
+  measuredEngine?: boolean;
+}
+
 /**
  * Factory for creating frame sources
  * Automatically selects WebCodecs or HTMLVideoElement based on support
@@ -355,8 +361,18 @@ export class FrameSourceFactory {
   private manager: VideoDecodeManager | null = null;
   private useWebCodecs: boolean;
 
-  constructor(useWebCodecs: boolean = true) {
-    this.useWebCodecs = useWebCodecs && VideoDecodeManager.isSupported();
+  /**
+   * `measuredEngine` says whether this engine's worker output was measured
+   * against its own `<video>` (`workerDecodeEngine.ts`). When it was not, the
+   * worker is never started and no source is read into memory for it: every
+   * source takes the `<video>` path, and the MP4 export says so once
+   * (ESCSUITE-254). Defaults to asking the running browser.
+   */
+  constructor(
+    useWebCodecs: boolean = true,
+    { measuredEngine = isMeasuredWorkerDecodeEngine(globalThis.navigator) }: FrameSourceFactoryOptions = {}
+  ) {
+    this.useWebCodecs = useWebCodecs && measuredEngine && VideoDecodeManager.isSupported();
   }
 
   /**

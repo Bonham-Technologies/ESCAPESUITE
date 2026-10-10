@@ -25,6 +25,12 @@ const decoder = vi.hoisted(() => ({
   lastInitializeSignal: undefined as AbortSignal | undefined,
 }))
 
+// The decode worker is admitted only in an engine whose worker output was
+// measured against its own <video> (ESCSUITE-254 fix round 1, B1); jsdom's
+// user agent is not one, so this file, which exists to drive the WebCodecs
+// path, says it is.
+vi.mock('./workerDecodeEngine', () => ({ isMeasuredWorkerDecodeEngine: () => true }))
+
 vi.mock('./videoDecodeManager', () => ({
   VideoDecodeManager: class {
     static isSupported = () => decoder.supported

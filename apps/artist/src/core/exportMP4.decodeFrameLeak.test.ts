@@ -39,6 +39,12 @@ vi.mock('./audioMixer', () => ({
   extractAndMixAudio: vi.fn(async () => null),
 }))
 
+// The decode worker is admitted only in an engine whose worker output was
+// measured against its own <video> (ESCSUITE-254 fix round 1, B1); jsdom's
+// user agent is not one, so this file, which exists to drive the WebCodecs
+// path, says it is.
+vi.mock('./workerDecodeEngine', () => ({ isMeasuredWorkerDecodeEngine: () => true }))
+
 // The decode manager owns a Web Worker running WebCodecs, neither of which
 // exists in jsdom. Stand in for it with a recording double that hands out a
 // fresh VideoFrameDouble per call — the real bug only shows up when the two
