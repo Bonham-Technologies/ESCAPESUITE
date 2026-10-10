@@ -170,6 +170,27 @@ describe('an inspector slider drag and the undo stack', () => {
     expect(clipNow().effects?.blur).toBe(10)
   })
 
+  it('records one entry for a drag on one slider while another still has focus (ESCSUITE-267)', async () => {
+    // Every slider on the panel shares one gesture. Pressing Blur while
+    // Opacity still holds focus delivers Blur's pointerdown and THEN
+    // Opacity's blur — which used to end the gesture Blur had just opened, so
+    // the whole drag pushed one entry per move and 20 moves were 20 entries.
+    const { user } = await selectedClipEditor()
+    await openSection(user, 'Effects')
+    const opacity = rowControl('Opacity')
+    const blur = rowControl('Blur')
+    opacity.focus()
+    const before = past()
+
+    fireEvent.pointerDown(blur)
+    fireEvent.blur(opacity)
+    for (let step = 1; step <= 20; step++) slide(blur, step / 2)
+    fireEvent.pointerUp(blur)
+
+    expect(clipNow().effects?.blur).toBe(10)
+    expect(past() - before).toBe(1)
+  })
+
   it('records one entry for a shape overlay slider drag', async () => {
     store().addShapeOverlayClip({ type: 'rectangle' })
     render(<ClipEditor />)
