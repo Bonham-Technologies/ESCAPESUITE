@@ -65,7 +65,11 @@ describe('saving', () => {
       await result.current.handleSaveProject()
     })
 
-    expect(saveProject).toHaveBeenCalledWith(deps.project, deps.sourceVideos)
+    expect(saveProject).toHaveBeenCalledWith(deps.project, deps.sourceVideos, undefined, {
+      inPoint: null,
+      outPoint: null,
+      markers: [],
+    })
     expect(deps.showNotification).toHaveBeenCalledWith('Project saved successfully', 'success')
     expect(result.current.isSaving).toBe(false)
   })
@@ -608,3 +612,85 @@ describe('starting a new project', () => {
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 })
+
+describe('the editor block (ESCSUITE-245)', () => {
+  const marker = (id: string, time: number) => ({ id, time, label: id, color: '#ffcc00' })
+  const projectWithClip = () => ({
+    ...useEditorStore.getState().project,
+    timeline: {
+      ...useEditorStore.getState().project.timeline,
+      clips: [{
+        id: 'c1', sourceVideoId: 'v1', name: 'c1', startTime: 0, endTime: 10, duration: 10,
+        trackId: useEditorStore.getState().project.timeline.tracks[0].id, timelinePosition: 0,
+        blendMode: 'normal', transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+        effects: { blur: 0 }, transition: { type: 'none', duration: 0.5 },
+      }],
+      duration: 10,
+    },
+  })
+  const open = async (editor: unknown) => {
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockResolvedValue({
+      project: projectWithClip() as never,
+      sourceVideos: [{ ...sampleVideo }],
+      editor,
+    } as never)
+    const view = mountActions({ clipCount: 0 })
+    await act(async () => {
+      await view.result.current.handleLoadProject()
+    })
+    return view
+  }
+
+  it('saves the store\'s current range and markers with the project', async () => {
+    store().setInPoint(1)
+    store().setOutPoint(4)
+    store().addMarker(2, 'two')
+    const { result } = mountActions()
+
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+
+    expect(saveProject).toHaveBeenCalledWith(deps.project, deps.sourceVideos, undefined, {
+      inPoint: 1,
+      outPoint: 4,
+      markers: useEditorStore.getState().markers,
+    })
+  })
+
+  it('applies a loaded range and markers after the project lands, then clears the history', async () => {
+    const order: string[] = []
+    deps.setProject = vi.fn(() => { order.push('setProject') })
+    deps.clearHistory = vi.fn(() => { order.push(`clearHistory:${useEditorStore.getState().inPoint}`) })
+
+    const undoableBefore = useEditorStore.getState().canUndo()
+    await open({ inPoint: 1, outPoint: 40, markers: [marker('b', 6), marker('a', 2)] })
+
+    expect(useEditorStore.getState().inPoint).toBe(1)
+    expect(useEditorStore.getState().outPoint).toBe(10)
+    expect(useEditorStore.getState().markers).toEqual([marker('a', 2), marker('b', 6)])
+    expect(order).toEqual(['setProject', 'clearHistory:1'])
+    expect(useEditorStore.getState().canUndo()).toBe(undoableBefore)
+  })
+
+  it('leaves the reset defaults alone for a file with no block', async () => {
+    await open(undefined)
+
+    expect(useEditorStore.getState().inPoint).toBeNull()
+    expect(useEditorStore.getState().markers).toEqual([])
+    expect(deps.showNotification).toHaveBeenCalledWith('Project loaded successfully', 'success')
+  })
+
+  it('refuses a malformed block before resetting the editor, naming the field', async () => {
+    await open({ inPoint: 5, outPoint: 1, markers: [] })
+
+    expect(deps.resetProject).not.toHaveBeenCalled()
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      expect.stringContaining('editor.inPoint'),
+      'error'
+    )
+  })
+})
+

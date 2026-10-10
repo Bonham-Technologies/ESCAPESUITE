@@ -12,6 +12,7 @@ import {
 } from './projectManager'
 // The real storage layer, running on the fake-indexeddb installed by
 // src/test/setup.ts — save/load really round-trips through IndexedDB here.
+import { parseProject } from '../store/projectMigration'
 import { deleteVideo, getAllVideoMetadata, getThumbnail, getVideo, storeThumbnail, storeVideo } from './storage'
 import type { Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
@@ -1303,3 +1304,78 @@ describe('showOpenProjectDialog', () => {
     await expect(showOpenProjectDialog()).resolves.toBeNull()
   })
 })
+
+describe('the editor block in the project file (ESCSUITE-245)', () => {
+  let clickSpy: ReturnType<typeof vi.spyOn>
+  let createObjectURL: ReturnType<typeof vi.spyOn>
+  let fileReader: ReturnType<typeof installFileReaderDouble>
+  let media: MediaDoubles
+
+  beforeEach(() => {
+    clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    createObjectURL = vi.spyOn(URL, 'createObjectURL')
+    fileReader = installFileReaderDouble()
+    media = installMediaElementDoubles({ video: { duration: 42, videoWidth: 1280, videoHeight: 720 } })
+  })
+
+  afterEach(() => {
+    media.uninstall()
+    fileReader.uninstall()
+    clickSpy.mockRestore()
+    createObjectURL.mockRestore()
+  })
+
+  const marker = (id: string, time: number) => ({ id, time, label: id, color: '#ffcc00' })
+  const lastFile = async (): Promise<File> => {
+    const blob = createObjectURL.mock.calls.at(-1)![0] as Blob
+    return new File([await blob.text()], 'p.veditor', { type: 'application/json' })
+  }
+
+  it('writes the range and markers beside the project, not inside it', async () => {
+    const id = uniqueId('ed')
+    const editor = { inPoint: 1, outPoint: 4, markers: [marker('b', 3), marker('a', 1)] }
+    await saveProject(createTestProject(id), [], undefined, editor)
+
+    const saved = JSON.parse(await (await lastFile()).text())
+    expect(saved.editor).toEqual(editor)
+    expect('editor' in saved.project).toBe(false)
+  })
+
+  it('round trips a range and three unsorted markers, the markers coming back sorted', async () => {
+    const id = uniqueId('ed')
+    await saveProject(createTestProject(id), [], undefined, {
+      inPoint: 1, outPoint: 4, markers: [marker('c', 9), marker('a', 2), marker('b', 5)],
+    })
+
+    const loaded = await loadProject(await lastFile())
+    const parsed = parseProject(loaded.project, loaded.editor)
+
+    expect(parsed.ok).toBe(true)
+    if (parsed.ok) {
+      expect(parsed.editor).toEqual({
+        inPoint: 1, outPoint: 4, markers: [marker('a', 2), marker('b', 5), marker('c', 9)],
+      })
+    }
+  })
+
+  it('an old file without the block loads with no editor state', async () => {
+    const id = uniqueId('ed')
+    await saveProject(createTestProject(id), [])
+
+    const loaded = await loadProject(await lastFile())
+    expect(loaded.editor).toBeUndefined()
+    const parsed = parseProject(loaded.project, loaded.editor)
+    expect(parsed.ok && parsed.editor).toBeUndefined()
+  })
+
+  it('hands back a malformed block as it found it, for parseProject to refuse by name', async () => {
+    const id = uniqueId('ed')
+    await saveProject(createTestProject(id), [], undefined, { inPoint: 5, outPoint: 1, markers: [] })
+
+    const loaded = await loadProject(await lastFile())
+    const parsed = parseProject(loaded.project, loaded.editor)
+    expect(parsed.ok).toBe(false)
+    if (!parsed.ok) expect(parsed.reason).toContain('editor.inPoint')
+  })
+})
+

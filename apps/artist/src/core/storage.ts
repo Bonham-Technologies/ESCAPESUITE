@@ -1,6 +1,6 @@
 // ESCAPEARTIST storage layer - extends shared storage with project-specific operations
 
-import type { Project } from '../store/types'
+import type { Project, EditorBlock } from '../store/types'
 
 // Re-export all shared storage functions
 export {
@@ -36,6 +36,8 @@ export interface SessionState {
   currentTime: number
   selectedClipId: string | null
   zoom: number
+  /** In/out points and markers (ESCSUITE-245). Absent on a session saved before it. */
+  editor?: EditorBlock
   timestamp: number
 }
 

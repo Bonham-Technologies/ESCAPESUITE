@@ -3064,6 +3064,34 @@ saved) and against the fix (2 / 2), on Chromium against `pnpm build:deploy` —
 suites and the kit's `test:run` are green unchanged; no app source moved, and the apps' figures do
 not move. **No floor crossed**; shared's floors stay 100 / 98 / 92 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-245 (markers and the in/out points are
+saved in the `.veditor` file and in the session autosave as one `EditorBlock` beside the project, and
+come back on reopen or restore: `parseProject(input, editorInput?)` validates a file's block with the
+field named — `editor.inPoint`, `editor.markers[i].time`, a duplicate marker id, an inverted or equal
+pair, unsorted markers — and clamps the points to the timeline's length, dropping a range that
+collapses; the autosave path repairs a bad field with one warning instead of refusing the user's own
+session; the block is applied after `setProject` and before `clearHistory` on both paths, so restoring
+it is not an undo step): **99.82** / 99.32 / **96.19** / **99.70** against the 99.81 / 99.32 / 96.14 /
+99.69 that `main` at `b586e904` (the ESCSUITE-242 version-packages commit) measures in the same
+sitting — lines, branches and functions each up a hundredth or five, statements unmoved. The base
+gives 5,335 / 5,549 branches and this branch 5,412 / 5,626: seventy-seven new branches, seventy-seven
+covered, the same 214 uncovered as before (lines 8,305 / 8,320 → 8,369 / 8,384, statements
+9,380 / 9,444 → 9,449 / 9,513, functions 1,985 / 1,991 → 1,994 / 2,000, every denominator growing by
+exactly what the numerator did; the same 15 / 64 / 6 uncovered). The seventy-seven are
+`store/projectMigration.ts`'s sixty-five (128 → 193: `validateEditorBlock`'s shape, type, range,
+uniqueness, order and inverted-pair arms, `clampEditorBlock`'s lone-in-at-or-past-the-end,
+lone-out-past-the-end, collapsed-range and marker-kept arms, and `repairEditorBlock`'s per-field
+defaults, each reached from both sides by the refusals that name their field and the accepted,
+clamped and repaired blocks), `app/useSessionAutosave.ts`'s four (12 → 16: the subscription re-arming
+on an in/out or marker change against the project edits that already armed it), `app/editorBlock.ts`'s
+four on arrival (`applyEditorBlock`'s points-or-not and markers-or-not), `app/useProjectActions.ts`'s
+two (20 → 22: a loaded file with and without a block) and `core/projectManager.ts`'s two (54 → 56: a
+save with and without one); `store/markerSlice.ts`'s `setMarkers` is one non-history `set`, a
+function and no decision. Red-first: 29 of the new or changed cases failed before the fix. The
+review's follow-ups (the lone-point rules, the marker refusals naming `editor.markers[i].<field>`) are
+in these numbers. The three rerender pins and every `*.perf.test.ts` are byte-identical. **No floor
+crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3071,7 +3099,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.81 | 99.32 | 96.14 | 99.69 |
+| `@escapesuite/artist` | 99.82 | 99.32 | 96.19 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

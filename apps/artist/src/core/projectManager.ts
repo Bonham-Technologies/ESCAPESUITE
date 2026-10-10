@@ -1,6 +1,6 @@
 // Project save/load functionality
 
-import type { Project, SourceVideo, Clip } from '../store/types';
+import type { Project, SourceVideo, Clip, EditorBlock } from '../store/types';
 import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
 
@@ -29,6 +29,12 @@ export type SourceVideoMeta = Omit<SourceVideo, 'id' | 'name' | 'mimeType' | 'si
 export interface ProjectFile {
   version: number;
   project: Project;
+  /**
+   * The in/out points and markers (ESCSUITE-245). Beside `project`, not inside
+   * it. Additive: absent on a file saved before the ticket, which loads with
+   * no range and no markers. Validated by `parseProject` on the way in.
+   */
+  editor?: EditorBlock;
   videos: {
     id: string;
     name: string;
@@ -143,7 +149,9 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 export async function saveProject(
   project: Project,
   sourceVideos: SourceVideo[],
-  onProgress?: (progress: number, message: string) => void
+  onProgress?: (progress: number, message: string) => void,
+  /** Handed in, as `sourceVideos` is, rather than read from the store here. */
+  editor?: EditorBlock
 ): Promise<void> {
   onProgress?.(0, 'Preparing project data...');
 
@@ -154,6 +162,7 @@ export async function saveProject(
   const projectFile: ProjectFile = {
     version: CURRENT_VERSION,
     project,
+    ...(editor && { editor }),
     videos: [],
   };
 
@@ -275,7 +284,7 @@ async function resolveMetaDimensions(
 export async function loadProject(
   file: File,
   onProgress?: (progress: number, message: string) => void
-): Promise<{ project: Project; sourceVideos: SourceVideo[] }> {
+): Promise<{ project: Project; sourceVideos: SourceVideo[]; editor?: unknown }> {
   onProgress?.(0, 'Reading project file...');
 
   // Read file content
@@ -437,7 +446,8 @@ export async function loadProject(
 
   onProgress?.(100, 'Project loaded!');
 
-  return { project, sourceVideos };
+  // Handed back as found: `parseProject` validates it (a file is untrusted).
+  return { project, sourceVideos, editor: projectFile.editor };
 }
 
 /**

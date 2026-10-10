@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useEditorStore } from './projectStore'
-import { parseProject } from './projectMigration'
+import { parseProject, repairEditorBlock } from './projectMigration'
 import { DEFAULT_ANIMATION } from './types'
 import type { Project } from './types'
 import { buildMaskedSceneProject } from '../test/fixtures/perfScene'
@@ -668,6 +668,131 @@ describe('parseProject (ESCSUITE-102)', () => {
         expect(result.project.resolution).toEqual({ width: 1920, height: 1080 })
       }
     })
+  })
+})
+
+describe('the editor block (ESCSUITE-245)', () => {
+  const project = (): Project => ({
+    id: 'p', name: 'Valid', created: 1, modified: 1,
+    resolution: { width: 1920, height: 1080 },
+    timeline: {
+      tracks: [{ id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }],
+      clips: [{
+        id: 'c1', sourceVideoId: 'v1', name: 'c1', startTime: 0, endTime: 10, duration: 10,
+        trackId: 't1', timelinePosition: 0, blendMode: 'normal',
+        transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+        effects: { blur: 0 }, transition: { type: 'none', duration: 0.5 },
+      }],
+      textOverlays: [], shapeOverlays: [], duration: 10,
+    },
+  })
+  const marker = (id: string, time: number) => ({ id, time, label: id, color: '#ffcc00' })
+  const block = (over: Record<string, unknown> = {}) => ({ inPoint: 1, outPoint: 4, markers: [], ...over })
+
+  it('accepts a file with no editor block and returns none', () => {
+    const result = parseProject(project())
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.editor).toBeUndefined()
+  })
+
+  it('accepts a valid block and sorts its markers by time', () => {
+    const result = parseProject(project(), block({ markers: [marker('c', 9), marker('a', 2), marker('b', 5)] }))
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.editor).toEqual(block({ markers: [marker('a', 2), marker('b', 5), marker('c', 9)] }))
+    }
+  })
+
+  it('accepts null points and one-sided points', () => {
+    for (const b of [block({ inPoint: null, outPoint: null }), block({ inPoint: 2, outPoint: null }), block({ inPoint: null, outPoint: 0 })]) {
+      const result = parseProject(project(), b)
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.editor).toEqual(b)
+    }
+  })
+
+  it.each([
+    ['an inverted pair', block({ inPoint: 4, outPoint: 1 }), 'editor.inPoint'],
+    ['an equal pair', block({ inPoint: 3, outPoint: 3 }), 'editor.inPoint'],
+    ['a negative inPoint', block({ inPoint: -1, outPoint: 4 }), 'editor.inPoint'],
+    ['a NaN outPoint', block({ outPoint: NaN }), 'editor.outPoint'],
+    ['a string outPoint', block({ outPoint: '4' }), 'editor.outPoint'],
+    ['a missing inPoint', { outPoint: 4, markers: [] }, 'editor.inPoint'],
+    ['markers that are not an array', block({ markers: {} }), 'editor.markers'],
+    ['a marker that is not an object', block({ markers: [marker('a', 1), 7] }), 'editor.markers[1]'],
+    ['a marker with a non-string id', block({ markers: [{ ...marker('a', 1), id: 5 }] }), 'editor.markers[0].id'],
+    ['a duplicate marker id', block({ markers: [marker('a', 1), marker('a', 2)] }), 'editor.markers[1].id'],
+    ['a negative marker time', block({ markers: [marker('z', 0), marker('y', 0), marker('a', -1)] }), 'editor.markers[2].time'],
+    ['a NaN marker time', block({ markers: [marker('a', NaN)] }), 'editor.markers[0].time'],
+    ['a non-string label', block({ markers: [{ ...marker('a', 1), label: 1 }] }), 'editor.markers[0].label'],
+    ['a non-string color', block({ markers: [{ ...marker('a', 1), color: null }] }), 'editor.markers[0].color'],
+    ['a block that is not an object', 'nope', 'editor'],
+  ])('refuses %s, naming the field', (_label, bad, field) => {
+    const result = parseProject(project(), bad)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toContain(field)
+  })
+
+  it('clamps points past the timeline to its length and keeps a marker past the end', () => {
+    const result = parseProject(project(), block({ inPoint: 3, outPoint: 99, markers: [marker('late', 50)] }))
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      expect(result.editor).toEqual(block({ inPoint: 3, outPoint: 10, markers: [marker('late', 50)] }))
+    }
+  })
+
+  it.each([
+    ['an in point past the end', block({ inPoint: 12, outPoint: null }), block({ inPoint: null, outPoint: null })],
+    ['an in point exactly at the end', block({ inPoint: 10, outPoint: null }), block({ inPoint: null, outPoint: null })],
+    ['an out point past the end', block({ inPoint: null, outPoint: 12 }), block({ inPoint: null, outPoint: null })],
+    ['a lone in point inside the timeline', block({ inPoint: 9, outPoint: null }), block({ inPoint: 9, outPoint: null })],
+    ['a lone out point exactly at the end', block({ inPoint: null, outPoint: 10 }), block({ inPoint: null, outPoint: 10 })],
+  ])('one-sided: %s', (_label, given, expected) => {
+    const result = parseProject(project(), given)
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.editor).toEqual(expected)
+  })
+
+  it('drops a range that collapses to nothing once clamped', () => {
+    const result = parseProject(project(), block({ inPoint: 20, outPoint: 30 }))
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.editor).toEqual(block({ inPoint: null, outPoint: null }))
+  })
+
+  it('does not touch the project it returns', () => {
+    const result = parseProject(project(), block())
+    expect(result.ok && 'editor' in result.project).toBe(false)
+  })
+})
+
+describe('repairEditorBlock — the autosave is repaired, not refused (ESCSUITE-245)', () => {
+  const marker = (id: string, time: number) => ({ id, time, label: '', color: '#fff' })
+  const clips = [{ timelinePosition: 0, duration: 10 }] as never
+
+  it('returns defaults, silently, for an old snapshot with no block', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(repairEditorBlock(undefined, clips)).toEqual({ inPoint: null, outPoint: null, markers: [] })
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('applies a valid block, sorted and clamped', () => {
+    const out = repairEditorBlock({ inPoint: 2, outPoint: 40, markers: [marker('b', 6), marker('a', 1)] }, clips)
+    expect(out).toEqual({ inPoint: 2, outPoint: 10, markers: [marker('a', 1), marker('b', 6)] })
+  })
+
+  it('drops a lone point past the end on the snapshot path too', () => {
+    expect(repairEditorBlock({ inPoint: 10, outPoint: null, markers: [] }, clips).inPoint).toBeNull()
+    expect(repairEditorBlock({ inPoint: null, outPoint: 11, markers: [] }, clips).outPoint).toBeNull()
+  })
+
+  it('drops a malformed block to defaults with one warning naming the field', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const out = repairEditorBlock({ inPoint: 5, outPoint: 1, markers: [marker('a', 1)] }, clips)
+    expect(out).toEqual({ inPoint: null, outPoint: null, markers: [] })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toContain('editor.inPoint')
+    warn.mockRestore()
   })
 })
 

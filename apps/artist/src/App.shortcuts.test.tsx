@@ -309,7 +309,12 @@ describe('App keyboard shortcuts', () => {
       press('s', { ctrlKey: true })
 
       await waitFor(() => expect(notification()).toBe('Project saved successfully'))
-      expect(saveProject).toHaveBeenCalledWith(store().project, store().sourceVideos)
+      expect(saveProject).toHaveBeenCalledWith(
+        store().project,
+        store().sourceVideos,
+        undefined,
+        { inPoint: null, outPoint: null, markers: [] }
+      )
     })
 
     it('reports a failed save', async () => {

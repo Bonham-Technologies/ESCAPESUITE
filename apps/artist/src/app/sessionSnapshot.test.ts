@@ -25,8 +25,25 @@ describe('buildSessionSnapshot', () => {
       currentTime: 3.5,
       selectedClipId: clip.id,
       zoom: 2,
+      editor: { inPoint: null, outPoint: null, markers: [] },
       timestamp: 123456789,
     });
+  });
+
+  it('writes the in/out points and the markers as the editor block (ESCSUITE-245)', () => {
+    store().setInPoint(1);
+    store().setOutPoint(4);
+    store().addMarker(7, 'late');
+    store().addMarker(2, 'early');
+
+    const snapshot = buildSessionSnapshot(useEditorStore.getState(), 1);
+
+    expect(snapshot.editor).toEqual({
+      inPoint: 1,
+      outPoint: 4,
+      markers: useEditorStore.getState().markers,
+    });
+    expect(snapshot.editor!.markers.map((m) => m.label)).toEqual(['early', 'late']);
   });
 
   it('takes the timestamp from the argument, not Date.now()', () => {

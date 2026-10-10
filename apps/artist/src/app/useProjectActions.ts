@@ -20,6 +20,7 @@ import { saveProject, loadProject, showOpenProjectDialog, ProjectTooLargeError }
 import { clearSessionState, revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
+import { applyEditorBlock, currentEditorBlock } from './editorBlock';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
@@ -83,7 +84,7 @@ export function useProjectActions({
   const handleSaveProject = useCallback(async () => {
     setIsSaving(true);
     try {
-      await saveProject(project, sourceVideos);
+      await saveProject(project, sourceVideos, undefined, currentEditorBlock());
       analytics.projectSaved();
       showNotification('Project saved successfully', 'success');
     } catch (error) {
@@ -107,13 +108,13 @@ export function useProjectActions({
     // thumbnail that is already live in the store and on screen.
     let mintedButNotYetOwned: SourceVideo[] | undefined;
     try {
-      const { project: loadedProject, sourceVideos: loadedVideos } = await loadProject(file);
+      const { project: loadedProject, sourceVideos: loadedVideos, editor: loadedEditor } = await loadProject(file);
       mintedButNotYetOwned = loadedVideos;
 
       // Validate (and migrate) before touching anything: ensureTimelineHasTracks
       // assumes a shape a malformed .veditor does not have, and used to throw
       // *after* resetProject() had already emptied the editor (ESCSUITE-102).
-      const parsed = parseProject(loadedProject);
+      const parsed = parseProject(loadedProject, loadedEditor);
       if (!parsed.ok) {
         // loadProject already minted a thumbnailUrl for each of these —
         // nothing is ever going to render them now, and nothing else would
@@ -141,6 +142,11 @@ export function useProjectActions({
         mintedButNotYetOwned = loadedVideos.slice(i + 1);
       }
       mintedButNotYetOwned = undefined;
+
+      // ESCSUITE-245: the file's range and markers, validated and clamped by
+      // parseProject. resetProject() has already cleared the outgoing ones, so
+      // a file without the block simply keeps those defaults.
+      if (parsed.editor) applyEditorBlock(parsed.editor);
 
       // ESCSUITE-164: resetProject() + setProject() + one addSourceVideo per
       // source each push their own history entry — left alone, one Ctrl+Z
@@ -197,7 +203,7 @@ export function useProjectActions({
     // fails for any reason did not happen, so the load must not either, and
     // the user has to be able to choose again.
     try {
-      await saveProject(project, sourceVideos);
+      await saveProject(project, sourceVideos, undefined, currentEditorBlock());
     } catch (error) {
       console.error('Failed to save current project:', error);
       showNotification(

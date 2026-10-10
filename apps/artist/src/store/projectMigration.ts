@@ -1,7 +1,7 @@
 // Migration of a loaded project onto the current timeline shape: resolution,
 // tracks, overlay arrays, and the legacy overlays that fold into clips.
 
-import type { Clip, ClipTransform, Project } from './types';
+import type { Clip, ClipTransform, EditorBlock, Marker, Project } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from './types';
 import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
@@ -127,7 +127,7 @@ function ensureTimelineHasTracks(project: Project): Project {
 
 /** What `parseProject` hands back: a migrated project, or why it refused one. */
 export type ParseProjectResult =
-  | { ok: true; project: Project }
+  | { ok: true; project: Project; editor?: EditorBlock }
   | { ok: false; reason: string };
 
 // The smallest raster worth encoding, and the largest the exporters are ever
@@ -182,6 +182,113 @@ function isValidTransform(transform: unknown): transform is ClipTransform {
   );
 }
 
+/** `null`, or a finite number >= 0: what an in or out point may be. */
+function isValidPoint(value: unknown): value is number | null {
+  return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
+/**
+ * Validate an `editor` block (ESCSUITE-245) as untrusted input: each point
+ * `null` or a finite number >= 0, an inverted or equal pair refused rather than
+ * swapped, and `markers` a list of `{ id, time, label, color }` with unique
+ * string ids and a finite time >= 0. The reason names the field. Markers come
+ * back sorted by time, which the UI's next / previous navigation assumes.
+ * Clamping to the timeline is a separate step (`clampEditorBlock`).
+ */
+export function validateEditorBlock(
+  raw: unknown
+): { ok: true; editor: EditorBlock } | { ok: false; reason: string } {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, reason: 'editor must be an object' };
+  }
+  const { inPoint, outPoint, markers } = raw as Record<string, unknown>;
+  if (!isValidPoint(inPoint)) {
+    return { ok: false, reason: 'editor.inPoint must be null or a number of seconds, 0 or more' };
+  }
+  if (!isValidPoint(outPoint)) {
+    return { ok: false, reason: 'editor.outPoint must be null or a number of seconds, 0 or more' };
+  }
+  if (inPoint !== null && outPoint !== null && inPoint >= outPoint) {
+    return { ok: false, reason: 'editor.inPoint must be before editor.outPoint' };
+  }
+  if (!Array.isArray(markers)) {
+    return { ok: false, reason: 'editor.markers is not a list' };
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < markers.length; i++) {
+    const m = markers[i] as Partial<Marker> | null;
+    const at = `editor.markers[${i}]`;
+    if (!m || typeof m !== 'object') {
+      return { ok: false, reason: `${at} must be an object` };
+    }
+    if (typeof m.id !== 'string') {
+      return { ok: false, reason: `${at}.id must be a string` };
+    }
+    if (typeof m.time !== 'number' || !Number.isFinite(m.time) || m.time < 0) {
+      return { ok: false, reason: `${at}.time must be a number of seconds, 0 or more` };
+    }
+    if (typeof m.label !== 'string') {
+      return { ok: false, reason: `${at}.label must be a string` };
+    }
+    if (typeof m.color !== 'string') {
+      return { ok: false, reason: `${at}.color must be a string` };
+    }
+    if (seen.has(m.id)) {
+      return { ok: false, reason: `${at}.id is a duplicate: ${m.id}` };
+    }
+    seen.add(m.id);
+  }
+  const sorted = (markers as Marker[])
+    .map((m) => ({ id: m.id, time: m.time, label: m.label, color: m.color }))
+    .sort((a, b) => a.time - b.time);
+  return { ok: true, editor: { inPoint, outPoint, markers: sorted } };
+}
+
+/**
+ * Clamp the in/out points to the timeline's length (ESCSUITE-245): a file
+ * saved with a range and then edited elsewhere is still openable. A range that
+ * collapses to nothing once clamped is dropped. Markers are annotations, not
+ * playback bounds, so one past the end is kept. A one-sided point past the end
+ * (an in point at or past it, an out point past it) is dropped to `null`.
+ */
+function clampEditorBlock(editor: EditorBlock, duration: number): EditorBlock {
+  // A lone point past the end has nothing to bound against: dropped, not
+  // clamped onto the end (an in point AT the end is a range the export refuses).
+  if (editor.outPoint === null && editor.inPoint !== null && editor.inPoint >= duration) {
+    return { ...editor, inPoint: null };
+  }
+  if (editor.inPoint === null && editor.outPoint !== null && editor.outPoint > duration) {
+    return { ...editor, outPoint: null };
+  }
+  const inPoint = editor.inPoint === null ? null : Math.min(editor.inPoint, duration);
+  const outPoint = editor.outPoint === null ? null : Math.min(editor.outPoint, duration);
+  if (inPoint !== null && outPoint !== null && inPoint >= outPoint) {
+    return { ...editor, inPoint: null, outPoint: null };
+  }
+  return { ...editor, inPoint, outPoint };
+}
+
+/**
+ * The editor block of the app's OWN autosave: repaired, not refused (the
+ * ESCSUITE-173 / 255 split). Absent gives the defaults silently; one that
+ * fails `validateEditorBlock` gives the defaults with one `console.warn`
+ * naming the field, so it never blocks the restore. Otherwise sorted and
+ * clamped to the length of `clips`.
+ */
+export function repairEditorBlock(
+  raw: unknown,
+  clips: Pick<Clip, 'timelinePosition' | 'duration'>[]
+): EditorBlock {
+  const defaults: EditorBlock = { inPoint: null, outPoint: null, markers: [] };
+  if (raw === undefined) return defaults;
+  const checked = validateEditorBlock(raw);
+  if (!checked.ok) {
+    console.warn(`Dropped the saved range and markers: ${checked.reason}`);
+    return defaults;
+  }
+  return clampEditorBlock(checked.editor, calculateTimelineDuration(clips as Clip[]));
+}
+
 /**
  * Validate a project shape before anything downstream touches it, and only
  * then run the existing migration on it.
@@ -224,8 +331,15 @@ function isValidTransform(transform: unknown): transform is ClipTransform {
  * `core/cropDrag.ts`'s `sourceDelta` divides by it. An *absent* transform is
  * left untouched, to whatever default the caller (the migration below, or a
  * headless render) supplies.
+ *
+ * `editorInput` is the file's `editor` block, which sits BESIDE the project
+ * and not inside it (ESCSUITE-245): validated by name with `validateEditorBlock`
+ * (refused when malformed, since a file is untrusted input), clamped to the
+ * migrated timeline and returned as `editor`. Absent in, absent out — the
+ * caller keeps the defaults. The host's `LOAD_PROJECT` and the headless entry
+ * pass none and ignore the field.
  */
-export function parseProject(input: unknown): ParseProjectResult {
+export function parseProject(input: unknown, editorInput?: unknown): ParseProjectResult {
   if (!input || typeof input !== 'object') {
     return { ok: false, reason: 'Not a project file' };
   }
@@ -297,6 +411,13 @@ export function parseProject(input: unknown): ParseProjectResult {
     }
   }
 
+  let editorChecked: { ok: true; editor: EditorBlock } | undefined;
+  if (editorInput !== undefined) {
+    const checked = validateEditorBlock(editorInput);
+    if (!checked.ok) return checked;
+    editorChecked = checked;
+  }
+
   const migrated = ensureTimelineHasTracks(candidate as Project);
   const trackIds = new Set(migrated.timeline.tracks.map((track) => track.id));
 
@@ -309,7 +430,13 @@ export function parseProject(input: unknown): ParseProjectResult {
     }
   }
 
-  return { ok: true, project: migrated };
+  return {
+    ok: true,
+    project: migrated,
+    ...(editorChecked && {
+      editor: clampEditorBlock(editorChecked.editor, calculateTimelineDuration(migrated.timeline.clips)),
+    }),
+  };
 }
 
 export { ensureTimelineHasTracks };
