@@ -107,6 +107,9 @@ async function publishTemp(tempPath: string, finalPath: string): Promise<void> {
  * then proves it is writable by creating and removing a private temp file in it -- never by
  * `fs.access`, which cannot see ACLs or a read-only mount. Rejects with the directory and the
  * uid the process runs as, because "EACCES" alone does not tell an operator whom to chown to.
+ *
+ * Accepted limits: no `fs` error lacks a `code`, so none is defaulted; and a sticky-bit output
+ * directory is not a supported layout (the probe file could be left behind there).
  */
 export async function probeVolumeDir(configuredDir: string): Promise<void> {
   const dir = path.resolve(configuredDir)

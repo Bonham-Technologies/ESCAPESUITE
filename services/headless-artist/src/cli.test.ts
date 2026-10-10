@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs'
+import { mkdtempSync, promises as fs, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -67,7 +67,12 @@ let stderr: string[]
 let stdout: string[]
 let closeSpy: Mock<() => Promise<void>>
 
+// A real, private output directory per test: the volume pre-flight (ESCSUITE-236) creates and
+// writes it, so a fixed /tmp/out would be created on the host.
+let outDir = ''
+
 beforeEach(() => {
+  outDir = mkdtempSync(path.join(os.tmpdir(), 'headless-artist-out-'))
   stderr = []
   stdout = []
   closeSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
@@ -92,6 +97,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  rmSync(outDir, { recursive: true, force: true })
   fsState.realpathFails = false
   fsState.kitJson = undefined
   while (tempDirs.length > 0) {
@@ -113,7 +119,7 @@ function validSpec(overrides: Record<string, unknown> = {}): Record<string, unkn
     jobId: 'job-1',
     input: { manifest: { path: '/tmp/manifest.json' } },
     options: { format: 'mp4' },
-    output: { sink: 'volume', config: { dir: '/tmp/out' } },
+    output: { sink: 'volume', config: { dir: outDir } },
     ...overrides,
   }
 }

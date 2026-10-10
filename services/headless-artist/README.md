@@ -585,7 +585,7 @@ at all it falls back to the default command, which reads the job spec from stdin
 cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headless-artist
 ```
 
-This image is built from `services/headless-artist` and smoke-tested (`render` and `--version`)
+This image is built from `services/headless-artist` and smoke-tested (`render`, `serve` with a zombie check, and `--version`)
 in CI on every non-Dependabot pull request (the `kit-docker` job).
 
 Four things worth knowing:

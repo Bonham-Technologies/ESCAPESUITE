@@ -335,7 +335,13 @@ jobs:
           for n in 1 2 3; do test -f "$RUNNER_TEMP/out/ci-serve-$n.mp4"; done
 
           docker exec "$id" ps -eo stat,comm
-          zombies=$(docker exec "$id" ps -eo stat,comm | awk '$1 ~ /^Z/' | wc -l)
+          # Poll briefly: a helper still exiting is not a leak; a zombie that persists is.
+          zombies=-1
+          for _ in $(seq 1 10); do
+            zombies=$(docker exec "$id" ps -eo stat,comm | awk '$1 ~ /^Z/' | wc -l)
+            [ "$zombies" = "0" ] && break
+            sleep 1
+          done
           if [ "$zombies" != "0" ]; then
             echo "::error::$zombies zombie process(es) inside the serve container"
             exit 1

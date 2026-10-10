@@ -19,7 +19,7 @@ spec:
       containers:
         - name: headless-artist
           image: headless-artist:latest
-          # The image's ENTRYPOINT is `node dist/cli.js`; args are the CLI's own, so the
+          # The image's ENTRYPOINT is `tini -- node dist/cli.js`; args are the CLI's own, so the
           # command name comes first.
           args: ["render", "--job", "/in/job.json"]
           env:
