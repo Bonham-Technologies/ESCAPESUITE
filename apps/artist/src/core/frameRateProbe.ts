@@ -14,11 +14,15 @@
  * Half speed because `requestVideoFrameCallback` fires at most once per
  * *rendered* frame: at 1x on a 60 Hz display a 120 fps file shows every other
  * frame, and its callbacks describe a 60 fps file (review round 2). At 0.5x a
- * source up to twice the display's refresh rate can be sampled reliably; at
- * exactly twice it is presented at the refresh rate with no headroom, so a
- * missed refresh drops a frame — a real 120 fps run did — and
- * `rateFromMediaTimes` counts each one as a missing interval. A source faster
- * than twice the refresh rate drops a frame at every presentation and still
+ * source up to twice the display's refresh rate can be sampled; at exactly
+ * twice it is presented at the refresh rate with no headroom, and a real
+ * 120 fps run reported a callback for only some of its frames.
+ * `rateFromMediaTimes` counts the intervals from the compositor's own
+ * presented-frame counter where the engine reports one, so a callback the page
+ * missed — a busy main thread, a loaded machine — changes how many callbacks
+ * the probe sees but not the rate it reads; without the counter it counts them
+ * from the media times. A source faster than twice the refresh rate has frames
+ * the compositor itself never presents, which neither count sees, and still
  * under-reads.
  *
  * 500 ms rather than 400 because half speed halves the media the budget
@@ -81,37 +85,62 @@ function snapFrameRate(rate: number): number {
 }
 
 /**
- * The frame rate a run of presented frames' `mediaTime`s implies.
+ * The frame rate a run of presented frames implies, from each frame callback's
+ * `mediaTime` and, where the engine reports it, its `presentedFrames`.
  *
  * Not one over a spacing: a WebM stamps frames in whole milliseconds, so a
  * 30 fps file's spacings are 33, 34, 33… ms and any one of them reads as 30.30
- * or 29.41 — about 3 % out, at every rate, and stored as `'measured'`. The
- * spacings are used only to **count** the intervals the run spans, and the
- * rate is `intervals / span`, so the millisecond of rounding is spread over the
- * whole span rather than one interval. Then `snapFrameRate`.
+ * or 29.41 — about 3 % out, at every rate, and stored as `'measured'`. The rate
+ * is `intervals / span`, the source intervals the run covers over its media
+ * span, so the millisecond of rounding is spread over the whole span rather
+ * than one interval. Then `snapFrameRate`.
  *
- * Each spacing is counted on its own, as `round(spacing / smallest)` whole
- * intervals, against the smallest positive spacing in the run. A dropped frame
- * therefore adds one interval wherever it falls, and each spacing's rounding
- * error stays inside that spacing — about 4 % of one interval at 120 fps with
- * millisecond stamps, so a gap of up to about ten frames still counts exactly.
- * Review round 2 (F1) found the count it replaced, `round(span / median)`,
- * wrong once frames drop: with millisecond stamps the median of a 120 fps run
- * is a rounded 8 ms against a true 8.33, and over a long span the difference
- * becomes a whole interval (a real run read 126.87); and once half the
- * spacings are doubled the median is a doubled one and the rate halves. The
- * smallest spacing is the true interval unless every presentation dropped a
- * frame — a source faster than twice the display's refresh rate, which nothing
- * here can detect. A repeated presentation time (a zero spacing) counts
- * nothing; a time that goes backwards means the run describes nothing, and it
- * is refused.
+ * **The count, from the compositor** (review round 3, G1). `presentedFrames`
+ * is the compositor's own count of the frames it has presented, so the count
+ * between the first and last callback is the number of source intervals
+ * between them, whatever the page missed. A busy main thread — the import's
+ * own thumbnail and waveform work, a loaded machine — delays frame callbacks,
+ * and can make every spacing the page sees a multiple of the true interval: a
+ * 60 fps file read 20 and 16 from its media times alone in real Chromium. It
+ * changes how many callbacks the probe sees, not the counter, which an
+ * instrumented run matched to every media-time jump, one for one, quiet, loaded
+ * and busy. A counter that advanced less than once per callback describes no
+ * run of presented frames, and is refused. `droppedVideoFrames` is not read:
+ * Chromium advances it about once per callback on every file, quiet or not,
+ * while every presented frame is consecutive.
  *
- * Fewer than three frames, a run that ends no later than it starts, or one
- * whose presentation times go backwards answers `undefined`.
+ * **The count, from the media times** — the fallback for an engine whose frame
+ * callbacks carry no `presentedFrames`. Each spacing is counted on its own, as
+ * `round(spacing / smallest)` whole intervals, against the smallest positive
+ * spacing in the run. A dropped frame therefore adds one interval wherever it
+ * falls, and each spacing's rounding error stays inside that spacing — about
+ * 4 % of one interval at 120 fps with millisecond stamps, so a gap of up to
+ * about ten frames still counts exactly. Review round 2 (F1) found the count it
+ * replaced, `round(span / median)`, wrong once frames drop: with millisecond
+ * stamps the median of a 120 fps run is a rounded 8 ms against a true 8.33, and
+ * over a long span the difference becomes a whole interval (a real run read
+ * 126.87); and once half the spacings are doubled the median is a doubled one
+ * and the rate halves. The smallest spacing is the true interval unless every
+ * presented frame dropped one or more frames before it — a source faster than
+ * twice the display's refresh rate, or a run under load — and then this count
+ * under-reads, with nothing in the media times to show it. A repeated
+ * presentation time (a zero spacing) counts nothing.
+ *
+ * On a variable-rate source (a screen capture, a MediaRecorder take) the
+ * media-time count follows the closest pair of frames presented, so it errs
+ * high, never low.
+ *
+ * Fewer than three frames, a run that ends no later than it starts, one whose
+ * presentation times go backwards, or one whose counter advanced fewer times
+ * than there were callbacks after the first answers `undefined`.
  */
-export function rateFromMediaTimes(mediaTimes: readonly number[]): number | undefined {
+export function rateFromMediaTimes(
+  mediaTimes: readonly number[],
+  presentedFrames?: readonly (number | undefined)[]
+): number | undefined {
   if (mediaTimes.length < 3) return undefined;
-  const span = mediaTimes[mediaTimes.length - 1] - mediaTimes[0];
+  const last = mediaTimes.length - 1;
+  const span = mediaTimes[last] - mediaTimes[0];
   if (!(span > 0)) return undefined;
   let smallest = Infinity;
   for (let i = 1; i < mediaTimes.length; i++) {
@@ -119,6 +148,16 @@ export function rateFromMediaTimes(mediaTimes: readonly number[]): number | unde
     if (spacing < 0) return undefined;
     if (spacing > 0 && spacing < smallest) smallest = spacing;
   }
+
+  // NaN — so the media times decide — unless both ends carry a finite count.
+  const presented = (presentedFrames?.[last] ?? NaN) - (presentedFrames?.[0] ?? NaN);
+  if (Number.isFinite(presented)) {
+    // One presented frame per callback is the least a real run can show; with
+    // three or more callbacks this also refuses a count below two.
+    if (presented < last) return undefined;
+    return snapFrameRate(presented / span);
+  }
+
   // `span > 0` with no spacing negative means at least one is positive, and
   // that one counts at least one interval: `intervals` is never 0.
   let intervals = 0;
@@ -133,7 +172,7 @@ export function rateFromMediaTimes(mediaTimes: readonly number[]): number | unde
  * Play `video` muted and read its frame rate off the frames it presents.
  *
  * Seeks it to 0, plays it at `playbackRate`, then collects
- * `requestVideoFrameCallback`'s `mediaTime` until `maxFrames` frames have been
+ * `requestVideoFrameCallback`'s `mediaTime` and `presentedFrames` until `maxFrames` frames have been
  * presented or `maxMs` has passed, then pauses the element, puts its own
  * playback rate back, seeks it to 0 and answers `rateFromMediaTimes` of what it
  * saw. `mediaTime` is media time, so the rate it reads is the file's whatever
@@ -157,6 +196,7 @@ export function measureFrameRate(
 
   return new Promise((resolve) => {
     const mediaTimes: number[] = [];
+    const presentedFrames: (number | undefined)[] = [];
     let handle = 0;
     let finished = false;
     const previousPlaybackRate = video.playbackRate;
@@ -169,11 +209,12 @@ export function measureFrameRate(
       video.pause();
       video.playbackRate = previousPlaybackRate;
       video.currentTime = 0;
-      resolve(rateFromMediaTimes(mediaTimes));
+      resolve(rateFromMediaTimes(mediaTimes, presentedFrames));
     };
 
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
       mediaTimes.push(metadata.mediaTime);
+      presentedFrames.push(metadata.presentedFrames);
       if (mediaTimes.length >= maxFrames) {
         finish();
         return;
