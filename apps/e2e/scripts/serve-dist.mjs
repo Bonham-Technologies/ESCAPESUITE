@@ -13,8 +13,16 @@
  *     `/` 404s, and a catch-all rewrite for `/` is re-applied recursively to
  *     the craft/artist destinations, which sends those back to the hub.
  *
- * Resolution order (first match wins), mirroring Vercel's own filesystem-
- * first semantics:
+ * Resolution order (first match wins), mirroring Vercel's own semantics:
+ *   0. the first `vercel.json` `redirects` entry whose `source` matches →
+ *      308 (or 307 when `permanent` is false) with `Location` set to the
+ *      destination plus the request's ORIGINAL query string (Vercel keeps
+ *      the query on a redirect by default). Redirects run before the
+ *      filesystem and before rewrites (ESCSUITE-234: `/artist` and `/craft`
+ *      used to be rewritten, so the document URL stayed slashless and the
+ *      hosted worker chunk resolved against the site root; a deep path such
+ *      as `/artist/foo/` redirects to the one document too, because neither
+ *      app has client-side routes, only query parameters)
  *   1. an actual file on disk        → served as-is
  *   2. the first `vercel.json` `rewrites` entry whose `source` matches,
  *      PROVIDED its `destination` exists on disk → served as that file
@@ -156,6 +164,24 @@ export function assertVercelSettingsSupported(config) {
 assertVercelSettingsSupported(vercelConfig)
 
 /**
+ * The first `vercel.json` `redirects` entry whose `source` matches this path
+ * (path only, no query), as `{ destination, statusCode }`, or null. `$1`-style
+ * captures in the destination are substituted. Status follows Vercel:
+ * explicit `statusCode`, else 308 for `permanent: true`, else 307.
+ */
+export function redirectFor(requestPath, redirects = vercelConfig.redirects ?? []) {
+  for (const entry of redirects) {
+    if (matchesSource(entry.source, requestPath)) {
+      const match = new RegExp(`^${entry.source}$`).exec(requestPath)
+      const destination = entry.destination.replace(/\$(\d+)/g, (_, n) => match[Number(n)] ?? '')
+      const statusCode = entry.statusCode ?? (entry.permanent ? 308 : 307)
+      return { destination, statusCode }
+    }
+  }
+  return null
+}
+
+/**
  * Pure file-or-rewrite decision for one request path, given `vercel.json`'s
  * `rewrites` array (in priority order, first match wins — Vercel's own
  * semantics) and a `fileExists` predicate. No filesystem access of its own,
@@ -221,6 +247,17 @@ function createRequestHandler(base) {
     } catch {
       res.writeHead(400)
       res.end('Bad request')
+      return
+    }
+
+    const redirect = redirectFor(requestPath)
+    if (redirect) {
+      const search = new URL(req.url, 'http://localhost').search
+      res.writeHead(redirect.statusCode, {
+        Location: redirect.destination + search,
+        'Cache-Control': 'no-store',
+      })
+      res.end()
       return
     }
 
@@ -295,6 +332,6 @@ export function createServer(base = root) {
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const server = createServer(root)
   server.listen(port, '127.0.0.1', () => {
-    console.log(`Serving ${root} at http://localhost:${port} (vercel.json rewrites)`)
+    console.log(`Serving ${root} at http://localhost:${port} (vercel.json redirects + rewrites)`)
   })
 }
