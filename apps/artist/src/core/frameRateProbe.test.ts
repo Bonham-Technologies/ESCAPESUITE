@@ -33,14 +33,59 @@ describe('rateFromMediaTimes', () => {
     expect(rateFromMediaTimes(spaced(1001 / 60000, 8))).toBe(59.94)
   })
 
-  it('snaps a rate measured a little off an NTSC rate, within 0.6 % of it and nearer it than the whole number', () => {
+  it('snaps a rate measured a little off a standard rate to the nearest one', () => {
     // 29.95 fps: 0.07 % from 29.97, 0.17 % from 30.
     expect(rateFromMediaTimes(spaced(1 / 29.95, 8))).toBe(29.97)
+    // 50.6 fps: 1.2 % from 50, inside the 1.5 % tolerance.
+    expect(rateFromMediaTimes(spaced(1 / 50.6, 8))).toBe(50)
   })
 
-  it('rounds any other rate to two decimals', () => {
-    expect(rateFromMediaTimes(spaced(1 / 120, 8))).toBe(120)
+  it.each([25, 48, 50, 90, 100, 120])('reads exactly %s fps as %s', (fps) => {
+    expect(rateFromMediaTimes(spaced(1 / fps, 8))).toBe(fps)
+  })
+
+  it('snaps 1001/120000-spaced frames to 119.88', () => {
+    expect(rateFromMediaTimes(spaced(1001 / 120000, 8))).toBe(119.88)
+  })
+
+  it('rounds a rate more than 1.5 % from every standard rate to two decimals', () => {
+    // 47.123 is 1.8 % from 48, the nearest.
     expect(rateFromMediaTimes(spaced(1 / 47.123, 8))).toBe(47.12)
+  })
+
+  // A WebM stamps every frame in whole milliseconds, so a 30 fps file presents
+  // its frames 33, 34, 33… ms apart. One spacing read as a rate is 30.30 or
+  // 29.41; the span over all eight frames is off by at most a millisecond.
+  // A whole-number rate and its NTSC neighbour, 0.1 % apart, cannot be told
+  // apart from millisecond timestamps over eight frames, so either is right.
+  describe('millisecond-rounded timestamps, as a WebM carries them', () => {
+    const ms = (times: number[]) => times.map((t) => Math.round(t * 1000) / 1000)
+
+    it.each([
+      [30, [30, 29.97]],
+      [60, [60, 59.94]],
+      [24, [24, 23.976]],
+      [120, [120, 119.88]],
+    ])('reads %s fps as that rate or its NTSC neighbour, from the first frame', (fps, accepted) => {
+      expect(accepted).toContain(rateFromMediaTimes(ms(spaced(1 / fps, 8))))
+    })
+
+    it.each([
+      [30, [30, 29.97]],
+      [60, [60, 59.94]],
+      [24, [24, 23.976]],
+      [25, [25]],
+      [50, [50]],
+    ])('reads %s fps the same way from any starting point', (fps, accepted) => {
+      for (let offset = 0; offset < 200; offset++) {
+        expect(accepted).toContain(rateFromMediaTimes(ms(spaced(1 / fps, 8, 1 + offset * 0.00137))))
+      }
+    })
+
+    it('still reads a dropped frame as one missing interval, not a slower rate', () => {
+      const times = ms([0, 1, 2, 4, 5, 6, 7, 8].map((n) => n / 30))
+      expect([30, 29.97]).toContain(rateFromMediaTimes(times))
+    })
   })
 
   it('takes the median spacing, so one dropped frame does not halve the rate', () => {
@@ -49,10 +94,27 @@ describe('rateFromMediaTimes', () => {
     expect(rateFromMediaTimes(times)).toBe(60)
   })
 
-  it('takes the mean of the middle two spacings when there is an even number of them', () => {
-    // Three frames, two deltas: 1/50 and 1/70; the mean spacing is 1/58.33….
+  it('counts intervals by the mean of the middle two spacings when there is an even number of them', () => {
+    // Three frames, two spacings, 1/50 and 1/70: their mean says the span holds
+    // two intervals, so the rate is 2 / (1/50 + 1/70) = 58.33.
     const times = [0, 1 / 50, 1 / 50 + 1 / 70]
     expect(rateFromMediaTimes(times)).toBe(58.33)
+  })
+
+  it('leaves a repeated or reordered presentation time out of the spacing it counts by', () => {
+    // A zero spacing among three frames used to halve the median and double
+    // the rate; here the one real spacing counts the span as one interval.
+    expect(rateFromMediaTimes([0, 0, 1 / 30])).toBe(30)
+    expect(rateFromMediaTimes([0, 1 / 30, 1 / 30, 2 / 30])).toBe(30)
+  })
+
+  it('answers nothing when the frames end no later than they start', () => {
+    expect(rateFromMediaTimes([1, 0.5, 0.6])).toBeUndefined()
+  })
+
+  it('answers nothing when the span is too short to hold one interval', () => {
+    // One spacing of 0.1 s, and the last frame 0.02 s after the first.
+    expect(rateFromMediaTimes([0, 0.1, 0.02])).toBeUndefined()
   })
 
   it('answers nothing from fewer than three frames', () => {
@@ -165,15 +227,45 @@ describe('measureFrameRate', () => {
     expect(v.play).toHaveBeenCalledTimes(1)
   })
 
-  it('stops after maxFrames presented frames, then pauses and seeks back to 0', async () => {
+  it('starts from 0, stops after maxFrames presented frames, then pauses and seeks back to 0', async () => {
     const v = probeVideo(spaced(1 / 24, 20, 3))
 
     await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBe(24)
 
     expect(v.delivered()).toBe(8)
     expect(v.pause).toHaveBeenCalledTimes(1)
-    expect(v.seeks).toEqual([0])
+    expect(v.seeks).toEqual([0, 0])
     expect(v.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('seeks to the start before it plays, wherever the element was left', async () => {
+    // A headerless WebM's duration probe leaves the element at its end.
+    const v = probeVideo(spaced(1 / 60, 8))
+    v.el.currentTime = 12.5
+    v.seeks.length = 0
+    const atPlay: number[] = []
+    v.play.mockImplementationOnce(function (this: unknown) {
+      atPlay.push(v.el.currentTime)
+      return v.play.getMockImplementation()!.call(this)
+    })
+
+    await measureFrameRate(v.el, FRAME_RATE_PROBE)
+
+    expect(atPlay).toEqual([0])
+    expect(v.seeks).toEqual([0, 0])
+  })
+
+  it('clears its deadline when the frame budget finishes first', async () => {
+    vi.useFakeTimers()
+    const v = probeVideo(spaced(1 / 60, 8))
+    const pending = measureFrameRate(v.el, FRAME_RATE_PROBE)
+
+    await vi.advanceTimersByTimeAsync(0)
+
+    await expect(pending).resolves.toBe(60)
+    expect(vi.getTimerCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(400)
+    expect(v.pause).toHaveBeenCalledTimes(1)
   })
 
   it('gives up at maxMs with what it has, answering nothing from two frames', async () => {
@@ -188,7 +280,7 @@ describe('measureFrameRate', () => {
     await expect(pending).resolves.toBeUndefined()
     expect(v.delivered()).toBe(2)
     expect(v.pause).toHaveBeenCalledTimes(1)
-    expect(v.seeks).toEqual([0])
+    expect(v.seeks).toEqual([0, 0])
   })
 
   it('measures from the frames it got when maxMs arrives first', async () => {
@@ -221,7 +313,7 @@ describe('measureFrameRate', () => {
     await expect(pending).resolves.toBeUndefined()
     expect(v.delivered()).toBe(0)
     expect(v.pause).toHaveBeenCalledTimes(1)
-    expect(v.seeks).toEqual([0])
+    expect(v.seeks).toEqual([0, 0])
   })
 
   it('finishes once when its own pause rejects the play() it is still waiting on', async () => {
@@ -233,6 +325,6 @@ describe('measureFrameRate', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
 
     expect(v.pause).toHaveBeenCalledTimes(1)
-    expect(v.seeks).toEqual([0])
+    expect(v.seeks).toEqual([0, 0])
   })
 })

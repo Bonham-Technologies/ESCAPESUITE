@@ -107,8 +107,23 @@ describe('videoProcessor', () => {
         expect(video.muted).toBe(true)
         expect(video.play).toHaveBeenCalledTimes(1)
         expect(video.pause).toHaveBeenCalledTimes(1)
-        // Paused and sought back to the start once the frames were counted.
-        expect(media.seeks).toEqual([0])
+        // Sought to the start to play from, then paused and sought back to it
+        // once the frames were counted.
+        expect(media.seeks).toEqual([0, 0])
+      })
+
+      // The duration probe leaves a headerless WebM at its end; the frame-rate
+      // probe must play it from the start, not from there.
+      it('measures a headerless file from its start, after the end seek', async () => {
+        media.script({
+          video: { duration: Infinity, durationAfterSeek: 12, durationStaysUnknown: true, frameTimes: spaced(1 / 60, 8) },
+        })
+
+        const metadata = await extractVideoMetadata(mediaFile(['webm'], 'headerless.webm', 'video/webm'))
+
+        expect(metadata.duration).toBe(12)
+        expect(metadata.frameRate).toBe(60)
+        expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER, 0, 0])
       })
 
       it('measures 24 and 29.97 the same way', async () => {
