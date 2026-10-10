@@ -89,63 +89,161 @@ describe('rateFromMediaTimes', () => {
     })
   })
 
-  it('counts one dropped frame as one missing interval, so it does not halve the rate', () => {
-    // Seven deltas, one of them two frames wide.
-    const times = [0, 1, 2, 4, 5, 6, 7, 8].map((n) => n / 60)
-    expect(rateFromMediaTimes(times)).toBe(60)
+  // Review round 3, G1: an engine whose frame callbacks carry no
+  // `presentedFrames` is read from the media times alone, each spacing counted
+  // against the smallest one. Every case here passes no counter.
+  describe('without presentedFrames: counting each spacing (the fallback)', () => {
+    it('counts one dropped frame as one missing interval, so it does not halve the rate', () => {
+      // Seven deltas, one of them two frames wide.
+      const times = [0, 1, 2, 4, 5, 6, 7, 8].map((n) => n / 60)
+      expect(rateFromMediaTimes(times)).toBe(60)
+    })
+
+    it('counts each spacing in whole multiples of the smallest one', () => {
+      // Three frames, spacings 1/50 and 1/70: 1/50 is 1.4 of the smaller, which
+      // rounds to one interval, so the span holds two and the rate is
+      // 2 / (1/50 + 1/70) = 58.33.
+      const times = [0, 1 / 50, 1 / 50 + 1 / 70]
+      expect(rateFromMediaTimes(times)).toBe(58.33)
+    })
+
+    // Review round 2, F1: counting the span's intervals as round(span / median)
+    // miscounts once frames are dropped. With millisecond stamps the median is a
+    // rounded 8 ms against a true 8.33, and 134 / 8 rounds to 17 intervals where
+    // there are 16 — 126.87, seen in a real Chromium run of a 120 fps WebM. And
+    // once half the spacings or more are doubled, the median is itself a doubled
+    // spacing and the rate halves. Counting each spacing on its own against the
+    // smallest one keeps every rounding error inside a single interval.
+    describe('dropped frames (review round 2, F1)', () => {
+      const ms = (times: number[]) => times.map((t) => t / 1000)
+
+      it('reads the real 120 fps WebM run that read 126.87 as 120 or 119.88', () => {
+        // Frames 1, 5, 6, 7, 11, 12, 13 and 17 of a 120 fps file, stamped in
+        // whole milliseconds: a stall of three refreshes after every third
+        // presentation.
+        expect([120, 119.88]).toContain(rateFromMediaTimes(ms([8, 42, 50, 58, 92, 100, 108, 142])))
+      })
+
+      it('reads 120 when three of seven spacings are doubled, not 65.45', () => {
+        expect(rateFromMediaTimes([0, 1, 3, 5, 7, 8, 10, 11].map((i) => i / 120))).toBe(120)
+      })
+
+      it('reads 120 when four of seven spacings are doubled, not 60', () => {
+        expect(rateFromMediaTimes([0, 2, 3, 5, 7, 9, 10, 12].map((i) => i / 120))).toBe(120)
+      })
+
+      it('reads 60 when four of seven spacings are doubled, not 30', () => {
+        expect(rateFromMediaTimes([0, 2, 3, 5, 7, 9, 10, 12].map((i) => i / 60))).toBe(60)
+      })
+
+      it('reads a gap of several frames as that many intervals, from millisecond stamps', () => {
+        // A ten-frame stall in a 120 fps WebM: 83 ms is 9.96 of the 8 ms
+        // spacings, which still rounds to the ten it is.
+        const times = [0, 1, 2, 12, 13, 14, 15, 16].map((i) => Math.round((i / 120) * 1000) / 1000)
+        expect([120, 119.88]).toContain(rateFromMediaTimes(times))
+      })
+    })
+
+    it('leaves a repeated presentation time out of the spacing it counts by', () => {
+      // A zero spacing is not the smallest spacing — dividing by it would count
+      // without end — so here the one real spacing counts the span as one
+      // interval.
+      expect(rateFromMediaTimes([0, 0, 1 / 30])).toBe(30)
+      expect(rateFromMediaTimes([0, 1 / 30, 1 / 30, 2 / 30])).toBe(30)
+    })
+
+
+    // Review round 2 checked 117,000 drop-free inputs and found the per-spacing
+    // count identical to the median count it replaced. A seeded sample of that
+    // space, so no drop-free reading can move without this going red.
+    it('reads every drop-free run exactly as the median count it replaced did', () => {
+      const rates = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88, 120]
+      const ntsc: Record<number, number> = { 23.976: 24000 / 1001, 29.97: 30000 / 1001, 59.94: 60000 / 1001, 119.88: 120000 / 1001 }
+      const stamps = [
+        (t: number) => t,
+        (t: number) => Math.round(t * 1000) / 1000,
+        (t: number) => Math.floor(t * 1000) / 1000,
+      ]
+      const random = mulberry32(276)
+      for (let n = 0; n < 400; n++) {
+        const rate = rates[Math.floor(random() * rates.length)]
+        const fps = ntsc[rate] ?? rate
+        const stamp = stamps[Math.floor(random() * stamps.length)]
+        const count = 3 + Math.floor(random() * 6)
+        const start = random() * 10
+        const times = Array.from({ length: count }, (_, i) => stamp(start + i / fps))
+        expect(rateFromMediaTimes(times), JSON.stringify(times)).toBe(medianCountRate(times))
+      }
+    })
   })
 
-  it('counts each spacing in whole multiples of the smallest one', () => {
-    // Three frames, spacings 1/50 and 1/70: 1/50 is 1.4 of the smaller, which
-    // rounds to one interval, so the span holds two and the rate is
-    // 2 / (1/50 + 1/70) = 58.33.
-    const times = [0, 1 / 50, 1 / 50 + 1 / 70]
-    expect(rateFromMediaTimes(times)).toBe(58.33)
-  })
-
-  // Review round 2, F1: counting the span's intervals as round(span / median)
-  // miscounts once frames are dropped. With millisecond stamps the median is a
-  // rounded 8 ms against a true 8.33, and 134 / 8 rounds to 17 intervals where
-  // there are 16 — 126.87, seen in a real Chromium run of a 120 fps WebM. And
-  // once half the spacings or more are doubled, the median is itself a doubled
-  // spacing and the rate halves. Counting each spacing on its own against the
-  // smallest one keeps every rounding error inside a single interval.
-  describe('dropped frames (review round 2, F1)', () => {
-    const ms = (times: number[]) => times.map((t) => t / 1000)
-
-    it('reads the real 120 fps WebM run that read 126.87 as 120 or 119.88', () => {
-      // Frames 1, 5, 6, 7, 11, 12, 13 and 17 of a 120 fps file, stamped in
-      // whole milliseconds: a stall of three refreshes after every third
-      // presentation.
-      expect([120, 119.88]).toContain(rateFromMediaTimes(ms([8, 42, 50, 58, 92, 100, 108, 142])))
+  // Review round 3, G1: under a busy main thread the page misses frame
+  // callbacks, and every reported spacing can be a multiple of the source
+  // interval — a 60 fps file read 20 and 16, 'measured'. The compositor's own
+  // `presentedFrames` counter still advances once per presented frame, so the
+  // count between the first and last callback is the number of source
+  // intervals, whatever the page missed. Each case below is a real Chromium
+  // run with a 30 ms busy loop every 34 ms on the page's main thread: media
+  // times from the spacings it reported, the counter from its gaps.
+  describe("with presentedFrames: counting the compositor's presented frames", () => {
+    /** Cumulative sums from `start`, so a run reads as its spacings. */
+    const cumulative = (start: number, steps: number[]) =>
+      steps.reduce((run, step) => [...run, run[run.length - 1] + step], [start])
+    const run = (spacingsMs: number[], gaps: number[]) => ({
+      times: cumulative(0, spacingsMs).map((t) => t / 1000),
+      presented: cumulative(1, gaps),
     })
 
-    it('reads 120 when three of seven spacings are doubled, not 65.45', () => {
-      expect(rateFromMediaTimes([0, 1, 3, 5, 7, 8, 10, 11].map((i) => i / 120))).toBe(120)
+    it.each([
+      ['60 fps WebM', [17, 33, 67, 33, 17, 16, 17], [1, 2, 4, 2, 1, 1, 1], [60, 59.94]],
+      ['60 fps WebM', [16, 84, 16, 50, 67], [1, 5, 1, 3, 4], [60, 59.94]],
+      ['120 fps WebM', [8, 17, 33, 25, 17, 16, 9], [1, 2, 4, 3, 2, 2, 1], [120, 119.88]],
+      ['60 fps MP4', [16, 34, 33, 33, 34, 33, 33], [1, 2, 2, 2, 2, 2, 2], [60, 59.94]],
+      ['120 fps MP4', [9, 16, 17, 17, 16, 17, 17], [1, 2, 2, 2, 2, 2, 2], [120, 119.88]],
+    ])('reads a busy %s run %j as its own rate', (_file, spacingsMs, gaps, accepted) => {
+      const { times, presented } = run(spacingsMs, gaps)
+      expect(accepted).toContain(rateFromMediaTimes(times, presented))
     })
 
-    it('reads 120 when four of seven spacings are doubled, not 60', () => {
-      expect(rateFromMediaTimes([0, 2, 3, 5, 7, 9, 10, 12].map((i) => i / 120))).toBe(120)
+    // Every spacing two source intervals wide: from the times alone this is a
+    // 30 fps file, and the per-spacing count reads 30. The counter says twelve
+    // intervals in 198 ms.
+    const allDoubled = [0, 33, 66, 99, 132, 165, 198].map((t) => t / 1000)
+    const everyOther = [1, 3, 5, 7, 9, 11, 13]
+
+    it('reads a quiet run, one presented frame per callback, as its rate', () => {
+      expect(rateFromMediaTimes(spaced(1 / 60, 8), [1, 2, 3, 4, 5, 6, 7, 8])).toBe(60)
     })
 
-    it('reads 60 when four of seven spacings are doubled, not 30', () => {
-      expect(rateFromMediaTimes([0, 2, 3, 5, 7, 9, 10, 12].map((i) => i / 60))).toBe(60)
+    it('reads 60, not 30, when every spacing the page saw is doubled', () => {
+      expect(rateFromMediaTimes(allDoubled, everyOther)).toBe(60)
     })
 
-    it('reads a gap of several frames as that many intervals, from millisecond stamps', () => {
-      // A ten-frame stall in a 120 fps WebM: 83 ms is 9.96 of the 8 ms
-      // spacings, which still rounds to the ten it is.
-      const times = [0, 1, 2, 12, 13, 14, 15, 16].map((i) => Math.round((i / 120) * 1000) / 1000)
-      expect([120, 119.88]).toContain(rateFromMediaTimes(times))
+    it('reads the same run as 30 without the counter, through the fallback', () => {
+      expect(rateFromMediaTimes(allDoubled)).toBe(30)
+      expect(rateFromMediaTimes(allDoubled, allDoubled.map(() => undefined))).toBe(30)
     })
-  })
 
-  it('leaves a repeated presentation time out of the spacing it counts by', () => {
-    // A zero spacing is not the smallest spacing — dividing by it would count
-    // without end — so here the one real spacing counts the span as one
-    // interval.
-    expect(rateFromMediaTimes([0, 0, 1 / 30])).toBe(30)
-    expect(rateFromMediaTimes([0, 1 / 30, 1 / 30, 2 / 30])).toBe(30)
+    it('falls back to the media times when only the first callback carries a count', () => {
+      expect(rateFromMediaTimes(allDoubled, [1, 3, 5, 7, 9, 11, undefined])).toBe(30)
+    })
+
+    it('answers nothing when the counter advanced fewer times than there were callbacks', () => {
+      // Five callbacks are four presented frames after the first; a counter
+      // that moved three cannot describe them.
+      expect(rateFromMediaTimes(spaced(1 / 60, 5), [1, 2, 3, 3, 4])).toBeUndefined()
+      // Three callbacks, one count: fewer than the two intervals any rate
+      // needs.
+      expect(rateFromMediaTimes(spaced(1 / 60, 3), [4, 5, 5])).toBeUndefined()
+    })
+
+    it('still answers nothing from fewer than three callbacks, whatever the counter says', () => {
+      expect(rateFromMediaTimes([0, 1 / 30], [1, 3])).toBeUndefined()
+    })
+
+    it('still refuses a run whose presentation times go backwards', () => {
+      expect(rateFromMediaTimes([0, 0.1, 0.02, 0.2], [1, 2, 3, 4])).toBeUndefined()
+    })
   })
 
   it('answers nothing when the frames end no later than they start', () => {
@@ -170,28 +268,6 @@ describe('rateFromMediaTimes', () => {
     expect(rateFromMediaTimes([0.5, 0.5, 0.5])).toBeUndefined()
   })
 
-  // Review round 2 checked 117,000 drop-free inputs and found the per-spacing
-  // count identical to the median count it replaced. A seeded sample of that
-  // space, so no drop-free reading can move without this going red.
-  it('reads every drop-free run exactly as the median count it replaced did', () => {
-    const rates = [23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88, 120]
-    const ntsc: Record<number, number> = { 23.976: 24000 / 1001, 29.97: 30000 / 1001, 59.94: 60000 / 1001, 119.88: 120000 / 1001 }
-    const stamps = [
-      (t: number) => t,
-      (t: number) => Math.round(t * 1000) / 1000,
-      (t: number) => Math.floor(t * 1000) / 1000,
-    ]
-    const random = mulberry32(276)
-    for (let n = 0; n < 400; n++) {
-      const rate = rates[Math.floor(random() * rates.length)]
-      const fps = ntsc[rate] ?? rate
-      const stamp = stamps[Math.floor(random() * stamps.length)]
-      const count = 3 + Math.floor(random() * 6)
-      const start = random() * 10
-      const times = Array.from({ length: count }, (_, i) => stamp(start + i / fps))
-      expect(rateFromMediaTimes(times), JSON.stringify(times)).toBe(medianCountRate(times))
-    }
-  })
 })
 
 /** A small seeded PRNG, so the sample above is the same on every run. */
@@ -246,11 +322,18 @@ interface ProbeVideo {
  * A `<video>` whose `requestVideoFrameCallback` answers, while it is playing,
  * with the next of `frameTimes` as `mediaTime` — one per callback, a microtask
  * after it is asked for. When the list runs out it stops answering, as a
- * stalled or ended element does.
+ * stalled or ended element does. Given `presentedFrames`, each callback's
+ * metadata carries the matching entry as its `presentedFrames`, as Chromium's
+ * does; without it the metadata has none, as an engine that does not report
+ * the counter.
  */
 function probeVideo(
   frameTimes: number[],
-  { playRejects = false, rejectOnPause = false }: { playRejects?: boolean; rejectOnPause?: boolean } = {}
+  {
+    playRejects = false,
+    rejectOnPause = false,
+    presentedFrames,
+  }: { playRejects?: boolean; rejectOnPause?: boolean; presentedFrames?: number[] } = {}
 ): ProbeVideo {
   const el = document.createElement('video')
   const pending = new Map<number, VideoFrameRequestCallback>()
@@ -265,8 +348,9 @@ function probeVideo(
       const cb = pending.get(handle)
       if (!cb || !playing || delivered >= frameTimes.length) return
       pending.delete(handle)
+      const presented = presentedFrames?.[delivered]
       const mediaTime = frameTimes[delivered++]
-      cb(performance.now(), { mediaTime } as VideoFrameCallbackMetadata)
+      cb(performance.now(), { mediaTime, presentedFrames: presented } as VideoFrameCallbackMetadata)
     })
   }
 
@@ -420,6 +504,29 @@ describe('measureFrameRate', () => {
     expect(v.seeks).toEqual([0, 0])
   })
 
+  // Review round 3, G1: the counter reaches the estimator. The run is the real
+  // busy 60 fps MP4 one with its first callback left out, so every spacing is
+  // two source frames and the media times alone read 30. Seven frames, so the
+  // probe ends on its deadline.
+  it('reads the presentedFrames each callback carries, so a busy 60 fps run reads 60', async () => {
+    vi.useFakeTimers()
+    const v = probeVideo([33, 67, 100, 133, 167, 200, 233].map((t) => t / 1000), {
+      presentedFrames: [3, 5, 7, 9, 11, 13, 15],
+    })
+    const pending = measureFrameRate(v.el, FRAME_RATE_PROBE)
+
+    await vi.advanceTimersByTimeAsync(FRAME_RATE_PROBE.maxMs)
+
+    expect([60, 59.94]).toContain(await pending)
+    expect(v.delivered()).toBe(7)
+  })
+
+  it('answers nothing when the counter shows fewer presented frames than callbacks', async () => {
+    const v = probeVideo(spaced(1 / 60, 8), { presentedFrames: [1, 2, 3, 4, 4, 5, 6, 7] })
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBeUndefined()
+  })
+
   it('finishes once when its own pause rejects the play() it is still waiting on', async () => {
     // A browser rejects a pending play() with AbortError when pause() lands
     // first — and the probe's own finish is that pause().
@@ -449,6 +556,8 @@ describe('measureFrameRate', () => {
  * `millisecondStamps` rounds each `mediaTime` to a whole millisecond, the way
  * a WebM stamps its frames. It still models no decode stall, no clock drift
  * between media and display, and no variation in when a refresh lands.
+ * Its callbacks carry no `presentedFrames`, so every case here measures
+ * through the media-time fallback (review round 3, G1).
  *
  * Driven by fake timers: a 1 ms interval counts wall milliseconds, and a
  * refresh happens whenever the count crosses a multiple of 1000/60.

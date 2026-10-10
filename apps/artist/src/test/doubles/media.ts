@@ -69,6 +69,12 @@ export interface VideoScript extends SeekScript {
    * such (review round 2, F1).
    */
   frameTimes?: number[]
+  /**
+   * With `frameTimes`: the compositor's `presentedFrames` counter each frame
+   * callback reports beside its `mediaTime` (ESCSUITE-276 review round 3, G1).
+   * Left unset, the metadata carries none, as an engine without it.
+   */
+  presentedFrames?: number[]
 }
 
 export interface ImageScript {
@@ -200,7 +206,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
    * list of presentation times, answered only while `play()` has been called
    * and `pause()` has not. `play` and `pause` stay spies.
    */
-  function defineFrameCallbacks(el: HTMLVideoElement, frameTimes: number[]): void {
+  function defineFrameCallbacks(el: HTMLVideoElement, frameTimes: number[], presentedFrames?: number[]): void {
     const pending = new Map<number, VideoFrameRequestCallback>()
     let nextHandle = 1
     let delivered = 0
@@ -210,7 +216,11 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
         const callback = pending.get(handle)
         if (!callback || !playing || delivered >= frameTimes.length) return
         pending.delete(handle)
-        callback(performance.now(), { mediaTime: frameTimes[delivered++] } as VideoFrameCallbackMetadata)
+        const presented = presentedFrames?.[delivered]
+        callback(performance.now(), {
+          mediaTime: frameTimes[delivered++],
+          presentedFrames: presented,
+        } as VideoFrameCallbackMetadata)
       })
     }
     own(
@@ -250,7 +260,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'play', vi.fn().mockResolvedValue(undefined))
     own(el, 'pause', vi.fn())
     own(el, 'load', vi.fn())
-    if (s.frameTimes) defineFrameCallbacks(el, s.frameTimes)
+    if (s.frameTimes) defineFrameCallbacks(el, s.frameTimes, s.presentedFrames)
 
     defineCurrentTime(el, s)
 

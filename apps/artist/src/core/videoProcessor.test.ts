@@ -139,6 +139,31 @@ describe('videoProcessor', () => {
         expect(metadata.frameRateSource).toBe('measured')
       })
 
+      // Review round 3, G1: a real Chromium run of a 60 fps MP4 with the page's
+      // main thread busy, its first callback left out, so every spacing the
+      // page saw is two source frames. The media times alone read 30; the
+      // compositor's presented-frame counter says 60.
+      it('stores a busy 60 fps run as 60 from the presented-frame counter, not 30', async () => {
+        vi.useFakeTimers()
+        try {
+          media.script({
+            video: {
+              frameTimes: [33, 67, 100, 133, 167, 200, 233].map((t) => t / 1000),
+              presentedFrames: [3, 5, 7, 9, 11, 13, 15],
+            },
+          })
+          const pending = extractVideoMetadata(mediaFile(['v'], 'busy.mp4', 'video/mp4'))
+
+          await vi.advanceTimersByTimeAsync(500)
+
+          const metadata = await pending
+          expect([60, 59.94]).toContain(metadata.frameRate)
+          expect(metadata.frameRateSource).toBe('measured')
+        } finally {
+          vi.useRealTimers()
+        }
+      })
+
       it('measures 24 and 29.97 the same way', async () => {
         media.script({ video: { frameTimes: spaced(1 / 24, 8) } })
         await expect(extractVideoMetadata(mediaFile(['v'], 'film.mp4', 'video/mp4'))).resolves.toMatchObject({
