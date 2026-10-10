@@ -1,3 +1,6 @@
+import { mkdtempSync, promises as fs, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import http from 'node:http'
 import net from 'node:net'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -49,7 +52,7 @@ function validSpec(jobId = 'job-1', overrides: Record<string, unknown> = {}): Re
     jobId,
     input: { manifest: { path: '/tmp/manifest.json' } },
     options: { format: 'mp4' },
-    output: { sink: 'volume', config: { dir: '/tmp/out' } },
+    output: { sink: 'volume', config: { dir: outDir } },
     ...overrides,
   }
 }
@@ -179,7 +182,12 @@ function settle(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 20))
 }
 
+// A real, private output directory per test: the volume pre-flight (ESCSUITE-236) creates and
+// writes it, so a fixed /tmp/out would be created on the host.
+let outDir = ''
+
 beforeEach(() => {
+  outDir = mkdtempSync(path.join(os.tmpdir(), 'headless-artist-out-'))
   logs = []
   vi.mocked(runJob).mockReset()
   vi.mocked(runJob).mockImplementation(async (spec) => outcomeFor(spec.jobId))
@@ -192,6 +200,7 @@ afterEach(async () => {
     if (server) await server.close()
   }
   vi.restoreAllMocks()
+  rmSync(outDir, { recursive: true, force: true })
 })
 
 // Review finding 3: the rewritten drain test (close() tears down a half-sent body itself,
@@ -337,6 +346,32 @@ describe('sink readiness', () => {
       probeSpy.mockRestore()
     }
   })
+
+  // ESCSUITE-236: same shape as the parse refusals -- a permanent input error, not a queued job.
+  it.skipIf(process.getuid?.() === 0)(
+    'answers 400 naming the directory when a volume directory is unwritable',
+    async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'serve-ro-'))
+      await fs.chmod(dir, 0o555)
+      try {
+        await start()
+
+        const res = await postSpec(
+          validSpec('job-1', { output: { sink: 'volume', config: { dir } } }),
+        )
+
+        expect(res.status).toBe(400)
+        const body = (await res.json()) as { error: string }
+        expect(body.error).toContain(dir)
+        expect(body.error).toContain(`uid ${process.getuid?.()}`)
+        expect(runJob).not.toHaveBeenCalled()
+        await waitForHealth({ inFlight: 0, queued: 0 })
+      } finally {
+        await fs.chmod(dir, 0o755)
+        await fs.rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('does not probe the SDK for a non-s3 sink', async () => {
     const probeSpy = vi.spyOn(s3Module, 'probeS3Sdk')

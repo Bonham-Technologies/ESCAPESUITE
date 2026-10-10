@@ -264,8 +264,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/in" "$RUNNER_TEMP/out"
-          # pwuser inside the container is uid 1000; chmod so it can write the render.
-          chmod 777 "$RUNNER_TEMP/out"
+          # pwuser inside the container is uid 1001 (uid 1000 is `ubuntu` in the base image).
+          # chown rather than chmod 777, so the uid claim in the docs is tested, not hidden.
+          sudo chown 1001:1001 "$RUNNER_TEMP/out"
           cp services/headless-artist/examples/manifest.json "$RUNNER_TEMP/in/manifest.json"
           cp services/headless-artist/examples/clip.mp4 "$RUNNER_TEMP/in/clip.mp4"
           cat > "$RUNNER_TEMP/in/job.json" <<'EOF'
@@ -304,6 +305,48 @@ jobs:
             exit 1
           fi
           echo "sha256 verified: $actual_sha"
+
+      - name: Smoke test - serve reaps Chromium's helper processes
+        run: |
+          set -euo pipefail
+          id=$(docker run -d \
+            -v "$RUNNER_TEMP/in:/in:ro" \
+            -v "$RUNNER_TEMP/out:/out" \
+            headless-artist:ci serve --host 0.0.0.0)
+          trap 'docker rm -f "$id" >/dev/null 2>&1 || true' EXIT
+
+          # Wait for the server to answer (no host port is published, so ask from inside).
+          for _ in $(seq 1 60); do
+            if docker exec "$id" node -e "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"; then
+              break
+            fi
+            sleep 1
+          done
+
+          for n in 1 2 3; do
+            sed "s/ci-smoke/ci-serve-$n/" "$RUNNER_TEMP/in/job.json" > "$RUNNER_TEMP/in/serve-$n.json"
+            docker exec -i "$id" node -e "
+              let b=''; process.stdin.on('data',d=>b+=d).on('end',async()=>{
+                const r=await fetch('http://127.0.0.1:8787/render',{method:'POST',headers:{'content-type':'application/json'},body:b});
+                const o=await r.json(); console.log(JSON.stringify(o)); process.exit(o.ok===true?0:1)})" \
+              < "$RUNNER_TEMP/in/serve-$n.json"
+          done
+
+          for n in 1 2 3; do test -f "$RUNNER_TEMP/out/ci-serve-$n.mp4"; done
+
+          docker exec "$id" ps -eo stat,comm
+          # Poll briefly: a helper still exiting is not a leak; a zombie that persists is.
+          zombies=-1
+          for _ in $(seq 1 10); do
+            zombies=$(docker exec "$id" ps -eo stat,comm | awk '$1 ~ /^Z/' | wc -l)
+            [ "$zombies" = "0" ] && break
+            sleep 1
+          done
+          if [ "$zombies" != "0" ]; then
+            echo "::error::$zombies zombie process(es) inside the serve container"
+            exit 1
+          fi
+          docker stop "$id" >/dev/null
 
       - name: Smoke test - --version
         run: |

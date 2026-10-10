@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs'
+import { mkdtempSync, promises as fs, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -67,7 +67,12 @@ let stderr: string[]
 let stdout: string[]
 let closeSpy: Mock<() => Promise<void>>
 
+// A real, private output directory per test: the volume pre-flight (ESCSUITE-236) creates and
+// writes it, so a fixed /tmp/out would be created on the host.
+let outDir = ''
+
 beforeEach(() => {
+  outDir = mkdtempSync(path.join(os.tmpdir(), 'headless-artist-out-'))
   stderr = []
   stdout = []
   closeSpy = vi.fn<() => Promise<void>>().mockResolvedValue(undefined)
@@ -92,6 +97,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   vi.restoreAllMocks()
+  rmSync(outDir, { recursive: true, force: true })
   fsState.realpathFails = false
   fsState.kitJson = undefined
   while (tempDirs.length > 0) {
@@ -113,7 +119,7 @@ function validSpec(overrides: Record<string, unknown> = {}): Record<string, unkn
     jobId: 'job-1',
     input: { manifest: { path: '/tmp/manifest.json' } },
     options: { format: 'mp4' },
-    output: { sink: 'volume', config: { dir: '/tmp/out' } },
+    output: { sink: 'volume', config: { dir: outDir } },
     ...overrides,
   }
 }
@@ -461,6 +467,40 @@ describe('sink readiness', () => {
       expect(runJob).not.toHaveBeenCalled()
     } finally {
       probeSpy.mockRestore()
+    }
+  })
+
+  // ESCSUITE-236: an output directory the container's user cannot write is a permanent input
+  // error, found before Chromium launches rather than after a full render.
+  it.skipIf(process.getuid?.() === 0)(
+    'exits 2 naming the directory and the uid when a volume directory is unwritable',
+    async () => {
+      const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cli-ro-'))
+      await fs.chmod(dir, 0o555)
+      try {
+        const jobFile = await writeJobSpec(validSpec({ output: { sink: 'volume', config: { dir } } }))
+
+        expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+        expect(stderrText()).toContain(dir)
+        expect(stderrText()).toContain(`uid ${process.getuid?.()}`)
+        expect(runJob).not.toHaveBeenCalled()
+      } finally {
+        await fs.chmod(dir, 0o755)
+        await fs.rm(dir, { recursive: true, force: true })
+      }
+    },
+  )
+
+  it('renders when the volume directory is writable', async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'cli-rw-'))
+    try {
+      const jobFile = await writeJobSpec(validSpec({ output: { sink: 'volume', config: { dir } } }))
+
+      expect(await main(['render', '--job', jobFile], {})).toBe(0)
+      expect(runJob).toHaveBeenCalledTimes(1)
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true })
     }
   })
 
