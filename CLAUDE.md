@@ -3109,6 +3109,33 @@ wins, applied once, settled-applies-at-once, invalid payload held nowhere, proje
 hook. The review approved both verdicts with no fix round. The rerender pins and every
 `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-247 (the shortcut hook's typing guard
+exempts text entry only, so Ctrl+Z works right after a slider, select or checkbox edit; every chord
+compares its letter case-insensitively, so Ctrl+Shift+Z redo fires on Windows and Linux and under Caps
+Lock, while the eight plain chords carry `!e.shiftKey` so Ctrl+Shift+<letter> stays the browser's and
+Shift+M tests `shiftKey` rather than the letter's case; Space on a focused button, link or
+`role="button"` in the playback controls presses it instead of toggling playback; and the shortcut
+sheet lists only keys the cascade or the transport binds, pinned against `BOUND_SINGLE_KEYS` and
+`TRANSPORT_KEYS`): 99.81 / 99.32 / **96.15** / 99.69 against the 99.81 / 99.32 / 96.14 / 99.69 that
+`main` at `b586e904` measures in the same sitting — branches up a hundredth, the other three unmoved.
+The base gives 5,335 / 5,549 branches and this branch 5,349 / 5,563: fourteen new branches, fourteen
+covered, the same 214 uncovered as before (lines 8,305 / 8,320 → 8,313 / 8,328, statements
+9,380 / 9,444 → 9,390 / 9,454, functions 1,985 / 1,991 → 1,987 / 1,993, every denominator growing by
+exactly what the numerator did; the same 15 / 64 / 6 uncovered). The fourteen are
+`app/useAppKeyboardShortcuts.ts`'s ten (193 → 203: `isTextEntryTarget`'s text-like-input, textarea
+and contenteditable operands, the `!e.shiftKey` operand the eight chords share, and Shift+M's
+`shiftKey` test, each reached from both sides by the range / select / checkbox cases that now undo
+against the text / textarea / contenteditable cases that still type, the Caps-Lock uppercase cases that
+fire against the Ctrl+Shift+<letter> cases that are left alone, and the Shift+M-with-Ctrl refusal) and
+`components/Preview/PlaybackControls.tsx`'s four (24 / 25 → 28 / 29: `spaceBelongsToTarget`'s
+`HTMLElement` and `SPACE_ACTIVATES` operands and the early return they feed, reached by the button,
+link and `role="button"` targets against `<video>`, the dialog body and `window`; the file's one
+pre-existing uncovered arm untouched). The review's fix round deleted two unreachable operands
+(`isContentEditable` and `select`, both behind the typing guard) rather than test them, the ESCSUITE-185
+precedent; `components/Preview/transportKeys.ts` is one constant with no decision. The three rerender
+pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3116,7 +3143,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.32 | 96.19 | 99.70 |
+| `@escapesuite/artist` | 99.81 | 99.32 | 96.15 | 99.69 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
