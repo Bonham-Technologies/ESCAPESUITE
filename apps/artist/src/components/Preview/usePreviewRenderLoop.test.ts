@@ -394,6 +394,51 @@ describe('usePreviewRenderLoop readiness paint (ESCSUITE-264)', () => {
     expect(listeners.removed()).toEqual(listeners.added())
   })
 
+  /**
+   * Paused at 1.5 s inside a one-second fade from `a` (0-2 s) into `b` (2-4 s),
+   * each off its own source. `getClipsAtTime` returns only `a` there — the
+   * incoming clip has not started — but the frame draws `b`'s element too.
+   */
+  function pausedInTransition(incoming: HTMLVideoElement) {
+    const trackId = store().project.timeline.tracks[0].id
+    addClip('a', 0, 2, trackId)
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+      trackId,
+      2
+    )
+    store().updateClipTransition('a', { type: 'fade', duration: 1 })
+    const loop = harness()
+    loop.deps.videoElementsRef.current.set('video2', incoming)
+    loop.seek(1.5)
+    return loop
+  }
+
+  it('waits for a transition\'s incoming video, which the frame draws though its clip has not started', async () => {
+    const incoming = notReadyVideo()
+    const { deps } = pausedInTransition(incoming)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const before = draws(deps).length
+
+    becomeReady(incoming)
+
+    expect(draws(deps).length).toBe(before + 1)
+    expect(last(draws(deps))).toEqual([1.5])
+  })
+
+  it('leaves no listener on a transition\'s incoming video that is ready already', async () => {
+    const incoming = document.createElement('video')
+    const listeners = watchLoadedData(incoming)
+    const { deps } = pausedInTransition(incoming)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+
+    expect(listeners.added()).toEqual([])
+  })
+
   it('a frame step ends on a paint that follows the seek, not only the one before it', async () => {
     doubles.media.script({ video: { stallSeek: true } })
     addClip('clip1', 0, 4)
