@@ -14,7 +14,7 @@ function video(overrides: Partial<DemuxedVideo> = {}): DemuxedVideo {
     displayHeight: 720,
     description: new Uint8Array([1, 100, 0, 31]),
     rotation: 0,
-    colour: { fullyTagged: false },
+    colour: { kind: 'unspecified' },
     duration: 1,
     samples: [],
     keyframeCount: 1,
@@ -92,7 +92,7 @@ describe('decoderConfigFor', () => {
   describe('colour', () => {
     it('gives a fully tagged stream no colour space, so its own tags stand', async () => {
       const config = await decoderConfigFor(
-        video({ codedHeight: 480, colour: { fullyTagged: true, fullRange: false } }),
+        video({ codedHeight: 480, colour: { kind: 'bitstream' } }),
         echoes
       )
 
@@ -100,14 +100,21 @@ describe('decoderConfigFor', () => {
     })
 
     it('guesses for a stream that tags only part of its colour', async () => {
-      const config = await decoderConfigFor(video({ codedHeight: 480, colour: { fullyTagged: false } }), echoes)
+      const config = await decoderConfigFor(video({ codedHeight: 480, colour: { kind: 'unspecified' } }), echoes)
 
       expect(config.colorSpace).toEqual(assumedColorSpace(480))
     })
 
+    it('hands over the colour a colr box gives an untagged bitstream, instead of guessing', async () => {
+      const colorSpace = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false } as const
+      const config = await decoderConfigFor(video({ codedHeight: 120, colour: { kind: 'container', colorSpace } }), echoes)
+
+      expect(config.colorSpace).toEqual(colorSpace)
+    })
+
     it("keeps a stream's own full-range signal in the guess", async () => {
       const config = await decoderConfigFor(
-        video({ codedHeight: 480, colour: { fullyTagged: false, fullRange: true } }),
+        video({ codedHeight: 480, colour: { kind: 'unspecified', fullRange: true } }),
         echoes
       )
 

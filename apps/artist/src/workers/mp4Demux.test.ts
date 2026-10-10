@@ -88,37 +88,58 @@ describe('demuxVideoTrack', () => {
     })
   })
 
+  // Fix rounds 1 (M1) and 2: where the decoder's colour comes from. The
+  // VideoDecoder sees only the bitstream, so whether a stream is "tagged" is
+  // decided by its SPS VUI; a colour description carried only in the colr
+  // box is handed to the decoder explicitly; and the size guess is left for
+  // a stream that describes its colour nowhere in full. Measured in Chromium
+  // 153 against <video> (see decoderConfig.ts).
   describe("reads the stream's own colour description", () => {
-    it('a stream with no colour description is not tagged', async () => {
+    const rec = (standard: string) => ({ primaries: standard, transfer: standard, matrix: standard, fullRange: false })
+
+    it('a stream with no colour description is unspecified', async () => {
       const { colour } = await demuxVideoTrack(fixture('h264-bframes.mp4'))
 
-      expect(colour).toEqual({ fullyTagged: false })
+      expect(colour).toEqual({ kind: 'unspecified' })
     })
 
-    it('a stream whose VUI gives primaries, transfer and matrix is fully tagged, limited range', async () => {
+    it('a stream whose VUI gives primaries, transfer and matrix keeps them in the bitstream', async () => {
       const { colour } = await demuxVideoTrack(fixture('h264-tagged709-480p.mp4'))
 
-      expect(colour).toEqual({ fullyTagged: true, fullRange: false })
+      expect(colour).toEqual({ kind: 'bitstream' })
     })
 
-    it('a stream that signals full range alone is not tagged, and full range', async () => {
+    it('a stream that signals full range alone is unspecified, and full range', async () => {
       const { colour } = await demuxVideoTrack(fixture('h264-fullrange-480p.mp4'))
 
-      expect(colour).toEqual({ fullyTagged: false, fullRange: true })
+      expect(colour).toEqual({ kind: 'unspecified', fullRange: true })
     })
 
-    it('a stream that tags only its matrix is not fully tagged', async () => {
+    it('a stream that tags only its matrix is unspecified', async () => {
       // primaries and transfer 'unspecified' (2), matrix BT.709: Chromium's
       // <video> draws this with its size-based guess, so the worker must too.
       const { colour } = await demuxVideoTrack(fixture('h264-partial-tag.mp4'))
 
-      expect(colour).toEqual({ fullyTagged: false, fullRange: false })
+      expect(colour).toEqual({ kind: 'unspecified', fullRange: false })
     })
 
-    it('a colr box speaks for the stream', async () => {
+    it('a colr box that agrees with a fully tagged bitstream changes nothing', async () => {
       const { colour } = await demuxVideoTrack(fixture('h264-colr.mp4'))
 
-      expect(colour).toEqual({ fullyTagged: true, fullRange: false })
+      expect(colour).toEqual({ kind: 'bitstream' })
+    })
+
+    it('a colour description carried only in the colr box is handed to the decoder', async () => {
+      // ffmpeg -c copy with -color_* and +write_colr over an untagged stream:
+      // colr nclx 6/6/6 (BT.601) or 1/1/1 (BT.709), VUI untagged.
+      expect((await demuxVideoTrack(fixture('h264-colr-only-601.mp4'))).colour).toEqual({
+        kind: 'container',
+        colorSpace: rec('smpte170m'),
+      })
+      expect((await demuxVideoTrack(fixture('h264-colr-only-709.mp4'))).colour).toEqual({
+        kind: 'container',
+        colorSpace: rec('bt709'),
+      })
     })
   })
 
@@ -175,6 +196,16 @@ describe('demuxVideoTrack', () => {
       await expect(demuxVideoTrack(fixture('h264-sar4x3.mp4'))).rejects.toThrow(
         'Non-square pixels are not decoded in the worker; the <video> path draws this source'
       )
+    })
+
+    // Fix round 2: which of two disagreeing descriptions <video> follows is
+    // not something the worker should guess at.
+    it('a colr box that disagrees with the colour description in the bitstream', async () => {
+      const refusal = 'The colr box and the H.264 stream describe its colour differently; the <video> path draws this source'
+      // colr 6/6/6 over a VUI tagging 1/1/1...
+      await expect(demuxVideoTrack(fixture('h264-colr-disagrees.mp4'))).rejects.toThrow(refusal)
+      // ...and over a VUI tagging only its matrix (2/2/1).
+      await expect(demuxVideoTrack(fixture('h264-partial-tag-colr-disagrees.mp4'))).rejects.toThrow(refusal)
     })
 
     it('a track whose first sample is not a keyframe', async () => {

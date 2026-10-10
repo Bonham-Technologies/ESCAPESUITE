@@ -116,15 +116,34 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
     expect(video.samples).toHaveLength(5)
   })
 
-  // Fix round 1, M1: the colr shapes no ffmpeg fixture here produces.
-  describe('colour from a colr box', () => {
-    it("reads an 'nclc' box's code points, with no range", async () => {
+  // Fix rounds 1 and 2: the colr shapes no ffmpeg fixture here produces. The
+  // scripted avcC carries no SPS, so the bitstream describes nothing.
+  describe('colour from a colr box over an untagged bitstream', () => {
+    it("hands an 'nclc' box's code points to the decoder, limited range", async () => {
       script.colr = { colour_type: 'nclc', colour_primaries: 1, transfer_characteristics: 1, matrix_coefficients: 1 }
 
-      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: true })
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({
+        kind: 'container',
+        colorSpace: { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false },
+      })
     })
 
-    it("reads an 'nclx' box's full-range flag", async () => {
+    it("hands an 'nclx' box's range over with its code points", async () => {
+      script.colr = {
+        colour_type: 'nclx',
+        colour_primaries: 9,
+        transfer_characteristics: 16,
+        matrix_coefficients: 9,
+        full_range_flag: 1,
+      }
+
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({
+        kind: 'container',
+        colorSpace: { primaries: 'bt2020', transfer: 'pq', matrix: 'bt2020-ncl', fullRange: true },
+      })
+    })
+
+    it("keeps an 'nclx' box's range when its code points are not all specified", async () => {
       script.colr = {
         colour_type: 'nclx',
         colour_primaries: 1,
@@ -133,19 +152,27 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
         full_range_flag: 1,
       }
 
-      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false, fullRange: true })
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ kind: 'unspecified', fullRange: true })
     })
 
     it('does not count a missing code point as specified', async () => {
       script.colr = { colour_type: 'nclc', colour_primaries: 1, matrix_coefficients: 1 }
 
-      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false })
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ kind: 'unspecified' })
     })
 
     it('ignores an ICC-profile colr box', async () => {
       script.colr = { colour_type: 'prof' }
 
-      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false })
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ kind: 'unspecified' })
+    })
+
+    it('refuses code points VideoDecoder has no name for', async () => {
+      script.colr = { colour_type: 'nclc', colour_primaries: 4, transfer_characteristics: 1, matrix_coefficients: 1 }
+
+      await expect(demuxVideoTrack(new ArrayBuffer(8))).rejects.toThrow(
+        'The colr box describes a colour space VideoDecoder cannot be given (4/1/1); the <video> path draws this source'
+      )
     })
   })
 

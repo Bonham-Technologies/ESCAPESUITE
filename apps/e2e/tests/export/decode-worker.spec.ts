@@ -64,6 +64,20 @@ const TAGGED_709_480P_MP4 = resolvePath(FIXTURES, 'tagged709-480p.mp4')
 /** The same picture at 640x480, signalling full range and no colour description. */
 const FULL_RANGE_480P_MP4 = resolvePath(FIXTURES, 'fullrange-480p.mp4')
 /**
+ * The 160x120 picture with its VUI tagging only the matrix (BT.709; primaries
+ * and transfer unspecified). Chromium's <video> draws it with its BT.601 size
+ * guess and a config-less VideoDecoder as BT.709: the one shape where giving
+ * the guess to a stream that tags *something* changes Chromium's pixels.
+ */
+const PARTIAL_TAG_MP4 = resolvePath(FIXTURES, 'partial-tag.mp4')
+/**
+ * `segments.mp4` with a `colr` box saying BT.601 (6/6/6) and BT.709 (1/1/1)
+ * respectively, over its untagged bitstream: a description the decoder cannot
+ * see, so the worker hands it over. Chromium's <video> follows the box.
+ */
+const COLR_ONLY_601_MP4 = resolvePath(FIXTURES, 'colr-only-601.mp4')
+const COLR_ONLY_709_MP4 = resolvePath(FIXTURES, 'colr-only-709.mp4')
+/**
  * 320x180 coded, red left / blue right, display matrix rotating it to 180x320,
  * blue on top. The one display rotation pinned end to end here (270° clockwise
  * in WebCodecs terms, ffmpeg's "90"); the matrix-to-rotation reading of all
@@ -474,6 +488,32 @@ const PARITY_CASES: ParityCase[] = [
     file: FULL_RANGE_480P_MP4,
     width: 640,
     height: 480,
+    exportedFrames: 60,
+    frames: [0, 25, 41, 59],
+  },
+  {
+    name: 'a 160x120 source whose VUI tags only its matrix',
+    file: PARTIAL_TAG_MP4,
+    width: 160,
+    height: 120,
+    exportedFrames: 60,
+    frames: [0, 25, 41, 59],
+  },
+  {
+    name: 'a 160x120 source whose colr box alone says BT.601',
+    file: COLR_ONLY_601_MP4,
+    width: 160,
+    height: 120,
+    exportedFrames: 60,
+    frames: [0, 25, 41, 59],
+  },
+  {
+    // Under 720 lines, so the size guess would be BT.601: the box is what
+    // makes it BT.709.
+    name: 'a 160x120 source whose colr box alone says BT.709',
+    file: COLR_ONLY_709_MP4,
+    width: 160,
+    height: 120,
     exportedFrames: 60,
     frames: [0, 25, 41, 59],
   },
