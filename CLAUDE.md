@@ -3254,6 +3254,24 @@ rounds (opus, then a scoped sonnet) put the incoming clip there. `drawFrame.perf
 `App.*rerender*` and every `*.perf.test.ts` are byte-identical — the extra paint is on readiness, none
 per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-261 (an MP4 export whose project holds a
+WebM source — every ESCAPECRAFT recording — raises the once-per-export "decoding in the page" notice
+through the existing `onFallback` at source creation, with a reason naming the MIME type, instead of
+promising background-tab encoding it cannot deliver; which path a source takes is unchanged):
+99.82 / 99.34 / 96.27 / 99.70, byte-identical on every percentage to the 99.82 / 99.34 / 96.27 /
+99.70 that `main` at `74bb3de9` measures in the same sitting. The base gives 5,452 / 5,663 branches
+and this branch 5,456 / 5,667: four new branches, four covered, the same 211 uncovered as before
+(lines 8,432 / 8,447 → 8,434 / 8,449, statements 9,519 / 9,582 → 9,521 / 9,584, functions
+2,012 / 2,018 on both, every denominator growing by exactly what the numerator did; the same
+15 / 63 / 6 uncovered). All four are `core/frameSource.ts`'s (46 / 47 → 50 / 51): the non-MP4 test
+and the worker-running gate in `createSource`, each reached from both sides by
+`frameSource.webmNotice.test.ts`'s seven cases — one WebM, WebM plus MP4, two WebMs and a WebM plus a
+mid-export handover each notifying once, an MP4-only and a refused-MP4 project not at all, and the
+reason string asserted once; four of them red before the fix. The file's one pre-existing uncovered
+arm is untouched. The review (sonnet) approved both verdicts; its LOWs are in the third commit.
+`exportMP4.perf.test.ts` and every pin are byte-identical — one decision per source at creation,
+nothing per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3261,7 +3279,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.29 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.27 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
