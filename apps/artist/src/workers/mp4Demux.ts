@@ -35,6 +35,7 @@ import {
   type MP4TrakBox,
   type MP4VideoTrack,
 } from 'mp4box';
+import { readAvcConfig } from './avcConfig';
 
 /** A clockwise rotation, in degrees, as `VideoDecoderConfig.rotation` takes it. */
 export type VideoRotation = 0 | 90 | 180 | 270;
@@ -48,6 +49,20 @@ export interface DemuxedSample {
   data: Uint8Array;
 }
 
+/**
+ * What the stream says about its own colour (ESCSUITE-254 fix round 1, M1):
+ * `fullyTagged` when its primaries, transfer and matrix are all specified,
+ * from the sample entry's `colr` box or else the SPS VUI; `fullRange` when it
+ * signals its range at all.
+ */
+export interface StreamColour {
+  fullyTagged: boolean;
+  fullRange?: boolean;
+}
+
+/** H.264 / H.273 code point for "unspecified". */
+const UNSPECIFIED = 2;
+
 /** Everything the decoder needs about one MP4's first video track. */
 export interface DemuxedVideo {
   /** The RFC 6381 codec string mp4box read from the sample description, e.g. `avc1.64001f`. */
@@ -60,6 +75,7 @@ export interface DemuxedVideo {
   /** The codec configuration record (avcC / hvcC) without its box header, when the codec needs one. */
   description?: Uint8Array;
   rotation: VideoRotation;
+  colour: StreamColour;
   /** Movie duration in seconds. */
   duration: number;
   /** Every sample of the track, in decode order. The first is a keyframe. */
@@ -148,11 +164,26 @@ function codecDescription(entry: SampleEntry): Uint8Array | undefined {
 
 type SampleEntry = MP4TrakBox['mdia']['minf']['stbl']['stsd']['entries'][number];
 
+/**
+ * The stream's own colour description: a `colr` box with code points ('nclx',
+ * 'nclc') speaks for it, else the SPS VUI does.
+ */
+function streamColour(entry: SampleEntry, vui: ReturnType<typeof readAvcConfig> | undefined): StreamColour {
+  const colr = entry.colr?.colour_type === 'nclx' || entry.colr?.colour_type === 'nclc' ? entry.colr : undefined;
+  const codes = colr
+    ? [colr.colour_primaries, colr.transfer_characteristics, colr.matrix_coefficients]
+    : vui?.colour && [vui.colour.primaries, vui.colour.transfer, vui.colour.matrix];
+  const fullyTagged = !!codes && codes.every((code) => code !== undefined && code !== UNSPECIFIED);
+  const fullRange = colr?.colour_type === 'nclx' ? colr.full_range_flag === 1 : vui?.fullRange;
+  return fullRange === undefined ? { fullyTagged } : { fullyTagged, fullRange };
+}
+
 interface TrackHeader {
   video: MP4VideoTrack;
   rotation: VideoRotation;
   mediaTime: number;
   description?: Uint8Array;
+  colour: StreamColour;
   /** Movie duration in seconds. */
   duration: number;
 }
@@ -169,11 +200,13 @@ function readTrackHeader(info: MP4Info, sampleEntries: (trackId: number) => Samp
   if (entries.length !== 1) {
     throw new Error(`MP4 video track has ${entries.length} sample descriptions; the worker decodes one`);
   }
+  const description = codecDescription(entries[0]);
   return {
     video,
     rotation: rotationFromMatrix(video.matrix),
     mediaTime: presentationStart(video.edits),
-    description: codecDescription(entries[0]),
+    description,
+    colour: streamColour(entries[0], entries[0].avcC ? readAvcConfig(description!) : undefined),
     duration: info.duration / info.timescale,
   };
 }
@@ -233,7 +266,7 @@ export async function demuxVideoTrack(
 
   if (parsed.failure) throw parsed.failure;
   if (!parsed.header) throw new Error('MP4 parsing incomplete: no movie header (moov box) found');
-  const { video, rotation, description, duration } = parsed.header;
+  const { video, rotation, description, colour, duration } = parsed.header;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -264,6 +297,7 @@ export async function demuxVideoTrack(
     displayHeight: quarterTurn ? video.video.width : video.video.height,
     description,
     rotation,
+    colour,
     duration,
     samples,
     keyframeCount: samples.filter((sample) => sample.isKeyframe).length,

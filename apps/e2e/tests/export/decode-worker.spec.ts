@@ -37,13 +37,16 @@ import { waitForAppReady } from '../../utils/ready'
  * 3. Rotation: a source whose `tkhd` display matrix rotates it exports in the
  *    orientation the preview shows.
  *
- * Chromium only: Firefox and WebKit are not part of CI's e2e job. Run here
- * once each with the skip lifted (ESCSUITE-254): Firefox 155 decodes in the
- * worker and matches its own <video> export (MAD 0.34 and 0.92 at frames 25
- * and 41), and keeps a rotated source on <video> because its VideoDecoder
- * drops `rotation`; WebKit 26.6 cannot import media under Playwright at all
- * (IndexedDB refuses the Blob), and its worker is refused by
- * `workers/decoderConfig.ts` on a measured colour mismatch.
+ * Which engines take the worker at all is decided by an allow-list,
+ * `apps/artist/src/core/workerDecodeEngine.ts`: Chromium and Firefox, the two
+ * whose worker output was measured against their own <video>. These cases run
+ * in Chromium, the one CI runs. Firefox 155 was run here with the skip lifted
+ * (ESCSUITE-254): it decodes in the worker and matches its own <video> export
+ * (MAD 0.34 and 0.92 at frames 25 and 41), and keeps a rotated source on
+ * <video> because its VideoDecoder drops `rotation`. WebKit is not on the
+ * list (measured 4.46-17.45/255 apart) and cannot import media under
+ * Playwright anyway (IndexedDB refuses the Blob). Admitting another engine is
+ * ESCSUITE-262.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -56,7 +59,18 @@ const FIXTURES = resolvePath(HERE, '../../fixtures/decode-worker')
  * See fixtures/decode-worker/README.md.
  */
 const SEGMENTS_MP4 = resolvePath(FIXTURES, 'segments.mp4')
-/** 320x180 coded, red left / blue right, display matrix rotating it to 180x320, blue on top. */
+/** The same picture at 640x480, its VUI tagging BT.709 primaries, transfer and matrix. */
+const TAGGED_709_480P_MP4 = resolvePath(FIXTURES, 'tagged709-480p.mp4')
+/** The same picture at 640x480, signalling full range and no colour description. */
+const FULL_RANGE_480P_MP4 = resolvePath(FIXTURES, 'fullrange-480p.mp4')
+/**
+ * 320x180 coded, red left / blue right, display matrix rotating it to 180x320,
+ * blue on top. The one display rotation pinned end to end here (270° clockwise
+ * in WebCodecs terms, ffmpeg's "90"); the matrix-to-rotation reading of all
+ * four is pinned by `apps/artist/src/workers/mp4Demux.test.ts`, and 90° and
+ * 180° were each compared against Chromium's <video> once, by hand
+ * (ESCSUITE-254 report).
+ */
 const ROTATED_MP4 = resolvePath(FIXTURES, 'rotated.mp4')
 
 const FALLBACK_WARNING = 'falling back to HTMLVideoElement'
@@ -65,9 +79,12 @@ const IN_PAGE_NOTICE = 'Decoding in the page; keep this tab in the foreground'
 /**
  * Parity tolerance: mean absolute difference per RGB channel, out of 255.
  * Both exports go through the same H.264 encoder at the same settings, so a
- * correctly decoded source differs only by encoder noise; a wrong frame (the
- * colour changes every 8 source frames), a missing one (black) or a flipped
- * one (the luma ramp reverses) differs by tens.
+ * correctly decoded source differs only by encoder noise (measured 0.05-0.27
+ * in Chromium 153). A wrong frame (the colour changes every 8 source frames),
+ * a missing one (black) or a flipped one (the luma ramp reverses) differs by
+ * tens. The breakage closest to the bound, and the reason it is 1.5 rather
+ * than 4: decoding an untagged SD source as BT.709 where `<video>` assumes
+ * BT.601, measured at 3.70 on frame 25 of `segments.mp4`.
  */
 const PARITY_TOLERANCE = 1.5
 
@@ -85,6 +102,8 @@ interface ProbeOptions {
 
 interface ExportOptions extends ProbeOptions {
   resolution: 'project' | '480p'
+  /** Trim the clip to start this many seconds into its source, still at the timeline's start. */
+  trimStart?: number
 }
 
 /**
@@ -169,20 +188,65 @@ async function readProbes(page: Page) {
   }))
 }
 
+/**
+ * Trim the one clip on the timeline to start `seconds` into its source, kept
+ * at the timeline's start, through the documented integration API: `GET_STATE`
+ * for the project, `LOAD_PROJECT` for the edited one. Both are posted from the
+ * page to itself, which `initIntegration` accepts at the top level (see
+ * `utils/perf.ts`'s `loadPerfScene`).
+ */
+async function trimClipStart(page: Page, seconds: number): Promise<void> {
+  const project = await getProject(page)
+  const [clip] = project.timeline.clips
+  const end = clip.startTime + clip.duration
+  Object.assign(clip, { startTime: seconds, duration: end - seconds, endTime: end, timelinePosition: 0 })
+  project.timeline.duration = end - seconds
+  await page.evaluate((payload) => window.postMessage({ type: 'LOAD_PROJECT', payload }, '*'), project)
+  await expect.poll(async () => (await getProject(page)).timeline.clips[0].startTime, { timeout: 15_000 }).toBe(seconds)
+}
+
+interface ProjectShape {
+  timeline: { duration: number; clips: Array<{ startTime: number; duration: number; endTime: number; timelinePosition: number }> }
+}
+
+/** The editor's project, through `GET_STATE`. */
+async function getProject(page: Page): Promise<ProjectShape> {
+  return page.evaluate(
+    () =>
+      new Promise<ProjectShape>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('GET_STATE never answered')), 15_000)
+        const onMessage = (event: Event) => {
+          const detail = (event as CustomEvent).detail
+          if (detail?.type !== 'STATE') return
+          clearTimeout(timer)
+          window.removeEventListener('videoeditor:message', onMessage)
+          resolve(detail.payload.project)
+        }
+        window.addEventListener('videoeditor:message', onMessage)
+        window.postMessage({ type: 'GET_STATE' }, '*')
+      })
+  )
+}
+
 /** Open ESCAPEARTIST in `page`, import `file`, put it on the timeline and export it as an MP4. */
-async function importAndExportMp4(page: Page, file: string, resolution: 'project' | '480p'): Promise<ExportRun> {
+async function importAndExportMp4(
+  page: Page,
+  file: string,
+  { resolution, trimStart }: Pick<ExportOptions, 'resolution' | 'trimStart'>
+): Promise<ExportRun> {
   const logs = await openWithSource(page, file)
+  if (trimStart !== undefined) await trimClipStart(page, trimStart)
   const bytes = await exportMp4FromDialog(page, resolution)
   return { bytes, logs, ...(await readProbes(page)) }
 }
 
 /** Run `importAndExportMp4` in a fresh browser context (its own IndexedDB), with the given probes. */
-async function exportInFreshContext(browser: Browser, file: string, { resolution, ...probes }: ExportOptions) {
+async function exportInFreshContext(browser: Browser, file: string, { resolution, trimStart, ...probes }: ExportOptions) {
   const context = await browser.newContext()
   try {
     const page = await context.newPage()
     await installProbes(page, probes)
-    return await importAndExportMp4(page, file, resolution)
+    return await importAndExportMp4(page, file, { resolution, trimStart })
   } finally {
     await context.close()
   }
@@ -245,54 +309,107 @@ async function frameAt(
   )
 }
 
-interface Region {
-  x0: number
-  y0: number
-  x1: number
-  y1: number
+interface FrameComparison {
+  /** Mean absolute difference per RGB channel over the source's region, out of 255. */
+  mad: number
+  regionWidth: number
+  regionHeight: number
 }
 
 /**
- * Where the source was drawn: the bounding box of the reference frame's
- * non-black pixels, inset two pixels so the encoder's edge ringing is not
- * counted. The project background is black and the source sits at native
- * size in the middle of it, so a difference taken over the whole frame would
- * be diluted a hundredfold by background both paths draw identically.
+ * Decode the MP4s `x` and `y` in two `<video>` elements in `page` and, for
+ * each `[timeInX, timeInY]` pair, compare the two frames over the region where
+ * `y`'s frame is not black (the source; the project background around it is
+ * black in both), inset two pixels so the encoder's edge ringing is not
+ * counted. Only a `centre`-sized rectangle from the middle of each frame is
+ * read, and the arithmetic stays in the page: a 1080p frame is eight million
+ * numbers to carry back. `x` and `y` may be the same file.
  */
-function sourceRegion(frame: DecodedFrame): Region {
-  let x0 = frame.width
-  let y0 = frame.height
-  let x1 = -1
-  let y1 = -1
-  for (let y = 0; y < frame.height; y++) {
-    for (let x = 0; x < frame.width; x++) {
-      const i = (y * frame.width + x) * 4
-      if (Math.max(frame.data[i], frame.data[i + 1], frame.data[i + 2]) > 12) {
-        x0 = Math.min(x0, x)
-        y0 = Math.min(y0, y)
-        x1 = Math.max(x1, x)
-        y1 = Math.max(y1, y)
+async function compareFrames(
+  page: Page,
+  x: Buffer,
+  y: Buffer,
+  pairs: Array<[number, number]>,
+  centre: { width: number; height: number }
+): Promise<FrameComparison[]> {
+  return page.evaluate(
+    async ({ xBase64, yBase64, pairs, centre }) => {
+      const open = async (base64: string) => {
+        const binary = atob(base64)
+        const array = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
+        const video = document.createElement('video')
+        video.muted = true
+        // Without 'auto', a detached element in headless Chromium can keep
+        // painting its first frame after a seek.
+        video.preload = 'auto'
+        video.src = URL.createObjectURL(new Blob([array], { type: 'video/mp4' }))
+        await new Promise<void>((resolve, reject) => {
+          video.onloadeddata = () => resolve()
+          video.onerror = () => reject(new Error('the exported MP4 did not load'))
+        })
+        return video
       }
-    }
-  }
-  return { x0: x0 + 2, y0: y0 + 2, x1: x1 - 2, y1: y1 - 2 }
-}
-
-/** Mean absolute difference per RGB channel (alpha ignored) over `region`, out of 255. */
-function meanAbsoluteDifference(a: DecodedFrame, b: DecodedFrame, region: Region): number {
-  expect([a.width, a.height]).toEqual([b.width, b.height])
-  let sum = 0
-  let count = 0
-  for (let y = region.y0; y <= region.y1; y++) {
-    for (let x = region.x0; x <= region.x1; x++) {
-      const i = (y * a.width + x) * 4
-      for (let c = 0; c < 3; c++) {
-        sum += Math.abs(a.data[i + c] - b.data[i + c])
-        count++
+      const read = async (video: HTMLVideoElement, time: number) => {
+        video.currentTime = time
+        await new Promise<void>((resolve) => {
+          video.onseeked = () => resolve()
+        })
+        const canvas = document.createElement('canvas')
+        canvas.width = video.videoWidth
+        canvas.height = video.videoHeight
+        const ctx = canvas.getContext('2d')!
+        ctx.drawImage(video, 0, 0)
+        return ctx.getImageData(
+          Math.floor((canvas.width - centre.width) / 2),
+          Math.floor((canvas.height - centre.height) / 2),
+          centre.width,
+          centre.height
+        ).data
       }
-    }
-  }
-  return sum / count
+      const xVideo = await open(xBase64)
+      const yVideo = await open(yBase64)
+      const results = []
+      for (const [timeInX, timeInY] of pairs) {
+        const a = await read(xVideo, timeInX)
+        const b = await read(yVideo, timeInY)
+        let x0 = centre.width
+        let y0 = centre.height
+        let x1 = -1
+        let y1 = -1
+        for (let row = 0; row < centre.height; row++) {
+          for (let col = 0; col < centre.width; col++) {
+            const i = (row * centre.width + col) * 4
+            if (Math.max(b[i], b[i + 1], b[i + 2]) > 12) {
+              x0 = Math.min(x0, col)
+              y0 = Math.min(y0, row)
+              x1 = Math.max(x1, col)
+              y1 = Math.max(y1, row)
+            }
+          }
+        }
+        x0 += 2
+        y0 += 2
+        x1 -= 2
+        y1 -= 2
+        let sum = 0
+        let count = 0
+        for (let row = y0; row <= y1; row++) {
+          for (let col = x0; col <= x1; col++) {
+            const i = (row * centre.width + col) * 4
+            for (let c = 0; c < 3; c++) {
+              sum += Math.abs(a[i + c] - b[i + c])
+              count++
+            }
+          }
+        }
+        results.push({ mad: sum / count, regionWidth: x1 - x0 + 1, regionHeight: y1 - y0 + 1 })
+      }
+      for (const video of [xVideo, yVideo]) URL.revokeObjectURL(video.src)
+      return results
+    },
+    { xBase64: x.toString('base64'), yBase64: y.toString('base64'), pairs, centre }
+  )
 }
 
 type Colour = 'red' | 'blue' | 'other'
@@ -314,12 +431,64 @@ function expectMp4(bytes: Buffer) {
   expect(bytes.subarray(4, 8).toString('latin1')).toBe('ftyp')
 }
 
-function expectWorkerDecoded(run: ExportRun) {
+/** The worker decoded the export: no fallback, no notice, and at least `frames` frames answered by the worker. */
+function expectWorkerDecoded(run: ExportRun, frames = 1) {
   expect(run.logs.some((line) => line.includes('[MP4 Export] Using WebCodecs'))).toBe(true)
   expect(run.logs.filter((line) => line.includes(FALLBACK_WARNING))).toEqual([])
-  expect(run.framesReady).toBeGreaterThan(0)
+  expect(run.framesReady).toBeGreaterThanOrEqual(frames)
   expect(run.inPageNoticeSeen).toBe(false)
 }
+
+interface ParityCase {
+  name: string
+  file: string
+  /** The source's own size: drawn at native size in the middle of the 1080p project. */
+  width: number
+  height: number
+  trimStart?: number
+  /** Frames of the export the timeline makes, all decoded by the worker for its one clip. */
+  exportedFrames: number
+  /**
+   * Export frames compared: the first (the edit list's first presented
+   * frame), two mid-timeline frames that are each the second frame of an
+   * 8-frame colour segment (a source frame two or more early, the edit list
+   * ignored, lands in the previous segment), and the last (the end-of-stream
+   * flush). The middle two are in different segments, which is what proves a
+   * reader is not stuck on one frame.
+   */
+  frames: [number, number, number, number]
+}
+
+const PARITY_CASES: ParityCase[] = [
+  { name: 'an untagged 160x120 source', file: SEGMENTS_MP4, width: 160, height: 120, exportedFrames: 60, frames: [0, 25, 41, 59] },
+  {
+    name: 'a BT.709-tagged 640x480 source, which must keep its own colours',
+    file: TAGGED_709_480P_MP4,
+    width: 640,
+    height: 480,
+    exportedFrames: 60,
+    frames: [0, 25, 41, 59],
+  },
+  {
+    name: 'a full-range 640x480 source',
+    file: FULL_RANGE_480P_MP4,
+    width: 640,
+    height: 480,
+    exportedFrames: 60,
+    frames: [0, 25, 41, 59],
+  },
+  {
+    // Starts 15 frames in, so export frames 10, 26 and 44 are source frames
+    // 25, 41 and 59.
+    name: 'a clip trimmed to start 0.5 s into its source',
+    file: SEGMENTS_MP4,
+    width: 160,
+    height: 120,
+    trimStart: 0.5,
+    exportedFrames: 45,
+    frames: [0, 10, 26, 44],
+  },
+]
 
 test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () => {
   test.skip(({ browserName }) => browserName !== 'chromium', 'measured in Chromium only; see the file comment')
@@ -333,55 +502,56 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
     expectMp4(run.bytes)
   })
 
-  test('the worker export matches the <video> export frame for frame', async ({ browser, page }) => {
-    test.setTimeout(300_000)
+  for (const parity of PARITY_CASES) {
+    test(`the worker export matches the <video> export frame for frame: ${parity.name}`, async ({ browser, page }) => {
+      test.setTimeout(300_000)
 
-    // At the project's own 1920x1080 the 160x120 source is drawn at native
-    // size (scale 1 is native pixels), so the compared region is the source's
-    // own pixels rather than a downscaled blur of them.
-    const withWorker = await exportInFreshContext(browser, SEGMENTS_MP4, { resolution: 'project' })
-    const withoutWorker = await exportInFreshContext(browser, SEGMENTS_MP4, {
-      resolution: 'project',
-      forceNoWorker: true,
-    })
+      // At the project's own 1920x1080 the source is drawn at native size
+      // (scale 1 is native pixels), so the compared region is the source's
+      // own pixels rather than a downscaled blur of them.
+      const options = { resolution: 'project' as const, trimStart: parity.trimStart }
+      const withWorker = await exportInFreshContext(browser, parity.file, options)
+      const withoutWorker = await exportInFreshContext(browser, parity.file, { ...options, forceNoWorker: true })
 
-    // The two runs took the two paths they were meant to.
-    expectWorkerDecoded(withWorker)
-    expect(withoutWorker.logs.some((line) => line.includes('[MP4 Export] Using HTMLVideoElement'))).toBe(true)
-    expect(withoutWorker.framesReady).toBe(0)
-    expect(withoutWorker.inPageNoticeSeen).toBe(true)
-    expectMp4(withWorker.bytes)
-    expectMp4(withoutWorker.bytes)
+      // The two runs took the two paths they were meant to.
+      expectWorkerDecoded(withWorker, parity.exportedFrames)
+      expect(withoutWorker.logs.some((line) => line.includes('[MP4 Export] Using HTMLVideoElement'))).toBe(true)
+      expect(withoutWorker.framesReady).toBe(0)
+      expect(withoutWorker.inPageNoticeSeen).toBe(true)
+      expectMp4(withWorker.bytes)
+      expectMp4(withoutWorker.bytes)
 
-    // Mid-timeline frames 25 and 41, each the second frame of an 8-frame
-    // colour segment: a source frame two or more early (the edit list
-    // ignored) lands in the previous segment. Sampled half a frame in, so the
-    // exported file's own frame boundaries cannot decide it.
-    await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
-    await waitForAppReady(page, 'artist')
-    // The 160x120 source sits at native size in the middle of the 1080p frame.
-    const centre = { width: 200, height: 160 }
-    // Not vacuous: the two sampled frames are in different colour segments,
-    // so a reader stuck on one frame (or an export that froze) cannot pass.
-    const early = await frameAt(page, withoutWorker.bytes, 25.5 / 30, centre)
-    const late = await frameAt(page, withoutWorker.bytes, 41.5 / 30, centre)
-    expect(meanAbsoluteDifference(early, late, sourceRegion(early))).toBeGreaterThan(20)
-    for (const frameIndex of [25, 41]) {
-      const time = (frameIndex + 0.5) / 30
-      const a = await frameAt(page, withWorker.bytes, time, centre)
-      const b = await frameAt(page, withoutWorker.bytes, time, centre)
-      const region = sourceRegion(b)
-      // Not vacuous: the 160x120 source, minus the inset, is what is compared.
-      expect(region.x1 - region.x0).toBeGreaterThan(150)
-      expect(region.y1 - region.y0).toBeGreaterThan(110)
-      const mad = meanAbsoluteDifference(a, b, region)
-      console.log(
-        `[ESCSUITE-254 parity] frame ${frameIndex}: MAD ${mad.toFixed(3)} / 255 over the source's ` +
-          `${region.x1 - region.x0 + 1}x${region.y1 - region.y0 + 1} region`
+      await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+      await waitForAppReady(page, 'artist')
+      const centre = { width: parity.width + 40, height: parity.height + 40 }
+      // Sampled half a frame in, so the exported file's own frame boundaries
+      // cannot decide it.
+      const at = (frame: number) => (frame + 0.5) / 30
+
+      // Not vacuous: the two middle frames are in different colour segments,
+      // so a reader stuck on one frame (or an export that froze) cannot pass.
+      const [segments] = await compareFrames(page, withoutWorker.bytes, withoutWorker.bytes, [[at(parity.frames[1]), at(parity.frames[2])]], centre)
+      expect(segments.mad).toBeGreaterThan(20)
+
+      const results = await compareFrames(
+        page,
+        withWorker.bytes,
+        withoutWorker.bytes,
+        parity.frames.map((frame) => [at(frame), at(frame)]),
+        centre
       )
-      expect(mad).toBeLessThan(PARITY_TOLERANCE)
-    }
-  })
+      results.forEach(({ mad, regionWidth, regionHeight }, index) => {
+        console.log(
+          `[ESCSUITE-254 parity] ${parity.name}, frame ${parity.frames[index]}: MAD ${mad.toFixed(3)} / 255 ` +
+            `over the source's ${regionWidth}x${regionHeight} region`
+        )
+        // Not vacuous: the source itself, less the inset, is what is compared.
+        expect(regionWidth).toBeGreaterThan(parity.width - 10)
+        expect(regionHeight).toBeGreaterThan(parity.height - 10)
+        expect(mad).toBeLessThan(PARITY_TOLERANCE)
+      })
+    })
+  }
 
   test('a rotated source exports in the orientation its <video> preview shows', async ({ page }) => {
     test.setTimeout(180_000)

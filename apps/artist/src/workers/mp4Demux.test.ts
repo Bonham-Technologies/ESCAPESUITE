@@ -127,6 +127,14 @@ describe('demuxVideoTrack', () => {
       expect(colour).toEqual({ fullyTagged: false, fullRange: true })
     })
 
+    it('a stream that tags only its matrix is not fully tagged', async () => {
+      // primaries and transfer 'unspecified' (2), matrix BT.709: Chromium's
+      // <video> draws this with its size-based guess, so the worker must too.
+      const { colour } = await demuxVideoTrack(fixture('h264-partial-tag.mp4'))
+
+      expect(colour).toEqual({ fullyTagged: false, fullRange: false })
+    })
+
     it('a colr box speaks for the stream', async () => {
       const { colour } = await demuxVideoTrack(fixture('h264-colr.mp4'))
 

@@ -144,6 +144,16 @@ declare module 'mp4box' {
               type: string;
               avcC?: MP4WritableBox;
               hvcC?: MP4WritableBox;
+              /** Colour information box: 'nclx'/'nclc' carry code points, 'prof'/'rICC' an ICC profile. */
+              colr?: {
+                colour_type: string;
+                colour_primaries?: number;
+                transfer_characteristics?: number;
+                matrix_coefficients?: number;
+                full_range_flag?: number;
+              };
+              /** Pixel aspect ratio box. */
+              pasp?: { hSpacing: number; vSpacing: number };
             }>;
           };
         };

@@ -16,6 +16,8 @@ interface ScriptedTrack {
 
 const script = vi.hoisted(() => ({
   entries: 1,
+  /** The sample entry's colr box, if any. */
+  colr: undefined as undefined | Record<string, unknown>,
   /** Sample counts per onSamples call. */
   batches: [2] as number[],
 }))
@@ -33,7 +35,7 @@ vi.mock('mp4box', () => {
         onSamples: undefined as undefined | ((id: number, user: unknown, samples: unknown[]) => void),
         onError: undefined as undefined | ((error: string) => void),
         getTrackById: () => ({
-          mdia: { minf: { stbl: { stsd: { entries: Array.from({ length: script.entries }, () => ({ type: 'vp09' })) } } } },
+          mdia: { minf: { stbl: { stsd: { entries: Array.from({ length: script.entries }, () => ({ type: 'vp09', colr: script.colr })) } } } },
         }),
         setExtractionOptions: vi.fn(),
         start: vi.fn(),
@@ -75,6 +77,7 @@ vi.mock('mp4box', () => {
 import { demuxVideoTrack } from './mp4Demux'
 
 beforeEach(() => {
+  script.colr = undefined
   script.entries = 1
   script.batches = [2]
 })
@@ -94,5 +97,38 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
     const video = await demuxVideoTrack(new ArrayBuffer(8), { timeoutMs: 20 })
 
     expect(video.samples).toHaveLength(5)
+  })
+
+  // Fix round 1, M1: the colr shapes no ffmpeg fixture here produces.
+  describe('colour from a colr box', () => {
+    it("reads an 'nclc' box's code points, with no range", async () => {
+      script.colr = { colour_type: 'nclc', colour_primaries: 1, transfer_characteristics: 1, matrix_coefficients: 1 }
+
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: true })
+    })
+
+    it("reads an 'nclx' box's full-range flag", async () => {
+      script.colr = {
+        colour_type: 'nclx',
+        colour_primaries: 1,
+        transfer_characteristics: 2,
+        matrix_coefficients: 1,
+        full_range_flag: 1,
+      }
+
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false, fullRange: true })
+    })
+
+    it('does not count a missing code point as specified', async () => {
+      script.colr = { colour_type: 'nclc', colour_primaries: 1, matrix_coefficients: 1 }
+
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false })
+    })
+
+    it('ignores an ICC-profile colr box', async () => {
+      script.colr = { colour_type: 'prof' }
+
+      expect((await demuxVideoTrack(new ArrayBuffer(8))).colour).toEqual({ fullyTagged: false })
+    })
   })
 })

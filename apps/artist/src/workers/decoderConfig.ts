@@ -25,9 +25,17 @@ export type ConfigSupportCheck = (config: OrientedDecoderConfig) => Promise<{
  * (measured: 718 lines is 601, 720 is 709; the width plays no part). A raw
  * VideoDecoder assumes BT.709 at every size instead, which shifts a
  * saturated colour by up to ~20/255 against the preview and against the
- * `<video>` path. A stream that does carry primaries, transfer and matrix
- * keeps them in both paths: the config's colour space only fills in what the
- * bitstream leaves out.
+ * `<video>` path.
+ *
+ * What was measured in Chromium 153, `<video>` beside the decoder
+ * (ESCSUITE-254 fix round 1): a stream whose primaries, transfer and matrix
+ * are all specified is drawn in its own colours by both, whatever the config
+ * says; one that leaves any unspecified is drawn by `<video>` with this guess
+ * — a 160x120 file tagging only its matrix as BT.709 is shown as BT.601 —
+ * and by the decoder with the config's colour space. A full-range signal
+ * alone was likewise kept by both. Firefox 155's VideoDecoder ignores the
+ * config and matched its `<video>` in all of these. So the guess is given only
+ * to a stream that is not fully tagged, with the stream's own range.
  */
 export function assumedColorSpace(codedHeight: number): VideoColorSpaceInit {
   const standard = codedHeight >= 720 ? 'bt709' : 'smpte170m';
@@ -61,12 +69,16 @@ export async function decoderConfigFor(
     codedWidth: video.codedWidth,
     codedHeight: video.codedHeight,
     description: video.description,
-    colorSpace: assumedColorSpace(video.codedHeight),
     // 'prefer-hardware' is a requirement in Chromium, not a preference: a
     // machine without a hardware decoder for the codec (a Linux CI runner, a
     // VM) would refuse every source.
     hardwareAcceleration: preferHardwareAcceleration ? 'prefer-hardware' : 'no-preference',
   };
+  // Only for a stream that does not fully describe its own colour: one that
+  // does is drawn in its own colours by <video>, and keeps them here too.
+  if (!video.colour.fullyTagged) {
+    config.colorSpace = { ...assumedColorSpace(video.codedHeight), fullRange: video.colour.fullRange ?? false };
+  }
   if (video.rotation !== 0) config.rotation = video.rotation;
 
   const support = await isConfigSupported(config);
