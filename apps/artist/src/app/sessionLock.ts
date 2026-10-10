@@ -67,7 +67,9 @@ export function acquireSessionOwnership(
   }
 
   let released = false;
-  let releaseHold: () => void = () => {};
+  // Assigned by the executor below, which runs synchronously — no placeholder
+  // function, since nothing could ever call one.
+  let releaseHold!: () => void;
   const hold = new Promise<void>((resolve) => {
     releaseHold = resolve;
   });
