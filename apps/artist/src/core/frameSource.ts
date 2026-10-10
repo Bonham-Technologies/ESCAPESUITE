@@ -11,6 +11,7 @@
  */
 
 import { VideoDecodeManager } from './videoDecodeManager';
+import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -34,6 +35,33 @@ export interface SourceInfo {
  * Progress callback for source loading
  */
 export type LoadProgressCallback = (phase: string, progress: number) => void;
+
+/**
+ * Called when a source the WebCodecs worker was asked to decode ends up on
+ * the HTMLVideoElement path instead — refused when it was loaded, or given up
+ * on mid-export — with the worker's reason. The export uses it to say it is
+ * decoding in the page (ESCSUITE-254).
+ */
+export type FallbackCallback = (sourceId: string, reason: string) => void;
+
+/**
+ * The most source bytes one export hands to the decode worker, summed over
+ * its sources. The worker holds every encoded sample of every source it takes
+ * until the export ends (mp4box copies them out of the file, which is read
+ * into memory first), where the `<video>` path streams from the Blob. While a
+ * source is being demuxed the worker briefly holds it twice — the file and the
+ * copies — so the peak is up to the budget plus the largest source again.
+ * A source that would take the export past it keeps the `<video>` path, and
+ * the export says so (ESCSUITE-254). 512 MB: a few minutes of 1080p phone
+ * video, on a renderer the operator's lower-spec customers share with the
+ * page; a judgement, not a measurement.
+ */
+export const MAX_WORKER_SOURCE_BYTES = 512 * 1024 * 1024;
+
+/** The words of whatever a decode failure was rejected with. */
+function failureReason(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 /**
  * Abstract frame source interface
@@ -270,15 +298,98 @@ export class HTMLVideoFrameSource implements IFrameSource {
 }
 
 /**
+ * A WebCodecs source that hands itself over to the HTMLVideoElement path the
+ * first time the decode worker cannot produce a frame — a decoder error, a
+ * stall — instead of leaving that clip missing from every frame after it.
+ *
+ * The worker answers every request (it bounds its own waits), so a failure
+ * arrives as a rejection here. Requests already in flight when it happens are
+ * served by the same `<video>` source; the worker's copy is disposed.
+ */
+class FailoverFrameSource implements IFrameSource {
+  private fallback: Promise<IFrameSource> | null = null;
+
+  constructor(
+    private readonly primary: IFrameSource,
+    private readonly sourceId: string,
+    private readonly createFallback: () => Promise<IFrameSource>,
+    private readonly onFallback?: FallbackCallback
+  ) {}
+
+  async getFrame(timestamp: number): Promise<DrawableFrame> {
+    if (!this.fallback) {
+      try {
+        return await this.primary.getFrame(timestamp);
+      } catch (error) {
+        this.handOver(error);
+      }
+    }
+    return (await this.fallback!).getFrame(timestamp);
+  }
+
+  getInfo(): SourceInfo {
+    return this.primary.getInfo();
+  }
+
+  requiresCleanup(): boolean {
+    return true;
+  }
+
+  async dispose(): Promise<void> {
+    await this.primary.dispose();
+    if (!this.fallback) return;
+    // A <video> that never loaded skipped this clip, as the oracle does; it
+    // must not turn a finished export into a failed one at cleanup.
+    let fallback: IFrameSource;
+    try {
+      fallback = await this.fallback;
+    } catch (error) {
+      console.warn(`The <video> fallback for ${this.sourceId} never loaded:`, error);
+      return;
+    }
+    await fallback.dispose();
+  }
+
+  /** Switch to the `<video>` path, once, however many requests failed together. */
+  private handOver(error: unknown): void {
+    if (this.fallback) return;
+    console.warn(
+      `WebCodecs failed for ${this.sourceId} mid-export, falling back to HTMLVideoElement:`,
+      error
+    );
+    this.onFallback?.(this.sourceId, failureReason(error));
+    this.fallback = this.createFallback();
+    void this.primary.dispose();
+  }
+}
+
+export interface FrameSourceFactoryOptions {
+  /** Whether the worker's output was measured against this engine's `<video>`; see `workerDecodeEngine.ts`. */
+  measuredEngine?: boolean;
+}
+
+/**
  * Factory for creating frame sources
  * Automatically selects WebCodecs or HTMLVideoElement based on support
  */
 export class FrameSourceFactory {
   private manager: VideoDecodeManager | null = null;
   private useWebCodecs: boolean;
+  /** Source bytes handed to the worker so far; see MAX_WORKER_SOURCE_BYTES. */
+  private workerBytes = 0;
 
-  constructor(useWebCodecs: boolean = true) {
-    this.useWebCodecs = useWebCodecs && VideoDecodeManager.isSupported();
+  /**
+   * `measuredEngine` says whether this engine's worker output was measured
+   * against its own `<video>` (`workerDecodeEngine.ts`). When it was not, the
+   * worker is never started and no source is read into memory for it: every
+   * source takes the `<video>` path, and the MP4 export says so once
+   * (ESCSUITE-254). Defaults to asking the running browser.
+   */
+  constructor(
+    useWebCodecs: boolean = true,
+    { measuredEngine = isMeasuredWorkerDecodeEngine(globalThis.navigator) }: FrameSourceFactoryOptions = {}
+  ) {
+    this.useWebCodecs = useWebCodecs && measuredEngine && VideoDecodeManager.isSupported();
   }
 
   /**
@@ -326,31 +437,49 @@ export class FrameSourceFactory {
    * @param blob Video blob
    * @param mimeType MIME type (e.g., 'video/mp4')
    * @param onProgress Optional progress callback
+   * @param onFallback Told when an MP4 the worker was given ends up on the
+   *   HTMLVideoElement path — refused now, or given up on mid-export
    * @returns A frame source (WebCodecs or HTMLVideoElement based)
    */
   async createSource(
     sourceId: string,
     blob: Blob,
     mimeType: string,
-    onProgress?: LoadProgressCallback
+    onProgress?: LoadProgressCallback,
+    onFallback?: FallbackCallback
   ): Promise<IFrameSource> {
     // Use WebCodecs for MP4 files when supported
     if (this.useWebCodecs && this.manager && mimeType.includes('mp4')) {
       try {
+        if (this.workerBytes + blob.size > MAX_WORKER_SOURCE_BYTES) {
+          throw new Error(
+            `This export's sources would hold more than the ${MAX_WORKER_SOURCE_BYTES / 1024 / 1024} MB the decode worker keeps in memory`
+          );
+        }
         const data = await blob.arrayBuffer();
-        return await WebCodecsFrameSource.create(
+        const source = await WebCodecsFrameSource.create(
           this.manager,
           sourceId,
           data,
           mimeType,
           onProgress
         );
+        this.workerBytes += blob.size;
+        return new FailoverFrameSource(
+          source,
+          sourceId,
+          () => HTMLVideoFrameSource.create(sourceId, blob, onProgress),
+          onFallback
+        );
       } catch (error) {
-        // Fall back to HTMLVideoElement on error
+        // Fall back to HTMLVideoElement on error — and say so: before
+        // ESCSUITE-254 this warning was the only trace that every source
+        // fell back.
         console.warn(
           `WebCodecs failed for ${sourceId}, falling back to HTMLVideoElement:`,
           error
         );
+        onFallback?.(sourceId, failureReason(error));
       }
     }
 

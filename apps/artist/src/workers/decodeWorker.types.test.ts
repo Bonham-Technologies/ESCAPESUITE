@@ -21,9 +21,8 @@ import {
 describe('decodeWorker.types', () => {
   describe('DEFAULT_DECODE_WORKER_CONFIG', () => {
     it('has expected default values', () => {
-      expect(DEFAULT_DECODE_WORKER_CONFIG.maxCachedFramesPerSource).toBe(60);
-      expect(DEFAULT_DECODE_WORKER_CONFIG.lookAheadFrames).toBe(10);
-      expect(DEFAULT_DECODE_WORKER_CONFIG.preferHardwareAcceleration).toBe(true);
+      // ESCSUITE-254: a handful of held frames, not two seconds of them.
+      expect(DEFAULT_DECODE_WORKER_CONFIG).toEqual({ maxCachedFramesPerSource: 8 });
     });
 
     it('can be used as a DecodeWorkerConfig', () => {

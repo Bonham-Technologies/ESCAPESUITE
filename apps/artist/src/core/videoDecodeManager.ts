@@ -52,6 +52,8 @@ interface PendingRequest {
   resolve: (frame: VideoFrame) => void;
   reject: (error: Error) => void;
   timestamp: number;
+  /** Whose request it is: a dispose rejects only its own source's (ESCSUITE-254). */
+  sourceId: string;
 }
 
 /**
@@ -208,20 +210,35 @@ export class VideoDecodeManager {
       this.handleWorkerMessage(event.data);
     };
 
+    // Before ready these reject the startup wait; after it, every frame
+    // request and source load in flight — an answer lost to a dead worker or
+    // an unreadable message is never coming, and an export must not wait for
+    // it (ESCSUITE-254). A worker killed outright may fire neither; a
+    // main-thread deadline per request is ESCSUITE-266.
     this.worker.onerror = (error) => {
       console.error('Decode worker error:', error);
       if (this.errorCallback) {
         this.errorCallback(`Worker error: ${error.message}`, true);
       }
       this.readyReject?.(new Error(`Decode worker failed to start: ${error.message || 'unknown error'}`));
+      this.rejectInFlight(new Error(`Decode worker failed: ${error.message || 'unknown error'}`));
     };
 
     this.worker.onmessageerror = () => {
       console.error('Decode worker message error: received an unparseable message');
       this.readyReject?.(new Error('Decode worker failed to start: received an unparseable message'));
+      this.rejectInFlight(new Error('Decode worker failed: received an unparseable message'));
     };
 
     return this.readyPromise;
+  }
+
+  /** Reject, and forget, every frame request and source load in flight. */
+  private rejectInFlight(error: Error): void {
+    for (const pending of this.pendingRequests.values()) pending.reject(error);
+    this.pendingRequests.clear();
+    for (const loadPromise of this.sourceLoadPromises.values()) loadPromise.reject(error);
+    this.sourceLoadPromises.clear();
   }
 
   /**
@@ -258,6 +275,10 @@ export class VideoDecodeManager {
         if (pending) {
           pending.resolve(response.frame);
           this.pendingRequests.delete(response.requestId);
+        } else {
+          // Its request was already settled (its source disposed, say): the
+          // frame was transferred to this thread and is nobody else's to close.
+          response.frame.close();
         }
         break;
       }
@@ -384,7 +405,7 @@ export class VideoDecodeManager {
     const requestId = this.nextRequestId++;
 
     return new Promise((resolve, reject) => {
-      this.pendingRequests.set(requestId, { resolve, reject, timestamp });
+      this.pendingRequests.set(requestId, { resolve, reject, timestamp, sourceId });
 
       this.postRequest({
         type: 'REQUEST_FRAME',
@@ -457,11 +478,11 @@ export class VideoDecodeManager {
     // Remove callbacks
     this.progressCallbacks.delete(sourceId);
 
-    // Cancel pending requests for this source
+    // Cancel this source's pending requests — only this source's: a
+    // mid-export handover disposes one source while the others' requests are
+    // still in flight (ESCSUITE-254).
     for (const [requestId, pending] of this.pendingRequests.entries()) {
-      // We don't track sourceId on pending requests, so just cancel all
-      // This is a simplification; in production you might want to track sourceId
-      if (pending.timestamp !== undefined) {
+      if (pending.sourceId === sourceId) {
         pending.reject(new Error('Source disposed'));
         this.pendingRequests.delete(requestId);
       }
@@ -492,17 +513,7 @@ export class VideoDecodeManager {
     this.readyResolve = null;
     this.readyReject = null;
 
-    // Reject all pending requests
-    for (const pending of this.pendingRequests.values()) {
-      pending.reject(new Error('Manager terminated'));
-    }
-    this.pendingRequests.clear();
-
-    // Reject all pending source loads
-    for (const loadPromise of this.sourceLoadPromises.values()) {
-      loadPromise.reject(new Error('Manager terminated'));
-    }
-    this.sourceLoadPromises.clear();
+    this.rejectInFlight(new Error('Manager terminated'));
 
     this.progressCallbacks.clear();
   }

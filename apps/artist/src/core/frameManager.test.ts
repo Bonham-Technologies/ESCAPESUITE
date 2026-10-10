@@ -25,6 +25,12 @@ const decoder = vi.hoisted(() => ({
   lastInitializeSignal: undefined as AbortSignal | undefined,
 }))
 
+// The decode worker is admitted only in an engine whose worker output was
+// measured against its own <video> (ESCSUITE-254 fix round 1, B1); jsdom's
+// user agent is not one, so this file, which exists to drive the WebCodecs
+// path, says it is.
+vi.mock('./workerDecodeEngine', () => ({ isMeasuredWorkerDecodeEngine: () => true }))
+
 vi.mock('./videoDecodeManager', () => ({
   VideoDecodeManager: class {
     static isSupported = () => decoder.supported
@@ -172,6 +178,9 @@ describe('frameManager', () => {
       const manager = await createFrameManager(true)
       await loadFrameSource(manager, 'clip-a', mp4(), 'video/mp4')
       decoder.getFrameError = new Error('decode failed')
+      // Since ESCSUITE-254 a worker failure hands the source to a <video>
+      // element; this is the case where that fails too.
+      media.script({ video: { fail: true } })
 
       expect(await getFrameAtTime(manager, 'clip-a', 2)).toBeNull()
       expect(warn).toHaveBeenCalledWith(
@@ -264,6 +273,27 @@ describe('frameManager', () => {
       expect(decoder.disposedSources.sort()).toEqual(['clip-a', 'clip-b'])
       expect(decoder.terminated).toBe(1)
       expect(allFramesClosed()).toBe(true)
+    })
+
+    // Fix round 1, MD2: a finished export stays finished. A source whose
+    // dispose throws must not stop the others being disposed or the worker
+    // being terminated.
+    it('disposes every source and tears down the factory even when one source fails to dispose', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const manager = await createFrameManager(true)
+      await loadFrameSource(manager, 'clip-a', mp4(), 'video/mp4')
+      await loadFrameSource(manager, 'clip-b', mp4(), 'video/mp4')
+      manager.sources.get('clip-a')!.dispose = async () => {
+        throw new Error('the fallback <video> never loaded')
+      }
+
+      await expect(disposeFrameManager(manager)).resolves.toBeUndefined()
+
+      expect(decoder.disposedSources).toEqual(['clip-b'])
+      expect(manager.sources.size).toBe(0)
+      expect(decoder.terminated).toBe(1)
+      expect(warn).toHaveBeenCalledWith('Failed to dispose frame source clip-a:', expect.any(Error))
+      warn.mockRestore()
     })
 
     it('disposes an empty manager without complaint', async () => {

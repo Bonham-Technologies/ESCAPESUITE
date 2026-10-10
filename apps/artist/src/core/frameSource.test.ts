@@ -3,6 +3,7 @@ import {
   WebCodecsFrameSource,
   HTMLVideoFrameSource,
   FrameSourceFactory,
+  MAX_WORKER_SOURCE_BYTES,
   isWebCodecsAvailable,
   type IFrameSource,
 } from './frameSource';
@@ -53,6 +54,13 @@ vi.mock('./videoDecodeManager', () => {
     VideoDecodeManager: MockVideoDecodeManager,
   };
 });
+
+// Every factory in this file is built in an engine the worker is admitted in,
+// unless a case says otherwise (jsdom's own user agent is not one).
+const engine = vi.hoisted(() => ({ measured: true }));
+vi.mock('./workerDecodeEngine', () => ({
+  isMeasuredWorkerDecodeEngine: () => engine.measured,
+}));
 
 // Import after mock is set up
 import { VideoDecodeManager } from './videoDecodeManager';
@@ -195,6 +203,7 @@ describe('frameSource', () => {
     vi.clearAllMocks();
     videoFactory = () => new MockHTMLVideoElement();
     nextInitializeRejection.error = null;
+    engine.measured = true;
   });
 
   describe('WebCodecsFrameSource', () => {
@@ -487,6 +496,40 @@ describe('frameSource', () => {
       expect(factory.isWebCodecsEnabled()).toBe(false);
     });
 
+    // ESCSUITE-254 fix round 1, B1: the worker is admitted only in an engine
+    // whose output was measured against its own <video>; the decision is made
+    // here, on the main thread, before any source is read into memory.
+    it('never starts the worker in an engine whose worker decode was not measured', async () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      const factory = new FrameSourceFactory(true, { measuredEngine: false });
+      await factory.initialize();
+      const blob = new Blob(['x'], { type: 'video/mp4' });
+      const read = vi.spyOn(blob, 'arrayBuffer');
+
+      const source = await factory.createSource('a', blob, 'video/mp4');
+
+      expect(factory.isWebCodecsEnabled()).toBe(false);
+      expect((factory as unknown as { manager: unknown }).manager).toBeNull();
+      expect(source.requiresCleanup()).toBe(false);
+      expect(read).not.toHaveBeenCalled();
+    });
+
+    it('starts the worker in an engine whose worker decode was measured', async () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      const factory = new FrameSourceFactory(true, { measuredEngine: true });
+      await factory.initialize();
+
+      expect(factory.isWebCodecsEnabled()).toBe(true);
+    });
+
+    it('asks the engine predicate when the caller does not say', () => {
+      (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+      engine.measured = false;
+      expect(new FrameSourceFactory(true).isWebCodecsEnabled()).toBe(false);
+      engine.measured = true;
+      expect(new FrameSourceFactory(true).isWebCodecsEnabled()).toBe(true);
+    });
+
     it('falls back when WebCodecs not supported', () => {
       (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(false);
 
@@ -563,6 +606,220 @@ describe('frameSource', () => {
         expect.any(Error)
       );
       warn.mockRestore();
+    });
+
+    // ESCSUITE-254: the decode worker threw on every source for nine months
+    // and the only trace was this warning. A source that falls back is now
+    // reported to the caller, so the export can tell the user it is
+    // decoding in the page.
+    describe('reporting a source that falls back to the <video> path', () => {
+      type ManagerDouble = {
+        loadSource: ReturnType<typeof vi.fn>;
+        getFrame: ReturnType<typeof vi.fn>;
+        disposeSource: ReturnType<typeof vi.fn>;
+      };
+      const managerOf = (factory: FrameSourceFactory) =>
+        (factory as unknown as { manager: ManagerDouble }).manager;
+      const mp4 = () => new Blob(['x'], { type: 'video/mp4' });
+
+      async function factoryWithWorker() {
+        (VideoDecodeManager as unknown as { isSupported: ReturnType<typeof vi.fn> }).isSupported.mockReturnValue(true);
+        const factory = new FrameSourceFactory(true);
+        await factory.initialize();
+        return factory;
+      }
+
+      it('reports each source the worker refuses, with the reason', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        managerOf(factory).loadSource.mockRejectedValue(new Error('Unsupported display matrix'));
+        const onFallback = vi.fn();
+
+        await factory.createSource('a', mp4(), 'video/mp4', undefined, onFallback);
+        await factory.createSource('b', mp4(), 'video/mp4', undefined, onFallback);
+
+        expect(onFallback.mock.calls).toEqual([
+          ['a', 'Unsupported display matrix'],
+          ['b', 'Unsupported display matrix'],
+        ]);
+        warn.mockRestore();
+      });
+
+      it('reports a refusal that was not an Error in its own words', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        managerOf(factory).loadSource.mockRejectedValue('NotReadableError');
+        const onFallback = vi.fn();
+
+        await factory.createSource('a', mp4(), 'video/mp4', undefined, onFallback);
+
+        expect(onFallback).toHaveBeenCalledWith('a', 'NotReadableError');
+        warn.mockRestore();
+      });
+
+      it('falls back without complaint when nobody asked to be told', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const manager = managerOf(factory);
+        manager.loadSource.mockRejectedValueOnce(new Error('refused'));
+
+        const refused = await factory.createSource('a', mp4(), 'video/mp4');
+        const later = await factory.createSource('b', mp4(), 'video/mp4');
+        manager.getFrame.mockRejectedValue(new Error('stalled'));
+
+        expect(refused.requiresCleanup()).toBe(false);
+        await expect(later.getFrame(0.1)).resolves.toBeInstanceOf(MockHTMLVideoElement);
+        warn.mockRestore();
+      });
+
+      it('keeps a source too large to hold in the worker on the <video> path, without reading it', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const onFallback = vi.fn();
+        const huge = mp4();
+        Object.defineProperty(huge, 'size', { value: MAX_WORKER_SOURCE_BYTES + 1 });
+        const read = vi.spyOn(huge, 'arrayBuffer');
+
+        const source = await factory.createSource('a', huge, 'video/mp4', undefined, onFallback);
+
+        expect(source.requiresCleanup()).toBe(false);
+        expect(read).not.toHaveBeenCalled();
+        expect(managerOf(factory).loadSource).not.toHaveBeenCalled();
+        expect(onFallback).toHaveBeenCalledWith(
+          'a',
+          "This export's sources would hold more than the 512 MB the decode worker keeps in memory"
+        );
+        warn.mockRestore();
+      });
+
+      // Fix round 1, MD3: the budget is the export's, not each source's —
+      // every source the worker takes is held until the export ends.
+      it('refuses a source that would take the export past the budget, and takes one that fits', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const sized = (bytes: number) => {
+          const blob = mp4();
+          Object.defineProperty(blob, 'size', { value: bytes });
+          return blob;
+        };
+        const onFallback = vi.fn();
+        const third = MAX_WORKER_SOURCE_BYTES / 3;
+
+        const first = await factory.createSource('a', sized(2 * third), 'video/mp4', undefined, onFallback);
+        const second = await factory.createSource('b', sized(2 * third), 'video/mp4', undefined, onFallback);
+        const third_ = await factory.createSource('c', sized(third), 'video/mp4', undefined, onFallback);
+
+        expect([first, second, third_].map((source) => source.requiresCleanup())).toEqual([true, false, true]);
+        expect(onFallback).toHaveBeenCalledWith(
+          'b',
+          "This export's sources would hold more than the 512 MB the decode worker keeps in memory"
+        );
+        warn.mockRestore();
+      });
+
+      it('hands a source of exactly the limit to the worker', async () => {
+        const factory = await factoryWithWorker();
+        const atLimit = mp4();
+        Object.defineProperty(atLimit, 'size', { value: MAX_WORKER_SOURCE_BYTES });
+
+        const source = await factory.createSource('a', atLimit, 'video/mp4', undefined, vi.fn());
+
+        expect(source.requiresCleanup()).toBe(true);
+        expect(managerOf(factory).loadSource).toHaveBeenCalled();
+      });
+
+      it('reports nothing when the worker takes the source', async () => {
+        const factory = await factoryWithWorker();
+        const onFallback = vi.fn();
+
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, onFallback);
+        await source.getFrame(0.5);
+
+        expect(onFallback).not.toHaveBeenCalled();
+      });
+
+      it('hands a source over to the <video> path, once, when the worker fails a frame mid-export', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const manager = managerOf(factory);
+        const onFallback = vi.fn();
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, onFallback);
+        await source.getFrame(0.1);
+        manager.getFrame.mockRejectedValue(new Error('Decoder stalled: no output for 5000ms'));
+
+        // Two requests in flight when it fails, and one after.
+        const frames = await Promise.all([source.getFrame(0.2), source.getFrame(0.3)]);
+        const later = await source.getFrame(0.4);
+
+        expect(frames.every((frame) => frame instanceof MockHTMLVideoElement)).toBe(true);
+        expect(later).toBeInstanceOf(MockHTMLVideoElement);
+        expect(onFallback.mock.calls).toEqual([['a', 'Decoder stalled: no output for 5000ms']]);
+        expect(manager.disposeSource).toHaveBeenCalledWith('a');
+        expect(warn).toHaveBeenCalledWith(
+          'WebCodecs failed for a mid-export, falling back to HTMLVideoElement:',
+          expect.any(Error)
+        );
+        // The worker is not asked again once the source has been handed over.
+        expect(manager.getFrame).toHaveBeenCalledTimes(3);
+        // It still reports the worker's own description of the source.
+        expect(source.getInfo().codec).toBe('avc1.640028');
+        expect(source.requiresCleanup()).toBe(true);
+
+        await source.dispose();
+        warn.mockRestore();
+      });
+
+      // Fix round 1, MD2: when the <video> the source was handed to cannot
+      // load either, the clip is skipped (the frame request rejects, as the
+      // oracle's would) and disposing the source does not throw — a finished
+      // export must not turn into a failure at cleanup.
+      it('disposes cleanly after a handover whose <video> never loaded', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());
+        managerOf(factory).getFrame.mockRejectedValue(new Error('Decoder stalled'));
+        videoFactory = () => new ScriptedVideoElement({ failLoad: true });
+
+        await expect(source.getFrame(0.2)).rejects.toThrow('Failed to load video');
+        await expect(source.dispose()).resolves.toBeUndefined();
+
+        expect(managerOf(factory).disposeSource).toHaveBeenCalledWith('a');
+        expect(warn).toHaveBeenCalledWith('The <video> fallback for a never loaded:', expect.any(Error));
+        warn.mockRestore();
+      });
+
+      // Fix round 1, MINOR 7: the <video> is asked for the very time the
+      // worker failed on, so the source resumes where it stopped.
+      it('asks the <video> it hands over to for the failing request\'s own time', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());
+        managerOf(factory).getFrame.mockRejectedValue(new Error('Decoder stalled'));
+        const created: MockHTMLVideoElement[] = [];
+        videoFactory = () => {
+          const element = new MockHTMLVideoElement();
+          created.push(element);
+          return element;
+        };
+
+        const frame = await source.getFrame(0.25);
+
+        expect(frame).toBe(created[0]);
+        expect(created[0].currentTime).toBe(0.25);
+        await source.dispose();
+        warn.mockRestore();
+      });
+
+      it('disposes a source that never needed the <video> path without creating one', async () => {
+        const factory = await factoryWithWorker();
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());
+        const created = vi.mocked(document.createElement).mock.calls.filter(([tag]) => tag === 'video').length;
+
+        await source.dispose();
+
+        expect(managerOf(factory).disposeSource).toHaveBeenCalledWith('a');
+        expect(vi.mocked(document.createElement).mock.calls.filter(([tag]) => tag === 'video')).toHaveLength(created);
+      });
     });
 
     it('uses HTMLVideoElement for non-MP4 formats', async () => {

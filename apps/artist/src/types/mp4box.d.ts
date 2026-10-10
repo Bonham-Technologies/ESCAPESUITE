@@ -21,6 +21,15 @@ declare module 'mp4box' {
     codec: string;
     language: string;
     nb_samples: number;
+    /** The tkhd display matrix: nine fixed-point values, a b u c d v x y w. */
+    matrix: Int32Array | Uint32Array | number[];
+    /** The edit list (elst) entries, when the track has one. */
+    edits?: Array<{
+      segment_duration: number;
+      media_time: number;
+      media_rate_integer: number;
+      media_rate_fraction: number;
+    }>;
   }
 
   export interface MP4VideoTrack extends MP4MediaTrack {
@@ -68,7 +77,7 @@ declare module 'mp4box' {
       vpcC?: ArrayBuffer;
       av1C?: ArrayBuffer;
     };
-    data: ArrayBuffer;
+    data: Uint8Array;
     size: number;
     alreadyRead?: number;
     duration: number;
@@ -113,16 +122,50 @@ declare module 'mp4box' {
 
     seek(time: number, useRap?: boolean): { offset: number; time: number };
 
-    getTrackById(trackId: number): MP4Track | undefined;
+    /** The track's `trak` box (not the summary in MP4Info), down to its sample descriptions. */
+    getTrackById(trackId: number): MP4TrakBox;
 
     releaseUsedSamples(trackId: number, sampleNumber: number): void;
 
     getInfo(): MP4Info;
   }
 
+  /** A box that can serialise itself, header included, into a DataStream. */
+  export interface MP4WritableBox {
+    write(stream: DataStream): void;
+  }
+
+  export interface MP4TrakBox {
+    mdia: {
+      minf: {
+        stbl: {
+          stsd: {
+            entries: Array<{
+              type: string;
+              avcC?: MP4WritableBox;
+              hvcC?: MP4WritableBox;
+              /** Colour information box: 'nclx'/'nclc' carry code points, 'prof'/'rICC' an ICC profile. */
+              colr?: {
+                colour_type: string;
+                colour_primaries?: number;
+                transfer_characteristics?: number;
+                matrix_coefficients?: number;
+                full_range_flag?: number;
+              };
+              /** Pixel aspect ratio box. */
+              pasp?: { hSpacing: number; vSpacing: number };
+            }>;
+          };
+        };
+      };
+    };
+  }
+
   export function createFile(): MP4File;
 
-  export interface DataStream {
+  export class DataStream {
+    static readonly BIG_ENDIAN: boolean;
+    constructor(buffer?: ArrayBuffer, byteOffset?: number, endianness?: boolean);
     buffer: ArrayBuffer;
     byteLength: number;
   }
