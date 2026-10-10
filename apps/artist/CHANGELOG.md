@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.15.50
+
+### Patch Changes
+
+- 62d7c5b: One ESCAPEARTIST tab at a time owns the saved session
+  
+  A second ESCAPEARTIST tab is no longer offered the first tab's live session and no longer overwrites or deletes its saved session; only one tab at a time owns the session slot, and an empty project never overwrites a saved one.
+
 ## 2.15.49
 
 ### Patch Changes
