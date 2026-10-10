@@ -5,10 +5,12 @@
 // caller, and what is asserted is that each control reaches the right callback
 // with the right arguments, and that the DOM the timeline's own tests query
 // (titles, aria labels, the `active` class) is what this component draws.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { TrackHeader } from './TrackHeader'
+import { useEditorStore } from '../../store/projectStore'
+import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import type { Track } from '../../store/types'
 import styles from './Timeline.module.css'
 
@@ -330,5 +332,166 @@ describe('TrackHeader visibility, lock and delete', () => {
     renderHeader({ track: makeTrack({ locked: false }), trackCount: 2 })
 
     expect(screen.getByTitle('Delete track')).toBeEnabled()
+  })
+})
+
+// ESCSUITE-242: one drag of the volume slider is one undo step.
+//
+// The slider writes on every `input` event, and each write used to push an
+// undo entry, so a single sweep evicted the whole 50-entry history. It now
+// carries the inspector sliders' `useSliderGesture` (ESCSUITE-75/87): the
+// gesture's first write pushes, the rest pass `skipHistory`, and the store is
+// still written on every event so the preview and the meter follow. These run
+// against the real store, through a header that reads its track from it the way
+// `Timeline` hands it one.
+describe('TrackHeader volume and the undo stack', () => {
+  const past = () => store().history.past.length
+  const trackNow = () => store().project.timeline.tracks[0]
+
+  function renderLive() {
+    const writes = vi.fn((trackId: string, updates: Partial<Track>, skipHistory?: boolean) =>
+      useEditorStore.getState().updateTrack(trackId, updates, skipHistory)
+    )
+    function LiveHeader() {
+      const track = useEditorStore((s) => s.project.timeline.tracks[0])
+      return (
+        <TrackHeader
+          track={track}
+          index={0}
+          trackCount={1}
+          onUpdateTrack={writes}
+          onMoveTrackUp={vi.fn()}
+          onMoveTrackDown={vi.fn()}
+          onDeleteTrack={vi.fn()}
+        />
+      )
+    }
+    render(<LiveHeader />)
+    const slider = screen.getByLabelText(`${trackNow().name} volume`) as HTMLInputElement
+    return { writes, slider }
+  }
+
+  /** One `input` event carrying a new slider value, as a real drag delivers it. */
+  function slide(slider: HTMLInputElement, value: number) {
+    fireEvent.input(slider, { target: { value: String(value) } })
+  }
+
+  /** A whole pointer drag: press, a run of values, release. */
+  function drag(slider: HTMLInputElement, values: number[]) {
+    fireEvent.pointerDown(slider)
+    for (const value of values) slide(slider, value)
+    fireEvent.pointerUp(slider)
+  }
+
+  /** Sixty moves, 0.99 down to 0.40 — the hunter's reproduction. */
+  const SIXTY = Array.from({ length: 60 }, (_, i) => Math.round((0.99 - i * 0.01) * 100) / 100)
+
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('records one entry for a sixty-move drag, while writing the store on every move', () => {
+    const { writes, slider } = renderLive()
+    const before = past()
+
+    drag(slider, SIXTY)
+
+    expect(writes).toHaveBeenCalledTimes(60)
+    expect(trackNow().volume).toBe(0.4)
+    expect(past() - before).toBe(1)
+  })
+
+  it('undoes the whole drag in one step, back to the volume before it', () => {
+    const { slider } = renderLive()
+    const original = trackNow().volume
+
+    drag(slider, SIXTY)
+    store().undo()
+
+    expect(trackNow().volume).toBe(original)
+  })
+
+  it('records one entry for a held arrow key', () => {
+    const { writes, slider } = renderLive()
+    const before = past()
+
+    // A held key: the first keydown, four auto-repeats, one input after each,
+    // then the release.
+    fireEvent.keyDown(slider, { key: 'ArrowRight' })
+    slide(slider, 0.5)
+    for (const value of [0.51, 0.52, 0.53, 0.54]) {
+      fireEvent.keyDown(slider, { key: 'ArrowRight', repeat: true })
+      slide(slider, value)
+    }
+    fireEvent.keyUp(slider, { key: 'ArrowRight' })
+
+    expect(writes).toHaveBeenCalledTimes(5)
+    expect(trackNow().volume).toBe(0.54)
+    expect(past() - before).toBe(1)
+  })
+
+  it('records one entry per drag for two separate drags', () => {
+    const { slider } = renderLive()
+    const before = past()
+
+    drag(slider, [0.9, 0.8, 0.7])
+    drag(slider, [0.6, 0.5, 0.4])
+
+    expect(past() - before).toBe(2)
+    store().undo()
+    expect(trackNow().volume).toBe(0.7)
+  })
+
+  it('keeps a drag open through a Shift released mid-drag (the ESCSUITE-169 guard)', () => {
+    const { slider } = renderLive()
+    const before = past()
+
+    fireEvent.pointerDown(slider)
+    slide(slider, 0.9)
+    fireEvent.keyDown(slider, { key: 'Shift' })
+    fireEvent.keyUp(slider, { key: 'Shift' })
+    slide(slider, 0.8)
+    slide(slider, 0.7)
+    fireEvent.pointerUp(slider)
+
+    expect(past() - before).toBe(1)
+  })
+
+  it('ends a drag whose release never arrives on blur, as every slider does', () => {
+    const { slider } = renderLive()
+    const before = past()
+
+    fireEvent.pointerDown(slider)
+    slide(slider, 0.9)
+    fireEvent.blur(slider)
+    // The next write belongs to no gesture and keeps its own entry.
+    slide(slider, 0.8)
+
+    expect(past() - before).toBe(2)
+  })
+
+  it('keeps one entry for a value set with no gesture around it', () => {
+    const { slider } = renderLive()
+    const before = past()
+
+    slide(slider, 0.9)
+    slide(slider, 0.8)
+
+    expect(past() - before).toBe(2)
+  })
+
+  it('keeps one entry per click of the mute button, before and after a drag', () => {
+    const { slider } = renderLive()
+    const before = past()
+
+    fireEvent.click(screen.getByTitle('Mute'))
+    expect(past() - before).toBe(1)
+    fireEvent.click(screen.getByTitle('Unmute'))
+    expect(past() - before).toBe(2)
+
+    drag(slider, [0.9, 0.8])
+    fireEvent.click(screen.getByTitle('Mute'))
+
+    expect(past() - before).toBe(4)
   })
 })

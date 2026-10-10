@@ -1,9 +1,13 @@
 // The "Shape" section of the clip inspector, rendered on its own with explicit
 // data so every control's onChange payload can be read directly.
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ShapeSection } from './ShapeSection'
+import { useClipEditorActions } from './useClipEditorActions'
+import { BURST_PAUSE_MS } from './useBurstGesture'
+import { useEditorStore } from '../../store/projectStore'
+import { resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import { inertSliderGesture } from '../../test/fixtures/clipFixtures'
 import { rowControl, rowColor } from '../../test/domQueries'
 import type { ShapeOverlayData } from '../../store/types'
@@ -239,5 +243,133 @@ describe('ShapeSection', () => {
 
     expect(rowControl('Blur')).toHaveValue('8')
     expect(screen.getByText('8px')).toBeInTheDocument()
+  })
+})
+
+// ESCSUITE-242: one sweep of a colour picker is one undo step.
+//
+// `<input type="color">` reports continuously while the user sweeps the picker,
+// and each write used to push an undo entry. A sweep is a burst
+// (`useBurstGesture`): it opens on the first edit and closes on blur or after
+// `BURST_PAUSE_MS` with none, while the store is written on every event. The
+// sliders keep `useSliderGesture`, and the selects and the no-fill toggle keep
+// one entry per change. Run against the real store, wired the way `ClipEditor`
+// wires it.
+describe('ShapeSection and the undo stack', () => {
+  const past = () => store().history.past.length
+  const shapeNow = () => store().project.timeline.clips[0].shapeData!
+
+  function renderLive() {
+    const writes = vi.spyOn(useEditorStore.getState(), 'updateShapeOverlayData')
+    function LiveSection() {
+      const { selectedClip, handleShapeDataChange, sliderGesture, burstGesture } = useClipEditorActions()
+      return (
+        <ShapeSection
+          shapeData={selectedClip!.shapeData!}
+          onChange={handleShapeDataChange}
+          sliderGesture={sliderGesture}
+          burstGesture={burstGesture}
+        />
+      )
+    }
+    const view = render(<LiveSection />)
+    return { writes, unmount: view.unmount }
+  }
+
+  /** `count` picker reports, each a different red, then the picker's closing `change`. */
+  function sweep(swatch: HTMLInputElement, count: number) {
+    let last = ''
+    for (let i = 0; i < count; i++) {
+      last = `#${(i * 8).toString(16).padStart(2, '0')}0000`
+      fireEvent.input(swatch, { target: { value: last } })
+    }
+    fireEvent.change(swatch, { target: { value: last } })
+    return last
+  }
+
+  beforeEach(() => {
+    resetStoreForTest()
+    store().addShapeOverlayClip({ type: 'rectangle', fillColor: '#000000ff', strokeWidth: 2 })
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('records one entry for a thirty-report sweep of the fill picker, writing on every report', () => {
+    const { writes } = renderLive()
+    const before = past()
+
+    const last = sweep(rowColor('Fill'), 30)
+
+    expect(writes).toHaveBeenCalledTimes(30)
+    expect(shapeNow().fillColor).toBe(`${last}ff`)
+    expect(past() - before).toBe(1)
+  })
+
+  it('undoes the whole sweep in one step', () => {
+    renderLive()
+
+    sweep(rowColor('Fill'), 30)
+    store().undo()
+
+    expect(shapeNow().fillColor).toBe('#000000ff')
+  })
+
+  it('records one entry for a sweep of the stroke picker', () => {
+    renderLive()
+    const before = past()
+
+    sweep(rowColor('Stroke'), 30)
+
+    expect(past() - before).toBe(1)
+  })
+
+  it('starts a new entry for a sweep after blur, and for one after a pause', () => {
+    renderLive()
+    const before = past()
+
+    sweep(rowColor('Fill'), 5)
+    fireEvent.blur(rowColor('Fill'))
+    sweep(rowColor('Fill'), 5)
+    vi.advanceTimersByTime(BURST_PAUSE_MS)
+    sweep(rowColor('Fill'), 5)
+
+    expect(past() - before).toBe(3)
+  })
+
+  it('keeps one entry per press of the no-fill toggle and per shape-type choice', () => {
+    renderLive()
+    const before = past()
+
+    fireEvent.click(screen.getByRole('button', { name: 'No fill' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Enable fill' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Shape type' }), { target: { value: 'ellipse' } })
+
+    expect(past() - before).toBe(3)
+  })
+
+  it('still records one entry for a slider drag', () => {
+    renderLive()
+    const before = past()
+    const width = rowControl('Size W')
+
+    fireEvent.pointerDown(width)
+    for (const value of [0.3, 0.4, 0.5]) fireEvent.input(width, { target: { value: String(value) } })
+    fireEvent.pointerUp(width)
+
+    expect(shapeNow().width).toBe(0.5)
+    expect(past() - before).toBe(1)
+  })
+
+  it('ends an open sweep and clears its timer when the panel unmounts', () => {
+    const { unmount } = renderLive()
+
+    fireEvent.input(rowColor('Fill'), { target: { value: '#123456' } })
+    expect(vi.getTimerCount()).toBeGreaterThan(0)
+    unmount()
+
+    expect(vi.getTimerCount()).toBe(0)
   })
 })
