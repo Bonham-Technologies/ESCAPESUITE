@@ -148,8 +148,9 @@ export function useProjectActions({
       // a file without the block simply keeps those defaults.
       if (parsed.editor) applyEditorBlock(parsed.editor);
 
-      // ESCSUITE-164: resetProject() + setProject() + one addSourceVideo per
-      // source each push their own history entry — left alone, one Ctrl+Z
+      // ESCSUITE-164: resetProject() and setProject() each push a history
+      // entry (addSourceVideo pushes none; it grafts its source into every
+      // snapshot) — left alone, one Ctrl+Z
       // after a load lands on "loaded project, one source missing" rather
       // than whatever was open before. Opening a file is a new document, not
       // an edit, so it is not undoable at all: parity with the session

@@ -143,9 +143,11 @@ export function scrubRemovedSources(
  * records no step of its own. But every snapshot holds its own copy of
  * `sourceVideos` and undo/redo replace the live library with it wholesale, so
  * a snapshot taken before the import would, on the next undo or redo that
- * lands on it, drop the source and strand its bytes. The invariant is
- * therefore "every snapshot's library includes every live source": this makes
- * the imported source present in every past and future snapshot.
+ * lands on it, drop the source and strand its bytes. So this makes the
+ * imported source present in every past and future snapshot: an add leaves no
+ * snapshot without the added source. It says nothing about a source that
+ * entered the live library another way (undoing a `resetProject` can restore
+ * a live library that a future snapshot lacks, and redo then drops it again).
  *
  * Two properties follow, and both are deliberate:
  *  - undoing an edit made *before* the import keeps the import in the library;

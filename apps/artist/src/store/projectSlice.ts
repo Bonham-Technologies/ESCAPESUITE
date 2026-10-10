@@ -1,5 +1,7 @@
 // Project slice: the project itself and the source-video library it draws from.
-// Every action here records an undo step, and `resetProject` clears the fields
+// Every action here records an undo step except three: `addSourceVideo` (it grafts
+// the source into every snapshot instead), `removeSourceVideosPermanently` (it scrubs
+// the stack) and `setSourceThumbnail`. `resetProject` clears the fields
 // other slices own by writing them through the one flat state object.
 
 import type { StateCreator } from 'zustand';
