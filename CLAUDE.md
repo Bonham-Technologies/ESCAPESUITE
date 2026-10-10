@@ -2996,6 +2996,39 @@ base on every untouched file. The Docker half is outside this measurement: built
 as PID 1) and by CI's `kit-docker` job on every push. **No floor crossed**; the kit's floors stay
 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-242 (the track volume slider, the
+caption and font-size fields and the five colour pickers cost one undo entry per **gesture** instead
+of one per input event — a 60-move volume drag used to push the history from two entries to the
+50-entry cap and evict every earlier edit; the slider takes the inspector sliders' own
+`useSliderGesture` / `useGestureHistory` pair, with `updateTrack` gaining the `skipHistory` flag and the
+ESCSUITE-87 boolean and refusing an unknown id; typing bursts and picker sweeps share one new
+`useBurstGesture` hook — a scope opened on the first event, closed on blur or a 600 ms pause, its
+timer cleared on unmount — over a gesture history of its own, so a text field's blur when a slider is
+pressed cannot end the slider's drag, while blur still ends a slider's own drag, the ESCSUITE-169
+rule): 99.81 / 99.32 / **96.14** / 99.69 against the 99.81 / 99.32 / 96.13 / 99.69 that `main` at
+`42ef4bd0` (the ESCSUITE-254 squash) measures in the same sitting — branches up a hundredth, the
+other three unmoved. That base reads a few hundredths above the row the ESCSUITE-254 paragraph wrote
+from its own rebased tree (99.31 / 96.09): drift of the kind ESCSUITE-91 and 113 recorded, on the same
+uncovered counts, and the row is corrected to the direct measurement. The base gives 5,327 / 5,541
+branches and this branch 5,335 / 5,549: eight new branches, eight covered, the same 214 uncovered as
+before (lines 8,279 / 8,294 → 8,305 / 8,320, statements 9,348 / 9,412 → 9,380 / 9,444, functions
+1,975 / 1,981 → 1,985 / 1,991, every denominator growing by exactly what the numerator did; the same
+15 / 64 / 6 uncovered). The eight are `store/trackSlice.ts`'s four (15 / 18 → 19 / 22: the unknown-id
+refusal and the `skipHistory` choice in `updateTrack`, each reached from both sides by the
+no-such-track, with-flag and without-flag cases; the same three pre-existing arms uncovered),
+`components/ClipEditor/useBurstGesture.ts`'s two (2 / 2: open-or-reopen on an event, reached by the
+first event and by a repeat inside the window) and `components/ClipEditor/useClipEditorActions.ts`'s two
+(125 → 127: the burst scope's own history handed to the sections). `TextContentSection.tsx`,
+`ShapeSection.tsx` and `MaskSection.tsx` gained the handlers as statements and no decision;
+`TrackHeader.tsx` one function (the gesture wiring). Each is reached from both sides by the 60-move
+drag, the keyboard run, the two-drags, the 20-keystroke burst, the 700 ms pause, the 30-event sweep,
+the unmount mid-burst and the text-blur-during-slider-drag cases against the single-change inputs that
+keep one entry each. The review (opus) probed the interleaving — three letters, a slider drag inside
+600 ms, more letters → three entries in order, each undo restoring the right state — and its one
+MEDIUM (naming ESCSUITE-267, the pre-existing slider-to-slider case on the sliders' shared history) and
+two MINORs are in these numbers. `ClipEditor.rerender.test.tsx`, `timelineGestures.perf.test.ts` and
+every other pin are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3003,7 +3036,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.81 | 99.31 | 96.09 | 99.69 |
+| `@escapesuite/artist` | 99.81 | 99.32 | 96.14 | 99.69 |
 | `@escapesuite/shared` | 100.00 | 98.63 | 92.00 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
