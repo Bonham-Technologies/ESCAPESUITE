@@ -124,28 +124,45 @@ pnpm lint                # Run ESLint
   120 fps file shows every other frame and its callbacks describe a 60 fps file — 100 read 50, 90
   read 49.18, all stored as `'measured'`, and ESCSUITE-263's seek window would have been a whole
   frame for exactly the 120 fps source this ticket was opened for. `mediaTime` is media time, so
-  half speed changes nothing in the arithmetic and presents every frame of a source up to **twice
-  the display's refresh rate**. That is the honest limit: a source faster than that (240 fps on
-  60 Hz) still under-reads, as the source at its own speed would. The budget is 500 ms rather than
-  400 because half speed halves the media it covers: 500 ms of wall time is 250 ms of media, which
-  at 24 fps is six intervals and seven frames — the eight-frame cap (333 ms of media, 667 ms of
-  wall time) is not reached there, the three-frame floor is cleared with room — while 60 fps and
-  above end on the cap first. The unit double for this, `displayCappedVideo` in
-  `frameRateProbe.test.ts`, answers at most once per 1/60 s of wall time while media time advances
-  at `playbackRate` times wall time; the other doubles answer every frame asked for, which no
-  browser does. The rate is **not** one over a spacing: a WebM stamps frames in whole
-  milliseconds, so a 30 fps file's spacings are 33, 34, 33… ms and any one of them reads 30.30 or
-  29.41 (60 read 58.82, 24 read 23.81, 120 read 125 — review round 1). The median of the
-  **positive** spacings (a repeated or reordered time is left out) only **counts** the intervals,
-  `k = round(span / median)` with `span` the last `mediaTime` minus the first, so a dropped frame
-  raises `k` instead of skewing the spacing, and the rate is `k / span` — the millisecond of
-  rounding spread over the whole span. That is snapped to the **nearest** of the standard rates
+  half speed changes nothing in the arithmetic, and it lets a source up to **twice the display's
+  refresh rate** be *sampled* reliably. It does not guarantee every frame is presented: at exactly
+  twice the refresh rate (120 fps on 60 Hz) half speed presents at the refresh rate with no
+  headroom, so a missed refresh drops a frame — the real 120 fps runs did — and the estimator below
+  counts each drop as one missing interval rather than letting it move the reading. That is the
+  honest limit: a source faster than twice the refresh rate (240 fps on 60 Hz) drops a frame at
+  every presentation and still under-reads, as the source at its own speed would. The budget is
+  500 ms rather than the brief's 400 because half speed halves the media it covers — ratified by
+  the coordinator in review round 3: 500 ms of wall time is 250 ms of media, which at 24 fps is six
+  intervals and seven frames — the eight-frame cap (333 ms of media, 667 ms of wall time) is not
+  reached there, the three-frame floor is cleared with room — while 60 fps and above end on the
+  cap first. The unit double for this, `displayCappedVideo` in `frameRateProbe.test.ts`, answers at
+  most once per 1/60 s of wall time while media time advances at `playbackRate` times wall time,
+  and can be told to miss refreshes and to stamp `mediaTime` in whole milliseconds; the other
+  doubles answer every frame asked for, which no browser does. The rate is **not** one over a
+  spacing: a WebM stamps frames in whole milliseconds, so a 30 fps file's spacings are 33, 34,
+  33… ms and any one of them reads 30.30 or 29.41 (60 read 58.82, 24 read 23.81, 120 read 125 —
+  review round 1). The spacings only **count** the intervals the run spans, and the rate is
+  `intervals / span` with `span` the last `mediaTime` minus the first — the millisecond of rounding
+  spread over the whole span. Each spacing is counted **on its own**, as `round(spacing /
+  smallest)` intervals against the smallest positive spacing in the run, so a dropped frame adds
+  one interval wherever it falls and each spacing's rounding error (about 4 % of an interval at
+  120 fps with millisecond stamps) stays inside that spacing; a gap of up to about ten frames still
+  counts exactly. Review round 2 (F1) replaced `round(span / median)`, which miscounted once frames
+  drop: two error sources at 120 fps, not one — millisecond rounding **and** dropped frames. The
+  real 120 fps WebM run that read 126.87 presented frames 1, 5, 6, 7, 11, 12, 13 and 17, whose
+  rounded median of 8 ms against a true 8.33 made 134 / 8 round to 17 intervals where there were
+  16; and once half the spacings are doubled the median is itself a doubled one, so 120 read 60 or
+  65.45 and 60 read 30 — all stored as `'measured'`. On drop-free runs the two counts agree
+  everywhere (a seeded sample in the test pins it). The smallest spacing is the true interval
+  unless every presentation dropped a frame, which is the twice-the-refresh-rate limit above. A
+  repeated presentation time counts nothing; one that goes **backwards** makes the run answer
+  `undefined`. That is snapped to the **nearest** of the standard rates
   23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88 and 120 when within **1.5 %** of
   it, else rounded to two decimals. "Nearest" is what keeps an exact 24 or 30 fps MP4 from being
   stored as 23.976 or 29.97; from millisecond timestamps over eight frames a whole rate and its
   NTSC neighbour, 0.1 % apart, cannot be told apart at all, so a 30 fps WebM is stored as 30 or
   29.97 depending on where its frames fall — which no reader cares about. Fewer than three frames,
-  a run that ends no later than it starts or is too short to hold one interval, no
+  a run that ends no later than it starts or whose times go backwards, no
   `requestVideoFrameCallback`, or a refused `play()` answer `undefined`, and the import stores `frameRate: 30` with
   `frameRateSource: 'assumed'`; a measured rate is stored with `'measured'`. **This adds up to
   500 ms to a video import** — it runs once, at import, and only for a file that decoded a picture
