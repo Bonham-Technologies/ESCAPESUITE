@@ -134,7 +134,11 @@ pnpm lint                # Run ESLint
   below comes from the compositor's own counter, which a missed callback does not move. The honest
   limit that remains: a source faster than twice the refresh rate (240 fps on 60 Hz) has frames the
   compositor itself never presents, which neither count sees, and it still under-reads, as the
-  source at its own speed would. The budget is
+  source at its own speed would. One more, not observed: a frame the browser decodes too late and
+  discards unpresented would, if the counter does not count it, under-read on either path — in 70
+  instrumented runs (472 callback steps, quiet, loaded and with a busy loop on the page's own main
+  thread) `totalVideoFrames − presentedFrames` never grew, and starving the decoder on purpose to
+  settle it is ESCSUITE-278. The budget is
   500 ms rather than the brief's 400 because half speed halves the media it covers — ratified by
   the coordinator in review round 3: 500 ms of wall time is 250 ms of media, which at 24 fps is six
   intervals and seven frames — the eight-frame cap (333 ms of media, 667 ms of wall time) is not

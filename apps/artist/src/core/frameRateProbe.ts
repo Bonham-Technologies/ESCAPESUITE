@@ -23,7 +23,10 @@
  * the probe sees but not the rate it reads; without the counter it counts them
  * from the media times. A source faster than twice the refresh rate has frames
  * the compositor itself never presents, which neither count sees, and still
- * under-reads.
+ * under-reads. A frame decoded too late and discarded unpresented would, if
+ * the counter does not count it, under-read on either path; it was not seen in
+ * 70 instrumented runs (`totalVideoFrames − presentedFrames` never grew), and
+ * starving the decoder on purpose to settle it is ESCSUITE-278.
  *
  * 500 ms rather than 400 because half speed halves the media the budget
  * covers. 500 ms of wall time is 250 ms of media: at 24 fps that is six
