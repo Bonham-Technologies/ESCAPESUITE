@@ -56,20 +56,6 @@ describe('decoderConfigFor', () => {
     expect(config.hardwareAcceleration).toBe('prefer-hardware')
   })
 
-  it('accepts avc3 as well as avc1', async () => {
-    await expect(decoderConfigFor(video({ codec: 'avc3.42e01e' }), echoes, false)).resolves.toMatchObject({
-      codec: 'avc3.42e01e',
-    })
-  })
-
-  it('refuses every codec but H.264', async () => {
-    for (const codec of ['hvc1.1.6.L93.B0', 'vp09.00.10.08', 'av01.0.04M.08']) {
-      await expect(decoderConfigFor(video({ codec }), echoes, false)).rejects.toThrow(
-        `Only H.264 is decoded in the worker; ${codec} needs the <video> path`
-      )
-    }
-  })
-
   it('refuses a configuration the browser cannot decode', async () => {
     const unsupported = async () => ({ supported: false })
 

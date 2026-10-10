@@ -47,9 +47,6 @@ export function assumedColorSpace(codedHeight: number): VideoColorSpaceInit {
  * browser. Throws a named error — so the source falls back to `<video>` —
  * when:
  *
- * - the codec is not H.264. It is the only codec the worker's output was
- *   compared against `<video>`'s; HEVC, VP9 and AV1 in MP4 keep the path they
- *   always had.
  * - the browser cannot decode it.
  * - the track is rotated and the browser's VideoDecoder does not apply
  *   `rotation` to its output. A browser that implements the member echoes it
@@ -61,9 +58,6 @@ export async function decoderConfigFor(
   isConfigSupported: ConfigSupportCheck,
   preferHardwareAcceleration: boolean
 ): Promise<OrientedDecoderConfig> {
-  if (!/^avc[13]\./.test(video.codec)) {
-    throw new Error(`Only H.264 is decoded in the worker; ${video.codec} needs the <video> path`);
-  }
   const config: OrientedDecoderConfig = {
     codec: video.codec,
     codedWidth: video.codedWidth,

@@ -21,9 +21,12 @@
  * whose presentation this module cannot reproduce exactly is refused with a
  * named error rather than decoded differently: the factory then falls back to
  * the `<video>` path for that source, and the export says so. That covers a
- * fragmented file, more than one sample description, an edit list other than
- * a single plain one, and a display matrix other than the four right-angle
- * rotations.
+ * codec other than H.264, a fragmented file, more than one sample description
+ * or one with no avcC, non-square pixels (a VUI sample aspect ratio or a
+ * `pasp` box other than 1:1), an edit list other than a single plain one, and
+ * a display matrix other than the four right-angle rotations. All of it is
+ * decided inside `onReady`, before extraction is armed, so a refused file has
+ * none of its samples copied.
  */
 
 import {
@@ -72,8 +75,8 @@ export interface DemuxedVideo {
   /** Width and height as shown, after `rotation` — what `<video>`'s videoWidth/videoHeight report. */
   displayWidth: number;
   displayHeight: number;
-  /** The codec configuration record (avcC / hvcC) without its box header, when the codec needs one. */
-  description?: Uint8Array;
+  /** The avcC record without its box header. */
+  description: Uint8Array;
   rotation: VideoRotation;
   colour: StreamColour;
   /** Movie duration in seconds. */
@@ -153,12 +156,11 @@ export function presentationStart(edits: readonly EditListEntry[] | undefined): 
   return edit.media_time;
 }
 
-/** The sample description's codec configuration record, without its 8-byte box header. */
-function codecDescription(entry: SampleEntry): Uint8Array | undefined {
-  const box = entry.avcC ?? entry.hvcC;
-  if (!box) return undefined;
+/** The avcC record, without its 8-byte box header. */
+function avcDescription(entry: SampleEntry): Uint8Array {
+  if (!entry.avcC) throw new Error('The H.264 sample description has no avcC record');
   const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
-  box.write(stream);
+  entry.avcC.write(stream);
   return new Uint8Array(stream.buffer, 8);
 }
 
@@ -168,13 +170,13 @@ type SampleEntry = MP4TrakBox['mdia']['minf']['stbl']['stsd']['entries'][number]
  * The stream's own colour description: a `colr` box with code points ('nclx',
  * 'nclc') speaks for it, else the SPS VUI does.
  */
-function streamColour(entry: SampleEntry, vui: ReturnType<typeof readAvcConfig> | undefined): StreamColour {
+function streamColour(entry: SampleEntry, vui: ReturnType<typeof readAvcConfig>): StreamColour {
   const colr = entry.colr?.colour_type === 'nclx' || entry.colr?.colour_type === 'nclc' ? entry.colr : undefined;
   const codes = colr
     ? [colr.colour_primaries, colr.transfer_characteristics, colr.matrix_coefficients]
-    : vui?.colour && [vui.colour.primaries, vui.colour.transfer, vui.colour.matrix];
+    : vui.colour && [vui.colour.primaries, vui.colour.transfer, vui.colour.matrix];
   const fullyTagged = !!codes && codes.every((code) => code !== undefined && code !== UNSPECIFIED);
-  const fullRange = colr?.colour_type === 'nclx' ? colr.full_range_flag === 1 : vui?.fullRange;
+  const fullRange = colr?.colour_type === 'nclx' ? colr.full_range_flag === 1 : vui.fullRange;
   return fullRange === undefined ? { fullyTagged } : { fullyTagged, fullRange };
 }
 
@@ -182,7 +184,7 @@ interface TrackHeader {
   video: MP4VideoTrack;
   rotation: VideoRotation;
   mediaTime: number;
-  description?: Uint8Array;
+  description: Uint8Array;
   colour: StreamColour;
   /** Movie duration in seconds. */
   duration: number;
@@ -196,16 +198,22 @@ function readTrackHeader(info: MP4Info, sampleEntries: (trackId: number) => Samp
   const video = info.videoTracks[0];
   if (!video) throw new Error('No video tracks found in file');
   if (info.isFragmented) throw new Error('Fragmented MP4 is not decoded in the worker');
+  // H.264 is the only codec the worker's output was compared against
+  // <video>'s. Refused here, inside onReady, nothing of another codec's file
+  // is copied before it is turned away (fix round 1, MD3).
+  if (!/^avc[13]\./.test(video.codec)) {
+    throw new Error(`Only H.264 is decoded in the worker; ${video.codec} needs the <video> path`);
+  }
   const entries = sampleEntries(video.id);
   if (entries.length !== 1) {
     throw new Error(`MP4 video track has ${entries.length} sample descriptions; the worker decodes one`);
   }
-  const description = codecDescription(entries[0]);
-  const vui = entries[0].avcC ? readAvcConfig(description!) : undefined;
+  const description = avcDescription(entries[0]);
+  const vui = readAvcConfig(description);
   // <video> draws a non-square pixel wider or narrower; whether a
   // VideoDecoder's frame is drawn the same was never measured (fix round 1).
   const pasp = entries[0].pasp;
-  if (vui?.squarePixels === false || (pasp && pasp.hSpacing !== pasp.vSpacing)) {
+  if (!vui.squarePixels || (pasp && pasp.hSpacing !== pasp.vSpacing)) {
     throw new Error('Non-square pixels are not decoded in the worker; the <video> path draws this source');
   }
   return {

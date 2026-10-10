@@ -45,11 +45,16 @@ export type LoadProgressCallback = (phase: string, progress: number) => void;
 export type FallbackCallback = (sourceId: string, reason: string) => void;
 
 /**
- * The largest source handed to the decode worker. The worker holds every
- * encoded sample of a source for the whole export (mp4box copies them out of
- * the file it is given, and the file itself is read into memory first), where
- * the `<video>` path streams from the Blob; above this a source keeps the
- * `<video>` path, and the export says so (ESCSUITE-254).
+ * The most source bytes one export hands to the decode worker, summed over
+ * its sources. The worker holds every encoded sample of every source it takes
+ * until the export ends (mp4box copies them out of the file, which is read
+ * into memory first), where the `<video>` path streams from the Blob. While a
+ * source is being demuxed the worker briefly holds it twice — the file and the
+ * copies — so the peak is up to the budget plus the largest source again.
+ * A source that would take the export past it keeps the `<video>` path, and
+ * the export says so (ESCSUITE-254). 512 MB: a few minutes of 1080p phone
+ * video, on a renderer the operator's lower-spec customers share with the
+ * page; a judgement, not a measurement.
  */
 export const MAX_WORKER_SOURCE_BYTES = 512 * 1024 * 1024;
 
@@ -370,6 +375,8 @@ export interface FrameSourceFactoryOptions {
 export class FrameSourceFactory {
   private manager: VideoDecodeManager | null = null;
   private useWebCodecs: boolean;
+  /** Source bytes handed to the worker so far; see MAX_WORKER_SOURCE_BYTES. */
+  private workerBytes = 0;
 
   /**
    * `measuredEngine` says whether this engine's worker output was measured
@@ -444,9 +451,9 @@ export class FrameSourceFactory {
     // Use WebCodecs for MP4 files when supported
     if (this.useWebCodecs && this.manager && mimeType.includes('mp4')) {
       try {
-        if (blob.size > MAX_WORKER_SOURCE_BYTES) {
+        if (this.workerBytes + blob.size > MAX_WORKER_SOURCE_BYTES) {
           throw new Error(
-            `The source is larger than the ${MAX_WORKER_SOURCE_BYTES / 1024 / 1024} MB the decode worker holds in memory`
+            `This export's sources would hold more than the ${MAX_WORKER_SOURCE_BYTES / 1024 / 1024} MB the decode worker keeps in memory`
           );
         }
         const data = await blob.arrayBuffer();
@@ -457,6 +464,7 @@ export class FrameSourceFactory {
           mimeType,
           onProgress
         );
+        this.workerBytes += blob.size;
         return new FailoverFrameSource(
           source,
           sourceId,

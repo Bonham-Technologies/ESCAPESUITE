@@ -20,6 +20,8 @@ const script = vi.hoisted(() => ({
   colr: undefined as undefined | Record<string, unknown>,
   /** The sample entry's pasp box, if any. */
   pasp: undefined as undefined | { hSpacing: number; vSpacing: number },
+  /** An H.264 sample entry with no avcC record. */
+  noAvcC: false,
   /** Sample counts per onSamples call. */
   batches: [2] as number[],
 }))
@@ -29,6 +31,12 @@ vi.mock('mp4box', () => {
     static BIG_ENDIAN = false
     buffer = new ArrayBuffer(8)
   }
+  /** An avcC record with no SPS in it: square pixels, no colour description. */
+  const avcC = {
+    write(stream: DataStream) {
+      stream.buffer = Uint8Array.of(0, 0, 0, 15, 0x61, 0x76, 0x63, 0x43, 1, 100, 0, 31, 0xff, 0xe0, 0).buffer
+    },
+  }
   return {
     DataStream,
     createFile: () => {
@@ -37,7 +45,12 @@ vi.mock('mp4box', () => {
         onSamples: undefined as undefined | ((id: number, user: unknown, samples: unknown[]) => void),
         onError: undefined as undefined | ((error: string) => void),
         getTrackById: () => ({
-          mdia: { minf: { stbl: { stsd: { entries: Array.from({ length: script.entries }, () => ({ type: 'vp09', colr: script.colr, pasp: script.pasp })) } } } },
+          mdia: { minf: { stbl: { stsd: { entries: Array.from({ length: script.entries }, () => ({
+            type: 'avc1',
+            avcC: script.noAvcC ? undefined : avcC,
+            colr: script.colr,
+            pasp: script.pasp,
+          })) } } } },
         }),
         setExtractionOptions: vi.fn(),
         start: vi.fn(),
@@ -46,7 +59,7 @@ vi.mock('mp4box', () => {
           const total = script.batches.reduce((sum, count) => sum + count, 0)
           const track: ScriptedTrack = {
             id: 1,
-            codec: 'vp09.00.10.08',
+            codec: 'avc1.64001f',
             nb_samples: total,
             matrix: [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 0x40000000],
             video: { width: 64, height: 48 },
@@ -79,6 +92,7 @@ vi.mock('mp4box', () => {
 import { demuxVideoTrack } from './mp4Demux'
 
 beforeEach(() => {
+  script.noAvcC = false
   script.colr = undefined
   script.pasp = undefined
   script.entries = 1
@@ -144,5 +158,11 @@ describe('demuxVideoTrack (scripted mp4box)', () => {
 
     script.pasp = { hSpacing: 1, vSpacing: 1 }
     await expect(demuxVideoTrack(new ArrayBuffer(8))).resolves.toMatchObject({ samples: expect.any(Array) })
+  })
+
+  it('refuses an H.264 sample description with no avcC record', async () => {
+    script.noAvcC = true
+
+    await expect(demuxVideoTrack(new ArrayBuffer(8))).rejects.toThrow('The H.264 sample description has no avcC record')
   })
 })
