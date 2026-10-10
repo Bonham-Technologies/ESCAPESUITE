@@ -3272,6 +3272,31 @@ arm is untouched. The review (sonnet) approved both verdicts; its LOWs are in th
 `exportMP4.perf.test.ts` and every pin are byte-identical — one decision per source at creation,
 nothing per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-273 (a decode worker that has not
+finished loading a source within a budget scaled to the file's size — `LOAD_DEADLINE_FLOOR_MS` 30 s
+plus `LOAD_DEADLINE_PER_MIB_MS` 250 ms per MiB — is terminated through ESCSUITE-266's path, every
+other pending load and request rejects at once, no new worker starts for the rest of the export, a
+disposed source's pending load rejects instead of waiting forever, and each source falls back to
+`<video>` with the once-per-export notice; the timer is armed only after the post returns):
+99.82 / 99.34 / **96.29** / 99.70 against the 99.82 / 99.34 / 96.27 / 99.70 that `main` at `74bb3de9`
+measures in the same sitting — branches up two hundredths, the other three unmoved, and with one
+*fewer* uncovered arm: the base gives 5,452 / 5,663 branches and this branch 5,461 / 5,671, eight new
+branches and nine more covered, so the uncovered column falls 211 → 210 (lines 8,432 / 8,447 →
+8,456 / 8,471, statements 9,519 / 9,582 → 9,542 / 9,605, functions 2,012 / 2,018 → 2,015 / 2,021,
+every denominator growing by exactly what the numerator did; the same 15 / 63 / 6 uncovered). All of
+the movement is `core/videoDecodeManager.ts` (61 / 69 → 70 / 77 branches, 175 / 177 → 198 / 200
+statements): the load deadline's expiry and clearing paths, the sticky refusal of a later load after a
+missed deadline against a plain `terminate()` that leaves it unset, dispose's rejection of its own
+source's pending load, and the already-loaded source's deadline-named fallback reason, each reached
+from both sides by `videoDecodeManager.loadDeadline.test.ts`'s twenty fake-timer cases (never-answers
+→ deadline and terminate; 90 % of budget → no rejection, timer cleared; a second source rejects at
+once; dispose before expiry → no late terminate; the arithmetic at 0 / 20 / 512 MiB) — twelve of the
+first sixteen red before the fix, and disabling each clearing path in turn reds a named case — and
+the one pre-existing arm newly reached is the terminate path's load rejection. The review (opus)
+approved both verdicts and both extensions; its two LOWs are in the third commit.
+`exportMP4.perf.test.ts`, every other `*.perf.test.ts` and the rerender pins are byte-identical — one
+timer per load, none per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3279,7 +3304,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.34 | 96.27 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.29 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
