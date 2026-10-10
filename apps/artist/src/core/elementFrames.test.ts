@@ -14,6 +14,7 @@ import {
   releaseElementSources,
   rewindElementSources,
 } from './elementFrames'
+import { elementSeekTarget } from './elementSeek'
 import { getVideoBlob, storeVideo } from './storage'
 import {
   getLastCanvasContext,
@@ -350,6 +351,35 @@ describe('createFrameComposer', () => {
 
     await composeFrame(0.1)
     expect(media.seeks).toHaveLength(seeksBefore + 1)
+  })
+
+  // ESCSUITE-265: a frame-aligned request lands on a source frame's start,
+  // which both measured engines resolve to the frame before it on a third of
+  // the starts; the seek goes a little past it instead (`elementSeek.ts`).
+  it('seeks to just past the requested time, so a frame start shows its own frame', async () => {
+    await store('v1')
+    const clips = [makeClip({ sourceVideoId: 'v1', startTime: 0.5, duration: 1, endTime: 1.5 })]
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    const seeksBefore = media.seeks.length
+
+    await composeFrame(1 / 30)
+    await composeFrame(2 / 30)
+
+    expect(media.seeks.slice(seeksBefore)).toEqual([0.5 + 1 / 30, 0.5 + 2 / 30].map(elementSeekTarget))
   })
 
   it('waits for a video with no frame data yet, then draws nothing for it', async () => {

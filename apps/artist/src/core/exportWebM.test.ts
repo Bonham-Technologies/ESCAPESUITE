@@ -11,6 +11,7 @@ import { exportToWebM } from './exportWebM'
 import { ExportAbortedError, ExportError, noAudioNote, type ExportResult } from './exportTypes'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
+import { elementSeekTarget } from './elementSeek'
 import {
   getMediabunnyState,
   lastMediabunnyOutput,
@@ -371,14 +372,10 @@ describe('exportToWebM rendering', () => {
     })
 
     expect(media.seeks[0]).toBe(0) // rewound during setup
-    expect(media.seeks.slice(1)).toEqual([
-      2,
-      2 + 1 / 30,
-      2 + 2 / 30,
-      2 + 3 / 30,
-      2 + 4 / 30,
-      2 + 5 / 30,
-    ])
+    // Each just past its frame's start (ESCSUITE-265).
+    expect(media.seeks.slice(1)).toEqual(
+      [2, 2 + 1 / 30, 2 + 2 / 30, 2 + 3 / 30, 2 + 4 / 30, 2 + 5 / 30].map(elementSeekTarget)
+    )
   })
 
   it('draws the video element for each timeline frame', async () => {

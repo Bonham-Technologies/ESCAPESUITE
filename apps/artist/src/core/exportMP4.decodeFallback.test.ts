@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { exportToMP4 } from './exportMP4'
 import { storeVideo } from './storage'
+import { elementSeekTarget } from './elementSeek'
 import { resetMediabunnyDouble } from '../test/doubles/mediabunny'
 import {
   installCanvasDouble,
@@ -237,7 +238,7 @@ describe('exportToMP4 says when the decode worker hands sources back to the page
     expect(allFramesClosed()).toBe(true)
     // MINOR 7: the <video> resumed at the failing request's own time.
     const failed = worker.requests.filter((r) => r.sourceId === 'video2')[2]
-    expect(media.seeks[0]).toBeCloseTo(failed.timestamp, 6)
+    expect(media.seeks[0]).toBeCloseTo(elementSeekTarget(failed.timestamp), 6)
   })
 
   // Fix round 2, NIT 4 (MD2 at the exporter): the <video> the failing source

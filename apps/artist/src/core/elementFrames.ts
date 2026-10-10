@@ -24,6 +24,7 @@ import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
+import { elementSeekTarget } from './elementSeek';
 import {
   getActiveTransition,
   loadVideoElement,
@@ -168,20 +169,22 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
 }
 
 /**
- * Sync a video to a target time. Always seeks to the exact time for
- * frame-accurate export, skipping the seek when the element is already within
- * (a little under) half an output frame of it.
+ * Sync a video to a target time. Seeks to just past the target
+ * (`elementSeekTarget`, ESCSUITE-265) for frame-accurate export, skipping the
+ * seek when the element is already within (a little under) half an output
+ * frame of it.
  */
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
   frameRate: number
 ): Promise<void> {
-  // Always seek to exact time for frame-accurate export.
-  // Skip if already within half a frame of the target.
+  // Skip if already within (a little under) half a frame of the target.
   const frameDuration = 1 / frameRate;
   if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
-    video.currentTime = targetTime;
+    // Just past the target: a target on a frame's exact start would otherwise
+    // show the frame before it a third of the time (ESCSUITE-265).
+    video.currentTime = elementSeekTarget(targetTime);
     // Two waits race here as well, and — ESCSUITE-159 — whichever settles the
     // wait cancels the other, exactly as the readiness poll below now does. The
     // seek used to leave its 500 ms fallback pending, to resolve an

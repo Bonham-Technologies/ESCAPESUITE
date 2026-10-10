@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { HTMLVideoFrameSource, FrameSourceFactory, seekToleranceFor } from './frameSource';
+import { elementSeekTarget } from './elementSeek';
 
 /**
  * ESCSUITE-263: the in-page frame source decides whether to seek from the
@@ -53,7 +54,7 @@ describe('HTMLVideoFrameSource seek tolerance (ESCSUITE-263)', () => {
     const { el, source } = sourceFor(60);
     await source.getFrame(1);
     await source.getFrame(1 + 1 / 60);
-    expect(el.seeks).toEqual([1, 1 + 1 / 60]);
+    expect(el.seeks).toEqual([1, 1 + 1 / 60].map(elementSeekTarget));
   });
 
   it('seeks for each of two consecutive frames of a 30 fps source', async () => {
@@ -62,7 +63,7 @@ describe('HTMLVideoFrameSource seek tolerance (ESCSUITE-263)', () => {
     // `> 1/30` test skipped this seek and drew the previous frame again.
     await source.getFrame(2);
     await source.getFrame(2 + 1 / 30);
-    expect(el.seeks).toEqual([2, 2 + 1 / 30]);
+    expect(el.seeks).toEqual([2, 2 + 1 / 30].map(elementSeekTarget));
   });
 
   it('seeks for 1/30-spaced requests even when the rate is far below 30 fps', async () => {
@@ -76,14 +77,14 @@ describe('HTMLVideoFrameSource seek tolerance (ESCSUITE-263)', () => {
     const { el, source } = sourceFor(60);
     await source.getFrame(2);
     await source.getFrame(2);
-    expect(el.seeks).toEqual([2]);
+    expect(el.seeks).toEqual([elementSeekTarget(2)]);
   });
 
   it('skips a request closer than half a frame', async () => {
     const { el, source } = sourceFor(60);
     await source.getFrame(2);
     await source.getFrame(2 + 0.4 / 60);
-    expect(el.seeks).toEqual([2]);
+    expect(el.seeks).toEqual([elementSeekTarget(2)]);
   });
 
   it('uses the 30 fps fallback when the rate is unknown', async () => {

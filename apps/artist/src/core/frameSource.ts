@@ -12,6 +12,7 @@
 
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
+import { elementSeekTarget } from './elementSeek';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -165,7 +166,9 @@ export class WebCodecsFrameSource implements IFrameSource {
  * finite and positive counts as 30 too. An imported video's rate is measured
  * at import (ESCSUITE-276, `frameRateSource: 'measured'`); a rate the probe
  * could not measure, an ESCAPECRAFT take (`'configured'`) and every source
- * imported before then carry 30, so they get the 1/60 s window.
+ * imported before then carry 30, so they get the 1/60 s window. The element
+ * itself sits `ELEMENT_SEEK_BIAS` past the last request it was seeked for
+ * (`elementSeek.ts`, ESCSUITE-265), far inside this window.
  */
 export function seekToleranceFor(frameRate: number | undefined): number {
   const rate = frameRate !== undefined && Number.isFinite(frameRate) && frameRate > 0 ? frameRate : 30;
@@ -250,7 +253,9 @@ export class HTMLVideoFrameSource implements IFrameSource {
     // rate) of the current time is the frame already showing.
     if (Math.abs(diff) > this.seekTolerance) {
       video.pause();
-      video.currentTime = timestamp;
+      // Just past the requested time: a request on a frame's exact start would
+      // otherwise show the frame before it a third of the time (ESCSUITE-265).
+      video.currentTime = elementSeekTarget(timestamp);
 
       // Wait for seek to complete
       await new Promise<void>((resolve) => {
