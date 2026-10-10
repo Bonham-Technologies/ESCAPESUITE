@@ -14,6 +14,7 @@ function video(overrides: Partial<DemuxedVideo> = {}): DemuxedVideo {
     displayHeight: 720,
     description: new Uint8Array([1, 100, 0, 31]),
     rotation: 0,
+    colour: { fullyTagged: false },
     duration: 1,
     samples: [],
     keyframeCount: 1,
@@ -98,5 +99,41 @@ describe('decoderConfigFor', () => {
     const noEcho = async () => ({ supported: true })
 
     await expect(decoderConfigFor(video({ rotation: 180 }), noEcho, false)).rejects.toThrow(/cannot rotate/)
+  })
+
+  // Fix round 1, M1. Measured in Chromium 153 (ESCSUITE-254): a stream whose
+  // primaries, transfer and matrix are all specified is drawn by <video> in
+  // its own colours, and VideoDecoder keeps them too whatever the config
+  // says — so it is given no guess. A stream that leaves any of the three
+  // unspecified is drawn by <video> with the size-based guess, even where it
+  // tags the matrix alone (a 160x120 file tagged 'bt709' matrix-only shows
+  // BT.601 in <video>), so it keeps the guess. Firefox 155's VideoDecoder
+  // ignores the config and matched its <video> in every case.
+  describe('colour', () => {
+    it('gives a fully tagged stream no colour space, so its own tags stand', async () => {
+      const config = await decoderConfigFor(
+        video({ codedHeight: 480, colour: { fullyTagged: true, fullRange: false } }),
+        echoes,
+        false
+      )
+
+      expect(config).not.toHaveProperty('colorSpace')
+    })
+
+    it('guesses for a stream that tags only part of its colour', async () => {
+      const config = await decoderConfigFor(video({ codedHeight: 480, colour: { fullyTagged: false } }), echoes, false)
+
+      expect(config.colorSpace).toEqual(assumedColorSpace(480))
+    })
+
+    it("keeps a stream's own full-range signal in the guess", async () => {
+      const config = await decoderConfigFor(
+        video({ codedHeight: 480, colour: { fullyTagged: false, fullRange: true } }),
+        echoes,
+        false
+      )
+
+      expect(config.colorSpace).toEqual({ ...assumedColorSpace(480), fullRange: true })
+    })
   })
 })

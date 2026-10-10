@@ -104,6 +104,36 @@ describe('demuxVideoTrack', () => {
     expect(video.samples).toHaveLength(2)
   })
 
+  // Fix round 1, M1: the decoder is given the size-based colour guess only
+  // where the stream does not fully describe its own colour, so the demuxer
+  // reads the description — from the sample entry's colr box, else from the
+  // SPS VUI in the avcC.
+  describe("reads the stream's own colour description", () => {
+    it('a stream with no colour description is not tagged', async () => {
+      const { colour } = await demuxVideoTrack(fixture('h264-bframes.mp4'))
+
+      expect(colour).toEqual({ fullyTagged: false })
+    })
+
+    it('a stream whose VUI gives primaries, transfer and matrix is fully tagged, limited range', async () => {
+      const { colour } = await demuxVideoTrack(fixture('h264-tagged709-480p.mp4'))
+
+      expect(colour).toEqual({ fullyTagged: true, fullRange: false })
+    })
+
+    it('a stream that signals full range alone is not tagged, and full range', async () => {
+      const { colour } = await demuxVideoTrack(fixture('h264-fullrange-480p.mp4'))
+
+      expect(colour).toEqual({ fullyTagged: false, fullRange: true })
+    })
+
+    it('a colr box speaks for the stream', async () => {
+      const { colour } = await demuxVideoTrack(fixture('h264-colr.mp4'))
+
+      expect(colour).toEqual({ fullyTagged: true, fullRange: false })
+    })
+  })
+
   describe('refuses, by name, what it cannot present the way <video> does', () => {
     it('a fragmented file', async () => {
       await expect(demuxVideoTrack(fixture('h264-fragmented.mp4'))).rejects.toThrow(

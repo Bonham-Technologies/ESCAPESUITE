@@ -12,3 +12,6 @@ Each is a few kilobytes.
 | `hevc.mp4` | 0.2 s, 2 frames, 64x48 HEVC tagged `hvc1` — carries an hvcC record | `ffmpeg -f lavfi -i color=c=red:s=64x48:d=0.2:r=10 -c:v libx265 -tag:v hvc1 -pix_fmt yuv420p hevc.mp4` |
 | `vp9.mp4` | 0.2 s, 2 frames, 64x48 VP9 in MP4 — no codec record the decoder needs | `ffmpeg -f lavfi -i color=c=red:s=64x48:d=0.2:r=10 -c:v libvpx-vp9 -pix_fmt yuv420p vp9.mp4` |
 | `audio-only.mp4` | AAC audio and no video track | an audio-only MP4 |
+| `h264-tagged709-480p.mp4` | 2 s, 30 fps, 640x480 H.264, VUI colour description BT.709 primaries, transfer and matrix, limited range | `ffmpeg -f lavfi -i "nullsrc=s=640x480:r=30:d=2,format=yuv444p,geq=lum='16+X*104/W':cb='128+60*sin(floor(N/8))':cr='128+60*cos(floor(N/8)*1.7)'" -c:v libx264 -pix_fmt yuv420p -g 30 -bf 2 -x264-params colorprim=bt709:transfer=bt709:colormatrix=bt709 -colorspace bt709 -color_primaries bt709 -color_trc bt709 h264-tagged709-480p.mp4` |
+| `h264-fullrange-480p.mp4` | the same picture with only `video_full_range_flag` set (no colour description) | the same, with `-x264-params fullrange=on -color_range pc` instead of the colour options |
+| `h264-colr.mp4` | `h264-tagged709-480p.mp4` with an `nclx` `colr` box in its sample entry | `ffmpeg -i h264-tagged709-480p.mp4 -c copy -movflags +write_colr h264-colr.mp4` |
