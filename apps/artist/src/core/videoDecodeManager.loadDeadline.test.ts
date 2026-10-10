@@ -274,6 +274,53 @@ describe('a source load the decode worker never answers (ESCSUITE-273)', () => {
     expect(workers).toHaveLength(1);
   });
 
+  it("refuses a frame request with the missed deadline's reason, so a loaded source's handover names it", async () => {
+    const { manager } = await readyManager();
+    await startLoad(manager, 'a', 4);
+    await vi.advanceTimersByTimeAsync(31_000);
+
+    await expect(manager.getFrame('b', 0.5)).rejects.toThrow(
+      'Decode worker did not finish loading a (4 MiB) within 31 s'
+    );
+  });
+
+  it('refuses a frame request after a plain terminate() with the wording it always had', async () => {
+    const { manager } = await readyManager();
+    manager.terminate();
+
+    await expect(manager.getFrame('b', 0.5)).rejects.toThrow('Manager not initialized');
+  });
+
+  it('arms no deadline for a load whose post throws: no late terminate of a live worker', async () => {
+    const { manager, terminate } = await readyManager();
+    vi.spyOn(latestWorker(), 'postMessage').mockImplementationOnce(() => {
+      throw new DOMException('could not be cloned', 'DataCloneError');
+    });
+
+    const load = await startLoad(manager, 'a', 1);
+
+    expect(messageOf(load.outcome)).toBe('could not be cloned');
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(loadDeadlineMs(1 * MIB));
+    expect(terminate).not.toHaveBeenCalled();
+    expect(manager.ready).toBe(true);
+  });
+
+  it('arms no deadline for a load the worker answers during the post', async () => {
+    const { manager, terminate } = await readyManager();
+    const worker = latestWorker();
+    vi.spyOn(worker, 'postMessage').mockImplementationOnce(() => {
+      worker.simulateMessage({ type: 'SOURCE_READY', sourceId: 'a', info: info('a') });
+    });
+
+    const load = await startLoad(manager, 'a', 1);
+
+    expect(load.outcome).toEqual(info('a'));
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(loadDeadlineMs(1 * MIB));
+    expect(terminate).not.toHaveBeenCalled();
+  });
+
   it('still starts a worker again after a plain terminate()', async () => {
     const { manager } = await readyManager();
     manager.terminate();
@@ -328,9 +375,9 @@ describe('a source load the decode worker never answers (ESCSUITE-273)', () => {
       expect(sourceC.requiresCleanup()).toBe(false);
       expect(workers).toHaveLength(1);
 
-      // A, which the worker held, hands itself over at its next frame.
+      // A, which the worker held, hands itself over at its next frame — naming the deadline.
       await (sourceA.outcome as IFrameSource).getFrame(0);
-      expect(onFallback).toHaveBeenCalledWith('a', 'Manager not initialized');
+      expect(onFallback).toHaveBeenCalledWith('a', reason);
       expect(createVideo.mock.calls.map(([sourceId]) => sourceId)).toEqual(['b', 'c', 'a']);
       factory.dispose();
     });

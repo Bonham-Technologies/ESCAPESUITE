@@ -139,8 +139,12 @@ export class VideoDecodeManager {
     {
       resolve: (info: VideoSourceInfo) => void;
       reject: (error: Error) => void;
-      /** Its loadDeadlineMs() timer, cleared wherever the load settles (ESCSUITE-273). */
-      deadline: ReturnType<typeof setTimeout>;
+      /**
+       * Its loadDeadlineMs() timer, cleared wherever the load settles
+       * (ESCSUITE-273). Armed only once the post has returned, so it is unset
+       * for a load whose post threw or that was answered during the post.
+       */
+      deadline?: ReturnType<typeof setTimeout>;
     }
   >();
 
@@ -148,7 +152,9 @@ export class VideoDecodeManager {
    * Set when a load missed its deadline and terminated the worker, presumed
    * dead: every later load is refused with the same reason rather than
    * starting another worker, so the rest of the export's sources go straight
-   * to `<video>` (ESCSUITE-273).
+   * to `<video>`, and a frame request from a source the worker had already
+   * loaded is refused with it too, so that source's handover names the
+   * deadline (ESCSUITE-273).
    */
   private loadDeadlineMissed: Error | null = null;
 
@@ -469,15 +475,12 @@ export class VideoDecodeManager {
     const deadlineMs = loadDeadlineMs(byteLength);
 
     return new Promise((resolve, reject) => {
-      // Cleared on every settle, so it fires only for a load still in flight:
-      // terminate() rejects that one along with everything else.
-      const deadline = setTimeout(() => {
-        this.loadDeadlineMissed = new Error(
-          `Decode worker did not finish loading ${sourceId} (${oneDecimal(byteLength / MIB)} MiB) within ${oneDecimal(deadlineMs / 1000)} s`
-        );
-        this.terminate(this.loadDeadlineMissed);
-      }, deadlineMs);
-      this.sourceLoadPromises.set(sourceId, { resolve, reject, deadline });
+      // Registered before the post, so an answer can always find it.
+      const entry: { resolve: typeof resolve; reject: typeof reject; deadline?: ReturnType<typeof setTimeout> } = {
+        resolve,
+        reject,
+      };
+      this.sourceLoadPromises.set(sourceId, entry);
 
       this.postRequest({
         type: 'INIT_SOURCE',
@@ -485,6 +488,21 @@ export class VideoDecodeManager {
         data,
         mimeType,
       });
+
+      // Armed after the post, so a post that throws (a DataCloneError, say)
+      // rejects this load without leaving a timer behind that would later
+      // terminate a live worker — and only while the load is still in flight,
+      // since a worker that answers during the post has already settled it.
+      // Cleared on every settle, so it fires only for a load still in flight:
+      // terminate() rejects that one along with everything else.
+      if (this.sourceLoadPromises.get(sourceId) === entry) {
+        entry.deadline = setTimeout(() => {
+          this.loadDeadlineMissed = new Error(
+            `Decode worker did not finish loading ${sourceId} (${oneDecimal(byteLength / MIB)} MiB) within ${oneDecimal(deadlineMs / 1000)} s`
+          );
+          this.terminate(this.loadDeadlineMissed);
+        }, deadlineMs);
+      }
     });
   }
 
@@ -503,7 +521,7 @@ export class VideoDecodeManager {
    */
   async getFrame(sourceId: string, timestamp: number): Promise<VideoFrame> {
     if (!this.isReady) {
-      throw new Error('Manager not initialized');
+      throw this.loadDeadlineMissed ?? new Error('Manager not initialized');
     }
 
     const requestId = this.nextRequestId++;

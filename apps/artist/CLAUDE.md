@@ -414,8 +414,9 @@ probe):
   (30 s) plus `LOAD_DEADLINE_PER_MIB_MS` (250 ms) per MiB, scaled because a load's honest duration
   grows with the file (mp4box parses all of it): a 20 MiB ESCAPECRAFT take gets 35 s, a 512 MiB
   source — the whole per-export budget — 158 s. One timer per load, sized before the post
-  transfers (and detaches) the buffer, stored beside the load's entry and cleared wherever the load
-  settles (`SOURCE_READY`, the worker's error reply, a dispose of that source — which now rejects
+  transfers (and detaches) the buffer but armed only after the post returns — so a post that throws
+  leaves no timer behind to terminate a live worker later — stored beside the load's entry and
+  cleared wherever the load settles (`SOURCE_READY`, the worker's error reply, a dispose of that source — which now rejects
   its load with "Source disposed", so its deadline cannot terminate a worker the other sources
   still use — a worker `error`, `terminate()`). On expiry the manager runs the same terminate path
   a missed frame deadline does, rejecting that load and everything else in flight with "Decode
@@ -423,7 +424,8 @@ probe):
   with that reason instead of starting another worker. `FrameSourceFactory.createSource` already
   hands a source whose load rejects to `<video>` with the reason, so the source that missed its
   deadline and every source after it fall back there, a source the worker already held hands
-  itself over at its next frame, and the export continues with the same once-per-export line.
+  itself over at its next frame (its frame request refused with the same reason), and the export
+  continues with the same once-per-export line.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A source
