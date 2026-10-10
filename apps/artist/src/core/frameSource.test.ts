@@ -744,6 +744,25 @@ describe('frameSource', () => {
         warn.mockRestore();
       });
 
+      // Fix round 1, MD2: when the <video> the source was handed to cannot
+      // load either, the clip is skipped (the frame request rejects, as the
+      // oracle's would) and disposing the source does not throw — a finished
+      // export must not turn into a failure at cleanup.
+      it('disposes cleanly after a handover whose <video> never loaded', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const factory = await factoryWithWorker();
+        const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());
+        managerOf(factory).getFrame.mockRejectedValue(new Error('Decoder stalled'));
+        videoFactory = () => new ScriptedVideoElement({ failLoad: true });
+
+        await expect(source.getFrame(0.2)).rejects.toThrow('Failed to load video');
+        await expect(source.dispose()).resolves.toBeUndefined();
+
+        expect(managerOf(factory).disposeSource).toHaveBeenCalledWith('a');
+        expect(warn).toHaveBeenCalledWith('The <video> fallback for a never loaded:', expect.any(Error));
+        warn.mockRestore();
+      });
+
       it('disposes a source that never needed the <video> path without creating one', async () => {
         const factory = await factoryWithWorker();
         const source = await factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn());

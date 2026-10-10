@@ -275,6 +275,27 @@ describe('frameManager', () => {
       expect(allFramesClosed()).toBe(true)
     })
 
+    // Fix round 1, MD2: a finished export stays finished. A source whose
+    // dispose throws must not stop the others being disposed or the worker
+    // being terminated.
+    it('disposes every source and tears down the factory even when one source fails to dispose', async () => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const manager = await createFrameManager(true)
+      await loadFrameSource(manager, 'clip-a', mp4(), 'video/mp4')
+      await loadFrameSource(manager, 'clip-b', mp4(), 'video/mp4')
+      manager.sources.get('clip-a')!.dispose = async () => {
+        throw new Error('the fallback <video> never loaded')
+      }
+
+      await expect(disposeFrameManager(manager)).resolves.toBeUndefined()
+
+      expect(decoder.disposedSources).toEqual(['clip-b'])
+      expect(manager.sources.size).toBe(0)
+      expect(decoder.terminated).toBe(1)
+      expect(warn).toHaveBeenCalledWith('Failed to dispose frame source clip-a:', expect.any(Error))
+      warn.mockRestore()
+    })
+
     it('disposes an empty manager without complaint', async () => {
       const manager: FrameManager = await createFrameManager(false)
       await expect(disposeFrameManager(manager)).resolves.toBeUndefined()
