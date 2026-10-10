@@ -103,6 +103,17 @@ export interface FrameReadyResponse {
 }
 
 /**
+ * Sign of life for one frame request still being decoded (ESCSUITE-272):
+ * posted on each decoder output while the request is pending in the worker —
+ * being served, or queued behind a request the same decoder is serving — so
+ * the main thread's FRAME_REQUEST_DEADLINE_MS measures silence, not age.
+ */
+export interface FrameProgressResponse {
+  type: 'FRAME_PROGRESS';
+  requestId: number;
+}
+
+/**
  * Response when the decoder status is requested
  */
 export interface StatusResponse {
@@ -139,6 +150,7 @@ export interface ErrorResponse {
 export type DecodeWorkerResponse =
   | SourceReadyResponse
   | FrameReadyResponse
+  | FrameProgressResponse
   | StatusResponse
   | ProgressResponse
   | ErrorResponse;

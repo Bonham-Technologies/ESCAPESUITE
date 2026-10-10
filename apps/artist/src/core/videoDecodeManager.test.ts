@@ -845,6 +845,130 @@ describe('VideoDecodeManager', () => {
       expect((request.outcome as Error).message).toBe('Manager terminated');
       expect(vi.getTimerCount()).toBe(0);
     });
+
+    // ESCSUITE-272: the deadline measures silence, not age. A live worker
+    // still decoding one hard request — a long keyframe gap on a slow machine,
+    // a transition bouncing one decoder between two positions — reports each
+    // decoder output for it as FRAME_PROGRESS, and each one re-arms that
+    // request's deadline (and only that request's).
+    describe('a request the worker reports progress on (ESCSUITE-272)', () => {
+      function progress(requestId: number) {
+        mockWorkerInstance!.simulateMessage({ type: 'FRAME_PROGRESS', requestId });
+      }
+
+      it('is not terminated at 15 s when the worker reported progress at 10 s, and resolves at 20 s', async () => {
+        const { manager, terminate } = await readyManager();
+        const request = track(manager.getFrame('a', 0.5));
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        progress(1);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(request.outcome).toBe('pending');
+        expect(terminate).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        const answer = { close: vi.fn() } as unknown as VideoFrame;
+        mockWorkerInstance!.simulateMessage({ type: 'FRAME_READY', requestId: 1, sourceId: 'a', timestamp: 0.5, frame: answer });
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(request.outcome).toBe(answer);
+        expect(answer.close).not.toHaveBeenCalled();
+        expect(terminate).not.toHaveBeenCalled();
+        expect(manager.ready).toBe(true);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('re-arms the whole 15 s from the progress: silent after it, the request fails at 25 s, one timer throughout', async () => {
+        const { manager, terminate } = await readyManager();
+        const request = track(manager.getFrame('a', 0.5));
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        progress(1);
+        expect(vi.getTimerCount()).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(14_999);
+        expect(request.outcome).toBe('pending');
+        expect(terminate).not.toHaveBeenCalled();
+
+        await vi.advanceTimersByTimeAsync(1);
+        expect((request.outcome as Error).message).toBe(DEADLINE_REASON);
+        expect(terminate).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it("does not keep a silent request alive: progress on a's request, b's still fails at its own 15 s", async () => {
+        const { manager, terminate } = await readyManager();
+        const fromA = track(manager.getFrame('a', 0.5));
+        const fromB = track(manager.getFrame('b', 0.5));
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        progress(1);
+        await vi.advanceTimersByTimeAsync(4_999);
+        expect(fromB.outcome).toBe('pending');
+
+        await vi.advanceTimersByTimeAsync(1);
+        // B's deadline, not A's: the reason names b, and A goes with it.
+        expect((fromB.outcome as Error).message).toBe('Decode worker did not answer within 15 s for b');
+        expect((fromA.outcome as Error).message).toBe('Decode worker did not answer within 15 s for b');
+        expect(terminate).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+      });
+
+      it('ignores progress for a request id it never issued: nothing re-armed, nothing thrown', async () => {
+        const { manager, terminate } = await readyManager();
+        const request = track(manager.getFrame('a', 0.5));
+
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(() => progress(99)).not.toThrow();
+        expect(vi.getTimerCount()).toBe(1);
+
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect((request.outcome as Error).message).toBe(DEADLINE_REASON);
+        expect(terminate).toHaveBeenCalledTimes(1);
+      });
+
+      it('ignores progress for a request already answered: no timer comes back', async () => {
+        const { manager, terminate } = await readyManager();
+        const request = track(manager.getFrame('a', 0.5));
+        const answer = { close: vi.fn() } as unknown as VideoFrame;
+        mockWorkerInstance!.simulateMessage({ type: 'FRAME_READY', requestId: 1, sourceId: 'a', timestamp: 0.5, frame: answer });
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(() => progress(1)).not.toThrow();
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(FRAME_REQUEST_DEADLINE_MS);
+        expect(request.outcome).toBe(answer);
+        expect(terminate).not.toHaveBeenCalled();
+      });
+
+      it("ignores progress for a request its source's dispose cancelled", async () => {
+        const { manager, terminate } = await readyManager();
+        const request = track(manager.getFrame('a', 0.5));
+        const disposed = manager.disposeSource('a');
+        await vi.advanceTimersByTimeAsync(50);
+        await disposed;
+
+        expect(() => progress(1)).not.toThrow();
+        expect(vi.getTimerCount()).toBe(0);
+        await vi.advanceTimersByTimeAsync(FRAME_REQUEST_DEADLINE_MS);
+        expect((request.outcome as Error).message).toBe('Source disposed');
+        expect(terminate).not.toHaveBeenCalled();
+      });
+
+      it('ignores progress that reaches it after terminate()', async () => {
+        const { manager } = await readyManager();
+        const request = track(manager.getFrame('a', 0.5));
+        // Held before terminate() detaches it, as a message already queued
+        // on this thread would still be dispatched.
+        const deliver = mockWorkerInstance!.onmessage!;
+        manager.terminate();
+        await vi.advanceTimersByTimeAsync(0);
+
+        expect(() => deliver(new MessageEvent('message', { data: { type: 'FRAME_PROGRESS', requestId: 1 } }))).not.toThrow();
+        expect(vi.getTimerCount()).toBe(0);
+        expect((request.outcome as Error).message).toBe('Manager terminated');
+      });
+    });
   });
 
   describe('terminate', () => {

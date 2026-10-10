@@ -183,6 +183,14 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s, which repeated about every other frame, is fixed by
   ESCSUITE-263 (half a frame; the parity oracle is re-run for it). A worker killed outright, which may never fire `error`,
   is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266). See `apps/artist/CLAUDE.md`'s
+
+  (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s can repeat a frame, and fixing it
+  moves the parity oracle (ESCSUITE-263). A worker killed outright, which may never fire `error`,
+  is caught by a 15 s main-thread deadline on each frame request (ESCSUITE-266) — 15 s with no sign of
+  life on that request, since ESCSUITE-272 the worker posts `FRAME_PROGRESS` on each decoder output
+  for the requests waiting on that decoder and the deadline restarts, so a healthy worker still working
+  through one hard request is not terminated — and a source load by a size-scaled deadline
+  (ESCSUITE-273). See `apps/artist/CLAUDE.md`'s
   "Video Decode Worker"
 
 ### Data Flow
@@ -3461,6 +3469,39 @@ rerender pin are byte-identical; the seek-before-data order the arrival path rel
 not measured in a real browser, and ESCSUITE-264's `preview-first-paint.spec.ts` ran three times on
 Chromium against this tree, 6 / 6. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-272 (the decode worker's 15 s per-request
+main-thread deadline — ESCSUITE-266's `FRAME_REQUEST_DEADLINE_MS`, which measured a frame request's
+*total* age while the worker's own 5 s stall bound resets on every decoder output — now resets while the
+worker reports progress: the worker posts a `FRAME_PROGRESS { requestId }` message on each decoder output
+to the requests waiting on that decoder, and the manager restarts that request's timer, clear and set,
+with the callback built once per request so a restart allocates only the timer handle; progress never
+crosses to another decoder, so a silent request on another source still terminates at its own 15 s, and
+the true-silence path — terminate, reject every pending request and in-flight load, hand each source to
+`<video>` with the once-per-export notice — is unchanged, as is ESCSUITE-273's load deadline):
+99.82 / 99.34 / 96.32 / 99.70, byte-identical on every percentage to the 99.82 / 99.34 / 96.32 / 99.70
+that `main` at `4c0e156e` (the ESCSUITE-273 version-packages commit) measures in the same sitting. That
+base reads 96.32 where the ESCSUITE-273 paragraph recorded 96.29 on its own rebased tree — the
+ESCSUITE-261 and 264 trees landed between them, and the table row is corrected here to the direct
+measurement. The base gives 5,474 / 5,683 branches and this branch 5,479 / 5,688: five new branches,
+five covered, the same 209 uncovered as before (lines 8,478 / 8,493 → 8,491 / 8,506, statements
+9,567 / 9,630 → 9,582 / 9,645, functions 2,019 / 2,025 → 2,020 / 2,026, every denominator growing by
+exactly what the numerator did; the same 15 / 63 / 6 uncovered). The five are
+`core/videoDecodeManager.ts`'s three (70 / 77 → 73 / 80: the `FRAME_PROGRESS` arm of the worker-message
+switch, the "is this request still pending" check before the restart, and the restart itself against a
+message for a request already settled or disposed; the file's seven pre-existing uncovered arms
+untouched) and `workers/frameDecoder.ts`'s two (50 / 50 → 52 / 52: the per-output post to the waiting
+requests and the decoder with none waiting), the one new function being that post's listener — each
+reached from both sides by the five red cases (a request reporting progress at 10 s and resolving at
+20 s is not terminated; a re-arm is a full 15 s; progress on A does not keep a silent B on another source
+alive; a queued request behind another on the same decoder hears every output, seven of them including
+the keyframe; a progress message for an unknown or settled request and one after `dispose()` are
+ignored) against ESCSUITE-266's silent-worker cases, which stay green. The review (opus) approved both
+verdicts, ruling the per-decoder broadcast right — a queued request on a healthy decoder would otherwise
+time out by age again, and the FIFO queue with the 5 s stall bound caps every wait — and the unthrottled
+post acceptable (about one message per exported frame per source; at worst several hundred tiny messages
+a second during a seek burst). `exportMP4.perf.test.ts` and every rerender pin are byte-identical.
+**No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3468,7 +3509,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
-| `@escapesuite/artist` | 99.82 | 99.35 | 96.31 | 99.70 |
+| `@escapesuite/artist` | 99.82 | 99.34 | 96.32 | 99.70 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
