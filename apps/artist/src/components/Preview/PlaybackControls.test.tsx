@@ -291,21 +291,16 @@ describe('PlaybackControls keyboard shortcuts', () => {
 
 // ESCSUITE-247: Space belongs to the focused control (CRAFT's ESCSUITE-185 twin).
 describe('PlaybackControls Space handling', () => {
-  type FocusMode = 'visible' | 'not-visible' | 'throws'
-  const realMatches = Element.prototype.matches
-  const stubFocusVisible = (mode: FocusMode) => {
-    vi.spyOn(Element.prototype, 'matches').mockImplementation(function (this: Element, sel: string) {
-      if (sel === ':focus-visible') {
-        if (mode === 'throws') throw new DOMException('unsupported selector', 'SyntaxError')
-        return mode === 'visible'
-      }
-      return realMatches.call(this, sel)
-    })
+  // Focus modality is recorded by the tracker PlaybackControls installs, so the
+  // cases drive the real event sequence instead of stubbing a pseudo-class.
+  const focusByKeyboard = (el: HTMLElement) => {
+    fireEvent.keyDown(document.body, { code: 'Tab', key: 'Tab' })
+    el.focus()
   }
-  // jsdom answers `false` for :focus-visible (it does not throw); the ESCSUITE-247
-  // cases model a keyboard user, so they run with it true.
-  beforeEach(() => stubFocusVisible('visible'))
-  afterEach(() => vi.restoreAllMocks())
+  const focusByMouse = (el: HTMLElement) => {
+    fireEvent.pointerDown(el)
+    el.focus()
+  }
 
   const press = (target: Element | Window, init: KeyboardEventInit) =>
     fireEvent.keyDown(target, { bubbles: true, cancelable: true, ...init })
@@ -314,6 +309,7 @@ describe('PlaybackControls Space handling', () => {
     addClip('clip1', 0, 10)
     render(<PlaybackControls />)
     const button = screen.getByTitle('Step forward (→)')
+    focusByKeyboard(button)
 
     const notPrevented = press(button, { code: 'Space', key: ' ' })
 
@@ -322,7 +318,7 @@ describe('PlaybackControls Space handling', () => {
   })
 
   it.each([
-    ['a role="button" element', () => { const e = document.createElement('div'); e.setAttribute('role', 'button'); return e }],
+    ['a role="button" element', () => { const e = document.createElement('div'); e.setAttribute('role', 'button'); e.tabIndex = 0; return e }],
     ['a link with an href', () => { const e = document.createElement('a'); e.setAttribute('href', '#x'); return e }],
     ['a select', () => document.createElement('select')],
     ['a range input', () => { const e = document.createElement('input'); e.type = 'range'; return e }],
@@ -331,6 +327,7 @@ describe('PlaybackControls Space handling', () => {
     render(<PlaybackControls />)
     const el = make()
     document.body.appendChild(el)
+    focusByKeyboard(el)
 
     const notPrevented = press(el, { code: 'Space', key: ' ' })
 
@@ -372,51 +369,31 @@ describe('PlaybackControls Space handling', () => {
     expect(store().isPlaying).toBe(true)
   })
 
-  // ESCSUITE-270: a button the mouse last clicked keeps focus but not
-  // `:focus-visible`, so Space is the transport's again.
-  describe('focus-visible decides (ESCSUITE-270)', () => {
+  // ESCSUITE-270: a button the mouse last clicked keeps focus, but Space is
+  // the transport's again.
+  it('toggles playback when the focused button was focused by the mouse', () => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    const button = screen.getByTitle('Step forward (→)')
+    const onClick = vi.fn()
+    button.addEventListener('click', onClick)
+    focusByMouse(button)
 
-    it('toggles playback when the focused button is not focus-visible (mouse-focused)', () => {
-      stubFocusVisible('not-visible')
-      addClip('clip1', 0, 10)
-      render(<PlaybackControls />)
-      const button = screen.getByTitle('Step forward (→)')
+    expect(press(button, { code: 'Space', key: ' ' })).toBe(false)
+    expect(store().isPlaying).toBe(true)
+    expect(onClick).not.toHaveBeenCalled()
+  })
 
-      expect(press(button, { code: 'Space', key: ' ' })).toBe(false)
-      expect(store().isPlaying).toBe(true)
-    })
+  it('leaves Space to the button once the keyboard has moved focus onto it', () => {
+    addClip('clip1', 0, 10)
+    render(<PlaybackControls />)
+    const button = screen.getByTitle('Step forward (→)')
+    focusByMouse(button)
+    focusByKeyboard(screen.getByTitle('Step backward (←)'))
+    focusByKeyboard(button)
 
-    it('leaves Space to the button when it is focus-visible (keyboard-focused)', () => {
-      stubFocusVisible('visible')
-      addClip('clip1', 0, 10)
-      render(<PlaybackControls />)
-      const button = screen.getByTitle('Step forward (→)')
-
-      expect(press(button, { code: 'Space', key: ' ' })).toBe(true)
-      expect(store().isPlaying).toBe(false)
-    })
-
-    it('leaves Space to the button when the engine does not support :focus-visible', () => {
-      stubFocusVisible('throws')
-      addClip('clip1', 0, 10)
-      render(<PlaybackControls />)
-      const button = screen.getByTitle('Step forward (→)')
-
-      expect(press(button, { code: 'Space', key: ' ' })).toBe(true)
-      expect(store().isPlaying).toBe(false)
-    })
-
-    it('still toggles from a plain element when focus-visible is false', () => {
-      stubFocusVisible('not-visible')
-      addClip('clip1', 0, 10)
-      render(<PlaybackControls />)
-      const plain = document.createElement('div')
-      document.body.appendChild(plain)
-
-      expect(press(plain, { code: 'Space', key: ' ' })).toBe(false)
-      expect(store().isPlaying).toBe(true)
-      plain.remove()
-    })
+    expect(press(button, { code: 'Space', key: ' ' })).toBe(true)
+    expect(store().isPlaying).toBe(false)
   })
 
   it('keeps the arrows on a focused button (the gate is Space only)', () => {
