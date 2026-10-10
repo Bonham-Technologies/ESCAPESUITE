@@ -4,9 +4,10 @@
 //
 //  - a media URL changed (an undo brought a clip back, say) — redraw once the
 //    elements have had a moment to pick the new source up;
-//  - the playhead moved while paused — seek every active video, draw the best
-//    frame available immediately, then draw again the moment the seeks report
-//    back, so a scrub is responsive without ending on a stale frame;
+//  - the playhead moved while paused, or a <video> arrived — seek every video
+//    the frame draws, draw the best frame available immediately, then draw
+//    again the moment the last seek reports back, so a scrub is responsive
+//    without ending on a stale frame;
 //  - playback is running — a requestAnimationFrame loop drives the clock,
 //    keeps the media elements in sync with it, and paints each frame.
 //
@@ -143,25 +144,36 @@ export function usePreviewRenderLoop({
     return () => clearTimeout(timeout);
   }, [videoUrlsKey, imageUrlsKey, isPlaying, drawFrame, drawSelectionHandles, drawMultiSelectHandles, currentTimeRef]);
 
-  // Handle scrubbing (when not playing)
-  // Simple approach: seek videos, then poll-redraw as seeks settle.
-  // No cancelled flags, no complex ref machinery. Each currentTime change
-  // starts its own seek+poll cycle; cleanup just cancels the rAF poll.
-  // The last poll cycle always wins because it draws at the latest currentTime.
+  // The element set the scrub effect last ran against — so a run can tell an
+  // element arriving from the playhead moving (below).
+  const scrubVideoUrlsKeyRef = useRef(videoUrlsKey);
+
+  // Handle scrubbing (when not playing): seek every video the frame draws to
+  // the playhead, paint the best frame available at once, and paint again when
+  // the last of those seeks reports back (ESCSUITE-275), with a 300 ms
+  // fallback for a seek that never does.
+  //
+  // It also runs when the element set changes (`videoUrlsKey`), because a
+  // <video> created while paused — a source restored by undo mid-clip, a
+  // project opened with the playhead off 0, a frame step pressed before the
+  // element existed — starts at source time 0 and nothing else seeks it. On
+  // such a run every element already at its target (within 0.05 s) is left
+  // alone, so an unchanged element costs one comparison, and the immediate
+  // paint is left to the media-change effect above, which paints 50 ms after
+  // any change of the set: the arrival paints once, as before, plus once after
+  // its seek if it needed one.
   useEffect(() => {
+    const elementsChanged = scrubVideoUrlsKeyRef.current !== videoUrlsKey;
+    scrubVideoUrlsKeyRef.current = videoUrlsKey;
     if (isPlaying) return;
 
     publishDisplayTime(currentTime, true);
 
-    const activeClips = getClipsAtTime(clips, tracks, currentTime);
-
-    // No active clips — draw black, done
-    if (activeClips.length === 0) {
+    const paint = () => {
       drawFrame(currentTime);
       drawSelectionHandles(currentTime);
       drawMultiSelectHandles(currentTime);
-      return;
-    }
+    };
 
     // Where each <video> element has to be for this frame.
     //
@@ -177,97 +189,89 @@ export function usePreviewRenderLoop({
     // (each clip overwrote the element's currentTime), so the frame the user
     // sees is unchanged: the last live clip's target, or the incoming side of
     // a transition, which is applied after the clips for the same reason.
-    const activeTransition = getActiveTransition(clips, tracks, currentTime);
     const seekTargets = new Map<HTMLVideoElement, number>();
+    const activeClips = getClipsAtTime(clips, tracks, currentTime);
 
-    const wantSeek = (sourceVideoId: string, sourceTime: number) => {
-      const sourceMedia = sourceVideos.find(s => s.id === sourceVideoId);
-      if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') return;
+    if (activeClips.length > 0) {
+      const activeTransition = getActiveTransition(clips, tracks, currentTime);
 
-      const video = videoElementsRef.current.get(sourceVideoId);
-      if (!video) return;
+      const wantSeek = (sourceVideoId: string, sourceTime: number) => {
+        const sourceMedia = sourceVideos.find(s => s.id === sourceVideoId);
+        if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') return;
 
-      seekTargets.set(video, sourceTime);
-    };
+        const video = videoElementsRef.current.get(sourceVideoId);
+        if (!video) return;
 
-    for (const { clip, clipTime } of activeClips) {
-      if (clip.overlayType) continue; // Text/shape overlays don't need seeking
-      wantSeek(clip.sourceVideoId, clip.startTime + clipTime);
-    }
+        seekTargets.set(video, sourceTime);
+      };
 
-    if (activeTransition) {
-      const { incomingClip } = activeTransition;
-      const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
-      wantSeek(incomingClip.sourceVideoId, incomingClip.startTime + inClipTime);
-    }
+      for (const { clip, clipTime } of activeClips) {
+        if (clip.overlayType) continue; // Text/shape overlays don't need seeking
+        wantSeek(clip.sourceVideoId, clip.startTime + clipTime);
+      }
 
-    // One comparison and at most one seek per element.
-    let needsVideoSeek = false;
-    for (const [video, sourceTime] of seekTargets) {
-      if (Math.abs(video.currentTime - sourceTime) > 0.05) {
-        video.currentTime = sourceTime;
-        needsVideoSeek = true;
+      if (activeTransition) {
+        const { incomingClip } = activeTransition;
+        const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
+        wantSeek(incomingClip.sourceVideoId, incomingClip.startTime + inClipTime);
       }
     }
 
-    // If no video seeking needed (overlays only, or videos already at position),
-    // draw once and be done — no poll needed
-    if (!needsVideoSeek) {
-      drawFrame(currentTime);
-      drawSelectionHandles(currentTime);
-      drawMultiSelectHandles(currentTime);
-      return;
-    }
-
-    // Event-driven redraw: listen for seeked events instead of polling.
+    // One comparison and at most one seek per element, and one 'seeked' to
+    // wait for per element that is moving: one this run sent, or one an
+    // earlier run sent that is still under way (`seeking`) — an earlier run's
+    // listener went with its cleanup, and the element already reads the
+    // target, so without this the paint after that seek would be lost.
     let settled = false;
+    let pendingSeeks = 0;
+    let finalPaintFrame = 0;
 
-    // Listen for seeked events on all active videos to know when to redraw
+    // Paint once the last pending seek has reported back — not the first: with
+    // two elements moving (picture-in-picture, a transition's two sides) the
+    // one that lands second would otherwise keep its old frame until the next
+    // scrub.
     const seekedHandler = () => {
       if (settled) return;
+      pendingSeeks -= 1;
+      if (pendingSeeks > 0) return;
       settled = true;
-      // One final accurate draw after seek completes
-      requestAnimationFrame(() => {
-        drawFrame(currentTime);
-        drawSelectionHandles(currentTime);
-        drawMultiSelectHandles(currentTime);
-      });
+      finalPaintFrame = requestAnimationFrame(paint);
     };
 
-    const activeVideos: HTMLVideoElement[] = [];
-    for (const { clip } of activeClips) {
-      if (clip.overlayType) continue;
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
-      if (video) {
+    for (const [video, sourceTime] of seekTargets) {
+      const offTarget = Math.abs(video.currentTime - sourceTime) > 0.05;
+      if (offTarget) video.currentTime = sourceTime;
+      if (offTarget || video.seeking) {
+        pendingSeeks += 1;
         video.addEventListener('seeked', seekedHandler, { once: true });
-        activeVideos.push(video);
       }
     }
 
-    // Draw once immediately with best available frame
-    drawFrame(currentTime);
-    drawSelectionHandles(currentTime);
-    drawMultiSelectHandles(currentTime);
+    // The best frame available now, for a playhead move. For a change of the
+    // element set the media-change effect paints it, 50 ms on.
+    if (!elementsChanged) paint();
 
-    // Fallback: if seeked doesn't fire within 300ms, draw anyway
+    if (pendingSeeks === 0) return;
+
+    // Fallback: if a seek has not reported back within 300 ms, paint anyway.
     const fallbackTimeout = setTimeout(() => {
       if (!settled) {
         settled = true;
-        drawFrame(currentTime);
-        drawSelectionHandles(currentTime);
-        drawMultiSelectHandles(currentTime);
+        paint();
       }
     }, 300);
 
-    // Cleanup just removes listeners — no rAF loop to cancel
+    // A newer playhead, element set or timeline supersedes this cycle: nothing
+    // it was waiting for may paint, including a final paint already asked for.
     return () => {
       settled = true;
       clearTimeout(fallbackTimeout);
-      for (const video of activeVideos) {
+      cancelAnimationFrame(finalPaintFrame);
+      for (const video of seekTargets.keys()) {
         video.removeEventListener('seeked', seekedHandler);
       }
     };
-  }, [currentTime, isPlaying, clips, tracks, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
+  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
 
   // Paint once more when a paused frame's video decodes its first frame
   // (ESCSUITE-264).
@@ -287,7 +291,10 @@ export function usePreviewRenderLoop({
   // HAVE_CURRENT_DATA the paint lacked, once per load, in every engine —
   // where rVFC is tied to presentation to the compositor, which an engine may
   // throttle or skip for these elements, never inserted in the document. A seek is not
-  // this effect's: the scrub effect above already paints after 'seeked'.
+  // this effect's: the scrub effect above paints after the last 'seeked'. An
+  // element both unready and off the playhead gets both paints, at the same
+  // playhead time, so whichever of 'loadeddata' and 'seeked' comes last paints
+  // the frame at the target: the seek was asked for before either fired.
   useEffect(() => {
     if (isPlaying) return;
 

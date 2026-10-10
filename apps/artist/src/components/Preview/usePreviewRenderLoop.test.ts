@@ -622,7 +622,7 @@ describe('usePreviewRenderLoop seeks (ESCSUITE-275)', () => {
     await settle(FRAME_MS)
     expect(drawnTimes(deps)).toEqual([1])
     // The browser has the seek in hand: currentTime already reads the target.
-    Object.defineProperty(element, 'seeking', { value: true, configurable: true, writable: true })
+    Object.defineProperty(element, 'seeking', { value: true, configurable: true })
 
     // An unrelated source arrives before that seek reports back.
     deps.videoElementsRef.current.set('video2', document.createElement('video'))
@@ -630,7 +630,7 @@ describe('usePreviewRenderLoop seeks (ESCSUITE-275)', () => {
     await settle(100)
     expect(drawnTimes(deps)).toEqual([1, 1])
 
-    element.seeking = false
+    Object.defineProperty(element, 'seeking', { value: false, configurable: true })
     seeked(element)
     await settle(FRAME_MS)
     expect(drawnTimes(deps)).toEqual([1, 1, 1])

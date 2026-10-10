@@ -1558,18 +1558,34 @@ state itself — the first time the element reaches the `HAVE_CURRENT_DATA` the 
 per load, in every engine — where rVFC is tied to presentation to the compositor, which an
 engine may throttle or skip for these elements, never inserted in the document. It adds no
 paint per frame — `drawFrame.perf.test.ts` and `preview-playback`'s rAF count are untouched.
-**A step or scrub ends on a paint after `seeked`**: the scrub effect paints once at once (over
-whatever frame the element shows) and again on the first `seeked`, through one
-`requestAnimationFrame`, with the 300 ms fallback only for a seek that never reports back —
-that order was already in place and the probe's step case passed 20 / 20 before the fix. The
-"every run after a frame step" in the original report was the transport's one-second step on a
+**A step or scrub ends on a paint after the last `seeked`** (ESCSUITE-264, ESCSUITE-275): the
+scrub effect paints once at once (over whatever frame the elements show) and again, through one
+`requestAnimationFrame`, when the **last** element it is waiting for reports `seeked`, with the
+300 ms fallback painting once if any of them has not by then; a `seeked` after the fallback, or
+after a newer cycle replaced this one, paints nothing, and the cleanup cancels a final paint
+already asked for. It waits per *element*, with a counter rather than a list: every element it
+seeked this run, plus any still `seeking` from a run the new one replaced (that run's listener went
+with its cleanup, and the element already reads the target, so the paint after its seek would
+otherwise be lost). Before ESCSUITE-275 "the first `seeked`" was literal — with two elements
+seeking at once (picture-in-picture, a transition's two sides, the incoming one of which was not
+listened to at all) the one that finished second kept its pre-step frame while paused. The
+"every run after a frame step" in the ESCSUITE-264 report was the transport's one-second step on a
 one-second fixture: from 0 s it lands on 1.0 s, the clip's own end, where no clip is active and
-black is the correct frame; the probe steps a two-second source for that reason. Two known gaps
-remain, both older than this ticket and left to a follow-up: "the first `seeked`" is literal — with
-two different elements seeking at once (picture-in-picture, a transition's two sides) the one that
-finishes second is not repainted while paused — and an element created while paused is never
-seeked to the playhead (the scrub effect does not re-run on `videoUrlsKey`), so it shows its
-source's first frame until the playhead moves.
+black is the correct frame; the probe steps a two-second source for that reason.
+
+**An element created while paused is seeked to the playhead** (ESCSUITE-275). The scrub effect
+also runs when the element set changes (`videoUrlsKey`), so a `<video>` created while the
+playhead's source time is not 0 — a source restored by undo mid-clip, a project or session
+opened with the playhead off 0, a frame step pressed before the element existed — is seeked
+like a playhead move, instead of showing its source's first frame until the playhead moved (and
+ESCSUITE-264's readiness paint reliably painting that wrong frame). An element already within
+0.05 s of its target is left alone, so an unchanged element costs one comparison and no seek. On
+such a run the immediate paint is the media-change effect's, 50 ms after any change of the set,
+so an arrival paints once as before, plus once after its seek if it needed one. An element both
+unready and off the playhead gets the readiness paint and the seek paint, both at the same
+playhead time and the seek asked for before either event fires, so whichever of `loadeddata` and
+`seeked` comes last paints the frame at the target (`usePreviewRenderLoop.test.ts` pins both
+orders).
 
 **Loop-back seeks nothing itself** (ESCSUITE-129). `loopStart` is a timeline time; a media
 element's own position is `clip.startTime + (loopStart - clip.timelinePosition)`, which is
