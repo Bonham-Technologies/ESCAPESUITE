@@ -4,6 +4,7 @@ import { DEFAULT_CLIP_MASK_RADIUS, DEFAULT_CLIP_STROKE_COLOR } from '../../store
 import { CLIP_MASK_KINDS } from './clipEditorOptions';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { SliderGestureHandlers } from './useSliderGesture';
+import type { BurstGestureHandlers } from './useBurstGesture';
 import styles from './ClipEditor.module.css';
 
 interface MaskSectionProps {
@@ -33,6 +34,13 @@ interface MaskSectionProps {
    * a pointer gesture is not what bounds that interaction.
    */
   sliderGesture: SliderGestureHandlers;
+  /**
+   * What bounds the swatch instead (ESCSUITE-242): one sweep of the stroke
+   * colour picker is one burst — opened by its first edit, closed on blur or
+   * after a pause — and so one undo entry. Optional, so the section renders on
+   * its own in a test; without it every write keeps its own entry.
+   */
+  burstGesture?: BurstGestureHandlers;
   /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
   disabled?: boolean;
 }
@@ -82,6 +90,7 @@ export function MaskSection({
   onMaskChange,
   onStrokeChange,
   sliderGesture,
+  burstGesture,
   disabled,
 }: MaskSectionProps) {
   // ESCSUITE-89: one id for the section, one label wired to each control.
@@ -155,7 +164,11 @@ export function MaskSection({
               type="color"
               value={swatchValue(stroke?.color)}
               disabled={strokeWidth <= 0}
-              onChange={(e) => onStrokeChange({ color: e.target.value, width: strokeWidth })}
+              onChange={(e) => {
+                burstGesture?.onEdit();
+                onStrokeChange({ color: e.target.value, width: strokeWidth });
+              }}
+              onBlur={burstGesture?.onBlur}
             />
           </div>
         </div>

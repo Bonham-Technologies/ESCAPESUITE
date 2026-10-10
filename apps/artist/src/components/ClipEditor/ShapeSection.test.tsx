@@ -279,7 +279,9 @@ describe('ShapeSection and the undo stack', () => {
   /** `count` picker reports, each a different red, then the picker's closing `change`. */
   function sweep(swatch: HTMLInputElement, count: number) {
     let last = ''
-    for (let i = 0; i < count; i++) {
+    // From 1, not 0: `#000000` is the fill swatch's starting value, and a report
+    // that changes nothing never reaches `onChange`.
+    for (let i = 1; i <= count; i++) {
       last = `#${(i * 8).toString(16).padStart(2, '0')}0000`
       fireEvent.input(swatch, { target: { value: last } })
     }

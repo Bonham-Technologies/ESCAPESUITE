@@ -1566,7 +1566,7 @@ component.
 | `TimelineTimeReadout.tsx` | The `current / total` readout in the info bar, split out for the same reason |
 | `TimelineTrack.tsx` | One track row: its clips (only the ones the virtualiser passed), the drag preview, the trim's live sizing, and each clip's label, **masked thumbnail**, waveform and keyframe diamonds. `React.memo`'d, which holds for a marquee or a scrub but not for a clip drag — `dragState` is one of its props |
 | `visibleRangeCache.ts` | `pruneVisibleRangeCache` (ESCSUITE-13 round 3): deletes `TimelineTrack`'s per-clip `visibleRangePx` cache entries for clips no longer on the row. Its own file rather than living in `TimelineTrack.tsx` purely so it can be `export`ed and unit-tested directly without breaking that file's Fast Refresh (`react-refresh/only-export-components` disallows a component file exporting anything else) |
-| `TrackHeader.tsx` | One header row: volume and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
+| `TrackHeader.tsx` | One header row: volume (one drag or held key = one undo entry, through `ClipEditor/useSliderGesture.ts` — ESCSUITE-242) and mute, the track name (double-click to rename, Enter commits, Escape discards — the only state in the directory that is not a gesture), the reorder arrows and the visibility/lock/delete controls. `React.memo`'d — its props are stable through a clip drag, a marquee and playback, so the whole column sits those out. **Not through a trim**: `useTrackHeaderActions`' `handleDeleteTrack` depends on `clips`, and a trim writes the store every move, so `onDeleteTrack` changes identity per frame and the column re-renders anyway |
 | `ClipKeyframeDiamonds.tsx` | The keyframe markers along a clip: every animated property's times, deduplicated and placed |
 | `AudioWaveform.tsx` | The canvas waveform inside a clip. Resamples the clip's *visible window* — not its whole box — so detail follows zoom instead of being frozen at a whole-clip cap (ESCSUITE-13); the CSS size and the backing store are always the same clamped number, so a canvas never stretches past what it actually holds |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
@@ -2029,6 +2029,7 @@ behaviour change rather than a tidy-up. Every module here has its own test file,
 | `ClipEditor.tsx` | The composition: the hook call, the empty-state early return, and the per-section guards in their fixed order. Owns `div.container` itself in both the empty and selected states, so that element's identity is stable across the empty↔selected transition |
 | `useClipEditorActions.ts` | Every store read and write the panel makes — the selectors, the derived `sourceVideo`/`track`, the clip classification, and one handler per control. Adds no state and no subscription of its own; the hook calls are the ones that used to sit at the top of `ClipEditor.tsx`, in the same order and with the same dependency arrays (plus the stable `commit`, which changes no identity). **No `currentTime` selector** — see the note below |
 | `useSliderGesture.ts` | Where one slider gesture starts and stops, and `commit`, which runs one write inside it with the `skipHistory` flag it is owed — a `useGestureHistory` and six listeners, no state. One instance serves the whole panel; see "One drag of a slider is one undo step" below |
+| `useBurstGesture.ts` | The same for a typed or picked value (ESCSUITE-242): a burst opens on its first edit and closes on blur, after `BURST_PAUSE_MS` (600 ms) with no edit, or on unmount — a `useGestureHistory` and one timer ref, no state. One instance serves the whole panel; see "One typing burst or picker sweep is one undo step" below |
 | `clipEditorModel.ts` | The panel's pure derivations: `describeClip` (which kind of clip, and the header's label), `relativeTimeInClip`, `overlayPositionValue`, `maxPresetDuration`, `fitToCanvasScale`, `keyframeCount`. No store, no React |
 | `clipColorValues.ts` | The colour and font-size maths the text and shape controls share: the font-size clamp, the text background's fixed `cc` alpha, a fill's rgb-with-carried-alpha rewrite, the no-fill toggle, and the fill alpha as a 0–100 percentage |
 | `clipEditorOptions.ts` | The **five** `{ value, label }` option lists the dropdowns render — transitions, blend modes, clip mask kinds, animation presets, easings (the last re-exported from `utils/easingOptions.ts`) — plus `CROP_ASPECT_PRESETS` (ESCSUITE-6), which is buttons rather than a dropdown because a preset is an action and not a stored value |
@@ -2162,7 +2163,8 @@ code. It holds refs and no state, so no slider adds a subscription and no render
 The flag reaches the store through the trailing optional `skipHistory` parameter on
 `updateClipTransform`, `updateClip`, `updateClipEffects`, `updateTextOverlayData`,
 `updateShapeOverlayData`, `updateClipAnimation`, `updateClipTransition`,
-`shiftClipsAfter` and `setClipTimelinePosition` — the first, fourth
+`shiftClipsAfter`, `setClipTimelinePosition` and — since ESCSUITE-242, for the track header's
+volume slider — `updateTrack` — the first, fourth
 and fifth already had it; ESCSUITE-75 added it to
 `updateClip` and `updateClipEffects`, ESCSUITE-77 the next three and ESCSUITE-79
 `setClipTimelinePosition`, all six in the same shape
@@ -2171,6 +2173,42 @@ pushToHistory(state)`). It is optional and last, so every existing caller is one
 exactly as before. `trimClip` (ESCSUITE-110 review round 1) takes it the same way, having taken
 over the timeline trim's own write from `updateClip` — which still carries the flag today, now
 purely for the mask/stroke sliders in `useClipEditorActions.ts`.
+
+**One typing burst or picker sweep is one undo step** (ESCSUITE-242). Three more inputs wrote
+on every event and pushed an entry each, so one gesture evicted the user's whole history: the
+**track header's volume slider** (a 60-move drag took the stack from 2 entries to 50), the
+**caption textarea** (one entry per keystroke) and the **colour pickers** (an
+`<input type="color">` reports continuously while it is swept). The volume slider is a slider,
+so it takes `useSliderGesture` unchanged — one instance per `TrackHeader`, refs only, so the
+header's `React.memo` and `timelineGestures.perf.test.ts` hold exactly as before — and
+`updateTrack` grew the trailing `skipHistory` flag and the ESCSUITE-87 boolean to carry it (an
+id naming no track is refused in front of the `set`, as ESCSUITE-172 refuses an unknown clip).
+Like every inspector slider, its `blur` ends the gesture (the substitute for a `pointerup` that
+never comes) while a Shift released mid-drag does not (ESCSUITE-169). The mute, visibility and
+lock buttons and the rename keep one entry per call.
+
+The typed and picked values are not bounded by a pointer or a key, so they get
+`ClipEditor/useBurstGesture.ts` instead: a **burst** opens on the first edit and closes on
+`blur`, after **`BURST_PAUSE_MS` = 600 ms** with no edit, or on unmount (timer cleared and scope
+ended — ESCSUITE-120's lesson). Same `useGestureHistory` rule underneath: the burst's first
+write pushes, the rest skip; the store is still written on every event. It covers the caption
+textarea, the font-size field and all **five** colour pickers on the panel — text and
+background (`TextContentSection`), fill and stroke (`ShapeSection`), and the mask stroke colour
+(`MaskSection`). Each control calls `onEdit` from inside its own `onChange`, right before the
+write, rather than spreading an `onInput` listener, so the burst is open at the write however
+the edit arrived; and it does not close on a picker's own closing `change`, because React's
+value tracker drops that event (it repeats the last `input`'s value) before any handler sees
+it — the pause and the blur end a sweep, which also coalesces a browser that reports each
+picker step as a `change`. The burst keeps a history of its own rather than sharing the
+slider's, so the textarea's blur when the user presses a slider cannot end the drag that press
+began; `useClipEditorActions`' `commitEdit` nests the two `commit`s and skips history when
+either gesture says to, and is what `handleTextDataChange`, `handleShapeDataChange` and
+`handleStrokeChange` write through — outside both gestures it hands the write `false`, so the
+bold/italic toggles, the selects and the no-fill toggle keep one entry each. Three scopes, then:
+**a slider gesture** (pointer or key), **a typing burst** and **a picker sweep** (both the 600 ms
+burst). Held by `useBurstGesture.test.ts` (the contract), `store/trackSlice.test.ts`, and the
+real-store cases in `TrackHeader.test.tsx`, `TextContentSection.test.tsx`,
+`ShapeSection.test.tsx` and `MaskSection.test.tsx`; no rerender or perf pin moved.
 
 **Every slider in the inspector and the trim drag on the timeline now follow the one-entry-per-gesture
 rule** (ESCSUITE-77 finished what ESCSUITE-75 started). `Timeline/useTrimDrag.ts` is the one that

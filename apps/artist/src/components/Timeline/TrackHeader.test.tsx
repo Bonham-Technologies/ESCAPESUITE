@@ -30,7 +30,7 @@ function makeTrack(overrides: Partial<Track> = {}): Track {
 
 function makeCallbacks() {
   return {
-    onUpdateTrack: vi.fn<(trackId: string, updates: Partial<Track>) => void>(),
+    onUpdateTrack: vi.fn<(trackId: string, updates: Partial<Track>, skipHistory?: boolean) => boolean>(),
     onMoveTrackUp: vi.fn<(trackId: string) => void>(),
     onMoveTrackDown: vi.fn<(trackId: string) => void>(),
     onDeleteTrack: vi.fn<(trackId: string) => void>(),
@@ -71,6 +71,9 @@ describe('TrackHeader layout', () => {
 })
 
 describe('TrackHeader volume', () => {
+  // Each `change` below is a value set with no gesture around it, so the
+  // slider's `commit` hands the store `skipHistory: false` — its own undo entry
+  // (ESCSUITE-242; the gesture cases are in "the undo stack" block below).
   it('shows the track volume as a percentage, labelled by track name', () => {
     renderHeader({ track: makeTrack({ name: 'Music', volume: 0.35 }) })
 
@@ -93,7 +96,7 @@ describe('TrackHeader volume', () => {
 
     fireEvent.change(screen.getByLabelText('Track 1 volume'), { target: { value: '0.6' } })
 
-    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0.6, lastVolume: 0.6 })
+    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0.6, lastVolume: 0.6 }, false)
   })
 
   it('keeps the remembered level when the slider is dragged to zero', () => {
@@ -101,7 +104,7 @@ describe('TrackHeader volume', () => {
 
     fireEvent.change(screen.getByLabelText('Track 1 volume'), { target: { value: '0' } })
 
-    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0, lastVolume: 0.4 })
+    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0, lastVolume: 0.4 }, false)
   })
 
   it('unmutes the track when a muted slider is raised', () => {
@@ -109,7 +112,7 @@ describe('TrackHeader volume', () => {
 
     fireEvent.change(screen.getByLabelText('Track 1 volume'), { target: { value: '0.7' } })
 
-    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0.7, muted: false })
+    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0.7, muted: false }, false)
   })
 
   it('leaves a muted track muted when its slider is set to zero', () => {
@@ -117,7 +120,7 @@ describe('TrackHeader volume', () => {
 
     fireEvent.change(screen.getByLabelText('Track 1 volume'), { target: { value: '0' } })
 
-    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0, lastVolume: 0.8 })
+    expect(calls.onUpdateTrack).toHaveBeenCalledWith('t1', { volume: 0, lastVolume: 0.8 }, false)
   })
 })
 

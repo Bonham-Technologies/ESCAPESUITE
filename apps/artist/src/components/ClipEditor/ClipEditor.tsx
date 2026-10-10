@@ -31,6 +31,7 @@ export function ClipEditor() {
     frameWidth,
     keyframePanelOpen,
     sliderGesture,
+    burstGesture,
     handleSplitAtPlayhead,
     handleDeleteClip,
     handleGoToClip,
@@ -87,6 +88,7 @@ export function ClipEditor() {
         <TextContentSection
           textData={selectedClip.textData}
           onChange={handleTextDataChange}
+          burstGesture={burstGesture}
           disabled={trackLocked}
         />
       )}
@@ -97,6 +99,7 @@ export function ClipEditor() {
           shapeData={selectedClip.shapeData}
           onChange={handleShapeDataChange}
           sliderGesture={sliderGesture}
+          burstGesture={burstGesture}
           disabled={trackLocked}
         />
       )}
@@ -146,6 +149,7 @@ export function ClipEditor() {
           onMaskChange={handleMaskChange}
           onStrokeChange={handleStrokeChange}
           sliderGesture={sliderGesture}
+          burstGesture={burstGesture}
           disabled={trackLocked}
         />
       )}

@@ -2,6 +2,7 @@ import { useId } from 'react';
 import type { TextAlign, TextOverlayData } from '../../store/types';
 import { clampFontSize, withBackgroundAlpha } from './clipColorValues';
 import { CollapsibleSection } from './CollapsibleSection';
+import type { BurstGestureHandlers } from './useBurstGesture';
 import styles from './ClipEditor.module.css';
 
 interface TextContentSectionProps {
@@ -9,6 +10,16 @@ interface TextContentSectionProps {
   textData: TextOverlayData;
   /** Apply a partial change to that data. */
   onChange: (updates: Partial<TextOverlayData>) => void;
+  /**
+   * Undo coalescing for the four controls that write on every event — the
+   * text, the font size and the two colour pickers (ESCSUITE-242): one typing
+   * burst or one picker sweep is one undo entry rather than one per event.
+   * Each calls `onEdit` right before its write, and `onBlur` when it loses
+   * focus. The bold/italic toggles and the two selects are single changes and
+   * do not take part. Optional, so the section renders on its own in a test;
+   * without it every write keeps its own entry.
+   */
+  burstGesture?: BurstGestureHandlers;
   /** Freeze the section's controls — the clip's track is locked (ESCSUITE-84). */
   disabled?: boolean;
 }
@@ -21,7 +32,7 @@ interface TextContentSectionProps {
  * `style.height` on the element directly — there is no measured height in
  * React state, so a re-render never fights the resize.
  */
-export function TextContentSection({ textData, onChange, disabled }: TextContentSectionProps) {
+export function TextContentSection({ textData, onChange, burstGesture, disabled }: TextContentSectionProps) {
   /**
    * One id for the section (ESCSUITE-89).
    *
@@ -48,12 +59,14 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
         aria-label="Text"
         value={textData.text}
         onChange={(e) => {
+          burstGesture?.onEdit();
           onChange({ text: e.target.value });
           // Auto-expand: reset height then set to scrollHeight
           const el = e.target;
           el.style.height = 'auto';
           el.style.height = el.scrollHeight + 'px';
         }}
+        onBlur={burstGesture?.onBlur}
         onFocus={(e) => {
           // Expand on focus in case content already exceeds 2 rows
           const el = e.target;
@@ -84,7 +97,11 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
           type="number"
           className={styles.numberInput}
           value={textData.fontSize}
-          onChange={(e) => onChange({ fontSize: clampFontSize(e.target.value) })}
+          onChange={(e) => {
+            burstGesture?.onEdit();
+            onChange({ fontSize: clampFontSize(e.target.value) });
+          }}
+          onBlur={burstGesture?.onBlur}
           min={8}
           max={200}
           title="Font size"
@@ -128,7 +145,11 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
             aria-label="Text color"
             type="color"
             value={textData.color}
-            onChange={(e) => onChange({ color: e.target.value })}
+            onChange={(e) => {
+              burstGesture?.onEdit();
+              onChange({ color: e.target.value });
+            }}
+            onBlur={burstGesture?.onBlur}
           />
         </div>
         <div className={styles.colorInput}>
@@ -138,7 +159,11 @@ export function TextContentSection({ textData, onChange, disabled }: TextContent
             aria-label="BG color"
             type="color"
             value={textData.backgroundColor.substring(0, 7)}
-            onChange={(e) => onChange({ backgroundColor: withBackgroundAlpha(e.target.value) })}
+            onChange={(e) => {
+              burstGesture?.onEdit();
+              onChange({ backgroundColor: withBackgroundAlpha(e.target.value) });
+            }}
+            onBlur={burstGesture?.onBlur}
           />
         </div>
       </div>
