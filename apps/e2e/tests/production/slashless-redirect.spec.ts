@@ -22,9 +22,9 @@ test.describe('production: slashless and deep app URLs redirect (ESCSUITE-234)',
       expect(withQuery.headers()['location']).toBe(`/${app}/?loadVideo=abc`)
     })
 
-    test(`/${app}/foo/ answers 308 to the one document /${app}/`, async ({ request }) => {
+    test(`/${app}/foo/ answers 307 (temporary) to the one document /${app}/`, async ({ request }) => {
       const deep = await request.get(`${BASE}/${app}/foo/`, { maxRedirects: 0 })
-      expect(deep.status()).toBe(308)
+      expect(deep.status()).toBe(307)
       expect(deep.headers()['location']).toBe(`/${app}/`)
     })
 

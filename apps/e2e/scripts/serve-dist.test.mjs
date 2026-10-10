@@ -336,11 +336,14 @@ const REDIRECT_CASES = [
   ['/artist/foo', '/artist/'],
   ['/artist/deep/er/path', '/artist/'],
 ]
+// Bare paths are permanent (308); deep paths are temporary (307) so a browser
+// never caches them and a future real sub-route stays reachable.
+const statusFor = (from) => (from === '/craft' || from === '/artist' ? 308 : 307)
 
 test('redirectFor: vercel.json redirects /craft and /artist (and deep paths) to the slashed document, 308', () => {
   for (const [from, to] of REDIRECT_CASES) {
     const hit = serveDist.redirectFor?.(from, realVercelConfig.redirects ?? [])
-    assert.deepEqual(hit, { destination: to, statusCode: 308 }, from)
+    assert.deepEqual(hit, { destination: to, statusCode: statusFor(from) }, from)
   }
 })
 
@@ -374,13 +377,15 @@ test('HTTP: redirects answer 308 with Location, keeping the query string', async
 
     for (const [from, to] of REDIRECT_CASES) {
       const response = await get(from)
-      assert.equal(response.status, 308, from)
+      assert.equal(response.status, statusFor(from), from)
       assert.equal(response.headers.get('location'), to, from)
     }
 
     const withQuery = await get('/artist?loadVideo=abc&x=1')
     assert.equal(withQuery.status, 308)
     assert.equal(withQuery.headers.get('location'), '/artist/?loadVideo=abc&x=1')
+    const deepStatus = await get('/artist/foo/')
+    assert.equal(deepStatus.status, 307)
     const deepQuery = await get('/artist/foo/?loadVideo=abc')
     assert.equal(deepQuery.headers.get('location'), '/artist/?loadVideo=abc')
 
