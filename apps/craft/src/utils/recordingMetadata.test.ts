@@ -40,7 +40,7 @@ describe('buildSourceVideo', () => {
   // capture at — the same constant the capture constraints, the compositor and
   // the WebCodecs encoder read — and is labelled as such, so ESCAPEARTIST can
   // tell it from a rate it measured or one nothing knew.
-  it('writes the rate the recorder captured at, labelled configured', () => {
+  it('writes the rate the recorder was configured to capture at, labelled configured', () => {
     const sourceVideo = buildSourceVideo({
       id: 'rec-rate',
       now: 0,

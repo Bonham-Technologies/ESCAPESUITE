@@ -28,7 +28,7 @@ export class Compositor {
   private animationFrameId: number | null = null;
   private config: CompositorConfig;
   private outputStream: MediaStream | null = null;
-  private targetFrameRate: number = 30;
+  private targetFrameRate: number = CAPTURE_FRAME_RATE;
   /** `performance.now()` at which the next composited frame is due. */
   private nextFrameDue: number = 0;
   /**

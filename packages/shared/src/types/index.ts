@@ -72,7 +72,8 @@ export interface SourceVideo {
   /**
    * Where `frameRate` came from (ESCSUITE-276): `'measured'` from the file's
    * own presented frames at import (ESCAPEARTIST), `'configured'` from the
-   * rate the recorder captured at (ESCAPECRAFT), `'assumed'` for a fallback
+   * rate the recorder was configured to capture at (ESCAPECRAFT — an `ideal`
+   * constraint, so a capture can deliver fewer), `'assumed'` for a fallback
    * value nothing measured — 30 for a video, 1 for an image, 0 for audio.
    * Absent on every record written before the field existed, which reads the
    * same as `'assumed'`: its rate was always a placeholder.
