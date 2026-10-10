@@ -116,7 +116,7 @@ export async function probeVolumeDir(configuredDir: string): Promise<void> {
     await fs.writeFile(probePath, '', { flag: 'wx' })
     await fs.rm(probePath, { force: true })
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code ?? 'unknown error'
+    const code = (err as NodeJS.ErrnoException).code
     throw new Error(
       `volume sink directory "${dir}" is not writable by uid ${process.getuid?.()} (${code}); ` +
         'make it writable by that user',
