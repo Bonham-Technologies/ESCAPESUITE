@@ -86,6 +86,12 @@ afterEach(() => {
 
 const mount = () => renderHook(() => useClipEditorActions())
 
+/**
+ * The one slider these tests press. The gesture belongs to the element that
+ * opened it (ESCSUITE-267), so a press and its release name the same target.
+ */
+const slider = { currentTarget: new EventTarget() }
+
 /** Select a clip and forget the writes that setting the scene made. */
 function select(clip: Clip): Clip {
   store().setSelectedClipId(clip.id)
@@ -969,11 +975,11 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     // The listeners the sections spread onto their sliders. A press opens the
     // gesture; the first write then pushes and the rest of the drag skips, so
     // the whole drag is one entry captured before it started.
-    act(() => result.current.sliderGesture.onPointerDown())
+    act(() => result.current.sliderGesture.onPointerDown(slider))
     act(() => result.current.handleBlurChange(1))
     act(() => result.current.handleBlurChange(2))
     act(() => result.current.handleBlurChange(3))
-    act(() => result.current.sliderGesture.onPointerUp())
+    act(() => result.current.sliderGesture.onPointerUp(slider))
 
     expect(spies.updateClipEffects).toHaveBeenNthCalledWith(1, clip.id, { blur: 1 }, false)
     expect(spies.updateClipEffects).toHaveBeenNthCalledWith(2, clip.id, { blur: 2 }, true)
@@ -991,7 +997,7 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
     act(() => store().updateTrack(clip.trackId, { locked: true }))
     useEditorStore.setState({ history: { past: [], future: [] } })
 
-    act(() => result.current.sliderGesture.onPointerDown())
+    act(() => result.current.sliderGesture.onPointerDown(slider))
     act(() => result.current.handleBlurChange(1))
 
     // Refused: no blur, and no entry for a later write to join.
@@ -1003,7 +1009,7 @@ describe('useClipEditorActions mask and stroke (ESCSUITE-65)', () => {
 
     act(() => result.current.handleBlurChange(2))
     act(() => result.current.handleBlurChange(3))
-    act(() => result.current.sliderGesture.onPointerUp())
+    act(() => result.current.sliderGesture.onPointerUp(slider))
 
     // The write that landed is the one that pushed. Before this, the refused
     // first write had claimed the push and both of these would have skipped,
@@ -1188,10 +1194,10 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     const clip = mediaClip()
     const { result } = mount()
 
-    act(() => result.current.sliderGesture.onPointerDown())
+    act(() => result.current.sliderGesture.onPointerDown(slider))
     act(() => result.current.handleCropChange({ left: 0.1, top: 0, right: 0, bottom: 0 }))
     act(() => result.current.handleCropChange({ left: 0.2, top: 0, right: 0, bottom: 0 }))
-    act(() => result.current.sliderGesture.onPointerUp())
+    act(() => result.current.sliderGesture.onPointerUp(slider))
 
     // One drag, one undo entry — and exactly two writes, so a third could not
     // slip past. Each write's compensating centre (ESCSUITE-171) is rebased from
