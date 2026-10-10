@@ -341,13 +341,26 @@ export function useRecordingSave({
         }
 
         await storeVideo(companionId, companion.blob, companionSourceVideo);
-        if (companionThumbnail) await storeThumbnail(companionId, companionThumbnail);
+
+        // The thumbnail is cosmetic here as it is for the primary (ESCSUITE-107):
+        // the bytes are already stored, so a rejected thumbnail write must not
+        // hide the row, report the part as lost or orphan the file
+        // (ESCSUITE-224). Listed with no thumbnail, as an audio part is.
+        let companionThumbnailUrl: string | undefined;
+        if (companionThumbnail) {
+          try {
+            await storeThumbnail(companionId, companionThumbnail);
+            companionThumbnailUrl = createBlobUrl(companionThumbnail);
+          } catch (error) {
+            console.warn(`${part.trackLabel} thumbnail could not be saved:`, error);
+          }
+        }
 
         addRecording(buildRecordingEntry({
           sourceVideo: companionSourceVideo,
           now,
           size: companion.blob.size,
-          ...(companionThumbnail ? { thumbnailUrl: createBlobUrl(companionThumbnail) } : {}),
+          ...(companionThumbnailUrl ? { thumbnailUrl: companionThumbnailUrl } : {}),
           hasWebcam: !part.isAudio,
           hasAudio: part.isAudio,
         }));

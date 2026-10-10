@@ -242,6 +242,22 @@ describe('App recording hand-off and deletion', () => {
     expect((await getRecordingsMetadata()).map(m => m.id)).toEqual(['keep']);
   });
 
+  // ESCSUITE-224: a companion whose thumbnail write failed is stored with no
+  // thumbnail but is listed, so deleting its take reaches its bytes too.
+  it('deletes a thumbnail-less webcam companion with its take', async () => {
+    await seedRecording({ id: 'take-1', name: 'Take', takeId: 'take-1', role: 'screen', recordedAt: 2_000 });
+    await seedRecording(
+      { id: 'part-2', name: 'Take — webcam', takeId: 'take-1', role: 'webcam', recordedAt: 2_000 },
+      { withThumbnail: false }
+    );
+    await renderAppWithLibrary(2);
+
+    await user().click(screen.getByRole('button', { name: 'Delete Take' }));
+    await waitFor(() => expect(items()).toHaveLength(0));
+
+    expect(await getRecordingsMetadata()).toEqual([]);
+  });
+
   it('shows the empty state again once the last recording is deleted', async () => {
     await seedRecording({ id: 'only', name: 'Only Take' });
     await renderAppWithLibrary(1);
