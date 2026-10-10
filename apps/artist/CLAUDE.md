@@ -1581,11 +1581,15 @@ like a playhead move, instead of showing its source's first frame until the play
 ESCSUITE-264's readiness paint reliably painting that wrong frame). An element already within
 0.05 s of its target is left alone, so an unchanged element costs one comparison and no seek. On
 such a run the immediate paint is the media-change effect's, 50 ms after any change of the set,
-so an arrival paints once as before, plus once after its seek if it needed one. An element both
-unready and off the playhead gets the readiness paint and the seek paint, both at the same
-playhead time and the seek asked for before either event fires, so whichever of `loadeddata` and
-`seeked` comes last paints the frame at the target (`usePreviewRenderLoop.test.ts` pins both
-orders).
+so an arrival paints once as before, plus once after its seek if it needed one — and a run where
+the playhead moved in the same render as the set changed gets its first paint 50 ms late, the
+trade for that. An element both unready and off the playhead gets the readiness paint and the
+seek paint, both at the same playhead time and the seek asked for before either event fires: if
+its `seeked` lands within the 300 ms fallback, whichever of `loadeddata` and `seeked` comes last
+paints the frame at the target (`usePreviewRenderLoop.test.ts` pins both orders); past the
+fallback the late `seeked` paints nothing, and the `loadeddata` paint is the backstop. That a
+browser applies a seek made at `HAVE_NOTHING` as the default playback start position — after
+metadata, before the first frame's data — is the spec's order, not measured in a real browser.
 
 **Loop-back seeks nothing itself** (ESCSUITE-129). `loopStart` is a timeline time; a media
 element's own position is `clip.startTime + (loopStart - clip.timelinePosition)`, which is

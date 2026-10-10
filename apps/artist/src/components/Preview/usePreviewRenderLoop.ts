@@ -169,12 +169,6 @@ export function usePreviewRenderLoop({
 
     publishDisplayTime(currentTime, true);
 
-    const paint = () => {
-      drawFrame(currentTime);
-      drawSelectionHandles(currentTime);
-      drawMultiSelectHandles(currentTime);
-    };
-
     // Where each <video> element has to be for this frame.
     //
     // Collected per *element*, not per clip: `usePreviewMedia` keeps one
@@ -229,29 +223,45 @@ export function usePreviewRenderLoop({
     // Paint once the last pending seek has reported back — not the first: with
     // two elements moving (picture-in-picture, a transition's two sides) the
     // one that lands second would otherwise keep its old frame until the next
-    // scrub.
-    const seekedHandler = () => {
-      if (settled) return;
-      pendingSeeks -= 1;
-      if (pendingSeeks > 0) return;
-      settled = true;
-      finalPaintFrame = requestAnimationFrame(paint);
-    };
+    // scrub. Created on the first pending element, so a run with nothing to
+    // seek — every run of a paused drag that moves no element — allocates no
+    // closure at all. It only ever runs from a 'seeked' event, after this run
+    // has returned and `paint` below exists.
+    let seekedHandler: (() => void) | undefined;
 
     for (const [video, sourceTime] of seekTargets) {
       const offTarget = Math.abs(video.currentTime - sourceTime) > 0.05;
       if (offTarget) video.currentTime = sourceTime;
       if (offTarget || video.seeking) {
         pendingSeeks += 1;
+        seekedHandler ??= () => {
+          if (settled) return;
+          pendingSeeks -= 1;
+          if (pendingSeeks > 0) return;
+          settled = true;
+          finalPaintFrame = requestAnimationFrame(paint);
+        };
         video.addEventListener('seeked', seekedHandler, { once: true });
       }
     }
 
     // The best frame available now, for a playhead move. For a change of the
-    // element set the media-change effect paints it, 50 ms on.
-    if (!elementsChanged) paint();
+    // element set the media-change effect paints it, 50 ms on — also when the
+    // playhead moved in the same render, whose first paint is then 50 ms late.
+    if (!elementsChanged) {
+      drawFrame(currentTime);
+      drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
+    }
 
-    if (pendingSeeks === 0) return;
+    if (!seekedHandler) return;
+    const onSeeked = seekedHandler;
+
+    const paint = () => {
+      drawFrame(currentTime);
+      drawSelectionHandles(currentTime);
+      drawMultiSelectHandles(currentTime);
+    };
 
     // Fallback: if a seek has not reported back within 300 ms, paint anyway.
     const fallbackTimeout = setTimeout(() => {
@@ -268,7 +278,7 @@ export function usePreviewRenderLoop({
       clearTimeout(fallbackTimeout);
       cancelAnimationFrame(finalPaintFrame);
       for (const video of seekTargets.keys()) {
-        video.removeEventListener('seeked', seekedHandler);
+        video.removeEventListener('seeked', onSeeked);
       }
     };
   }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
@@ -293,8 +303,13 @@ export function usePreviewRenderLoop({
   // throttle or skip for these elements, never inserted in the document. A seek is not
   // this effect's: the scrub effect above paints after the last 'seeked'. An
   // element both unready and off the playhead gets both paints, at the same
-  // playhead time, so whichever of 'loadeddata' and 'seeked' comes last paints
-  // the frame at the target: the seek was asked for before either fired.
+  // playhead time, the seek asked for before either fired: if its 'seeked'
+  // lands within the scrub's 300 ms fallback, whichever of 'loadeddata' and
+  // 'seeked' comes last paints the frame at the target; past the fallback the
+  // late 'seeked' paints nothing and this readiness paint is the backstop. That
+  // a browser applies a seek made at HAVE_NOTHING as the default playback start
+  // position, after metadata and before the first frame's data, is the spec's
+  // order and is not measured here in a real browser.
   useEffect(() => {
     if (isPlaying) return;
 
