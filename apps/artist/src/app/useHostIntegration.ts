@@ -53,7 +53,7 @@ const hasStringUrl = (payload: unknown): payload is { url: string } =>
   typeof (payload as { url?: unknown } | null | undefined)?.url === 'string';
 
 const isThemePreference = (value: unknown): value is ThemePreference =>
-  typeof value === 'string' && Object.hasOwn(THEME_PREFERENCES, value);
+  typeof value === 'string' && Object.prototype.hasOwnProperty.call(THEME_PREFERENCES, value);
 
 /**
  * The one reply a malformed inbound message gets (ESCSUITE-232): the protocol's
