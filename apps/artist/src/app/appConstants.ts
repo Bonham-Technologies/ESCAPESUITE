@@ -18,3 +18,11 @@ export const DEFAULT_TIMELINE_HEIGHT = 320;
 
 /** LocalStorage key the timeline panel's height is persisted under. */
 export const TIMELINE_HEIGHT_KEY = 'escapeartist-timeline-height';
+
+/**
+ * How long a tab's saved session is kept once its tab is gone (ESCSUITE-274):
+ * 30 days. Every tab keeps a slot of its own, so slots from tabs nobody came
+ * back to would otherwise pile up; the startup check deletes one older than
+ * this instead of offering it.
+ */
+export const SESSION_SLOT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;

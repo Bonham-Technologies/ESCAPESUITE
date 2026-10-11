@@ -10,7 +10,8 @@ interface SessionRestorePromptProps {
   onRestore: (session: SessionState) => void;
   /**
    * Start fresh. **Destructive**: `useSessionRestore`'s `handleDeclineSession`
-   * calls `clearSessionState()`, so the saved session is gone afterwards.
+   * calls `clearSessionState()` on the offered slot, so the saved session is
+   * gone afterwards.
    */
   onDecline: () => void;
 }

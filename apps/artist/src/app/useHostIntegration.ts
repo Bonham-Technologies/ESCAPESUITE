@@ -79,7 +79,7 @@ export interface HostIntegrationDeps {
    * being negotiated and a handed-over take must not be written to it yet.
    *
    * Deliberately wider than "the prompt is on screen": for the first moments of
-   * a load the prompt has not appeared *yet* — `getSessionState()` has not come
+   * a load the prompt has not appeared *yet* — `listSessionStates()` has not come
    * back — and a take placed in that window is discarded by the "Restore" that
    * follows it just as surely. `App` fills this from `useSessionRestore`'s
    * `sessionRestored`, which is false from the first render until the question

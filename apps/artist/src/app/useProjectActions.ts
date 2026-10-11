@@ -9,8 +9,8 @@
 // `handleProjectFile` is the entry that path now calls instead.
 //
 // Binds no effects, so its position in `App`'s hook order does not affect the
-// effect order; it sits after `useSessionAutosave`, whose `ownsSession` it
-// takes (ESCSUITE-227), and before the keyboard-shortcut hook, which takes
+// effect order; it sits after `useSessionAutosave`, whose `clearSession` it
+// takes (ESCSUITE-227, ESCSUITE-274), and before the keyboard-shortcut hook, which takes
 // `handleSaveProject` and `handleLoadProject` as parameters.
 //
 // `clipCount` arrives as a number rather than the clips array: the two
@@ -18,7 +18,7 @@
 // dependency both of them carried inline.
 import { useCallback, useState } from 'react';
 import { saveProject, loadProject, showOpenProjectDialog, ProjectTooLargeError } from '../core/projectManager';
-import { clearSessionState, revokeSourceThumbnails } from '../core/storage';
+import { revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
 import { applyEditorBlock, currentEditorBlock } from './editorBlock';
@@ -39,11 +39,11 @@ export interface ProjectActionsDeps {
   clearHistory: () => void;
   showNotification: ShowNotification;
   /**
-   * This tab owns the shared session slot (ESCSUITE-227) — read when New
-   * Project runs, so a tab that does not own it never empties another tab's
-   * saved session.
+   * Empty this tab's own session slot (ESCSUITE-274) — the autosave's, which
+   * knows the tab id. Every tab has a slot of its own, so New Project never
+   * touches another tab's saved session.
    */
-  ownsSession: () => boolean;
+  clearSession: () => void;
 }
 
 /** The project actions, and the two flags the chrome shows while they run. */
@@ -79,7 +79,7 @@ export function useProjectActions({
   addSourceVideo,
   clearHistory,
   showNotification,
-  ownsSession,
+  clearSession,
 }: ProjectActionsDeps): ProjectActions {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -244,13 +244,11 @@ export function useProjectActions({
     }
     resetProject();
     clearHistory();
-    // Every tab shares one session slot: only the owner empties it. Another
-    // tab's New Project starts its own editor over and leaves the owning
-    // tab's crash recovery where it is (ESCSUITE-227).
-    if (ownsSession()) clearSessionState();
+    // This tab's own slot, and no other tab's (ESCSUITE-274).
+    clearSession();
     analytics.projectCreated();
     showNotification('New project created', 'info');
-  }, [clipCount, resetProject, clearHistory, showNotification, ownsSession]);
+  }, [clipCount, resetProject, clearHistory, showNotification, clearSession]);
 
   return {
     isSaving,

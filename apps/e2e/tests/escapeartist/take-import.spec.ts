@@ -234,7 +234,9 @@ async function seedSession(page: Page) {
               currentTime: 0,
               selectedClipId: null,
               zoom: 1,
-              timestamp: 1_700_000_000_000,
+              // Recent: since ESCSUITE-274 a saved session older than 30 days
+              // is pruned at startup instead of offered.
+              timestamp: Date.now(),
             },
             'current-session'
           )

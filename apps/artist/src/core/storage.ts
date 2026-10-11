@@ -16,6 +16,7 @@ export {
   getThumbnail,
   setSetting,
   getSetting,
+  listSettings,
   getStorageEstimate,
   createBlobUrl,
   revokeBlobUrl,
@@ -25,12 +26,29 @@ export {
 // Re-export SourceVideo type for convenience
 export type { SourceVideo } from '@escapesuite/shared/types'
 
-import { getDB, getStorageEstimate, getThumbnail, createBlobUrl, revokeBlobUrl, type VideoEditorDB } from '@escapesuite/shared/storage'
+import {
+  getDB,
+  getSetting,
+  getStorageEstimate,
+  getThumbnail,
+  listSettings,
+  setSetting,
+  createBlobUrl,
+  revokeBlobUrl,
+  type VideoEditorDB,
+} from '@escapesuite/shared/storage'
 import type { IDBPDatabase } from 'idb'
 import type { SourceVideo } from '@escapesuite/shared/types'
 
 // Session state for auto-save/restore
 export interface SessionState {
+  /**
+   * The tab whose slot this is (ESCSUITE-274): its row is `session:<tabId>`.
+   * A row written before that ticket — the one slot every tab shared — has no
+   * `tabId` at runtime; `listSessionStates` hands it back as a slot with no
+   * owner rather than trusting this field.
+   */
+  tabId: string
   project: Project
   sourceVideos: SourceVideo[]
   currentTime: number
@@ -138,19 +156,46 @@ export async function getTotalVideoSize(): Promise<number> {
 }
 
 // Session state operations (auto-save/restore)
-const SESSION_KEY = 'current-session'
+//
+// One slot per tab (ESCSUITE-274): each tab autosaves to its own `settings`
+// row, `session:<tabId>`, so a tab that crashed keeps its session however long
+// another tab goes on editing. Before that ticket every tab shared the one row
+// `current-session`; a row still there from an older build is read as a slot
+// with no owner (`tabId: null`) and deleted once it is restored, declined or
+// pruned — nothing writes it any more.
+export const SESSION_KEY_PREFIX = 'session:'
+export const LEGACY_SESSION_KEY = 'current-session'
 
+/** A saved session and the tab whose slot it is — `null` for the legacy shared row. */
+export interface SessionSlot {
+  tabId: string | null
+  session: SessionState
+}
+
+const sessionKey = (tabId: string | null): string =>
+  tabId === null ? LEGACY_SESSION_KEY : `${SESSION_KEY_PREFIX}${tabId}`
+
+/** Write `session` into its own tab's slot, `session:<session.tabId>`. */
 export async function saveSessionState(session: SessionState): Promise<void> {
-  const db = await getDB()
-  await db.put('settings', session, SESSION_KEY)
+  await setSetting(sessionKey(session.tabId), session)
 }
 
-export async function getSessionState(): Promise<SessionState | undefined> {
-  const db = await getDB()
-  return db.get('settings', SESSION_KEY) as Promise<SessionState | undefined>
+/** Every saved session: each tab's slot, then the legacy shared row if one is left. */
+export async function listSessionStates(): Promise<SessionSlot[]> {
+  const [rows, legacy] = await Promise.all([
+    listSettings<SessionState>(SESSION_KEY_PREFIX),
+    getSetting<SessionState>(LEGACY_SESSION_KEY),
+  ])
+  const slots: SessionSlot[] = rows.map(({ key, value }) => ({
+    tabId: key.slice(SESSION_KEY_PREFIX.length),
+    session: value,
+  }))
+  if (legacy) slots.push({ tabId: null, session: legacy })
+  return slots
 }
 
-export async function clearSessionState(): Promise<void> {
+/** Remove one tab's slot — or, given `null`, the legacy shared row. */
+export async function clearSessionState(tabId: string | null): Promise<void> {
   const db = await getDB()
-  await db.delete('settings', SESSION_KEY)
+  await db.delete('settings', sessionKey(tabId))
 }

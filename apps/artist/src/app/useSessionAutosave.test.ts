@@ -19,11 +19,11 @@ import {
   AUTOSAVE_GENERIC_NOTICE,
   type SessionAutosaveDeps,
 } from './useSessionAutosave'
-import { saveSessionState } from '../core/storage'
+import { clearSessionState, saveSessionState } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, video } from '../test/fixtures/projectStore'
 import { AUTO_SAVE_DELAY } from './appConstants'
-import { SESSION_LOCK_NAME } from './sessionLock'
+import { holdTabLock, tabLockName } from './sessionLock'
 import { createFakeLocks, flushLocks, type FakeLocks } from '../test/doubles/locks'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
@@ -47,6 +47,7 @@ beforeEach(() => {
   deps = {
     sessionRestored: true,
     suppressRestore: false,
+    tabId: 'this-tab',
     project: state.project,
     sourceVideos: state.sourceVideos,
     selectedClipId: state.selectedClipId,
@@ -68,6 +69,7 @@ describe('useSessionAutosave', () => {
 
     expect(saveSessionState).toHaveBeenCalledTimes(1)
     expect(saveSessionState).toHaveBeenCalledWith({
+      tabId: 'this-tab',
       project: deps.project,
       sourceVideos: deps.sourceVideos,
       currentTime: 0,
@@ -306,11 +308,11 @@ describe('the editor block re-arms the debounce (ESCSUITE-245)', () => {
 })
 
 
-// ESCSUITE-227: two tabs share one session slot. Only the tab that owns the
-// session lock writes, and an empty project never overwrites the slot at all.
-// jsdom has no `navigator.locks` — every case above runs as a lone tab that
-// owns the session at once — so these install the double for themselves.
-describe('one owner tab (ESCSUITE-227)', () => {
+// ESCSUITE-274: every tab writes its own slot, `session:<tabId>`, and holds
+// `escapeartist-tab:<tabId>` for its lifetime so the startup check of a later
+// tab can tell its slot is a live tab's work and not a session to resume.
+// jsdom has no `navigator.locks`, so these install the double for themselves.
+describe('one slot per tab (ESCSUITE-274)', () => {
   let fake: FakeLocks
 
   beforeEach(() => {
@@ -322,97 +324,91 @@ describe('one owner tab (ESCSUITE-227)', () => {
     delete (navigator as { locks?: LockManager }).locks
   })
 
-  /** Another tab owning the session: hold the lock from outside the hook. */
-  const anotherTabOwns = async () => {
-    let releaseHold: () => void = () => {}
-    void fake.locks.request(SESSION_LOCK_NAME, () => new Promise<void>((resolve) => { releaseHold = resolve }))
+  it('writes its own slot while another tab is alive and writing its own', async () => {
+    holdTabLock('other-tab', fake.locks)
     await flushLocks()
-    return () => releaseHold()
-  }
-
-  it('writes nothing while another tab owns the session', async () => {
-    await anotherTabOwns()
     mountAutosave()
-    await flushLocks()
 
-    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY * 2)
-    movePlayhead(1)
-    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY * 2)
-
-    expect(saveSessionState).not.toHaveBeenCalled()
-  })
-
-  it('writes from the next change once the owning tab closes', async () => {
-    const closeOwner = await anotherTabOwns()
-    mountAutosave()
-    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
-    expect(saveSessionState).not.toHaveBeenCalled()
-
-    closeOwner()
-    await flushLocks()
-    movePlayhead(2)
     await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
 
     expect(saveSessionState).toHaveBeenCalledTimes(1)
-    expect(saveSessionState).toHaveBeenCalledWith(expect.objectContaining({ currentTime: 2 }))
+    expect(vi.mocked(saveSessionState).mock.calls[0][0].tabId).toBe('this-tab')
   })
 
-  it('writes once it owns the session', async () => {
-    mountAutosave()
-    await flushLocks()
-
-    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
-
-    expect(fake.log).toEqual(['acquire'])
-    expect(saveSessionState).toHaveBeenCalledTimes(1)
-  })
-
-  it('lets the session go when it unmounts', async () => {
+  it('holds this tab\'s lock while mounted, and lets it go on unmount', async () => {
     const { unmount } = mountAutosave()
     await flushLocks()
-    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(true)
+    expect(fake.log).toEqual(['acquire'])
+    expect(fake.isHeld(tabLockName('this-tab'))).toBe(true)
 
     unmount()
     await flushLocks()
 
-    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(false)
+    expect(fake.isHeld(tabLockName('this-tab'))).toBe(false)
   })
 
-  it('says whether this tab owns the session, through a stable reader', async () => {
-    const closeOwner = await anotherTabOwns()
-    const { result, rerender } = mountAutosave()
-    const reader = result.current.ownsSession
+  it('moves its lock and its writes to a new id when the tab is given one', async () => {
+    // The startup check renews the id of a duplicated tab (useSessionRestore).
+    const { rerender } = mountAutosave()
     await flushLocks()
-    expect(result.current.ownsSession()).toBe(false)
 
-    closeOwner()
+    rerender({ ...deps, tabId: 'renewed-tab' })
     await flushLocks()
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(fake.isHeld(tabLockName('this-tab'))).toBe(false)
+    expect(fake.isHeld(tabLockName('renewed-tab'))).toBe(true)
+    expect(vi.mocked(saveSessionState).mock.lastCall?.[0].tabId).toBe('renewed-tab')
+  })
+
+  it('does not hold a lock at all when the host drives its own state', async () => {
+    // A host-driven editor writes no slot, so it has no slot to vouch for.
+    mountAutosave({ suppressRestore: true })
+    await flushLocks()
+
+    expect(fake.log).toEqual([])
+  })
+})
+
+describe('clearSession (ESCSUITE-274)', () => {
+  it('clears this tab\'s slot and no other', () => {
+    const { result } = mountAutosave()
+
+    result.current.clearSession()
+
+    expect(clearSessionState).toHaveBeenCalledTimes(1)
+    expect(clearSessionState).toHaveBeenCalledWith('this-tab')
+  })
+
+  it('clears nothing when the host drives its own state', () => {
+    // ESCAPEARTIST neither offers nor writes the saved session under
+    // ?suppressRestore=1, and emptying a slot is a write.
+    const { result } = mountAutosave({ suppressRestore: true })
+
+    result.current.clearSession()
+
+    expect(clearSessionState).not.toHaveBeenCalled()
+  })
+
+  it('logs a clear that fails rather than leaving it unhandled', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const error = new Error('blocked')
+    vi.mocked(clearSessionState).mockRejectedValueOnce(error)
+    const { result } = mountAutosave()
+
+    result.current.clearSession()
+
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith(error))
+    consoleError.mockRestore()
+  })
+
+  it('keeps one identity across renders that change nothing it reads', () => {
+    const { result, rerender } = mountAutosave()
+    const first = result.current.clearSession
+
     rerender({ ...deps, zoom: 2 })
 
-    expect(result.current.ownsSession).toBe(reader)
-    expect(result.current.ownsSession()).toBe(true)
-  })
-
-  it('stops owning the session when it unmounts', async () => {
-    const { result, unmount } = mountAutosave()
-    await flushLocks()
-    const ownsSession = result.current.ownsSession
-    expect(ownsSession()).toBe(true)
-
-    unmount()
-
-    expect(ownsSession()).toBe(false)
-  })
-
-  it('does not ask for the session at all when the host drives its own state', async () => {
-    // A host-driven editor writes nothing, so holding the lock would only
-    // stop a real tab from ever owning the slot.
-    const { result } = mountAutosave({ suppressRestore: true })
-    await flushLocks()
-
-    expect(result.current.ownsSession()).toBe(false)
-    expect(fake.log).toEqual([])
-    expect(fake.isHeld(SESSION_LOCK_NAME)).toBe(false)
+    expect(result.current.clearSession).toBe(first)
   })
 })
 

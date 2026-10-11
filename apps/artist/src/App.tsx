@@ -102,6 +102,7 @@ function App() {
     sessionRestored,
     showSessionPrompt,
     pendingSession,
+    tabId,
     handleRestoreSession,
     handleDeclineSession,
   } = useSessionRestore({
@@ -115,9 +116,10 @@ function App() {
     showNotification,
   });
 
-  const { ownsSession } = useSessionAutosave({
+  const { clearSession } = useSessionAutosave({
     sessionRestored,
     suppressRestore: urlParams.suppressRestore,
+    tabId,
     project,
     sourceVideos,
     selectedClipId,
@@ -145,7 +147,7 @@ function App() {
     addSourceVideo,
     clearHistory,
     showNotification,
-    ownsSession,
+    clearSession,
   });
 
   const { handleZoomIn, handleZoomOut } = useTimelineZoom({ zoom, setZoom });
@@ -216,7 +218,7 @@ function App() {
 
   // The handoff holds its take back until the restore question is answered.
   // `sessionRestored` is that question, not `showSessionPrompt`: the prompt is
-  // still false for the first moments of a load, while `getSessionState()` is
+  // still false for the first moments of a load, while `listSessionStates()` is
   // in flight, and a take placed in that window is discarded by the "Restore"
   // that follows it. Both are this component's own state, so App gains no new
   // store subscription either way (App.rerender.test.tsx).

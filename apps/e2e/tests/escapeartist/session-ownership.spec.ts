@@ -1,24 +1,22 @@
 import { test, expect, type Page } from '@playwright/test'
-import { ARTIST_URL, importMediaAndAddToTimeline, seedTextClip } from '../../utils/artist'
+import { ARTIST_URL, importMediaAndAddToTimeline } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
- * ESCSUITE-227: every ESCAPEARTIST tab of one origin shares one autosave slot
- * (`settings` / `current-session` in `video-editor-db`). Before the ticket a
- * second tab was offered the first tab's LIVE work as "Resume Previous
- * Session?", and a third tab found nothing at all once the second had pressed
- * Start Fresh and autosaved its empty project over the slot.
+ * ESCSUITE-274 (after ESCSUITE-227): every ESCAPEARTIST tab autosaves to a slot
+ * of its own — `settings` / `session:<tabId>` in `video-editor-db`, the id kept
+ * in that tab's `sessionStorage` — and holds the Web Lock
+ * `escapeartist-tab:<tabId>` for as long as it lives
+ * (`apps/artist/src/app/sessionLock.ts`). The startup prompt offers the newest
+ * slot whose tab lock is free: a tab that closed or crashed, never a live one.
  *
- * Now one tab at a time owns the slot through a Web Lock
- * (`apps/artist/src/app/sessionLock.ts`): a tab that finds another live tab
- * owning it offers nothing, writes nothing and says so once; when the owner
- * closes, the next tab queued becomes the owner and autosaves from its next
- * change. Three tabs in one browser context — one origin, one lock manager.
+ * Before the ticket every tab shared one slot and one lock: when the owning tab
+ * crashed, the next tab became the owner and its next edit overwrote the
+ * crashed tab's session. Here tab A edits and then closes — `page.close()`
+ * releases its lock, standing in for a crash — tab B, open throughout, goes on
+ * editing, and a fresh tab C is offered A's session, not B's live one. Three
+ * tabs in one browser context: one origin, one database, one lock manager.
  */
-
-/** `SESSION_HELD_NOTICE` in `apps/artist/src/app/useSessionRestore.ts`. */
-const SESSION_HELD_NOTICE =
-  'Another ESCAPEARTIST tab is open. This tab will not offer or save a session until that tab closes.'
 
 /** ESCAPEARTIST's autosave debounce (`AUTO_SAVE_DELAY`) is 2 s; give it room. */
 const PAST_THE_DEBOUNCE_MS = 3_000
@@ -29,64 +27,68 @@ interface Slot {
   clips: number
 }
 
-/** What the shared session slot holds right now, read through the page. */
-function readSlot(page: Page): Promise<Slot | null> {
+/** This tab's id, the key of its slot (`apps/artist/src/app/tabId.ts`). */
+function tabIdOf(page: Page): Promise<string | null> {
+  return page.evaluate(() => sessionStorage.getItem('escapeartist-tab-id'))
+}
+
+/** Every tab's slot, keyed by tab id, read through `page`. */
+function readSlots(page: Page): Promise<Record<string, Slot>> {
   return page.evaluate(
     () =>
-      new Promise<Slot | null>((resolve) => {
+      new Promise<Record<string, Slot>>((resolve) => {
         const request = indexedDB.open('video-editor-db')
-        request.onerror = () => resolve(null)
+        request.onerror = () => resolve({})
         request.onsuccess = () => {
           const db = request.result
           if (!db.objectStoreNames.contains('settings')) {
             db.close()
-            resolve(null)
+            resolve({})
             return
           }
-          const get = db.transaction('settings', 'readonly').objectStore('settings').get('current-session')
-          get.onerror = () => {
+          const store = db.transaction('settings', 'readonly').objectStore('settings')
+          const range = IDBKeyRange.bound('session:', 'session:￿')
+          const keys = store.getAllKeys(range)
+          const values = store.getAll(range)
+          values.onerror = () => {
             db.close()
-            resolve(null)
+            resolve({})
           }
-          get.onsuccess = () => {
-            const session = get.result as
-              | {
-                  project?: { name?: string; timeline?: { clips?: unknown[] } }
-                  sourceVideos?: unknown[]
-                }
-              | undefined
+          values.onsuccess = () => {
+            const slots: Record<string, Slot> = {}
+            ;(keys.result as string[]).forEach((key, index) => {
+              const session = values.result[index] as {
+                project?: { name?: string; timeline?: { clips?: unknown[] } }
+                sourceVideos?: unknown[]
+              }
+              slots[key.slice('session:'.length)] = {
+                name: session.project?.name ?? null,
+                sources: session.sourceVideos?.length ?? 0,
+                clips: session.project?.timeline?.clips?.length ?? 0,
+              }
+            })
             db.close()
-            resolve(
-              session
-                ? {
-                    name: session.project?.name ?? null,
-                    sources: session.sourceVideos?.length ?? 0,
-                    clips: session.project?.timeline?.clips?.length ?? 0,
-                  }
-                : null
-            )
+            resolve(slots)
           }
         }
       })
   )
 }
 
-/**
- * Open ESCAPEARTIST in a new tab of `page`'s context, named by `?title=`.
- *
- * `waitUntil: 'commit'`: the notice is a three-second toast raised at mount,
- * so waiting for the full `load` event first could, on a loaded runner, eat
- * into the window the assertion has to see it in. `waitForAppReady` then
- * waits for the editor to mount.
- */
+/** What one tab's own slot holds, or `null`. */
+async function slotOf(reader: Page, tabId: string): Promise<Slot | null> {
+  return (await readSlots(reader))[tabId] ?? null
+}
+
+/** Open ESCAPEARTIST in a new tab of `from`'s context, named by `?title=`. */
 async function openTab(from: Page, title: string): Promise<Page> {
   const tab = await from.context().newPage()
-  await tab.goto(`${ARTIST_URL}/?title=${encodeURIComponent(title)}`, { waitUntil: 'commit' })
+  await tab.goto(`${ARTIST_URL}/?title=${encodeURIComponent(title)}`)
   await waitForAppReady(tab, 'artist')
   return tab
 }
 
-test.describe('Two ESCAPEARTIST tabs share one session slot (ESCSUITE-227)', () => {
+test.describe('One session slot per ESCAPEARTIST tab (ESCSUITE-274)', () => {
   // Tab A's work is a real imported source, and on WebKit the shared
   // `importMediaAndAddToTimeline` helper (`utils/artist.ts`) fails before any
   // session logic runs — the same failure `escapeartist/video-import.spec.ts`
@@ -97,56 +99,66 @@ test.describe('Two ESCAPEARTIST tabs share one session slot (ESCSUITE-227)', () 
     'WebKit fails inside importMediaAndAddToTimeline before any session logic runs — pre-existing on main, as in video-import.spec.ts'
   )
 
-  test('only the owning tab offers or writes the session', async ({ page }) => {
+  test('a crashed tab\'s session survives another tab\'s edits and is offered to a fresh tab', async ({
+    page,
+  }) => {
     test.setTimeout(120_000)
 
-    // Tab A: the owner, with a real source and a clip, autosaved.
+    // Tab A: a real source and a clip, autosaved into A's own slot.
     await page.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab A')}`)
     await waitForAppReady(page, 'artist')
     const tabA = page
+    const idA = (await tabIdOf(tabA))!
+    expect(idA).toBeTruthy()
     await importMediaAndAddToTimeline(tabA)
     await expect
-      .poll(() => readSlot(tabA), { timeout: 15_000 })
+      .poll(() => slotOf(tabA, idA), { timeout: 15_000 })
       .toEqual({ name: 'Tab A', sources: 1, clips: 1 })
 
     const tabB = await test.step('(a) a second tab is not offered the first tab\'s live session', async () => {
       const tab = await openTab(tabA, 'Tab B')
-      // The notice is the decision: once it is up, the prompt is not coming.
-      await expect(tab.getByText(SESSION_HELD_NOTICE)).toBeVisible()
+      // The startup check is a lock probe and one storage read; give it well
+      // past that before calling the absence a pass.
+      await tab.waitForTimeout(1_500)
       await expect(tab.getByRole('dialog', { name: 'Resume Previous Session?' })).toHaveCount(0)
+      expect(await tabIdOf(tab)).not.toBe(idA)
       return tab
     })
+    const idB = (await tabIdOf(tabB))!
 
-    await test.step('(b) a third tab opened later is told the same, and the slot is still A\'s', async () => {
-      // Tab B answers nothing and edits nothing; give it well past the debounce.
-      await tabB.waitForTimeout(PAST_THE_DEBOUNCE_MS)
-
-      const tabC = await openTab(tabA, 'Tab C')
-      await expect(tabC.getByText(SESSION_HELD_NOTICE)).toBeVisible()
-      await expect(tabC.getByRole('dialog', { name: 'Resume Previous Session?' })).toHaveCount(0)
-
-      expect(await readSlot(tabC)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
-    })
-
-    await test.step('(b2) the second tab\'s New Project leaves the first tab\'s session in the slot', async () => {
-      // Tab B holds no clip, so New Project asks no confirm. Only the owning
-      // tab may empty the shared slot; B starts its own editor over.
-      await tabB.getByRole('button', { name: 'File menu' }).click()
-      await tabB.getByRole('menuitem', { name: /New Project/ }).click()
-      await expect(tabB.getByText('New project created')).toBeVisible()
-
-      expect(await readSlot(tabB)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
-    })
-
-    await test.step('(c) once the owner closes, the next tab writes the slot from its next change', async () => {
+    await test.step('(b) the first tab closes — its lock goes with it, as in a crash', async () => {
       await tabA.close()
+    })
 
-      await seedTextClip(tabB)
-      // Tab B's New Project (b2) put its name back to the default, which is
-      // still nothing tab A ever wrote.
+    await test.step('(c) the second tab edits, into its own slot, and leaves the first tab\'s alone', async () => {
+      // A real source, so B's slot is one the prompt would offer (a slot with
+      // no media never is): in (d) only B's live lock keeps it from being
+      // offered, and it is the newer of the two.
+      await importMediaAndAddToTimeline(tabB)
       await expect
-        .poll(() => readSlot(tabB), { timeout: 15_000 })
-        .toEqual({ name: 'Untitled Project', sources: 0, clips: 1 })
+        .poll(() => slotOf(tabB, idB), { timeout: 15_000 })
+        .toEqual({ name: 'Tab B', sources: 1, clips: 1 })
+      await tabB.waitForTimeout(PAST_THE_DEBOUNCE_MS)
+      expect(await slotOf(tabB, idA)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
+    })
+
+    await test.step('(d) a fresh tab is offered the closed tab\'s session, not the live tab\'s newer one', async () => {
+      const tabC = await openTab(tabB, 'Tab C')
+      const prompt = tabC.getByRole('dialog', { name: 'Resume Previous Session?' })
+      await expect(prompt).toBeVisible({ timeout: 15_000 })
+      await expect(prompt.getByText('Tab A', { exact: true })).toBeVisible()
+      await expect(prompt.getByText('Tab B', { exact: true })).toHaveCount(0)
+
+      // Restoring adopts it: A's row is gone, the session is under C's id, and
+      // B's live slot is untouched.
+      const idC = (await tabIdOf(tabC))!
+      await tabC.getByRole('button', { name: 'Restore Session' }).click()
+      await expect
+        .poll(() => readSlots(tabC), { timeout: 15_000 })
+        .toEqual({
+          [idB]: { name: 'Tab B', sources: 1, clips: 1 },
+          [idC]: { name: 'Tab A', sources: 1, clips: 1 },
+        })
     })
   })
 })

@@ -3896,6 +3896,44 @@ here on the first oracle for exactly that reason and skips on the second; CI's `
 `drawFrame.perf.test.ts`, both export ceilings and the rerender pins are byte-identical: one object read per
 text draw. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` and `@escapesuite/shared` were re-measured 2026-10-10 for ESCSUITE-274 (per-tab session
+slots: a tab id minted at startup and kept in `sessionStorage` — `crypto.randomUUID()`, with a `getRandomValues`
+fallback where plain http has no `randomUUID` — names a slot `session:<tabId>` that only that tab autosaves; each
+tab holds a per-tab Web Lock for its lifetime, and on startup the restore prompt offers the tab's **own** slot
+first whenever it exists and, for a tab with none, the newest slot whose tab lock is free — so a tab the browser
+brings back after a crash is offered its own session, a live tab's session is never offered to another, and a
+crashed tab's recovery survives the next tab's edits; a restored slot is adopted under the restorer's id at once,
+Start Fresh deletes the offered slot, New Project clears this tab's, slots older than 30 days are pruned at
+startup, the legacy single row is offered once and deleted when consumed; ESCSUITE-227's session-wide lock,
+`ownsSession` and `SESSION_HELD_NOTICE` are gone), each in one sitting against `main` (`cb202b8c`; the commit
+this branch lands on, `d837515e`, differs in docs, plan and changelogs alone, so both sources are identical).
+**Artist**: 99.83 / **99.38** / **96.42** / 99.75 against 99.83 / 99.37 / 96.41 / 99.75 — statements and
+branches each up a hundredth, lines and functions unmoved. The base gives 5,594 / 5,802 branches and this
+branch 5,610 / 5,818: sixteen new branches, sixteen covered, the same 208 uncovered (lines 8,653 / 8,667 →
+8,685 / 8,699, statements 9,776 / 9,837 → 9,814 / 9,875, functions 2,061 / 2,066 → 2,070 / 2,075, every
+denominator growing by exactly what the numerator did; the same 14 / 61 / 5 uncovered). The net sixteen is
+four files: `app/sessionSlots.ts` arrives at 14 / 14 (the own-slot-first choice, the per-slot liveness probe,
+the newest-free walk, the empty-slot filter and the age prune), `app/tabId.ts` at 4 / 4 (the stored id, the
+duplicated-tab guard, the `randomUUID` fallback), `core/storage.ts` 5 / 6 → 9 / 10 (the legacy-row arm and the
+per-id clear; the same one pre-existing arm uncovered), while `app/sessionLock.ts` 12 → 8 and
+`app/useProjectActions.ts` 24 → 22 lost the session-wide lock's arms — each reached from both sides by the
+session suites' red cases (eighty-six failures with the session files reverted, five more in the fix round:
+the own slot offered over a newer free one, an own slot with no media offering nothing, two tabs restored
+together after a crash each offered their own, the adoption stamp, the fallback id). **Shared**: 100.00 /
+**98.70** / 92.20 / 100.00 against 100.00 / 98.67 / 92.20 / 100.00 — statements up three hundredths, the other
+three unmoved: lines 281 → 286, statements 298 / 302 → 304 / 308, functions 79 → 81, branches 142 / 154 on
+both — `storage/index.ts`'s `listSettings(prefix)` is two functions and six statements with **no decision**
+(a cursor walk filtered by prefix is a call, not a branch), the same 4 statements and 12 branches uncovered.
+Two review rounds (opus, then a scoped sonnet) put the own-slot rule there: the first found a tab's own slot
+lost when a closed tab's newer slot was offered instead — the common crash-restore case — and the three-tab
+Playwright step that could not fail; two fresh tabs adopting the same departed slot (two copies, nothing lost)
+is ESCSUITE-283. Outside vitest's measurement: every default-config Playwright spec that touches the session
+row — `session-ownership` (three tabs: A edits, A closes, B edits, a fresh C is offered A's session, not B's
+live one), `take-import`, `components`, the three `integration` specs, `errors/export`, `accessibility/core` —
+93 / 93 on Chromium before the fix round, and the three-tab spec 1 / 1 again after it. `App.*rerender*` and
+every `*.perf.test.ts` are byte-identical; the autosave debounce is unchanged, one write per settle. **No
+floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and shared's 100 / 98 / 92 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3903,8 +3941,8 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.83 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.38 | 96.44 | 99.75 |
-| `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
+| `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
+| `@escapesuite/shared` | 100.00 | 98.70 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down

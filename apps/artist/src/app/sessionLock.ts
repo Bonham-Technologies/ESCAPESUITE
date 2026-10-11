@@ -1,94 +1,82 @@
-// Which ESCAPEARTIST tab owns the session slot (ESCSUITE-227).
+// Which ESCAPEARTIST tabs are alive (ESCSUITE-274, after ESCSUITE-227).
 //
-// Every tab of one origin shares one autosave slot — `settings` /
-// `current-session` in `video-editor-db` — so two tabs used to take turns
-// overwriting it, and a second tab was offered the first one's *live* work as
-// a session to resume (and, on Start Fresh, threw it away). One tab at a time
-// now owns the slot, decided by an exclusive Web Lock that dies with its page:
-// a closed or crashed tab hands the slot to the next one queued for it.
+// Every tab autosaves to a slot of its own (`session:<tabId>`, `core/storage.ts`)
+// and holds the exclusive Web Lock `escapeartist-tab:<tabId>` for its lifetime.
+// A lock dies with its page, so a slot whose tab lock is free belongs to a tab
+// that closed or crashed — a session to offer back — and a slot whose lock is
+// held is a live tab's work in progress, which a second tab must neither offer
+// as its own nor throw away.
 //
-// `useSessionRestore` asks `probeSessionOwner()` before offering a session;
-// `useSessionAutosave` asks `acquireSessionOwnership()` for the slot and
-// writes nothing until it is granted. The probe has to be *requested* before
-// the same tab's own acquisition, or it would find this tab's queued request
-// and answer "held" against itself — which the two hooks' effect order
-// guarantees (the restore check is the editor's second effect and calls this
-// synchronously; the ownership request is the autosave's, after it).
+// `useSessionAutosave` holds this tab's lock (`holdTabLock`); `useSessionRestore`
+// asks after other tabs' (`probeTabLock`) before it offers their slots, and
+// after its *own* id before anything else: a duplicated tab starts with a copy
+// of its original's `sessionStorage`, id and all, and finds that id held. That
+// first probe has to be *requested* before this tab's own hold on the lock, or
+// it would find this tab's queued request and answer "held" against itself —
+// which the two hooks' effect order guarantees (the restore check is the
+// editor's second effect and calls this synchronously; the hold is the
+// autosave's, after it).
 //
 // Both take `locks` as an argument so the tests can hand in a double. Where
-// the browser has no Web Locks at all (jsdom, a very old browser) both answer
-// as if the tab were alone — which is exactly how the editor behaved before.
-// A lock manager that *rejects* is treated the same way: the spec rejects with
-// `SecurityError` on an opaque origin (a sandboxed frame, or `file://` in an
-// engine that treats it as opaque — the offline build), and a tab there should
-// still be offered and save its session rather than silently doing neither.
+// the browser has no Web Locks at all (jsdom, a very old browser) every tab
+// answers as if it were alone. A lock manager that *rejects* is treated the
+// same way: the spec rejects with `SecurityError` on an opaque origin (a
+// sandboxed frame, or `file://` in an engine that treats it as opaque — the
+// offline build), and a tab there should still be offered and save its
+// session rather than silently doing neither.
 
-/** The one lock name every ESCAPEARTIST tab of an origin queues on. */
-export const SESSION_LOCK_NAME = 'escapeartist-session';
+/** The lock a live tab holds for its lifetime. */
+export function tabLockName(tabId: string): string {
+  return `escapeartist-tab:${tabId}`;
+}
 
-/** Whether another live tab owns the session slot right now. */
-export type SessionOwner = 'free' | 'held';
+/** Whether the tab with this id is alive right now. */
+export type TabLockState = 'free' | 'held';
 
 /**
- * Ask whether another tab owns the session, without taking it: an
+ * Ask whether the tab with this id is alive, without taking its lock: an
  * `ifAvailable` request is handed `null` when the lock is held or queued for,
  * and is released the moment its callback returns when it is not.
  */
-export function probeSessionOwner(
+export function probeTabLock(
+  tabId: string,
   locks: LockManager | undefined = navigator.locks
-): Promise<SessionOwner> {
+): Promise<TabLockState> {
   if (!locks) return Promise.resolve('free');
   return locks
-    .request(SESSION_LOCK_NAME, { ifAvailable: true }, (lock): SessionOwner =>
+    .request(tabLockName(tabId), { ifAvailable: true }, (lock): TabLockState =>
       lock ? 'free' : 'held'
     )
-    .catch((error: unknown): SessionOwner => {
+    .catch((error: unknown): TabLockState => {
       // Unusable locks: answer as a lone tab, the same as no `navigator.locks`.
-      console.error('Failed to probe the session lock:', error);
+      console.error('Failed to probe a tab lock:', error);
       return 'free';
     });
 }
 
 /**
- * Queue for the session slot, and call `onAcquired` once this tab owns it.
- *
- * The lock is held until the returned function runs (or the page goes away).
- * A request released before it was granted — StrictMode's cleanup-then-remount,
- * or a tab unmounting while another still owns the slot — never calls
- * `onAcquired`, and lets go of the lock the moment it is handed it.
+ * Hold this tab's lock until the returned function runs (or the page goes
+ * away). A request released before it is granted — StrictMode's
+ * cleanup-then-remount, or the id changing under a duplicated tab — lets go
+ * of the lock the moment it is handed it.
  */
-export function acquireSessionOwnership(
-  onAcquired: () => void,
+export function holdTabLock(
+  tabId: string,
   locks: LockManager | undefined = navigator.locks
 ): () => void {
-  if (!locks) {
-    onAcquired();
-    return () => {};
-  }
+  if (!locks) return () => {};
 
-  let released = false;
-  // Assigned by the executor below, which runs synchronously — no placeholder
-  // function, since nothing could ever call one.
+  // Assigned by the executor below, which runs synchronously.
   let releaseHold!: () => void;
   const hold = new Promise<void>((resolve) => {
     releaseHold = resolve;
   });
 
-  locks
-    .request(SESSION_LOCK_NAME, () => {
-      if (released) return undefined;
-      onAcquired();
-      return hold;
-    })
-    .catch((error: unknown) => {
-      // Unusable locks: own the slot as a lone tab would, the same as no
-      // `navigator.locks` — unless the request was already released.
-      console.error('Failed to acquire the session lock:', error);
-      if (!released) onAcquired();
-    });
+  locks.request(tabLockName(tabId), () => hold).catch((error: unknown) => {
+    // Unusable locks: nothing to hold. The tab still saves its own slot; a
+    // later tab's probe of it answers "free" for the same reason.
+    console.error("Failed to hold this tab's lock:", error);
+  });
 
-  return () => {
-    released = true;
-    releaseHold();
-  };
+  return releaseHold;
 }

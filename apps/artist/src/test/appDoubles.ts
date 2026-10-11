@@ -15,6 +15,7 @@
 // `include` glob picks it up.
 import { vi } from 'vitest'
 import type { SourceVideo } from '../store/types'
+import type { SessionSlot, SessionState } from '../core/storage'
 
 export const sampleVideo: SourceVideo = {
   id: 'video1',
@@ -27,6 +28,15 @@ export const sampleVideo: SourceVideo = {
   size: 1000000,
 }
 
+/**
+ * A saved session as `listSessionStates` hands it back: the slot of a tab that
+ * is gone (ESCSUITE-274). jsdom has no Web Locks, so with no double installed
+ * every other tab counts as gone and the slot is offered.
+ */
+export function slotOf(session: SessionState, tabId: string | null = 'earlier-tab'): SessionSlot {
+  return { tabId, session }
+}
+
 export function storageDouble() {
   const getThumbnail = vi.fn((_id: string) => Promise.resolve(undefined as Blob | undefined))
   return {
@@ -36,8 +46,9 @@ export function storageDouble() {
     ),
     deleteVideo: vi.fn(() => Promise.resolve()),
     saveSessionState: vi.fn(() => Promise.resolve()),
-    getSessionState: vi.fn(() => Promise.resolve(undefined)),
-    clearSessionState: vi.fn(() => Promise.resolve()),
+    // One slot per tab (ESCSUITE-274): the quiet case is no slot at all.
+    listSessionStates: vi.fn(() => Promise.resolve([] as SessionSlot[])),
+    clearSessionState: vi.fn((_tabId: string | null) => Promise.resolve()),
     getVideo: vi.fn(() => Promise.resolve(undefined)),
     // The handoff asks for the whole library when the take it was given has a
     // takeId — that is how it finds the take's other parts (ESCSUITE-14).
