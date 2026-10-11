@@ -3041,7 +3041,10 @@ listed by neither app. `VideoUploader.tsx` shows them beside Clear Unused / Clea
 `core/orphanedImports.ts`'s `orphanedImports(rows, projectIds)`: every `getAllVideoMetadata()` row,
 minus every id the editor can still reach (`editorSourceIds` — the live library **and** every
 undo/redo snapshot, because New Project is undoable and the project it replaced still owns its
-bytes while that entry is on the stack), minus every `source === 'recording'` row whatever its age,
+bytes while that entry is on the stack), minus every source the **autosaved session** names
+(`getSessionState()`: the app keeps that slot on purpose while the live project does not hold its
+sources — under `?suppressRestore=1`, or after a restore that failed — and its next restore needs
+the bytes; review M1), minus every `source === 'recording'` row whatever its age,
 minus every row whose `takeId` is a recording's id or a recording's `takeId` (a take's companions,
 even one whose primary has gone). X is `totalBytes`, the rows' stored `size` — the byte length of
 the blob each ARTIST writer stored beside it, the figure Clear Unused and the tiles already show.
@@ -3055,8 +3058,11 @@ editor tab could still be using them.`, because "not referenced by this editor" 
 "unreferenced": another tab's project, or a `.veditor` that embeds the bytes, may still want them.
 Deleting is Clear All's shape — per id `deleteVideo` (bytes and thumbnail), a failure caught per id
 and reported once by count (`Could not remove N file(s) from storage`), the meter refreshed — with
-each id re-checked against the live store just before its delete, so a project load landing
-mid-loop keeps what it claimed. These rows are not in the project, so nothing writes the store or
+each id re-checked against the live store **and the saved session** just before its delete, so a
+project load or an autosave landing mid-loop keeps what it claimed (a re-check that cannot read the
+session counts as a failed delete, never as a pass). One removal runs at a time: a click while one
+is still awaiting does nothing (a ref guard). The button's accessible name says what it removes —
+`Remove N file(s) from earlier sessions` — rather than a bare "Remove". These rows are not in the project, so nothing writes the store or
 the undo history.
 
 `removeSourceVideo` — the per-id, undoable removal `removeSourceVideosPermanently` was modelled
