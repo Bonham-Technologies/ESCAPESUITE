@@ -16,6 +16,8 @@ import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectSt
 import type { ExportProgress } from '../../store/types'
 import styles from './ExportDialog.module.css'
 import { lastObjectUrl } from '../../test/objectUrls'
+import { disposeLiveExport } from './liveExport'
+import { ErrorBoundary } from '@escapesuite/shared/components'
 
 // The exporter itself is driven by its own suite; here it is a scripted
 // collaborator. The real error classes come through importOriginal so the
@@ -2319,6 +2321,234 @@ describe('ExportDialog', () => {
 
       expect(signal!.aborted).toBe(true)
       expect(onClose).toHaveBeenCalled()
+    })
+  })
+  // ESCSUITE-220: a render-time throw elsewhere in the editor unmounts this
+  // dialog through the app's ErrorBoundary, and nothing else would stop the
+  // export it started — its decodeWorker, encoders and muxer would run on
+  // behind the error panel until Reload. `main.tsx` hands the boundary
+  // `disposeLiveExport()` as `onError`; these pin the dialog's half of that
+  // contract: a run registers itself in the slot when it starts and clears
+  // itself when it settles or is cancelled.
+  describe('disposeLiveExport (ESCSUITE-220)', () => {
+    interface AbortableRun {
+      signal: AbortSignal
+      /**
+       * How many times the run's abort handling has run — the scripted
+       * stand-in for the real exporter's own release (its catch closes the
+       * encoders and disposes the VideoDecodeManager on an
+       * ExportAbortedError; that release is pinned in the exporters' suites).
+       */
+      releases: number
+      promise: Promise<unknown>
+      finish: () => void
+      fail: (e: unknown) => void
+    }
+
+    /**
+     * WebM runs that stay in flight until finished, failed or aborted. With
+     * `rejectOnAbort` false an aborted run still counts its release but only
+     * rejects when its test says so, for a run whose rejection lands late.
+     */
+    function abortableRuns({ rejectOnAbort = true } = {}) {
+      const runs: AbortableRun[] = []
+      mockExportToWebM.mockImplementation((...args: unknown[]) => {
+        const signal = args[5] as AbortSignal
+        const run = { signal, releases: 0 } as AbortableRun
+        run.promise = new Promise((resolve, reject) => {
+          run.finish = () => resolve(exported(new Blob()))
+          run.fail = reject
+          signal.addEventListener('abort', () => {
+            run.releases++
+            if (rejectOnAbort) reject(new ExportAbortedError())
+          })
+        })
+        runs.push(run)
+        return run.promise
+      })
+      return runs
+    }
+
+    let abortCalls: ReturnType<typeof vi.spyOn>
+
+    beforeEach(() => {
+      // The slot is module state. Earlier tests in this file leave runs that
+      // never settle and are never cancelled, so empty it before counting.
+      disposeLiveExport()
+      abortCalls = vi.spyOn(AbortController.prototype, 'abort')
+    })
+
+    afterEach(() => {
+      abortCalls.mockRestore()
+    })
+
+    it('aborts the export in flight, which rejects with the abort and releases once', async () => {
+      const runs = abortableRuns()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(runs).toHaveLength(1))
+      expect(runs[0].signal.aborted).toBe(false)
+
+      disposeLiveExport()
+
+      expect(runs[0].signal.aborted).toBe(true)
+      await expect(runs[0].promise).rejects.toBeInstanceOf(ExportAbortedError)
+      expect(runs[0].releases).toBe(1)
+
+      // A second call — the boundary's, after anything else already did it —
+      // finds the slot empty: no second abort, no second release.
+      disposeLiveExport()
+      await settle()
+      expect(abortCalls).toHaveBeenCalledTimes(1)
+      expect(runs[0].releases).toBe(1)
+      // An abort is not a failure, here as on the Cancel path.
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    })
+
+    it('is a no-op when no export has started', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(() => disposeLiveExport()).not.toThrow()
+      expect(abortCalls).not.toHaveBeenCalled()
+    })
+
+    it('is a no-op once the export has finished', async () => {
+      const runs = abortableRuns()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(runs).toHaveLength(1))
+
+      runs[0].finish()
+      await settle()
+      expect(clickedLinks).toHaveLength(1)
+
+      disposeLiveExport()
+
+      expect(abortCalls).not.toHaveBeenCalled()
+      expect(runs[0].signal.aborted).toBe(false)
+      expect(runs[0].releases).toBe(0)
+    })
+
+    it('holds the second export once the first has failed', async () => {
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const runs = abortableRuns()
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(runs).toHaveLength(1))
+        runs[0].fail(new Error('Encoding failed'))
+        await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(runs).toHaveLength(2))
+
+        disposeLiveExport()
+
+        expect(runs[1].signal.aborted).toBe(true)
+        expect(runs[1].releases).toBe(1)
+        expect(runs[0].signal.aborted).toBe(false)
+        expect(abortCalls).toHaveBeenCalledTimes(1)
+        await settle()
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    it('finds nothing to abort after Cancel has stopped the export', async () => {
+      const runs = abortableRuns()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(runs).toHaveLength(1))
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      expect(abortCalls).toHaveBeenCalledTimes(1)
+      expect(runs[0].releases).toBe(1)
+
+      disposeLiveExport()
+      await settle()
+
+      expect(abortCalls).toHaveBeenCalledTimes(1)
+      expect(runs[0].releases).toBe(1)
+    })
+
+    it("does not let a cancelled export's late rejection drop the export started after it", async () => {
+      const runs = abortableRuns({ rejectOnAbort: false })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      // A starts and is cancelled; its promise has not rejected yet.
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(runs).toHaveLength(1))
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      // B starts while A is still unsettled.
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(runs).toHaveLength(2))
+
+      // A's rejection lands now, so its `finally` runs with B registered.
+      runs[0].fail(new ExportAbortedError())
+      await settle()
+
+      disposeLiveExport()
+
+      expect(runs[1].signal.aborted).toBe(true)
+      expect(runs[1].releases).toBe(1)
+    })
+
+    // The ordering pin, mirroring ESCAPECRAFT's (useRecordingController.test.ts,
+    // ESCSUITE-212 R2): the fix rests on the slot still holding the run when
+    // the real ErrorBoundary's componentDidCatch calls onError, i.e. on nothing
+    // the crashed subtree's teardown does clearing it first. This mounts the
+    // real dialog beside a throwing sibling under the real shared boundary and
+    // asserts — synchronously, inside onError — that the call onError makes is
+    // what aborts the export.
+    it('is still holding the run when the real ErrorBoundary calls onError (ordering pin)', async () => {
+      const runs = abortableRuns()
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      let onErrorRan = false
+
+      function Boom({ shouldThrow }: { shouldThrow: boolean }) {
+        if (shouldThrow) {
+          throw new Error('boom')
+        }
+        return null
+      }
+
+      function tree(shouldThrow: boolean) {
+        return (
+          <ErrorBoundary
+            onError={() => {
+              onErrorRan = true
+              // Not aborted by anything before this call...
+              expect(runs[0].signal.aborted).toBe(false)
+              disposeLiveExport()
+              // ...and aborted by it, synchronously, before onError returns.
+              expect(runs[0].signal.aborted).toBe(true)
+              expect(runs[0].releases).toBe(1)
+            }}
+          >
+            <ExportDialog isOpen={true} onClose={onClose} />
+            <Boom shouldThrow={shouldThrow} />
+          </ErrorBoundary>
+        )
+      }
+
+      try {
+        const { rerender } = render(tree(false))
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(runs).toHaveLength(1))
+
+        rerender(tree(true))
+        await settle()
+
+        // Not vacuous: onError genuinely ran, the dialog is gone, and the run
+        // it aborted is the one the dialog started — released exactly once.
+        expect(onErrorRan).toBe(true)
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+        expect(runs[0].releases).toBe(1)
+        expect(abortCalls).toHaveBeenCalledTimes(1)
+      } finally {
+        errorLog.mockRestore()
+      }
     })
   })
 })
