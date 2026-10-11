@@ -182,9 +182,10 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   engines whose worker output was measured against their own `<video>` (Chromium: export MAD
   0.000/255 at every compared frame across untagged, BT.709-tagged, full-range, matrix-only,
   `colr`-only and trimmed sources; Firefox: 0.000–0.356 on the same sources, rotated sources
-  refused to `<video>` — both since ESCSUITE-265, below); WebKit measured
-  4.46–17.45/255 apart and is refused, as is any engine not yet measured (admitting one is
-  ESCSUITE-262). H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
+  refused to `<video>` — both since ESCSUITE-265, below); WebKit is not admitted (ESCSUITE-285:
+  its `VideoDecoder` ignores `colorSpace`, 6.5–8.0/255 mean off its own `<video>` as ESCSUITE-262
+  measured, and the fix would be a per-frame copy — it keeps the in-page path), and nor is any
+  engine not yet measured. H.264 MP4 sources only; a source the worker refuses, or gives up on mid-export, is
   decoded by a `<video>` element instead and the export says "Decoding in the page; keep this tab in
   the foreground" once. Follow-ups: a WebM source still decodes in the page with no such notice
   (ESCSUITE-261); the `<video>` path's own seek-skip within 1/30 s, which repeated about every other frame, is fixed by
