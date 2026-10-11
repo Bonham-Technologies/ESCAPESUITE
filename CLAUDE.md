@@ -385,7 +385,13 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
   (which mirrors `vercel.json`'s rewrites, and — since ESCSUITE-121 part 2 — reads and sends
   `vercel.json`'s `headers` block too, so the suite runs under the real hosted
   Content-Security-Policy and `X-Frame-Options` rather than none at all; `tests/production/csp-media.spec.ts`
-  is the regression test, proving a `blob:` video source survives that CSP in both apps). Since
+  is the regression test, proving a `blob:` video source survives that CSP in both apps).
+  ESCSUITE-240: `vercel.json` gives the hub's content-hashed `/assets/*` chunks
+  `Cache-Control: public, max-age=31536000, immutable` (the server keeps a Cache-Control the
+  `headers` block sets instead of forcing `no-store`; the craft/artist single files and the
+  artist worker chunk live outside `/assets/` and keep Vercel's default), the catch-all excludes
+  `favicon\.ico` so that path is a real 404 rather than the hub page (the hub's icon is a `data:`
+  URI; no `.ico` ships), and the sitemap lists `/craft/` and `/artist/`. Since
   ESCSUITE-196, `serve-dist.mjs`'s rewrite table is *derived* from `vercel.json`'s `rewrites`
   array (walked in order through the same `source`-pattern matcher the `headers` block already
   used), not a hand-coded copy of it — `tests/production/spa-fallback.spec.ts` and
