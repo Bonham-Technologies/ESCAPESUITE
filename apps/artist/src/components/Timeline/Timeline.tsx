@@ -151,6 +151,8 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     trackContainerRef,
     pixelsPerSecond,
     timelineDuration,
+    isPlaying,
+    setIsPlaying,
     setCurrentTime,
   });
 

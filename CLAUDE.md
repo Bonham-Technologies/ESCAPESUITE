@@ -3785,6 +3785,31 @@ coverage-excluded and its `main.test.tsx` pins the call. The table row is left a
 set it. `ExportDialog.rerender*` and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
 artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-246 (a playhead drag during playback pauses on
+mousedown and resumes on mouseup only if playback was running — the ruler click's shape, with the resume — so
+the render loop no longer overwrites the dragged position within 200 ms of release and mid-gesture; and a loop
+region shorter than one frame, `outPoint − inPoint < MIN_LOOP_LENGTH_S`, stops playback at its out point with
+one write instead of spinning "playing" in place at some sixty store writes a second):
+99.83 / **99.38** / 96.41 / 99.75 against the 99.83 / 99.37 / 96.41 / 99.75 that `main` measures in the same
+sitting (`cb202b8c`; the commit this branch lands on differs in docs alone, so the artist source is identical)
+— statements up a hundredth, the other three unmoved. The base gives 5,594 / 5,802 branches and this branch
+5,600 / 5,808: six new branches, six covered, the same 208 uncovered (lines 8,653 / 8,667 → 8,661 / 8,675,
+statements 9,776 / 9,837 → 9,784 / 9,845, functions 2,061 / 2,066 on both, every denominator growing by
+exactly what the numerator did; the same 14 / 61 / 5 uncovered). The six are
+`components/Timeline/usePlayheadDrag.ts`'s four (4 → 8: the was-playing test at mousedown and the resume on
+mouseup, reached by a drag that starts while playing against one that starts paused) and
+`components/Preview/usePreviewRenderLoop.ts`'s two (135 / 148 → 137 / 150: the sub-frame loop test, reached by
+`inPoint === outPoint` against a 0.5 s loop that still loops; the file's thirteen pre-existing uncovered arms
+untouched). The red cases — the drag pausing before its first seek and resuming on release, the paused drag
+never calling `setIsPlaying`, the zero-length loop not "playing" after 500 ms of fake frames with at most two
+writes, the Timeline-level drag whose release position survives one more frame — were red before the fix.
+The review (opus) approved; its MEDIUM, a pre-existing stall when playback starts in a gap between clips
+that the drag's resume can now reach, is ESCSUITE-280, and its two LOWs on the ~200 ms the store's time lags
+the preview readout at any pause are ESCSUITE-281 — both named in `apps/artist/CLAUDE.md`. The table row is
+left as the ESCSUITE-249 paragraph set it. `drawFrame.perf.test.ts`, `timelineGestures.perf.test.ts`, every
+`*.perf.test.ts` and the rerender pins are byte-identical — one store write per gesture, one comparison per
+frame that already happened. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
