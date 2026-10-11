@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processMediaFile } from '../core/videoProcessor';
-import { getStorageEstimate, deleteVideo, resolveThumbnailUrl, getAllVideoMetadata } from '../core/storage';
+import { getStorageEstimate, deleteVideo, resolveThumbnailUrl, getAllVideoMetadata, listSessionStates } from '../core/storage';
 import { orphanedImports, editorSourceIds, totalBytes } from '../core/orphanedImports';
 import { analytics } from '../utils/analytics';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
@@ -24,10 +24,22 @@ function notRemovedMessage(failed: number): string {
   return `Could not remove ${failed} file${failed !== 1 ? 's' : ''} from storage`;
 }
 
-/** Every source id the editor can still reach — the live library and each undo/redo snapshot's. */
-function currentEditorSourceIds(): Set<string> {
+/**
+ * Every source id something here still references (ESCSUITE-268): the live
+ * library, each undo/redo snapshot's, and every saved session slot's — each
+ * tab's own since ESCSUITE-274, plus the legacy shared row if one is left. A
+ * slot counts because the app keeps it on purpose while the live project does
+ * not hold its sources — under `?suppressRestore=1`, after a restore that
+ * failed, or for a tab that crashed — and its next restore needs those bytes
+ * (review M1). The slots are read first, so the store is read as it stands
+ * once that lands.
+ */
+async function referencedSourceIds(): Promise<Set<string>> {
+  const slots = await listSessionStates();
   const { sourceVideos, history } = useEditorStore.getState();
-  return editorSourceIds(sourceVideos, [...history.past, ...history.future]);
+  const ids = editorSourceIds(sourceVideos, [...history.past, ...history.future]);
+  for (const slot of slots) for (const v of slot.session.sourceVideos) ids.add(v.id);
+  return ids;
 }
 
 interface UploadProgress {
@@ -175,7 +187,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   const refreshOrphans = useCallback(async () => {
     try {
       const rows = await getAllVideoMetadata();
-      setOrphans(orphanedImports(rows, currentEditorSourceIds()));
+      setOrphans(orphanedImports(rows, await referencedSourceIds()));
     } catch (e) {
       console.error('Failed to read stored files:', e);
     }
@@ -293,22 +305,34 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   // history. Each id is checked against the editor's sources again just before
   // its delete, from live store state: a project load landing mid-loop can
   // claim a row the click offered, and its bytes are then the project's.
+  //
+  // One removal at a time (review L3): a click while one is still awaiting
+  // does nothing — no second confirm, no second loop over the same ids. A
+  // reference read that fails counts as a failed delete, so an id is never
+  // deleted without having been checked.
+  const removingOrphansRef = useRef(false);
   const handleRemoveOrphans = useCallback(async () => {
+    if (removingOrphansRef.current) return;
     const count = orphans.length;
     if (!confirm(`Remove ${count} file${count !== 1 ? 's' : ''} imported in earlier sessions (${formatFileSize(totalBytes(orphans))})? Another open editor tab could still be using them.`)) return;
-    let failed = 0;
-    for (const row of orphans) {
-      if (currentEditorSourceIds().has(row.id)) continue;
-      try {
-        await deleteVideo(row.id);
-      } catch (e) {
-        failed += 1;
-        console.error('Failed to remove a file from an earlier session:', e);
+    removingOrphansRef.current = true;
+    try {
+      let failed = 0;
+      for (const row of orphans) {
+        try {
+          if ((await referencedSourceIds()).has(row.id)) continue;
+          await deleteVideo(row.id);
+        } catch (e) {
+          failed += 1;
+          console.error('Failed to remove a file from an earlier session:', e);
+        }
       }
+      refreshStorageInfo();
+      await refreshOrphans();
+      if (failed > 0) showNotification(notRemovedMessage(failed), 'error');
+    } finally {
+      removingOrphansRef.current = false;
     }
-    refreshStorageInfo();
-    await refreshOrphans();
-    if (failed > 0) showNotification(notRemovedMessage(failed), 'error');
   }, [orphans, refreshStorageInfo, refreshOrphans, showNotification]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
@@ -533,6 +557,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
                 <button
                   className={`${styles.storageClearButton} ${styles.clearAll}`}
                   onClick={handleRemoveOrphans}
+                  aria-label={`Remove ${orphans.length} file${orphans.length !== 1 ? 's' : ''} from earlier sessions`}
                   title="Remove files imported in earlier sessions that no project here uses — ESCAPECRAFT recordings stay"
                 >
                   Remove

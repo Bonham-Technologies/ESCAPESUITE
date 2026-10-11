@@ -1202,6 +1202,7 @@ describe('VideoUploader', () => {
     /** An autosaved session that has not been restored — the `?suppressRestore=1` shape. */
     async function saveSessionHolding(sources: SourceVideo[]): Promise<void> {
       await saveSessionState({
+        tabId: 'earlier-tab',
         project: store().project,
         sourceVideos: sources,
         currentTime: 0,
@@ -1215,12 +1216,12 @@ describe('VideoUploader', () => {
       // Rows from earlier describes accumulate in the real fake-indexeddb (no
       // per-test reset), and every one of them would count as an orphan here.
       for (const row of await getAllVideoMetadata()) await storageModule.deleteVideo(row.id)
-      await clearSessionState()
+      await clearSessionState('earlier-tab')
     })
 
     afterEach(async () => {
       vi.restoreAllMocks()
-      await clearSessionState()
+      await clearSessionState('earlier-tab')
     })
 
     it('offers an import nothing references, and removes its bytes and thumbnail only when clicked', async () => {
