@@ -323,7 +323,8 @@ describe('one slot per tab (ESCSUITE-274)', () => {
   })
 
   it('offers the row an older build shared between tabs, and deletes it when declined', async () => {
-    const { tabId: _tabId, ...legacy } = savedSession()
+    const legacy: Partial<SessionState> = { ...savedSession() }
+    delete legacy.tabId
     vi.mocked(listSessionStates).mockResolvedValue([slotOf(legacy as SessionState, null)])
     const { result } = mountRestore()
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
@@ -334,7 +335,8 @@ describe('one slot per tab (ESCSUITE-274)', () => {
   })
 
   it('adopts the row an older build shared between tabs when it is restored', async () => {
-    const { tabId: _tabId, ...legacy } = savedSession()
+    const legacy: Partial<SessionState> = { ...savedSession() }
+    delete legacy.tabId
     vi.mocked(listSessionStates).mockResolvedValue([slotOf(legacy as SessionState, null)])
     const { result } = mountRestore()
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))

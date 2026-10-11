@@ -427,7 +427,8 @@ describe('storage', () => {
 
     it('lists the shared row an older build wrote as a slot with no owner', async () => {
       const storage = await getStorageModule()
-      const { tabId: _tabId, ...legacy } = sessionFor('ignored')
+      const legacy: Partial<import('./storage').SessionState> = { ...sessionFor('ignored') }
+      delete legacy.tabId
       await writeLegacy(storage, legacy)
       await storage.saveSessionState(sessionFor('tab-a'))
 

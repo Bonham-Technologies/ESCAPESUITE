@@ -4,26 +4,25 @@
 // Its effect is the editor's **second**, so `App` calls this hook third —
 // after the theme and the toast, and before the autosave,
 // which gates on the `sessionRestored` flag this hook owns and writes — and
-// whose request for the session slot must come after this hook's probe of it
-// (ESCSUITE-227, `sessionLock.ts`).
+// whose hold on this tab's own lock must come after this hook's probe of it
+// (ESCSUITE-274, `sessionLock.ts`).
+//
+// It also owns this tab's id (ESCSUITE-274, `tabId.ts`): the autosave writes
+// that tab's slot and New Project clears it. The id is state only so a
+// duplicated tab can be given a new one; it never changes otherwise.
 //
 // `suppressRestore` arrives as a boolean rather than the whole `urlParams`
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { getSessionState, clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
+import { clearSessionState, resolveThumbnailUrl, type SessionSlot, type SessionState } from '../core/storage';
 import { repairEditorBlock } from '../store/projectMigration';
 import { applyEditorBlock } from './editorBlock';
-import { probeSessionOwner } from './sessionLock';
+import { probeTabLock } from './sessionLock';
+import { adoptSessionSlot, findOfferableSlot } from './sessionSlots';
+import { readTabId, renewTabId } from './tabId';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
-
-/**
- * What a tab says when another live ESCAPEARTIST tab owns the session slot
- * (ESCSUITE-227): it neither offers that tab's session nor writes over it.
- */
-export const SESSION_HELD_NOTICE =
-  'Another ESCAPEARTIST tab is open. This tab will not offer or save a session until that tab closes.';
 
 /** What the session check and its two answers need from outside. */
 export interface SessionRestoreDeps {
@@ -49,6 +48,8 @@ export interface SessionRestore {
   showSessionPrompt: boolean;
   /** The session the prompt is offering, or `null`. */
   pendingSession: SessionState | null;
+  /** This tab's id: the key of its own session slot (ESCSUITE-274). */
+  tabId: string;
   handleRestoreSession: (session: SessionState) => Promise<void>;
   handleDeclineSession: () => void;
 }
@@ -66,6 +67,13 @@ export function useSessionRestore({
   const [sessionRestored, setSessionRestored] = useState(false);
   const [showSessionPrompt, setShowSessionPrompt] = useState(false);
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
+  // This tab's id, read once per mount (a reload keeps it: `tabId.ts`), and
+  // replaced only when the startup check finds it held by a live tab.
+  const [tabId, setTabId] = useState(readTabId);
+  // The slot the prompt is offering: declining deletes it, restoring adopts
+  // it. A ref, not state — `pendingSession` already renders the prompt, and
+  // the two answers read this only when they run.
+  const offeredSlotRef = useRef<SessionSlot | null>(null);
 
   // Which restore is still allowed to land, or none. Set at the top of
   // `handleRestoreSession`, checked again after its `await` settles — either
@@ -88,8 +96,9 @@ export function useSessionRestore({
 
   // The startup check has been started. StrictMode runs the effect below
   // twice on one instance (refs survive its cleanup-then-remount), and the
-  // second run's owner probe would find the first one's momentary hold on the
-  // session lock and call this tab's own startup "another tab" (ESCSUITE-227).
+  // second run's probe of this tab's own lock would find the first one's
+  // momentary hold and call this tab a duplicate of itself (ESCSUITE-227,
+  // ESCSUITE-274).
   const checkStartedRef = useRef(false);
 
   // Restore session on app start. A saved `thumbnailUrl` is an
@@ -155,18 +164,25 @@ export function useSessionRestore({
     // editor held. Neither is an edit, so neither is undoable.
     applyEditorBlock(repairEditorBlock(session.editor, session.project.timeline.clips));
     clearHistory();
+    // Another tab's slot — one that closed or crashed, or the legacy shared
+    // row — becomes this tab's (ESCSUITE-274). Not awaited: the restore has
+    // landed, and the adoption logs its own failure. This tab's own slot (a
+    // reload) is already where it belongs.
+    const offered = offeredSlotRef.current!;
+    if (offered.tabId !== tabId) void adoptSessionSlot(offered, tabId);
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
     showNotification('Session restored', 'success');
-  }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification]);
+  }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification, tabId]);
 
   const handleDeclineSession = useCallback(() => {
     // Cancel a restore in flight — see restoreAttemptRef's comment above.
     restoreAttemptRef.current = null;
     // Not awaited: the answer lands now whatever storage does about it. The
-    // catch is only so a rejection is logged rather than left unhandled.
-    clearSessionState().catch(console.error);
+    // catch is only so a rejection is logged rather than left unhandled. The
+    // slot deleted is the one offered, whichever tab's it was (ESCSUITE-274).
+    clearSessionState(offeredSlotRef.current!.tabId).catch(console.error);
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
@@ -189,18 +205,20 @@ export function useSessionRestore({
     const checkSession = async () => {
       try {
         // Requested synchronously, before this function's first await, so the
-        // probe is queued ahead of this tab's own ownership request — the
+        // probe is queued ahead of this tab's own hold on its lock — the
         // autosave's effect, which runs after this one (see `sessionLock.ts`).
-        if ((await probeSessionOwner()) === 'held') {
-          // Another live tab owns the slot: what is in it is that tab's work
-          // in progress, not a session to resume — and not one to throw away.
-          showNotification(SESSION_HELD_NOTICE, 'info');
-          setSessionRestored(true);
-          return;
+        let ownId = tabId;
+        if ((await probeTabLock(ownId)) === 'held') {
+          // A live tab already has this id: this tab is a duplicate of it,
+          // started with a copy of its sessionStorage. It takes an id of its
+          // own, so it neither writes over that tab's slot nor is offered it.
+          ownId = renewTabId();
+          setTabId(ownId);
         }
-        const session = await getSessionState();
-        if (session && session.sourceVideos.length > 0) {
-          setPendingSession(session);
+        const slot = await findOfferableSlot(ownId, Date.now());
+        if (slot) {
+          offeredSlotRef.current = slot;
+          setPendingSession(slot.session);
           setShowSessionPrompt(true);
         } else {
           setSessionRestored(true);
@@ -212,12 +230,13 @@ export function useSessionRestore({
     };
 
     checkSession();
-  }, [sessionRestored, suppressRestore, showNotification]);
+  }, [sessionRestored, suppressRestore, tabId]);
 
   return {
     sessionRestored,
     showSessionPrompt,
     pendingSession,
+    tabId,
     handleRestoreSession,
     handleDeclineSession,
   };

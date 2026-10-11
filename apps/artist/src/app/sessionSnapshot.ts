@@ -1,8 +1,8 @@
 // The autosave payload: what of the editor's state gets written to
 // session storage, and in what shape.
 //
-// Pure: takes the store's state and a timestamp as plain values, rather than
-// reading `useEditorStore.getState()` or `Date.now()` itself, so the call
+// Pure: takes the store's state, a timestamp and the tab id as plain values,
+// rather than reading `useEditorStore.getState()` or `Date.now()` itself, so the call
 // site keeps control of *when* those are read while the shape of the
 // snapshot is tested without a store.
 import type { EditorState, SourceVideo } from '../store/types';
@@ -20,9 +20,10 @@ function stripThumbnailUrl(video: SourceVideo): SourceVideo {
   return rest;
 }
 
-/** Build the session snapshot autosave persists, at `timestamp`. */
-export function buildSessionSnapshot(state: EditorState, timestamp: number): SessionState {
+/** Build the session snapshot autosave persists into `tabId`'s slot, at `timestamp`. */
+export function buildSessionSnapshot(state: EditorState, timestamp: number, tabId: string): SessionState {
   return {
+    tabId,
     project: state.project,
     sourceVideos: state.sourceVideos.map(stripThumbnailUrl),
     currentTime: state.currentTime,
@@ -36,9 +37,10 @@ export function buildSessionSnapshot(state: EditorState, timestamp: number): Ses
 /**
  * The snapshot holds no work at all: no source in the library and no clip on
  * the timeline (ESCSUITE-227). The autosave never writes such a snapshot, so a
- * tab with nothing in it — a second tab, a tab that pressed Start Fresh — can
- * never overwrite a slot that holds someone's work. A clip with no source (a
- * text overlay) is work, and so is a source with no clip.
+ * tab with nothing in it — a tab that pressed Start Fresh, or New Project —
+ * never writes an empty slot over the work it last held, and a reload still
+ * offers that work back. A clip with no source (a text overlay) is work, and
+ * so is a source with no clip.
  */
 export function isEmptySession(session: SessionState): boolean {
   return session.sourceVideos.length === 0 && session.project.timeline.clips.length === 0;

@@ -102,6 +102,10 @@ describe('App session storage', () => {
   it('writes the session to storage once the debounce elapses', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     await renderApp()
+    // The debounce is armed once the startup question settles, and that is a
+    // probe and a listing of every slot away (ESCSUITE-274) — on the file's
+    // first, cold, database open more than renderApp's own flush covers.
+    await flushStorage()
 
     await act(async () => {
       vi.advanceTimersByTime(2500)
@@ -405,7 +409,8 @@ describe('one session slot per tab (ESCSUITE-274)', () => {
   })
 
   it('offers the row an older build shared between tabs, and deletes it once restored', async () => {
-    const { tabId: _tabId, ...legacy } = storedSession('ignored', 'Before The Update')
+    const legacy: Partial<SessionState> = { ...storedSession('ignored', 'Before The Update') }
+    delete legacy.tabId
     const db = await getDB()
     await db.put('settings', legacy, 'current-session')
 

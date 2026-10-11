@@ -358,7 +358,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
     expect(fake.isHeld(tabLockName('this-tab'))).toBe(false)
     expect(fake.isHeld(tabLockName('renewed-tab'))).toBe(true)
-    expect(vi.mocked(saveSessionState).mock.calls.at(-1)?.[0].tabId).toBe('renewed-tab')
+    expect(vi.mocked(saveSessionState).mock.lastCall?.[0].tabId).toBe('renewed-tab')
   })
 
   it('does not hold a lock at all when the host drives its own state', async () => {
