@@ -507,6 +507,18 @@ Reusable video player with full playback controls:
 - **Duration**: `video.duration` is used when it is finite and above 0, and `knownDuration`
   is the fallback for when it is not — a MediaRecorder WebM often reports `Infinity` or 0.
   The playback dialog passes the saved recording's duration as that fallback
+- **Audio-only takes (ESCSUITE-233)**: `VideoPlayer` takes an optional `mediaType`. For
+  `'audio'` the one `<video>` element stays the playback engine (so the controls, the
+  keyboard model and the Space/chord handling remain one implementation) but is visually
+  hidden by `.videoAudio` (1px, transparent, no pointer events) and an `aria-hidden` speaker
+  glyph is drawn over the same dark surface; a click on the wrapper still toggles playback.
+  `useRecordingLibrary` carries the row's `mediaType` as `playbackMediaType` (`'audio'` only
+  for a row marked so; unmarked rows are video) through `App` to `PlaybackDialog`. The error
+  overlay says "This recording could not be played." / "It may be corrupted or in an
+  unsupported format." for both types, and `.controlsRow` has a `gap` so the time readout and
+  the name no longer run together (CSS; jsdom cannot lay it out, so the test pins only that
+  they are separate non-empty elements). The stored blob's `video/webm` MIME on an audio take
+  is left alone — nothing misbehaves on it
 - **Keyboard**: Space/K, Left/Right, Up/Down, M, 0/Home, End, Escape. It binds these on
   `window`; the shared `useDialogBehaviour` binds Escape and Tab on `document` in the capture
   phase, so while the playback dialog is open the dialog's Escape runs first and the player's

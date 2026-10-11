@@ -534,7 +534,7 @@ describe('VideoPlayer error handling', () => {
     });
 
     expect(onError).not.toHaveBeenCalled();
-    expect(screen.queryByText(/failed to load video/i)).toBeNull();
+    expect(screen.queryByText(/could not be played/i)).toBeNull();
     expect(warn).toHaveBeenCalledWith('Video playback error (non-fatal):', 'decode hiccup');
   });
 
@@ -549,7 +549,7 @@ describe('VideoPlayer error handling', () => {
     });
 
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
-    expect(screen.getByText(/failed to load video/i)).toBeTruthy();
+    expect(screen.getByText(/could not be played/i)).toBeTruthy();
   });
 
   it('does not require an onError handler to fail', () => {
@@ -560,7 +560,7 @@ describe('VideoPlayer error handling', () => {
         fireEvent.error(player.video);
       });
     }).not.toThrow();
-    expect(screen.getByText(/failed to load video/i)).toBeTruthy();
+    expect(screen.getByText(/could not be played/i)).toBeTruthy();
   });
 });
 

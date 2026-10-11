@@ -27,6 +27,25 @@
   display: block;
 }
 
+/* Audio-only take (ESCSUITE-233): the <video> stays in the DOM as the playback
+   engine but takes no room and shows nothing; the placeholder holds the
+   wrapper open at the same dark surface. */
+.videoAudio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.audioPlaceholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  color: #94a3b8;
+}
+
 /* Play overlay when paused */
 .playOverlay {
   position: absolute;
@@ -175,6 +194,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem; /* the time readout and the name used to run together (ESCSUITE-233) */
   margin-top: 0.5rem;
 }
 

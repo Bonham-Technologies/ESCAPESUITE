@@ -156,6 +156,7 @@ function App() {
     playbackUrl,
     playbackName,
     playbackDuration,
+    playbackMediaType,
     handleDeleteRecording,
     handleSendToEditor,
     handlePlayRecording,
@@ -280,6 +281,7 @@ function App() {
           url={playbackUrl}
           name={playbackName}
           duration={playbackDuration}
+          mediaType={playbackMediaType}
           onClose={handleClosePlayback}
         />
       )}
