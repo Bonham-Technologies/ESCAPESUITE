@@ -145,7 +145,7 @@ describe('Timeline markers', () => {
     store().addMarker(3, 'Cut here')
     const { root } = renderTimeline()
 
-    const flag = screen.getByTitle(/^Cut here \(0:03\)/)
+    const flag = screen.getByRole('button', { name: /^Marker Cut here at 0:03/ })
     expect(flag).toHaveStyle({ left: '150px' })
     expect(root.querySelectorAll(`.${styles.markerLine}`)).toHaveLength(1)
   })
@@ -155,7 +155,7 @@ describe('Timeline markers', () => {
     store().addMarker(3, 'Cut here')
     renderTimeline()
 
-    await user.dblClick(screen.getByTitle(/^Cut here/))
+    await user.dblClick(screen.getByRole('button', { name: /^Marker Cut here/ }))
 
     expect(store().markers).toHaveLength(0)
   })

@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Track } from '../../store/types';
 import { useSliderGesture } from '../ClipEditor/useSliderGesture';
 import styles from './Timeline.module.css';
@@ -67,6 +67,20 @@ export const TrackHeader = React.memo(function TrackHeader({
 }: TrackHeaderProps) {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editingName, setEditingName] = useState('');
+  // Enter and Escape close the editor from the keyboard, so focus goes back to
+  // the rename button instead of dropping to the page; a blur does not, since
+  // focus has already gone somewhere on purpose.
+  const renameButtonRef = useRef<HTMLButtonElement>(null);
+  const refocusRenameRef = useRef(false);
+  useEffect(() => {
+    if (!isEditingName && refocusRenameRef.current) {
+      refocusRenameRef.current = false;
+      // A tick later, not now: Enter's own keypress is still on its way, and
+      // landing it on the button would press it and reopen the editor.
+      const timer = setTimeout(() => renameButtonRef.current?.focus(), 0);
+      return () => clearTimeout(timer);
+    }
+  }, [isEditingName]);
   // The volume slider's gesture — see the note above.
   const { handlers: volumeGesture, commit: commitVolume } = useSliderGesture();
 
@@ -83,7 +97,7 @@ export const TrackHeader = React.memo(function TrackHeader({
   }, [track, onUpdateTrack]);
 
   // Handle track name editing
-  const handleTrackNameDoubleClick = useCallback(() => {
+  const handleTrackNameStart = useCallback(() => {
     setIsEditingName(true);
     setEditingName(track.name);
   }, [track.name]);
@@ -102,8 +116,10 @@ export const TrackHeader = React.memo(function TrackHeader({
 
   const handleTrackNameKeyDown = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
+      refocusRenameRef.current = true;
       handleTrackNameBlur();
     } else if (e.key === 'Escape') {
+      refocusRenameRef.current = true;
       setIsEditingName(false);
       setEditingName('');
     }
@@ -173,16 +189,20 @@ export const TrackHeader = React.memo(function TrackHeader({
               onChange={handleTrackNameChange}
               onBlur={handleTrackNameBlur}
               onKeyDown={handleTrackNameKeyDown}
+              aria-label="Track name"
               autoFocus
             />
           ) : (
-            <span
+            <button
+              type="button"
+              ref={renameButtonRef}
               className={styles.trackName}
-              onDoubleClick={handleTrackNameDoubleClick}
-              title="Double-click to rename"
+              onClick={handleTrackNameStart}
+              onDoubleClick={handleTrackNameStart}
+              aria-label={`Rename track ${track.name}`}
             >
               {track.name}
-            </span>
+            </button>
           )}
           <div className={styles.trackReorderBtns}>
             <button

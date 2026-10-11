@@ -61,28 +61,35 @@ export const TimelineRuler = React.memo(function TimelineRuler({
         aria-label="Timeline ruler"
       >
         <div className={styles.rulerContent} style={{ width }}>
-          {getRulerTicks(duration, pixelsPerSecond).map(({ time, x, isMajor }) => (
+          {getRulerTicks(duration, pixelsPerSecond).map(({ time, x, isMajor, label }) => (
             <div
               key={time}
               className={`${styles.tick} ${isMajor ? styles.tickMajor : styles.tickMinor}`}
               style={{ left: x }}
             >
-              {isMajor && <span className={styles.tickLabel}>{formatTime(time)}</span>}
+              {isMajor && <span className={styles.tickLabel}>{label}</span>}
             </div>
           ))}
           {markers.map((marker) => (
-            <div
+            <button
+              type="button"
               key={marker.id}
               className={styles.markerFlag}
               style={{ left: timeToPixels(marker.time, pixelsPerSecond), '--marker-color': marker.color } as React.CSSProperties}
-              title={`${marker.label} (${formatTime(marker.time)}) - Double-click to remove`}
+              aria-label={`Marker ${marker.label} at ${formatTime(marker.time)} — Delete to remove`}
+              onKeyDown={(e) => {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                  e.preventDefault();
+                  onRemoveMarker(marker.id);
+                }
+              }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
                 onRemoveMarker(marker.id);
               }}
             >
-              <div className={styles.markerFlagHead} />
-            </div>
+              <span className={styles.markerFlagHead} />
+            </button>
           ))}
 
           {/* In/Out point markers in ruler */}
