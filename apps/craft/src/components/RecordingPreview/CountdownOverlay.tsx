@@ -17,6 +17,9 @@ interface CountdownOverlayProps {
  * `RecordingDurationReadout` makes for the duration tick;
  * `App.rerender.test.tsx` counts it.
  *
+ * The digit is `aria-hidden`: the header's live region announces each tick
+ * (ESCSUITE-231), so it is not read twice.
+ *
  * `state` stays a prop: `App` derives it for the transport bar as well, and it
  * changes once per transition rather than on a tick.
  */
@@ -26,7 +29,7 @@ export function CountdownOverlay({ state }: CountdownOverlayProps) {
   if (state !== 'countdown' || countdownValue <= 0) return null;
 
   return (
-    <div className={styles.countdown}>
+    <div className={styles.countdown} aria-hidden="true">
       <span className={styles.countdownNumber}>{countdownValue}</span>
     </div>
   );

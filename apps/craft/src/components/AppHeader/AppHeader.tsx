@@ -1,6 +1,7 @@
 import { isStandaloneMode, isFileOrigin, editorUrl } from '@escapesuite/shared/config';
 import type { RecordingState } from '../../store/types';
 import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor';
+import { CountdownAnnouncement } from './CountdownAnnouncement';
 import styles from '../../App.module.css';
 
 interface AppHeaderProps {
@@ -28,7 +29,10 @@ interface AppHeaderProps {
  *
  * The status region is `aria-live="polite" aria-atomic="true"` and holds at
  * most one `role="status"` span, so a screen reader hears the whole phrase
- * ("Recording", "Paused", "Saving...") each time the state changes.
+ * ("Recording", "Paused", "Saving...") each time the state changes. During the
+ * 3-2-1 countdown it says "Recording starts in 3", 2, 1 — the cancel window must
+ * not be silent (ESCSUITE-231) — through `CountdownAnnouncement`, which owns the
+ * `countdownValue` subscription so `App` never reads it.
  *
  * A `notice` is announced through that same region, and deliberately carries
  * **no** `role` of its own: the region's `aria-live` is what announces it, and
@@ -53,6 +57,7 @@ export function AppHeader({ state, notice, onOpenHelp }: AppHeaderProps) {
       </div>
 
       <div className={styles.headerCenter} aria-live="polite" aria-atomic="true">
+        {state === 'countdown' && <CountdownAnnouncement />}
         {state === 'recording' && (
           <span className={styles.recordingIndicator} role="status">
             <span className={styles.recordingDot} aria-hidden="true" />

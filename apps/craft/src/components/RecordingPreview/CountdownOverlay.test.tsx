@@ -25,6 +25,13 @@ describe('CountdownOverlay', () => {
     expect(container.querySelector(`.${styles.countdownNumber}`)).toHaveTextContent('3')
   })
 
+  it('hides the digit from assistive technology; the header announces the tick (ESCSUITE-231)', () => {
+    useRecorderStore.setState({ countdownValue: 3 })
+    const { container } = render(<CountdownOverlay state="countdown" />)
+
+    expect(container.querySelector(`.${styles.countdown}`)).toHaveAttribute('aria-hidden', 'true')
+  })
+
   it('counts itself down, unprompted by any parent', () => {
     useRecorderStore.setState({ countdownValue: 3 })
     const { container } = render(<CountdownOverlay state="countdown" />)
