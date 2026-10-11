@@ -7,8 +7,8 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createRef } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler'
-import { RULER_MAJOR_INTERVAL, RULER_MINOR_INTERVAL } from './timelineGeometry'
 import type { Marker } from '../../store/types'
 import styles from './Timeline.module.css'
 
@@ -42,10 +42,11 @@ describe('TimelineRuler ticks', () => {
   it('draws a tick per minor interval at its pixel position', () => {
     const root = renderRuler()
 
+    // 50 px/s: a tick every second.
     const ticks = root.querySelectorAll(`.${styles.tick}`)
-    expect(ticks).toHaveLength(DURATION / RULER_MINOR_INTERVAL + 1)
+    expect(ticks).toHaveLength(DURATION + 1)
     expect(ticks[0]).toHaveStyle({ left: '0px' })
-    expect(ticks[1]).toHaveStyle({ left: `${RULER_MINOR_INTERVAL * PPS}px` })
+    expect(ticks[1]).toHaveStyle({ left: `${PPS}px` })
     expect(ticks[ticks.length - 1]).toHaveStyle({ left: `${DURATION * PPS}px` })
   })
 
@@ -53,20 +54,24 @@ describe('TimelineRuler ticks', () => {
     const root = renderRuler()
 
     const labels = [...root.querySelectorAll(`.${styles.tickLabel}`)].map((el) => el.textContent)
-    expect(labels).toEqual(['0:00', '0:05', '0:10'])
-    expect(root.querySelectorAll(`.${styles.tickMajor}`)).toHaveLength(
-      DURATION / RULER_MAJOR_INTERVAL + 1
-    )
-    expect(root.querySelectorAll(`.${styles.tickMinor}`)).toHaveLength(
-      DURATION / RULER_MINOR_INTERVAL - DURATION / RULER_MAJOR_INTERVAL
-    )
+    expect(labels).toEqual(['0:00', '0:02', '0:04', '0:06', '0:08', '0:10'])
+    expect(root.querySelectorAll(`.${styles.tickMajor}`)).toHaveLength(6)
+    expect(root.querySelectorAll(`.${styles.tickMinor}`)).toHaveLength(5)
+  })
+
+  it('follows the zoom: tenths of a second when zoomed right in', () => {
+    const root = renderRuler({ duration: 0.3, pixelsPerSecond: 1000, width: 300 })
+
+    const labels = [...root.querySelectorAll(`.${styles.tickLabel}`)].map((el) => el.textContent)
+    expect(labels).toEqual(['0:00.0', '0:00.1', '0:00.2', '0:00.3'])
   })
 
   it('scales with the zoom and takes its content width from the caller', () => {
     const root = renderRuler({ pixelsPerSecond: PPS * 2, width: DURATION * PPS * 2 })
 
     expect(root.querySelector(`.${styles.rulerContent}`)).toHaveStyle({ width: '1000px' })
-    expect(root.querySelectorAll(`.${styles.tick}`)[1]).toHaveStyle({ left: '100px' })
+    // 100 px/s: a tick every half second.
+    expect(root.querySelectorAll(`.${styles.tick}`)[1]).toHaveStyle({ left: '50px' })
   })
 
   it('hands the scroll box back through the ref it was given', () => {
@@ -89,22 +94,63 @@ describe('TimelineRuler ticks', () => {
 })
 
 describe('TimelineRuler markers', () => {
-  it('flags a marker at its time, in its own colour', () => {
+  const flagName = 'Marker Cut here at 0:03 — Delete to remove'
+
+  it('flags a marker at its time, in its own colour, as a named button', () => {
     renderRuler({ markers: [marker] })
 
-    const flag = screen.getByTitle('Cut here (0:03) - Double-click to remove')
+    const flag = screen.getByRole('button', { name: flagName })
     expect(flag).toHaveStyle({ left: `${marker.time * PPS}px` })
     expect(flag.style.getPropertyValue('--marker-color')).toBe(marker.color)
     expect(flag.querySelector(`.${styles.markerFlagHead}`)).not.toBeNull()
+    expect(flag).not.toHaveAttribute('title')
   })
 
   it('asks for a marker to be removed when its flag is double-clicked', () => {
     const onRemoveMarker = vi.fn()
-    renderRuler({ markers: [marker], onRemoveMarker })
+    const onRulerClick = vi.fn()
+    renderRuler({ markers: [marker], onRemoveMarker, onRulerClick })
 
-    fireEvent.doubleClick(screen.getByTitle(/^Cut here/))
+    fireEvent.doubleClick(screen.getByRole('button', { name: flagName }))
 
     expect(onRemoveMarker).toHaveBeenCalledWith(marker.id)
+  })
+
+  it.each(['Delete', 'Backspace'])('removes the marker on %s', (key) => {
+    const onRemoveMarker = vi.fn()
+    renderRuler({ markers: [marker], onRemoveMarker })
+
+    fireEvent.keyDown(screen.getByRole('button', { name: flagName }), { key })
+
+    expect(onRemoveMarker).toHaveBeenCalledWith(marker.id)
+  })
+
+  it('leaves other keys alone', () => {
+    const onRemoveMarker = vi.fn()
+    renderRuler({ markers: [marker], onRemoveMarker })
+
+    fireEvent.keyDown(screen.getByRole('button', { name: flagName }), { key: 'a' })
+
+    expect(onRemoveMarker).not.toHaveBeenCalled()
+  })
+
+  it('is a Tab stop', async () => {
+    const user = userEvent.setup()
+    renderRuler({ markers: [marker] })
+
+    for (let i = 0; i < 5 && document.activeElement !== screen.getByRole('button', { name: flagName }); i++) {
+      await user.tab()
+    }
+    expect(screen.getByRole('button', { name: flagName })).toHaveFocus()
+  })
+
+  it('still lets a click on the flag reach the ruler\'s seek handler', () => {
+    const onRulerClick = vi.fn()
+    renderRuler({ markers: [marker], onRulerClick })
+
+    fireEvent.click(screen.getByRole('button', { name: flagName }))
+
+    expect(onRulerClick).toHaveBeenCalledTimes(1)
   })
 })
 

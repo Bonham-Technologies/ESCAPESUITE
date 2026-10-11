@@ -21,42 +21,125 @@ import {
   MARQUEE_DRAG_THRESHOLD,
   MIN_CLIP_DURATION,
   MIN_SPLIT_DISTANCE,
-  RULER_MAJOR_INTERVAL,
-  RULER_MINOR_INTERVAL,
+  formatRulerTime,
+  rulerIntervals,
+  RULER_INTERVAL_LADDER,
 } from './timelineGeometry'
 import { makeClip, makeSourceVideo } from '../../test/fixtures/clipFixtures'
 
 /** The timeline's default scale: one second is 50px at zoom 1. */
 const PPS = 50
 
+/** The seconds between two labelled ticks at this scale. */
+function labelEvery(pps: number): number {
+  return rulerIntervals(pps).label
+}
+/** The labelled ticks' times. */
+function labelled(duration: number, pps: number): number[] {
+  return getRulerTicks(duration, pps).filter((t) => t.isMajor).map((t) => t.time)
+}
+
+describe('rulerIntervals', () => {
+  it('walks a monotone ladder as the zoom grows: spacing only ever shrinks', () => {
+    const ladder = [...RULER_INTERVAL_LADDER]
+    expect(ladder).toEqual([...ladder].sort((a, b) => a - b))
+    let previous = Infinity
+    for (let pps = 1; pps <= 5000; pps *= 1.3) {
+      const { minor, label } = rulerIntervals(pps)
+      expect(minor).toBeLessThanOrEqual(previous)
+      expect(label).toBeGreaterThanOrEqual(minor)
+      previous = minor
+    }
+  })
+
+  it('picks the smallest ladder step that is at least 50px wide for the minor tick', () => {
+    expect(rulerIntervals(50).minor).toBe(1)
+    expect(rulerIntervals(49).minor).toBe(2)
+    expect(rulerIntervals(10).minor).toBe(5)
+    expect(rulerIntervals(1000).minor).toBe(0.1)
+    expect(rulerIntervals(100000).minor).toBe(0.1)
+  })
+
+  it('labels the smallest step at least 80px wide that lands on a tick', () => {
+    expect(labelEvery(10)).toBe(10)
+    expect(labelEvery(100)).toBe(1)
+    expect(labelEvery(1000)).toBe(0.1)
+    // 30 px/s: ticks every 2 s; 5 s (150px) is not a tick, so 10 s labels.
+    expect(rulerIntervals(30)).toEqual({ minor: 2, label: 10 })
+  })
+
+  it('falls back to the last ladder step when nothing is wide enough', () => {
+    expect(rulerIntervals(0.5)).toEqual({ minor: 60, label: 60 })
+  })
+})
+
 describe('getRulerTicks', () => {
   it('places a tick every minor interval, up to and including the end', () => {
     const ticks = getRulerTicks(10, PPS)
 
-    expect(ticks).toHaveLength(10 / RULER_MINOR_INTERVAL + 1)
-    expect(ticks[0]).toEqual({ time: 0, x: 0, isMajor: true })
-    expect(ticks[ticks.length - 1]).toEqual({ time: 10, x: 10 * PPS, isMajor: true })
+    expect(ticks).toHaveLength(10 + 1)
+    expect(ticks[0]).toEqual({ time: 0, x: 0, isMajor: true, label: '0:00' })
+    expect(ticks[ticks.length - 1]).toEqual({ time: 10, x: 10 * PPS, isMajor: true, label: '0:10' })
   })
 
-  it('labels every major interval and leaves the rest bare', () => {
+  it('keeps the 60 s scene at 61 ticks at 50 px/s', () => {
+    expect(getRulerTicks(60, PPS)).toHaveLength(61)
+  })
+
+  it('labels the labelled ticks only and leaves the rest bare', () => {
     const ticks = getRulerTicks(10, PPS)
 
-    expect(ticks.filter((t) => t.isMajor).map((t) => t.time)).toEqual([0, 5, 10])
+    expect(labelled(10, PPS)).toEqual([0, 2, 4, 6, 8, 10])
     for (const tick of ticks) {
-      expect(tick.isMajor).toBe(tick.time % RULER_MAJOR_INTERVAL === 0)
+      expect(tick.label === '').toBe(!tick.isMajor)
     }
   })
 
   it('rounds a fractional duration up to the next whole tick', () => {
-    const ticks = getRulerTicks(2.5, PPS)
-
-    expect(ticks.map((t) => t.time)).toEqual([0, 1, 2, 3])
+    expect(getRulerTicks(2.5, PPS).map((t) => t.time)).toEqual([0, 1, 2, 3])
   })
 
   it('scales tick positions with the zoom', () => {
-    const ticks = getRulerTicks(2, PPS * 2)
+    // 200 px/s: a tick every quarter second, 50px apart.
+    expect(getRulerTicks(1, PPS * 4).map((t) => t.x)).toEqual([0, 50, 100, 150, 200])
+  })
 
-    expect(ticks.map((t) => t.x)).toEqual([0, 100, 200])
+  it('at 10 px/s labels one tick in 10 s', () => {
+    expect(labelled(40, 10)).toEqual([0, 10, 20, 30, 40])
+    expect(getRulerTicks(40, 10).map((t) => t.time)).toEqual([0, 5, 10, 15, 20, 25, 30, 35, 40])
+  })
+
+  it('at 100 px/s labels every second, with a bare half-second between', () => {
+    const ticks = getRulerTicks(2, 100)
+    expect(ticks.map((t) => t.time)).toEqual([0, 0.5, 1, 1.5, 2])
+    expect(labelled(2, 100)).toEqual([0, 1, 2])
+  })
+
+  it('at 1000 px/s labels every tenth of a second, with tenths in the label', () => {
+    const ticks = getRulerTicks(0.5, 1000)
+    expect(ticks.map((t) => t.time)).toEqual([0, 0.1, 0.2, 0.3, 0.4, 0.5])
+    expect(ticks.map((t) => t.label)).toEqual(['0:00.0', '0:00.1', '0:00.2', '0:00.3', '0:00.4', '0:00.5'])
+    expect(ticks.every((t) => t.isMajor)).toBe(true)
+  })
+
+  it('keeps float drift out of the times', () => {
+    expect(getRulerTicks(0.5, 1000)[3].time).toBe(0.3)
+  })
+})
+
+describe('formatRulerTime', () => {
+  it('shows whole seconds when the labelled step is a second or more', () => {
+    expect(formatRulerTime(65, 5)).toBe('1:05')
+    expect(formatRulerTime(2, 1)).toBe('0:02')
+  })
+
+  it('shows tenths for a tenth or half-second step', () => {
+    expect(formatRulerTime(1.5, 0.5)).toBe('0:01.5')
+    expect(formatRulerTime(61.2, 0.1)).toBe('1:01.2')
+  })
+
+  it('shows hundredths for a quarter-second step', () => {
+    expect(formatRulerTime(1.25, 0.25)).toBe('0:01.25')
   })
 })
 
