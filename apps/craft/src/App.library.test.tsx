@@ -65,7 +65,7 @@ function metadata(overrides: Partial<SourceVideo> & { id: string; name: string }
     size: 5 * 1024 * 1024,
     mediaType: 'video',
     source: 'recording',
-    recordedAt: 1_000,
+    recordedAt: new Date(2026, 9, 10, 15, 4, 5).getTime(),
     ...overrides,
   };
 }
@@ -199,7 +199,7 @@ describe('App recording downloads', () => {
 
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo: 9/9' }));
 
-    expect(browser.downloads).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.webm' }]);
+    expect(browser.downloads).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.webm' }]);
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:mock-url');
     expect(document.querySelector('a[download]')).toBeNull();
@@ -282,7 +282,7 @@ describe('App MP4 downloads', () => {
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1);
     expect(browser.downloads).toEqual([
-      { href: 'blob:mock-url', download: 'standup_demo__9_9.mp4' },
+      { href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' },
     ]);
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined);
   });
@@ -339,7 +339,7 @@ describe('App MP4 downloads', () => {
     await waitFor(() => expect(browser.downloads).toHaveLength(1));
 
     expect(browser.downloads).toEqual([
-      { href: 'blob:mock-url', download: 'standup_demo.mp4' },
+      { href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' },
     ]);
     expect(
       screen.getByText('Saved as MP4 — without audio: this browser has no AAC encoder')
@@ -361,7 +361,7 @@ describe('App MP4 downloads', () => {
     // The instant WebM download is unaffected.
     await user().click(screen.getByRole('button', { name: 'Download Standup Demo' }));
     expect(browser.downloads).toEqual([
-      { href: 'blob:mock-url', download: 'standup_demo.webm' },
+      { href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.webm' },
     ]);
   });
 });

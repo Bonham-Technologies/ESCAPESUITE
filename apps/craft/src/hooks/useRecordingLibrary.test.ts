@@ -31,6 +31,9 @@ let setNotice: ReturnType<typeof vi.fn<(notice: string | null) => void>>
 let clicks: Array<{ href: string; download: string }>
 let removed: string[]
 
+/** The take's own timestamp, local time — the download stem is built from it. */
+const AT = new Date(2026, 9, 10, 15, 4, 5).getTime()
+
 function listed(id: string, name: string, duration: number): Recording {
   return { id, name, duration, createdAt: 1_000, size: 1024, hasWebcam: false, hasAudio: true }
 }
@@ -337,10 +340,10 @@ describe('useRecordingLibrary downloading', () => {
       const { result } = mountLibrary([listed('take-1', 'Standup Demo: 9/9', 12)])
 
       await act(async () => {
-        await result.current.handleDownload('take-1', 'Standup Demo: 9/9')
+        await result.current.handleDownload('take-1', 'Standup Demo: 9/9', AT)
       })
 
-      expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.webm' }])
+      expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.webm' }])
       expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
       expect(document.querySelector('a[download]')).toBeNull()
       // The browser has not necessarily started reading the blob yet, so the URL
@@ -359,7 +362,7 @@ describe('useRecordingLibrary downloading', () => {
     const { result } = mountLibrary([listed('gone', 'Gone', 10)])
 
     await act(async () => {
-      await result.current.handleDownload('gone', 'Gone')
+      await result.current.handleDownload('gone', 'Gone', AT)
     })
 
     expect(clicks).toEqual([])

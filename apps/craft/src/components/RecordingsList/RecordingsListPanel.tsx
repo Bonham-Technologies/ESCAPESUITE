@@ -12,7 +12,7 @@ interface RecordingsListPanelProps {
   /** Newest first, as the store keeps them. */
   recordings: Recording[];
   onPlay: (id: string, name: string) => void;
-  onDownload: (id: string, name: string) => void;
+  onDownload: (id: string, name: string, createdAt: number) => void;
   onSendToEditor: (id: string) => void;
   onDelete: (id: string) => void;
 }

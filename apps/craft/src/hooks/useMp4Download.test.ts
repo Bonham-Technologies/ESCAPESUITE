@@ -63,7 +63,7 @@ function metadata(id: string, name: string): SourceVideo {
     size: 1024,
     mediaType: 'video',
     source: 'recording',
-    recordedAt: 1_000,
+    recordedAt: new Date(2026, 9, 10, 15, 4, 5).getTime(),
   }
 }
 
@@ -163,7 +163,7 @@ describe('useMp4Download, start to finish', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
     // A conversion that worked says nothing of its own, and clears whatever
     // the channel was still holding — see the notice test below.
@@ -367,7 +367,7 @@ describe('useMp4Download cancellation', () => {
       await result.current.startMp4Download('take-1', 'Take One')
     })
 
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
   })
 
   it('does nothing when there is no conversion to cancel', () => {
@@ -548,7 +548,7 @@ describe('useMp4Download and a recording deleted mid-conversion', () => {
     })
     await waitFor(() => expect(result.current.converting).toBeNull())
 
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     expect(setNotice).toHaveBeenLastCalledWith(null)
   })
 })
@@ -644,7 +644,7 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
   })
 
   it('is blocked with the probe\'s own reason once it says it cannot', async () => {
@@ -712,7 +712,7 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     // Told twice: before, in the note, and after, in the one notice channel.
     expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_AUDIO)
   })
@@ -759,6 +759,32 @@ describe('useMp4Download gating', () => {
   })
 })
 
+describe('useMp4Download download name', () => {
+  it('falls back to a dated stem for a legacy record with no recordedAt', async () => {
+    const legacy = metadata('old', 'Old Take')
+    delete legacy.recordedAt
+    await storeVideo('old', new Blob(['video-bytes'], { type: 'video/webm' }), legacy)
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('old', 'Old Take')
+    })
+
+    expect(clicks[0].download).toMatch(/^recording_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mp4$/)
+  })
+
+  it('names a companion row by its label', async () => {
+    await seed('take-1', 'Recording x — Webcam')
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Recording x — Webcam')
+    })
+
+    expect(clicks[0].download).toBe('recording_2026-10-10_15-04-05_webcam.mp4')
+  })
+})
+
 describe('useMp4Download audio-only (M4A)', () => {
   it('converts the take\'s audio and downloads it under a safe .m4a name', async () => {
     await seed('take-1', 'Standup Demo: 9/9')
@@ -772,7 +798,7 @@ describe('useMp4Download audio-only (M4A)', () => {
     // the picture thrown away afterwards.
     expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
     expect(converterModule.convertToMP4).not.toHaveBeenCalled()
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.m4a' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.m4a' }])
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
     expect(setNotice.mock.calls).toEqual([[null]])
   })
@@ -932,7 +958,7 @@ describe('useMp4Download audio-only (M4A)', () => {
     })
 
     expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.m4a' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.m4a' }])
   })
 
   it('is offered, with nothing to say, once the probe says the browser can encode AAC', () => {
@@ -1022,7 +1048,7 @@ describe('useMp4Download for a take recorded as separate tracks', () => {
     expect(await composite!.companion.blob.text()).toBe('camera-bytes')
     expect(composite!.companion.placement).toEqual(PLACEMENT)
     expect(composite!.companion.startOffset).toBe(0)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     // A composite that worked is not worth a sentence: the file is what was
     // asked for, and the channel is cleared as it is after any conversion.
     expect(setNotice.mock.calls).toEqual([[null]])
@@ -1122,7 +1148,7 @@ describe('useMp4Download for a take recorded as separate tracks', () => {
     // No companion handed to the converter, a real MP4 downloaded, and the user
     // told what is not in it — the `'unavailable'` outcome exactly.
     expect(converterModule.convertToMP4.mock.calls[0][3]).toBeUndefined()
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
     expect(consoleWarn).toHaveBeenCalledWith(
       'Could not read the take’s webcam part; converting the screen alone',
