@@ -34,6 +34,9 @@ export const RULER_MIN_TICK_PX = 50;
 /** The narrowest two time labels may sit apart, in pixels. */
 export const RULER_MIN_LABEL_PX = 80;
 
+/** The smallest scale the zoom control reaches: zoom 0.1, in pixels per second. */
+export const MIN_PIXELS_PER_SECOND = PIXELS_PER_SECOND_BASE * 0.1;
+
 /** How close to a clip's edges the razor refuses to split, in seconds. */
 export const MIN_SPLIT_DISTANCE = 0.1;
 
@@ -59,21 +62,16 @@ export interface RulerTick {
  * the smallest ladder step at least `RULER_MIN_LABEL_PX` wide, so labels never
  * get coarser as the zoom grows. `minor` is then the smallest ladder step at
  * least `RULER_MIN_TICK_PX` wide that divides `label` evenly, so every labelled
- * time is a tick. A scale too small for a label falls back to the ladder's last
- * step, and a tick too narrow to draw falls back to the label step itself.
+ * time is a tick. The scale is held at the timeline's minimum zoom, so a label
+ * step and a dividing tick step always exist on the ladder.
  */
 export function rulerIntervals(pixelsPerSecond: number): { minor: number; label: number } {
-  const label =
-    RULER_INTERVAL_LADDER.find((step) => step * pixelsPerSecond >= RULER_MIN_LABEL_PX) ??
-    RULER_INTERVAL_LADDER[RULER_INTERVAL_LADDER.length - 1];
-  const minor =
-    RULER_INTERVAL_LADDER.find((step) => {
-      const steps = label / step;
-      return (
-        step * pixelsPerSecond >= RULER_MIN_TICK_PX &&
-        Math.abs(steps - Math.round(steps)) < 1e-9
-      );
-    }) ?? label;
+  const pps = Math.max(pixelsPerSecond, MIN_PIXELS_PER_SECOND);
+  const label = RULER_INTERVAL_LADDER.find((step) => step * pps >= RULER_MIN_LABEL_PX)!;
+  const minor = RULER_INTERVAL_LADDER.find((step) => {
+    const steps = label / step;
+    return step * pps >= RULER_MIN_TICK_PX && Math.abs(steps - Math.round(steps)) < 1e-9;
+  })!;
   return { minor, label };
 }
 

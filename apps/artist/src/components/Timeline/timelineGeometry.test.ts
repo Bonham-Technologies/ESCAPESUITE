@@ -81,8 +81,10 @@ describe('rulerIntervals', () => {
     expect(rulerIntervals(30)).toEqual({ minor: 5, label: 5 })
   })
 
-  it('falls back to the last ladder step when nothing is wide enough', () => {
-    expect(rulerIntervals(0.5)).toEqual({ minor: 60, label: 60 })
+  it('resolves both ends of the zoom range, and holds a smaller scale at the minimum', () => {
+    expect(rulerIntervals(5)).toEqual({ minor: 10, label: 30 })
+    expect(rulerIntervals(500)).toEqual({ minor: 0.25, label: 0.25 })
+    expect(rulerIntervals(0.5)).toEqual(rulerIntervals(5))
   })
 })
 
