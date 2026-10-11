@@ -14,6 +14,8 @@ ESCAPE Suite is a **Turborepo monorepo** containing privacy-first, client-side m
 | E2E Tests | `@escapesuite/e2e` | End-to-end test suite | N/A |
 | Headless ARTIST kit | `@escapesuite/headless-artist` | Server-side render CLI + kit | N/A |
 
+Each app's dev (and preview) port is pinned in its `vite.config.ts` with `strictPort: true`, so a taken port fails loudly instead of sliding to the next one and the table above always holds.
+
 ## Monorepo Structure
 
 ```

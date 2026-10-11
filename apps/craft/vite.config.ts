@@ -16,6 +16,10 @@ export default defineConfig({
       gzipSize: true,
     }),
   ].filter(Boolean),
+  // Pinned so the port never depends on start order (ESCSUITE-252): a taken port
+  // fails loudly instead of sliding to the next one.
+  server: { port: 5174, strictPort: true },
+  preview: { port: 5174, strictPort: true },
   build: {
     target: 'esnext',
     cssCodeSplit: false,
