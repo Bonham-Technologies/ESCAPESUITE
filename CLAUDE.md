@@ -3761,6 +3761,30 @@ hanging past the 5 s test timeout) were red before the fix; the review's two LOW
 the deadline through `resolveStoredDuration`) are the last commit. `App.*rerender*` and every `*.perf.test.ts`
 are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-220 (an export in flight is released when a
+render error unmounts the editor: `components/Export/liveExport.ts` holds one module-level slot that
+`ExportDialog` registers a run's abort in when the run starts and clears — behind an identity guard, so an
+older run's `finally` cannot clear a newer run's registration — when it settles or is cancelled;
+`disposeLiveExport()` aborts whatever is registered, once, and is a no-op otherwise; `main.tsx`'s `onError`
+calls it, the CRAFT shape of `disposeLiveRecordingSession`, relying on the same ordering — `componentDidCatch`
+runs before the deleted subtree's passive cleanup — which the dialog's ordering pin shows red when an unmount
+`useLayoutEffect` clears the slot early): 99.83 / **99.38** / 96.41 / 99.75 against the
+99.83 / 99.37 / 96.41 / 99.75 that `main` measures in the same sitting (`cb202b8c`; the commit this branch
+lands on differs in docs alone, so the artist source is identical) — statements up a hundredth, the other
+three unmoved. The base gives 5,594 / 5,802 branches and this branch 5,596 / 5,804: two new branches, two
+covered, the same 208 uncovered (lines 8,653 / 8,667 → 8,663 / 8,677, statements 9,776 / 9,837 →
+9,786 / 9,847, functions 2,061 / 2,066 → 2,064 / 2,069, every denominator growing by exactly what the
+numerator did; the same 14 / 61 / 5 uncovered). Both branches are `liveExport.ts`'s, on arrival at
+2 / 2, 7 / 7 and 3 / 3 — the slot held or empty in `disposeLiveExport()`, and the identity guard on the clear
+— each reached from both sides by the module's own cases and the dialog's (a run in flight aborted once; no
+run → nothing; a settled run → nothing; a second run after the first settled holds the slot; a dispose after
+Cancel aborts nothing more); `ExportDialog.tsx` gains three statements and no decision. The review (opus) ran
+the two mutations itself — the guard removed reds the late-rejection and late-clear cases; the ordering pin
+reds under an early `useLayoutEffect` clear — and approved with no code change; `main.tsx` is
+coverage-excluded and its `main.test.tsx` pins the call. The table row is left as the ESCSUITE-249 paragraph
+set it. `ExportDialog.rerender*` and every `*.perf.test.ts` are byte-identical. **No floor crossed**;
+artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
