@@ -233,6 +233,39 @@ describe('useRecordingLibrary playback', () => {
       expect(result.current.playbackUrl).toBe('blob:b')
     })
 
+    it('a Play still reading when Close is pressed does not reopen the dialog', async () => {
+      await seed('take-1', 'First')
+      const { result } = mountLibrary([listed('take-1', 'First', 10)])
+
+      await act(async () => {
+        const pending = result.current.handlePlayRecording('take-1', 'First')
+        result.current.handleClosePlayback()
+        await pending
+      })
+
+      expect(result.current.playbackUrl).toBeNull()
+      expect(result.current.playbackName).toBe('')
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBe(
+        vi.mocked(URL.createObjectURL).mock.calls.length,
+      )
+      expect(setNotice).not.toHaveBeenCalled()
+    })
+
+    it('a Play whose read lands after unmount revokes its own mint', async () => {
+      await seed('take-1', 'First')
+      const { result, unmount } = mountLibrary([listed('take-1', 'First', 10)])
+
+      let pending!: Promise<void>
+      await act(async () => {
+        pending = result.current.handlePlayRecording('take-1', 'First')
+        unmount()
+        await pending
+      })
+
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    })
+
     it('Play then Close mints once and revokes once', async () => {
       await seed('take-1', 'First')
       const { result } = mountLibrary([listed('take-1', 'First', 10)])

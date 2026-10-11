@@ -68,7 +68,14 @@ export function useRecordingLibrary({
   };
 
   // The dialog can be open when the app unmounts (the ESCSUITE-212 crash path).
-  useEffect(() => revokeLiveUrl, []);
+  // Bumping the token first makes a read still parked at unmount land stale.
+  useEffect(
+    () => () => {
+      playTokenRef.current++;
+      revokeLiveUrl();
+    },
+    [],
+  );
 
   // Delete a recording, and the companions that belong to it
   const handleDeleteRecording = async (id: string) => {
@@ -163,6 +170,8 @@ export function useRecordingLibrary({
 
   // Close playback
   const handleClosePlayback = () => {
+    // A Play still reading must not reopen the dialog the user just closed.
+    playTokenRef.current++;
     revokeLiveUrl();
     setPlaybackUrl(null);
     setPlaybackName('');
