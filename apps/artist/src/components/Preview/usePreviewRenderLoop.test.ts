@@ -285,6 +285,81 @@ describe('usePreviewRenderLoop and a loop region shorter than one frame', () => 
   })
 })
 
+// ESCSUITE-280: starting playback with the playhead in a gap between clips
+// wrote the next clip's start to the store and returned without starting the
+// animation loop — `currentTime` is not one of the playback effect's
+// dependencies, so nothing started it later. The transport showed Pause,
+// `isPlaying` stayed true and the playhead sat frozen on the next clip's start.
+// The loop now starts in the same run, on its own clock, from that clip.
+describe('usePreviewRenderLoop starting in a gap (ESCSUITE-280)', () => {
+  it('plays on from the next clip when playback starts in a gap', async () => {
+    addClip('first', 0, 2)
+    addClip('second', 4, 2)
+    const { deps, play, seek } = harness()
+    seek(3)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    vi.mocked(deps.drawFrame).mockClear()
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(true)
+    // Past the next clip's start, not parked on it.
+    expect(store().currentTime).toBeGreaterThan(4)
+    const times = drawnTimes(deps)
+    expect(times.length).toBeGreaterThan(10)
+    expect(times[0]).toBeGreaterThanOrEqual(4)
+    expect(last(times)).toBeGreaterThan(4.4)
+  })
+
+  it('writes the jumped-to time to the store once, before the first frame', async () => {
+    addClip('first', 0, 2)
+    addClip('second', 4, 2)
+    const { deps, play, seek } = harness()
+    seek(3)
+    const writes = spyOnStoreTimeWrites()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(0)
+
+    expect(writes.mock.calls).toEqual([[4]])
+    expect(store().currentTime).toBe(4)
+  })
+
+  it('starts the next clip\'s video from its own start once the loop reaches it', async () => {
+    const second = addClip('second', 4, 2)
+    store().updateClip(second.id, { startTime: 1, endTime: 3 })
+    addClip('first', 0, 2)
+    const { deps, play, seek } = harness()
+    const element = deps.videoElementsRef.current.get(video.id)!
+    seek(3)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(FRAME_MS * 3)
+
+    expect(element.play).toHaveBeenCalled()
+    // Its source time: the clip's own start plus however far the loop has got.
+    expect(element.currentTime).toBeGreaterThanOrEqual(1)
+    expect(element.currentTime).toBeLessThan(1.2)
+  })
+
+  it('stops at the end, as before, when no clip follows the gap', async () => {
+    addClip('only', 0, 2)
+    const { deps, play, seek } = harness()
+    seek(2.5)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    vi.mocked(deps.drawFrame).mockClear()
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(2)
+  })
+})
+
 describe('usePreviewRenderLoop scrubbing', () => {
   it('draws the uncached frame straight away when there is nothing to seek', async () => {
     const { deps } = harness()
