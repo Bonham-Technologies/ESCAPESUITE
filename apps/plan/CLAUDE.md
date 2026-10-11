@@ -38,6 +38,9 @@ pnpm lint                # Run ESLint
 - **React Router** for client-side routing
 - **Vercel Analytics** for usage tracking
 
+### Error boundary (ESCSUITE-219)
+`main.tsx` builds its own root (no `bootstrapApp()`, which has no hook for `<BrowserRouter>`), so it mounts the shared `ErrorBoundary` (`@escapesuite/shared/components`) itself: inside `<BrowserRouter>` (the fallback's Reload keeps the route) and around `<App />`, with `GatedAnalytics` outside it. A render-time throw on any route shows the shared panel with a Reload button instead of a blank page. No `onError` is passed: the hub holds nothing live to release. Pinned by `src/main.test.tsx` (`main.tsx` itself is coverage-excluded).
+
 ### Project Structure
 ```
 src/

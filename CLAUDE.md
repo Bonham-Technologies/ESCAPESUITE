@@ -126,13 +126,15 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   declining discards the
   saved session. See each app's CLAUDE.md "Dialogs" note
 - **Shared error boundary**: `ErrorBoundary` (`packages/shared/src/components`), available as
-  `@escapesuite/shared/components` for a host app — `bootstrapApp` reaches it directly — is the
-  one React error boundary for both apps, mounted by `bootstrapApp()` around `<App />`. A
+  `@escapesuite/shared/components` for a host app, is the one React error boundary for all three
+  apps. `bootstrapApp()` mounts it around `<App />` for CRAFT and ARTIST; ESCAPEPLAN, which
+  builds its own root, mounts it itself in `main.tsx` inside `<BrowserRouter>` (so Reload keeps
+  the route) and around `<App />`, with no `onError` (ESCSUITE-219). A
   render-time throw anywhere below it shows one minimal,
   accessible fallback panel instead of unmounting the whole app to a blank page, and calls an
   optional `onError(error, info)` — the one hook a host app has for releasing anything a crash
   would otherwise leave dangling. CRAFT's disposes a live recorder; ARTIST's is a documented
-  no-op. See each app's CLAUDE.md
+  no-op; PLAN passes none. See each app's CLAUDE.md
 
 ### ESCAPEPLAN (apps/plan)
 - React Router for client-side routing
@@ -3592,6 +3594,18 @@ on the review's ruling: the preview's own 0.05 s seek skip (the paused preview i
 design) and a Firefox WebM read-back that still shows 10 of 45 frames of a per-frame source off by six to
 fourteen, the same before and after, filed as ESCSUITE-279. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
+
+`@escapesuite/plan` was re-measured 2026-10-10 for ESCSUITE-219 (the hub mounts the shared `ErrorBoundary`
+itself — inside `<BrowserRouter>` so the fallback's Reload keeps the route, around `<App />`, with
+`GatedAnalytics` outside it and no `onError`, the hub holding nothing live to release — so a render-time
+throw on any route shows the panel and its Reload button instead of a blank page): 100.00 / 100.00 /
+100.00 / 100.00, identical on every count to `main` at `cb202b8c` in the same sitting — lines 82, statements
+83, branches 21, functions 27, every one covered on both trees. The one source change is in `main.tsx`,
+which is coverage-excluded in every package; it is pinned by the new `main.test.tsx`, which mocks
+`createRoot`, renders the element tree the entry hands it with `App` replaced by a component that throws,
+and asserts the `role="alert"` panel and the Reload button — red before the boundary was mounted (the
+throw escaped `render`). No measured file gained a unit. **No floor crossed**; plan's floors stay
+100 / 100 / 100 / 100.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
