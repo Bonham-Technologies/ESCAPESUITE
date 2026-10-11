@@ -17,6 +17,8 @@ interface TimelineRulerProps {
   inPoint: number | null;
   outPoint: number | null;
   onRulerClick: (e: React.MouseEvent) => void;
+  /** Seek to an exact time; a marker flag uses it instead of the ruler's pixel maths. */
+  onSeek: (time: number) => void;
   onRemoveMarker: (markerId: string) => void;
   onInPointMouseDown: (e: React.MouseEvent) => void;
   onOutPointMouseDown: (e: React.MouseEvent) => void;
@@ -45,6 +47,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   inPoint,
   outPoint,
   onRulerClick,
+  onSeek,
   onRemoveMarker,
   onInPointMouseDown,
   onOutPointMouseDown,
@@ -77,6 +80,12 @@ export const TimelineRuler = React.memo(function TimelineRuler({
               className={styles.markerFlag}
               style={{ left: timeToPixels(marker.time, pixelsPerSecond), '--marker-color': marker.color } as React.CSSProperties}
               aria-label={`Marker ${marker.label} at ${formatTime(marker.time)} — Delete to remove`}
+              onClick={(e) => {
+                // Not the ruler's pixel maths: a keyboard activation has no
+                // pointer position, and a mouse click should land on the marker.
+                e.stopPropagation();
+                onSeek(marker.time);
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Delete' || e.key === 'Backspace') {
                   e.preventDefault();

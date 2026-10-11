@@ -236,7 +236,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   });
 
   // Click-to-seek, on the ruler and on empty track space
-  const { handleRulerClick, handleTrackClick } = useTimelineSeek({
+  const { handleRulerClick, handleSeekTo, handleTrackClick } = useTimelineSeek({
     rulerRef,
     trackContainerRef,
     pixelsPerSecond,
@@ -264,6 +264,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
         inPoint={inPoint}
         outPoint={outPoint}
         onRulerClick={handleRulerClick}
+        onSeek={handleSeekTo}
         onRemoveMarker={removeMarker}
         onInPointMouseDown={handleInPointMouseDown}
         onOutPointMouseDown={handleOutPointMouseDown}
