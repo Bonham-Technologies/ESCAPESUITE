@@ -1158,7 +1158,9 @@ Clips support animated properties via keyframes:
 - **KeyframeGraph.tsx**: Visual keyframe editor with Bezier curve display
 - **Per-keyframe easing**: select a keyframe in the graph and its easing `<select>` appears below it
   (`EASING_TYPES` from `src/utils/easingOptions.ts`, shared with the animate-in/out presets); new
-  keyframes default to `ease-in-out` and a value drag preserves the stored easing
+  keyframes default to `ease-in-out` and a value drag preserves the stored easing; an add aimed at
+  a time that already holds a keyframe selects that one and leaves its easing alone (ESCSUITE-248,
+  below)
 - When keyframe panel is open, manipulating overlays in the main preview creates keyframes instead of direct updates
 - **The panel works from the keyboard (ESCSUITE-243).** Each property row (`KeyframeTrack.tsx`) was a
   `<div onClick>`, so the graph's own keyboard model was reachable only by a mouse. The row stays a
@@ -1171,8 +1173,9 @@ Clips support animated properties via keyframes:
   Enter and Space are the native button's; no key handler of ours, and one activation calls
   `onSelect` once. The rows sit in one `role="group"` named "Animated properties" (the audio header and
   the Volume row included) with a **roving tab stop derived from the open row** — 0 on it, or on the
-  first row when none is open or the open property has no row, -1 elsewhere — so there is no state and
-  no extra render. ArrowUp/ArrowDown wrap, Home/End jump, through `app/menuNavigation.ts`'s
+  first row when no graph is open, -1 elsewhere — so there is no state and no extra render. (A stored
+  selection naming a property the clip has no row for draws no graph at all since ESCSUITE-248, so
+  it cannot hold the stop either.) ArrowUp/ArrowDown wrap, Home/End jump, through `app/menuNavigation.ts`'s
   `nextMenuIndex`; a ⌘/Ctrl/Alt chord is left to the browser. **Keyboard** activation of a row opens
   its graph and focuses it (`onSelect(event.detail === 0)`, `focusGraphOnOpenRef`, consumed once by an
   effect on `selectedProperty` after the graph has mounted); a mouse click opens it and leaves focus
@@ -1253,8 +1256,9 @@ Clips support animated properties via keyframes:
   (review round 1, MINOR 6) — and the setter now goes straight to the row, the alternating
   zero-width mark having nothing left to help a screen reader re-read. The occupied-time refusal
   itself survives where it is still reachable: `nudgeTime`, for a keyboard that has no pointer
-  position to clamp, through the graph's own region and `announceWithMark` (module-local again,
-  beside the `nudgeTime` that raises it).
+  position to clamp, through the graph's own region and `announceWithMark` (which lives beside the
+  `nudgeTime` that raises it, and is exported again since ESCSUITE-248 for the panel's
+  "Keyframe at 1.20 s selected", which a user can repeat word for word).
 
   The graph's own point drag makes the identical clamp, through the identical helper — see "The
   graph's own point drag cannot be dragged into an occupied neighbour's window either"
@@ -1269,6 +1273,40 @@ Clips support animated properties via keyframes:
   always passed a value. `KeyframePanel.handleAddKeyframe`'s `value` parameter is required now:
   nothing calls it without one, so the clip-default fallback was deleted rather than kept
   unreachable.
+- **Adding where a keyframe already is selects it (ESCSUITE-248 / M-15)**. All three add paths —
+  the graph's Enter ("Add Keyframe at Playhead", `addAtPlayhead`), the graph's double-click and a
+  row's double-click — land in `KeyframePanel.handleAddKeyframe`, which wrote
+  `easing: 'ease-in-out'` unconditionally: aimed at a time that already held a keyframe,
+  `setClipKeyframe` replaced it, so the add silently reset that keyframe's easing and spent an undo
+  step on what was otherwise no change, while the graph announced "Opacity 50% at 1.00 seconds" as
+  if a keyframe had been added. Now a time within `KEYFRAME_TIME_EPSILON` of one of the property's
+  **stored** keyframes (`animation.keyframes[property]`, the ones `setClipKeyframe` would replace, at
+  the tolerance it replaces at) is not written: the panel asks the graph to select that keyframe,
+  announces "Keyframe at 1.20 s selected" (the keyframe's own time, two decimals) through its one
+  live region with `announceWithMark` — so Enter twice on one keyframe is heard twice — and
+  answers `false`. No store write, no history entry. The selection is the graph's own state, so the
+  panel **asks** rather than sets it: `KeyframeGraph`'s `selectRequest` prop, a new `{ time }` object
+  per request, applied once by an effect (the same two writes a click on the keyframe makes) and
+  handed back through `onSelectRequestHandled` so a later remount of the graph does not apply it
+  again. From a row whose graph is not the one showing, the panel opens that row's graph first, in
+  the same update, so the request lands on the graph that mounts. `onAddKeyframe` is typed
+  `=> boolean | void` on the graph and the keyboard hook: `false` means "nothing was written", and
+  `addAtPlayhead` then neither moves the active option to the playhead nor announces an add in the
+  graph's own region; any other answer (a host that returns nothing included) is an add, as before.
+  A **preset** handle's time (Animate In/Out, never stored as a keyframe) is not "held" in this
+  sense: an add there still writes a custom keyframe, as it always has.
+- **An audio-only clip is offered Volume alone (ESCSUITE-248 / M-19)**. The property list rendered
+  Position, Scale, Rotation, Opacity and Blur for every clip, so a voice-over could be keyframed to
+  move or fade, to no visible effect (the inspector already hides Transform for audio). The panel
+  derives the clip's `sourceMedia` once; `clipHasAudio` gates the audio section as before
+  (`mediaType === 'audio' || hasAudio`), and its mirror `clipHasPicture` (`mediaType !== 'audio'`;
+  a clip with no source media is an overlay and keeps the picture rows) gates the picture rows. The
+  rows a clip is offered (`rowProperties`) are the union, never empty. The stored
+  `keyframePanelState.selectedProperty` is the panel's, not the clip's, so it survives a change of
+  selection; a property the newly selected clip has **no row for** draws no graph (`openProperty`
+  is `null`) — a picture graph left open when the selection moves to an audio-only clip, and,
+  by the same derivation, a Volume graph left open on a clip with no sound, which ESCSUITE-243 used
+  to keep drawing. Nothing is written: selecting a clip that has the row shows the graph again.
 - **The playhead follows the timeline, not a local scrub state (ESCSUITE-126)**. `KeyframePanel.tsx`
   used to keep a `previewTime` local override, set only by `handlePreviewTimeChange` (the callback
   `ClipPreview`'s scrubber and Play button both call) and never reset back to `null` by anything —

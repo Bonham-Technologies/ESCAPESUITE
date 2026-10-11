@@ -84,11 +84,12 @@ const ANNOUNCE_MARK = '\u200B';
  * `KeyframePanel`'s row-wide live region could share this exact mechanism
  * rather than hand-roll a third copy beside this one and
  * `Preview/useCropHandleGesture.ts`'s (ESCSUITE-163/167 review round 1,
- * MAJOR 1). ESCSUITE-183 took that refusal away — a pointer drag's landing is
- * always legal now — so the only announcements left that can repeat are this
- * file's own, and it is module-local again.
+ * MAJOR 1). ESCSUITE-183 took that refusal away and it went module-local;
+ * ESCSUITE-248 exports it again, for the panel's "Keyframe at 1.20 s selected"
+ * — an add aimed at a keyframe that is already there, which a user pressing
+ * Enter twice on the same keyframe repeats word for word.
  */
-function announceWithMark(
+export function announceWithMark(
   setMessage: Dispatch<SetStateAction<string>>,
   text: string
 ): void {
@@ -153,7 +154,12 @@ interface KeyframeGraphKeyboardOptions {
    */
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory: boolean) => boolean;
   onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory: boolean) => boolean;
-  onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
+  /**
+   * `false` means nothing was written: the time already held a keyframe, and
+   * the host selected that one and announced it instead (ESCSUITE-248). Any
+   * other answer — `true`, or a host that returns nothing — is an add.
+   */
+  onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => boolean | void;
   /** Returns whether the store removed the keyframe — as the two above do. */
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => boolean;
 }
@@ -311,7 +317,10 @@ export function useKeyframeGraphKeyboard({
     // is clamped to the clip's edge, and reading the curve anywhere other than
     // where the keyframe lands would make the curve jump when it does.
     const value = interpolateKeyframes(keyframes, time, defaultValue);
-    onAddKeyframe(property, time, value);
+    // A keyframe already there (ESCSUITE-248): the host selected it and said
+    // so through the panel's region, so this one says nothing — no keyframe
+    // was added — and leaves the selection where the host put it.
+    if (onAddKeyframe(property, time, value) === false) return;
     setActiveTime(time);
     setSelectedKeyframeTime(time);
     announce(nudgeAnnouncement(property, value, time));

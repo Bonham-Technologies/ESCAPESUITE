@@ -1230,19 +1230,20 @@ describe('KeyframePanel', () => {
       expect(document.activeElement).toBe(row('Opacity'))
     })
 
-    it('Escape in a graph whose property has no row returns focus to the rows\' tab stop', () => {
+    // Until ESCSUITE-248 a Volume graph left open on a clip with no sound was
+    // still drawn, and this case pinned where Escape in it sent focus. Since
+    // then a graph whose property has no row is not drawn at all — the mirror
+    // of the picture graph closing on an audio-only clip — so there is no
+    // such graph to press Escape in, and the stored selection waits for a
+    // clip that has the row.
+    it('draws no graph for an open property the clip has no row for, and keeps the selection', () => {
       openPanelWithClip()
       store().setKeyframePanelSelectedProperty('volume')
       render(<KeyframePanel />)
-      const windowKeys = vi.fn()
-      window.addEventListener('keydown', windowKeys)
 
-      screen.getByRole('listbox').focus()
-      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
-
-      window.removeEventListener('keydown', windowKeys)
-      expect(document.activeElement).toBe(row('Position X'))
-      expect(windowKeys).not.toHaveBeenCalled()
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(store().keyframePanelState.selectedProperty).toBe('volume')
+      expect(row('Position X').tabIndex).toBe(0)
     })
 
     it('leaves every other key in the graph region to the graph and the editor', () => {
