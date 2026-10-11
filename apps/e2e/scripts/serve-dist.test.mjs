@@ -84,7 +84,52 @@ test('headersFor, called with no config, reads the real vercel.json — the serv
 
   // And the whole thing is literally vercel.json's own array for a path every
   // pattern in it matches — proof this reads the file rather than a copy of it.
-  assert.deepEqual(headers, realVercelConfig.headers[0].headers)
+  assert.deepEqual(
+    headers,
+    realVercelConfig.headers.find((entry) => entry.source === '/(.*)').headers
+  )
+})
+
+// ESCSUITE-240: the hub's content-hashed /assets/* chunks are immutable, so
+// they carry a year-long cache header, and nothing else does.
+test('headersFor gives /assets/* an immutable Cache-Control and no other path one', () => {
+  const cacheControl = (path) =>
+    headersFor(path).filter((header) => header.key === 'Cache-Control')
+  assert.deepEqual(cacheControl('/assets/index-Ch5NE3Oq.js'), [
+    { key: 'Cache-Control', value: 'public, max-age=31536000, immutable' },
+  ])
+  assert.deepEqual(cacheControl('/'), [])
+  assert.deepEqual(cacheControl('/artist/decodeWorker-abc.js'), [])
+  assert.deepEqual(cacheControl('/craft/'), [])
+})
+
+test('a served /assets file keeps vercel.json\'s Cache-Control; other files stay no-store (ESCSUITE-240)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'serve-dist-240-'))
+  mkdirSync(join(dir, 'assets'))
+  writeFileSync(join(dir, 'assets', 'index-abc.js'), 'export {}')
+  writeFileSync(join(dir, 'index.html'), '<!doctype html>')
+  const server = createServer(dir)
+  await new Promise((done) => server.listen(0, '127.0.0.1', done))
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`
+    const asset = await fetch(`${base}/assets/index-abc.js`)
+    assert.equal(asset.headers.get('cache-control'), 'public, max-age=31536000, immutable')
+    const hub = await fetch(`${base}/`)
+    assert.equal(hub.headers.get('cache-control'), 'no-store')
+  } finally {
+    await new Promise((done) => server.close(done))
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+// ESCSUITE-240: /favicon.ico used to be answered with the hub page (200
+// text/html) because the catch-all excluded only `favicon` the segment.
+test('/favicon.ico is excluded from the SPA catch-all and is a miss when absent', () => {
+  const rewrites = realVercelConfig.rewrites ?? []
+  const fileExists = (path) => new Set(['/index.html']).has(path)
+  assert.equal(resolveRequestPath('/favicon.ico', rewrites, fileExists), null)
+  // Nothing relies on a /favicon segment; it is an ordinary hub path now.
+  assert.equal(resolveRequestPath('/favicon', rewrites, fileExists), '/index.html')
 })
 
 // ESCSUITE-140: `/_vercel/*` (the @vercel/analytics beacon endpoint,
@@ -253,7 +298,11 @@ test('resolveRequestPath: a path excluded from the catch-all and absent from dis
   const rewrites = realVercelConfig.rewrites ?? []
   const fileExists = (path) => new Set(['/index.html', '/craft/index.html', '/artist/index.html']).has(path)
   assert.equal(resolveRequestPath('/assets/does-not-exist.js', rewrites, fileExists), null)
-  assert.equal(resolveRequestPath('/favicon/does-not-exist.ico', rewrites, fileExists), null)
+  // /favicon.ico (ESCSUITE-240) is excluded by name: absent from disk, a real miss.
+  assert.equal(resolveRequestPath('/favicon.ico', rewrites, fileExists), null)
+  // The old `/favicon/...` segment exclusion is gone: that path is an ordinary
+  // hub path now, not a miss (nothing relies on a /favicon directory).
+  assert.equal(resolveRequestPath('/favicon/does-not-exist.ico', rewrites, fileExists), '/index.html')
   // But an ordinary hub-shaped path still resolves to the hub SPA.
   assert.equal(resolveRequestPath('/about', rewrites, fileExists), '/index.html')
 })

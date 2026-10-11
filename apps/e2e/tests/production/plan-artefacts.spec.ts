@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test'
  * Both are deleted from `apps/plan/public/`.
  *
  * Deleting the files does NOT make either path 404: `vercel.json`'s SPA
- * catch-all rewrite (`/((?!craft|artist|assets|favicon).*)` → `/index.html`)
+ * catch-all rewrite (`/((?!(?:craft|artist|assets|favicon\\.ico)(?:/|$)).*)` → `/index.html`)
  * matches both, the same as it matches any typo'd URL, so a request that no
  * longer has a filesystem match falls through to the hub's `index.html` at
  * 200 — verified against both `serve-dist.mjs` here and the live

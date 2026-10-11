@@ -385,7 +385,13 @@ VITE_EDITOR_URL=/artist/     # where CRAFT sends recordings for editing
   (which mirrors `vercel.json`'s rewrites, and — since ESCSUITE-121 part 2 — reads and sends
   `vercel.json`'s `headers` block too, so the suite runs under the real hosted
   Content-Security-Policy and `X-Frame-Options` rather than none at all; `tests/production/csp-media.spec.ts`
-  is the regression test, proving a `blob:` video source survives that CSP in both apps). Since
+  is the regression test, proving a `blob:` video source survives that CSP in both apps).
+  ESCSUITE-240: `vercel.json` gives the hub's content-hashed `/assets/*` chunks
+  `Cache-Control: public, max-age=31536000, immutable` (the server keeps a Cache-Control the
+  `headers` block sets instead of forcing `no-store`; the craft/artist single files and the
+  artist worker chunk live outside `/assets/` and keep Vercel's default), the catch-all excludes
+  `favicon\.ico` so that path is a real 404 rather than the hub page (the hub's icon is a `data:`
+  URI; no `.ico` ships), and the sitemap lists `/craft/` and `/artist/`. Since
   ESCSUITE-196, `serve-dist.mjs`'s rewrite table is *derived* from `vercel.json`'s `rewrites`
   array (walked in order through the same `source`-pattern matcher the `headers` block already
   used), not a hand-coded copy of it — `tests/production/spa-fallback.spec.ts` and
@@ -3712,6 +3718,20 @@ ruling: one decision, in the store, beats two). The four red cases (the unchange
 store's refusal) were red before the fix; the ESCSUITE-160 inline-editor pins, `drawFrame.perf.test.ts`,
 every `*.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
+
+`@escapesuite/plan` was re-measured 2026-10-10 for ESCSUITE-240 (hub infra: the hub's content-hashed
+`/assets/*` chunks are served `Cache-Control: public, max-age=31536000, immutable` through a `vercel.json`
+`headers` entry — which `serve-dist.mjs` now carries through instead of forcing `no-store` on every path —
+`/favicon.ico` is a real 404 instead of the hub page at 200 (the catch-all excludes the file `favicon\.ico`
+rather than any `/favicon` segment; the hub's icon is a `data:` URI and nothing relied on the old
+exclusion), and the sitemap lists `/craft/` and `/artist/`): 100.00 / 100.00 / 100.00 / 100.00, identical on
+every count to `main` at `7873c436` in the same sitting — lines 82, statements 83, branches 21, functions 27,
+every one covered on both trees. The change touches no measured plan source (a public file, `vercel.json`,
+the e2e server and its pins), so nothing moved; the `serve-dist.mjs` change is covered by
+`serve-dist.test.mjs` (19 / 19), and the two production-layout pins — a hashed `/assets` chunk carrying the
+immutable header while the document does not, and `/favicon.ico` answering 404 and not `text/html` — were
+run here against `pnpm build:deploy` on Chromium: 25 / 25, and 5 / 5 for the spec after the review's
+follow-ups. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:

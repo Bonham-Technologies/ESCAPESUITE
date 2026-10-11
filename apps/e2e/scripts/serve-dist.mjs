@@ -110,7 +110,7 @@ function fileFor(requestPath, base) {
  *
  * Vercel's `source` is path-to-regexp-flavoured, but every pattern actually in
  * this repo's `vercel.json` (`/(.*)`, `/craft/(.*)`, `/artist/(.*)`,
- * `/((?!(?:craft|artist|assets|favicon)(?:/|$)).*)`) is already a plain regex
+ * `/((?!(?:craft|artist|assets|favicon\\.ico)(?:/|$)).*)`) is already a plain regex
  * fragment, so anchoring it at both ends and handing it to `RegExp` matches
  * Vercel's own behaviour exactly, with no new dependency.
  */
@@ -298,12 +298,15 @@ function createRequestHandler(base) {
     res.writeHead(200, {
       'Content-Type': CONTENT_TYPES[extname(file).toLowerCase()] ?? 'application/octet-stream',
       'Content-Length': statSync(file).size,
-      // Tests rebuild dist between runs; never let the browser reuse stale bytes.
-      // This is a `writeHead` header, not a `setHeader` one, so it overrides any
-      // Cache-Control vercel.json's `headers` block might set (it doesn't today)
-      // rather than being merged alongside it — see the Node docs for
-      // `response.writeHead()` on how the two are combined.
-      'Cache-Control': 'no-store',
+      // Tests rebuild dist between runs; never let the browser reuse stale bytes —
+      // unless vercel.json's `headers` block set a Cache-Control of its own for
+      // this path (ESCSUITE-240: the immutable `/assets/*` entry), which the
+      // suite must see exactly as Vercel sends it. (A missing hashed /assets name
+      // carries the header on its 404 on Vercel too; that is harmless, since only
+      // a stale page requests it and the next deploy's HTML names a new hash.)
+      // A `writeHead` header would
+      // otherwise override the `setHeader` one above.
+      'Cache-Control': res.getHeader('Cache-Control') ?? 'no-store',
     })
 
     if (req.method === 'HEAD') {
