@@ -3662,6 +3662,35 @@ reached by a 0 value that says nothing and by 3, 2 and 1), each from both sides 
 cases. The review passed with one LOW (a comment that claimed a zero step), corrected. `App.*rerender*` and
 every `*.perf.test.ts` are byte-identical. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-232 and ESCSUITE-228 (host-integration hygiene:
+every inbound message validates its payload and answers a malformed one with the protocol's one `ERROR` shape
+and a new `code: 'INVALID_MESSAGE'` naming the field — `LOAD_VIDEO` without a string `url`, `SET_THEME` with a
+theme outside the enum, `LOAD_PROJECT` with no object payload, which used to be ignored — with an unknown
+`type` still ignored as the protocol says; a video loaded from a URL is named after the URL's last path
+segment with an extension appended from the blob's MIME type only when the segment has none, a `data:` URL is
+"Loaded media" plus that extension instead of its whole base64 payload, the stem capped at 120 characters;
+the `?video=` import honours the effect's `cancelled` flag so StrictMode's double mount no longer imports
+twice in development; and `theme.ts`'s comment no longer claims a cross-tab sync its same-document event never
+did): 99.83 / **99.38** / **96.42** / 99.75 against the 99.83 / 99.37 / 96.41 / 99.75 that `main` at `cb202b8c`
+measures in the same sitting — statements and branches each up a hundredth, lines and functions unmoved. That
+base reads above the table row the ESCSUITE-276 paragraph recorded (99.36 / 96.38): ESCSUITE-265 landed after
+it and the row was left as 276 set it; the uncovered counts fell 62 / 209 → 61 / 208 along the way, and the
+row is corrected here to the direct measurement. The base gives 5,594 / 5,802 branches and this branch
+5,604 / 5,812: ten new branches, ten covered, the same 208 uncovered (lines 8,653 / 8,667 → 8,674 / 8,688,
+statements 9,776 / 9,837 → 9,800 / 9,861, functions 2,061 / 2,066 → 2,064 / 2,069, every denominator growing
+by exactly what the numerator did; the same 14 / 61 / 5 uncovered). All ten are `utils/integration.ts`'s
+(43 / 45 → 53 / 55: `extractFilename(url, blobType)`'s `data:` choice, the empty-segment fallback, the
+has-an-extension test, the MIME table hit and miss, and the cap), each reached from both sides by the
+data: URL, `/x.wav`, `/clips/`, `/clip` with `audio/mpeg`, unknown-type and over-long cases; the file's two
+pre-existing uncovered arms (the streaming reader's) are untouched. `app/useHostIntegration.ts` gained
+eleven lines, thirteen statements and three functions and **no branch**: each validation is a guard that
+replaces the old silent `if`, one decision for one, reached from both sides by the thirty red cases (a
+malformed payload → one `ERROR` with `INVALID_MESSAGE`, nothing applied; the valid payload applied) and the
+three `App.messages` cases that used to expect silence. The review (opus) approved; its two MINORs — the
+changeset naming the `LOAD_PROJECT` change, and `'toString'` / `'__proto__'` rows that make the
+`hasOwnProperty` check the reason a test passes — are the last commit. `App.*rerender*` and every
+`*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3669,7 +3698,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.83 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
+| `@escapesuite/artist` | 99.83 | 99.38 | 96.42 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
