@@ -59,6 +59,10 @@ describe('isFirefoxEngine', () => {
     expect(isFirefoxEngine({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101' })).toBe(false)
   })
 
+  it('is false when there is no navigator at all', () => {
+    expect(isFirefoxEngine(undefined)).toBe(false)
+  })
+
   it('is false for Chromium, WebKit and jsdom', () => {
     expect(
       isFirefoxEngine({ userAgent: UA.chromium, userAgentData: { brands: [{ brand: 'Chromium' }] } })

@@ -64,6 +64,30 @@ describe('relabelFirefoxVpxMeta', () => {
     expect(relabelFirefoxVpxMeta(corrected)).toBe(corrected)
     expect(relabelFirefoxVpxMeta(unlabelled)).toBe(unlabelled)
   })
+
+  // Review M1: the gate is the whole measured report, not its matrix alone. A
+  // Firefox that fixes its encoder the way Chromium works today — converting
+  // with BT.709 and reporting sRGB transfer at full range — changes its report
+  // and so falls out of the gate on its own instead of being relabelled wrong.
+  it('passes the Chromium-shaped report through untouched (BT.709 matrix, sRGB transfer, full range)', () => {
+    const chromiumShaped = metaWith('vp09.00.10.08', {
+      primaries: 'bt709',
+      transfer: 'iec61966-2-1',
+      matrix: 'bt709',
+      fullRange: true,
+    })
+    expect(relabelFirefoxVpxMeta(chromiumShaped)).toBe(chromiumShaped)
+  })
+
+  it.each([
+    ['primaries', { primaries: 'smpte170m' }],
+    ['transfer', { transfer: 'iec61966-2-1' }],
+    ['range', { fullRange: true }],
+    ['range left unreported', { fullRange: undefined }],
+  ] as const)('passes a report that differs from the measured one only in its %s through untouched', (_, change) => {
+    const meta = metaWith('vp09.00.10.08', { ...FIREFOX_REPORT, ...change })
+    expect(relabelFirefoxVpxMeta(meta)).toBe(meta)
+  })
 })
 
 // --- the real muxer over byte fixtures -------------------------------------
