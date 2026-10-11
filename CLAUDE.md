@@ -4032,31 +4032,35 @@ callback at import, never per preview or export frame. **No floor crossed**; art
 bytes orphaned before ESCSUITE-244: beside Clear Unused and Clear All, "N files from earlier sessions
 (X MB)" with a Remove button, shown only when such rows exist, read once on mount and after each clear and
 never on render; a row is offered only when nothing this editor references names it — the live library,
-every undo and redo snapshot, and the autosaved session's sources — and never when it is an ESCAPECRAFT
-recording or a companion sharing a recording's `takeId`; each delete sits in its own try/catch behind a
-live re-check, one notice reports the failures, nothing writes the project or the history, and a second
-click during a removal does nothing): **99.84** / 99.38 / **96.47** / **99.76** against the
-99.83 / 99.38 / 96.45 / 99.75 that `main` at `5337c092` (the ESCSUITE-220 squash) measures in the same
-sitting — lines, branches and functions each up a hundredth or two, statements unmoved. That base reads
-96.45 where the table row recorded 96.42: ESCSUITE-249 and 220 landed after the row was written, each
-measured on its own tree, and the row is corrected here to the direct measurement. The base gives
-5,612 / 5,818 branches and this branch 5,641 / 5,847: twenty-nine new branches, twenty-nine covered, the
-same 206 uncovered as before (lines 8,692 / 8,706 → 8,739 / 8,753, statements 9,820 / 9,881 →
-9,882 / 9,943, functions 2,069 / 2,074 → 2,084 / 2,089, every denominator growing by exactly what the
-numerator did; the same 14 / 61 / 5 uncovered). The twenty-nine are `core/orphanedImports.ts`'s nine on
-arrival (9 / 9: the recording skip, the recording's own `takeId`, and the filter's project-id, recording,
-`takeId`-present and companion operands, each reached from both sides by the helper's cases — a companion
-whose primary is gone, a companion keyed on the primary's id, a stray `takeId` on an import) and
-`components/VideoUploader.tsx`'s twenty (117 / 122 → 137 / 142: the list's shown-or-hidden gate and both
-plurals, the mount read's rejection arm, the render-time prune of a row the project claimed after the read,
-the confirm declined and accepted, the per-id live re-check's skip, the per-id catch, the `failed > 0`
-notice and the in-flight guard — each reached from both sides by the thirteen red cases, the five the fix
-round added for the saved session and the guard, and the clears that were already there; the file's same
-five pre-existing uncovered arms untouched). The `getAllVideoMetadata` call-count pin is real: the review
-made the read run per render and watched it go red. Five session-restore cases in `App.project.test.tsx`
-changed only how they script the session double — persistent rather than once, because the uploader's mount
-read now reaches it first — with no assertion changed. The rerender pins and every `*.perf.test.ts` are
-byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+every undo and redo snapshot, and every saved session slot, each tab's own since ESCSUITE-274 plus the
+legacy shared row — and never when it is an ESCAPECRAFT recording or a companion sharing a recording's
+`takeId`; each delete sits in its own try/catch behind a live re-check, one notice reports the failures,
+nothing writes the project or the history, and a second click during a removal does nothing):
+99.84 / 99.39 / **96.55** / 99.76 against the 99.84 / 99.39 / 96.53 / 99.76 that `main` at `8b966483`
+(the ESCSUITE-262 squash) measures in the same sitting — branches up two hundredths, the other three
+unmoved. That base reads above the table row (99.83 / 99.36 / 96.38 / 99.75): the wave-8 branches landed
+one after another, each measured on its own tree, and the row is corrected here to the direct measurement.
+The base gives 5,683 / 5,887 branches and this branch 5,710 / 5,914: twenty-seven new branches,
+twenty-seven covered, the same 204 uncovered as before (lines 8,802 / 8,816 → 8,849 / 8,863, statements
+9,947 / 10,008 → 10,010 / 10,071, functions 2,096 / 2,101 → 2,111 / 2,116, every denominator growing by
+exactly what the numerator did; the same 14 / 61 / 5 uncovered). The twenty-seven are
+`core/orphanedImports.ts`'s nine on arrival (9 / 9: the recording skip, the recording's own `takeId`, and
+the filter's project-id, recording, `takeId`-present and companion operands, each reached from both sides
+by the helper's cases — a companion whose primary is gone, a companion keyed on the primary's id, a stray
+`takeId` on an import) and `components/VideoUploader.tsx`'s eighteen (117 / 122 → 135 / 140: the list's
+shown-or-hidden gate and both plurals, the mount read's rejection arm, the render-time prune of a row the
+project claimed after the read, the confirm declined and accepted, the per-id live re-check's skip, the
+per-id catch, the `failed > 0` notice and the in-flight guard — each reached from both sides by the thirteen
+red cases, the five the fix round added for the saved session and the guard, and the clears that were
+already there; the file's same five pre-existing uncovered arms untouched). The branch was first measured
+before ESCSUITE-274 landed, when the session was one row read through `getSessionState()`; rebased onto
+the per-tab slots it reads `listSessionStates()` and adds every slot's sources in one loop, which is two
+branches fewer than the `?? []` it replaced and why the count is twenty-seven rather than twenty-nine. The
+`getAllVideoMetadata` call-count pin is real: the review made the read run per render and watched it go
+red. Five session-restore cases in `App.project.test.tsx` changed only how they script the session double
+— persistent rather than once, because the uploader's mount read now reaches it first — with no assertion
+changed. The rerender pins and every `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's
+floors stay 99 / 99 / 96 / 99.
 
 `@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-11 for ESCSUITE-238 and
 ESCSUITE-237 (the headless render's `durationSec` is the encoded video length — every exporter returns a
@@ -4103,7 +4107,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.38 | 96.46 | 99.75 |
+| `@escapesuite/artist` | 99.84 | 99.39 | 96.55 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.56 | 99.48 | 98.50 | 98.75 |
 
