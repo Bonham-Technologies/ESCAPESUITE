@@ -3733,6 +3733,31 @@ immutable header while the document does not, and `/favicon.ico` answering 404 a
 run here against `pnpm build:deploy` on Chromium: 25 / 25, and 5 / 5 for the spec after the review's
 follow-ups. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-249 (the media library's import rows are keyed by
+a per-upload id rather than the filename, so two drops named `clip.mp4` get their own progress and Dismiss; the
+`.veditor` test lower-cases the extension first, so `PROJECT.VEDITOR` opens as a project; an unsupported file
+is refused through the editor's notice — "Only video, image, audio and .veditor files can be imported." — and
+the last `alert()` in the app is gone; and `settleMediaDuration`, which the video and audio probes,
+`loadMediaDuration` and ESCSUITE-97's `resolveStoredDuration` all share, gains a 15 s
+`METADATA_LOAD_TIMEOUT_MS` armed when its listeners attach and cleared by `loadedmetadata`, `error` and the
+release path, so a file the browser neither decodes nor rejects fails its row with "could not be read" instead
+of sitting on "Processing…" forever — the ESCSUITE-180 shape, at three times the thumbnail's budget):
+99.83 / **99.38** / **96.43** / 99.75 against the 99.83 / 99.37 / 96.41 / 99.75 that `main` measures in the same
+sitting (`cb202b8c`; the commit this branch lands on, `7873c436`, differs from it in docs alone, so the artist
+source is identical) — statements up a hundredth, branches up two, lines and functions unmoved, and with one
+*fewer* uncovered arm. The base gives 5,594 / 5,802 branches and this branch 5,595 / 5,802: **no new branch at
+all** and one more covered, so the uncovered column falls 208 → 207 (lines 8,653 / 8,667 → 8,659 / 8,673,
+statements 9,776 / 9,837 → 9,782 / 9,843, functions 2,061 / 2,066 → 2,062 / 2,067, every denominator growing by
+exactly what the numerator did; the same 14 / 61 / 5 uncovered). The id key swapped one comparison for another
+in each row transition — one decision for one — and the deadline is a timer whose callback runs the probe's
+existing `fail`, so `core/videoProcessor.ts` gains five lines, five statements and one function and no
+decision; the arm newly reached is in `components/VideoUploader.tsx` (116 / 122 → 117 / 122), driven for the
+first time by the two-rows case. The red cases (the two same-name rows collapsing into one, the upper-case
+`.VEDITOR` refused, the notice sentence with `window.alert` never called, and the video and audio probes
+hanging past the 5 s test timeout) were red before the fix; the review's two LOWs (a semicolon, a case driving
+the deadline through `resolveStoredDuration`) are the last commit. `App.*rerender*` and every `*.perf.test.ts`
+are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
