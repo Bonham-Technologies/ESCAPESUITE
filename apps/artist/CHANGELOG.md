@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.15.62
+
+### Patch Changes
+
+- 9dde4de: A video loaded from a URL is named properly and imported once
+  
+  A video loaded from a URL is named after the URL's own filename with the right extension, a data: URL is named "Loaded media", and a ?video= import no longer happens twice in development.
+- 9dde4de: A malformed message from a host now gets an error reply instead of silence
+  
+  A host that sends a malformed message — LOAD_VIDEO with no URL, SET_THEME with an unknown theme — now gets an ERROR reply with code INVALID_MESSAGE naming the field, instead of silence. A LOAD_PROJECT with no payload at all now gets the same INVALID_MESSAGE reply, where it used to be ignored.
+
 ## 2.15.57
 
 ### Patch Changes
