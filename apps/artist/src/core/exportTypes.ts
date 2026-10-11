@@ -410,14 +410,22 @@ export const MP4_NO_CODEC_REASON =
  * Shown, and thrown, when the H.264 ladder refuses the requested output size but
  * accepts the {@link MP4_REFERENCE_SIZE} (ESCSUITE-237): the browser encodes
  * H.264, so {@link MP4_NO_CODEC_REASON} would be false, and the size is what has
- * to change. `parseProject` accepts any side from 2 to 7680; Chromium's encoder
- * refused 64x8, 64x2, 2x2 and 3840x2 and encoded 16x16 and 64x48 when the
- * ticket measured it, which is where the 16x16 floor in the sentence comes from
- * (a unit test's `isConfigSupported` double cannot measure a real encoder).
- * WebM and GIF rendered 3840x2 fine, hence the second half.
+ * to change. Which way it is wrong is read from the size itself:
+ *
+ * - **A side under 16** — "too small". `parseProject` accepts any side from 2 to
+ *   7680; Chromium's encoder refused 64x8, 64x2, 2x2 and 3840x2 and encoded 16x16
+ *   and 64x48 when the ticket measured it, which is where the 16x16 floor in the
+ *   sentence comes from (a unit test's `isConfigSupported` double cannot measure
+ *   a real encoder).
+ * - **Otherwise** — "too large": a size past what the ladder's Level 5.1 ceiling
+ *   (or this browser's encoder) configures, 8K say.
+ *
+ * WebM and GIF rendered 3840x2 fine, hence the clause both sentences share.
  */
 export function mp4OutputSizeReason(width: number, height: number): string {
-  return `The output size ${width}×${height} is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.`;
+  return Math.min(width, height) < 16
+    ? `The output size ${width}×${height} is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.`
+    : `The output size ${width}×${height} is too large for H.264 in this browser; WebM and GIF are unaffected.`;
 }
 
 /**
@@ -429,7 +437,8 @@ export const MP4_REFERENCE_SIZE = { width: 1280, height: 720 } as const;
 
 /**
  * Called only after the H.264 ladder found nothing at `width`x`height`: the
- * sentence that blames the output size when the same ladder accepts the
+ * sentence that blames the output size (too small or too large,
+ * {@link mp4OutputSizeReason}) when the same ladder accepts the
  * {@link MP4_REFERENCE_SIZE}, or `undefined` when it refuses that too and the
  * browser really cannot encode H.264. Asked only on that failure path, so a
  * normal export — and the dialog's probe on a normal size — pays nothing for it.
