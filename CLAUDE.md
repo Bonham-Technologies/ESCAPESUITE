@@ -4187,6 +4187,37 @@ measurement, `apps/e2e/tests/escapeartist/session-ownership.spec.ts` gains the t
 twice here on Chromium and Firefox, 4 / 4 each. `App.*rerender*` and every `*.perf.test.ts` are
 byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-11 for ESCSUITE-284 (a Firefox WebM export is labelled with
+the BT.601 matrix its encoder converted with: Firefox 155 misreports `decoderConfig.colorSpace` as
+`{bt709, bt709, bt709, fullRange: false}` for VP9 and VP8 frames it converted with the BT.601 matrix, and
+mediabunny copies that report into both the WebM Colour element and every VP9 keyframe header's colour
+field, so `core/vpxColorLabel.ts`'s pure `relabelFirefoxVpxMeta` rewrites the matrix to `smpte170m` for
+exactly that report — primaries, transfer and matrix `bt709`, `fullRange` false — and passes every other
+report and every delta chunk through by reference, applied once per export in `core/exportWebM.ts`'s output
+callback behind `isFirefoxEngine(navigator)`; the patched exports are byte-identical to the hand-patched
+files that read within 3/255 of the drawn RGB in ffmpeg, Chromium and Firefox): 99.84 / 99.39 /
+**96.56** / 99.76 against the 99.84 / 99.39 / 96.55 / 99.76 that `main` at `89988d16` (the ESCSUITE-268
+version-packages commit) measures in the same sitting — branches up a hundredth, the other three unmoved.
+The base gives 5,717 / 5,921 branches and this branch 5,727 / 5,931: ten new branches, ten covered, the
+same 204 uncovered as before (lines 8,857 / 8,871 → 8,864 / 8,878, statements 10,018 / 10,079 →
+10,026 / 10,087, functions 2,113 / 2,118 → 2,115 / 2,120, every denominator growing by exactly what the
+numerator did; the same 14 / 61 / 5 uncovered). The ten are `core/vpxColorLabel.ts`'s six on arrival
+(6 / 6: the no-`decoderConfig` pass-through and the four report operands, each reached from both sides by
+the measured report against a report with sRGB transfer, full range, other primaries or another matrix —
+Chromium's own shape among them), `core/exportWebM.ts`'s two (70 / 72 → 72 / 74: the once-per-export
+Firefox choice, reached by the Firefox VP9, Firefox VP8 and Chromium exporter cases; the file's same two
+pre-existing arms uncovered) and `core/workerDecodeEngine.ts`'s two (6 → 8: `isFirefoxEngine`'s
+missing-`navigator` guard). A real-mediabunny muxer test over Firefox keyframe byte fixtures pins that
+mediabunny writes the header field from the report — switching off its header rewrite reds both VP9 muxer
+cases — so an upgrade that stops doing so turns red rather than silently leaving the header mislabelled.
+The review's first pass found the gate wider than measured (matrix alone); the round that narrowed it to
+all four operands is why the count is ten of ten. The table row is left as the ESCSUITE-280 / 281
+paragraph set it (96.57), which lands first and reads higher. Outside vitest's measurement: nine Playwright
+runs on Chromium and Firefox, one at a time — the reader-trust variants, the bare encoder probes, the
+VP8 export and the patched exports read back in all three readers, 0 of 45 frames misread.
+`exportWebM.perf.test.ts`, every other `*.perf.test.ts` and the rerender pins are byte-identical. **No floor
+crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
