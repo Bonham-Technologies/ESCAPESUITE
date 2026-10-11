@@ -1,4 +1,4 @@
-import { test, expect, type Page, type Browser } from '@playwright/test'
+import { test, expect, type Page, type Browser, type ConsoleMessage } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -40,22 +40,39 @@ import { waitForAppReady } from '../../utils/ready'
  * Which engines take the worker at all is decided by an allow-list,
  * `apps/artist/src/core/workerDecodeEngine.ts`: Chromium and Firefox, the two
  * whose worker output was measured against their own <video>. These cases run
- * in Chromium, the one CI runs. Firefox 155 was last run here with the skip
- * lifted for ESCSUITE-265: every parity case matched (MAD 0.000, the
- * full-range source 0.195-0.356), the trimmed clip included, and one case is
- * known to fail there:
- * - the rotated source: Firefox's VideoDecoder drops `rotation`, so the source
- *   is refused to <video> by design and `expectWorkerDecoded` fails.
+ * in both (ESCSUITE-262). CI's gating job runs only the chromium project (the
+ * config drops the cross-browser projects under `CI`); Firefox runs under
+ * `pnpm test:e2e:browsers` and `--project=firefox`. Measured 2026-10-11:
+ * - Chromium 153 (twice): MAD 0.000 at every compared frame of every case.
+ * - Firefox 155 (four runs): MAD 0.000 at every compared frame of every case
+ *   but the full-range source, whose frames 25, 41 and 59 measured
+ *   0.314-0.337, 0.353-0.379 and 0.207-0.211 (frame 0 0.000) — the one
+ *   source the two paths do not reproduce pixel for pixel (0.195-0.356 when
+ *   ESCSUITE-265 ran it by hand), far inside the 1.5 bound.
+ * - The rotated source is the one case whose expectation differs by engine:
+ *   Firefox's VideoDecoder drops `rotation` from isConfigSupported's echo, so
+ *   `decoderConfigFor` refuses the track and the source decodes on <video>.
+ *   The case asserts that refusal on Firefox — the worker path chosen, one
+ *   fallback naming "VideoDecoder cannot rotate its output", no FRAME_READY,
+ *   the in-page notice shown — and the orientation then holds because the
+ *   export IS <video>. Firefox prints an Error console argument as the bare
+ *   word "Error", so the reason is read from the message's argument handles.
  * The trimmed clip's earlier failure (the previous colour segment at export
  * frames 25-26, 68.3/255) was the <video> oracle, not the worker: frame 26 was
  * ESCSUITE-263's seek skip, and frame 25 a seek to a frame's exact start, which
  * both engines' <video> resolved to the frame before it on one start in three
  * (ESCSUITE-265; the segment-start frames below are what catch it — with the
  * fix removed, Chromium measured 70.5 at frame 8 and Firefox 66.8 at frame 25
- * of the trimmed clip). WebKit is not on the list
- * (measured 4.46-17.45/255 apart) and cannot import media under Playwright
- * anyway (IndexedDB refuses the Blob). Lifting the skip for another engine is
- * ESCSUITE-262, which has to account for the one known Firefox failure.
+ * of the trimmed clip).
+ *
+ * WebKit stays skipped (ESCSUITE-262). It is not on the allow-list: its
+ * VideoDecoder, beside its own <video>, measured 6.5-8.0/255 mean and up to
+ * 17.6 on one frame across the six colour fixtures — <video> picks the matrix
+ * per stream and colour-manages (Apple's 1.961 video gamma to sRGB, SMPTE-C
+ * primaries to BT.709 for a BT.601 source), while every decoded frame is drawn
+ * as BT.709 with no conversion, whatever `VideoDecoderConfig.colorSpace` says
+ * (WebKit 26.6 ignores it). It also cannot import media under Playwright
+ * (IndexedDB refuses the Blob), so these cases could not run there anyway.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -98,6 +115,8 @@ const ROTATED_MP4 = resolvePath(FIXTURES, 'rotated.mp4')
 
 const FALLBACK_WARNING = 'falling back to HTMLVideoElement'
 const IN_PAGE_NOTICE = 'Decoding in the page; keep this tab in the foreground'
+/** `decoderConfigFor`'s refusal of a rotated track in a VideoDecoder that does not echo `rotation`. */
+const ROTATION_REFUSAL = 'VideoDecoder cannot rotate its output'
 
 /**
  * Parity tolerance: mean absolute difference per RGB channel, out of 255.
@@ -462,6 +481,33 @@ function expectWorkerDecoded(run: ExportRun, frames = 1) {
   expect(run.inPageNoticeSeen).toBe(false)
 }
 
+/**
+ * The worker path was taken and then refused the one source for its display
+ * rotation: the factory chose WebCodecs, `createSource` fell back with the
+ * rotation refusal, the worker answered no frame and the in-page notice was
+ * shown.
+ */
+function expectWorkerRefusedRotation(run: ExportRun, fallbackDetails: string[]) {
+  expect(run.logs.some((line) => line.includes('[MP4 Export] Using WebCodecs'))).toBe(true)
+  expect(run.logs.filter((line) => line.includes(FALLBACK_WARNING))).toHaveLength(1)
+  expect(fallbackDetails).toHaveLength(1)
+  expect(fallbackDetails[0]).toContain(ROTATION_REFUSAL)
+  expect(run.framesReady).toBe(0)
+  expect(run.inPageNoticeSeen).toBe(true)
+}
+
+/**
+ * A console message's arguments, each an `Error` read as `name: message`.
+ * Firefox renders an `Error` argument in `ConsoleMessage.text()` as the bare
+ * word "Error", so the fallback warning's reason is only in its arguments.
+ */
+async function consoleArgsText(message: ConsoleMessage): Promise<string> {
+  const parts = await Promise.all(
+    message.args().map((arg) => arg.evaluate((value) => (value instanceof Error ? `${value.name}: ${value.message}` : String(value))))
+  )
+  return parts.join(' ')
+}
+
 interface ParityCase {
   name: string
   file: string
@@ -555,7 +601,11 @@ const PARITY_CASES: ParityCase[] = [
 ]
 
 test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () => {
-  test.skip(({ browserName }) => browserName !== 'chromium', 'measured in Chromium only; see the file comment')
+  test.skip(
+    ({ browserName }) => browserName === 'webkit',
+    'ESCSUITE-262: WebKit 26.6 is not on the worker allow-list (its VideoDecoder measured 6.5-8.0/255 mean, ' +
+      'up to 17.6, apart from its own <video>: colour, see the file comment) and cannot import media under Playwright'
+  )
 
   test('a real video source is decoded by the worker, with no fallback and no in-page notice', async ({ browser }) => {
     test.setTimeout(180_000)
@@ -617,9 +667,13 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
     })
   }
 
-  test('a rotated source exports in the orientation its <video> preview shows', async ({ page }) => {
+  test('a rotated source exports in the orientation its <video> preview shows', async ({ page, browserName }) => {
     test.setTimeout(180_000)
     await installProbes(page)
+    const fallbackDetails: Array<Promise<string>> = []
+    page.on('console', (message) => {
+      if (message.text().includes(FALLBACK_WARNING)) fallbackDetails.push(consoleArgsText(message))
+    })
     const logs = await openWithSource(page, ROTATED_MP4)
 
     // The preview draws a source through a <video> element, which honours
@@ -639,8 +693,20 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
     expect(shownOrientation).toEqual({ top: 'blue', bottom: 'red' })
 
     const bytes = await exportMp4FromDialog(page, '480p')
+    const run = { bytes, logs, ...(await readProbes(page)) }
 
-    expectWorkerDecoded({ bytes, logs, ...(await readProbes(page)) })
+    if (browserName === 'firefox') {
+      // Firefox's VideoDecoder drops `rotation` from isConfigSupported's echo,
+      // so `decoderConfigFor` refuses the track and the source is decoded by
+      // <video> instead (ESCSUITE-262): the export starts on the worker path,
+      // the one source is handed over with the reason named, the worker
+      // answers no frame, and the once-per-export notice is shown. The
+      // orientation check below then holds because the export IS <video>.
+      const details = await Promise.all(fallbackDetails)
+      expectWorkerRefusedRotation(run, details)
+    } else {
+      expectWorkerDecoded(run)
+    }
     expectMp4(bytes)
     // At native size in the 1920x1080 project the source spans y 380..700 —
     // 35% to 65% of the height — so 42% and 58% are well inside each half.
