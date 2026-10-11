@@ -44,9 +44,9 @@ import { waitForAppReady } from '../../utils/ready'
  * config drops the cross-browser projects under `CI`); Firefox runs under
  * `pnpm test:e2e:browsers` and `--project=firefox`. Measured 2026-10-11:
  * - Chromium 153 (twice): MAD 0.000 at every compared frame of every case.
- * - Firefox 155 (three runs): MAD 0.000 at every compared frame of every case
+ * - Firefox 155 (four runs): MAD 0.000 at every compared frame of every case
  *   but the full-range source, whose frames 25, 41 and 59 measured
- *   0.317-0.337, 0.353-0.367 and 0.207-0.211 (frame 0 0.000) — the one
+ *   0.314-0.337, 0.353-0.379 and 0.207-0.211 (frame 0 0.000) — the one
  *   source the two paths do not reproduce pixel for pixel (0.195-0.356 when
  *   ESCSUITE-265 ran it by hand), far inside the 1.5 bound.
  * - The rotated source is the one case whose expectation differs by engine:
