@@ -3645,6 +3645,21 @@ stem as the `en-US` rendering of the same instant; the WebM and MP4 hook pins mo
 `recording_10_10_2026…` shape to the new one, red before the fix. `App.library.test.tsx`'s default seed
 `recordedAt` became a fixed instant so its filename pins are deterministic; every ordering case there sets
 its own. No Playwright pin names the old shape (the e2e suite checks extensions only). `App.*rerender*` and
+
+`@escapesuite/craft` was re-measured 2026-10-10 for ESCSUITE-231 (the 3-2-1 countdown is announced: a
+`CountdownAnnouncement` rendered inside the header's existing `aria-live="polite" aria-atomic="true"` region
+during `countdown` reads `countdownValue` from the store itself — no new `App` subscription — and says
+"Recording starts in 3", 2, 1, one `role="status"` span at a time; the overlay's digit is `aria-hidden` so it
+is not read twice; the transition to `recording` keeps the one announcement the header already made):
+100.00 / 99.53 / **97.83** / 100.00 against the 100.00 / 99.53 / 97.82 / 100.00 that `main` at `cb202b8c`
+measures in the same sitting — branches up a hundredth, the other three unmoved at exactly 100, 99.53 and
+100. Lines 2,400 → 2,403, statements 2,557 / 2,569 → 2,562 / 2,574, branches 1,395 / 1,426 → 1,399 / 1,430
+and functions 456 → 458, every new unit covered; the same 12 statements and 31 branches uncovered, in the same
+four files. The four new branches are `components/AppHeader/AppHeader.tsx`'s two (16 → 18: the `countdown`
+arm of the status region) and `components/AppHeader/CountdownAnnouncement.tsx`'s two on arrival (2 / 2: the
+`countdownValue <= 0` bound — a defensive one, since the interval starts the take at 1 and never writes 0 —
+reached by a 0 value that says nothing and by 3, 2 and 1), each from both sides by the header's six red
+cases. The review passed with one LOW (a comment that claimed a zero step), corrected. `App.*rerender*` and
 every `*.perf.test.ts` are byte-identical. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
