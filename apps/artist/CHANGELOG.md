@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.15.73
+
+### Patch Changes
+
+- Updated dependencies [be3e45e]
+  - @escapesuite/shared@1.4.9
+
 ## 2.15.71
 
 ### Patch Changes
