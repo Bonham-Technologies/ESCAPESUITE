@@ -3595,6 +3595,18 @@ design) and a Firefox WebM read-back that still shows 10 of 45 frames of a per-f
 fourteen, the same before and after, filed as ESCSUITE-279. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/plan` was re-measured 2026-10-10 for ESCSUITE-219 (the hub mounts the shared `ErrorBoundary`
+itself — inside `<BrowserRouter>` so the fallback's Reload keeps the route, around `<App />`, with
+`GatedAnalytics` outside it and no `onError`, the hub holding nothing live to release — so a render-time
+throw on any route shows the panel and its Reload button instead of a blank page): 100.00 / 100.00 /
+100.00 / 100.00, identical on every count to `main` at `cb202b8c` in the same sitting — lines 82, statements
+83, branches 21, functions 27, every one covered on both trees. The one source change is in `main.tsx`,
+which is coverage-excluded in every package; it is pinned by the new `main.test.tsx`, which mocks
+`createRoot`, renders the element tree the entry hands it with `App` replaced by a component that throws,
+and asserts the `role="alert"` panel and the Reload button — red before the boundary was mounted (the
+throw escaped `render`). No measured file gained a unit. **No floor crossed**; plan's floors stay
+100 / 100 / 100 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
