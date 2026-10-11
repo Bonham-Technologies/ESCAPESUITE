@@ -23,10 +23,10 @@
  * the probe sees but not the rate it reads; without the counter it counts them
  * from the media times. A source faster than twice the refresh rate has frames
  * the compositor itself never presents, which neither count sees, and still
- * under-reads. A frame decoded too late and discarded unpresented would, if
- * the counter does not count it, under-read on either path; it was not seen in
- * 70 instrumented runs (`totalVideoFrames − presentedFrames` never grew), and
- * starving the decoder on purpose to settle it is ESCSUITE-278.
+ * under-reads. A frame decoded too late and discarded unpresented moves
+ * neither count's callback nor the counter, and starving the decoder on
+ * purpose showed it happens (ESCSUITE-278): `rateFromMediaTimes` refuses such a
+ * run rather than read it low.
  *
  * 500 ms rather than 400 because half speed halves the media the budget
  * covers. 500 ms of wall time is 250 ms of media: at 24 fps that is six
@@ -66,6 +66,18 @@ const STANDARD_RATES: readonly number[] = [
  * only shrinks the rounding's share of it, so they never push a reading out.
  */
 const SNAP_TOLERANCE = 0.015;
+
+/**
+ * How far `totalVideoFrames − presentedFrames` may rise between the first and
+ * last frame callback before the run is refused (ESCSUITE-278).
+ * `totalVideoFrames` counts frames decoded, presented or not, so the
+ * difference is the decoder's look-ahead queue plus every frame discarded
+ * unpresented. The queue alone fills and drains: over 103 healthy Chromium
+ * runs of the probe (0.5x, eight frames; VP9 and H.264, 60 and 120 fps, quiet,
+ * CPU-throttled and with a busy main thread) it sat two to four frames deep
+ * and its first-to-last change was −1 to +2, so "grew" means more than 2.
+ */
+const DECODER_QUEUE_SWING = 2;
 
 /**
  * The nearest standard rate when it is within 1.5 %, else `rate` rounded to two
@@ -133,13 +145,28 @@ function snapFrameRate(rate: number): number {
  * media-time count follows the closest pair of frames presented, so it errs
  * high, never low.
  *
+ * **A frame discarded unpresented** (ESCSUITE-278). A frame the browser
+ * decodes too late to show is dropped: no callback, no counter step, and the
+ * next presented frame's `mediaTime` jumps over it, so the counter under-reads.
+ * Starved on purpose — real Chromium, 0.5x, high-bitrate VP9 WebMs, quiet,
+ * CPU-throttled and with a busy main thread — 17 of 140 runs did it in their
+ * first 370 ms, and the counter read 120 fps as 83.33 and 60 fps as 41.92.
+ * Two signs refuse such a run, answering `undefined` so the source is stored
+ * `'assumed'`, never the larger of the two counts: the media times counting
+ * more intervals than the counter (every one of those 17 runs, and none of
+ * the 103 healthy ones), and `totalVideoFrames − presentedFrames`, from
+ * `totalVideoFrames` where the caller has it, rising by more than
+ * `DECODER_QUEUE_SWING` — the case where every spacing is a multiple of the
+ * true interval and the media times hide the discards too.
+ *
  * Fewer than three frames, a run that ends no later than it starts, one whose
  * presentation times go backwards, or one whose counter advanced fewer times
  * than there were callbacks after the first answers `undefined`.
  */
 export function rateFromMediaTimes(
   mediaTimes: readonly number[],
-  presentedFrames?: readonly (number | undefined)[]
+  presentedFrames?: readonly (number | undefined)[],
+  totalVideoFrames?: readonly (number | undefined)[]
 ): number | undefined {
   if (mediaTimes.length < 3) return undefined;
   const last = mediaTimes.length - 1;
@@ -152,15 +179,6 @@ export function rateFromMediaTimes(
     if (spacing > 0 && spacing < smallest) smallest = spacing;
   }
 
-  // NaN — so the media times decide — unless both ends carry a finite count.
-  const presented = (presentedFrames?.[last] ?? NaN) - (presentedFrames?.[0] ?? NaN);
-  if (Number.isFinite(presented)) {
-    // One presented frame per callback is the least a real run can show; with
-    // three or more callbacks this also refuses a count below two.
-    if (presented < last) return undefined;
-    return snapFrameRate(presented / span);
-  }
-
   // `span > 0` with no spacing negative means at least one is positive, and
   // that one counts at least one interval: `intervals` is never 0.
   let intervals = 0;
@@ -168,6 +186,22 @@ export function rateFromMediaTimes(
     const spacing = mediaTimes[i] - mediaTimes[i - 1];
     if (spacing > 0) intervals += Math.round(spacing / smallest);
   }
+
+  // NaN — so the media times decide — unless both ends carry a finite count.
+  const presented = (presentedFrames?.[last] ?? NaN) - (presentedFrames?.[0] ?? NaN);
+  if (Number.isFinite(presented)) {
+    // One presented frame per callback is the least a real run can show; with
+    // three or more callbacks this also refuses a count below two.
+    if (presented < last) return undefined;
+    // Frames the media times step over that the counter never counted.
+    if (intervals > presented) return undefined;
+    // Δtotal − Δpresented: NaN — so nothing is refused here — unless both ends
+    // carry a total.
+    const unpresented = (totalVideoFrames?.[last] ?? NaN) - (totalVideoFrames?.[0] ?? NaN) - presented;
+    if (unpresented > DECODER_QUEUE_SWING) return undefined;
+    return snapFrameRate(presented / span);
+  }
+
   return snapFrameRate(intervals / span);
 }
 
@@ -175,7 +209,9 @@ export function rateFromMediaTimes(
  * Play `video` muted and read its frame rate off the frames it presents.
  *
  * Seeks it to 0, plays it at `playbackRate`, then collects
- * `requestVideoFrameCallback`'s `mediaTime` and `presentedFrames` until `maxFrames` frames have been
+ * `requestVideoFrameCallback`'s `mediaTime` and `presentedFrames`, and
+ * `getVideoPlaybackQuality().totalVideoFrames` at each callback where the
+ * element has it, until `maxFrames` frames have been
  * presented or `maxMs` has passed, then pauses the element, puts its own
  * playback rate back, seeks it to 0 and answers `rateFromMediaTimes` of what it
  * saw. `mediaTime` is media time, so the rate it reads is the file's whatever
@@ -200,6 +236,9 @@ export function measureFrameRate(
   return new Promise((resolve) => {
     const mediaTimes: number[] = [];
     const presentedFrames: (number | undefined)[] = [];
+    const totalVideoFrames: (number | undefined)[] = [];
+    // jsdom's element has none; every engine the probe runs in has it.
+    const readsQuality = typeof video.getVideoPlaybackQuality === 'function';
     let handle = 0;
     let finished = false;
     const previousPlaybackRate = video.playbackRate;
@@ -212,12 +251,13 @@ export function measureFrameRate(
       video.pause();
       video.playbackRate = previousPlaybackRate;
       video.currentTime = 0;
-      resolve(rateFromMediaTimes(mediaTimes, presentedFrames));
+      resolve(rateFromMediaTimes(mediaTimes, presentedFrames, totalVideoFrames));
     };
 
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
       mediaTimes.push(metadata.mediaTime);
       presentedFrames.push(metadata.presentedFrames);
+      totalVideoFrames.push(readsQuality ? video.getVideoPlaybackQuality().totalVideoFrames : undefined);
       if (mediaTimes.length >= maxFrames) {
         finish();
         return;
