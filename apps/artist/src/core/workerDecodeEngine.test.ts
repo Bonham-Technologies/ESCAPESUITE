@@ -5,7 +5,7 @@
 // WebKit included (4.46-17.45/255 apart), stays on <video>, and so does the
 // next engine nobody has measured: admitting one is ESCSUITE-262.
 import { describe, it, expect } from 'vitest'
-import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine'
+import { isFirefoxEngine, isMeasuredWorkerDecodeEngine } from './workerDecodeEngine'
 
 const UA = {
   chromium:
@@ -45,5 +45,25 @@ describe('isMeasuredWorkerDecodeEngine', () => {
 
   it('refuses when there is no navigator at all', () => {
     expect(isMeasuredWorkerDecodeEngine(undefined)).toBe(false)
+  })
+})
+
+// ESCSUITE-284: the same Firefox test, exported for the WebM exporter's colour
+// relabel, which corrects a mislabel measured on Firefox 155 alone.
+describe('isFirefoxEngine', () => {
+  it('recognises Firefox by its Gecko/ and Firefox/ tokens', () => {
+    expect(isFirefoxEngine({ userAgent: UA.firefox })).toBe(true)
+  })
+
+  it('needs both tokens', () => {
+    expect(isFirefoxEngine({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101' })).toBe(false)
+  })
+
+  it('is false for Chromium, WebKit and jsdom', () => {
+    expect(
+      isFirefoxEngine({ userAgent: UA.chromium, userAgentData: { brands: [{ brand: 'Chromium' }] } })
+    ).toBe(false)
+    expect(isFirefoxEngine({ userAgent: UA.safari })).toBe(false)
+    expect(isFirefoxEngine({ userAgent: UA.jsdom })).toBe(false)
   })
 })

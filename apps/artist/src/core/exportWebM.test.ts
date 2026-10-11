@@ -1194,3 +1194,68 @@ describe('exportToWebM audio codec selection', () => {
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video', 'audio'])
   })
 })
+
+// ESCSUITE-284: Firefox 155's VP9 and VP8 encoders convert with the BT.601
+// matrix but report BT.709, and the muxer writes whatever is reported into the
+// Colour element (and, for VP9, every keyframe header). The exporter corrects
+// the report on Firefox only — Chromium's encoders convert and label BT.709
+// consistently, and nothing else has been measured.
+describe('exportToWebM colour label (ESCSUITE-284)', () => {
+  const FIREFOX_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:155.0) Gecko/20100101 Firefox/155.0'
+  const CHROMIUM_UA =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.8010.12 Safari/537.36'
+  const REPORTED: VideoColorSpaceInit = { primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false }
+
+  /** Make the encoder double report a colour space on every decoder configuration, as a real encoder does. */
+  function reportColourSpace(colorSpace: VideoColorSpaceInit): void {
+    type Init = { output: (chunk: unknown, meta?: EncodedVideoChunkMetadata) => unknown; error: (e: unknown) => void }
+    const Base = globalThis.VideoEncoder as unknown as new (init: Init) => object
+    globalThis.VideoEncoder = class extends Base {
+      constructor(init: Init) {
+        super({
+          ...init,
+          output: (chunk, meta) =>
+            init.output(
+              chunk,
+              meta?.decoderConfig ? { ...meta, decoderConfig: { ...meta.decoderConfig, colorSpace } } : meta
+            ),
+        })
+      }
+    } as unknown as typeof VideoEncoder
+  }
+
+  let userAgent: ReturnType<typeof vi.spyOn> | null = null
+  const engine = (ua: string) => {
+    userAgent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(ua)
+  }
+  afterEach(() => {
+    userAgent?.mockRestore()
+    userAgent = null
+  })
+
+  const firstVideoMeta = () =>
+    getMediabunnyState().videoSources[0].packets[0].meta as EncodedVideoChunkMetadata
+
+  it('on Firefox, hands the muxer a BT.601 matrix in place of the BT.709 the encoder reported', async () => {
+    engine(FIREFOX_UA)
+    reportColourSpace(REPORTED)
+    await run()
+    expect(firstVideoMeta().decoderConfig?.colorSpace).toEqual({ ...REPORTED, matrix: 'smpte170m' })
+  })
+
+  it('relabels on Firefox whichever codec the ladder settled on (VP8 here)', async () => {
+    engine(FIREFOX_UA)
+    webcodecs.encoder.answer = (config) => (config as { codec: string }).codec === 'vp8'
+    reportColourSpace(REPORTED)
+    await run()
+    expect(getMediabunnyState().videoSources[0].codec).toBe('vp8')
+    expect(firstVideoMeta().decoderConfig?.colorSpace?.matrix).toBe('smpte170m')
+  })
+
+  it('leaves the report alone on any other engine (Chromium labels what it converts)', async () => {
+    engine(CHROMIUM_UA)
+    reportColourSpace(REPORTED)
+    await run()
+    expect(firstVideoMeta().decoderConfig?.colorSpace).toEqual(REPORTED)
+  })
+})
