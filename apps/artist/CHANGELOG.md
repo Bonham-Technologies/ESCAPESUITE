@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.15.69
+
+### Patch Changes
+
+- 664319a: Track names can be renamed from the keyboard, markers can be removed with Delete, and the ruler's time labels follow the zoom — quarter seconds when zoomed in, every ten seconds when zoomed out.
+  
+  A track's name is now a button that Tab reaches and Enter or Space opens for editing (a click or a double-click still does), and each marker flag on the ruler is a focusable button with a spoken name that Delete or Backspace removes. The ruler used to label every five seconds at every zoom; it now picks its tick spacing and label spacing from the zoom, so a zoomed-in view reads in fractions of a second and a long project does not crowd its ticks. Clicking a marker flag, or pressing Enter on it, now moves the playhead to exactly that marker.
+
 ## 2.15.68
 
 ### Patch Changes
