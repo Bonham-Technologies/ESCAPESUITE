@@ -4751,8 +4751,8 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   (ESCSUITE-191, hunt-j J-9): `render()` clamps `{start, end}` to `[0, timelineDuration]`
   — an `end` past the timeline is pulled in to it, a negative `start` is floored at
   0 — and replaces `options.timeRange` with the clamped pair in place, so the
-  `exportToMP4`/`exportToWebM`/`exportToGIF` call below it and the `durationSec` derived
-  after it both read the clamped range, never the caller's raw request. Before this, a
+  `exportToMP4`/`exportToWebM`/`exportToGIF` call below it — and so the frame count the
+  `durationSec` is derived from — covers the clamped range, never the caller's raw request. Before this, a
   one-second project asked for `{start: 0, end: 600}` encoded roughly 599 seconds of
   black and the signed verification manifest reported `durationSec: 600` for it — the
   manifest describing the request rather than the bytes. A range whose clamped
@@ -4773,9 +4773,20 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   coarser delay — not the range itself unless `seconds x rate` happens to be a whole number (a
   1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = **1.05**). The verification manifest describes the bytes — the kit README tells
   callers to compare `durationSec` against `ffprobe` — so the headless path reports that rather
-  than the requested range; the two video formats encode the range itself and are unchanged.
+  than the requested range.
   `exportGIF.ts`'s own `addFrame` argument stays the first rounding (67 ms at 15 fps): `gifenc`
   does the second one, and `gifEncoder.test.ts` decodes the Graphic Control Extension to pin it.
+- **Every format's `meta.durationSec` is the encoded length — frames encoded x one frame
+  period** (ESCSUITE-238). The two video formats are no exception to the GIF rule above: they
+  encode whole frames at `VIDEO_EXPORT_FRAME_RATE` (30, in `core/exportTypes.ts`, the one constant
+  both video exporters step by), `ceil(range x 30)` of them, so a 0.75 s range is 23 frames and
+  **0.766667 s** of file — what `ffprobe -count_frames` measures. Before this ticket the headless
+  path reported the range itself, 0.75, for MP4 and WebM, and a consumer checking `durationSec`
+  against the file within a millisecond rejected a valid render. The count is not recomputed in
+  `headless/renderProject.ts`: every exporter returns it on `ExportResult.framesEncoded` (its own
+  frame loop's `frameCount`, set on the success path of all three), and `encodedDurationSec` there
+  multiplies it by `1 / VIDEO_EXPORT_FRAME_RATE` or by `gifFrameDelayMs(fps)`. The field is
+  required rather than optional so no reader of it has a fallback arm or a `NaN` to guard.
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.

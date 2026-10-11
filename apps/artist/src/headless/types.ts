@@ -34,7 +34,12 @@ export interface RenderFileInput {
 export interface RenderMeta {
   format: 'mp4' | 'webm' | 'gif'
   byteLength: number
-  /** Encoded duration in seconds — the timeRange length when one is given, else the full timeline. */
+  /**
+   * Encoded duration in seconds: the frames the exporter encoded times one
+   * frame period (1/30 s for MP4 and WebM, the stored delay for a GIF) — so it
+   * matches the file to within a millisecond, not the timeRange it was asked
+   * for (ESCSUITE-238).
+   */
   durationSec: number
   /** Encoded frame size — honours options.resolution, not simply project.resolution. */
   width: number

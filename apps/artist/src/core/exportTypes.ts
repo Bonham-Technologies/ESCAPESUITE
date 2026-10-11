@@ -319,6 +319,17 @@ export function webMVideoCodecConfigs(
 }
 
 /**
+ * The frame rate both video exporters encode at — MP4 and WebM alike, every
+ * export. A GIF has its own, chosen per export (`gifFrameRate`).
+ *
+ * One constant rather than a `30` in each exporter because something outside
+ * them needs it too: the headless render reports the encoded duration as
+ * `framesEncoded / VIDEO_EXPORT_FRAME_RATE` (ESCSUITE-238), and a second copy of
+ * the number there could drift from the one the frame loops step by.
+ */
+export const VIDEO_EXPORT_FRAME_RATE = 30;
+
+/**
  * A representative bitrate/framerate for the export dialog's up-front probes.
  * The dialog asks before the user has chosen a quality setting — `quality`
  * only scales bitrate, never which codecs exist — so one fixed, reasonable
@@ -328,7 +339,7 @@ export function webMVideoCodecConfigs(
  * (ESCSUITE-175) so neither can drift from the other.
  */
 const EXPORT_PROBE_BITRATE = 5_000_000;
-const EXPORT_PROBE_FRAMERATE = 30;
+const EXPORT_PROBE_FRAMERATE = VIDEO_EXPORT_FRAME_RATE;
 
 /**
  * The audio bitrate the dialog's audio probes ask about: the `'medium'` quality
@@ -649,6 +660,18 @@ export async function isMP4ExportSupported(
 export interface ExportResult {
   blob: Blob;
   audio: boolean;
+  /**
+   * How many frames the exporter's frame loop encoded (ESCSUITE-238): whole
+   * frames, `ceil(range x rate)` of them, so the file plays for
+   * `framesEncoded` frame periods — not for the range it was asked for. A
+   * 0.75 s range at 30 fps is 23 frames, 0.766667 s of file.
+   *
+   * The headless render reads it to report the encoded duration, which is why
+   * every exporter sets it and the field is not optional: an optional count
+   * would leave that reader either a fallback no exporter can reach or a `NaN`
+   * the type system would not catch.
+   */
+  framesEncoded: number;
 }
 
 /**

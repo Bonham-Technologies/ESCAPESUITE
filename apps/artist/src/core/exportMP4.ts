@@ -37,6 +37,7 @@ import {
   EXPORT_AUDIO_SAMPLE_RATE,
   noAudioNote,
   MP4_NO_CODEC_REASON,
+  VIDEO_EXPORT_FRAME_RATE,
 } from './exportTypes';
 import type { ExportResult } from './exportTypes';
 import {
@@ -126,7 +127,7 @@ export async function exportToMP4(
   }
 
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
-  const frameRate = 30;
+  const frameRate = VIDEO_EXPORT_FRAME_RATE;
   const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
 
   // A timeline with no length cannot be mixed or encoded (ESCSUITE-257): refuse
@@ -704,7 +705,7 @@ export async function exportToMP4(
     // question the exporter deliberately cannot answer — knowing would mean
     // decoding, which is the cost the probe-first ordering removed — so the
     // dialog pairs this with its own `projectHasAudio` before claiming a loss.
-    return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported };
+    return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported, framesEncoded: frameCount };
   } catch (error) {
     // Clean up resources on error
     await cleanup();
