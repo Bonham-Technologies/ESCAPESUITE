@@ -607,6 +607,9 @@ Five things worth knowing:
   metric-compatible clone, so they render through the generic family their stack names
   (`serif` and `sans-serif`) and will not match a machine that has the real fonts. No web fonts
   are bundled; a project that needs an exact face should be rendered where it is installed.
+  The font parity case in `src/run.chromium.test.ts` is Linux-only: it relies on an image
+  that lacks Impact, Georgia and Verdana, which macOS and Windows install natively, so it skips
+  there and runs in CI's `e2e` job.
 - Scratch space defaults to the container's `/tmp`. For long renders, mount real storage and
   set `HEADLESS_WORK_DIR` to it.
 - **This image cannot use the `s3` sink.** It installs with `--omit=optional`, so
