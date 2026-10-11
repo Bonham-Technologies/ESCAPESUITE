@@ -659,7 +659,7 @@ hosted deployment. See the root `CLAUDE.md`'s "URL params (ARTIST)" bullet.
 | `?project=<base64>` | Base64-encoded project state — *documented but not currently implemented* (parsed, never applied) |
 | `?autoplay=true` | Start playback once loaded — *documented but not currently implemented* (parsed, never applied) |
 | `?loadVideo=<id>` | Load a **take** from IndexedDB (ESCAPECRAFT handoff). The id names the take's primary part; every part of it joins the media library and is placed on the timeline — see "A handed-over take is several files" below |
-| `?suppressRestore=1` | Skip the "Resume Previous Session?" prompt. Accepts `1` or `true`. ESCAPEARTIST **neither offers nor writes** the saved session under this flag — the session autosave is switched off too, so a host-driven session leaves storage exactly as it found it. It also neither probes nor queues for the session lock (ESCSUITE-227), so an embedded editor never keeps a real tab from owning the slot |
+| `?suppressRestore=1` | Skip the "Resume Previous Session?" prompt. Accepts `1` or `true`. ESCAPEARTIST **neither offers nor writes** the saved session under this flag — the session autosave is switched off too, so a host-driven session leaves storage exactly as it found it. It also neither probes nor holds a tab lock, and New Project clears no slot (ESCSUITE-274), so an embedded editor leaves every tab's saved session where it is |
 | `?title=<name>` | Initial project name. Trimmed, capped at 120 chars, trimmed again after the cut, blank ignored. Applied only while the project name is still the default `'Untitled Project'`, so it never overrides a name from `?project=` data or a restored session. `clearHistory()` runs right after, so the host naming the project is not an undo step |
 | `?hostOrigin=<origin>` | The host's own origin, e.g. `https://host.example`. **Recommended for production hosts, and required of a host that offers ESCAPECRAFT's "Upload to host" button** (ESCSUITE-176: that message carries a recording's bytes and has no `'*'` fallback). Accepts any `http:`/`https:` value `new URL()` can parse, normalised down to its origin — a trailing slash or a path included; only an unparseable value, one with an opaque origin such as a `data:` URL, or one on any other scheme (a real host is always served over HTTP(S)), is ignored with one console warning. Outbound posts go to it instead of `'*'` wherever one parses, and inbound messages from any other origin are dropped. It protects the **host's** deployment, *not* against being framed — a hostile page that frames the app also controls this URL and would just supply its own origin. Refusing to be framed is `Content-Security-Policy: frame-ancestors` on the deployment serving the app  The hosted deployment sends `frame-ancestors 'self'` (see `vercel.json`); self-hosted builds must set their own. |
 
@@ -861,7 +861,7 @@ the take as usual; accepting restores first and then appends the take after the 
 run that step still undoes it.
 
 `sessionDecisionPending` is `!sessionRestored`, **not** `showSessionPrompt`, and the difference
-is the whole point: for the first moments of a cold load `getSessionState()` has not come back,
+is the whole point: for the first moments of a cold load `listSessionStates()` has not come back,
 so no prompt is on screen while the question is very much unanswered — and a take placed in
 that window is discarded by the "Restore" the user has not been offered yet. `sessionRestored`
 (`app/useSessionRestore.ts`) is false from the first render until the question settles one of
@@ -3209,76 +3209,93 @@ resize → host integration. The three hooks that bind no effect (`useNotificati
 positions are load-bearing rather than tidy: `useSessionRestore` writes the `sessionRestored`
 flag `useSessionAutosave` gates on, so registering the autosave any earlier would change which
 render first arms the debounce (`App.session.test.tsx`'s "writes nothing before the debounce
-elapses" and "clears the pending write on unmount" are the net) — and, since ESCSUITE-227, would
-queue this tab for the session lock before the restore check had asked whether another tab owns
-it; and `useThemeLifecycle` runs ahead of everything else, so the document is already themed by
-the time the editor mounts below it. ESCSUITE-227 gave `useSessionAutosave` a second effect, the
-request for the session slot, registered right after its debounce, so the autosave's effects are
-the third and fourth and every hook after it moved down one (keydown fifth, timeline resize
-sixth, host integration seventh). `useProjectActions`, which binds no effect, moved from third
-to fifth in the call order — right after the autosave, whose `ownsSession` reader New Project
-needs (fix round 1).
+elapses" and "clears the pending write on unmount" are the net) — and, since ESCSUITE-274, would
+queue this tab for its own tab lock before the restore check had asked whether a live tab already
+holds this tab's id; and `useThemeLifecycle` runs ahead of everything else, so the document is already themed by
+the time the editor mounts below it. ESCSUITE-227 gave `useSessionAutosave` a second effect —
+since ESCSUITE-274 the hold on this tab's own lock — registered right after its debounce, so the
+autosave's effects are the third and fourth and every hook after it moved down one (keydown fifth,
+timeline resize sixth, host integration seventh). `useProjectActions`, which binds no effect, moved
+from third to fifth in the call order — right after the autosave, whose `clearSession` New Project
+calls (ESCSUITE-227 fix round 1, ESCSUITE-274).
 
-**One tab owns the session slot (ESCSUITE-227).** Every ESCAPEARTIST tab of one origin shares
-the one autosave slot — `settings` / `current-session` in `video-editor-db`. Before this ticket a
-second tab was offered the first tab's *live* work as "Resume Previous Session?", and if it
-pressed Start Fresh it threw that work away and, two seconds later, autosaved its own empty
-project over the slot, so a third tab got no prompt at all: the first tab's crash recovery was
-gone while that tab was still open and unchanged. Three rules now hold:
+**One session slot per tab (ESCSUITE-274, after ESCSUITE-227).** Before ESCSUITE-227 every
+ESCAPEARTIST tab of one origin shared one autosave row — `settings` / `current-session` in
+`video-editor-db` — so a second tab was offered the first tab's *live* work as "Resume Previous
+Session?" and, on Start Fresh, threw it away. ESCSUITE-227 made one tab at a time own that row
+through a session-wide Web Lock; what it left was a crash: the owner's lock released, the next tab
+became the owner, and its next edit overwrote the crashed tab's session. ESCSUITE-274 gives every
+tab a slot of its own, and the session-wide lock, `ownsSession` and `SESSION_HELD_NOTICE` are gone
+(the situation the notice described — a tab that may neither offer nor save — no longer exists).
+Five rules now hold:
 
-- **One owner, decided by a Web Lock.** `app/sessionLock.ts`'s
-  `acquireSessionOwnership(onAcquired)` queues for the exclusive lock `'escapeartist-session'`
-  and calls `onAcquired` once this tab holds it; the lock is held until the returned release
-  runs (the autosave's effect cleanup) or the page goes away — a lock dies with its page, so a
-  closed *or crashed* tab hands the slot to the next tab queued for it. A request released
-  before it was granted (StrictMode's cleanup-then-remount, an unmount while another tab still
-  owns the slot) never calls `onAcquired` and passes the lock straight on.
-  `probeSessionOwner()` asks the same name with `ifAvailable: true` and answers `'held'` when the
-  callback is handed `null`. Where the browser has no Web Locks (jsdom, a very old browser) both
-  answer as a lone tab — `'free'`, and `onAcquired` at once — which is how the editor behaved
-  before, and why no pre-existing test needed a Web Locks double. A lock manager that *rejects*
-  is treated exactly like a missing one (fix round 1): the probe answers `'free'` and the
-  acquisition calls `onAcquired` at once, each logging the error — the spec rejects with
-  `SecurityError` on an opaque origin (a sandboxed frame, or `file://` in an engine that treats it
-  as opaque, i.e. the offline build), and a tab there must still be offered and save its session
-  rather than silently doing neither.
-- **A session another live tab owns is not offered.** `useSessionRestore`'s startup check awaits
-  `probeSessionOwner()` first. `'held'` → no prompt, no storage read and no
-  `clearSessionState()`, the question settles (so the autosave, the `?loadVideo=` placement and
-  a host `LOAD_PROJECT` stop waiting), and the editor's one notice says once
-  `SESSION_HELD_NOTICE`: "Another ESCAPEARTIST tab is open. This tab will not offer or save a
-  session until that tab closes." The probe is *requested* synchronously as the effect runs,
-  before the autosave's own request a hook later — asked the other way round it would find this
-  tab's own queued request and answer `'held'` against itself (`App.session.test.tsx` pins the
-  order through a Web Locks double, `src/test/doubles/locks.ts`). The check is started once per
-  mount (`checkStartedRef`): StrictMode runs the effect twice on one instance, and a second
-  probe would find the first one's momentary hold and call the tab's own startup "another tab".
-  `?suppressRestore=1` is unchanged — it neither probes nor queues.
-- **Only the owner autosaves, and an empty project never overwrites the slot.** The debounce's
-  timer reads `ownsSessionRef` — a ref the lock callback flips, so ownership costs no render —
-  when it fires, and writes nothing until this tab owns the slot; a tab that becomes the owner
-  later (the owning tab closed) writes from its next change. Independently of ownership, a
-  snapshot with no sources and no clips (`isEmptySession`, `app/sessionSnapshot.ts`) is never
-  written, so a tab with nothing in it can never overwrite a slot that holds someone's work.
-  Start Fresh's own `clearSessionState()` is unchanged: the user declined explicitly. File → New
-  Project clears the slot only when `ownsSession()` (the autosave hook's ref reader, passed to
-  `useProjectActions`) says this tab owns it, so a second tab starting over never deletes the
-  owning tab's saved session (fix round 1). The
-  corollary is that deleting everything from a project leaves the last populated snapshot in the
-  slot rather than writing an empty one over it, so a reload offers that last populated state
-  back.
+- **A tab id per tab.** `app/tabId.ts`'s `readTabId()` returns the id kept in `sessionStorage`
+  under `escapeartist-tab-id`, or mints one (`crypto.randomUUID()`) and keeps it there.
+  `sessionStorage` belongs to one tab and survives a reload, so a reloaded tab finds its own slot
+  again and a new tab gets a new one; where `sessionStorage` throws (a sandboxed frame) the id lasts
+  for the document only. `useSessionRestore` owns the id (`useState(readTabId)`, read once per
+  mount) and returns it; `App` hands it to `useSessionAutosave`. `SessionState` carries `tabId`.
+- **One row per tab.** `core/storage.ts`: `saveSessionState(session)` writes `session:<tabId>`
+  (through `@escapesuite/shared/storage`'s `setSetting`); `listSessionStates()` returns every slot
+  as `{ tabId, session }` — the `session:*` rows through the shared `listSettings(prefix)` (an
+  `IDBKeyRange` over the prefix), the tab id taken from the row's key, then the legacy
+  `current-session` row if one is left, as `tabId: null`, a slot with **no owner**;
+  `clearSessionState(tabId)` removes one row, and `clearSessionState(null)` the legacy one. Nothing
+  writes the legacy row any more: it is offered as-is and deleted when restored, declined or pruned.
+  (The Playwright suites that seed a session for the prompt — `components.spec.ts`,
+  `accessibility/core.spec.ts`, `take-import.spec.ts`, `host-embedding.spec.ts` — still seed that
+  legacy row, which is exactly the shape a user upgrading from an older build has.)
+- **Each tab holds its own lock, and a slot is offered only when its tab is gone.**
+  `app/sessionLock.ts`: `holdTabLock(tabId, locks?)` requests the exclusive lock
+  `escapeartist-tab:<tabId>` and holds it until the returned release runs (the autosave's effect
+  cleanup) or the page goes away — a lock dies with its page, so a closed *or crashed* tab's lock is
+  free. A request released before it was granted (StrictMode's cleanup-then-remount, the id changing
+  under a duplicated tab) lets go the moment it is handed the lock. `probeTabLock(tabId, locks?)`
+  asks the same name with `ifAvailable: true` and answers `'held'` when the callback is handed
+  `null`. Both take the `LockManager` as an argument (default `navigator.locks`) so the tests hand in
+  `src/test/doubles/locks.ts`; where the browser has no Web Locks, or the lock manager *rejects*
+  (`SecurityError` on an opaque origin — a sandboxed frame, or `file://` in an engine that treats it
+  as opaque), every tab answers as if it were alone: the probe says `'free'` and logs, the hold
+  logs and holds nothing. `app/sessionSlots.ts`'s `findOfferableSlot(tabId, now)` lists every slot,
+  deletes (not awaited, a failure logged) any whose `timestamp` is older than
+  `SESSION_SLOT_MAX_AGE_MS` (`appConstants.ts`, 30 days — exactly 30 days is kept), drops any with
+  no source in it (the prompt never offered one), and walks the rest **newest first**, returning the
+  first that is the legacy row, this tab's own slot, or one whose tab lock `probeTabLock` finds
+  `'free'`. This tab's own slot (a reload) is offered without a probe: this tab is about to hold
+  that lock itself, and a probe would call it `'held'`.
+- **The startup check, in order.** `useSessionRestore`'s effect first probes **this tab's own id**,
+  synchronously as the effect runs and so before the autosave's `holdTabLock` a hook later (asked
+  the other way round, the probe would find this tab's own queued request): `'held'` means a live
+  tab already has this id — a browser copies `sessionStorage`, id and all, into a duplicated tab —
+  so this tab calls `renewTabId()` and `setTabId` and takes an id of its own, and the original's
+  live slot is then probed like any other and skipped. Then `findOfferableSlot` decides the prompt;
+  the offered slot is kept in `offeredSlotRef`. The check starts once per mount
+  (`checkStartedRef`): StrictMode runs the effect twice, and a second probe of this tab's own lock
+  would find the first one's momentary hold. `?suppressRestore=1` neither probes nor holds.
+- **What happens to a slot.** It is removed when its session is **restored** — the restoring tab
+  adopts it, `adoptSessionSlot(slot, tabId)` writing the session again under this tab's id and only
+  then deleting the old row, so a failed write leaves it where it was (not awaited, a failure
+  logged; this tab's own slot, after a reload, is not rewritten); when it is **declined** — Start
+  Fresh deletes the offered slot, whoever's it was; when its own tab starts a **New Project** —
+  `useSessionAutosave`'s `clearSession()` (a no-op under `?suppressRestore=1`, which writes nothing
+  to storage) deletes this tab's row and no other, and `useProjectActions` calls it unconditionally;
+  or when it is **pruned** at startup for age. A failed thumbnail read during a restore leaves the
+  slot in storage, as before. Every tab autosaves its own slot — no ownership gate — and a snapshot
+  with no sources and no clips (`isEmptySession`, `app/sessionSnapshot.ts`) is still never written,
+  so deleting everything from a project leaves the last populated snapshot in the slot and a reload
+  offers it back.
 
-**The limit this leaves.** If the owner tab *closes or crashes*, its lock is released and the next
-tab queued becomes the owner — and that tab's next non-empty edit overwrites the slot. The
-departed tab's "Resume Previous Session?" therefore survives only until the new owner's first
-change (a fresh tab opened
-afterwards, with nothing in it, cannot overwrite it, because it writes nothing until it holds
-work). Per-tab session slots are the full fix and are a follow-up ("per-tab session slots").
-A reload relies on the old document's lock being released when it unloads, before the new
-document's probe is requested (after its scripts load and React mounts); were a browser ever to
-answer that probe `'held'`, the reload would show the notice instead of the prompt. The reload
-cases in `apps/e2e` — `escapeartist/components.spec.ts`'s "session restore prompt appears when
-applicable" among them — are the net for that.
+**The limits this leaves.** Two fresh tabs opened at once after a crash can both be offered the
+same crashed slot, and if both restore it, both adopt it (two copies of the work, nothing lost —
+the second adoption's delete finds the row already gone). The duplicated-tab rule relies on the
+original tab still being alive when the duplicate starts; a duplicate of a tab that has since
+closed simply inherits its id and its slot, which is the reload case. A reload relies on the old
+document's lock being released before the new document's own-id probe is requested; were a browser
+ever to answer that probe `'held'`, the reload would take a new id and its old slot would be offered
+as a closed tab's — the same work, under the prompt, not lost. `apps/e2e`'s
+`escapeartist/session-ownership.spec.ts` drives the crash case with three tabs in one context: A
+edits and closes, B (open throughout) edits, and a fresh C is offered A's session — not B's newer
+live one — and restoring it leaves exactly B's slot and C's.
 
 **The store selectors stay in `App.tsx` on purpose.** Each hook takes what it needs as plain
 parameters rather than subscribing for itself, so the whole subscription set is readable in one
@@ -3332,13 +3349,15 @@ and queries `styles.menuBackdrop`.
 | `appConstants.ts` | The shell's plain numbers: the autosave debounce delay, the timeline panel's min/max/default height and the localStorage key it is persisted under. No behaviour, so `timelineHeight.ts`, the hooks and `App` read the same values instead of each spelling them out |
 | `timelineHeight.ts` | The timeline panel's height maths: `clampTimelineHeight` (which propagates `NaN` rather than clamping it), the localStorage read/write pair, and `heightFromPointer`, the resize drag's pointer-to-height conversion. Pure but for the two storage calls, so the maths is testable without a DOM |
 | `appFormat.ts` | The three notification strings: `formatTimeForNotification` (a one-line pass-through to `formatTime`, kept because three call sites read better for it), `clipCountMessage`, which spells the pluralisation rule once, and `takeLoadedMessage`, the handoff's one sentence, which folds "how many tracks" and "what was missing" into the single toast slot |
-| `sessionSnapshot.ts` | `buildSessionSnapshot` — what of the editor's state the autosave writes, and in what shape. Takes the state and the timestamp as values rather than reading `getState()`/`Date.now()` itself, so the call site keeps control of *when* they are read. Strips every source video's `thumbnailUrl` before it is written (ESCSUITE-96): the field is only ever an `URL.createObjectURL` handle, and persisting one would just be writing down a URL nothing can ever open again. `isEmptySession(session)` — no sources and no clips — is what the autosave asks before every write, so an empty project never overwrites the slot (ESCSUITE-227) |
-| `sessionLock.ts` | Which tab owns the session slot (ESCSUITE-227): `acquireSessionOwnership(onAcquired, locks?)` and `probeSessionOwner(locks?)` over the Web Lock `'escapeartist-session'`, each taking the `LockManager` as an argument (default `navigator.locks`) so the tests hand in `src/test/doubles/locks.ts`; both answer as a lone tab where Web Locks are missing. See "One tab owns the session slot" above |
+| `sessionSnapshot.ts` | `buildSessionSnapshot(state, timestamp, tabId)` — what of the editor's state the autosave writes, and in what shape, stamped with the tab whose slot it is (ESCSUITE-274). Takes the state, the timestamp and the tab id as values rather than reading `getState()`/`Date.now()` itself, so the call site keeps control of *when* they are read. Strips every source video's `thumbnailUrl` before it is written (ESCSUITE-96): the field is only ever an `URL.createObjectURL` handle, and persisting one would just be writing down a URL nothing can ever open again. `isEmptySession(session)` — no sources and no clips — is what the autosave asks before every write, so an empty project never overwrites the slot (ESCSUITE-227) |
+| `tabId.ts` | This tab's id (ESCSUITE-274): `readTabId()` — the id kept in `sessionStorage` under `escapeartist-tab-id`, or a new `crypto.randomUUID()` kept there — and `renewTabId()`, which replaces it for a duplicated tab. A reload keeps the id; a new tab gets a new one; where `sessionStorage` throws, the id lasts for the document. See "One session slot per tab" above |
+| `sessionSlots.ts` | Which saved session the prompt offers, and how a restored one changes hands (ESCSUITE-274): `findOfferableSlot(tabId, now)` prunes slots older than `SESSION_SLOT_MAX_AGE_MS` and returns the newest slot with media whose tab is gone — the legacy shared row and this tab's own slot without a probe, every other through `probeTabLock`; `adoptSessionSlot(slot, tabId)` writes it again under this tab's id, then deletes the old row. See "One session slot per tab" above |
+| `sessionLock.ts` | Which tabs are alive (ESCSUITE-274, after ESCSUITE-227): `holdTabLock(tabId, locks?)` holds the Web Lock `escapeartist-tab:<tabId>` for the tab's lifetime and `probeTabLock(tabId, locks?)` asks after one without taking it, each taking the `LockManager` as an argument (default `navigator.locks`) so the tests hand in `src/test/doubles/locks.ts`; both answer as a lone tab where Web Locks are missing or reject. See "One session slot per tab" above |
 | `useThemeLifecycle.ts` | Starting the shared theme module on mount and stopping it on unmount. The editor's **first** effect, so `App` calls it first |
 | `useNotification.ts` | The transient status toast: one slot, not a queue. `showNotification` overwrites whatever is showing and opens a fresh three-second timer, which is deliberately neither stored nor cleared — carried behaviour, pinned by the App suite. Binds no effect; sits second because every hook after it takes `showNotification` |
-| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file — and the editor's **only** project-load dialog: `handleProjectFile(file)` is the "given a project file" entry the uploader's drop/pick path calls, with `handleLoadProject` being that same entry behind the file picker (see "Dialogs"). Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits fifth — right after `useSessionAutosave`, whose `ownsSession` it takes (ESCSUITE-227 fix round 1; it sat third before), and before the shortcut hook, which takes `handleSaveProject` and `handleLoadProject`. `handleNewProject` clears the saved session (`clearSessionState()`) **only when `ownsSession()` says this tab owns the slot**: every tab shares one slot, so a second tab's New Project resets its own editor and leaves the owning tab's crash recovery where it is. `loadProjectFile` (shared by every path above) runs `parseProject` on what `loadProject(file)` read back **before** calling `resetProject()` (ESCSUITE-102): a malformed file used to throw out of `setProject`'s migration *after* the reset had already emptied the editor, leaving the failure notice over a blank timeline; now a bad file shows "Failed to load project: \<reason\>" and the current project is never touched. `loadProject(file)` already minted a `thumbnailUrl` for every incoming source before validation ever runs, so a REFUSED load (a `parsed.ok === false`, or anything that throws before the sources are actually handed to `addSourceVideo`) revokes those incoming thumbnails itself — nothing is ever going to render them. A load that *succeeds* does **not** also revoke the outgoing library here: that is `resetProject()`'s own job (ESCSUITE-113, `store/projectSlice.ts`), and revoking it twice from two places was the review round's own finding. `clearHistory()` runs once every source has landed, right before the success notification (ESCSUITE-164) — left out, `resetProject()` + `setProject()` + one `addSourceVideo` per source were four separate undo entries, and the first Ctrl+Z after an open landed on "loaded project, one source missing" rather than whatever was open before. Opening a file is a new document, not an edit, so it is not undoable at all — parity with `useSessionRestore`'s own `clearHistory()` and `handleNewProject`'s. It is **not** called on any failure path: a load that throws partway through (ESCSUITE-113's own case — `addSourceVideo` dies on the second of three sources) leaves whatever undo history the editor held before the user picked this file untouched, because there is nothing to clear history *to* |
-| `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect. `handleRestoreSession` rebuilds every source's `thumbnailUrl` before writing the store — the snapshot no longer carries one — resolving each with `Promise.all` (the reads are independent) so the library renders once with live pictures rather than once broken and once fixed (ESCSUITE-96). It does **not** revoke anything itself: the library is not reliably empty when a restore lands — the CRAFT handoff (`useHostIntegration` → `importTake`) adds a take's parts to it as soon as they arrive, well before the placement that waits on `sessionDecisionPending` — so a blanket revoke of "whatever is here" would kill the handoff's still-live thumbnails. `addSourceVideo` (`store/projectSlice.ts`) is the one place that owns freeing a replaced source's *old* thumbnailUrl, exactly when a restored source happens to share an id the handoff already added (ESCSUITE-113). Restoring is therefore asynchronous, not the single-tick write it used to be, and is guarded against both ways that window can be walked into: a `restoreAttemptRef` set at entry makes a second `handleRestoreSession` call while one is already reading thumbnails a no-op, and `handleDeclineSession` clears it, so "Start Fresh" clicked mid-restore wins — the restore finds its answer overruled when its reads come back and does not commit. `SessionRestorePrompt` disables both buttons the moment either is clicked, as the first line of defence against the same race. A rejected thumbnail read is answered the same way a decline is — the ref is cleared, the prompt closes, `sessionRestored` settles, and the user is left with a fresh project — except the notification says the restore failed and the saved session is left in storage rather than cleared, so a reload can still offer it. Since ESCSUITE-227 the startup check first asks `probeSessionOwner()` and, when another live tab owns the slot, offers and clears nothing and says `SESSION_HELD_NOTICE` once; the check starts once per mount (`checkStartedRef`) so StrictMode's second run cannot probe against the first |
-| `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector. A rejected write used to go to `console.error` alone (ESCSUITE-217): now it also raises the editor's one notice, through `showNotification` — the media library's own quota sentence (`components/VideoUploader.tsx`'s "Storage quota exceeded. Remove some media to free up space.") when the browser's error name is `QuotaExceededError`, read through `error.cause ?? error` the same way ESCSUITE-210 reads it in ESCAPECRAFT, or a generic "Your session could not be saved — storage may be full." for anything else. The sentence choice is the pure, exported `autosaveFailureNotice(error)`. A ref-backed latch — not state, since it must survive the effect re-running on every edit without itself causing a render — reports once per run of failing ticks and clears on the next SUCCESSFUL write, so a later failure (a new run) is reported again; `console.error` still logs every failure's detail regardless of the latch. Its second effect (the editor's **fourth**, ESCSUITE-227) queues for the session lock and releases it on unmount; the timer writes nothing until `ownsSessionRef` says this tab owns the slot, and never an `isEmptySession` snapshot. Neither costs a render. `?suppressRestore=1` does not queue |
+| `useProjectActions.ts` | Project lifecycle: save to disk, open from disk with the "you have unsaved work" dialog in front of it, and start over. Owns `isSaving`, `isLoading`, `showProjectLoadDialog` and the pending file — and the editor's **only** project-load dialog: `handleProjectFile(file)` is the "given a project file" entry the uploader's drop/pick path calls, with `handleLoadProject` being that same entry behind the file picker (see "Dialogs"). Takes `clipCount` as a number, the dependency both callbacks carried inline. Binds no effect; sits fifth — right after `useSessionAutosave`, whose `clearSession` it takes (ESCSUITE-227 fix round 1, ESCSUITE-274; it sat third before), and before the shortcut hook, which takes `handleSaveProject` and `handleLoadProject`. `handleNewProject` calls `clearSession()`, which empties **this tab's own** slot and no other (ESCSUITE-274) — every tab has its own, so a New Project never touches another tab's crash recovery — and does nothing under `?suppressRestore=1`. `loadProjectFile` (shared by every path above) runs `parseProject` on what `loadProject(file)` read back **before** calling `resetProject()` (ESCSUITE-102): a malformed file used to throw out of `setProject`'s migration *after* the reset had already emptied the editor, leaving the failure notice over a blank timeline; now a bad file shows "Failed to load project: \<reason\>" and the current project is never touched. `loadProject(file)` already minted a `thumbnailUrl` for every incoming source before validation ever runs, so a REFUSED load (a `parsed.ok === false`, or anything that throws before the sources are actually handed to `addSourceVideo`) revokes those incoming thumbnails itself — nothing is ever going to render them. A load that *succeeds* does **not** also revoke the outgoing library here: that is `resetProject()`'s own job (ESCSUITE-113, `store/projectSlice.ts`), and revoking it twice from two places was the review round's own finding. `clearHistory()` runs once every source has landed, right before the success notification (ESCSUITE-164) — left out, `resetProject()` + `setProject()` + one `addSourceVideo` per source were four separate undo entries, and the first Ctrl+Z after an open landed on "loaded project, one source missing" rather than whatever was open before. Opening a file is a new document, not an edit, so it is not undoable at all — parity with `useSessionRestore`'s own `clearHistory()` and `handleNewProject`'s. It is **not** called on any failure path: a load that throws partway through (ESCSUITE-113's own case — `addSourceVideo` dies on the second of three sources) leaves whatever undo history the editor held before the user picked this file untouched, because there is nothing to clear history *to* |
+| `useSessionRestore.ts` | The "Resume Previous Session?" lookup on startup and the two answers to it, and the `sessionRestored` flag the autosave gates on. The editor's **second** effect. `handleRestoreSession` rebuilds every source's `thumbnailUrl` before writing the store — the snapshot no longer carries one — resolving each with `Promise.all` (the reads are independent) so the library renders once with live pictures rather than once broken and once fixed (ESCSUITE-96). It does **not** revoke anything itself: the library is not reliably empty when a restore lands — the CRAFT handoff (`useHostIntegration` → `importTake`) adds a take's parts to it as soon as they arrive, well before the placement that waits on `sessionDecisionPending` — so a blanket revoke of "whatever is here" would kill the handoff's still-live thumbnails. `addSourceVideo` (`store/projectSlice.ts`) is the one place that owns freeing a replaced source's *old* thumbnailUrl, exactly when a restored source happens to share an id the handoff already added (ESCSUITE-113). Restoring is therefore asynchronous, not the single-tick write it used to be, and is guarded against both ways that window can be walked into: a `restoreAttemptRef` set at entry makes a second `handleRestoreSession` call while one is already reading thumbnails a no-op, and `handleDeclineSession` clears it, so "Start Fresh" clicked mid-restore wins — the restore finds its answer overruled when its reads come back and does not commit. `SessionRestorePrompt` disables both buttons the moment either is clicked, as the first line of defence against the same race. A rejected thumbnail read is answered the same way a decline is — the ref is cleared, the prompt closes, `sessionRestored` settles, and the user is left with a fresh project — except the notification says the restore failed and the saved session is left in storage rather than cleared, so a reload can still offer it. Since ESCSUITE-274 it owns this tab's id (`readTabId`, returned as `tabId`): the startup check first probes this tab's own lock and renews the id of a duplicated tab, then offers what `findOfferableSlot` returns — the newest slot with media whose tab is gone — keeping the offered slot in `offeredSlotRef` so Start Fresh deletes that slot and a restore adopts it (`adoptSessionSlot`) unless it is this tab's own; the check starts once per mount (`checkStartedRef`) so StrictMode's second run cannot probe against the first. `SESSION_HELD_NOTICE` (ESCSUITE-227) is gone |
+| `useSessionAutosave.ts` | The debounced session write. The editor's **third** effect, registered immediately after `useSessionRestore` for the reason above; re-arms on `currentTime` through a subscription inside the effect, never a selector. A rejected write used to go to `console.error` alone (ESCSUITE-217): now it also raises the editor's one notice, through `showNotification` — the media library's own quota sentence (`components/VideoUploader.tsx`'s "Storage quota exceeded. Remove some media to free up space.") when the browser's error name is `QuotaExceededError`, read through `error.cause ?? error` the same way ESCSUITE-210 reads it in ESCAPECRAFT, or a generic "Your session could not be saved — storage may be full." for anything else. The sentence choice is the pure, exported `autosaveFailureNotice(error)`. A ref-backed latch — not state, since it must survive the effect re-running on every edit without itself causing a render — reports once per run of failing ticks and clears on the next SUCCESSFUL write, so a later failure (a new run) is reported again; `console.error` still logs every failure's detail regardless of the latch. Its second effect (the editor's **fourth**, ESCSUITE-227; since ESCSUITE-274 `holdTabLock(tabId)`) holds this tab's lock and releases it on unmount, or when a duplicated tab is given a new id; the timer writes this tab's own slot, `session:<tabId>`, with no ownership gate, and never an `isEmptySession` snapshot. Neither costs a render. It returns `clearSession()`, New Project's: this tab's row only, a no-op under `?suppressRestore=1`. `?suppressRestore=1` holds no lock |
 | `useTimelineZoom.ts` | The two zoom steps, one factor of 1.25 each way. Binds no effect; sits sixth because the shortcut hook and the timeline footer call the same two handlers |
 | `useAppKeyboardShortcuts.ts` | The global `keydown` listener: one ordered cascade of `if`s where the order *is* the semantics — `c`/`v`/`o` sit below their Ctrl chords so each bare letter only sees what fell through, and the Escape cascade runs shortcuts sheet → crop mode → in/out points → multi-selection → single selection (the crop-mode branch, ESCSUITE-157, sits there so deselecting never leaves crop mode as a side effect and takes the selection with it). Above all of it sits `modalOpen`, which stops the cascade dead while a dialog is up (see "Dialogs"). The editor's **fifth** effect. Its deps array is the inline one character for character plus `modalOpen`, `clips.length` included while the Ctrl+B branch reads `clips.find` — a known staleness, carried deliberately. **40 deps, measured and left verbatim** — see below. Its five editing branches — Delete/Backspace on a multi-selection, Delete/Backspace on a single clip, Ctrl+V, Ctrl+D and Ctrl+B — ask `store/trackLock.ts` about the lock on demand before calling the store and toast "Track is locked" instead when it would refuse (ESCSUITE-84) |
 | `useTimelineHeight.ts` | The resize drag, the double-click reset and the persisted height. The editor's **sixth** effect; its `[isResizing, timelineHeight]` deps re-bind both document listeners on every clamped pixel of a drag, which is load-bearing — it is how `handleResizeEnd` closes over the final height. `src/hooks/useDocumentListener.ts` keeps its handler in a ref and would break exactly that, so it is not used here |
