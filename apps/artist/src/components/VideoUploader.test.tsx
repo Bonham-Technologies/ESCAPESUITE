@@ -467,9 +467,100 @@ describe('VideoUploader', () => {
       selectFiles([file('notes.txt', 'text/plain')])
 
       await waitFor(() =>
-        expect(globalThis.alert).toHaveBeenCalledWith('Please select video, image, or audio files')
+        expect(showNotification).toHaveBeenCalledWith(
+          'Only video, image, audio and .veditor files can be imported.',
+          'error'
+        )
       )
+      // ESCSUITE-249: the one blocking alert() left in the app is gone.
+      expect(globalThis.alert).not.toHaveBeenCalled()
       expect(mockProcessMediaFile).not.toHaveBeenCalled()
+    })
+
+    it('says nothing about a file it accepts', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+      selectFiles([file('test.mp4', 'video/mp4')])
+
+      await screen.findByText('Complete')
+      expect(showNotification).not.toHaveBeenCalled()
+      expect(globalThis.alert).not.toHaveBeenCalled()
+    })
+
+    // ESCSUITE-249: upload rows were matched by file name, so two drops of
+    // `clip.mp4` shared one row's progress, one row's error and one Dismiss.
+    describe('two files with the same name (ESCSUITE-249)', () => {
+      it('gives each its own row, and Dismiss removes only the one it sits on', async () => {
+        let finishSecond: (value: typeof videoMeta) => void = () => {}
+        mockProcessMediaFile
+          .mockRejectedValueOnce(new Error('Unsupported codec'))
+          .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+          render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+          selectFiles([file('clip.mp4', 'video/mp4'), file('clip.mp4', 'video/mp4')])
+
+          expect(await screen.findByText('Unsupported codec')).toBeInTheDocument()
+          expect(await screen.findByText('Processing...')).toBeInTheDocument()
+          expect(screen.getAllByText('clip.mp4')).toHaveLength(2)
+
+          fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+
+          expect(screen.queryByText('Unsupported codec')).not.toBeInTheDocument()
+          expect(screen.getByText('Processing...')).toBeInTheDocument()
+          expect(screen.getAllByText('clip.mp4')).toHaveLength(1)
+
+          await act(async () => finishSecond(videoMeta))
+          expect(await screen.findByText('Complete')).toBeInTheDocument()
+        } finally {
+          errorLog.mockRestore()
+        }
+      })
+
+      it('keeps two failures apart, each with its own Dismiss', async () => {
+        mockProcessMediaFile
+          .mockRejectedValueOnce(new Error('first failed'))
+          .mockRejectedValueOnce(new Error('second failed'))
+        const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+        try {
+          render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+          selectFiles([file('clip.mp4', 'video/mp4'), file('clip.mp4', 'video/mp4')])
+
+          expect(await screen.findByText('first failed')).toBeInTheDocument()
+          expect(await screen.findByText('second failed')).toBeInTheDocument()
+          const dismissals = screen.getAllByRole('button', { name: 'Dismiss' })
+          expect(dismissals).toHaveLength(2)
+
+          fireEvent.click(dismissals[0])
+
+          expect(screen.queryByText('first failed')).not.toBeInTheDocument()
+          expect(screen.getByText('second failed')).toBeInTheDocument()
+        } finally {
+          errorLog.mockRestore()
+        }
+      })
+
+      it('fades and removes a finished row without touching its namesake', async () => {
+        vi.useFakeTimers()
+        let finishSecond: (value: typeof videoMeta) => void = () => {}
+        mockProcessMediaFile
+          .mockResolvedValueOnce(videoMeta)
+          .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+
+        selectFiles([file('clip.mp4', 'video/mp4'), file('clip.mp4', 'video/mp4')])
+        await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+        expect(screen.getByText('Complete')).toBeInTheDocument()
+        expect(screen.getByText('Processing...')).toBeInTheDocument()
+
+        await act(async () => { await vi.advanceTimersByTimeAsync(2000 + 200) })
+
+        expect(screen.queryByText('Complete')).not.toBeInTheDocument()
+        expect(screen.getByText('Processing...')).toBeInTheDocument()
+        await act(async () => finishSecond(videoMeta))
+      })
     })
 
     it('refuses a file that would not fit in the remaining quota', async () => {
@@ -580,6 +671,20 @@ describe('VideoUploader', () => {
       selectFiles([file('my.veditor', ''), file('test.mp4', 'video/mp4')])
 
       await waitFor(() => expect(onProjectFile).toHaveBeenCalledTimes(1))
+      expect(mockProcessMediaFile).not.toHaveBeenCalled()
+    })
+
+    // ESCSUITE-249: the test was case-sensitive, so a project saved or renamed
+    // in upper case fell through to the "not media" refusal.
+    it('recognises the extension in any case', async () => {
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const projectFile = file('PROJECT.VEDITOR', '')
+
+      selectFiles([projectFile])
+
+      await waitFor(() => expect(onProjectFile).toHaveBeenCalledWith(projectFile))
+      expect(showNotification).not.toHaveBeenCalled()
+      expect(globalThis.alert).not.toHaveBeenCalled()
       expect(mockProcessMediaFile).not.toHaveBeenCalled()
     })
 

@@ -3465,8 +3465,9 @@ have differently went with the duplication, all of them the App path's and all o
 the load now shows the blocking `LoadingOverlay`, a success reports `Project loaded successfully`
 through the notice channel rather than nothing at all, and a file that cannot be read reports
 `Failed to load project` there too instead of a blocking `alert('Failed to load project file.')`
-— the last `alert()` on any ARTIST *load* path (the uploader still raises one to reject a file
-that is not media at all, and `confirm()` still guards Clear All and New Project). Save-and-load
+— the last `alert()` on any ARTIST *load* path (`confirm()` still guards Clear All and New Project;
+the uploader's own refusal of a file that is not media at all stopped being an `alert()` in
+ESCSUITE-249, below). Save-and-load
 also announces its save, and a failed save, which the uploader's copy swallowed to the console.
 The one thing that swap costs, for the record: `useNotification` is a single slot on a
 three-second timer, so a failure the user happens not to be looking at is now missed, where an
@@ -4720,3 +4721,23 @@ Ctrl/Cmd chord the cascade binds, redo's Shift spelling as its own entry; the sh
 each entry is claimed. The sheet and the menu once showed `Ctrl+N` for New Project, which nothing bound and
 which Chromium/Edge keep for a new window (a page cannot claim it), so both lost it; the menu item keeps its
 label and shows no hint. Add a chord to the table when you bind one, and never one the browser reserves.
+
+### Import rows, the refusal notice and the metadata deadline (ESCSUITE-249)
+
+`VideoUploader`'s upload rows are keyed by a per-file `id` (`uuidv4()`, minted when a file is
+accepted into the loop), never by `fileName`: progress, completion, the fade-out, the error state
+and Dismiss all match on `id`, and the list's React `key` is the same `id`. `fileName` is display
+only, so two drops of `clip.mp4` get two rows with their own status and their own Dismiss, and
+dismissing one leaves the other. The `.veditor` test lower-cases the name first, so `PROJECT.VEDITOR`
+goes to `onProjectFile` like `project.veditor`. A drop with no recognised file at all is refused
+through the editor's notice channel (`showNotification`) with "Only video, image, audio and
+.veditor files can be imported." instead of `window.alert()` — the last blocking `alert()` in the
+app. `videoProcessor.ts`'s `settleMediaDuration` (behind `extractVideoMetadata`,
+`extractAudioMetadata`, `loadMediaDuration` and so `resolveStoredDuration`) arms
+`METADATA_LOAD_TIMEOUT_MS` (15 s) when it attaches its listeners; `loadedmetadata`, `error` and the
+single release path clear it. On expiry it fails with "Could not read <name> — the browser did not
+report its metadata within 15 s" through the same `fail` as the error path, so the row shows an
+error and can be dismissed (and the object URL is revoked once). The end-seek duration probe keeps
+its own 5 s timer, armed after `loadedmetadata`. Images load through `Image` and are untouched. The
+media test double's `silent` script flag (`src/test/doubles/media.ts`) models an element that fires
+nothing.
