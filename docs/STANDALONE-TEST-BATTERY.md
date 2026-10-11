@@ -59,7 +59,7 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 - [ ] Recording UI shows correctly
 - [ ] Source selection (screen/webcam) works
 - [ ] Start/stop a recording and confirm it plays back
-- [ ] Theme toggle works
+- [ ] Follows the OS colour scheme (light and dark) — there is no in-app theme toggle
 - [ ] "Download WebM" produces a valid WebM file, instantly (no progress, no conversion)
 - [ ] "MP4" converts in the page: the row shows a phase and a percentage while it runs, and the file that lands is a playable `.mp4` (H.264 + AAC)
 - [ ] Cancelling a conversion returns the row to idle, writes no file, and says nothing in the header
@@ -76,7 +76,7 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 - [ ] Preview area displays
 - [ ] Add a clip, trim it, and confirm the change reflects in preview
 - [ ] Export button works and produces a valid WebM/MP4 file
-- [ ] Theme toggle works
+- [ ] Follows the OS colour scheme (light and dark) — there is no in-app theme toggle
 
 ## Offline Operation Test
 
@@ -94,6 +94,10 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 3. File should contain all JS/CSS/assets inlined (no external `<script src>` or `<link href>`
    pointing outside the file)
 4. File should work when opened directly (`file://`) and when copied to another machine
+
+## Privacy note for the offline build
+
+Under `file://`, Chromium and Firefox give every local HTML file the same origin, so another HTML file opened from disk in the same browser profile can read the recordings and projects the offline ESCAPECRAFT and ESCAPEARTIST keep in IndexedDB. The same shared origin is what lets a recording flow from a downloaded ESCAPECRAFT file to a downloaded ESCAPEARTIST file. The hosted deployment does not have this property, because its origin is its own. The mitigation is the ordinary one: open only HTML files you trust, or keep the offline tools in a separate browser profile.
 
 ## Cleanup
 

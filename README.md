@@ -88,7 +88,7 @@ pnpm build:deploy        # Combined build for deployment, outputs to /dist
 
 `pnpm build:deploy` produces a static `dist/` directory (ESCAPEPLAN at the root, ESCAPECRAFT at `/craft/`, ESCAPEARTIST at `/artist/`) that you can deploy to any static host — Vercel, Netlify, GitHub Pages, S3, or a plain web server.
 
-The offline build (`pnpm build:standalone`) needs no host at all — it's a single self-contained HTML file per app that you can open directly from disk (`file://`) or hand to someone else.
+The offline build (`pnpm build:standalone`) needs no host at all — it's a single self-contained HTML file per app that you can open directly from disk (`file://`) or hand to someone else. Opened from disk, every local HTML file in a browser profile shares one origin, so open only files you trust in the profile that holds your offline recordings (see the privacy note in `docs/STANDALONE-TEST-BATTERY.md`).
 
 ## Render on a server (headless kit)
 
