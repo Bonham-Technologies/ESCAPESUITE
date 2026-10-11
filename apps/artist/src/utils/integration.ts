@@ -172,7 +172,7 @@ export async function loadVideoFromUrl(
   if (!response.body) {
     // No streaming support, just get blob directly
     const blob = await response.blob();
-    return { blob, name: extractFilename(url) };
+    return { blob, name: extractFilename(url, blob.type) };
   }
 
   // Stream the response for progress tracking
@@ -206,7 +206,7 @@ export async function loadVideoFromUrl(
     type: response.headers.get('content-type') || 'video/mp4',
   });
 
-  return { blob, name: extractFilename(url) };
+  return { blob, name: extractFilename(url, blob.type) };
 }
 
 /**
@@ -243,24 +243,62 @@ function describeFetchFailure(url: string, error: unknown): Error {
   );
 }
 
+/** The name a media file gets when its URL offers none (a `data:` URL, or no path). */
+const FALLBACK_MEDIA_NAME = 'Loaded media';
+
+/** The longest stem a URL-derived name keeps: the project-title cap. */
+const MAX_NAME_STEM_LENGTH = MAX_TITLE_LENGTH;
+
+// The MIME types a host is likely to hand over, and the extension each takes
+// when its URL names none (ESCSUITE-228). An unlisted type adds no extension.
+const EXTENSION_BY_MIME: Record<string, string> = {
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'audio/wav': 'wav',
+  'audio/mpeg': 'mp3',
+  'audio/webm': 'webm',
+  'audio/mp4': 'm4a',
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
 /**
- * Extract filename from URL
+ * The name a fetched file is given (ESCSUITE-228): the URL's last path
+ * segment, decoded; a `data:` URL, or a URL whose last segment is empty (a
+ * trailing slash, no path), is "Loaded media". A name with no extension takes one from the blob's MIME
+ * type; one that already has an extension keeps it, even if the type
+ * disagrees. The stem is capped at the project-title length.
  */
-function extractFilename(url: string): string {
+export function extractFilename(url: string, blobType: string): string {
+  let segment = '';
   try {
     const urlObj = new URL(url);
-    const pathname = urlObj.pathname;
-    const parts = pathname.split('/');
-    const filename = parts[parts.length - 1];
-
-    if (filename) {
-      return decodeURIComponent(filename);
+    if (urlObj.protocol !== 'data:') {
+      const parts = urlObj.pathname.split('/');
+      const last = parts[parts.length - 1];
+      if (last) {
+        try {
+          segment = decodeURIComponent(last);
+        } catch {
+          // A malformed escape: the raw segment is still the best name.
+          segment = last;
+        }
+      }
     }
   } catch {
     // Invalid URL
   }
+  if (!segment) segment = FALLBACK_MEDIA_NAME;
 
-  return 'video.mp4';
+  const existing = /\.[A-Za-z0-9]{1,5}$/.exec(segment)?.[0];
+  const stem = (existing ? segment.slice(0, -existing.length) : segment).slice(
+    0,
+    MAX_NAME_STEM_LENGTH
+  );
+  const mimeExtension = EXTENSION_BY_MIME[blobType.split(';')[0].trim().toLowerCase()];
+  return stem + (existing ?? (mimeExtension ? `.${mimeExtension}` : ''));
 }
 
 /**
@@ -308,7 +346,11 @@ export function generateShareUrl(
  * Integration message types for documentation:
  *
  * Incoming messages (from parent):
- * - LOAD_VIDEO: { url: string } - Load a video from URL. Fetched from this page, so bound by its
+ * - LOAD_VIDEO: { url: string } - Load a video (or audio, or image) from URL. A payload with
+ *   no string `url` gets an ERROR reply (code: 'INVALID_MESSAGE') and nothing is fetched. The
+ *   file is named after the URL's last path segment, with an extension from the response's
+ *   MIME type when the segment has none; a `data:` URL, or one with no filename, is named
+ *   "Loaded media" (ESCSUITE-228). Fetched from this page, so bound by its
  *   own connect-src (ESCSUITE-130): on the hosted deployment that is same-origin only, and a URL
  *   the policy refuses gets an ERROR reply (code: 'LOAD_ERROR') naming the origin and the likely
  *   cause instead of a generic failure — see loadVideoFromUrl.
@@ -319,13 +361,19 @@ export function generateShareUrl(
  *   clip ids are unique, every clip's trackId names a track that exists once
  *   migration has run) before it replaces anything; a payload that fails gets
  *   an ERROR reply (code: 'INVALID_PROJECT', see below) instead of being
- *   applied, and the current project is left exactly as it was. An absent
- *   payload is still silently ignored, as it always was.
+ *   applied, and the current project is left exactly as it was. A payload that is
+ *   not an object at all (absent, null, a string, a number) gets an ERROR reply with
+ *   code 'INVALID_MESSAGE' instead (ESCSUITE-232).
  * - EXPORT: { format: 'webm' | 'mp4' } - Trigger export
  *   [documented but not currently implemented - App has no handler for it]
  * - GET_STATE: {} - Request current state
- * - SET_THEME: { theme: 'light' | 'dark' | 'system' } - Set theme preference
+ * - SET_THEME: { theme: 'light' | 'dark' | 'system' } - Set theme preference. A theme outside
+ *   that list, or a payload without one, gets an ERROR reply (code: 'INVALID_MESSAGE').
  * - GET_THEME: {} - Request current theme state
+ *
+ * A message whose `type` is none of the above (EXPORT included, which is documented but not
+ * implemented) is ignored without a reply; a message with no `type` never reaches the handler.
+ * A known type with a malformed payload is not ignored: it gets the ERROR reply above.
  *
  * Only messages whose `event.source` is `window.parent` are acted on, and when
  * the host named itself with `?hostOrigin=` its `event.origin` must match too.
@@ -351,8 +399,10 @@ export function generateShareUrl(
  * - STATE: { project: Project, videos: SourceVideo[] } - Current state
  * - ERROR: { message: string, code: string } - Error occurred. One shape for
  *   every failure; `code` values in use today are 'LOAD_ERROR' (a LOAD_VIDEO
- *   fetch failed) and 'INVALID_PROJECT' (a LOAD_PROJECT payload failed
- *   `parseProject`'s shape checks — `message` carries the specific reason).
+ *   fetch failed), 'INVALID_PROJECT' (a LOAD_PROJECT payload failed
+ *   `parseProject`'s shape checks — `message` carries the specific reason) and
+ *   'INVALID_MESSAGE' (an inbound message of a known type had a malformed payload —
+ *   `message` names the field).
  * - THEME_CHANGED: { preference: string, resolved: string } - Theme was changed
  * - THEME_STATE: { preference: string, resolved: string } - Current theme state
  *
