@@ -12,8 +12,9 @@
 //    keeps the media elements in sync with it, and paints each frame.
 //
 // The loop runs off `performance.now()` rather than React state: the store
-// learns the new time only every 200ms, and the loop calls no React setter at
-// all per frame. The timecode readout instead subscribes to the playhead
+// learns the new time only every 200ms, and once more, exactly, when a pause
+// stops the loop (ESCSUITE-281); the loop calls no React setter at all per
+// frame. The timecode readout instead subscribes to the playhead
 // (`subscribeDisplayTime` / `getDisplayTime`), so a frame re-renders one span
 // rather than the whole preview subtree — and only ten times a second.
 import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
@@ -175,6 +176,12 @@ export function usePreviewRenderLoop({
     const elementsChanged = scrubVideoUrlsKeyRef.current !== videoUrlsKey;
     scrubVideoUrlsKeyRef.current = videoUrlsKey;
     if (isPlaying) return;
+    // The store has moved on since this render: a pause published the loop's
+    // last frame from the playback effect's cleanup, which runs in the same
+    // commit before this effect (ESCSUITE-281). The run for the newer time
+    // follows at once, so this one would only seek every video back to a
+    // position up to 200 ms stale and paint it.
+    if (useEditorStore.getState().currentTime !== currentTime) return;
 
     publishDisplayTime(currentTime, true);
 
@@ -467,7 +474,10 @@ export function usePreviewRenderLoop({
 
     // Track playback start
     let playbackStartTime = performance.now();
+    // The last time this loop wrote to the store, and the time of the frame it
+    // last drew — what a pause publishes (ESCSUITE-281).
     let lastStoreUpdateTime = startTimelineTime;
+    let frameTime = startTimelineTime;
 
     // Track last active clips to detect transitions
     let lastActiveClipIds = new Set(activeClips.map(c => c.clip.id));
@@ -516,6 +526,7 @@ export function usePreviewRenderLoop({
           publishDisplayTime(loopStart, true);
           lastActiveClipIds = new Set();
           lastStoreUpdateTime = loopStart;
+          frameTime = loopStart;
 
           // Continue animation loop
           animationFrameRef.current = requestAnimationFrame(animate);
@@ -656,6 +667,7 @@ export function usePreviewRenderLoop({
       }
 
       // Draw the composited frame (even if there are no active clips - shows black)
+      frameTime = newTimelineTime;
       drawFrame(newTimelineTime);
 
       animationFrameRef.current = requestAnimationFrame(animate);
@@ -670,6 +682,20 @@ export function usePreviewRenderLoop({
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = null;
+      }
+
+      // A pause resumes from the frame on screen (ESCSUITE-281). The store has
+      // only the loop's last 200 ms write, so publish the last frame's time
+      // once, here, as the loop stops — every pauser (Space, the Pause button,
+      // a grab of the playhead) goes through this cleanup. Only when this is a
+      // pause (the effect is not just restarting for an edit, or unmounting
+      // mid-playback) and only when the store still holds the loop's own last
+      // write: a pause that came with a seek — a ruler click, Home, a step —
+      // wrote its target in the same batch, and must keep it. That is also
+      // why the pause branch above writes nothing.
+      const { isPlaying: stillPlaying, currentTime: storeTime } = useEditorStore.getState();
+      if (!stillPlaying && storeTime === lastStoreUpdateTime) {
+        setCurrentTime(frameTime);
       }
     };
   }, [isPlaying, clips, tracks, timelineDuration, setIsPlaying, setCurrentTime, drawFrame, sourceVideos, videoElementsRef, audioElementsRef, isPlayingRef, publishDisplayTime]);

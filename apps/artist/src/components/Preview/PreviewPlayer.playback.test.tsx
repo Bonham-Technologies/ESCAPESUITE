@@ -442,9 +442,14 @@ describe('PreviewPlayer transport running', () => {
     preview.clearCalls()
     store().setIsPlaying(false)
     await settle(60)
-    // The paused position is drawn twice: once by the scrub effect the moment
-    // playback stops, once by the debounced redraw 50ms later.
-    expect(preview.frames()).toHaveLength(2)
+    // The paused position is drawn three times: once by the scrub effect the
+    // moment playback stops, once more when the video's seek to it reports
+    // back, and once by the debounced redraw 50ms later. The seek is the media
+    // double's: it does not advance a playing element, so the video is still
+    // at 0 while the pause lands on the last frame the loop drew (ESCSUITE-281;
+    // before it, the pause landed on the store's stale 0 and needed no seek).
+    // A browser's playing element is already near that frame.
+    expect(preview.frames()).toHaveLength(3)
 
     preview.clearCalls()
     await settle(300)

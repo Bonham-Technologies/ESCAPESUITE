@@ -407,19 +407,50 @@ describe('usePreviewRenderLoop pausing (ESCSUITE-281)', () => {
   it('writes the paused position once, and redraws from it', async () => {
     addClip('clip1', 0, 4)
     const { deps, play, pause } = harness()
+    // Installed before the hook mounts: swapping the store's setter later
+    // would re-run the playback effect with it.
+    const writes = spyOnStoreTimeWrites()
 
     renderHook(() => usePreviewRenderLoop(deps))
     play()
     await settle(1150)
     const shown = last(drawnTimes(deps))
-    const writes = spyOnStoreTimeWrites()
+    const throttled = last(writes.mock.calls)[0]
+    writes.mockClear()
+    vi.mocked(deps.drawFrame).mockClear()
 
     pause()
     await settle(0)
 
+    expect(throttled).toBeLessThan(shown)
     expect(writes.mock.calls).toEqual([[shown]])
-    // The paused frame is drawn at the position the store now holds.
-    expect(last(drawnTimes(deps))).toBe(shown)
+    // The paused frame is drawn at the position the store now holds, and
+    // never at the stale one the store held when the pause was rendered.
+    expect(drawnTimes(deps).length).toBeGreaterThan(0)
+    expect(drawnTimes(deps).every((time) => time === shown)).toBe(true)
+  })
+
+  it('lands on the in point when paused between a loop-back and the next frame', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(1)
+    store().setOutPoint(2)
+    const { deps, play, pause, seek } = harness()
+    seek(1.9)
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    // 1.9 + 7 frames of 16 ms crosses the out point: the seventh frame loops
+    // back and draws nothing, and the pause lands before the eighth.
+    await settle(FRAME_MS * 7)
+    expect(last(drawnTimes(deps))).toBeGreaterThan(1.9)
+    expect(result.current.getDisplayTime()).toBe(1)
+
+    pause()
+    await settle(0)
+
+    // What the readout showed, not the last frame drawn before the loop-back.
+    expect(store().currentTime).toBe(1)
   })
 
   it('keeps a seek that pauses in the same batch on the seek\'s target', async () => {
@@ -444,12 +475,13 @@ describe('usePreviewRenderLoop pausing (ESCSUITE-281)', () => {
   it('writes nothing when the loop restarts for an edit made during playback', async () => {
     addClip('clip1', 0, 4)
     const { deps, play } = harness()
+    const writes = spyOnStoreTimeWrites()
 
     renderHook(() => usePreviewRenderLoop(deps))
     play()
     await settle(1150)
     const before = store().currentTime
-    const writes = spyOnStoreTimeWrites()
+    writes.mockClear()
 
     // A new clip re-runs the playback effect while it is still playing.
     act(() => {
@@ -466,14 +498,17 @@ describe('usePreviewRenderLoop pausing (ESCSUITE-281)', () => {
     addClip('clip1', 0, 4)
     const { deps, play } = harness()
 
+    const writes = spyOnStoreTimeWrites()
     const { unmount } = renderHook(() => usePreviewRenderLoop(deps))
     play()
     await settle(1150)
-    const writes = spyOnStoreTimeWrites()
+    const before = store().currentTime
+    writes.mockClear()
 
     act(() => unmount())
 
     expect(writes).not.toHaveBeenCalled()
+    expect(store().currentTime).toBe(before)
   })
 })
 
