@@ -3032,7 +3032,39 @@ Clear Unused / Clear All, `setSourceThumbnail`, the project load's `clearHistory
 and the session restore's as writes that never sit on the undo stack. **Nothing deletes bytes on
 undo or redo**: the redo branch can hold a source another snapshot still references, and a stored
 row may belong to a project open in another tab. Storage orphans from before ESCSUITE-244 are not
-swept (ESCSUITE-268).
+swept on load; the media library offers them on a click instead (ESCSUITE-268, next paragraph).
+
+**Files from earlier sessions** (ESCSUITE-268). Rows ESCSUITE-244 came too late for — an import
+undone and then edited past, in any session before it — are still in the shared `videos` store,
+listed by neither app. `VideoUploader.tsx` shows them beside Clear Unused / Clear All as one line,
+"N files from earlier sessions (X MB)", with a Remove button, only when N > 0. The set is
+`core/orphanedImports.ts`'s `orphanedImports(rows, projectIds)`: every `getAllVideoMetadata()` row,
+minus every id the editor can still reach (`editorSourceIds` — the live library **and** every
+undo/redo snapshot, because New Project is undoable and the project it replaced still owns its
+bytes while that entry is on the stack), minus every source **any saved session slot** names
+(`listSessionStates()` — each tab's own slot since ESCSUITE-274, plus the legacy shared row if one
+is left: the app keeps a slot on purpose while the live project does not hold its sources — under
+`?suppressRestore=1`, after a restore that failed, or for a tab that crashed — and its next restore needs
+the bytes; review M1), minus every `source === 'recording'` row whatever its age,
+minus every row whose `takeId` is a recording's id or a recording's `takeId` (a take's companions,
+even one whose primary has gone). X is `totalBytes`, the rows' stored `size` — the byte length of
+the blob each ARTIST writer stored beside it, the figure Clear Unused and the tiles already show.
+The list is read when the panel mounts and again after Clear Unused, Clear All and this Remove —
+never on render (the uploader suite pins one `getAllVideoMetadata` call across re-renders) and
+never as a sweep. A row the project claims after the read (a session restore landing after the
+panel mounted) is dropped from the list during render and stays off it until the next read, so a
+per-item Remove of that source later — which deletes the bytes first — cannot put a dead row back
+on the line. The confirm is `Remove N files imported in earlier sessions (X MB)? Another open
+editor tab could still be using them.`, because "not referenced by this editor" is not
+"unreferenced": another tab's project, or a `.veditor` that embeds the bytes, may still want them.
+Deleting is Clear All's shape — per id `deleteVideo` (bytes and thumbnail), a failure caught per id
+and reported once by count (`Could not remove N file(s) from storage`), the meter refreshed — with
+each id re-checked against the live store **and every saved session slot** just before its delete, so a
+project load or an autosave landing mid-loop keeps what it claimed (a re-check that cannot read the
+session counts as a failed delete, never as a pass). One removal runs at a time: a click while one
+is still awaiting does nothing (a ref guard). The button's accessible name says what it removes —
+`Remove N file(s) from earlier sessions` — rather than a bare "Remove". These rows are not in the project, so nothing writes the store or
+the undo history.
 
 `removeSourceVideo` — the per-id, undoable removal `removeSourceVideosPermanently` was modelled
 on — is gone (ESCSUITE-154): the per-item Remove button was its only caller anywhere in the app,

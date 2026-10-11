@@ -2,11 +2,13 @@ import { v4 as uuidv4 } from 'uuid';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processMediaFile } from '../core/videoProcessor';
-import { getStorageEstimate, deleteVideo, resolveThumbnailUrl } from '../core/storage';
+import { getStorageEstimate, deleteVideo, resolveThumbnailUrl, getAllVideoMetadata, listSessionStates } from '../core/storage';
+import { orphanedImports, editorSourceIds, totalBytes } from '../core/orphanedImports';
 import { analytics } from '../utils/analytics';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
+import type { SourceVideo } from '../store/types';
 import styles from './VideoUploader.module.css';
 
 /**
@@ -16,6 +18,29 @@ import styles from './VideoUploader.module.css';
  * declared in terms of, so the two stay in step without a shared constant.
  */
 const UPLOAD_ROW_FADE_MS = 200;
+
+/** The one notice a storage clear raises for the ids it could not delete (ESCSUITE-142's shape). */
+function notRemovedMessage(failed: number): string {
+  return `Could not remove ${failed} file${failed !== 1 ? 's' : ''} from storage`;
+}
+
+/**
+ * Every source id something here still references (ESCSUITE-268): the live
+ * library, each undo/redo snapshot's, and every saved session slot's — each
+ * tab's own since ESCSUITE-274, plus the legacy shared row if one is left. A
+ * slot counts because the app keeps it on purpose while the live project does
+ * not hold its sources — under `?suppressRestore=1`, after a restore that
+ * failed, or for a tab that crashed — and its next restore needs those bytes
+ * (review M1). The slots are read first, so the store is read as it stands
+ * once that lands.
+ */
+async function referencedSourceIds(): Promise<Set<string>> {
+  const slots = await listSessionStates();
+  const { sourceVideos, history } = useEditorStore.getState();
+  const ids = editorSourceIds(sourceVideos, [...history.past, ...history.future]);
+  for (const slot of slots) for (const v of slot.session.sourceVideos) ids.add(v.id);
+  return ids;
+}
 
 interface UploadProgress {
   /**
@@ -149,6 +174,39 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
     refreshStorageInfo();
   }, [refreshStorageInfo]);
 
+  /**
+   * Files imported in earlier sessions that nothing here references any more
+   * (ESCSUITE-268) — see `orphanedImports`. Read from storage when the panel
+   * mounts and again after each clear, never on render: a re-render filters
+   * this list in memory and reads nothing.
+   *
+   * The ids the editor references are taken when the rows land, from the
+   * store as it is then, rather than from the render that asked.
+   */
+  const [orphans, setOrphans] = useState<SourceVideo[]>([]);
+  const refreshOrphans = useCallback(async () => {
+    try {
+      const rows = await getAllVideoMetadata();
+      setOrphans(orphanedImports(rows, await referencedSourceIds()));
+    } catch (e) {
+      console.error('Failed to read stored files:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshOrphans();
+  }, [refreshOrphans]);
+
+  // A row the project has claimed since the list was read — a session restore
+  // landing after the panel mounted, say — is not an orphan, and stays off the
+  // list until the next read even if the project lets go of it again: the
+  // per-item Remove deletes its bytes before it does that. Adjusted during
+  // render (React's "state from props" form), so the stale line never paints;
+  // with nothing listed this is one empty `.some`.
+  if (orphans.some((row) => sourceVideos.some((v) => v.id === row.id))) {
+    setOrphans(orphans.filter((row) => !sourceVideos.some((v) => v.id === row.id)));
+  }
+
   // Clear unused videos (not in any clip). A storage clear, not an edit
   // (ESCSUITE-149): the ids whose `deleteVideo` actually succeeded are
   // collected and handed to `removeSourceVideosPermanently` in one call after
@@ -174,9 +232,10 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         // meter has to say so even when the clear as a whole did not finish.
         if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
         refreshStorageInfo();
+        void refreshOrphans();
       }
     }
-  }, [unusedVideos, unusedSize, removeSourceVideosPermanently, refreshStorageInfo]);
+  }, [unusedVideos, unusedSize, removeSourceVideosPermanently, refreshStorageInfo, refreshOrphans]);
 
   // Clear all storage — the bulk form of Clear Unused (ESCSUITE-142): per id,
   // over the editor's own `sourceVideos`, so its blast radius can only ever be
@@ -233,15 +292,48 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
       } finally {
         if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
         refreshStorageInfo();
+        void refreshOrphans();
       }
-      if (failed > 0) {
-        showNotification(
-          `Could not remove ${failed} file${failed !== 1 ? 's' : ''} from storage`,
-          'error'
-        );
-      }
+      if (failed > 0) showNotification(notRemovedMessage(failed), 'error');
     }
-  }, [clearableVideos, removeSourceVideosPermanently, refreshStorageInfo, showNotification]);
+  }, [clearableVideos, removeSourceVideosPermanently, refreshStorageInfo, refreshOrphans, showNotification]);
+
+  // Remove the files from earlier sessions (ESCSUITE-268). Only from this
+  // click — nothing sweeps them on load. The same per-id `deleteVideo` (bytes
+  // and thumbnail) and the same one notice by count as Clear All; but these
+  // rows are not in the project, so nothing here writes the store or the undo
+  // history. Each id is checked against the editor's sources again just before
+  // its delete, from live store state: a project load landing mid-loop can
+  // claim a row the click offered, and its bytes are then the project's.
+  //
+  // One removal at a time (review L3): a click while one is still awaiting
+  // does nothing — no second confirm, no second loop over the same ids. A
+  // reference read that fails counts as a failed delete, so an id is never
+  // deleted without having been checked.
+  const removingOrphansRef = useRef(false);
+  const handleRemoveOrphans = useCallback(async () => {
+    if (removingOrphansRef.current) return;
+    const count = orphans.length;
+    if (!confirm(`Remove ${count} file${count !== 1 ? 's' : ''} imported in earlier sessions (${formatFileSize(totalBytes(orphans))})? Another open editor tab could still be using them.`)) return;
+    removingOrphansRef.current = true;
+    try {
+      let failed = 0;
+      for (const row of orphans) {
+        try {
+          if ((await referencedSourceIds()).has(row.id)) continue;
+          await deleteVideo(row.id);
+        } catch (e) {
+          failed += 1;
+          console.error('Failed to remove a file from an earlier session:', e);
+        }
+      }
+      refreshStorageInfo();
+      await refreshOrphans();
+      if (failed > 0) showNotification(notRemovedMessage(failed), 'error');
+    } finally {
+      removingOrphansRef.current = false;
+    }
+  }, [orphans, refreshStorageInfo, refreshOrphans, showNotification]);
 
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);
@@ -456,6 +548,21 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
               >
                 Clear Unused ({formatFileSize(unusedSize)})
               </button>
+            )}
+            {orphans.length > 0 && (
+              <div className={styles.orphanedImports}>
+                <span>
+                  {orphans.length} file{orphans.length !== 1 ? 's' : ''} from earlier sessions ({formatFileSize(totalBytes(orphans))})
+                </span>
+                <button
+                  className={`${styles.storageClearButton} ${styles.clearAll}`}
+                  onClick={handleRemoveOrphans}
+                  aria-label={`Remove ${orphans.length} file${orphans.length !== 1 ? 's' : ''} from earlier sessions`}
+                  title="Remove files imported in earlier sessions that no project here uses — ESCAPECRAFT recordings stay"
+                >
+                  Remove
+                </button>
+              </div>
             )}
           </div>
         </div>

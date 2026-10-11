@@ -371,9 +371,19 @@ describe('App project lifecycle', () => {
   })
 
   describe('the session restore prompt', () => {
+    // The saved session is read by more than the restore prompt: since
+    // ESCSUITE-268 the media library reads it too, as a reference its "files
+    // from earlier sessions" line must not offer. So each case scripts every
+    // read, not just the first one to arrive, and puts the double's default
+    // (no saved session) back afterwards — `vi.clearAllMocks()` keeps a
+    // scripted implementation.
+    afterEach(() => {
+      vi.mocked(listSessionStates).mockImplementation(() => Promise.resolve([]))
+    })
+
     it('restores the saved session', async () => {
       const user = userEvent.setup()
-      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
       await renderApp()
 
       expect(await screen.findByText('Resume Previous Session?')).toBeInTheDocument()
@@ -394,7 +404,7 @@ describe('App project lifecycle', () => {
       // names that same id — exactly what an autosave of the current session looks like on
       // the next visit.
       expect(store().sourceVideos.map((v) => v.id)).toEqual([sampleVideo.id])
-      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
       await renderApp()
 
       await user.click(await screen.findByRole('button', { name: 'Restore Session' }))
@@ -412,7 +422,7 @@ describe('App project lifecycle', () => {
     })
 
     it('describes what is on offer', async () => {
-      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
       await renderApp()
 
       expect(await screen.findByText('Saved Project')).toBeInTheDocument()
@@ -421,7 +431,7 @@ describe('App project lifecycle', () => {
 
     it('throws the session away when the user starts fresh', async () => {
       const user = userEvent.setup()
-      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
       await renderApp()
 
       await user.click(await screen.findByRole('button', { name: 'Start Fresh' }))
@@ -432,7 +442,7 @@ describe('App project lifecycle', () => {
     })
 
     it('offers nothing for a session with no media in it', async () => {
-      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf({ ...savedSession(), sourceVideos: [] })])
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf({ ...savedSession(), sourceVideos: [] })])
       await renderApp()
 
       expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
@@ -440,7 +450,7 @@ describe('App project lifecycle', () => {
 
     it('carries on when the session lookup fails', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.mocked(listSessionStates).mockRejectedValueOnce(new Error('db closed'))
+      vi.mocked(listSessionStates).mockRejectedValue(new Error('db closed'))
       await renderApp()
 
       expect(consoleError).toHaveBeenCalledWith('Failed to check session:', expect.any(Error))

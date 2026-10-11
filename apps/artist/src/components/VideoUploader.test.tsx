@@ -3,7 +3,7 @@ import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-libra
 import { VideoUploader, VideoLibrary } from './VideoUploader'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store, addClip } from '../test/fixtures/projectStore'
-import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail, getVideoBlob } from '../core/storage'
+import { storeVideo, getAllVideoMetadata, storeThumbnail, getThumbnail, getVideoBlob, saveSessionState, clearSessionState } from '../core/storage'
 import * as storageModule from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
@@ -1177,6 +1177,356 @@ describe('VideoUploader', () => {
       expect(screen.queryByRole('button', { name: /Clear Unused/ })).not.toBeInTheDocument()
     })
   })
+  // ESCSUITE-268: ESCSUITE-244 stopped an undone import orphaning its bytes,
+  // but rows orphaned before it are still in the shared `video-editor-db`,
+  // listed by neither app. The uploader offers them — on a click, never on
+  // load — as "files from earlier sessions": every stored row minus what this
+  // editor references (the live library and every undo/redo snapshot) minus
+  // everything ESCAPECRAFT owns (a recording, and any row sharing a
+  // recording's take).
+  describe('files from earlier sessions (ESCSUITE-268)', () => {
+    /** Store a row's bytes and thumbnail the way an import would, without telling the store. */
+    async function seedStored(id: string, extra: Partial<SourceVideo> = {}): Promise<void> {
+      await storeVideo(id, new Blob(['bytes']), { ...videoMeta, id, name: `${id}.mp4`, size: MB, ...extra })
+      await storeThumbnail(id, new Blob(['thumb']))
+    }
+
+    function renderUploader(): ReturnType<typeof render> {
+      return render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+    }
+
+    /** Its accessible name says what it removes (review L4), not a bare "Remove". */
+    const removeButton = (n: number) =>
+      screen.findByRole('button', { name: `Remove ${n} file${n !== 1 ? 's' : ''} from earlier sessions` })
+
+    /** An autosaved session that has not been restored — the `?suppressRestore=1` shape. */
+    async function saveSessionHolding(sources: SourceVideo[]): Promise<void> {
+      await saveSessionState({
+        tabId: 'earlier-tab',
+        project: store().project,
+        sourceVideos: sources,
+        currentTime: 0,
+        selectedClipId: null,
+        zoom: 1,
+        timestamp: 1,
+      })
+    }
+
+    beforeEach(async () => {
+      // Rows from earlier describes accumulate in the real fake-indexeddb (no
+      // per-test reset), and every one of them would count as an orphan here.
+      for (const row of await getAllVideoMetadata()) await storageModule.deleteVideo(row.id)
+      await clearSessionState('earlier-tab')
+    })
+
+    afterEach(async () => {
+      vi.restoreAllMocks()
+      await clearSessionState('earlier-tab')
+    })
+
+    it('offers an import nothing references, and removes its bytes and thumbnail only when clicked', async () => {
+      await seedStored('old', { size: 3 * MB })
+      store().addSourceVideo(videoMeta)
+      const historyBefore = useEditorStore.getState().history
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (3.0 MB)')).toBeInTheDocument()
+      // Never on load: listing it deleted nothing.
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('old')
+
+      fireEvent.click(await removeButton(1))
+
+      expect(globalThis.confirm).toHaveBeenCalledWith(
+        'Remove 1 file imported in earlier sessions (3.0 MB)? Another open editor tab could still be using them.'
+      )
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('old')
+      expect(await getThumbnail('old')).toBeUndefined()
+      // Not an edit: the project and the history are untouched.
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+      expect(useEditorStore.getState().history).toBe(historyBefore)
+      expect(showNotification).not.toHaveBeenCalled()
+    })
+
+    it('keeps everything when the confirmation is declined', async () => {
+      vi.mocked(globalThis.confirm).mockReturnValue(false)
+      await seedStored('old')
+      renderUploader()
+
+      fireEvent.click(await removeButton(1))
+
+      await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('old')
+      expect(screen.getByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+    })
+
+    it('never offers an ESCAPECRAFT recording, however old', async () => {
+      await seedStored('craft-take', { source: 'recording' })
+      await seedStored('old')
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      fireEvent.click(await removeButton(1))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('craft-take')
+      expect(remainingIds).not.toContain('old')
+      expect(await getThumbnail('craft-take')).toBeDefined()
+    })
+
+    it("never offers a row sharing a recording's take (a companion)", async () => {
+      await seedStored('primary', { source: 'recording', takeId: 'primary' })
+      await seedStored('companion', { takeId: 'primary', role: 'webcam' })
+      await seedStored('old')
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      fireEvent.click(await removeButton(1))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('companion')
+    })
+
+    it('never offers a row this project references', async () => {
+      await seedStored('video1')
+      store().addSourceVideo(videoMeta)
+      await seedStored('old')
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      fireEvent.click(await removeButton(1))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+    })
+
+    // New Project is an undoable edit: the project it replaced lives on in
+    // `history.past`, and undo hands its sources back — so their bytes are
+    // still referenced, by this editor, even though the live library is empty.
+    it('never offers a row only an undo snapshot still references', async () => {
+      await seedStored('video1')
+      store().addSourceVideo(videoMeta)
+      store().resetProject()
+      await seedStored('old')
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      fireEvent.click(await removeButton(1))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+      useEditorStore.getState().undo()
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+    })
+
+    it('stops offering a row the project claims after the list was read (a session restore landing)', async () => {
+      await seedStored('restored')
+      renderUploader()
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+
+      act(() => store().addSourceVideo({ ...videoMeta, id: 'restored', name: 'restored.mp4' }))
+      expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument()
+
+      // And stays withdrawn once the project lets go of it again (the per-item
+      // Remove deletes the bytes before it does that), until the next read.
+      act(() => store().removeSourceVideosPermanently(['restored']))
+      expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument()
+    })
+
+    it('spares a row the project claims while the removal is in flight', async () => {
+      await seedStored('a')
+      await seedStored('b')
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'a') store().addSourceVideo({ ...videoMeta, id: 'b', name: 'b.mp4' })
+        return realDeleteVideo(id)
+      })
+      renderUploader()
+
+      fireEvent.click(await removeButton(2))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).not.toContain('a')
+      expect(remainingIds).toContain('b')
+      expect(showNotification).not.toHaveBeenCalled()
+    })
+
+    it('removes the rest when one delete fails, and says so once', async () => {
+      await seedStored('a', { size: MB })
+      await seedStored('b', { size: 2 * MB })
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'a') throw new Error('disk full')
+        return realDeleteVideo(id)
+      })
+      const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
+      Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
+      renderUploader()
+
+      expect(await screen.findByText('2 files from earlier sessions (3.0 MB)')).toBeInTheDocument()
+      const callsBeforeClick = estimate.mock.calls.length
+      fireEvent.click(await removeButton(2))
+
+      expect(globalThis.confirm).toHaveBeenCalledWith(
+        'Remove 2 files imported in earlier sessions (3.0 MB)? Another open editor tab could still be using them.'
+      )
+      // The list is read again afterwards: only the one that failed is left.
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      expect(showNotification).toHaveBeenCalledTimes(1)
+      expect(showNotification).toHaveBeenCalledWith('Could not remove 1 file from storage', 'error')
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('a')
+      expect(remainingIds).not.toContain('b')
+      await waitFor(() => expect(estimate.mock.calls.length).toBeGreaterThan(callsBeforeClick))
+    })
+
+    it('reads the list again after Clear Unused', async () => {
+      await seedStored('unused')
+      store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'unused.mp4' })
+      const read = vi.spyOn(storageModule, 'getAllVideoMetadata')
+      renderUploader()
+      const clearUnused = await screen.findByRole('button', { name: /Clear Unused/ })
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+      await act(async () => { await read.mock.results[0].value })
+      // Written after the mount read landed: only a fresh read can see it.
+      await seedStored('old')
+
+      fireEvent.click(clearUnused)
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+    })
+
+    it('reads the list again after Clear All', async () => {
+      await seedStored('video1')
+      store().addSourceVideo(videoMeta)
+      const read = vi.spyOn(storageModule, 'getAllVideoMetadata')
+      renderUploader()
+      const clearAll = await screen.findByRole('button', { name: 'Clear All' })
+      await waitFor(() => expect(read).toHaveBeenCalledTimes(1))
+      await act(async () => { await read.mock.results[0].value })
+      await seedStored('old')
+
+      fireEvent.click(clearAll)
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('video1')
+    })
+
+    it('reads the list once per mount, not once per render', async () => {
+      await seedStored('old')
+      const read = vi.spyOn(storageModule, 'getAllVideoMetadata')
+      renderUploader()
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+
+      fireEvent.dragOver(dropZone())
+      fireEvent.dragLeave(dropZone())
+      act(() => store().addSourceVideo(videoMeta))
+      act(() => store().setCurrentTime(1))
+      await act(async () => {})
+
+      expect(read).toHaveBeenCalledTimes(1)
+    })
+
+    // Review M1: the autosaved session slot is a reference the app keeps on
+    // purpose while the live project does not hold its sources — under
+    // `?suppressRestore=1`, or after a restore that failed — and its next
+    // restore needs those bytes. No other tab is open, so the confirm's warning
+    // would not even be true.
+    it('never offers a row the saved session references', async () => {
+      await seedStored('saved')
+      await saveSessionHolding([{ ...videoMeta, id: 'saved', name: 'saved.mp4' }])
+      await seedStored('old')
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      fireEvent.click(await removeButton(1))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).toContain('saved')
+      expect(remainingIds).not.toContain('old')
+    })
+
+    it('offers the row when the saved session is empty', async () => {
+      await seedStored('old')
+      await saveSessionHolding([])
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+    })
+
+    it('offers the row when there is no saved session at all', async () => {
+      await seedStored('old')
+      renderUploader()
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+    })
+
+    it('spares a row the saved session takes up while the removal is in flight (an autosave landing)', async () => {
+      await seedStored('a')
+      await seedStored('b')
+      const realDeleteVideo = storageModule.deleteVideo
+      vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'a') await saveSessionHolding([{ ...videoMeta, id: 'b', name: 'b.mp4' }])
+        return realDeleteVideo(id)
+      })
+      renderUploader()
+
+      fireEvent.click(await removeButton(2))
+
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      const remainingIds = (await getAllVideoMetadata()).map((v) => v.id)
+      expect(remainingIds).not.toContain('a')
+      expect(remainingIds).toContain('b')
+    })
+
+    // Review L3: a second click while the first removal is still awaiting
+    // must not ask again or run a second loop over the same ids.
+    it('ignores a second click while a removal is in flight', async () => {
+      await seedStored('a')
+      await seedStored('b')
+      const realDeleteVideo = storageModule.deleteVideo
+      let release!: () => void
+      const parked = new Promise<void>((resolve) => { release = resolve })
+      const deletes = vi.spyOn(storageModule, 'deleteVideo').mockImplementation(async (id: string) => {
+        if (id === 'a') await parked
+        return realDeleteVideo(id)
+      })
+      renderUploader()
+      const button = await removeButton(2)
+
+      fireEvent.click(button)
+      await waitFor(() => expect(deletes).toHaveBeenCalledTimes(1))
+      fireEvent.click(button)
+      // Stored while the first removal is parked, so the re-read it ends with lists it.
+      await seedStored('c')
+      await act(async () => { release() })
+
+      expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
+      expect(globalThis.confirm).toHaveBeenCalledTimes(1)
+      expect(deletes.mock.calls.map(([id]) => id)).toEqual(['a', 'b'])
+
+      // And the guard is released afterwards: the next list can be removed.
+      fireEvent.click(await removeButton(1))
+      await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
+      expect(globalThis.confirm).toHaveBeenCalledTimes(2)
+      expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('c')
+    })
+
+    it('shows nothing, and does not throw, when the stored rows cannot be read', async () => {
+      await seedStored('old')
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.spyOn(storageModule, 'getAllVideoMetadata').mockRejectedValue(new Error('db closed'))
+      renderUploader()
+
+      await screen.findByText('50.0 MB / 500.0 MB')
+      await waitFor(() => expect(error).toHaveBeenCalledWith('Failed to read stored files:', expect.any(Error)))
+      expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument()
+    })
+  })
+
 })
 
 describe('VideoLibrary', () => {
