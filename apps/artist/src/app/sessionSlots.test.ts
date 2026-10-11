@@ -82,6 +82,46 @@ describe('findOfferableSlot', () => {
     await expect(findOfferableSlot('me', NOW)).resolves.toBeNull()
   })
 
+  // Fix round 1 (MAJOR-1): this tab's own slot comes first whenever it exists.
+  // It is this tab's own session after a reload or a browser crash-restore,
+  // and offering another tab's newer slot instead would lose it either way —
+  // a restore adopts over it, a decline leaves it for the next edit to
+  // overwrite.
+  it('offers this tab\'s own slot ahead of another tab\'s newer free one', async () => {
+    const mine = slot('me', NOW - 60_000)
+    const newer = slot('crashed', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([newer, mine])
+
+    await expect(findOfferableSlot('me', NOW)).resolves.toBe(mine)
+    expect(fake.log).toEqual([])
+  })
+
+  it('offers nothing when this tab\'s own slot holds no media, rather than another tab\'s slot over it', async () => {
+    // Restoring the other slot would adopt it over this tab's own work.
+    vi.mocked(listSessionStates).mockResolvedValue([
+      slot('me', NOW - 60_000, { sourceVideos: [] }),
+      slot('crashed', NOW - 1_000),
+    ])
+
+    await expect(findOfferableSlot('me', NOW)).resolves.toBeNull()
+  })
+
+  it('offers the newest free slot when this tab has none of its own', async () => {
+    const older = slot('closed-early', NOW - 60_000)
+    const newer = slot('closed-late', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([older, newer])
+
+    await expect(findOfferableSlot('me', NOW)).resolves.toBe(newer)
+  })
+
+  it('treats this tab\'s own slot past the age limit as gone, and offers the next', async () => {
+    const other = slot('crashed', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([slot('me', NOW - SESSION_SLOT_MAX_AGE_MS - 1), other])
+
+    await expect(findOfferableSlot('me', NOW)).resolves.toBe(other)
+    expect(clearSessionState).toHaveBeenCalledWith('me')
+  })
+
   it('offers this tab\'s own slot — a reload — without probing a lock it is about to hold', async () => {
     const mine = slot('me', NOW - 1_000)
     vi.mocked(listSessionStates).mockResolvedValue([mine])
@@ -145,12 +185,27 @@ describe('findOfferableSlot', () => {
 })
 
 describe('adoptSessionSlot', () => {
+  it('stamps the adopted session with now, so the age limit counts from the restore', async () => {
+    // Fix round 1 (LOW-2): a 29-day-old slot adopted today must not be pruned
+    // tomorrow.
+    const nearlyStale = slot('crashed', Date.now() - SESSION_SLOT_MAX_AGE_MS + 60_000)
+    const before = Date.now()
+
+    await adoptSessionSlot(nearlyStale, 'me')
+
+    expect(vi.mocked(saveSessionState).mock.calls[0][0].timestamp).toBeGreaterThanOrEqual(before)
+  })
+
   it('rewrites the session under the restoring tab\'s id, then deletes the old row', async () => {
     const crashed = slot('crashed', NOW - 1_000)
 
     await adoptSessionSlot(crashed, 'me')
 
-    expect(saveSessionState).toHaveBeenCalledWith({ ...crashed.session, tabId: 'me' })
+    expect(saveSessionState).toHaveBeenCalledWith({
+      ...crashed.session,
+      tabId: 'me',
+      timestamp: expect.any(Number),
+    })
     expect(clearSessionState).toHaveBeenCalledWith('crashed')
     expect(vi.mocked(saveSessionState).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(clearSessionState).mock.invocationCallOrder[0]

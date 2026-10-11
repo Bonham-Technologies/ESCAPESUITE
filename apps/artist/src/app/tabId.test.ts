@@ -67,7 +67,8 @@ describe('outside a secure context', () => {
     try {
       const minted = readTabId()
 
-      expect(minted).toMatch(/^[0-9a-z]+-[0-9a-z]+$/)
+      // crypto.getRandomValues exists outside a secure context (fix round 1, LOW-4).
+      expect(minted).toMatch(/^[0-9a-f]{32}$/)
       expect(renewTabId()).not.toBe(minted)
     } finally {
       delete (crypto as { randomUUID?: unknown }).randomUUID

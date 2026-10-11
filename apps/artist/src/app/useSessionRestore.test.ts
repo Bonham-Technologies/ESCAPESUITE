@@ -85,11 +85,19 @@ afterEach(() => {
 
 describe('the startup session check', () => {
   it('settles the question without looking when the host suppresses it', async () => {
-    const { result } = mountRestore({ suppressRestore: true })
+    const fake = createFakeLocks()
+    Object.defineProperty(navigator, 'locks', { value: fake.locks, configurable: true })
+    try {
+      const { result } = mountRestore({ suppressRestore: true })
 
-    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
-    expect(listSessionStates).not.toHaveBeenCalled()
-    expect(result.current.showSessionPrompt).toBe(false)
+      await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+      expect(listSessionStates).not.toHaveBeenCalled()
+      expect(result.current.showSessionPrompt).toBe(false)
+      // Nor asks after any tab's lock, its own included (fix round 1, MINOR-2).
+      expect(fake.log).toEqual([])
+    } finally {
+      delete (navigator as { locks?: LockManager }).locks
+    }
   })
 
   it('leaves the question open while the storage read is still in flight', async () => {
@@ -282,6 +290,33 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 
+  // Fix round 1 (MAJOR-1): after a browser crash the browser restores every
+  // tab with its sessionStorage, and the tabs start together — before any has
+  // its lock back, so each finds every other's slot free. Each must be offered
+  // its own, not whichever slot is newest.
+  it('two tabs restored together after a browser crash are each offered their own slot', async () => {
+    const sessionA = savedSession({ tabId: 'tab-a', timestamp: Date.now() - 1_000 })
+    const sessionB = savedSession({ tabId: 'tab-b', timestamp: Date.now() - 60_000 })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(sessionA, 'tab-a'), slotOf(sessionB, 'tab-b')])
+
+    sessionStorage.setItem(TAB_ID_KEY, 'tab-b')
+    const tabB = mountRestore()
+    await waitFor(() => expect(tabB.result.current.showSessionPrompt).toBe(true))
+    sessionStorage.setItem(TAB_ID_KEY, 'tab-a')
+    const tabA = mountRestore()
+    await waitFor(() => expect(tabA.result.current.showSessionPrompt).toBe(true))
+
+    expect(tabB.result.current.pendingSession).toBe(sessionB)
+    expect(tabA.result.current.pendingSession).toBe(sessionA)
+
+    // Restoring its own slot is no adoption: nothing is rewritten or deleted.
+    await act(async () => {
+      await tabB.result.current.handleRestoreSession(sessionB)
+    })
+    expect(saveSessionState).not.toHaveBeenCalled()
+    expect(clearSessionState).not.toHaveBeenCalled()
+  })
+
   it('restoring another tab\'s slot adopts it: rewritten under this tab\'s id, the old row deleted', async () => {
     const crashed = savedSession({ tabId: 'crashed' })
     vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashed, 'crashed')])
@@ -293,7 +328,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     })
 
     await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed'))
-    expect(saveSessionState).toHaveBeenCalledWith({ ...crashed, tabId: THIS_TAB })
+    expect(saveSessionState).toHaveBeenCalledWith({ ...crashed, tabId: THIS_TAB, timestamp: expect.any(Number) })
   })
 
   it('restoring this tab\'s own slot rewrites and deletes nothing', async () => {
@@ -346,7 +381,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     })
 
     await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(null))
-    expect(saveSessionState).toHaveBeenCalledWith({ ...legacy, tabId: THIS_TAB })
+    expect(saveSessionState).toHaveBeenCalledWith({ ...legacy, tabId: THIS_TAB, timestamp: expect.any(Number) })
   })
 
   it('still offers a session when the browser rejects the lock requests', async () => {
