@@ -23,16 +23,30 @@
  *
  * Only the matrix changes: Firefox converted the canvas's sRGB pixels with the
  * BT.601 *matrix*, not into BT.601 primaries, so primaries, transfer and range
- * stay as reported. Only the measured mislabel — a `'bt709'` matrix — is
- * corrected; any other report passes through, so a Firefox that starts
- * labelling what it converts needs nothing from here. A Firefox that instead
- * starts *converting* with BT.709 while still reporting it would be mislabelled
- * by this, which is why the gate is the measured engine and the measured label.
+ * stay as reported.
+ *
+ * The gate is the whole report Firefox 155 was measured giving, every time, for
+ * VP9 and VP8 at every size probed — `primaries`, `transfer` and `matrix` all
+ * `'bt709'` and `fullRange` `false` — not the matrix alone (ESCSUITE-284 review
+ * M1). Any other report passes through by reference. So a Firefox that fixes
+ * its encoder and changes its report — converting with BT.709 and reporting
+ * sRGB transfer at full range the way Chromium does, say — falls out of the gate
+ * on its own. One that fixes the pixels but keeps this identical report would be
+ * mislabelled the other way; that residual risk is ESCSUITE-288, the upstream
+ * report. Measured on macOS only (Playwright's Firefox 155 build); Firefox on
+ * Linux, Windows and Android passes the engine gate unmeasured.
  */
 export function relabelFirefoxVpxMeta(
   meta: EncodedVideoChunkMetadata | undefined
 ): EncodedVideoChunkMetadata | undefined {
   const config = meta?.decoderConfig;
-  if (config?.colorSpace?.matrix !== 'bt709') return meta;
+  if (
+    config?.colorSpace?.matrix !== 'bt709' ||
+    config.colorSpace.primaries !== 'bt709' ||
+    config.colorSpace.transfer !== 'bt709' ||
+    config.colorSpace.fullRange !== false
+  ) {
+    return meta;
+  }
   return { ...meta, decoderConfig: { ...config, colorSpace: { ...config.colorSpace, matrix: 'smpte170m' } } };
 }

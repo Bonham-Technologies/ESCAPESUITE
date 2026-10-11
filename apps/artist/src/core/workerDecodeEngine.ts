@@ -53,9 +53,11 @@ export function isMeasuredWorkerDecodeEngine(nav: EngineNavigator | undefined): 
 }
 
 /**
- * Firefox, by its `Gecko/` and `Firefox/` tokens — the one Firefox test, shared
- * with the WebM exporter's colour relabel (ESCSUITE-284, `vpxColorLabel.ts`).
+ * Firefox, by its `Gecko/` and `Firefox/` tokens — the one Firefox test. The
+ * WebM exporter reads it too, to gate its colour relabel (ESCSUITE-284,
+ * `exportWebM.ts` and `vpxColorLabel.ts`).
  */
-export function isFirefoxEngine(nav: EngineNavigator): boolean {
+export function isFirefoxEngine(nav: EngineNavigator | undefined): boolean {
+  if (!nav) return false;
   return /Gecko\//.test(nav.userAgent) && /Firefox\//.test(nav.userAgent);
 }

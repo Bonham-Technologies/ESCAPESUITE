@@ -4226,9 +4226,11 @@ file and no fallback. WebM's shape now matches MP4's:
   the muxer `relabelFirefoxVpxMeta(meta)` (`core/vpxColorLabel.ts`) in place of the encoder's own
   metadata, on Firefox only — `isFirefoxEngine` in `core/workerDecodeEngine.ts`, the same `Gecko/` and
   `Firefox/` test the decode worker's allow-list uses, decided once per export. The helper changes
-  only the matrix, `'bt709'` → `'smpte170m'`, and only when the report says `'bt709'`; primaries,
-  transfer and range stay as reported, because Firefox converted sRGB pixels with the BT.601
-  *matrix*, not into BT.601 primaries. Mediabunny then writes Colour matrix 6 and, for VP9, header
+  only the matrix, `'bt709'` → `'smpte170m'`, and only when the report is **exactly** the one Firefox
+  155 was measured giving every time, for VP9 and VP8 at every size probed: `primaries`, `transfer`
+  and `matrix` all `'bt709'` and `fullRange` `false` (review M1 narrowed it from the matrix alone).
+  Any other report passes through by reference. Primaries, transfer and range stay as reported,
+  because Firefox converted sRGB pixels with the BT.601 *matrix*, not into BT.601 primaries. Mediabunny then writes Colour matrix 6 and, for VP9, header
   `color_space` 3 on every keyframe — no keyframe-byte patching of our own. A Firefox export from the
   patched exporter is byte-identical to the hand-patched "both, matrix only" row (VP9) and to its VP8
   twin, and reads back at 0.81–0.92 / 3 in all three readers (VP8 1.11–1.2 / 5), 0 of 45 misread.
@@ -4237,10 +4239,16 @@ file and no fallback. WebM's shape now matches MP4's:
   silently re-breaking Firefox and ffmpeg. No per-frame work: delta chunks carry no decoder
   configuration and pass through by reference, and `exportWebM.perf.test.ts` is unchanged.
 
-  **Limits.** The gate is the measured engine and the measured label: a Firefox that starts labelling
-  what it converts passes through untouched, but one that starts *converting* with BT.709 while still
-  reporting it would be mislabelled by this and must be re-measured — the upstream report
-  (Firefox's WebCodecs encoder reporting BT.709 for BT.601 output) is the way to retire the gate.
+  **Limits.** The gate is the measured engine and the measured report, all four fields of it. A
+  Firefox that fixes its encoder and changes its report — converting with BT.709 and reporting sRGB
+  transfer at full range the way Chromium does, or reporting the BT.601 matrix it uses — falls out of
+  the gate on its own and passes through untouched. One that fixes the *pixels* but keeps this
+  identical report would be mislabelled the other way, its colours shifted by the same ~25/255 in the
+  opposite direction, with nothing in CI to notice (CI's e2e runs Chromium only); that residual risk,
+  and retiring the gate, are **ESCSUITE-288**, the upstream report against Firefox's WebCodecs
+  encoder. Every measurement here was on **macOS**, with Playwright's Firefox 155 build: Firefox on
+  Linux, Windows and Android passes the `Gecko/` + `Firefox/` gate **unmeasured** (Android may hand
+  VP8/VP9 to a platform encoder that converts or reports differently).
   WebKit's WebM colour has not been measured and is left alone. Firefox's H.264 (MP4) encoder
   converts and labels BT.709 consistently and needs nothing. The headless kit renders in Chromium and
   is unaffected.
