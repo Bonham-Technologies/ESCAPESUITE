@@ -4014,6 +4014,22 @@ file and no fallback. WebM's shape now matches MP4's:
   which is the exact defect ESCSUITE-175 fixed on the MP4 side and had left standing here. The
   probe itself stays where it always was, just before the muxer starts, because unlike the MP4
   side there is nothing expensive after it to protect.
+- **Firefox 155 mislabels its VP9 colour matrix (ESCSUITE-279, measured 2026-10-11; the fix is
+  ESCSUITE-284).** Firefox's VP9 `VideoEncoder` converts a canvas-built `VideoFrame` with BT.601
+  coefficients (the encoded YUV matches a BT.601 conversion of the drawn RGB within 1.1 code values;
+  BT.709 would be 17.3 out) but labels the stream BT.709 twice — in the VP9 keyframe header
+  (`color_space` = 2) and in `decoderConfig.colorSpace`, which mediabunny writes into the WebM Colour
+  element — and every reader honours the label, so a WebM exported from Firefox plays back with its
+  colours shifted by up to about 25/255 per channel (a drawn (228,61,99) reads (241,80,96)). **Frame
+  placement is exact**: a luma-coded fixture read back 0 of 45 frames misplaced in ffmpeg, Chromium and
+  Firefox alike, and the "10 of 45 frames off by 6–14" the ESCSUITE-265 probe saw on Firefox was a
+  nearest-colour match landing on a neighbouring palette entry under the shifted colours — 9 of 45 in
+  both browsers' `<video>`, 10 in ffmpeg as labelled, 0 with ffmpeg's matrix forced to BT.601.
+  Chromium's VP9 encoder and Firefox's H.264 (MP4) encoder convert and label consistently (0 of 45),
+  which is why the MP4 path on Firefox measured clean. Nothing in `exportWebM.ts` is at fault and
+  nothing in WebCodecs lets the exporter set a canvas frame's colour space, so no code changed here;
+  the candidate fixes (rewriting the container label, patching the keyframe header, or converting to
+  I420 per frame) and the question of which label each player trusts are ESCSUITE-284.
 - **Encoder error tracking.** The video encoder's `error:` callback now stores the exception in
   `videoEncoderError`, checked at the top of every frame iteration and inside the backpressure
   wait, exactly where MP4 checks its own; the audio encoder's `error:` callback does the same,
