@@ -244,6 +244,95 @@ describe('rateFromMediaTimes', () => {
     it('still refuses a run whose presentation times go backwards', () => {
       expect(rateFromMediaTimes([0, 0.1, 0.02, 0.2], [1, 2, 3, 4])).toBeUndefined()
     })
+
+    // ESCSUITE-278: a frame the browser decodes too late and discards without
+    // presenting moves neither the counter nor a frame callback, but the next
+    // presented frame's media time jumps over it. Starved on purpose (real
+    // Chromium, 0.5x, high-bitrate VP9 WebMs), 17 of 140 runs did exactly that
+    // in their first 370 ms — `droppedVideoFrames` rising with each one — and
+    // the counter read a 120 fps file as 83.33 or 76.09 and a 60 fps one as
+    // 52.63 or 41.92, all 'measured'. The runs below are from those logs.
+    describe('a frame decoded and discarded unpresented (ESCSUITE-278)', () => {
+      // 120 fps VP9, first eight callbacks: every other spacing is two source
+      // frames wide while the counter moves one per callback.
+      const starved120 = {
+        times: [0.008, 0.017, 0.033, 0.042, 0.058, 0.067, 0.083, 0.092],
+        presented: [2, 3, 4, 5, 6, 7, 8, 9],
+        totals: [6, 6, 7, 10, 11, 13, 13, 16],
+      }
+      // 60 fps VP9: one spacing two frames wide, and `totalVideoFrames −
+      // presentedFrames` the same at both ends, so only the spacings show it.
+      const starved60 = {
+        times: [0, 0.017, 0.033, 0.05, 0.067, 0.1, 0.117, 0.133],
+        presented: [1, 2, 3, 4, 5, 6, 7, 8],
+        totals: [5, 5, 7, 8, 9, 10, 11, 12],
+      }
+
+      it('refuses a run whose media times count more intervals than the counter', () => {
+        expect(rateFromMediaTimes(starved120.times, starved120.presented)).toBeUndefined()
+        expect(rateFromMediaTimes(starved60.times, starved60.presented)).toBeUndefined()
+        expect(rateFromMediaTimes(starved60.times, starved60.presented, starved60.totals)).toBeUndefined()
+      })
+
+      // A variable-rate source (a screen capture, a MediaRecorder take) on the
+      // counter path: irregular spacings count seven intervals, the counter
+      // four. Before this it stored 20 'measured'; now it is refused and
+      // stored as 30 'assumed', which the seek window floors to anyway.
+      it('refuses a variable-rate run whose irregular spacings count more intervals than the counter', () => {
+        expect(rateFromMediaTimes([0, 0.033, 0.083, 0.116, 0.2], [1, 2, 3, 4, 5])).toBeUndefined()
+      })
+
+      it('still reads the same media times from the spacings alone, without the counter', () => {
+        expect([120, 119.88]).toContain(rateFromMediaTimes(starved120.times))
+        expect([60, 59.94]).toContain(rateFromMediaTimes(starved60.times))
+      })
+
+      // Every spacing two source frames wide and the counter moving one per
+      // callback: the spacings and the counter agree on six intervals, and
+      // only `totalVideoFrames` — decoded frames, presented or not — shows the
+      // six frames between them that were decoded and never presented.
+      const hidden = {
+        times: [0, 33, 66, 99, 132, 165, 198].map((t) => t / 1000),
+        presented: [1, 2, 3, 4, 5, 6, 7],
+        totals: [5, 7, 9, 11, 13, 15, 17],
+      }
+
+      it('refuses a run whose decoded-but-unpresented count grows by more than the queue swing', () => {
+        expect(rateFromMediaTimes(hidden.times, hidden.presented, hidden.totals)).toBeUndefined()
+        // Three more decoded than presented by the end: one past the swing.
+        expect(
+          rateFromMediaTimes(spaced(1 / 60, 8), [1, 2, 3, 4, 5, 6, 7, 8], [5, 6, 7, 8, 9, 10, 11, 15])
+        ).toBeUndefined()
+      })
+
+      it('reads the same run as its counter says when nothing piles up, or no totals are given', () => {
+        expect(rateFromMediaTimes(hidden.times, hidden.presented, [5, 6, 7, 8, 9, 10, 11])).toBe(30)
+        expect(rateFromMediaTimes(hidden.times, hidden.presented)).toBe(30)
+        expect(rateFromMediaTimes(hidden.times, hidden.presented, hidden.times.map(() => undefined))).toBe(30)
+      })
+
+      // Healthy runs from the same session: the decoder's look-ahead fills
+      // and drains, so `totalVideoFrames − presentedFrames` wanders between
+      // two and four and its first-to-last change was −1 to +2 in every one.
+      it.each([
+        [
+          '120 fps VP9, +2 as the queue fills',
+          [0.008, 0.017, 0.025, 0.033, 0.042, 0.05, 0.058, 0.067],
+          [2, 3, 4, 5, 6, 7, 8, 9],
+          [4, 7, 8, 8, 10, 11, 11, 13],
+          [120, 119.88],
+        ],
+        [
+          '4K 60 fps H.264, −1',
+          [0, 0.016667, 0.033333, 0.05, 0.066667, 0.083333, 0.1, 0.116667],
+          [1, 2, 3, 4, 5, 6, 7, 8],
+          [5, 5, 7, 8, 9, 10, 11, 11],
+          [60, 59.94],
+        ],
+      ])('still reads a healthy %s run as its rate', (_run, times, presented, totals, accepted) => {
+        expect(accepted).toContain(rateFromMediaTimes(times, presented, totals))
+      })
+    })
   })
 
   it('answers nothing when the frames end no later than they start', () => {
@@ -325,7 +414,9 @@ interface ProbeVideo {
  * stalled or ended element does. Given `presentedFrames`, each callback's
  * metadata carries the matching entry as its `presentedFrames`, as Chromium's
  * does; without it the metadata has none, as an engine that does not report
- * the counter.
+ * the counter. Given `totalVideoFrames`, the element has a
+ * `getVideoPlaybackQuality()` whose `totalVideoFrames` is the matching entry
+ * for the frame last delivered; without it the element has none, as jsdom's.
  */
 function probeVideo(
   frameTimes: number[],
@@ -333,7 +424,13 @@ function probeVideo(
     playRejects = false,
     rejectOnPause = false,
     presentedFrames,
-  }: { playRejects?: boolean; rejectOnPause?: boolean; presentedFrames?: number[] } = {}
+    totalVideoFrames,
+  }: {
+    playRejects?: boolean
+    rejectOnPause?: boolean
+    presentedFrames?: number[]
+    totalVideoFrames?: number[]
+  } = {}
 ): ProbeVideo {
   const el = document.createElement('video')
   const pending = new Map<number, VideoFrameRequestCallback>()
@@ -385,6 +482,12 @@ function probeVideo(
     },
   })
   Object.defineProperty(el, 'cancelVideoFrameCallback', { value: cancel, configurable: true })
+  if (totalVideoFrames) {
+    Object.defineProperty(el, 'getVideoPlaybackQuality', {
+      configurable: true,
+      value: () => ({ totalVideoFrames: totalVideoFrames[delivered - 1] }) as VideoPlaybackQuality,
+    })
+  }
   Object.defineProperty(el, 'currentTime', {
     configurable: true,
     get: () => (seeks.length > 0 ? seeks[seeks.length - 1] : 0),
@@ -525,6 +628,42 @@ describe('measureFrameRate', () => {
     const v = probeVideo(spaced(1 / 60, 8), { presentedFrames: [1, 2, 3, 4, 4, 5, 6, 7] })
 
     await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBeUndefined()
+  })
+
+  // ESCSUITE-278: the real starved 120 fps VP9 run, which the counter alone
+  // read as 83.33 — the media times count ten intervals, the counter seven.
+  it('answers nothing for a run whose media times count more intervals than the counter', async () => {
+    const v = probeVideo([0.008, 0.017, 0.033, 0.042, 0.058, 0.067, 0.083, 0.092], {
+      presentedFrames: [2, 3, 4, 5, 6, 7, 8, 9],
+      totalVideoFrames: [6, 6, 7, 10, 11, 13, 13, 16],
+    })
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBeUndefined()
+  })
+
+  it('reads each callback\'s totalVideoFrames, and answers nothing when decoded-but-unpresented frames pile up', async () => {
+    vi.useFakeTimers()
+    // Every spacing two frames wide and the counter one per callback, so only
+    // the decoded total shows the frames discarded between them.
+    const v = probeVideo([0, 33, 66, 99, 132, 165, 198].map((t) => t / 1000), {
+      presentedFrames: [1, 2, 3, 4, 5, 6, 7],
+      totalVideoFrames: [5, 7, 9, 11, 13, 15, 17],
+    })
+    const pending = measureFrameRate(v.el, FRAME_RATE_PROBE)
+
+    await vi.advanceTimersByTimeAsync(FRAME_RATE_PROBE.maxMs)
+
+    await expect(pending).resolves.toBeUndefined()
+    expect(v.delivered()).toBe(7)
+  })
+
+  it('still reads a healthy run whose decoded total stays a queue ahead of the counter', async () => {
+    const v = probeVideo(spaced(1 / 60, 8), {
+      presentedFrames: [1, 2, 3, 4, 5, 6, 7, 8],
+      totalVideoFrames: [5, 5, 7, 8, 9, 10, 11, 11],
+    })
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBe(60)
   })
 
   it('finishes once when its own pause rejects the play() it is still waiting on', async () => {

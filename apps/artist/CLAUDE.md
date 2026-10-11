@@ -134,11 +134,33 @@ pnpm lint                # Run ESLint
   below comes from the compositor's own counter, which a missed callback does not move. The honest
   limit that remains: a source faster than twice the refresh rate (240 fps on 60 Hz) has frames the
   compositor itself never presents, which neither count sees, and it still under-reads, as the
-  source at its own speed would. One more, not observed: a frame the browser decodes too late and
-  discards unpresented would, if the counter does not count it, under-read on either path — in 70
-  instrumented runs (472 callback steps, quiet, loaded and with a busy loop on the page's own main
-  thread) `totalVideoFrames − presentedFrames` never grew, and starving the decoder on purpose to
-  settle it is ESCSUITE-278. The budget is
+  source at its own speed would. One more, **observed and refused** (ESCSUITE-278): a frame the
+  browser decodes too late is discarded unpresented — no callback, no counter step, and the next
+  presented frame's `mediaTime` jumps over it — so the counter under-reads. 70 earlier runs never
+  showed it; starving the decoder on purpose did. Real Chromium, a bare `<video>` at 0.5x, ten runs
+  per condition, quiet, under CDP CPU throttling at 4x and 8x and with a 30 ms busy loop every
+  34 ms on top: a 4K 60 fps H.264 MP4 never under-counted (50 runs), but high-bitrate 1080p VP9
+  WebMs did in their first ~370 ms — 9 of 50 runs at 120 fps and 8 of 20 at 60 fps, at every
+  throttle rate including none, `droppedVideoFrames` rising with each discard — and the counter read
+  120 fps as **83.33, 82.57, 76.92, 76.09 or 111.11** and 60 fps as **52.63, 53.33, 48 or 41.92**,
+  all `'measured'`, while the per-spacing count over the same media times read the true rate every
+  time. Firefox (VP9 120 fps, quiet and busy, 20 runs) never under-counted. `rateFromMediaTimes`
+  therefore refuses a counter run on either of two signs, answering `undefined` so the import
+  stores 30 `'assumed'` — never the larger of the two counts: **the per-spacing count exceeding the
+  counter** (every one of the 17 starved Chromium runs in the probe's own eight-frame window, none
+  of the 103 healthy ones), and **`totalVideoFrames − presentedFrames` rising by more than 2**
+  between the first and last callback, `measureFrameRate` reading `getVideoPlaybackQuality()` at
+  each callback where the element has it — the case where every spacing is a multiple of the true
+  interval and the media times hide the discards too. The 2 is the decoder's look-ahead: that
+  difference sits two to four frames deep and moved −1 to +2 across every healthy Chromium run
+  (Firefox's healthy runs moved −2 to 0), so a strict "grew at all" would have refused 49 of the
+  103 — a threshold calibrated on one machine, headless, with software decoding; the discards
+  themselves moved it 0 to 4, which is
+  why the spacing check, not this one, is the sign every starved run showed. The spacing check also
+  refuses, on the safe side, a healthy 120 fps run whose page missed callbacks for 11 or more frames
+  in a row (about 183 ms at half speed), which millisecond stamps can round to one interval more
+  than the counter. Replayed through the
+  fixed estimator, all 140 logged runs either read their true rate or are refused. The budget is
   500 ms rather than the brief's 400 because half speed halves the media it covers — ratified by
   the coordinator in review round 3: 500 ms of wall time is 250 ms of media, which at 24 fps is six
   intervals and seven frames — the eight-frame cap (333 ms of media, 667 ms of wall time) is not
@@ -162,8 +184,9 @@ pnpm lint                # Run ESLint
   thread changes how many callbacks the probe sees but not the rate it reads. A counter that
   advanced fewer times than there were callbacks after the first describes no run of presented
   frames, and the run answers `undefined`. `getVideoPlaybackQuality().droppedVideoFrames` is **not**
-  read: Chromium advances it about once per callback on every file, quiet or not, while every
-  presented frame is consecutive, so it does not mean a source frame was skipped. **From the media
+  read: it is no per-frame signal across sessions — ESCSUITE-276's runs saw Chromium advance it
+  about once per callback while every presented frame was consecutive, and ESCSUITE-278's saw it
+  stay at 0 on quiet H.264 and rise only with the discarded frames on starved VP9. **From the media
   times** — the fallback, for an engine whose callbacks carry no `presentedFrames` — each spacing is
   counted **on its own**, as `round(spacing / smallest)` intervals against the smallest positive spacing in the run, so a dropped frame adds
   one interval wherever it falls and each spacing's rounding error (about 4 % of an interval at
@@ -179,7 +202,12 @@ pnpm lint                # Run ESLint
   **or under load** — and then the fallback under-reads with nothing in the media times to show it;
   the counter is what catches that, where the engine reports one. On a variable-rate source (a
   screen capture, a MediaRecorder take) the fallback follows the closest pair of frames presented,
-  so it errs high, never low — the safe direction for ESCSUITE-263's seek window. A repeated
+  so it errs high, never low — the safe direction for ESCSUITE-263's seek window. Where the engine
+  reports the counter, the same irregular spacings count more intervals than the counter, so the
+  run is **refused** by the ESCSUITE-278 spacing check and stored as 30 `'assumed'` (times
+  `[0, .033, .083, .116, .2]` with the counter one per callback used to store 20 `'measured'`).
+  That is the safe side too: the counter's average over irregular frames is no frame interval, and
+  the seek window floors at 30 fps, so an assumed 30 seeks exactly as a measured 20 would have. A repeated
   presentation time counts nothing; one that goes **backwards** makes the run answer `undefined`
   on either path. That is snapped to the **nearest** of the standard rates
   23.976, 24, 25, 29.97, 30, 48, 50, 59.94, 60, 90, 100, 119.88 and 120 when within **1.5 %** of
@@ -189,7 +217,8 @@ pnpm lint                # Run ESLint
   29.97 depending on where its frames fall — which no reader cares about. Fewer than three frames,
   a run that ends no later than it starts or whose times go backwards, a presented-frame counter
   that advanced fewer times than there were callbacks after the first, no
-  `requestVideoFrameCallback`, or a refused `play()` answer `undefined`, and the import stores `frameRate: 30` with
+  `requestVideoFrameCallback`, a refused `play()`, or a counter run showing a discarded frame (above)
+  answer `undefined`, and the import stores `frameRate: 30` with
   `frameRateSource: 'assumed'`; a measured rate is stored with `'measured'`. **This adds up to
   500 ms to a video import** — it runs once, at import, and only for a file that decoded a picture
   (`videoWidth > 0 && videoHeight > 0`; the mic-only `.webm` that `processMediaFile` probes in a
