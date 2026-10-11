@@ -76,6 +76,8 @@ const SNAP_TOLERANCE = 0.015;
  * runs of the probe (0.5x, eight frames; VP9 and H.264, 60 and 120 fps, quiet,
  * CPU-throttled and with a busy main thread) it sat two to four frames deep
  * and its first-to-last change was −1 to +2, so "grew" means more than 2.
+ * Firefox's healthy runs moved −2 to 0. Calibrated on one machine (an Intel
+ * i9-8950HK), headless, with software decoding.
  */
 const DECODER_QUEUE_SWING = 2;
 
@@ -121,8 +123,10 @@ function snapFrameRate(rate: number): number {
  * instrumented run matched to every media-time jump, one for one, quiet, loaded
  * and busy. A counter that advanced less than once per callback describes no
  * run of presented frames, and is refused. `droppedVideoFrames` is not read:
- * Chromium advances it about once per callback on every file, quiet or not,
- * while every presented frame is consecutive.
+ * it is not a per-frame signal across sessions — ESCSUITE-276's runs saw
+ * Chromium advance it about once per callback while every presented frame was
+ * consecutive, and ESCSUITE-278's saw it stay at 0 on quiet H.264 and rise only
+ * with the discarded frames on starved VP9.
  *
  * **The count, from the media times** — the fallback for an engine whose frame
  * callbacks carry no `presentedFrames`. Each spacing is counted on its own, as
@@ -143,7 +147,12 @@ function snapFrameRate(rate: number): number {
  *
  * On a variable-rate source (a screen capture, a MediaRecorder take) the
  * media-time count follows the closest pair of frames presented, so it errs
- * high, never low.
+ * high, never low. Where the engine reports the counter, the same irregular
+ * spacings count more intervals than the counter and the run is refused (the
+ * first sign below), stored as 30 `'assumed'` — the safe side: the counter's
+ * average over irregular frames is no frame interval, and ESCSUITE-263's seek
+ * window floors at 30 fps, so an assumed 30 seeks exactly as a measured 20
+ * would have.
  *
  * **A frame discarded unpresented** (ESCSUITE-278). A frame the browser
  * decodes too late to show is dropped: no callback, no counter step, and the
@@ -157,7 +166,11 @@ function snapFrameRate(rate: number): number {
  * the 103 healthy ones), and `totalVideoFrames − presentedFrames`, from
  * `totalVideoFrames` where the caller has it, rising by more than
  * `DECODER_QUEUE_SWING` — the case where every spacing is a multiple of the
- * true interval and the media times hide the discards too.
+ * true interval and the media times hide the discards too. The first sign also
+ * refuses, on the safe side, a healthy 120 fps run whose page missed callbacks
+ * for 11 or more frames in a row (a stall of about 183 ms at half speed): with
+ * millisecond stamps such a gap can round to one interval more than the
+ * counter.
  *
  * Fewer than three frames, a run that ends no later than it starts, one whose
  * presentation times go backwards, or one whose counter advanced fewer times

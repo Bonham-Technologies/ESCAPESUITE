@@ -274,6 +274,14 @@ describe('rateFromMediaTimes', () => {
         expect(rateFromMediaTimes(starved60.times, starved60.presented, starved60.totals)).toBeUndefined()
       })
 
+      // A variable-rate source (a screen capture, a MediaRecorder take) on the
+      // counter path: irregular spacings count seven intervals, the counter
+      // four. Before this it stored 20 'measured'; now it is refused and
+      // stored as 30 'assumed', which the seek window floors to anyway.
+      it('refuses a variable-rate run whose irregular spacings count more intervals than the counter', () => {
+        expect(rateFromMediaTimes([0, 0.033, 0.083, 0.116, 0.2], [1, 2, 3, 4, 5])).toBeUndefined()
+      })
+
       it('still reads the same media times from the spacings alone, without the counter', () => {
         expect([120, 119.88]).toContain(rateFromMediaTimes(starved120.times))
         expect([60, 59.94]).toContain(rateFromMediaTimes(starved60.times))
