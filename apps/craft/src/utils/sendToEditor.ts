@@ -3,7 +3,14 @@
 // editor URL — CRAFT just announces the recording via postMessage. Otherwise
 // CRAFT opens ESCAPEARTIST directly in a new tab/window.
 
-import { isEmbedded, editorUrl, parseHostOrigin } from '@escapesuite/shared/config';
+import {
+  isEmbedded,
+  isFileOrigin,
+  isStandaloneMode,
+  editorUrl,
+  editorUrlIsRelative,
+  parseHostOrigin,
+} from '@escapesuite/shared/config';
 import { analytics } from './analytics';
 
 /**
@@ -16,6 +23,21 @@ import { analytics } from './analytics';
  */
 export const EDITOR_FILE_ORIGIN_REASON =
   "Download this recording's WebM and import it into the offline ESCAPEARTIST file.";
+
+/**
+ * The one reader of "can this CRAFT reach an editor?" — null when it can, the
+ * sentence above when it cannot. Not reachable: opened from disk, or an
+ * offline standalone build served over http whose `VITE_EDITOR_URL` is
+ * relative (an intranet share has no `/artist/`). A hosted build, or a
+ * standalone build given an absolute editor address, is left alone. Embedded,
+ * the caller's button posts `SEND_TO_EDITOR` and works from anywhere; a
+ * caller whose button opens the editor itself passes `embedded: false`
+ * (ESCSUITE-221, 259).
+ */
+export const editorBlockedReasonFor = ({ embedded }: { embedded: boolean }): string | null =>
+  !embedded && (isFileOrigin() || (isStandaloneMode() && editorUrlIsRelative()))
+    ? EDITOR_FILE_ORIGIN_REASON
+    : null;
 
 export const sendToEditor = (id: string): 'posted' | 'opened' => {
   analytics.recordingSentToEditor();

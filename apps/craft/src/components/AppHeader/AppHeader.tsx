@@ -1,6 +1,6 @@
-import { isStandaloneMode, isFileOrigin, editorUrl } from '@escapesuite/shared/config';
+import { isStandaloneMode, editorUrl } from '@escapesuite/shared/config';
 import type { RecordingState } from '../../store/types';
-import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor';
+import { editorBlockedReasonFor, EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor';
 import { CountdownAnnouncement } from './CountdownAnnouncement';
 import styles from '../../App.module.css';
 
@@ -42,9 +42,12 @@ interface AppHeaderProps {
  * shared" during a recording is exactly that case.
  */
 export function AppHeader({ state, notice, onOpenHelp }: AppHeaderProps) {
-  // Opened from disk, `/artist/` is `file:///artist/` — an error page — so the
-  // button stays but says why it cannot work (ESCSUITE-221).
-  const editorBlocked = isFileOrigin();
+  // Opened from disk, `/artist/` is `file:///artist/` — an error page — and a
+  // standalone build with a relative editor URL has nothing at that path on a
+  // plain web server either, so the button stays but says why it cannot work.
+  // This button opens the editor itself even when embedded, so it never gets
+  // the embedded exemption (ESCSUITE-221, 259).
+  const editorBlocked = editorBlockedReasonFor({ embedded: false }) !== null;
   return (
     <header className={styles.header}>
       <div className={styles.headerLeft}>
