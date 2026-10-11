@@ -3962,6 +3962,46 @@ internal `Error('Failed to load video')` handed to `onError` is unchanged and st
 `PlaybackDialog` suite. The gap itself is CSS, which jsdom cannot lay out, so its pin is that the readout and
 the name are separate, non-empty elements. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/craft` and `@escapesuite/shared` were re-measured 2026-10-11 for ESCSUITE-259 (the offline
+ESCAPECRAFT disables its editor buttons wherever it is opened — from disk, as ESCSUITE-221 had it, or from a
+plain web server, an intranet share with no `/artist/` — unless it was built with an absolute address for
+ESCAPEARTIST: `editorBlockedReasonFor({ embedded })` in `apps/craft/src/utils/sendToEditor.ts` is the one
+reader, answering the ESCSUITE-221 sentence when
+`!embedded && (isFileOrigin() || (isStandaloneMode() && editorUrlIsRelative()))` and `null` otherwise, read
+by the panel and the header alike — the header rendering the string it returns, after the review's one
+round — and the constant renamed `EDITOR_UNREACHABLE_REASON`, since the sentence no longer shows for a file
+origin alone; `editorUrlIsRelative()` joins the shared config beside `EDITOR_URL`, true
+unless `VITE_EDITOR_URL` names an absolute `http(s):` URL), each in one sitting against `main` at `5e4d1a26`
+(the ESCSUITE-231 version-packages commit). **Craft**: 100.00 / 99.53 / 97.84 / 100.00, byte-identical on
+every percentage to the base. That base reads 97.84 where the ESCSUITE-231 paragraph recorded 97.83 from its
+own tree: the three wave-7 craft branches — 229, 230 and 231 — each measured against `cb202b8c` and landed one
+after another, twelve new branches, twelve covered, and the row is corrected here to the direct measurement.
+Lines 2,423 → 2,425, statements 2,585 / 2,597 → 2,587 / 2,599, branches 1,407 / 1,438 → 1,409 / 1,440 and
+functions 462 → 463, every new unit covered; the same 12 statements and 31 branches uncovered, in the same
+four files. The net two branches are two files moving in opposite directions: `utils/sendToEditor.ts` 4 → 10
+(the gate's `!embedded`, `isFileOrigin()`, `isStandaloneMode()` and `editorUrlIsRelative()` operands and the
+ternary they feed, each reached from both sides by that module's five cases — hosted over http, standalone
+over http with a relative URL, the same with an absolute one, a `file:` origin, and embedded) and
+`components/RecordingsList/RecordingsListPanel.tsx` 20 → 16, whose inline `isFileOrigin() && !embedded`
+became one call. The panel's and the header's own cases (the relative URL disabled with the reason, the
+absolute URL enabled, the hosted build enabled, embedded enabled) drive the gate again through each reader.
+**Shared**: 100.00 / **98.68** / 92.20 / 100.00 against 100.00 / 98.67 / 92.20 / 100.00 — statements up a
+hundredth, lines and functions still exactly 100, and **branches unmoved at 142 / 154**: the predicate is one
+negated regular-expression test, `!/^https?:\/\//i.test(rawEditorUrl)`, a statement and a function and no
+decision, so on the package whose floors leave no headroom nothing new can go uncovered. Its seven cases in
+`config/index.test.ts` (unset, `/artist/`, `artist/`, a value that is not a URL at all, an absolute URL on
+another scheme, an `https:` origin, an `http:` URL with a path) each re-import the module with the env
+stubbed, the way the `EDITOR_URL` cases already did, because the value is read at import time; lines
+281 → 282, statements 298 / 302 → 300 / 304 with the same 4 uncovered, functions 79 → 80. The
+`App.*rerender*` pins and every `*.perf.test.ts` are byte-identical. Outside vitest's measurement,
+`apps/e2e/tests/standalone/craft.spec.ts` gains a served-over-http case (the standalone project serves the
+file build with no `VITE_EDITOR_URL`, so the header button is expected disabled with the reason and a click
+is expected to open nothing) and
+`docs/STANDALONE-TEST-BATTERY.md`'s sentence claiming the opposite is corrected; the standalone project ran
+once here against `pnpm build:standalone` on Chromium, Firefox and WebKit: 42 passed, the same 3 WebKit
+Blob-in-IndexedDB skips as before, of 45. **No floor crossed**;
+craft's floors stay 100 / 99 / 97 / 100 and shared's 100 / 98 / 92 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3970,7 +4010,7 @@ never above what the suite actually achieves:
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
 | `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
-| `@escapesuite/shared` | 100.00 | 98.70 | 92.20 | 100.00 |
+| `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
