@@ -1886,8 +1886,9 @@ holds the loop's own last write — a seek changed it, and keeps its target. A l
 the loop's write, and a pause between it and the next frame lands on the in point the readout
 shows. The end of the timeline is unaffected: that arm wrote the end itself, which is not the
 loop's last throttled write, so the cleanup leaves it. Known limit: a seek whose target is
-exactly the value the store already holds — Home within the first 200 ms of playing from 0, or
-a marker on the in point clicked within 200 ms of a loop-back — cannot be told from a plain pause, because a
+exactly the value the store already holds — Home or ← within the first 200 ms of playing from 0, a
+marker on the in point clicked within 200 ms of a loop-back, or a marker on the jumped-to clip's start
+within 200 ms of a gap jump — cannot be told from a plain pause (filed as ESCSUITE-287), because a
 `setCurrentTime` of an unchanged value leaves no trace in the store, and lands on the paused
 frame instead. Because the cleanup runs before the scrub effect in the same commit, the scrub
 effect's run for that render would seek every video back to the stale throttled position and
