@@ -413,6 +413,22 @@ describe('exportToMP4 codec selection', () => {
     expect(getMediabunnyState().callLog).toEqual([])
   })
 
+  it('names an output size the ladder refuses as too large, with the same code, when no side is under 16', async () => {
+    webcodecs.encoder.answer = (c) => (c as VideoEncoderConfig).width <= 4096
+
+    const error = await run({
+      options: { resolution: 'project' },
+      projectResolution: { width: 7680, height: 4320 },
+    }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as Error).message).toBe(
+      'The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.'
+    )
+    expect((error as ExportError).code).toBe('OUTPUT_SIZE_UNSUPPORTED')
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+  })
+
   it('asks about the reference size only after the requested size has failed', async () => {
     await run({ options: { resolution: 'project' }, projectResolution: { width: 64, height: 48 } })
 

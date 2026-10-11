@@ -295,6 +295,23 @@ describe('ExportDialog', () => {
       expect(screen.queryByText('Not supported in this browser')).not.toBeInTheDocument()
     })
 
+    it('names the output size as too large when MP4 is refused at a size with no side under 16', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({
+        video: false,
+        audio: true,
+        outputSizeReason: mp4OutputSizeReason(7680, 4320),
+      })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(
+        screen.getByText('The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.')
+      ).toBeInTheDocument()
+      expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
+      fireEvent.click(advancedToggle())
+      expect(screen.getByText('Not supported at this output size')).toBeInTheDocument()
+    })
+
     it('switches the advanced button label with the chosen format', () => {
       render(<ExportDialog isOpen={true} onClose={onClose} />)
       fireEvent.click(advancedToggle())

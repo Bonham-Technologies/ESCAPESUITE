@@ -660,6 +660,20 @@ describe('isMP4ExportSupported at a size H.264 refuses', () => {
     }
   })
 
+  it('names the output size as too large when 7680x4320 is refused and 1280x720 encodes', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) => (c as VideoEncoderConfig).width <= 4096
+      const support = await isMP4ExportSupported(7680, 4320)
+      expect(support.video).toBe(false)
+      expect(support.outputSizeReason).toBe(
+        'The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.'
+      )
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
   it('keeps the no-H.264 answer, with no size reason, when 1280x720 is refused too', async () => {
     const codecs = installWebCodecsDoubles()
     try {
@@ -711,6 +725,18 @@ describe('export reason sentences', () => {
     expect(MP4_NO_CODEC_REASON).toBe(
       'This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.'
     )
+  })
+
+  it('calls an output size too large, not too small, when no side is under 16 (ESCSUITE-237)', () => {
+    // A size the ladder's Level 5.1 ceiling refuses (8K, which `parseProject`
+    // allows) in a browser that encodes 1280x720 is the size's fault too — but
+    // "too small" would be false.
+    expect(mp4OutputSizeReason(7680, 4320)).toBe(
+      'The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.'
+    )
+    // The boundary: 16 on both sides is not "too small".
+    expect(mp4OutputSizeReason(16, 16)).toMatch(/too large/)
+    expect(mp4OutputSizeReason(16, 15)).toMatch(/too small/)
   })
 
   it('names the requested size and the floor, for an output size H.264 refuses (ESCSUITE-237)', () => {
