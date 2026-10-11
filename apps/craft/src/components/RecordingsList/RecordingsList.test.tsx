@@ -43,7 +43,7 @@ function renderList(
 ) {
   const calls = {
     onPlay: vi.fn<(id: string, name: string) => void>(),
-    onDownload: vi.fn<(id: string, name: string) => void>(),
+    onDownload: vi.fn<(id: string, name: string, createdAt: number) => void>(),
     onDownloadMp4: vi.fn<(id: string, name: string) => void>(),
     onDownloadM4a: vi.fn<(id: string, name: string) => void>(),
     onCancelMp4: vi.fn<() => void>(),
@@ -143,7 +143,7 @@ describe('RecordingsList actions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Download Take Seven' }))
 
-    expect(calls.onDownload).toHaveBeenCalledWith('r7', 'Take Seven')
+    expect(calls.onDownload).toHaveBeenCalledWith('r7', 'Take Seven', 1_700_000_000_000)
   })
 
   it('hands the editor only an id — the editor reads the rest from storage', async () => {

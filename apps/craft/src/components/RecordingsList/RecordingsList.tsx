@@ -28,7 +28,7 @@ interface RecordingsListProps {
    */
   mp4Note: string | null;
   onPlay: (id: string, name: string) => void;
-  onDownload: (id: string, name: string) => void;
+  onDownload: (id: string, name: string, createdAt: number) => void;
   onDownloadMp4: (id: string, name: string) => void;
   onDownloadM4a: (id: string, name: string) => void;
   onCancelMp4: () => void;
@@ -217,7 +217,7 @@ export function RecordingsList({
                   <div className={styles.downloadDropdown}>
                     <button
                       className={styles.iconButton}
-                      onClick={() => onDownload(recording.id, recording.name)}
+                      onClick={() => onDownload(recording.id, recording.name, recording.createdAt)}
                       title="Download WebM"
                       aria-label={`Download ${recording.name}`}
                     >

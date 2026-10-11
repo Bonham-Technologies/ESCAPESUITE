@@ -367,7 +367,7 @@ describe('useMp4Download cancellation', () => {
       await result.current.startMp4Download('take-1', 'Take One')
     })
 
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
   })
 
   it('does nothing when there is no conversion to cancel', () => {
@@ -548,7 +548,7 @@ describe('useMp4Download and a recording deleted mid-conversion', () => {
     })
     await waitFor(() => expect(result.current.converting).toBeNull())
 
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     expect(setNotice).toHaveBeenLastCalledWith(null)
   })
 })
@@ -644,7 +644,7 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
   })
 
   it('is blocked with the probe\'s own reason once it says it cannot', async () => {
@@ -712,7 +712,7 @@ describe('useMp4Download gating', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     // Told twice: before, in the note, and after, in the one notice channel.
     expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_AUDIO)
   })
@@ -761,7 +761,8 @@ describe('useMp4Download gating', () => {
 
 describe('useMp4Download download name', () => {
   it('falls back to a dated stem for a legacy record with no recordedAt', async () => {
-    const { recordedAt: _omit, ...legacy } = metadata('old', 'Old Take')
+    const legacy = metadata('old', 'Old Take')
+    delete legacy.recordedAt
     await storeVideo('old', new Blob(['video-bytes'], { type: 'video/webm' }), legacy)
     const { result } = renderMp4Download()
 
@@ -1047,7 +1048,7 @@ describe('useMp4Download for a take recorded as separate tracks', () => {
     expect(await composite!.companion.blob.text()).toBe('camera-bytes')
     expect(composite!.companion.placement).toEqual(PLACEMENT)
     expect(composite!.companion.startOffset).toBe(0)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     // A composite that worked is not worth a sentence: the file is what was
     // asked for, and the channel is cleared as it is after any conversion.
     expect(setNotice.mock.calls).toEqual([[null]])
@@ -1147,7 +1148,7 @@ describe('useMp4Download for a take recorded as separate tracks', () => {
     // No companion handed to the converter, a real MP4 downloaded, and the user
     // told what is not in it — the `'unavailable'` outcome exactly.
     expect(converterModule.convertToMP4.mock.calls[0][3]).toBeUndefined()
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     expect(setNotice).toHaveBeenLastCalledWith(MP4_SAVED_WITHOUT_WEBCAM)
     expect(consoleWarn).toHaveBeenCalledWith(
       'Could not read the take’s webcam part; converting the screen alone',
