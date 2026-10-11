@@ -1295,6 +1295,9 @@ Clips support animated properties via keyframes:
   graph's own region; any other answer (a host that returns nothing included) is an add, as before.
   A **preset** handle's time (Animate In/Out, never stored as a keyframe) is not "held" in this
   sense: an add there still writes a custom keyframe, as it always has.
+  That custom keyframe lands over the Animate In/Out handle and hides it, because
+  `getAllKeyframesForProperty` merges the two handles and the custom one wins. The preset handle is
+  not treated as "occupied" for an add (filed as ESCSUITE-282).
 - **An audio-only clip is offered Volume alone (ESCSUITE-248 / M-19)**. The property list rendered
   Position, Scale, Rotation, Opacity and Blur for every clip, so a voice-over could be keyframed to
   move or fade, to no visible effect (the inspector already hides Transform for audio). The panel
