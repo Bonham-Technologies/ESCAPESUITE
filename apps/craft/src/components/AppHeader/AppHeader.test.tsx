@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event'
 import { AppHeader } from './AppHeader'
 import { useRecorderStore } from '../../store/recorderStore'
 import type { RecordingState } from '../../store/types'
-import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
+import { EDITOR_UNREACHABLE_REASON } from '../../utils/sendToEditor'
 import styles from '../../App.module.css'
 
 const { isStandaloneMode, isFileOrigin, editorUrlIsRelative } = vi.hoisted(() => ({
@@ -210,9 +210,9 @@ describe('AppHeader Open Editor under a file origin (ESCSUITE-221)', () => {
 
     const editor = screen.getByRole('button', { name: 'Open Editor in new window' })
     expect(editor).toBeDisabled()
-    expect(editor).toHaveAttribute('title', EDITOR_FILE_ORIGIN_REASON)
-    expect(editor).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
-    expect(screen.getByText(EDITOR_FILE_ORIGIN_REASON)).toBeVisible()
+    expect(editor).toHaveAttribute('title', EDITOR_UNREACHABLE_REASON)
+    expect(editor).toHaveAccessibleDescription(EDITOR_UNREACHABLE_REASON)
+    expect(screen.getByText(EDITOR_UNREACHABLE_REASON)).toBeVisible()
 
     await user.click(editor)
     expect(openSpy).not.toHaveBeenCalled()
@@ -225,7 +225,7 @@ describe('AppHeader Open Editor under a file origin (ESCSUITE-221)', () => {
     expect(editor).toBeEnabled()
     expect(editor).toHaveAttribute('title', 'Open Editor')
     expect(editor).not.toHaveAttribute('aria-describedby')
-    expect(screen.queryByText(EDITOR_FILE_ORIGIN_REASON)).not.toBeInTheDocument()
+    expect(screen.queryByText(EDITOR_UNREACHABLE_REASON)).not.toBeInTheDocument()
   })
 })
 
@@ -238,8 +238,8 @@ describe('AppHeader Open Editor in a standalone build over http (ESCSUITE-259)',
 
     const editor = screen.getByRole('button', { name: 'Open Editor in new window' })
     expect(editor).toBeDisabled()
-    expect(editor).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
-    expect(screen.getByText(EDITOR_FILE_ORIGIN_REASON)).toBeVisible()
+    expect(editor).toHaveAccessibleDescription(EDITOR_UNREACHABLE_REASON)
+    expect(screen.getByText(EDITOR_UNREACHABLE_REASON)).toBeVisible()
     await user.click(editor)
     expect(openSpy).not.toHaveBeenCalled()
   })

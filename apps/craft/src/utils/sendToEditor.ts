@@ -15,13 +15,14 @@ import { analytics } from './analytics';
 
 /**
  * Said, as a disabled editor button's title and visible description, when the
- * app was opened from disk (`file:`). The released single-file CRAFT has no
+ * editor is unreachable: the app was opened from disk (`file:`), or is an offline
+ * build served over http with no absolute editor address. The released single-file CRAFT has no
  * editor at a URL it can reach — `/artist/` resolves to `file:///artist/` — and
  * the downloaded ESCAPEARTIST file's name is the user's, so there is nothing
  * to navigate to (ESCSUITE-221). The recording is in the shared IndexedDB
  * either way; the sentence names the way across.
  */
-export const EDITOR_FILE_ORIGIN_REASON =
+export const EDITOR_UNREACHABLE_REASON =
   "Download this recording's WebM and import it into the offline ESCAPEARTIST file.";
 
 /**
@@ -36,7 +37,7 @@ export const EDITOR_FILE_ORIGIN_REASON =
  */
 export const editorBlockedReasonFor = ({ embedded }: { embedded: boolean }): string | null =>
   !embedded && (isFileOrigin() || (isStandaloneMode() && editorUrlIsRelative()))
-    ? EDITOR_FILE_ORIGIN_REASON
+    ? EDITOR_UNREACHABLE_REASON
     : null;
 
 export const sendToEditor = (id: string): 'posted' | 'opened' => {

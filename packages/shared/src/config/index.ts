@@ -37,6 +37,7 @@ export const EDITOR_URL = rawEditorUrl.replace(/\/+$/, '') + '/'
 // `artist/` and anything that is not a URL all resolve against whatever
 // document CRAFT was opened from, which for the offline single-file build is
 // not a place ESCAPEARTIST lives (ESCSUITE-259).
+// (`//host/` and a hostless `https://` are not values anyone sets; the regex does not chase them.)
 export const editorUrlIsRelative = (): boolean => !/^https?:\/\//i.test(rawEditorUrl)
 
 export const editorUrl = (params?: Record<string, string>): string => {

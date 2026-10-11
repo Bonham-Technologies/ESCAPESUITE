@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { editorBlockedReasonFor, EDITOR_FILE_ORIGIN_REASON } from './sendToEditor';
+import { editorBlockedReasonFor, EDITOR_UNREACHABLE_REASON } from './sendToEditor';
 
 const { isFileOrigin, isStandaloneMode, editorUrlIsRelative } = vi.hoisted(() => ({
   isFileOrigin: vi.fn(() => false),
@@ -29,7 +29,7 @@ describe('editorBlockedReasonFor (ESCSUITE-259)', () => {
   it('blocks a standalone build over http whose editor URL is relative', () => {
     isStandaloneMode.mockReturnValue(true);
     editorUrlIsRelative.mockReturnValue(true);
-    expect(editorBlockedReasonFor({ embedded: false })).toBe(EDITOR_FILE_ORIGIN_REASON);
+    expect(editorBlockedReasonFor({ embedded: false })).toBe(EDITOR_UNREACHABLE_REASON);
   });
 
   it('leaves a standalone build over http with an absolute editor URL alone', () => {
@@ -39,7 +39,7 @@ describe('editorBlockedReasonFor (ESCSUITE-259)', () => {
 
   it('blocks a file origin whatever the build and the editor URL', () => {
     isFileOrigin.mockReturnValue(true);
-    expect(editorBlockedReasonFor({ embedded: false })).toBe(EDITOR_FILE_ORIGIN_REASON);
+    expect(editorBlockedReasonFor({ embedded: false })).toBe(EDITOR_UNREACHABLE_REASON);
   });
 
   it('is null when embedded, however the page was opened', () => {

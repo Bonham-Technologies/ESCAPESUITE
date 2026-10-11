@@ -17,7 +17,7 @@ import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices'
 import { converterModule, resetAppDoubles } from '../../test/appDoubles'
 import type { ConversionProgressLike } from '../../test/appDoubles'
 import { storeVideo } from '../../core/storage'
-import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
+import { EDITOR_UNREACHABLE_REASON } from '../../utils/sendToEditor'
 import { clearAllRecordings } from '../../test/recordingsDb'
 import type { Recording } from '../../store/types'
 
@@ -378,7 +378,7 @@ describe('RecordingsListPanel editor gate under a file origin (ESCSUITE-221)', (
     renderPanel()
 
     expect(rowButton()).toBeDisabled()
-    expect(rowButton()).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
+    expect(rowButton()).toHaveAccessibleDescription(EDITOR_UNREACHABLE_REASON)
   })
 
   it('leaves it enabled on an http origin', () => {
@@ -405,7 +405,7 @@ describe('RecordingsListPanel editor gate in a standalone build over http (ESCSU
     renderPanel()
 
     expect(rowButton()).toBeDisabled()
-    expect(rowButton()).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
+    expect(rowButton()).toHaveAccessibleDescription(EDITOR_UNREACHABLE_REASON)
   })
 
   it('leaves it enabled when the build was given an absolute editor URL', () => {
