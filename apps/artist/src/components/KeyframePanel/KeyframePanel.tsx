@@ -9,7 +9,7 @@ import { KeyframeTrack } from './KeyframeTrack';
 import { KeyframeGraph } from './KeyframeGraph';
 import { ClipPreview } from './ClipPreview';
 import { nextMenuIndex } from '../../app/menuNavigation';
-import { KEYFRAME_TIME_EPSILON } from '../../utils/animation';
+import { KEYFRAME_TIME_EPSILON, presetHandleTimes } from '../../utils/animation';
 import { announceWithMark } from './hooks/useKeyframeGraphKeyboard';
 import styles from './KeyframePanel.module.css';
 
@@ -28,6 +28,10 @@ const VISUAL_PROPERTIES: { property: AnimatableProperty; label: string }[] = [
 const AUDIO_PROPERTIES: { property: AnimatableProperty; label: string }[] = [
   { property: 'volume', label: 'Volume' },
 ];
+
+// What the panel's live region says when an add is aimed at an Animate In/Out
+// handle's time (ESCSUITE-282).
+const PRESET_HANDLE_MESSAGE = 'That time belongs to the Animate In/Out preset';
 
 // Combined for lookups
 const ALL_PROPERTIES = [...VISUAL_PROPERTIES, ...AUDIO_PROPERTIES];
@@ -176,16 +180,17 @@ export function KeyframePanel() {
   }, [selectedClipId, moveClipKeyframe]);
 
   // The panel's one live region (see its render below for why it is always
-  // there). Two things speak through it: every property row's diamond drag
+  // there). Three things speak through it: every property row's diamond drag
   // (ESCSUITE-167 / M6, review round 1 MINOR 6) — only one diamond on one row
   // can ever be dragging at a time, so eight per-row regions would carry a
-  // message only one of them could ever produce — and an add that selected a
-  // keyframe instead of writing one (ESCSUITE-248, below).
+  // message only one of them could ever produce — an add that selected a
+  // keyframe instead of writing one (ESCSUITE-248, below), and an add refused
+  // at an Animate In/Out handle's time (ESCSUITE-282, below).
   //
   // Since ESCSUITE-183 the only thing a diamond drag reports is `''` — a
   // landed drop, with nothing to say — because the clamp makes every landing a
   // legal one and there is no refusal left for the row to raise, so the setter
-  // goes straight to the row. The add's sentence goes through
+  // goes straight to the row. The adds' sentences go through
   // `announceWithMark` instead: Enter pressed twice on the same keyframe says
   // the same words twice, and an `aria-atomic` region whose text does not
   // change is not re-read. The keyboard's own occupied-time refusal is
@@ -223,6 +228,22 @@ export function KeyframePanel() {
       if (selectedProperty !== property) setKeyframePanelSelectedProperty(property);
       setGraphSelectRequest({ time: existing.time });
       announceWithMark(setPanelMessage, `Keyframe at ${existing.time.toFixed(2)} s selected`);
+      return false;
+    }
+
+    // An Animate In/Out handle's time is occupied too (ESCSUITE-282), at the
+    // same tolerance. A handle is generated, not stored, so the check above
+    // never saw it, and the add wrote a custom keyframe that won the merge over
+    // the handle: the preset's easing changed, and — not being generated — it
+    // survived the transition suppression of ESCSUITE-139, so an incoming clip
+    // with a fade-in rendered invisible at its start again. Refused outright:
+    // there is no stored keyframe to select, so nothing is written, selected or
+    // opened, and the panel's one live region says why.
+    const handles = presetHandleTimes(
+      property, selectedClip.duration, selectedClip.animation, selectedClip.transform, selectedClip.effects
+    );
+    if (handles.some(t => Math.abs(t - time) < KEYFRAME_TIME_EPSILON)) {
+      announceWithMark(setPanelMessage, PRESET_HANDLE_MESSAGE);
       return false;
     }
 
@@ -510,8 +531,9 @@ export function KeyframePanel() {
 
             {/* Always rendered, never conditional: a live region has to exist
                 before its content changes for a screen reader to announce the
-                change. Shared by every property row's diamond drag and by an
-                add that selected a keyframe instead — see panelMessage above. */}
+                change. Shared by every property row's diamond drag, an add
+                that selected a keyframe instead and an add refused at a preset
+                handle — see panelMessage above. */}
             <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
               {panelMessage}
             </span>

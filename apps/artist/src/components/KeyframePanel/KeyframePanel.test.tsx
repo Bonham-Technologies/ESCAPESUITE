@@ -8,6 +8,7 @@ import type { Clip } from '../../store/types'
 import panelStyles from './KeyframePanel.module.css'
 import trackStyles from './KeyframeTrack.module.css'
 import graphStyles from './KeyframeGraph.module.css'
+import { getAnimatedValues, PRESET_SUPPRESSION } from '../../utils/animation'
 
 const CLIP_DURATION = 4.3
 
@@ -771,6 +772,156 @@ describe('KeyframePanel', () => {
       expect(rotation).toHaveLength(2) // the time-0 seed and the new one
       expect(rotation[1].time).toBeCloseTo(1.2, 9)
       expect(store().history.past).toHaveLength(historyBefore + 1)
+    })
+  })
+
+  // ESCSUITE-282: ESCSUITE-248's "occupied" counted stored keyframes only, and
+  // an Animate In/Out handle is generated, never stored — so an add at a
+  // handle's time wrote a custom ease-in-out keyframe that won the merge over
+  // the handle, changing the preset's easing and, because it is not generated,
+  // surviving the transition suppression ESCSUITE-139 added. A handle's time is
+  // now occupied too, and an add there is refused: no write, no history entry,
+  // no selection change, one sentence in the panel's live region.
+  describe('adding at an Animate In/Out handle\'s time (ESCSUITE-282)', () => {
+    const PRESET_SENTENCE = 'That time belongs to the Animate In/Out preset'
+    const panelStatus = () =>
+      document.body.querySelector<HTMLElement>(`.${panelStyles.srOnly}[role="status"]`)!
+    const graphStatus = () =>
+      document.body.querySelector<HTMLElement>(`.${graphStyles.srOnly}[role="status"]`)!
+
+    function withFades(sides: { in?: boolean; out?: boolean }) {
+      openPanelWithClip()
+      store().updateClipAnimation('clip1', {
+        in: { type: sides.in ? 'fade' : 'none', duration: 0.5, easing: 'linear' },
+        out: { type: sides.out ? 'fade' : 'none', duration: 0.5, easing: 'linear' },
+      })
+    }
+
+    function pressEnterAt(time: number) {
+      store().setKeyframePanelSelectedProperty('opacity')
+      store().setCurrentTime(time)
+      render(<KeyframePanel />)
+      const before = keyframesOf('opacity')
+      const historyBefore = store().history.past.length
+      const svg = measureGraph()
+      svg.focus()
+      const activeBefore = svg.getAttribute('aria-activedescendant')
+      fireEvent.keyDown(svg, { key: 'Enter' })
+      return { before, historyBefore, svg, activeBefore }
+    }
+
+    function expectRefused(
+      { before, historyBefore, svg, activeBefore }: ReturnType<typeof pressEnterAt>
+    ) {
+      expect(keyframesOf('opacity')).toEqual(before)
+      expect(store().history.past).toHaveLength(historyBefore)
+      expect(panelStatus()).toHaveTextContent(PRESET_SENTENCE)
+      // No add announced by the graph, and nothing selected or moved to.
+      expect(graphStatus().textContent).not.toMatch(/Opacity/)
+      expect(svg.getAttribute('aria-activedescendant')).toBe(activeBefore)
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+    }
+
+    it('refuses Enter at the in-preset\'s end handle', () => {
+      withFades({ in: true })
+      expectRefused(pressEnterAt(0.5))
+    })
+
+    it('refuses Enter at the in-preset\'s start handle', () => {
+      withFades({ in: true })
+      expectRefused(pressEnterAt(0))
+    })
+
+    it('refuses Enter at the out-preset\'s handle at the clip duration', () => {
+      withFades({ out: true })
+      expectRefused(pressEnterAt(CLIP_DURATION))
+    })
+
+    it('refuses Enter within KEYFRAME_TIME_EPSILON of a handle', () => {
+      withFades({ in: true })
+      expectRefused(pressEnterAt(0.5005))
+    })
+
+    it('still adds just outside KEYFRAME_TIME_EPSILON of a handle', () => {
+      withFades({ in: true })
+      const { historyBefore } = pressEnterAt(0.5015)
+
+      const added = keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 0.5015) < 1e-9)
+      expect(added?.easing).toBe('ease-in-out')
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+      expect(panelStatus()).toHaveTextContent('')
+      expect(graphStatus()).toHaveTextContent('Opacity')
+    })
+
+    it('makes a second refusal a different string, so it is re-read', () => {
+      withFades({ in: true })
+      const { svg } = pressEnterAt(0.5)
+      const first = panelStatus().textContent
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(panelStatus()).toHaveTextContent(PRESET_SENTENCE)
+      expect(panelStatus().textContent).not.toBe(first)
+    })
+
+    it('refuses a row double-click at a handle\'s time without opening the row\'s graph', () => {
+      withFades({ in: true })
+      render(<KeyframePanel />)
+      const historyBefore = store().history.past.length
+
+      // 50px into a 430px row over a 4.3s clip = 0.5s.
+      fireEvent.doubleClick(measureTrackArea('Opacity'), { clientX: 150 })
+
+      expect(keyframesOf('opacity') ?? []).toEqual([])
+      expect(store().history.past).toHaveLength(historyBefore)
+      expect(store().keyframePanelState.selectedProperty).toBeNull()
+      expect(panelStatus()).toHaveTextContent(PRESET_SENTENCE)
+    })
+
+    it('refuses a graph double-click at a handle\'s time', () => {
+      withFades({ out: true })
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      const historyBefore = store().history.past.length
+
+      // x = 50 + 100 * 3.8, the out-preset's start handle.
+      fireEvent.doubleClick(measureGraph(), { clientX: 430, clientY: 40 })
+
+      expect(keyframesOf('opacity') ?? []).toEqual([])
+      expect(store().history.past).toHaveLength(historyBefore)
+      expect(panelStatus()).toHaveTextContent(PRESET_SENTENCE)
+    })
+
+    it('leaves the ESCSUITE-248 path to a keyframe stored at a handle\'s time', () => {
+      withFades({ in: true })
+      store().setClipKeyframe('clip1', 'opacity', { time: 0.5, value: 0.5, easing: 'linear' })
+      pressEnterAt(0.5)
+
+      expect(panelStatus()).toHaveTextContent('Keyframe at 0.50 s selected')
+      expect(panelStatus().textContent).not.toMatch(/Animate In\/Out/)
+    })
+
+    it('adds at the same time exactly as before on a clip with no preset', () => {
+      withFades({})
+      const { historyBefore } = pressEnterAt(0.5)
+
+      expect(keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 0.5) < 1e-9)?.easing).toBe('ease-in-out')
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+      expect(panelStatus()).toHaveTextContent('')
+    })
+
+    it('keeps a transition\'s in-preset suppression intact after Enter at the in-handle at 0', () => {
+      // Before the fix this wrote a stored opacity keyframe of 0 at 0, which
+      // the ESCSUITE-139 suppression does not drop (it is not generated): the
+      // incoming clip rendered invisible at its start again.
+      withFades({ in: true })
+      pressEnterAt(0)
+
+      const clip = store().project.timeline.clips[0]
+      const underTransition = getAnimatedValues(
+        0, clip.duration, clip.animation, clip.transform, clip.effects, PRESET_SUPPRESSION.in
+      )
+      expect(underTransition.opacity).toBe(clip.transform.opacity)
     })
   })
 

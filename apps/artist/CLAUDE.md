@@ -1323,10 +1323,32 @@ Clips support animated properties via keyframes:
   `addAtPlayhead` then neither moves the active option to the playhead nor announces an add in the
   graph's own region; any other answer (a host that returns nothing included) is an add, as before.
   A **preset** handle's time (Animate In/Out, never stored as a keyframe) is not "held" in this
-  sense: an add there still writes a custom keyframe, as it always has.
-  That custom keyframe lands over the Animate In/Out handle and hides it, because
-  `getAllKeyframesForProperty` merges the two handles and the custom one wins. The preset handle is
-  not treated as "occupied" for an add (filed as ESCSUITE-282).
+  sense — there is nothing stored to select — and is refused instead (ESCSUITE-282, next).
+- **An add at an Animate In/Out handle's time is refused (ESCSUITE-282)**. ESCSUITE-248's
+  "occupied" counted stored keyframes only, and a preset handle is generated, so an add there
+  wrote a custom `ease-in-out` keyframe that won `getAnimatedValues`' merge over the handle: the
+  preset's easing changed, and because the custom keyframe is not generated it survived
+  `PRESET_SUPPRESSION` during a transition — an incoming clip with a fade-in rendered invisible at
+  its start again, the bug ESCSUITE-139 fixed, back through one Enter. `handleAddKeyframe` — which
+  all three add paths reach, the graph's Enter (`addAtPlayhead`) and both double-clicks — now
+  checks, after the stored-keyframe check above (so a keyframe stored at a handle's time still
+  selects), whether `time` is within `KEYFRAME_TIME_EPSILON` of any of the property's preset
+  handles, asked of `utils/animation.ts`'s `presetHandleTimes(property, clipDuration, animation,
+  transform, effects)`. That helper runs the same generators the merge does
+  (`presetKeyframesForProperty`, which `getAllKeyframesForProperty` now shares), so the panel reads
+  the handle times from the same generators the merge does, a `pop` preset's middle handle included
+  (`getAnimatedValues` still carries its own inline copy of that merge, so the two agree by
+  construction of the generators, not by sharing one merge).
+  A refused add writes nothing, pushes no history entry, selects and opens nothing, answers
+  `false` (so `addAtPlayhead` neither moves the active option nor announces an add), and the
+  panel's one live region says "That time belongs to the Animate In/Out preset" through
+  `announceWithMark`, so a second Enter is re-read. A time just outside the epsilon adds as before.
+  To key a value at a handle's time, change the preset instead (or set it to None and keyframe by
+  hand). Not covered here: `setClipKeyframe`'s first-write seed (ESCSUITE-166) still stores a
+  time-0 keyframe at the base value when a property gets its first keyframe away from 0, which
+  lands over an in-preset's 0 handle the same way: a fade-in clip whose first opacity keyframe is
+  added at 2 s starts at full opacity instead of 0 (measured; not a transition hazard, since the
+  seed holds the base value the suppression would read anyway). Filed as ESCSUITE-286.
 - **An audio-only clip is offered Volume alone (ESCSUITE-248 / M-19)**. The property list rendered
   Position, Scale, Rotation, Opacity and Blur for every clip, so a voice-over could be keyframed to
   move or fade, to no visible effect (the inspector already hides Transform for audio). The panel

@@ -586,17 +586,18 @@ export function hasAnimation(animation: ClipAnimation | undefined): boolean {
 }
 
 /**
- * Get all keyframes for a property, including those generated from presets
+ * One property's Animate In/Out handles — both presets' generated keyframes,
+ * merged, before any of the clip's own keyframes are laid over them. The one
+ * place outside `getAnimatedValues` that runs the preset arithmetic, shared by
+ * the two exported readers below so they cannot disagree about where a handle is.
  */
-export function getAllKeyframesForProperty(
+function presetKeyframesForProperty(
   property: AnimatableProperty,
   clipDuration: number,
-  animation: ClipAnimation | undefined,
+  animation: ClipAnimation,
   baseTransform: ClipTransform,
   baseEffects: ClipEffects
 ): Keyframe[] {
-  if (!animation) return [];
-
   const inKeyframes = generateInPresetKeyframes(
     animation.in.type,
     animation.in.duration,
@@ -614,10 +615,45 @@ export function getAllKeyframesForProperty(
     baseEffects
   );
 
-  let keyframes = mergeKeyframes(
+  return mergeKeyframes(
     inKeyframes[property] || [],
     outKeyframes[property] || []
   );
+}
+
+/**
+ * The times, in clip time and in order, at which the Animate In/Out presets put
+ * a handle on one property (ESCSUITE-282). A handle is generated, never stored,
+ * so a keyframe written at one of these times would win the merge in
+ * `getAnimatedValues` and replace it — changing the preset's easing, and, not
+ * being generated, surviving the transition suppression of ESCSUITE-139. The
+ * keyframe panel refuses an add within `KEYFRAME_TIME_EPSILON` of any of them.
+ */
+export function presetHandleTimes(
+  property: AnimatableProperty,
+  clipDuration: number,
+  animation: ClipAnimation | undefined,
+  baseTransform: ClipTransform,
+  baseEffects: ClipEffects
+): number[] {
+  if (!animation) return [];
+  return presetKeyframesForProperty(property, clipDuration, animation, baseTransform, baseEffects)
+    .map(kf => kf.time);
+}
+
+/**
+ * Get all keyframes for a property, including those generated from presets
+ */
+export function getAllKeyframesForProperty(
+  property: AnimatableProperty,
+  clipDuration: number,
+  animation: ClipAnimation | undefined,
+  baseTransform: ClipTransform,
+  baseEffects: ClipEffects
+): Keyframe[] {
+  if (!animation) return [];
+
+  let keyframes = presetKeyframesForProperty(property, clipDuration, animation, baseTransform, baseEffects);
 
   const customKeyframes = animation.keyframes[property];
   if (customKeyframes && customKeyframes.length > 0) {
