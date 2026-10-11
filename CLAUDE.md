@@ -4002,6 +4002,33 @@ once here against `pnpm build:standalone` on Chromium, Firefox and WebKit: 42 pa
 Blob-in-IndexedDB skips as before, of 45. **No floor crossed**;
 craft's floors stay 100 / 99 / 97 / 100 and shared's 100 / 98 / 92 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-11 for ESCSUITE-278 (the frame-rate probe refuses a run in
+which the compositor's `presentedFrames` counter under-counted: starved on purpose — high-bitrate VP9 at
+120 and 60 fps, CPU-throttled 4× and 8× with and without a 30 ms busy loop, 140 instrumented runs — Chromium
+153 threw away a late frame unpresented in 17 of 120 runs, so the counter stepped by one while `mediaTime`
+jumped two or three source frames and the probe stored 120 fps as 83.33, 76.92 or 76.09 and 60 as 52.63 or
+41.92 `'measured'`; the 4K H.264 and Firefox never did. `rateFromMediaTimes` now answers `undefined`, which
+`videoProcessor.ts` already stores as 30 `'assumed'`, on either sign — the per-spacing count exceeding the
+counter count, which caught all 17 starved runs and none of the 103 healthy ones, or
+`totalVideoFrames − presentedFrames` growing by more than 2 across the probe, read from
+`getVideoPlaybackQuality()` where the element has it, since a healthy decoder keeps 2–4 frames queued and
+a literal "grew" would have refused 49 healthy runs — never `max(counter, per-spacing)`):
+99.83 / 99.38 / 96.42 / 99.75, byte-identical on every percentage to the 99.83 / 99.38 / 96.42 / 99.75 that
+`main` at `3ef90c00` (the ESCSUITE-232 / 228 version-packages commit) measures in the same sitting. The base
+gives 5,604 / 5,812 branches and this branch 5,614 / 5,822: ten new branches, ten covered, the same 208
+uncovered as before (lines 8,674 / 8,688 → 8,681 / 8,695, statements 9,800 / 9,861 → 9,809 / 9,870,
+functions 2,064 / 2,069 on both, every denominator growing by exactly what the numerator did; the same
+14 / 61 / 5 uncovered). All ten are `core/frameRateProbe.ts`'s (30 → 40): the two refusal signs, the
+`getVideoPlaybackQuality` present-or-absent read, and the counter-or-fallback arms each sign sits behind,
+reached from both sides by the red cases built from the real starved runs (the 83.33 and 76.09 readings
+that now come back `undefined`, red before the fix at "expected 83.33 to be undefined") against two healthy
+runs kept as pins, the review's variable-rate case (irregular spacing, seven intervals against a counter of
+four, refused and stored assumed where it used to store 20 — the safe side, since `seekToleranceFor` floors
+at 30 fps) and the 276 cases that were already there. `drawFrame.perf.test.ts`, every other
+`*.perf.test.ts` and the rerender pins are byte-identical — the quality read happens once per probe
+callback at import, never per preview or export frame. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
