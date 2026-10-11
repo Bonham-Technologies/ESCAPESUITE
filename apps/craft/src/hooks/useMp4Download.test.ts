@@ -957,7 +957,7 @@ describe('useMp4Download audio-only (M4A)', () => {
     })
 
     expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'take_one.m4a' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.m4a' }])
   })
 
   it('is offered, with nothing to say, once the probe says the browser can encode AAC', () => {

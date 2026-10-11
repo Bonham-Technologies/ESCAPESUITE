@@ -34,7 +34,7 @@ import {
   MP4_SAVED_WITHOUT_WEBCAM,
   RECORDING_UNAVAILABLE,
 } from '../utils/notices'
-import { safeFileName } from '../utils/recordingFormat'
+import { downloadFileStem } from '../utils/recordingFormat'
 import type { ConversionProgress } from '../core/converter'
 import type { WebcamCompanionLookup } from '../utils/takeParts'
 import type { Mp4Support } from '../store/types'
@@ -345,7 +345,7 @@ export function useMp4Download({ setNotice, mp4Support, refreshStorageSpace }: M
             ? null
             : MP4_SAVED_WITHOUT_AUDIO
       )
-      downloadBlob(converted, `${safeFileName(name)}.${format}`)
+      downloadBlob(converted, `${downloadFileStem(name, record.metadata.recordedAt ?? 0)}.${format}`)
     } catch (error) {
       // Cancelling is not a failure — the user asked for it, and there is
       // nothing to say about it that the row returning to idle does not.

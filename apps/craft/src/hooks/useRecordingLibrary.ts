@@ -11,7 +11,7 @@ import { deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from '../core
 import { analytics } from '../utils/analytics';
 import { downloadBlob } from '../utils/downloadBlob';
 import { sendToEditor } from '../utils/sendToEditor';
-import { safeFileName } from '../utils/recordingFormat';
+import { downloadFileStem } from '../utils/recordingFormat';
 import { DELETE_FAILED, RECORDING_UNAVAILABLE } from '../utils/notices';
 import type { Recording } from '../store/types';
 
@@ -38,7 +38,7 @@ export interface RecordingLibrary {
   handleSendToEditor: (id: string) => void;
   handlePlayRecording: (id: string, name: string) => Promise<void>;
   handleClosePlayback: () => void;
-  handleDownload: (id: string, name: string) => Promise<void>;
+  handleDownload: (id: string, name: string, createdAt: number) => Promise<void>;
 }
 
 export function useRecordingLibrary({
@@ -181,7 +181,7 @@ export function useRecordingLibrary({
   };
 
   // Download a recording as WebM (instant — blob is already fixed during save)
-  const handleDownload = async (id: string, name: string) => {
+  const handleDownload = async (id: string, name: string, createdAt: number) => {
     const blob = await getVideoBlob(id);
     if (!blob) {
       // Same missing-blob fact as handlePlayRecording's else — see there.
@@ -192,7 +192,7 @@ export function useRecordingLibrary({
 
     analytics.recordingDownloaded();
     // The same anchor the MP4 path uses, deferred revoke included.
-    downloadBlob(blob, `${safeFileName(name)}.webm`);
+    downloadBlob(blob, `${downloadFileStem(name, createdAt)}.webm`);
   };
 
   return {
