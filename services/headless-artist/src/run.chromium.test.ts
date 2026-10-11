@@ -234,11 +234,17 @@ describe('runJob (real Chromium)', () => {
   }, RENDER_TIMEOUT_MS)
 
   // ESCSUITE-253: a text overlay names a fallback family, so a font the image lacks lands on
-  // the nearest generic instead of whatever the machine picks. Fonts differ per machine, so
-  // nothing is hashed: each offered non-monospace family must measure differently from the
-  // same text in `monospace`, which proves the stack — and not a bare 'monospace'-like
-  // default — reached the canvas. (Courier New is monospace and is the control's own family.)
-  it('draws each offered family through its own stack, not the monospace default', async () => {
+  // the generic its stack ends in. The oracle is equality with that generic, not a difference
+  // from some other family: Impact, Georgia and Verdana cannot be satisfied by name on the
+  // image, so with the stack each must measure exactly like its generic and unlike the other
+  // one. Red on the old wiring: a bare `Impact` resolves to Chromium's default standard font
+  // (serif-shaped), which is not the width of `sans-serif`, and the same for a bare `Verdana`.
+  // Georgia's stack is `Georgia, 'Times New Roman', serif`, and fontconfig maps Times New Roman
+  // to Liberation Serif, which may not be the image's default `serif`; so Georgia is compared
+  // with the stack minus Georgia, which is what it must fall back to. Arial is the metric-clone
+  // case: it must measure like `Liberation Sans`, which fonts-liberation installs and Chromium
+  // resolves by name, so no assumption is made about the image's default sans.
+  it('draws each offered family through its own stack', async () => {
     const manifestDir = path.join(tmpRoot, 'font-manifest')
     await fs.cp(path.dirname(MANIFEST), manifestDir, { recursive: true })
     const project = JSON.parse(await fs.readFile(path.join(manifestDir, 'project.json'), 'utf8'))
@@ -291,12 +297,16 @@ describe('runJob (real Chromium)', () => {
       return ink(firstGifFrame(await fs.readFile(path.join(outDir, `${jobId}.gif`))))
     }
 
-    const control = await measure('monospace', 'e2e-font-monospace')
-    expect(control.width).toBeGreaterThan(0)
+    const width = async (family: string) =>
+      (await measure(family, `e2e-font-${family.replace(/[^A-Za-z]/g, '-')}`)).width
+    const sans = await width('sans-serif')
+    const serif = await width('serif')
+    expect(sans, 'the generic families must differ for the oracle to mean anything').not.toBe(serif)
 
-    for (const family of ['Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana', 'Impact']) {
-      const box = await measure(family, `e2e-font-${family.replace(/\s/g, '-')}`)
-      expect(box.width, `${family} should not measure like monospace`).not.toBe(control.width)
-    }
+    expect(await width('Impact')).toBe(sans)
+    expect(await width('Verdana')).toBe(sans)
+    expect(await width('Georgia')).toBe(await width("'Times New Roman', serif"))
+    expect(await width('Georgia')).not.toBe(sans)
+    expect(await width('Arial')).toBe(await width('Liberation Sans'))
   }, RENDER_TIMEOUT_MS * 4)
 })

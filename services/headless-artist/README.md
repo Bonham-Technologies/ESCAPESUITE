@@ -588,7 +588,7 @@ cat job.json | docker run --rm -i -v "$PWD/in:/in:ro" -v "$PWD/out:/out" headles
 This image is built from `services/headless-artist` and smoke-tested (`render`, `serve` with a zombie check, and `--version`)
 in CI on every non-Dependabot pull request (the `kit-docker` job).
 
-Four things worth knowing:
+Five things worth knowing:
 
 - It runs as `pwuser`, not root, which keeps Chromium's own sandbox usable — so
   `HEADLESS_NO_SANDBOX` is *not* set. If you change the image to run as root you must set

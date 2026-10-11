@@ -35,6 +35,8 @@ export const FONT_STACKS: Record<string, string> = Object.fromEntries(
 export function fontStackFor(family: string): string {
   const known = FONT_STACKS[family];
   if (known) return known;
+  // No name at all (an emptied or blank field): the generic alone, not ", sans-serif".
+  if (!family.trim()) return 'sans-serif';
   // A bare name with a space in it needs quotes; one that is already quoted or
   // carries a comma is left as the author wrote it, with the generic behind it.
   const needsQuotes = /^[^,'"]*\s[^,'"]*$/.test(family);

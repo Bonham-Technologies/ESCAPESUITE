@@ -27,6 +27,11 @@ describe('fontStacks', () => {
     expect(fontStackFor('Inter')).toBe('Inter, sans-serif');
   });
 
+  it('gives an empty or blank family the bare generic', () => {
+    expect(fontStackFor('')).toBe('sans-serif');
+    expect(fontStackFor('   ')).toBe('sans-serif');
+  });
+
   it('quotes an unknown family that has a space in it', () => {
     expect(fontStackFor('Open Sans')).toBe("'Open Sans', sans-serif");
   });
