@@ -150,6 +150,21 @@ describe('Timeline markers', () => {
     expect(root.querySelectorAll(`.${styles.markerLine}`)).toHaveLength(1)
   })
 
+  it('seeks to the marker\'s exact time on Enter, and the ruler elsewhere still seeks by position', async () => {
+    const user = userEvent.setup()
+    store().addMarker(3, 'Cut here')
+    renderTimeline()
+    store().setCurrentTime(7)
+
+    screen.getByRole('button', { name: /^Marker Cut here/ }).focus()
+    await user.keyboard('{Enter}')
+    expect(store().currentTime).toBe(3)
+
+    store().setCurrentTime(7)
+    await user.click(screen.getByRole('group', { name: 'Timeline ruler' }))
+    expect(store().currentTime).not.toBe(7)
+  })
+
   it('removes a marker when its flag is double-clicked', async () => {
     const user = userEvent.setup()
     store().addMarker(3, 'Cut here')

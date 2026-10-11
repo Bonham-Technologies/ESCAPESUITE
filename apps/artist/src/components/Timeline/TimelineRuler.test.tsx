@@ -29,6 +29,7 @@ function renderRuler(props: Partial<Parameters<typeof TimelineRuler>[0]> = {}) {
       inPoint={null}
       outPoint={null}
       onRulerClick={() => {}}
+      onSeek={() => {}}
       onRemoveMarker={() => {}}
       onInPointMouseDown={() => {}}
       onOutPointMouseDown={() => {}}
@@ -144,13 +145,26 @@ describe('TimelineRuler markers', () => {
     expect(screen.getByRole('button', { name: flagName })).toHaveFocus()
   })
 
-  it('still lets a click on the flag reach the ruler\'s seek handler', () => {
+  it('seeks to the marker\'s exact time on a click, and not through the ruler\'s pixel maths', () => {
     const onRulerClick = vi.fn()
-    renderRuler({ markers: [marker], onRulerClick })
+    const onSeek = vi.fn()
+    renderRuler({ markers: [marker], onRulerClick, onSeek })
 
-    fireEvent.click(screen.getByRole('button', { name: flagName }))
+    fireEvent.click(screen.getByRole('button', { name: flagName }), { clientX: 151 })
 
-    expect(onRulerClick).toHaveBeenCalledTimes(1)
+    expect(onSeek).toHaveBeenCalledWith(marker.time)
+    expect(onRulerClick).not.toHaveBeenCalled()
+  })
+
+  it('seeks to the marker on keyboard activation too', async () => {
+    const user = userEvent.setup()
+    const onSeek = vi.fn()
+    renderRuler({ markers: [marker], onSeek })
+
+    screen.getByRole('button', { name: flagName }).focus()
+    await user.keyboard('{Enter}')
+
+    expect(onSeek).toHaveBeenCalledWith(marker.time)
   })
 })
 
