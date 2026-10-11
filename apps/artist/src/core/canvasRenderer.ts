@@ -15,6 +15,7 @@ import type {
 import { blendModeToCanvas, getSourceDimensions, getIncomingClipTime } from './exportTypes';
 import { drawWithMaskAndStroke } from './clipMask';
 import { croppedSourceRect } from './clipCrop';
+import { textFontString } from './fontStacks';
 
 /**
  * The animated transform/effect values of a clip at one instant.
@@ -118,9 +119,7 @@ export function drawTextOverlayToCanvasAnimated(
   ctx.translate(-x, -y);
 
   // Set up font
-  const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
-  const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
-  ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
+  ctx.font = textFontString(textData);
   ctx.textAlign = textData.textAlign;
   ctx.textBaseline = 'middle';
 

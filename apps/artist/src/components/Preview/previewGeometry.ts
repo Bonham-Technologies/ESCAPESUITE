@@ -8,6 +8,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
 import type { Clip, SourceVideo } from '../../store/types';
 import type { ManipulableClipType, NormalizedPoint, OverlayBounds, ProjectSize } from './types';
 import { croppedSourceRect } from '../../core/clipCrop';
+import { textFontString } from '../../core/fontStacks';
 import { presetSuppressionFor } from '../../core/exportTypes';
 import type { TransitionInfo } from '../../core/exportTypes';
 
@@ -151,12 +152,10 @@ export function getOverlayBounds(
     const y = animatedY ?? textData.y;
     const rotation = animatedRotation ?? (textData.rotation ?? 0);
 
-    const fontStyle = textData.fontStyle === 'italic' ? 'italic ' : '';
-    const fontWeight = textData.fontWeight === 'bold' ? 'bold ' : '';
     // The context is the preview's own, and the next frame draws through it:
     // the measuring font has to come back off again.
     ctx.save();
-    ctx.font = `${fontStyle}${fontWeight}${textData.fontSize}px ${textData.fontFamily}`;
+    ctx.font = textFontString(textData);
     const lines = textData.text.split('\n');
     const maxLineWidth = Math.max(...lines.map(line => ctx.measureText(line).width));
     ctx.restore();

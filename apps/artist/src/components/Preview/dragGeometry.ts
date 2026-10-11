@@ -12,6 +12,7 @@ import { getClipsAtTime } from '../../store/projectStore';
 import { isVisibleTrack } from '../../store/trackVisibility';
 import { presetSuppressionFor } from '../../core/exportTypes';
 import type { TransitionInfo } from '../../core/exportTypes';
+import { textFontString } from '../../core/fontStacks';
 import * as geometry from './previewGeometry';
 import type { ManipulableClipType, ProjectSize } from './types';
 
@@ -79,12 +80,10 @@ export function measureDragStart(
         // Get animated scale from the bounds vs base text size
         const ctx = canvas.getContext('2d');
         if (ctx) {
-          const fontStyle = clip.textData.fontStyle === 'italic' ? 'italic ' : '';
-          const fontWeight = clip.textData.fontWeight === 'bold' ? 'bold ' : '';
           // Same context the preview draws the next frame through: put the
           // font back where it was once the measurement is taken.
           ctx.save();
-          ctx.font = `${fontStyle}${fontWeight}${clip.textData.fontSize}px ${clip.textData.fontFamily}`;
+          ctx.font = textFontString(clip.textData);
           const metrics = ctx.measureText(clip.textData.text);
           ctx.restore();
           const baseWidth = metrics.width * baseScale;

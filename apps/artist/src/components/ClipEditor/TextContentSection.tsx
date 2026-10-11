@@ -1,6 +1,7 @@
 import { useId } from 'react';
 import type { TextAlign, TextOverlayData } from '../../store/types';
 import { hasVisibleFill } from '../../core/canvasRenderer';
+import { FONT_OPTIONS } from '../../core/fontStacks';
 import { withBackgroundAlpha } from './clipColorValues';
 import { CollapsibleSection } from './CollapsibleSection';
 import type { BurstGestureHandlers } from './useBurstGesture';
@@ -106,13 +107,11 @@ export function TextContentSection({ textData, onChange, burstGesture, disabled 
           value={textData.fontFamily}
           onChange={(e) => onChange({ fontFamily: e.target.value })}
         >
-          <option value="Arial">Arial</option>
-          <option value="Helvetica">Helvetica</option>
-          <option value="Times New Roman">Times</option>
-          <option value="Georgia">Georgia</option>
-          <option value="Verdana">Verdana</option>
-          <option value="Courier New">Courier</option>
-          <option value="Impact">Impact</option>
+          {FONT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
         <input
           type="number"
