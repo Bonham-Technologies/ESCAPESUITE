@@ -274,6 +274,19 @@ describe('exportToMP4 muxing', () => {
 
     await expect(run()).rejects.toThrow('Export failed: no data was written to buffer')
   })
+
+  // ESCSUITE-238: the headless manifest derives the encoded duration from this
+  // count, so it has to be the number of frames the encoder was actually handed
+  // — whole frames at 30 fps, which for a 0.75 s timeline is 23, not 22.5.
+  it.each([
+    [CLIP_DURATION, 6],
+    [0.75, 23],
+  ])('reports the frames it encoded for %s s of timeline (%s)', async (seconds, expected) => {
+    const result = await run({ clips: [makeClip({ duration: seconds, endTime: seconds })] })
+
+    expect(result.framesEncoded).toBe(expected)
+    expect(result.framesEncoded).toBe(webcodecs.videoEncoders[0].encodes.length)
+  })
 })
 
 describe('exportToMP4 codec selection', () => {
