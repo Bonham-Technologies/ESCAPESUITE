@@ -68,7 +68,7 @@ describe('PreviewPlayer overlay drawing', () => {
     const [first, second] = preview.frame().of('fillText')
     expect(first.args).toEqual(['Hello', 960, 510])
     expect(second.args).toEqual(['World', 960, 570])
-    expect(first.state.font).toBe('50px Arial')
+    expect(first.state.font).toBe('50px Arial, Helvetica, sans-serif')
     expect(first.state.fillStyle).toBe('#ff0000')
     expect(first.state.textAlign).toBe('center')
   })
@@ -78,7 +78,7 @@ describe('PreviewPlayer overlay drawing', () => {
 
     const preview = await renderPreview()
 
-    expect(preview.frame().of('fillText')[0].state.font).toBe('italic bold 20px Arial')
+    expect(preview.frame().of('fillText')[0].state.font).toBe('italic bold 20px Arial, Helvetica, sans-serif')
   })
 
   it('paints the text background box behind the lines when one is set', async () => {

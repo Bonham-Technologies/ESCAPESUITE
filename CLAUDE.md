@@ -3869,6 +3869,33 @@ the perf scene's 50 px/s — every other `*.perf.test.ts` and the rerender pins 
 new props are a stable ref and a memoised callback, so it re-renders no more often per pointer frame. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-253 (a text overlay's canvas font string names a
+fallback family — `core/fontStacks.ts` is the one table, `Arial, Helvetica, sans-serif` and the rest, with the
+inspector's options derived from its keys so stored `fontFamily` values are unchanged — and the preview, both
+exporters, the headless bundle, the selection measurements and the inline editor all read the same builder,
+so a machine without the chosen font renders the nearest equivalent instead of an unrelated one; the
+reference container installs `fonts-liberation`, `fonts-dejavu-core` and `fonts-croscore`, verified here with
+`fc-list` on the built image): 99.83 / **99.38** / **96.44** / 99.75 against the 99.83 / 99.37 / 96.41 / 99.75
+that `main` measures in the same sitting (`cb202b8c`; the commit this branch lands on, `51e62bac`, differs in
+docs and plan alone, so the artist source is identical) — statements up a hundredth, branches up three, lines
+and functions unmoved, and with *two fewer* uncovered arms: the base gives 5,594 / 5,802 branches and this
+branch 5,594 / 5,800. The denominator shrank by two and the uncovered column by two (208 → 206) because the
+three readers' inline font-string fallbacks — `components/Preview/dragGeometry.ts` 69 / 84 → 67 / 80,
+`previewGeometry.ts` 136 / 141 → 132 / 137 and `core/canvasRenderer.ts` 203 / 211 → 199 / 207, each a
+`fontFamily || …` default nothing had reached from its empty side — became one call into
+`core/fontStacks.ts`, which arrives at 10 / 10, 13 / 13 and 3 / 3 (the known-family lookup, the unknown family
+→ `<family>, sans-serif`, the blank family → `sans-serif`, the quoting of a name with spaces), each reached
+from both sides by the builder's thirteen cases. Lines 8,653 / 8,667 → 8,659 / 8,673, statements
+9,776 / 9,837 → 9,784 / 9,845 and functions 2,061 / 2,066 → 2,065 / 2,070 grew by exactly what their
+numerators did (the same 14 / 61 / 5 uncovered). The seven red cases — each reader's font string lacking its
+stack — were red before the fix. The review (sonnet) found the kit's Chromium parity case proved nothing
+about the stack (a bare family the image lacks falls to Chromium's default proportional font, not monospace);
+its oracle is now width(family) = width(its generic) for Impact, Verdana and Georgia and width(Arial) =
+width(Liberation Sans), Linux-only by `skipIf` because macOS carries those families natively — it failed
+here on the first oracle for exactly that reason and skips on the second; CI's `e2e` job runs it on ubuntu.
+`drawFrame.perf.test.ts`, both export ceilings and the rerender pins are byte-identical: one object read per
+text draw. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3876,7 +3903,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.83 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.38 | 96.43 | 99.75 |
+| `@escapesuite/artist` | 99.83 | 99.38 | 96.44 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

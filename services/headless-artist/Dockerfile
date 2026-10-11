@@ -36,8 +36,14 @@
 FROM mcr.microsoft.com/playwright:v1.63.0-noble
 
 # The base image ships no init. Installed as root, before USER drops privileges.
+#
+# The fonts are what a text overlay's Arial, Helvetica, Times New Roman and Courier New render
+# through here: Liberation (and Chrome OS's Arimo/Tinos/Cousine) are metric-compatible with
+# them, and DejaVu stands in for Verdana. Without them Georgia, Verdana and Impact fell back to a
+# CJK face (ESCSUITE-253). Georgia and Impact have no metric clone and render through the serif
+# and sans-serif stacks the editor names for them. No web fonts are bundled.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tini \
+    && apt-get install -y --no-install-recommends tini fonts-liberation fonts-dejavu-core fonts-croscore \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -85,6 +85,15 @@ describe('measureDragStart', () => {
     expect(ctx.font).toBe('12px Courier')
   })
 
+  it('measures the drag start through the family’s fallback stack', () => {
+    const canvas = makeCanvas()
+
+    measureDragStart(textClip({ fontSize: 40, fontFamily: 'Verdana' }), 'text', canvas, 0, true, [])
+
+    const fonts = getCanvasContext(canvas)!.stateFor('measureText').map((call) => call.font)
+    expect(fonts).toContain('40px Verdana, Geneva, sans-serif')
+  })
+
   it('falls back to the text’s own scale when the canvas has no 2D context', () => {
     // getOverlayBounds needs the context to measure with; the scale the drag
     // starts from is worked out from a second measurement, and a context that

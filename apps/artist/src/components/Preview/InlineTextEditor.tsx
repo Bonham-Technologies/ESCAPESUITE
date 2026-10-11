@@ -1,4 +1,5 @@
 import { useRef, useEffect, useCallback, useState } from 'react';
+import { fontStackFor } from '../../core/fontStacks';
 import styles from './InlineTextEditor.module.css';
 
 export interface InlineTextEditorProps {
@@ -109,7 +110,7 @@ export function InlineTextEditor({
       style={{
         left: `${x - padding}px`,
         top: `${y - padding}px`,
-        fontFamily,
+        fontFamily: fontStackFor(fontFamily),
         fontSize: `${fontSize}px`,
         fontWeight,
         fontStyle,

@@ -227,7 +227,7 @@ describe('getOverlayBounds for text overlays', () => {
     )
 
     expect(getCanvasContext(canvas)?.stateFor('measureText')[0].font).toBe(
-      'italic bold 40px Georgia'
+      "italic bold 40px Georgia, 'Times New Roman', serif"
     )
   })
 

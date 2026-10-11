@@ -1569,6 +1569,17 @@ out on its result — the hit test wants `1 / scale`, and asking for it separate
 second `getBoundingClientRect` per pointer move for a number that call had already computed.
 It is derived at draw time and held in no state.
 
+**A text overlay's canvas font names a generic fallback family** (ESCSUITE-253).
+`core/fontStacks.ts` is the single source of the inspector's family list (`FONT_OPTIONS`, whose
+`value` is what `textData.fontFamily` stores, so saved projects are unchanged) and of the
+`FONT_STACKS` table mapping each to a CSS list (`Georgia, 'Times New Roman', serif`, `Impact,
+'Arial Black', sans-serif`, ...). `textFontString(textData)` builds the canvas `font` string for
+`canvasRenderer.ts` (the preview and both exporters), `previewGeometry.ts` and `dragGeometry.ts`
+(the measurements), and `InlineTextEditor` takes `fontStackFor(family)` for CSS, so all readers agree
+and a machine without the font lands on the nearest generic. An unknown family (a hand-edited
+project) becomes `<family>, sans-serif`, quoted when it has a space. The kit image installs
+metric-compatible fonts for the same reason; see its README.
+
 **A left/right-aligned text overlay's box is rotated about the text's anchor, not its own
 centre** (ESCSUITE-128). `core/canvasRenderer.ts` draws a text overlay by translating to its
 anchor — `textData.x`/`.y`, the point `fillText` is issued at — rotating, then translating
