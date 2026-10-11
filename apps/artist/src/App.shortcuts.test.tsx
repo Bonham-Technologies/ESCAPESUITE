@@ -178,6 +178,22 @@ describe('App keyboard shortcuts', () => {
       expect(notification()).toBe('2 clips deleted')
     })
 
+    it.each(['Delete', 'Backspace'])(
+      'leaves the selected clip alone when %s is aimed at a focused marker flag',
+      async (key) => {
+        addClip('clip1', 0, 2)
+        store().setSelectedClipId('clip1')
+        store().addMarker(1, 'Cut here')
+        await renderApp()
+
+        fireEvent.keyDown(screen.getByRole('button', { name: /^Marker Cut here/ }), { key })
+
+        expect(store().markers).toHaveLength(0)
+        expect(store().project.timeline.clips).toHaveLength(1)
+        expect(notification()).toBeUndefined()
+      }
+    )
+
     it('does nothing with no clip selected', async () => {
       addClip('clip1', 0, 2)
       store().setSelectedClipId(null)

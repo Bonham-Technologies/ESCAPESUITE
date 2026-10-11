@@ -52,6 +52,19 @@ describe('rulerIntervals', () => {
     }
   })
 
+  it('never labels more coarsely as the zoom grows (x1.25 steps, 10 to 500 px/s)', () => {
+    let previous = Infinity
+    for (let pps = 10; pps <= 500; pps *= 1.25) {
+      const { label } = rulerIntervals(pps)
+      expect(label).toBeLessThanOrEqual(previous)
+      previous = label
+    }
+    // The two transitions the earlier whole-multiple rule got wrong.
+    expect(rulerIntervals(25.6).label).toBe(5)
+    expect(rulerIntervals(500).label).toBe(0.25)
+    expect(rulerIntervals(465.7).label).toBe(0.25)
+  })
+
   it('picks the smallest ladder step that is at least 50px wide for the minor tick', () => {
     expect(rulerIntervals(50).minor).toBe(1)
     expect(rulerIntervals(49).minor).toBe(2)
@@ -60,12 +73,12 @@ describe('rulerIntervals', () => {
     expect(rulerIntervals(100000).minor).toBe(0.1)
   })
 
-  it('labels the smallest step at least 80px wide that lands on a tick', () => {
+  it('labels the smallest step at least 80px wide, ticking at a step that divides it', () => {
     expect(labelEvery(10)).toBe(10)
     expect(labelEvery(100)).toBe(1)
     expect(labelEvery(1000)).toBe(0.1)
-    // 30 px/s: ticks every 2 s; 5 s (150px) is not a tick, so 10 s labels.
-    expect(rulerIntervals(30)).toEqual({ minor: 2, label: 10 })
+    // 30 px/s: 5 s is the first step 80px wide, and it is its own tick.
+    expect(rulerIntervals(30)).toEqual({ minor: 5, label: 5 })
   })
 
   it('falls back to the last ladder step when nothing is wide enough', () => {
