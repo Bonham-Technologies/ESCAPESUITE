@@ -1,5 +1,16 @@
 # @escapesuite/headless-artist
 
+## 0.4.11
+
+### Patch Changes
+
+- 3208a3f: A render refused because its output size is too small for H.264 exits 2 (400 under serve) as a permanent input error instead of exit 1.
+  
+  An MP4 job whose output size the H.264 encoder refuses — 64×8, say, or one too large for it — will be refused every time it is run, but it used to exit 1, the code that tells a broker to retry. It now exits 2 from `render` and answers 400 from `serve`, the same as an invalid job spec, and the outcome carries `"code": "OUTPUT_SIZE_UNSUPPORTED"` beside the reason, so it can go straight to a dead-letter queue. Every other failed render is unchanged.
+- 3208a3f: The verification manifest's durationSec matches the delivered file to the frame for every format.
+  
+  For MP4 and WebM the manifest used to report the requested time range — 0.75 s, say — while the file held 23 whole frames at 30 fps, 0.766667 s, so a consumer comparing `durationSec` to the file within a millisecond rejected a valid render. It now reports the frames encoded times the frame period, as it already did for GIF, and the README says a consumer may compare it to the file's video stream within one millisecond (a container with sound runs a few milliseconds longer, because the last audio frame is padded past the last video frame).
+
 ## 0.4.10
 
 ### Patch Changes
