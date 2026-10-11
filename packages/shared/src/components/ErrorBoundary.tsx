@@ -12,9 +12,9 @@
 // leaves anything more specific (what was lost, what to do instead) to each
 // app's own `onError`, which runs first and is the hook a host app uses to
 // let a half-finished piece of state go cleanly instead of leaving it
-// dangling. ESCAPECRAFT's disposes a live recorder; ESCAPEARTIST's is a
-// deliberate no-op — see `apps/craft/src/main.tsx` and
-// `apps/artist/src/main.tsx`.
+// dangling. ESCAPECRAFT's disposes a live recorder; ESCAPEARTIST's cancels
+// a live export through `disposeLiveExport()` (ESCSUITE-220) — see
+// `apps/craft/src/main.tsx` and `apps/artist/src/main.tsx`.
 //
 // Like every React error boundary, this only catches a **render-time**
 // throw — in `render()`, a constructor, or a lifecycle method, on some

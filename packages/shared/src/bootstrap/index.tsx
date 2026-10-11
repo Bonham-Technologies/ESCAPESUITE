@@ -15,7 +15,8 @@ export interface BootstrapConfig {
    * Passed straight through to the shared `ErrorBoundary` wrapped around
    * `App` (ESCSUITE-212) — the one place a host app reaches for anything a
    * render-time throw would otherwise leave dangling (ESCAPECRAFT disposes a
-   * live recorder; ESCAPEARTIST's is a documented no-op). See
+   * live recorder; ESCAPEARTIST's cancels a live export through
+   * `disposeLiveExport()`, ESCSUITE-220). See
    * `../components/ErrorBoundary`.
    */
   onError?: (error: Error, info: ErrorInfo) => void
