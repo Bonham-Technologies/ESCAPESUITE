@@ -5,9 +5,10 @@
 // doubled here the same way the App suite doubles it, and everything else is
 // this component's own rendering.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { AppHeader } from './AppHeader'
+import { useRecorderStore } from '../../store/recorderStore'
 import type { RecordingState } from '../../store/types'
 import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
 import styles from '../../App.module.css'
@@ -25,6 +26,7 @@ vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
 let openSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
+  useRecorderStore.setState({ countdownValue: 0 })
   isStandaloneMode.mockReturnValue(false)
   isFileOrigin.mockReturnValue(false)
   openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
@@ -91,14 +93,58 @@ describe('AppHeader status region', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Saving...')
   })
 
-  it.each(['preparing', 'countdown'] as RecordingState[])(
-    'says nothing while %s',
-    (state) => {
-      renderHeader(state)
+  it('says nothing while preparing', () => {
+    renderHeader('preparing')
 
-      expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    }
-  )
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it('says nothing during a countdown that has no number to show yet', () => {
+    useRecorderStore.setState({ countdownValue: 0 })
+    renderHeader('countdown')
+
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
+
+  it.each([3, 2, 1])('announces "Recording starts in %i" at that tick (ESCSUITE-231)', (n) => {
+    useRecorderStore.setState({ countdownValue: n })
+    renderHeader('countdown')
+
+    expect(screen.getByRole('status')).toHaveTextContent(`Recording starts in ${n}`)
+  })
+
+  it('re-announces each tick through the one status span', () => {
+    useRecorderStore.setState({ countdownValue: 3 })
+    renderHeader('countdown')
+
+    act(() => {
+      useRecorderStore.getState().setCountdown(2)
+    })
+
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.getByRole('status')).toHaveTextContent('Recording starts in 2')
+  })
+
+  it('does not announce a stale number outside the countdown', () => {
+    useRecorderStore.setState({ countdownValue: 3 })
+    renderHeader('recording')
+
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.getByRole('status')).toHaveTextContent(/^Recording$/)
+  })
+
+  it('hands over from the countdown phrase to the recording phrase without a second status span', () => {
+    useRecorderStore.setState({ countdownValue: 1 })
+    const onOpenHelp = vi.fn()
+    const { rerender } = render(<AppHeader state="countdown" notice={null} onOpenHelp={onOpenHelp} />)
+    expect(screen.getByRole('status')).toHaveTextContent('Recording starts in 1')
+
+    useRecorderStore.setState({ countdownValue: 0 })
+    rerender(<AppHeader state="recording" notice={null} onOpenHelp={onOpenHelp} />)
+
+    expect(screen.getAllByRole('status')).toHaveLength(1)
+    expect(screen.getByRole('status')).toHaveTextContent(/^Recording$/)
+  })
 })
 
 describe('AppHeader notices', () => {
