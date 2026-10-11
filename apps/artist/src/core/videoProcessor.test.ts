@@ -633,6 +633,24 @@ describe('videoProcessor', () => {
       expect(media.videos).toHaveLength(0)
     })
 
+    it('fails with the metadata-deadline sentence when the element never reports (ESCSUITE-249)', async () => {
+      vi.useFakeTimers()
+      try {
+        media.script({ video: { silent: true } })
+        const pending = resolveStoredDuration(new Blob(['webm'], { type: 'video/webm' }), stored(0))
+        const rejection = expect(pending).rejects.toThrow(
+          'Could not read Recording.webm \u2014 the browser did not report its metadata within 15 s'
+        )
+
+        await vi.advanceTimersByTimeAsync(15_000)
+
+        await rejection
+        expect(vi.getTimerCount()).toBe(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
     it('recovers the length of a recording stored with no usable duration', async () => {
       media.script({ video: { duration: Infinity, durationAfterSeek: 9 } })
       const blob = new Blob(['webm'], { type: 'video/webm' })

@@ -25,7 +25,7 @@ const DURATION_PROBE_TIMEOUT_MS = 5000;
  * shows an error and can be dismissed. Generous, because a multi-gigabyte file
  * on a slow disk legitimately takes a while to reach its header.
  */
-export const METADATA_LOAD_TIMEOUT_MS = 15_000
+export const METADATA_LOAD_TIMEOUT_MS = 15_000;
 
 /** A duration we can build a clip from: a real, positive number of seconds. */
 function isUsableDuration(value: number): boolean {
