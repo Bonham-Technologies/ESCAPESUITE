@@ -2,11 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react'
 import { renderApp } from './test/renderApp'
 import { useEditorStore } from './store/projectStore'
-import { getSessionState, clearSessionState, saveSessionState } from './core/storage'
+import { listSessionStates, clearSessionState, saveSessionState } from './core/storage'
 import { parseUrlParams, initIntegration, sendMessage } from './utils/integration'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
-import { sampleVideo } from './test/appDoubles'
+import { sampleVideo, slotOf } from './test/appDoubles'
 import type { SessionState } from './core/storage'
 
 // App's collaborators are replaced with the recording doubles shared by every
@@ -252,6 +252,7 @@ describe('App', () => {
 
   describe('host URL parameters', () => {
     const savedSession = (): SessionState => ({
+      tabId: 'earlier-tab',
       project: { ...useEditorStore.getState().project, name: 'Saved Project' },
       sourceVideos: [{
         id: 'video1',
@@ -284,12 +285,12 @@ describe('App', () => {
 
     afterEach(() => {
       urlParams()
-      vi.mocked(getSessionState).mockResolvedValue(undefined)
+      vi.mocked(listSessionStates).mockResolvedValue([])
     })
 
     it('shows the restore prompt for a saved session by default', async () => {
       urlParams()
-      vi.mocked(getSessionState).mockResolvedValue(savedSession())
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
 
       await renderApp()
 
@@ -298,7 +299,7 @@ describe('App', () => {
 
     it('skips the restore prompt when suppressRestore is set, keeping the saved session', async () => {
       urlParams({ suppressRestore: true })
-      vi.mocked(getSessionState).mockResolvedValue(savedSession())
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
 
       await renderApp()
 

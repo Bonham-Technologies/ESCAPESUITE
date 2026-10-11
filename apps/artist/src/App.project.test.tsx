@@ -7,10 +7,10 @@ import { store, resetStoreForTest } from './test/fixtures/projectStore'
 import { renderApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
-import { sampleVideo } from './test/appDoubles'
+import { sampleVideo, slotOf } from './test/appDoubles'
 import { addClip } from './test/fixtures/projectStore'
 import { loadProject, saveProject, showOpenProjectDialog } from './core/projectManager'
-import { clearSessionState, getSessionState, type SessionState } from './core/storage'
+import { clearSessionState, listSessionStates, type SessionState } from './core/storage'
 import styles from './App.module.css'
 
 vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
@@ -36,12 +36,14 @@ const openFileMenu = (user: ReturnType<typeof userEvent.setup>) =>
 const notification = () => screen.queryByRole('status')?.textContent
 
 const savedSession = (): SessionState => ({
+  tabId: 'earlier-tab',
   project: { ...store().project, name: 'Saved Project' },
   sourceVideos: [{ ...sampleVideo }],
   currentTime: 4,
   selectedClipId: null,
   zoom: 2,
-  timestamp: Date.parse('2026-01-02T03:04:05Z'),
+  // Recent: a slot older than SESSION_SLOT_MAX_AGE_MS is pruned, not offered.
+  timestamp: Date.now() - 60_000,
 })
 
 describe('App project lifecycle', () => {
@@ -371,7 +373,7 @@ describe('App project lifecycle', () => {
   describe('the session restore prompt', () => {
     it('restores the saved session', async () => {
       const user = userEvent.setup()
-      vi.mocked(getSessionState).mockResolvedValueOnce(savedSession())
+      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
       await renderApp()
 
       expect(await screen.findByText('Resume Previous Session?')).toBeInTheDocument()
@@ -392,7 +394,7 @@ describe('App project lifecycle', () => {
       // names that same id — exactly what an autosave of the current session looks like on
       // the next visit.
       expect(store().sourceVideos.map((v) => v.id)).toEqual([sampleVideo.id])
-      vi.mocked(getSessionState).mockResolvedValueOnce(savedSession())
+      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
       await renderApp()
 
       await user.click(await screen.findByRole('button', { name: 'Restore Session' }))
@@ -410,7 +412,7 @@ describe('App project lifecycle', () => {
     })
 
     it('describes what is on offer', async () => {
-      vi.mocked(getSessionState).mockResolvedValueOnce(savedSession())
+      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
       await renderApp()
 
       expect(await screen.findByText('Saved Project')).toBeInTheDocument()
@@ -419,7 +421,7 @@ describe('App project lifecycle', () => {
 
     it('throws the session away when the user starts fresh', async () => {
       const user = userEvent.setup()
-      vi.mocked(getSessionState).mockResolvedValueOnce(savedSession())
+      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf(savedSession())])
       await renderApp()
 
       await user.click(await screen.findByRole('button', { name: 'Start Fresh' }))
@@ -430,7 +432,7 @@ describe('App project lifecycle', () => {
     })
 
     it('offers nothing for a session with no media in it', async () => {
-      vi.mocked(getSessionState).mockResolvedValueOnce({ ...savedSession(), sourceVideos: [] })
+      vi.mocked(listSessionStates).mockResolvedValueOnce([slotOf({ ...savedSession(), sourceVideos: [] })])
       await renderApp()
 
       expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
@@ -438,7 +440,7 @@ describe('App project lifecycle', () => {
 
     it('carries on when the session lookup fails', async () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.mocked(getSessionState).mockRejectedValueOnce(new Error('db closed'))
+      vi.mocked(listSessionStates).mockRejectedValueOnce(new Error('db closed'))
       await renderApp()
 
       expect(consoleError).toHaveBeenCalledWith('Failed to check session:', expect.any(Error))

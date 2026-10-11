@@ -3,7 +3,7 @@
 // `app/useHostIntegration.test.ts` pins the hook's own half — a take waits
 // while `sessionDecisionPending` is true and is placed when it goes false.
 // What only the whole app can show is *what App fills that flag from*, and the
-// window that makes it matter: on a cold load `getSessionState()` has not come
+// window that makes it matter: on a cold load `listSessionStates()` has not come
 // back yet, so `showSessionPrompt` is still `false` while the question is very
 // much unanswered. A take placed in that window is replaced moments later by
 // the "Restore" the user has not been offered yet, with no undo step back to
@@ -20,9 +20,9 @@ import { store, resetStoreForTest } from './test/fixtures/projectStore'
 import { renderApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
 import { installMediaPlaybackStubs } from './test/doubles/media'
-import { defaultUrlParams, sampleVideo } from './test/appDoubles'
+import { defaultUrlParams, sampleVideo, slotOf } from './test/appDoubles'
 import { parseUrlParams } from './utils/integration'
-import { getSessionState, getVideo } from './core/storage'
+import { getVideo, listSessionStates } from './core/storage'
 import type { SessionState } from './core/storage'
 
 vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
@@ -42,12 +42,14 @@ const HANDED_OVER = { ...sampleVideo, id: 'rec-1', name: 'Recording.webm' }
 let answerSessionRead: (session: SessionState | undefined) => void
 
 const savedSession = (): SessionState => ({
+  tabId: 'earlier-tab',
   project: { ...store().project, name: 'From Storage' },
   sourceVideos: [{ ...sampleVideo }],
   currentTime: 0,
   selectedClipId: null,
   zoom: 1,
-  timestamp: Date.parse('2026-01-02T03:04:05Z'),
+  // Recent: a slot older than SESSION_SLOT_MAX_AGE_MS is pruned, not offered.
+  timestamp: Date.now() - 60_000,
 })
 
 /**
@@ -71,10 +73,11 @@ beforeEach(() => {
   installCanvasDouble()
   vi.mocked(parseUrlParams).mockReturnValue({ ...defaultUrlParams(), loadVideoId: 'rec-1' })
   vi.mocked(getVideo).mockResolvedValue({ metadata: HANDED_OVER } as never)
-  vi.mocked(getSessionState).mockImplementation(
+  vi.mocked(listSessionStates).mockImplementation(
     () =>
       new Promise((resolve) => {
-        answerSessionRead = resolve
+        // One slot per tab (ESCSUITE-274): the read answers a list of them.
+        answerSessionRead = (session) => resolve(session ? [slotOf(session)] : [])
       })
   )
 })

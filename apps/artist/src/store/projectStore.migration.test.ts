@@ -4,7 +4,7 @@ import { parseProject, repairEditorBlock } from './projectMigration'
 import { DEFAULT_ANIMATION } from './types'
 import type { Project } from './types'
 import { buildMaskedSceneProject } from '../test/fixtures/perfScene'
-import { getSessionState, saveSessionState, type SessionState } from '../core/storage'
+import { listSessionStates, saveSessionState, type SessionState } from '../core/storage'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 
 /** A project as an older ARTIST version saved it: overlays in the two legacy arrays. */
@@ -171,6 +171,7 @@ describe('projectStore remaining behaviours', () => {
       // buildSessionSnapshot persists state.project whole, so a session autosaved
       // before this change still holds the legacy arrays; it heals on restore.
       const session: SessionState = {
+        tabId: 'tab-1',
         project: projectWithLegacyOverlays(),
         sourceVideos: [],
         currentTime: 0,
@@ -180,9 +181,9 @@ describe('projectStore remaining behaviours', () => {
       }
 
       return saveSessionState(session)
-        .then(getSessionState)
-        .then((restored) => {
-          store().setProject(restored!.project)
+        .then(listSessionStates)
+        .then(([restored]) => {
+          store().setProject(restored.session.project)
 
           const timeline = store().project.timeline
           expect(timeline.clips.map((c) => c.overlayType)).toEqual(['shape', 'text'])

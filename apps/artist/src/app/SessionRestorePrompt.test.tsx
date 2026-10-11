@@ -38,6 +38,7 @@ function sessionWith(videoCount: number, clipCount: number, timestamp = 1_700_00
   } as unknown as Project;
 
   return {
+    tabId: 'tab-1',
     project,
     sourceVideos: Array.from({ length: videoCount }, (_, i) => video(`video${i}`)),
     currentTime: 0,
@@ -182,7 +183,7 @@ describe('SessionRestorePrompt', () => {
     it('swallows Escape rather than declining: the saved session survives it', () => {
       // The ruling, and the reason the prompt passes a no-op close where the
       // other two dialogs pass their cancel: `handleDeclineSession`
-      // (app/useSessionRestore.ts) calls `clearSessionState()`. Declining is
+      // (app/useSessionRestore.ts) calls `clearSessionState()` on the offered slot. Declining is
       // destructive, so Escape — a key people press to dismiss things — must
       // not reach it. Escape keeps the prompt up and focus inside it; the only
       // two ways out are the two buttons.

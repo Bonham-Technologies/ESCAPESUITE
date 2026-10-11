@@ -10,28 +10,43 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
-import { useSessionRestore, SESSION_HELD_NOTICE, type SessionRestoreDeps } from './useSessionRestore'
-import { probeSessionOwner } from './sessionLock'
-import { clearSessionState, getSessionState, getThumbnail, revokeSourceThumbnails, type SessionState } from '../core/storage'
+import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
+import { holdTabLock } from './sessionLock'
+import { TAB_ID_KEY } from './tabId'
+import {
+  clearSessionState,
+  getThumbnail,
+  listSessionStates,
+  revokeSourceThumbnails,
+  saveSessionState,
+  type SessionSlot,
+  type SessionState,
+} from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
-import { sampleVideo } from '../test/appDoubles'
+import { sampleVideo, slotOf } from '../test/appDoubles'
 import { lastObjectUrl } from '../test/objectUrls'
+import { createFakeLocks, flushLocks, type FakeLocks } from '../test/doubles/locks'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
-// The owner probe (ESCSUITE-227) answers 'free' unless a case says otherwise:
-// a lone tab, which is what every case before that ticket assumed.
-vi.mock('./sessionLock', () => ({ probeSessionOwner: vi.fn() }))
+// The tab locks (ESCSUITE-274) are the real module: jsdom has no Web Locks, so
+// unless a case installs the double every other tab counts as gone — a lone
+// tab, which is what every case before ESCSUITE-227 assumed.
+
+/** This tab's id, seeded the way a tab that has run before has one. */
+const THIS_TAB = 'this-tab'
 
 let deps: SessionRestoreDeps
 
 const savedSession = (overrides: Partial<SessionState> = {}): SessionState => ({
+  tabId: 'earlier-tab',
   project: { ...useEditorStore.getState().project, name: 'From Storage' },
   sourceVideos: [{ ...sampleVideo }],
   currentTime: 7,
   selectedClipId: 'clip-1',
   zoom: 2,
-  timestamp: Date.parse('2026-01-02T03:04:05Z'),
+  // Recent: a slot older than SESSION_SLOT_MAX_AGE_MS is pruned, not offered.
+  timestamp: Date.now() - 60_000,
   ...overrides,
 })
 
@@ -46,9 +61,10 @@ beforeEach(() => {
   // the same (mocked) revokeSourceThumbnails this file asserts on — clear
   // that setup call so a test's own assertion only sees what it did itself.
   vi.mocked(revokeSourceThumbnails).mockClear()
-  vi.mocked(getSessionState).mockResolvedValue(undefined)
+  vi.mocked(listSessionStates).mockResolvedValue([])
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
-  vi.mocked(probeSessionOwner).mockResolvedValue('free')
+  sessionStorage.clear()
+  sessionStorage.setItem(TAB_ID_KEY, THIS_TAB)
   deps = {
     suppressRestore: false,
     setProject: vi.fn(),
@@ -64,6 +80,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks()
   vi.restoreAllMocks()
+  sessionStorage.clear()
 })
 
 describe('the startup session check', () => {
@@ -71,7 +88,7 @@ describe('the startup session check', () => {
     const { result } = mountRestore({ suppressRestore: true })
 
     await waitFor(() => expect(result.current.sessionRestored).toBe(true))
-    expect(getSessionState).not.toHaveBeenCalled()
+    expect(listSessionStates).not.toHaveBeenCalled()
     expect(result.current.showSessionPrompt).toBe(false)
   })
 
@@ -81,8 +98,8 @@ describe('the startup session check', () => {
     // `useHostIntegration` precisely for this window: `showSessionPrompt` is
     // still false here, and a handed-over take placed now would be replaced by
     // the Restore the user has not even been offered yet.
-    let answer: (session: SessionState | undefined) => void = () => {}
-    vi.mocked(getSessionState).mockImplementation(
+    let answer: (slots: SessionSlot[]) => void = () => {}
+    vi.mocked(listSessionStates).mockImplementation(
       () => new Promise((resolve) => { answer = resolve })
     )
 
@@ -91,13 +108,13 @@ describe('the startup session check', () => {
     expect(result.current.sessionRestored).toBe(false)
     expect(result.current.showSessionPrompt).toBe(false)
 
-    // The read starts once the owner probe (ESCSUITE-227) has answered; the
-    // question is still open while it is out.
-    await waitFor(() => expect(getSessionState).toHaveBeenCalledTimes(1))
+    // The read starts once this tab's own lock probe (ESCSUITE-274) has
+    // answered; the question is still open while it is out.
+    await waitFor(() => expect(listSessionStates).toHaveBeenCalledTimes(1))
     expect(result.current.sessionRestored).toBe(false)
 
     await act(async () => {
-      answer(undefined)
+      answer([])
       await Promise.resolve()
     })
 
@@ -106,7 +123,7 @@ describe('the startup session check', () => {
 
   it('offers a session that has media in it', async () => {
     const session = savedSession()
-    vi.mocked(getSessionState).mockResolvedValue(session)
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
 
     const { result } = mountRestore()
 
@@ -117,7 +134,7 @@ describe('the startup session check', () => {
   })
 
   it('does not offer a session with no media in it', async () => {
-    vi.mocked(getSessionState).mockResolvedValue(savedSession({ sourceVideos: [] }))
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ sourceVideos: [] }))])
 
     const { result } = mountRestore()
 
@@ -135,7 +152,7 @@ describe('the startup session check', () => {
 
   it('settles the question when the lookup fails, and says why', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    vi.mocked(getSessionState).mockRejectedValue(new Error('no database'))
+    vi.mocked(listSessionStates).mockRejectedValue(new Error('no database'))
 
     const { result } = mountRestore()
 
@@ -149,103 +166,211 @@ describe('the startup session check', () => {
 
     rerender()
 
-    expect(getSessionState).toHaveBeenCalledTimes(1)
+    expect(listSessionStates).toHaveBeenCalledTimes(1)
   })
 
   it('only looks once under StrictMode, which runs the effect twice', async () => {
-    // A second probe would find the first one's momentary hold on the lock
-    // and call this tab's own startup "another tab" (ESCSUITE-227).
-    const { result } = renderHook(() => useSessionRestore(deps), { wrapper: StrictMode })
+    // A second probe of this tab's own lock would find the first one's
+    // momentary hold and call this tab a duplicate of itself (ESCSUITE-227,
+    // ESCSUITE-274).
+    const fake = createFakeLocks()
+    Object.defineProperty(navigator, 'locks', { value: fake.locks, configurable: true })
+    try {
+      const { result } = renderHook(() => useSessionRestore(deps), { wrapper: StrictMode })
 
-    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
-    expect(probeSessionOwner).toHaveBeenCalledTimes(1)
-    expect(getSessionState).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+      expect(fake.log).toEqual(['probe'])
+      expect(listSessionStates).toHaveBeenCalledTimes(1)
+      expect(result.current.tabId).toBe(THIS_TAB)
+    } finally {
+      delete (navigator as { locks?: LockManager }).locks
+    }
   })
 })
 
-// ESCSUITE-227: two tabs share one session slot, so a tab that finds another
-// live tab owning it must neither offer that tab's session as one to resume
-// nor throw it away.
-describe('another tab owns the session', () => {
-  it('asks who owns the session as the effect runs, before any storage read', async () => {
-    // Synchronously, so the probe is queued ahead of this tab's own
-    // ownership request — the autosave's, an effect later.
-    let answer: (owner: 'free' | 'held') => void = () => {}
-    vi.mocked(probeSessionOwner).mockImplementation(
-      () => new Promise((resolve) => { answer = resolve })
-    )
+// ESCSUITE-274: every tab keeps its own slot and holds `escapeartist-tab:<id>`
+// for its lifetime. The prompt offers the newest slot whose tab is gone — a tab
+// that closed or crashed — and never one whose tab is still alive.
+describe('one slot per tab (ESCSUITE-274)', () => {
+  let fake: FakeLocks
 
-    mountRestore()
-
-    expect(probeSessionOwner).toHaveBeenCalledTimes(1)
-    expect(getSessionState).not.toHaveBeenCalled()
-    await act(async () => {
-      answer('free')
-    })
-    expect(getSessionState).toHaveBeenCalledTimes(1)
+  beforeEach(() => {
+    fake = createFakeLocks()
+    Object.defineProperty(navigator, 'locks', { value: fake.locks, configurable: true })
   })
 
-  it('offers nothing, throws nothing away, and says why once', async () => {
-    vi.mocked(probeSessionOwner).mockResolvedValue('held')
-    vi.mocked(getSessionState).mockResolvedValue(savedSession())
+  afterEach(() => {
+    delete (navigator as { locks?: LockManager }).locks
+  })
 
-    const { result, rerender } = mountRestore()
+  /** Another tab, still open: it holds its own tab lock. */
+  const aliveTab = async (tabId: string) => {
+    holdTabLock(tabId, fake.locks)
+    await flushLocks()
+  }
+
+  it('keeps this tab\'s id across a reload, and offers its own slot back', async () => {
+    sessionStorage.setItem(TAB_ID_KEY, 'reloaded-tab')
+    const mine = savedSession({ tabId: 'reloaded-tab' })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(mine, 'reloaded-tab')])
+
+    const { result } = mountRestore()
+
+    expect(result.current.tabId).toBe('reloaded-tab')
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+    expect(result.current.pendingSession).toBe(mine)
+  })
+
+  it('gives a new tab an id of its own', async () => {
+    sessionStorage.clear()
+
+    const { result } = mountRestore()
 
     await waitFor(() => expect(result.current.sessionRestored).toBe(true))
-    rerender()
-    expect(result.current.showSessionPrompt).toBe(false)
-    expect(result.current.pendingSession).toBeNull()
-    expect(getSessionState).not.toHaveBeenCalled()
-    expect(clearSessionState).not.toHaveBeenCalled()
-    expect(deps.showNotification).toHaveBeenCalledTimes(1)
-    expect(deps.showNotification).toHaveBeenCalledWith(SESSION_HELD_NOTICE, 'info')
+    expect(result.current.tabId).toMatch(/^[0-9a-f-]{36}$/)
+    expect(sessionStorage.getItem(TAB_ID_KEY)).toBe(result.current.tabId)
   })
 
-  it('offers the session as before when no other tab owns it', async () => {
-    const session = savedSession()
-    vi.mocked(getSessionState).mockResolvedValue(session)
+  it('asks whether its own id is alive elsewhere as the effect runs, before any storage read', async () => {
+    // Synchronously, so the probe is queued ahead of this tab's own hold on
+    // the lock — the autosave's effect, after this one.
+    const { result } = mountRestore()
+
+    expect(fake.log).toEqual(['probe'])
+    expect(listSessionStates).not.toHaveBeenCalled()
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    expect(listSessionStates).toHaveBeenCalledTimes(1)
+  })
+
+  it('a tab opened with a live tab\'s id — a duplicated tab — takes a new id and is not offered that tab\'s session', async () => {
+    // Duplicating a tab copies its sessionStorage, id and all.
+    sessionStorage.setItem(TAB_ID_KEY, 'original')
+    await aliveTab('original')
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ tabId: 'original' }), 'original')])
+
+    const { result } = mountRestore()
+
+    await waitFor(() => expect(result.current.sessionRestored).toBe(true))
+    expect(result.current.tabId).not.toBe('original')
+    expect(sessionStorage.getItem(TAB_ID_KEY)).toBe(result.current.tabId)
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(clearSessionState).not.toHaveBeenCalled()
+  })
+
+  it('offers a closed tab\'s session while a live tab has saved a newer one', async () => {
+    const closed = savedSession({ tabId: 'tab-a', project: { ...savedSession().project, name: 'Tab A' } })
+    const live = savedSession({ tabId: 'tab-b', timestamp: Date.now() - 1_000 })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(closed, 'tab-a'), slotOf(live, 'tab-b')])
+    await aliveTab('tab-b')
 
     const { result } = mountRestore()
 
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
-    expect(probeSessionOwner).toHaveBeenCalledTimes(1)
-    expect(result.current.pendingSession).toBe(session)
+    expect(result.current.pendingSession).toBe(closed)
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 
-  it('does not probe at all when the host suppresses the question', async () => {
-    const { result } = mountRestore({ suppressRestore: true })
+  it('offers nothing and throws nothing away when the only slot belongs to a live tab', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ tabId: 'tab-b' }), 'tab-b')])
+    await aliveTab('tab-b')
+
+    const { result } = mountRestore()
 
     await waitFor(() => expect(result.current.sessionRestored).toBe(true))
-    expect(probeSessionOwner).not.toHaveBeenCalled()
+    expect(result.current.showSessionPrompt).toBe(false)
+    expect(clearSessionState).not.toHaveBeenCalled()
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 
-  it('still offers the session when the browser rejects the lock request', async () => {
+  it('restoring another tab\'s slot adopts it: rewritten under this tab\'s id, the old row deleted', async () => {
+    const crashed = savedSession({ tabId: 'crashed' })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashed, 'crashed')])
+    const { result } = mountRestore()
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+    await act(async () => {
+      await result.current.handleRestoreSession(crashed)
+    })
+
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed'))
+    expect(saveSessionState).toHaveBeenCalledWith({ ...crashed, tabId: THIS_TAB })
+  })
+
+  it('restoring this tab\'s own slot rewrites and deletes nothing', async () => {
+    const mine = savedSession({ tabId: THIS_TAB })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(mine, THIS_TAB)])
+    const { result } = mountRestore()
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+    await act(async () => {
+      await result.current.handleRestoreSession(mine)
+    })
+
+    expect(deps.showNotification).toHaveBeenCalledWith('Session restored', 'success')
+    expect(saveSessionState).not.toHaveBeenCalled()
+    expect(clearSessionState).not.toHaveBeenCalled()
+  })
+
+  it('declining deletes the slot it was offered', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ tabId: 'crashed' }), 'crashed')])
+    const { result } = mountRestore()
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+    act(() => result.current.handleDeclineSession())
+
+    expect(clearSessionState).toHaveBeenCalledTimes(1)
+    expect(clearSessionState).toHaveBeenCalledWith('crashed')
+  })
+
+  it('offers the row an older build shared between tabs, and deletes it when declined', async () => {
+    const { tabId: _tabId, ...legacy } = savedSession()
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(legacy as SessionState, null)])
+    const { result } = mountRestore()
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+    act(() => result.current.handleDeclineSession())
+
+    expect(clearSessionState).toHaveBeenCalledWith(null)
+  })
+
+  it('adopts the row an older build shared between tabs when it is restored', async () => {
+    const { tabId: _tabId, ...legacy } = savedSession()
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(legacy as SessionState, null)])
+    const { result } = mountRestore()
+    await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+    await act(async () => {
+      await result.current.handleRestoreSession(legacy as SessionState)
+    })
+
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(null))
+    expect(saveSessionState).toHaveBeenCalledWith({ ...legacy, tabId: THIS_TAB })
+  })
+
+  it('still offers a session when the browser rejects the lock requests', async () => {
     // A lock manager that rejects (SecurityError on an opaque origin) is
     // treated as no lock manager at all: a lone tab, which is offered its
-    // session (ESCSUITE-227 fix round 1). Driven through the real probe.
+    // session (ESCSUITE-227 fix round 1).
     vi.spyOn(console, 'error').mockImplementation(() => {})
-    const actual = await vi.importActual<typeof import('./sessionLock')>('./sessionLock')
     const rejecting = {
       request: () => Promise.reject(new DOMException('opaque origin', 'SecurityError')),
     } as unknown as LockManager
-    vi.mocked(probeSessionOwner).mockImplementation(() => actual.probeSessionOwner(rejecting))
+    Object.defineProperty(navigator, 'locks', { value: rejecting, configurable: true })
     const session = savedSession()
-    vi.mocked(getSessionState).mockResolvedValue(session)
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
 
     const { result } = mountRestore()
 
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
     expect(result.current.pendingSession).toBe(session)
-    expect(deps.showNotification).not.toHaveBeenCalled()
+    expect(result.current.tabId).toBe(THIS_TAB)
   })
 })
 
 describe('answering the prompt', () => {
   /** Mount with a session waiting, the way the prompt is reached in the app. */
   const mountWithPendingSession = async (session: SessionState) => {
-    vi.mocked(getSessionState).mockResolvedValue(session)
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
     const view = mountRestore()
     await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
     return view
@@ -258,7 +383,7 @@ describe('answering the prompt', () => {
     const session = savedSession()
     store().setProjectResolution(1280, 720)
     expect(store().history.past).toHaveLength(1)
-    vi.mocked(getSessionState).mockResolvedValue(session)
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
     const view = mountRestore({
       setProject: (p) => store().setProject(p),
       addSourceVideo: (v) => store().addSourceVideo(v),
@@ -305,7 +430,7 @@ describe('answering the prompt', () => {
     expect(result.current.pendingSession).toBeNull()
     expect(result.current.sessionRestored).toBe(true)
     // The question is settled, so the effect must not go looking again.
-    expect(getSessionState).toHaveBeenCalledTimes(1)
+    expect(listSessionStates).toHaveBeenCalledTimes(1)
   })
 
   it('rebuilds a source thumbnail from what is actually stored, not the dead handle the session carried', async () => {
@@ -341,7 +466,7 @@ describe('answering the prompt', () => {
     store().addSourceVideo(handoffShared)
     const session = savedSession({ sourceVideos: [{ ...sampleVideo, id: 'shared' }] })
     vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
-    vi.mocked(getSessionState).mockResolvedValue(session)
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
     const { result } = mountRestore({ addSourceVideo: (v) => store().addSourceVideo(v) })
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
 
@@ -427,6 +552,8 @@ describe('answering the prompt', () => {
     expect(deps.setProject).not.toHaveBeenCalled()
     expect(deps.addSourceVideo).not.toHaveBeenCalled()
     expect(deps.showNotification).not.toHaveBeenCalled()
+    // Nor adopt the slot the decline already deleted.
+    expect(saveSessionState).not.toHaveBeenCalled()
   })
 
   it('a second restore call while the first is still reading thumbnails is a no-op', async () => {
@@ -467,6 +594,7 @@ describe('answering the prompt', () => {
     // This was not the user's answer — the saved session stays in storage so
     // a reload can offer it again, unlike a decline.
     expect(clearSessionState).not.toHaveBeenCalled()
+    expect(saveSessionState).not.toHaveBeenCalled()
 
     consoleError.mockRestore()
   })
@@ -569,7 +697,7 @@ describe('the editor block (ESCSUITE-245)', () => {
   const marker = (id: string, time: number) => ({ id, time, label: id, color: '#ffcc00' })
 
   const restore = async (session: SessionState) => {
-    vi.mocked(getSessionState).mockResolvedValue(session)
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
     const view = mountRestore()
     await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
     await act(async () => {

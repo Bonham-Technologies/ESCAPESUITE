@@ -373,71 +373,94 @@ describe('storage', () => {
     })
   })
 
+  // ESCSUITE-274: one session slot per tab, a `session:<tabId>` row each, plus
+  // the single `current-session` row every tab shared before — read as a slot
+  // with no owner until it is consumed.
   describe('session state operations', () => {
-    it('saves and retrieves session state', async () => {
-      const storage = await getStorageModule()
-
-      const session: import('./storage').SessionState = {
+    const sessionFor = (tabId: string, overrides: Partial<import('./storage').SessionState> = {}) =>
+      ({
+        tabId,
         project: {
           id: 'project1',
-          name: 'Test',
-          created: Date.now(),
-          modified: Date.now(),
+          name: `Project of ${tabId}`,
+          created: 1,
+          modified: 1,
           resolution: { width: 1280, height: 720 },
-          timeline: {
-            tracks: [],
-            clips: [],
-            textOverlays: [],
-            shapeOverlays: [],
-            duration: 0,
-          },
+          timeline: { tracks: [], clips: [], textOverlays: [], shapeOverlays: [], duration: 0 },
         },
         sourceVideos: [],
         currentTime: 5.5,
         selectedClipId: 'clip1',
         zoom: 1.5,
-        timestamp: Date.now(),
-      }
+        timestamp: 1000,
+        ...overrides,
+      }) as import('./storage').SessionState
 
-      await storage.saveSessionState(session)
-      const result = await storage.getSessionState()
+    /** Write a row the way a build before ESCSUITE-274 did. */
+    const writeLegacy = async (storage: typeof import('./storage'), session: unknown) => {
+      const db = await storage.getDB()
+      await db.put('settings', session, 'current-session')
+    }
 
-      expect(result).toBeDefined()
-      expect(result?.currentTime).toBe(5.5)
-      expect(result?.selectedClipId).toBe('clip1')
-      expect(result?.zoom).toBe(1.5)
-    })
-
-    it('clears session state', async () => {
+    it('saves each tab under its own row, so one tab never overwrites another', async () => {
       const storage = await getStorageModule()
 
-      const session: import('./storage').SessionState = {
-        project: {
-          id: 'project1',
-          name: 'Test',
-          created: Date.now(),
-          modified: Date.now(),
-          resolution: { width: 1280, height: 720 },
-          timeline: {
-            tracks: [],
-            clips: [],
-            textOverlays: [],
-            shapeOverlays: [],
-            duration: 0,
-          },
-        },
-        sourceVideos: [],
-        currentTime: 5.5,
-        selectedClipId: null,
-        zoom: 1,
-        timestamp: Date.now(),
-      }
+      await storage.saveSessionState(sessionFor('tab-a'))
+      await storage.saveSessionState(sessionFor('tab-b', { currentTime: 9 }))
 
-      await storage.saveSessionState(session)
-      await storage.clearSessionState()
+      const db = await storage.getDB()
+      expect(await db.get('settings', 'session:tab-a')).toEqual(sessionFor('tab-a'))
+      expect(await db.get('settings', 'session:tab-b')).toEqual(sessionFor('tab-b', { currentTime: 9 }))
+    })
 
-      const result = await storage.getSessionState()
-      expect(result).toBeUndefined()
+    it('lists every tab\'s slot, keyed by the tab id in its row\'s key', async () => {
+      const storage = await getStorageModule()
+      await storage.saveSessionState(sessionFor('tab-a'))
+      await storage.saveSessionState(sessionFor('tab-b'))
+      await storage.setSetting('theme-preference', 'dark')
+
+      expect(await storage.listSessionStates()).toEqual([
+        { tabId: 'tab-a', session: sessionFor('tab-a') },
+        { tabId: 'tab-b', session: sessionFor('tab-b') },
+      ])
+    })
+
+    it('lists the shared row an older build wrote as a slot with no owner', async () => {
+      const storage = await getStorageModule()
+      const { tabId: _tabId, ...legacy } = sessionFor('ignored')
+      await writeLegacy(storage, legacy)
+      await storage.saveSessionState(sessionFor('tab-a'))
+
+      expect(await storage.listSessionStates()).toEqual([
+        { tabId: 'tab-a', session: sessionFor('tab-a') },
+        { tabId: null, session: legacy },
+      ])
+    })
+
+    it('lists nothing when no session was ever saved', async () => {
+      const storage = await getStorageModule()
+
+      expect(await storage.listSessionStates()).toEqual([])
+    })
+
+    it('clears one tab\'s slot and leaves the others', async () => {
+      const storage = await getStorageModule()
+      await storage.saveSessionState(sessionFor('tab-a'))
+      await storage.saveSessionState(sessionFor('tab-b'))
+
+      await storage.clearSessionState('tab-a')
+
+      expect(await storage.listSessionStates()).toEqual([{ tabId: 'tab-b', session: sessionFor('tab-b') }])
+    })
+
+    it('clears the ownerless shared row when asked for the slot with no owner', async () => {
+      const storage = await getStorageModule()
+      await writeLegacy(storage, sessionFor('ignored'))
+      await storage.saveSessionState(sessionFor('tab-a'))
+
+      await storage.clearSessionState(null)
+
+      expect(await storage.listSessionStates()).toEqual([{ tabId: 'tab-a', session: sessionFor('tab-a') }])
     })
   })
 
