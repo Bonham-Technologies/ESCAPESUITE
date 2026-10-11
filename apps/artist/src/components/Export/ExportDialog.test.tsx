@@ -7,8 +7,10 @@ import {
   EXPORT_NO_VIDEO_CODEC_REASON,
   MP4_NO_CODEC_REASON,
   exportedWithoutSoundReason,
+  mp4OutputSizeReason,
   noAudioNote,
 } from '../../core/exportTypes'
+import type { ExportFormatSupport } from '../../core/exportTypes'
 import { installWebCodecsDoubles } from '../../test/doubles/webcodecs'
 import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import { useEditorStore } from '../../store/projectStore'
@@ -28,7 +30,7 @@ const { mockExportToWebM, mockExportToMP4, mockExportToGIF, mockIsMP4ExportSuppo
   mockExportToGIF: vi.fn(),
   // ESCSUITE-175: a real asynchronous probe answering two questions, the shape
   // WebM's has had since ESCSUITE-22/29.
-  mockIsMP4ExportSupported: vi.fn(() => Promise.resolve({ video: true, audio: true })),
+  mockIsMP4ExportSupported: vi.fn((): Promise<ExportFormatSupport> => Promise.resolve({ video: true, audio: true })),
   mockIsWebMExportSupported: vi.fn(() => Promise.resolve({ video: true, audio: true })),
 }))
 
@@ -268,6 +270,29 @@ describe('ExportDialog', () => {
 
       expect(screen.getByRole('radio', { name: /mp4/i })).toBeDisabled()
       expect(screen.getByText('Not supported in this browser')).toBeInTheDocument()
+    })
+
+    // ESCSUITE-237: a refusal at this output size, from a browser that encodes
+    // H.264 at 1280x720, is the size's fault — said as such, in the main body
+    // and on the radio, instead of claiming the browser has no H.264.
+    it('names the output size, not the browser, when MP4 is refused at this size only', async () => {
+      mockIsMP4ExportSupported.mockResolvedValue({
+        video: false,
+        audio: true,
+        outputSizeReason: mp4OutputSizeReason(64, 8),
+      })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await settle()
+
+      expect(screen.getByText(mp4OutputSizeReason(64, 8))).toBeInTheDocument()
+      expect(screen.queryByText(MP4_NO_CODEC_REASON)).not.toBeInTheDocument()
+      // WebM still works, which is what the sentence promises.
+      expect(primaryExport()).toBeEnabled()
+
+      fireEvent.click(advancedToggle())
+      expect(screen.getByRole('radio', { name: /mp4/i })).toBeDisabled()
+      expect(screen.getByText('Not supported at this output size')).toBeInTheDocument()
+      expect(screen.queryByText('Not supported in this browser')).not.toBeInTheDocument()
     })
 
     it('switches the advanced button label with the chosen format', () => {

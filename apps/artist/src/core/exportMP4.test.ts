@@ -9,6 +9,7 @@ import { exportToMP4, ExportError } from './exportMP4'
 import {
   ExportAbortedError,
   MP4_NO_CODEC_REASON,
+  mp4OutputSizeReason,
   noAudioNote,
   type ExportResult,
 } from './exportTypes'
@@ -374,11 +375,50 @@ describe('exportToMP4 codec selection', () => {
 
     expect(error).toBeInstanceOf(ExportError)
     expect((error as Error).message).toBe(MP4_NO_CODEC_REASON)
-    expect(webcodecs.encoder.configs).toHaveLength(10) // 5 profiles x 2 acceleration modes
+    // No code: this is the browser, not the input (ESCSUITE-237).
+    expect((error as ExportError).code).toBeUndefined()
+    // 5 profiles x 2 acceleration modes at the requested size, then the same
+    // ten at the 1280x720 reference size, which is refused too.
+    expect(webcodecs.encoder.configs).toHaveLength(20)
+    expect(webcodecs.encoder.configs[10]).toMatchObject({ width: 1280, height: 720 })
     expect(mixAudio).not.toHaveBeenCalled()
     expect(media.videos).toHaveLength(0)
     expect(getMediabunnyState().callLog).toEqual([])
     expect(webcodecs.videoEncoders).toHaveLength(0)
+  })
+
+  // ESCSUITE-237: an output size the H.264 encoder refuses (64x8 here, under
+  // the 16x16 floor the ticket measured) used to be reported as a browser with
+  // no H.264 at all. The reference size tells the two apart, and the error
+  // carries a code the headless kit reads as a permanent input error.
+  it('names the output size, with a code, when H.264 encodes at 1280x720 but not at this size', async () => {
+    webcodecs.encoder.answer = (c) => {
+      const { width = 0, height = 0 } = c as VideoEncoderConfig
+      return width >= 16 && height >= 16
+    }
+    mixAudio.mockResolvedValue(audioFor(0.2))
+
+    const error = await run({
+      options: { resolution: 'project' },
+      projectResolution: { width: 64, height: 8 },
+    }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as Error).message).toBe(mp4OutputSizeReason(64, 8))
+    expect((error as ExportError).code).toBe('OUTPUT_SIZE_UNSUPPORTED')
+    // Before any of the work, the same as the no-H.264 refusal.
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(media.videos).toHaveLength(0)
+    expect(getMediabunnyState().callLog).toEqual([])
+  })
+
+  it('asks about the reference size only after the requested size has failed', async () => {
+    await run({ options: { resolution: 'project' }, projectResolution: { width: 64, height: 48 } })
+
+    // One probe, at the export's own size: a normal export pays nothing.
+    expect(webcodecs.encoder.configs).toHaveLength(1)
+    expect(webcodecs.encoder.configs[0]).toMatchObject({ width: 64, height: 48 })
   })
 
   it('encodes at the requested resolution and quality bitrate', async () => {

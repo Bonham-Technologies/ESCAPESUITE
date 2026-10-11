@@ -272,6 +272,36 @@ describe('runJob (real Chromium)', () => {
     RENDER_TIMEOUT_MS,
   )
 
+  // ESCSUITE-237: Chromium's H.264 encoder refuses 64x8 while encoding 1280x720, so the bundle
+  // throws an ExportError with `code: 'OUTPUT_SIZE_UNSUPPORTED'`. Playwright carries only an
+  // in-page error's message across the evaluate boundary; this pins that the code survives it
+  // too, which the CLI and the server map to exit 2 / 400.
+  it('carries an output size H.264 refuses across the page boundary as a coded failure', async () => {
+    const fixtureDir = path.dirname(MANIFEST)
+    const sizedDir = path.join(tmpRoot, 'fixture-64x8')
+    await fs.mkdir(sizedDir, { recursive: true })
+    for (const name of ['manifest.json', 'src-0.mp4']) {
+      await fs.copyFile(path.join(fixtureDir, name), path.join(sizedDir, name))
+    }
+    const project = JSON.parse(await fs.readFile(path.join(fixtureDir, 'project.json'), 'utf8'))
+    project.project.resolution = { width: 64, height: 8 }
+    await fs.writeFile(path.join(sizedDir, 'project.json'), JSON.stringify(project))
+
+    const outcome = await runJob(makeSpec('e2e-64x8', path.join(sizedDir, 'manifest.json')), {
+      bundlePath: BUNDLE,
+      workDir,
+      versions: VERSIONS,
+      log: quiet,
+    })
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.code).toBe('OUTPUT_SIZE_UNSUPPORTED')
+    expect(outcome.error).toBe(
+      'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.',
+    )
+    expect(await fs.readdir(workDir)).toEqual([])
+  }, RENDER_TIMEOUT_MS)
+
   it('returns ok:false and cleans up when the headless bundle is missing', async () => {
     const missing = path.join(tmpRoot, 'no-such-bundle.html')
 
