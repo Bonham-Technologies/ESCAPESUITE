@@ -34,6 +34,7 @@ import {
   exportLengthReason,
 } from '../../core/exportTypes';
 import { shouldAnnounceProgress } from './progressAnnouncement';
+import { registerLiveExport, clearLiveExport } from './liveExport';
 import type { ProgressAnnouncement } from './progressAnnouncement';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
@@ -375,6 +376,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     latestExportRef.current = abortController;
+    // ESCSUITE-220: also the run a crash elsewhere in the editor must stop.
+    // The ErrorBoundary unmounts this dialog without reaching handleCancel,
+    // and `main.tsx`'s onError aborts whatever is registered here.
+    registerLiveExport(abortController);
     const isCurrentRun = () => latestExportRef.current === abortController;
 
     // Determine options: primary button uses defaults, advanced button uses configured options
@@ -543,6 +548,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       if (abortControllerRef.current === abortController) {
         abortControllerRef.current = null;
       }
+      // Settled, so nothing left for a crash to stop. Guarded by identity
+      // inside, for the same reason as the line above.
+      clearLiveExport(abortController);
     }
   }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange]);
 
@@ -550,6 +558,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // Abort any in-progress export
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
+      // Already stopped: a crash after this must not abort it a second time.
+      clearLiveExport(abortControllerRef.current);
       abortControllerRef.current = null;
     }
     // A cancelled run is no longer "current" even to itself: without this, a

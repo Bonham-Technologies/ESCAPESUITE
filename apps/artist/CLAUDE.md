@@ -3114,15 +3114,23 @@ chrome lives in one module each under `src/app/`.
 
 **`main.tsx` wraps `App` in `@escapesuite/shared`'s `ErrorBoundary`**, via `bootstrapApp()`
 (ESCSUITE-212), so a render-time throw anywhere below shows that package's own minimal fallback
-panel instead of unmounting the whole app to a blank page. `main.tsx` passes it a documented
-no-op `onError`: unlike ESCAPECRAFT's live recorder, ARTIST holds no live *capture* — no camera
-or microphone light, no `getDisplayMedia` stream — which is what CRAFT's dispose exists for. An
-export in flight does own things a crash leaves running (a `decodeWorker` Web Worker, one or two
-WebCodecs encoders, a WebM muxer): the ruling is to let them run rather than tear them down from
-an unrelated render error, since an export that is already encoding is better finished than
-killed, and the panel's Reload ends them either way. The no-op is written out rather than the
-prop being left unset, so that choice reads as a decision rather than an unfinished one; the
-boundary's own `componentDidCatch` already logs the error to the console in dev.
+panel instead of unmounting the whole app to a blank page. ARTIST holds no live *capture* — no
+camera or microphone light, no `getDisplayMedia` stream — but an export in flight owns things a
+crash would leave running (a `decodeWorker` Web Worker, one or two WebCodecs encoders, a muxer),
+whose only release paths are the export's own completion, failure and Cancel. So since
+ESCSUITE-220 `main.tsx`'s `onError` calls `disposeLiveExport()` (`components/Export/liveExport.ts`,
+a module with no React in it so `main.tsx` imports no component): `ExportDialog` registers each
+run's `AbortController` in a module-level slot when the run starts and clears it when that run
+settles (its `finally`) or is cancelled (`handleCancel`), the clear guarded by identity so a
+cancelled run settling late cannot drop the run started after it; `disposeLiveExport()` empties
+the slot and aborts what was in it, so it aborts at most once and is a no-op with nothing
+exporting or after Cancel. The abort reaches the exporter through its signal, and the exporter's
+own abort path releases the encoders, the muxer and the worker exactly as Cancel does. The shape
+is ESCAPECRAFT's `disposeLiveRecordingSession`, and so is the ordering it relies on: the slot
+still names the run when `componentDidCatch` calls `onError` (the dialog has no unmount path that
+touches it), pinned under the real boundary by `ExportDialog.test.tsx`'s ordering case. Before
+the ticket this was a deliberate no-op that let an export run on behind the error panel until
+Reload. The boundary's own `componentDidCatch` already logs the error to the console in dev.
 
 **The hooks are called in a fixed order, and the order is the behaviour.** The order the hooks
 are called in is the order their effects run in, and it is the order the six effects ran in

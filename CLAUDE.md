@@ -138,6 +138,9 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   would otherwise leave dangling. CRAFT's disposes a live recorder; ARTIST's is a documented
   no-op; PLAN passes none. See each app's CLAUDE.md
 
+  would otherwise leave dangling. CRAFT's disposes a live recorder; ARTIST's stops an export in
+  flight through `disposeLiveExport()` (ESCSUITE-220). See each app's CLAUDE.md
+
 ### ESCAPEPLAN (apps/plan)
 - React Router for client-side routing
 - Landing page & legal pages only — no accounts, no backend
