@@ -264,9 +264,13 @@ describe('runJob (real Chromium)', () => {
         const result = await probe(path.join(outDir, `${jobId}.${format}`))
         const video = result.streams.find((s) => s.codec_type === 'video')
         expect(Number(video?.nb_read_frames)).toBe(Math.round(frames))
-        // The README's contract: the manifest matches the file within one millisecond. The
-        // fixture's source has no audio track, so the container's duration is the video's.
-        expect(Math.abs(Number(result.format.duration) - manifest.durationSec)).toBeLessThanOrEqual(0.001)
+        // The README's contract: the manifest matches the file's VIDEO stream within one
+        // millisecond. Compared with the video stream's own duration where ffprobe reports one
+        // (MP4); a WebM stream has none, so that falls back to the container's — which holds
+        // only because the fixture is silent. A file with sound pads its container past the
+        // last video frame by up to one AAC (21.3 ms) or Opus (20 ms) frame.
+        const videoDuration = Number(video?.duration ?? result.format.duration)
+        expect(Math.abs(videoDuration - manifest.durationSec)).toBeLessThanOrEqual(0.001)
       }
     },
     RENDER_TIMEOUT_MS,

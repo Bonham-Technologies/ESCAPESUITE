@@ -4807,6 +4807,12 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   frame loop's `frameCount`, set on the success path of all three), and `encodedDurationSec` there
   multiplies it by `1 / VIDEO_EXPORT_FRAME_RATE` or by `gifFrameDelayMs(fps)`. The field is
   required rather than optional so no reader of it has a fallback arm or a `NaN` to guard.
+  **It is the video length.** A consumer may compare it with the file's video stream (counted
+  frames x 1/30, or the stream's own duration) within one millisecond, but not with the
+  container's `format.duration`: the mix is sliced to exactly the range, and the audio encoders
+  write whole frames — AAC 1024 samples (21.3 ms at 48 kHz), Opus 20 ms — so the padded last audio
+  frame ends a few milliseconds after the last video frame (a 1 s MP4 with sound: 30 video frames,
+  `durationSec` 1, container about 1.0027 s).
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.

@@ -35,10 +35,13 @@ export interface RenderMeta {
   format: 'mp4' | 'webm' | 'gif'
   byteLength: number
   /**
-   * Encoded duration in seconds: the frames the exporter encoded times one
-   * frame period (1/30 s for MP4 and WebM, the stored delay for a GIF) — so it
-   * matches the file to within a millisecond, not the timeRange it was asked
-   * for (ESCSUITE-238).
+   * Encoded VIDEO length in seconds: the frames the exporter encoded times one
+   * frame period (1/30 s for MP4 and WebM, the stored delay for a GIF) — not the
+   * timeRange it was asked for (ESCSUITE-238). It matches the file's video
+   * stream to within a millisecond. The container (`format.duration`) of an MP4
+   * or WebM with sound runs a few milliseconds longer, because the last AAC or
+   * Opus frame is padded past the last video frame, so a consumer compares this
+   * with the video stream, not the container.
    */
   durationSec: number
   /** Encoded frame size — honours options.resolution, not simply project.resolution. */

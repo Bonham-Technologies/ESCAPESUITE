@@ -47,6 +47,7 @@ import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, SourceVideoInput } from './types'
 import type { Clip, TextOverlay } from '../store/types'
 import { lastObjectUrl } from '../test/objectUrls'
+import { VIDEO_EXPORT_FRAME_RATE } from '../core/exportTypes'
 
 /** A legacy text overlay as an older ARTIST version stored it, on the timeline's array. */
 const legacyText = (): TextOverlay => ({
@@ -186,17 +187,24 @@ describe('renderProject', () => {
     expect(res.meta.durationSec).toBeCloseTo(0.84, 6)
   })
 
-  it('computes durationSec from timelinePosition + duration, not from source trim bounds', async () => {
-    // A clip starting at timelinePosition=5 with duration=3 ends at second 8.
-    // The source trim bounds (startTime=0, endTime=3) must NOT be used — that
-    // would give durationSec=3 instead of 8.
+  // ESCSUITE-238: the duration is derived from the exporter's own frame count, not from the
+  // timeline. The clip spans 8 s (timelinePosition 5 + duration 3, trimmed 0-3 in its
+  // source), and the double reports a count that agrees with neither the range nor the trim,
+  // so only `framesEncoded / VIDEO_EXPORT_FRAME_RATE` gives the expected answer — and two
+  // counts mean a hard-coded one cannot pass both.
+  it.each([23, 16])('derives a video durationSec of %s frames from the count the exporter reports', async (frames) => {
+    exportToMP4.mockResolvedValueOnce({
+      blob: new Blob([new Uint8Array([9])], { type: 'video/mp4' }), audio: true, framesEncoded: frames,
+    })
     const input = baseInput()
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 5
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 3
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).startTime = 0
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).endTime = 3
+
     const res = await renderProject(input)
-    expect(res.meta.durationSec).toBe(8) // timelinePosition(5) + duration(3)
+
+    expect(res.meta.durationSec).toBe(frames / VIDEO_EXPORT_FRAME_RATE)
   })
 
   it('defaults options.resolution to project when the caller omits it', async () => {
