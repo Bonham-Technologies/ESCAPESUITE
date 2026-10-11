@@ -304,6 +304,30 @@ describe('storage', () => {
     })
   })
 
+  // ESCSUITE-274: ESCAPEARTIST keeps one session slot per tab, each a
+  // `session:<tabId>` row in `settings`, and finds them by their prefix.
+  describe('listSettings', () => {
+    it('lists every row whose key starts with the prefix, key and value', async () => {
+      await storage.setSetting('session:a', { n: 1 })
+      await storage.setSetting('session:b', { n: 2 })
+      await storage.setSetting('theme', 'dark')
+      await storage.setSetting('sessions', 'not a slot')
+
+      const rows = await storage.listSettings<{ n: number }>('session:')
+
+      expect(rows).toEqual([
+        { key: 'session:a', value: { n: 1 } },
+        { key: 'session:b', value: { n: 2 } },
+      ])
+    })
+
+    it('answers an empty list when no key has the prefix', async () => {
+      await storage.setSetting('theme', 'dark')
+
+      expect(await storage.listSettings('session:')).toEqual([])
+    })
+  })
+
   describe('getStorageEstimate', () => {
     afterEach(() => {
       Object.defineProperty(navigator, 'storage', { value: undefined, configurable: true })
