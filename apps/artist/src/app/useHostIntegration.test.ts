@@ -177,18 +177,6 @@ describe('inbound messages', () => {
     expect(deps.showNotification).toHaveBeenCalledWith('Failed to load video', 'error')
   })
 
-  it.each([
-    ['no payload at all', undefined],
-    ['a payload with no url', { name: 'clip.mp4' }],
-  ])('LOAD_VIDEO ignores %s', async (_label, payload) => {
-    await mountIntegration()
-
-    await dispatch({ type: 'LOAD_VIDEO', payload })
-
-    expect(loadVideoFromUrl).not.toHaveBeenCalled()
-    expect(sendMessage).not.toHaveBeenCalled()
-  })
-
   it('LOAD_PROJECT replaces the project with whatever well-formed project it was handed', async () => {
     await mountIntegration()
     const hostProject = { ...useEditorStore.getState().project, name: 'From Host' }

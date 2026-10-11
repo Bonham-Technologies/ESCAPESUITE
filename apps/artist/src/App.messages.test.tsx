@@ -87,14 +87,15 @@ describe('App inbound messages', () => {
       })
     })
 
-    it('ignores a payload with no url in it', async () => {
+    it('answers a payload with no url in it with INVALID_MESSAGE (ESCSUITE-232)', async () => {
       await renderApp()
 
       await dispatchToApp({ type: 'LOAD_VIDEO', payload: { name: 'clip.mp4' } })
       await dispatchToApp({ type: 'LOAD_VIDEO' })
 
       expect(loadVideoFromUrl).not.toHaveBeenCalled()
-      expect(sendMessage).not.toHaveBeenCalled()
+      expect(sendMessage).toHaveBeenCalledTimes(2)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'ERROR', payload: expect.objectContaining({ code: 'INVALID_MESSAGE' }) }))
     })
   })
 
@@ -165,20 +166,22 @@ describe('App inbound messages', () => {
       expect(getTheme()).toBe(theme)
     })
 
-    it('ignores a theme it does not know', async () => {
+    it('answers a theme it does not know with INVALID_MESSAGE (ESCSUITE-232)', async () => {
       await renderApp()
 
       await dispatchToApp({ type: 'SET_THEME', payload: { theme: 'neon' } })
 
-      expect(sendMessage).not.toHaveBeenCalled()
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'ERROR', payload: expect.objectContaining({ code: 'INVALID_MESSAGE' }) }))
     })
 
-    it('ignores a SET_THEME with no theme in it', async () => {
+    it('answers a SET_THEME with no theme in it with INVALID_MESSAGE (ESCSUITE-232)', async () => {
       await renderApp()
 
       await dispatchToApp({ type: 'SET_THEME', payload: {} })
 
-      expect(sendMessage).not.toHaveBeenCalled()
+      expect(sendMessage).toHaveBeenCalledTimes(1)
+      expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'ERROR', payload: expect.objectContaining({ code: 'INVALID_MESSAGE' }) }))
     })
 
     it.each([

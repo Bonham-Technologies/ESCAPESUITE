@@ -37,6 +37,36 @@ import { setTheme, getTheme, getResolvedTheme, type ThemePreference } from '@esc
 import type { Project, SourceVideo, TakeClipPart } from '../store/types';
 import type { ShowNotification } from './useNotification';
 
+/**
+ * The theme preferences a host may set. The shared theme module exports the
+ * `ThemePreference` type but no runtime list, so this is the list, and
+ * `satisfies Record<ThemePreference, true>` makes the compiler fail it the day
+ * the union gains or loses a member (ESCSUITE-232).
+ */
+const THEME_PREFERENCES = {
+  light: true,
+  dark: true,
+  system: true,
+} satisfies Record<ThemePreference, true>;
+
+const hasStringUrl = (payload: unknown): payload is { url: string } =>
+  typeof (payload as { url?: unknown } | null | undefined)?.url === 'string';
+
+const isThemePreference = (value: unknown): value is ThemePreference =>
+  typeof value === 'string' && Object.hasOwn(THEME_PREFERENCES, value);
+
+/**
+ * The one reply a malformed inbound message gets (ESCSUITE-232): the protocol's
+ * single ERROR shape, with a code a host can branch on and a message naming
+ * the field that was wrong. Nothing is applied.
+ */
+const replyInvalid = (type: string, field: string, expected: string): void => {
+  sendMessage({
+    type: 'ERROR',
+    payload: { message: `${type}: ${field} must be ${expected}.`, code: 'INVALID_MESSAGE' },
+  });
+};
+
 /** What the host surface needs from the editor. */
 export interface HostIntegrationDeps {
   /** The startup URL parameters — read once, never re-read. */
@@ -166,9 +196,11 @@ export function useHostIntegration({
           // sources through `addSourceVideo`'s replace-in-place without removing
           // the others, so a source added during the prompt survives either
           // answer (ESCSUITE-225).
-          if (message.payload && typeof message.payload === 'object' && 'url' in message.payload) {
+          if (!hasStringUrl(message.payload)) {
+            replyInvalid('LOAD_VIDEO', 'payload.url', 'a string');
+          } else {
             try {
-              const { blob, name } = await loadVideoFromUrl((message.payload as { url: string }).url);
+              const { blob, name } = await loadVideoFromUrl(message.payload.url);
               const file = new File([blob], name, { type: blob.type });
               const metadata = await processMediaFile(file);
               addSourceVideo(metadata);
@@ -188,7 +220,11 @@ export function useHostIntegration({
           break;
 
         case 'LOAD_PROJECT':
-          if (message.payload) {
+          if (!message.payload || typeof message.payload !== 'object') {
+            // Not even an object: nothing for parseProject to refuse. A parsed
+            // and refused project keeps INVALID_PROJECT below.
+            replyInvalid('LOAD_PROJECT', 'payload', 'the project object');
+          } else {
             // Validated the same way a dropped .veditor is (ESCSUITE-102):
             // ensureTimelineHasTracks assumes a shape this payload has never
             // been checked against, and a host is in no better position than
@@ -223,19 +259,24 @@ export function useHostIntegration({
           break;
         }
 
-        case 'SET_THEME':
-          if (message.payload && typeof message.payload === 'object' && 'theme' in message.payload) {
-            const themeValue = (message.payload as { theme: string }).theme;
-            if (['light', 'dark', 'system'].includes(themeValue)) {
-              setTheme(themeValue as ThemePreference).then(() => {
-                sendMessage({
-                  type: 'THEME_CHANGED',
-                  payload: { preference: getTheme(), resolved: getResolvedTheme() },
-                });
+        case 'SET_THEME': {
+          const themeValue = (message.payload as { theme?: unknown } | null | undefined)?.theme;
+          if (!isThemePreference(themeValue)) {
+            replyInvalid(
+              'SET_THEME',
+              'payload.theme',
+              `one of ${Object.keys(THEME_PREFERENCES).join(', ')}`
+            );
+          } else {
+            setTheme(themeValue).then(() => {
+              sendMessage({
+                type: 'THEME_CHANGED',
+                payload: { preference: getTheme(), resolved: getResolvedTheme() },
               });
-            }
+            });
           }
           break;
+        }
 
         case 'GET_THEME':
           sendMessage({
@@ -270,8 +311,13 @@ export function useHostIntegration({
       videos.forEach(async (url) => {
         try {
           const { blob, name } = await loadVideoFromUrl(url);
+          // The effect is gone (StrictMode's first mount, or an unmount): the
+          // run that replaced it makes this same import, so leave it alone
+          // rather than fetch, decode and add the file twice (ESCSUITE-228).
+          if (cancelled) return;
           const file = new File([blob], name, { type: blob.type });
           const metadata = await processMediaFile(file);
+          if (cancelled) return;
           addSourceVideo(metadata);
         } catch (error) {
           console.error('Failed to load video from URL:', error);

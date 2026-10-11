@@ -586,7 +586,29 @@ same `parseProject` a dropped `.veditor` file goes through before `setProject` e
 host is no better placed than a malformed file to hand a project ARTIST's migration can walk with
 no guards. A payload that fails validation is answered with
 `{ type: 'ERROR', payload: { message, code: 'INVALID_PROJECT' } }` and the current project is left
-untouched, undo history included. An absent payload is still silently ignored, as it always was.
+untouched, undo history included. An absent (non-object) payload is answered with `INVALID_MESSAGE` (ESCSUITE-232, below).
+
+**Malformed messages get an `ERROR` reply (ESCSUITE-232)**: every inbound type that carries a
+payload validates it in `useHostIntegration`, and a malformed one is answered with the protocol's
+one error shape, `{ type: 'ERROR', payload: { message, code: 'INVALID_MESSAGE' } }`, `message`
+naming the field (`LOAD_VIDEO: payload.url must be a string.`), with nothing fetched or applied.
+`LOAD_VIDEO` needs a string `url`; `SET_THEME` a `theme` in the shared `ThemePreference` union
+(the shared module exports the type but no runtime list, so the hook keeps a
+`satisfies Record<ThemePreference, true>` table that stops compiling if the union changes);
+`LOAD_PROJECT` an object — a *parsed-and-refused* project keeps `INVALID_PROJECT`, and an absent,
+`null`, string or number payload (which used to be dropped silently) is `INVALID_MESSAGE`.
+`GET_STATE` and `GET_THEME` carry no payload. A message with an unknown `type` (`EXPORT`
+included) is still ignored without a reply.
+
+**`LOAD_VIDEO` and `?video=` name the file from the URL (ESCSUITE-228)**: `extractFilename(url,
+blobType)` takes the URL's last path segment, decoded; a `data:` URL or an empty last segment
+(`/clips/`, no path) is "Loaded media". A name with no extension takes one from the blob's MIME type
+through a small table (`mp4`, `webm`, `wav`, `mp3`, `m4a`, `png`, `jpg`, `gif`, `webp`; an unlisted
+type adds none), a name with an extension keeps it even if the type disagrees, and the stem is
+capped at 120 characters. `processMediaFile` (not the name) decides the media type, so an
+`audio/wav` URL lands as audio. The `?video=` loop checks the effect's `cancelled` flag after the
+fetch and after the probe, as the `?loadVideo=` import does, so StrictMode's first mount adds
+nothing and each URL is imported once in development.
 
 **`LOAD_PROJECT` waits for the session question (ESCSUITE-225)**: without `?suppressRestore=1`,
 a project that arrives while "Resume Previous Session?" is open (or about to open —

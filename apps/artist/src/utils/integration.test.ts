@@ -473,7 +473,7 @@ describe('integration', () => {
       expect(result.name).toBe('my-video.mp4')
     })
 
-    it('falls back to video.mp4 when the URL path has no filename', async () => {
+    it('falls back to Loaded media when the URL path has no filename', async () => {
       const mockBlob = new Blob(['video data'], { type: 'video/mp4' })
 
       vi.mocked(fetch).mockResolvedValue({
@@ -485,7 +485,7 @@ describe('integration', () => {
 
       const result = await loadVideoFromUrl('http://example.com/videos/')
 
-      expect(result.name).toBe('video.mp4')
+      expect(result.name).toBe('Loaded media.mp4')
     })
 
     it('throws error on failed fetch', async () => {
@@ -576,7 +576,7 @@ describe('integration', () => {
       ['a data: URL is named Loaded media, not its payload', 'data:video/mp4;base64,AAAAIGZ0eXBpc29t', 'video/mp4', 'Loaded media.mp4'],
       ['a file with an extension keeps its name', 'https://h.example/x.wav', 'audio/wav', 'x.wav'],
       ['an extension that disagrees with the type is kept', 'https://h.example/x.mp4', 'audio/wav', 'x.mp4'],
-      ['an empty last segment falls back to the previous one', 'https://h.example/clips/', 'video/webm', 'clips.webm'],
+      ['an empty last segment is Loaded media', 'https://h.example/clips/', 'video/webm', 'Loaded media.webm'],
       ['no path at all is Loaded media', 'https://h.example/', 'video/webm', 'Loaded media.webm'],
       ['an extensionless segment gets one from the type', 'https://h.example/clip', 'audio/mpeg', 'clip.mp3'],
       ['an unknown type adds no extension', 'https://h.example/clip', 'application/x-weird', 'clip'],
@@ -599,7 +599,7 @@ describe('integration', () => {
       expect(extractFilename(`https://h.example/${exact}`, '')).toBe(exact)
     })
 
-    it('names a fetched blob from its own filename and its response type', async () => {
+    it('names a fetched blob with no filename after its response type', async () => {
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
         ok: true,
         blob: () => Promise.resolve(new Blob(['x'], { type: 'audio/wav' })),
@@ -607,7 +607,7 @@ describe('integration', () => {
         body: null,
       } as Response))
       const result = await loadVideoFromUrl('http://example.com/sounds/')
-      expect(result.name).toBe('sounds.wav')
+      expect(result.name).toBe('Loaded media.wav')
       expect(result.blob.type).toBe('audio/wav')
     })
   })

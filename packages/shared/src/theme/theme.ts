@@ -102,7 +102,8 @@ export async function setTheme(preference: ThemePreference): Promise<void> {
   applyTheme(resolved);
   await saveThemePreference(preference);
 
-  // Dispatch custom event for cross-tab/component sync
+  // Dispatch a custom event so components in this document can follow the change.
+  // It is same-document only: nothing syncs the preference across tabs.
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent('escape-theme-changed', {
       detail: { preference, resolved }
