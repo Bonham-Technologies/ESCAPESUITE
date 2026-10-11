@@ -600,6 +600,13 @@ Four things worth knowing:
 - [`tini`](https://github.com/krallin/tini) is PID 1. Under `serve`, each render leaves
   Chromium's helper processes orphaned when the browser closes; without an init they stay
   zombies until the container's pid limit. `docker run --init` is now redundant, but harmless.
+- The image carries `fonts-liberation`, `fonts-dejavu-core` and `fonts-croscore` (Arimo, Tinos,
+  Cousine), so a project's text overlays render through metric-compatible substitutes: Arial and
+  Helvetica as Liberation Sans or Arimo, Times New Roman as Liberation Serif or Tinos, Courier
+  New as Liberation Mono or Cousine, Verdana as DejaVu Sans. Georgia and Impact have no
+  metric-compatible clone, so they render through the generic family their stack names
+  (`serif` and `sans-serif`) and will not match a machine that has the real fonts. No web fonts
+  are bundled; a project that needs an exact face should be rendered where it is installed.
 - Scratch space defaults to the container's `/tmp`. For long renders, mount real storage and
   set `HEADLESS_WORK_DIR` to it.
 - **This image cannot use the `s3` sink.** It installs with `--omit=optional`, so
