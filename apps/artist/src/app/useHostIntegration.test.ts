@@ -292,6 +292,8 @@ describe('inbound messages', () => {
     ['an unknown theme name', { theme: 'sepia' }],
     ['a payload with no theme', { preference: 'light' }],
     ['a theme that is not a string', { theme: 3 }],
+    ["an inherited property name ('toString')", { theme: 'toString' }],
+    ["'__proto__'", { theme: '__proto__' }],
     ['no payload at all', undefined],
   ])('SET_THEME answers %s with INVALID_MESSAGE and applies nothing (ESCSUITE-232)', async (_label, payload) => {
     await mountIntegration()
