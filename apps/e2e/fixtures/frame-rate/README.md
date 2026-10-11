@@ -2,7 +2,7 @@
 
 Used by `tests/escapeartist/frame-rate-probe.spec.ts` (ESCSUITE-277), which pins ESCSUITE-276's import-time frame-rate probe (`apps/artist/src/core/frameRateProbe.ts`) in a real browser.
 
-Every file is 2 s of ffmpeg's `testsrc` at 160x120, no audio. `node make-fixtures.mjs` regenerates all nine (needs `ffmpeg` on PATH; the committed files were made with ffmpeg 9.0.1). The whole folder is about 110 KB.
+Every file is 2 s of ffmpeg's `testsrc` at 160x120, no audio. `node make-fixtures.mjs` regenerates all nine (needs `ffmpeg` on PATH; the committed files were made with ffmpeg 9.0.1). The whole folder, generator and this README included, is 112 KB (`du -sh`).
 
 `ffprobe` column: `ffprobe -v error -select_streams v -show_entries stream=r_frame_rate,nb_frames -of csv=p=0 <file>` (for the WebMs, which carry no frame count, `-count_frames` and `nb_read_frames` instead).
 

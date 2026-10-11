@@ -79,6 +79,10 @@ test.describe('import-time frame-rate probe', () => {
 
       const sources = await getSources(page)
       expect(sources).toHaveLength(1)
+      test.info().annotations.push({
+        type: 'frame-rate',
+        description: `${sources[0].frameRate} (${sources[0].frameRateSource})`,
+      })
       expect(sources[0].frameRateSource).toBe('measured')
       expect(rates).toContain(sources[0].frameRate)
     })
