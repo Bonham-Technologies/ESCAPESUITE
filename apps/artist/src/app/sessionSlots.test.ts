@@ -8,7 +8,7 @@
 // use, installed on `navigator` the way the browser provides it.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { adoptSessionSlot, findOfferableSlot } from './sessionSlots'
-import { claimTabLock, holdTabLock, tabLockName } from './sessionLock'
+import { claimOfferLock, holdTabLock, offerLockName, probeTabLock, tabLockName } from './sessionLock'
 import { SESSION_SLOT_MAX_AGE_MS } from './appConstants'
 import {
   clearSessionState,
@@ -188,11 +188,13 @@ describe('findOfferableSlot', () => {
   })
 })
 
-// ESCSUITE-283: the tab a departed tab's slot is offered to claims that tab's
-// lock until it answers, so a second fresh tab opened with it — two tabs
-// opened together after a crash — is not offered the same session.
-describe('findOfferableSlot claims the departed tab\'s lock (ESCSUITE-283)', () => {
-  it('holds the offered slot\'s tab lock, so a second fresh tab is offered the next slot', async () => {
+// ESCSUITE-283: the tab a departed tab's slot is offered to claims that slot's
+// offer lock, `escapeartist-offer:<id>`, until it answers, so a second fresh
+// tab opened with it — two tabs opened together after a crash — is not
+// offered the same session. Fix round 1: the departed tab's *liveness* lock is
+// only probed, never held, so that tab coming back is still itself.
+describe('findOfferableSlot claims the departed tab\'s offer (ESCSUITE-283)', () => {
+  it('holds the offered slot\'s offer lock, so a second fresh tab is offered the next slot', async () => {
     const older = slot('crashed-early', NOW - 60_000)
     const newer = slot('crashed-late', NOW - 1_000)
     vi.mocked(listSessionStates).mockResolvedValue([older, newer])
@@ -201,8 +203,28 @@ describe('findOfferableSlot claims the departed tab\'s lock (ESCSUITE-283)', () 
     await flushLocks()
 
     expect(first?.slot).toBe(newer)
-    expect(fake.isHeld(tabLockName('crashed-late'))).toBe(true)
+    expect(fake.isHeld(offerLockName('crashed-late'))).toBe(true)
     await expect(offered('fresh-2', NOW)).resolves.toBe(older)
+  })
+
+  it('probes the departed tab\'s liveness lock and leaves it free while its slot is on offer', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('crashed', NOW - 1_000)])
+
+    await findOfferableSlot('fresh-1', NOW)
+    await flushLocks()
+
+    expect(fake.log).toEqual(['probe', 'probe'])
+    expect(fake.isHeld(tabLockName('crashed'))).toBe(false)
+    // The departed tab reloading probes its own id and finds it unused.
+    await expect(probeTabLock('crashed', fake.locks)).resolves.toBe('free')
+  })
+
+  it('does not claim the offer of a slot whose tab is alive', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('alive', NOW - 1_000)])
+    await aliveTab('alive')
+
+    await expect(offered('fresh-1', NOW)).resolves.toBeNull()
+    expect(fake.isHeld(offerLockName('alive'))).toBe(false)
   })
 
   it('offers a second fresh tab nothing when the only slot is already on offer', async () => {
@@ -222,22 +244,22 @@ describe('findOfferableSlot claims the departed tab\'s lock (ESCSUITE-283)', () 
     first!.release()
     await flushLocks()
 
-    expect(fake.isHeld(tabLockName('crashed'))).toBe(false)
+    expect(fake.isHeld(offerLockName('crashed'))).toBe(false)
     await expect(offered('fresh-2', NOW)).resolves.toBe(crashed)
   })
 
-  it('skips a slot another tab claimed while this one was still reading storage, and offers the next', async () => {
-    // There is no probe-then-claim window: the claim *is* the question, so a
-    // lock taken a moment earlier is answered "held" and the slot passed over.
+  it('skips a slot another tab claimed after its probe found the tab gone, and offers the next', async () => {
+    // The tab-lock probe answers "free" for both tabs; the offer claim is what
+    // decides which one is offered the slot.
     const older = slot('crashed-early', NOW - 60_000)
     const newer = slot('crashed-late', NOW - 1_000)
     vi.mocked(listSessionStates).mockImplementation(async () => {
-      await claimTabLock('crashed-late', fake.locks)
+      await claimOfferLock('crashed-late', fake.locks)
       return [older, newer]
     })
 
     await expect(offered('fresh-2', NOW)).resolves.toBe(older)
-    expect(fake.isHeld(tabLockName('crashed-early'))).toBe(true)
+    expect(fake.isHeld(offerLockName('crashed-early'))).toBe(true)
   })
 
   it('claims nothing for this tab\'s own slot or the ownerless shared row, and their release does nothing', async () => {
@@ -249,6 +271,35 @@ describe('findOfferableSlot claims the departed tab\'s lock (ESCSUITE-283)', () 
     expect(fake.log).toEqual([])
     expect(() => own!.release()).not.toThrow()
     expect(() => legacy!.release()).not.toThrow()
+  })
+})
+
+// Fix round 1: an offer can go stale while the prompt is up — the departed tab
+// comes back (a reload after a renderer crash, a tab the browser restores
+// lazily) and is offered its own slot. Before either answer touches the slot,
+// the answering tab asks whether its owner is alive again.
+describe('OfferedSlot.ownerReturned (ESCSUITE-283)', () => {
+  it('answers false while the departed tab is still gone, and true once it holds its lock again', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('crashed', NOW - 1_000)])
+    const offer = await findOfferableSlot('fresh-1', NOW)
+
+    await expect(offer!.ownerReturned()).resolves.toBe(false)
+    await aliveTab('crashed')
+    await expect(offer!.ownerReturned()).resolves.toBe(true)
+  })
+
+  it('answers false for this tab\'s own slot and the ownerless shared row, without asking', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('me', NOW - 1_000)])
+    // This tab holds its own lock, as the autosave does: a probe would say "held".
+    await aliveTab('me')
+    const own = await findOfferableSlot('me', NOW)
+    vi.mocked(listSessionStates).mockResolvedValue([slot(null, NOW - 1_000)])
+    const legacy = await findOfferableSlot('fresh', NOW)
+    fake.log.length = 0
+
+    await expect(own!.ownerReturned()).resolves.toBe(false)
+    await expect(legacy!.ownerReturned()).resolves.toBe(false)
+    expect(fake.log).toEqual([])
   })
 })
 
@@ -267,7 +318,7 @@ describe('adoptSessionSlot', () => {
   it('rewrites the session under the restoring tab\'s id, then deletes the old row', async () => {
     const crashed = slot('crashed', NOW - 1_000)
 
-    await adoptSessionSlot(crashed, 'me')
+    await expect(adoptSessionSlot(crashed, 'me')).resolves.toBe(true)
 
     expect(saveSessionState).toHaveBeenCalledWith({
       ...crashed.session,
@@ -291,9 +342,19 @@ describe('adoptSessionSlot', () => {
     const error = new Error('quota')
     vi.mocked(saveSessionState).mockRejectedValueOnce(error)
 
-    await adoptSessionSlot(slot('crashed', NOW - 1_000), 'me')
+    // Not adopted: the caller keeps its claim on the offer (ESCSUITE-283 LOW-1).
+    await expect(adoptSessionSlot(slot('crashed', NOW - 1_000), 'me')).resolves.toBe(false)
 
     expect(clearSessionState).not.toHaveBeenCalled()
     expect(consoleError).toHaveBeenCalledWith('Failed to adopt the restored session:', error)
+  })
+
+  it('answers false when the old row cannot be deleted, so the caller keeps its claim', async () => {
+    // The old row is still in storage: releasing the offer would let another
+    // fresh tab adopt a second copy of it (ESCSUITE-283 LOW-1).
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(clearSessionState).mockRejectedValueOnce(new Error('blocked'))
+
+    await expect(adoptSessionSlot(slot('crashed', NOW - 1_000), 'me')).resolves.toBe(false)
   })
 })

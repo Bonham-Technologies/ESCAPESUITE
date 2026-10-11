@@ -5,7 +5,7 @@
 // jsdom has no `navigator.locks`, so the cases that pass no `locks` argument
 // are the "no Web Locks at all" ones — the tab behaves as if it were alone.
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { claimTabLock, holdTabLock, probeTabLock, tabLockName } from './sessionLock'
+import { claimOfferLock, holdTabLock, offerLockName, probeTabLock, tabLockName } from './sessionLock'
 import { createFakeLocks, flushLocks } from '../test/doubles/locks'
 
 afterEach(() => {
@@ -115,46 +115,53 @@ describe('holdTabLock', () => {
   })
 })
 
-// ESCSUITE-283: a departed tab's lock is claimed by the tab its slot is offered
-// to, from the offer until the answer, so a second fresh tab's request for it
-// is answered "held" and that tab moves on.
-describe('claimTabLock', () => {
-  it('takes a departed tab\'s lock and holds it until the returned function runs', async () => {
+// ESCSUITE-283 (fix round 1): a departed tab's slot is claimed through a lock
+// of its own, `escapeartist-offer:<id>`, held from the offer until the answer,
+// so a second fresh tab's claim is answered "held" and that tab moves on —
+// while the departed tab's *liveness* lock stays free, so the tab itself coming
+// back still finds its own id unused and is offered its own slot.
+describe('claimOfferLock', () => {
+  it('names one offer lock per tab id, apart from that tab\'s liveness lock', () => {
+    expect(offerLockName('abc')).toBe('escapeartist-offer:abc')
+    expect(offerLockName('abc')).not.toBe(tabLockName('abc'))
+  })
+
+  it('takes a departed tab\'s offer lock and holds it until the returned function runs', async () => {
     const { locks, isHeld, log } = createFakeLocks()
 
-    const release = await claimTabLock('crashed', locks)
+    const release = await claimOfferLock('crashed', locks)
     expect(release).toEqual(expect.any(Function))
     expect(log).toEqual(['probe'])
     await flushLocks()
-    expect(isHeld(tabLockName('crashed'))).toBe(true)
+    expect(isHeld(offerLockName('crashed'))).toBe(true)
 
     release!()
     await flushLocks()
+    expect(isHeld(offerLockName('crashed'))).toBe(false)
+  })
+
+  it('leaves the tab\'s liveness lock alone: the tab itself returning still finds its id free', async () => {
+    const { locks, isHeld } = createFakeLocks()
+
+    await claimOfferLock('crashed', locks)
+    await flushLocks()
+
     expect(isHeld(tabLockName('crashed'))).toBe(false)
+    await expect(probeTabLock('crashed', locks)).resolves.toBe('free')
   })
 
-  it('answers null, and holds nothing, while that tab is alive', async () => {
-    const { locks } = createFakeLocks()
-    const releaseAlive = holdTabLock('alive', locks)
-    await flushLocks()
-
-    await expect(claimTabLock('alive', locks)).resolves.toBeNull()
-
-    // The live tab closing frees its lock: the failed claim queued nothing.
-    releaseAlive()
-    await flushLocks()
-    await expect(probeTabLock('alive', locks)).resolves.toBe('free')
-  })
-
-  it('answers null to the second of two claims on the same lock', async () => {
+  it('answers null to the second of two claims on the same offer', async () => {
     // Two fresh tabs asking at once: the first request is granted, the second
-    // is answered against it.
+    // is answered against it, and nothing is queued for it.
     const { locks } = createFakeLocks()
 
-    const [first, second] = await Promise.all([claimTabLock('crashed', locks), claimTabLock('crashed', locks)])
+    const [first, second] = await Promise.all([claimOfferLock('crashed', locks), claimOfferLock('crashed', locks)])
 
     expect(first).toEqual(expect.any(Function))
     expect(second).toBeNull()
+    first!()
+    await flushLocks()
+    await expect(claimOfferLock('crashed', locks)).resolves.toEqual(expect.any(Function))
   })
 
   it('answers as a lone tab when the browser rejects the claim, and logs why', async () => {
@@ -162,17 +169,17 @@ describe('claimTabLock', () => {
     const error = new DOMException('opaque origin', 'SecurityError')
     const locks = { request: vi.fn(() => Promise.reject(error)) } as unknown as LockManager
 
-    const release = await claimTabLock('crashed', locks)
+    const release = await claimOfferLock('crashed', locks)
 
     expect(release).toEqual(expect.any(Function))
     expect(() => release!()).not.toThrow()
-    expect(consoleError).toHaveBeenCalledWith('Failed to claim a tab lock:', error)
+    expect(consoleError).toHaveBeenCalledWith('Failed to claim a session offer:', error)
   })
 
   it('answers as a lone tab where the browser has no Web Locks', async () => {
     expect(navigator.locks).toBeUndefined()
 
-    const release = await claimTabLock('crashed')
+    const release = await claimOfferLock('crashed')
 
     expect(release).toEqual(expect.any(Function))
     expect(() => release!()).not.toThrow()
