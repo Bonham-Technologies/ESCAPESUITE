@@ -1004,6 +1004,22 @@ describe('projectStore integration', () => {
         expect(useEditorStore.getState().updateShapeOverlayData(shape.id, { fillColor: '#ff0000ff' })).toBe(true)
       })
 
+      // ESCSUITE-250: ESCSUITE-101's "a no-op edit refuses", applied to the text writer.
+      it('refuses updateTextOverlayData when every field already holds the value, and a real change reports true', () => {
+        const text = useEditorStore.getState().addTextOverlayClip({ text: 'Hi', fontSize: 40 })!
+        const entries = useEditorStore.getState().history.past.length
+        const clips = useEditorStore.getState().project.timeline.clips
+
+        expect(useEditorStore.getState().updateTextOverlayData(text.id, { text: 'Hi' })).toBe(false)
+        expect(useEditorStore.getState().updateTextOverlayData(text.id, { text: 'Hi', fontSize: 40 })).toBe(false)
+        expect(useEditorStore.getState().project.timeline.clips).toBe(clips)
+        expect(useEditorStore.getState().history.past).toHaveLength(entries)
+
+        // One field differing is a write.
+        expect(useEditorStore.getState().updateTextOverlayData(text.id, { text: 'Hi', fontSize: 41 })).toBe(true)
+        expect(useEditorStore.getState().history.past).toHaveLength(entries + 1)
+      })
+
       it('lands a text overlay on a new track when the only empty track is locked', () => {
         const lockedId = useEditorStore.getState().project.timeline.tracks[0].id
         useEditorStore.getState().updateTrack(lockedId, { locked: true })
