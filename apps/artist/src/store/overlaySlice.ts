@@ -171,8 +171,7 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
     if (!target) return false;
     // ESCSUITE-250: ESCSUITE-101's "a no-op edit refuses" — every field in the
     // patch already holds the value it is being given.
-    const held = target.textData as Record<string, unknown> | undefined;
-    if (held && (Object.keys(textData) as Array<keyof TextOverlayData>).every((k) => held[k] === textData[k])) return false;
+    if ((Object.keys(textData) as Array<keyof TextOverlayData>).every((k) => target.textData?.[k] === textData[k])) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {

@@ -738,7 +738,9 @@ export interface EditorState {
    * change) and `clearClipKeyframes`, which refuses for an unknown clip or one
    * with no animation at all — `removeClipKeyframe`'s own two non-lock
    * reasons, applied here because this action had no existence guard
-   * whatsoever before. All of them still mean exactly what `false` means
+   * whatsoever before. ESCSUITE-250 added a no-op patch: `updateTextOverlayData`
+   * refuses when every field in the patch already equals the clip's
+   * `textData`. All of them still mean exactly what `false` means
    * above: no state changed, no undo entry pushed.
    *
    * A caller that passes `skipHistory: true` to a *later* write of the same
