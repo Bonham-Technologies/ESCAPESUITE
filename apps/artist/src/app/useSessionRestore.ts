@@ -143,7 +143,10 @@ export function useSessionRestore({
       );
       // A stale offer (ESCSUITE-283): the tab that wrote this slot is open
       // again and has been offered it itself. Adopting it would take its work
-      // out from under it, so this is refused the way a failed read is.
+      // out from under it, so this is refused the way a failed read is. An
+      // owner that comes back after this check and before the adoption below
+      // still has its slot adopted — two copies, never a loss (a documented
+      // limit; see apps/artist/CLAUDE.md, "The limits this leaves").
       if (await offered.ownerReturned()) throw new Error(OWNER_RETURNED);
     } catch (error) {
       console.error('Failed to restore session:', error);

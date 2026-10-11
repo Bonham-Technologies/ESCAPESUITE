@@ -417,7 +417,13 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     })
 
     it('two fresh tabs opened in the same tick: exactly one is offered the one slot', async () => {
-      // Both mounts before either startup check has run a single step.
+      // Both mounts before either startup check has run a single step. This
+      // pins the outcome (exactly one prompt), not the offer claim: the two
+      // tabs' simultaneous probes of the departed tab's lock collide in the
+      // locks double — as they would in a browser — so the second skips the
+      // slot before it ever asks for the offer, and this case stays green with
+      // the claim removed. The claim itself is pinned by the sequential case
+      // above and by sessionSlots.test.ts / sessionLock.test.ts.
       vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashedLate(), 'crashed-late')])
 
       const tabs = [mountTab('fresh-1'), mountTab('fresh-2')]

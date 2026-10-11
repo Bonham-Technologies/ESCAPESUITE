@@ -3452,9 +3452,15 @@ the work and nothing lost. A slot is offered again only once nobody holds its of
 or refused restore, or after the offering tab closed with the prompt up. A departed tab that comes
 back while its slot is on offer elsewhere is offered its own slot, as it is on its own; the other
 tab's prompt still shows the same work until it is answered, and either answer then leaves the slot
-alone, so the tab that came back is the one that keeps it. The two tabs can both be offered it in
-the instant before the returning tab holds its lock again — at worst two copies, as ESCSUITE-274
-had, never a loss. The prune does not ask whether a slot's tab is alive, so a tab left open for over 30
+alone while the tab that came back is still open, so that tab is the one that keeps it. The two tabs
+can both be offered it in the instant before the returning tab holds its lock again — at worst two
+copies, as ESCSUITE-274 had, never a loss. Likewise, an owner that comes back after a restore's
+answer-time check has asked and before the adoption has deleted the old row still has that slot
+adopted by the other tab: two copies (the returning tab holds the same session in its own prompt),
+never a loss. An old prompt answered after its slot's owner came back, saved newer work and closed
+again finds that owner gone once more, so Start Fresh deletes that newer work and Restore adopts the
+old snapshot over it — not new with ESCSUITE-283 (ESCSUITE-274 behaved the same), and filed as
+ESCSUITE-289: re-read the slot's timestamp at answer time and treat a changed one as stale. The prune does not ask whether a slot's tab is alive, so a tab left open for over 30
 days without an edit has its slot pruned by another tab's startup until its next edit writes it
 again. During a deploy, a tab still running the old build keeps writing the legacy row, which a
 new-build tab offers without a claim. The duplicated-tab rule relies on the
@@ -3465,7 +3471,11 @@ ever to answer that probe `'held'`, the reload would take a new id, and its old 
 tab's once the old document's lock is gone — would be offered to this tab if that lock is free by
 the time it looks at the other slots, and otherwise to the next fresh tab: the same work, under a
 prompt, not lost. No other tab's offer is ever held on a tab's own lock (ESCSUITE-283 fix round 1),
-so a slot on offer elsewhere is not a reason for that probe to answer `'held'`. `apps/e2e`'s
+so a slot on offer elsewhere is not a reason for that probe to answer `'held'` — though another
+tab's answer-time probe of that same lock (`ownerReturned()`) colliding with it, a sub-millisecond
+window, would make the reload renew its id while its old slot's offer is held elsewhere, and that
+other tab's answer could then delete or adopt the slot: the one case where the work is lost rather
+than copied. `apps/e2e`'s
 `escapeartist/session-ownership.spec.ts` drives the crash case with three tabs in one context: A
 imports a source and closes, B (open throughout) imports one after it, and a fresh C is offered A's
 session — not B's newer one, which only B's live lock keeps off the prompt — and restoring it
