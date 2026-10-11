@@ -27,6 +27,7 @@ let addListener: MockInstance
 let removeListener: MockInstance
 let containerRef: { current: HTMLDivElement | null }
 let setCurrentTime: MockInstance
+let setIsPlaying: MockInstance
 
 beforeEach(() => {
   resetStoreForTest()
@@ -39,6 +40,7 @@ beforeEach(() => {
   containerRef = { current: container }
 
   setCurrentTime = vi.fn(useEditorStore.getState().setCurrentTime)
+  setIsPlaying = vi.fn(useEditorStore.getState().setIsPlaying)
 })
 
 afterEach(() => {
@@ -48,10 +50,13 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
+/** The hook's inputs; `isPlaying` is read from the store on every render, as `Timeline` does. */
 const deps = (): PlayheadDragDeps => ({
   trackContainerRef: containerRef,
   pixelsPerSecond: PPS,
   timelineDuration: DURATION,
+  isPlaying: useEditorStore.getState().isPlaying,
+  setIsPlaying: setIsPlaying as unknown as (playing: boolean) => void,
   setCurrentTime: setCurrentTime as unknown as (time: number) => void,
 })
 
@@ -190,5 +195,67 @@ describe('usePlayheadDrag following the pointer', () => {
 
     expect(setCurrentTime).toHaveBeenCalledTimes(1)
     expect(currentTime()).toBe(2.5)
+  })
+})
+
+// ESCSUITE-246: the render loop writes the playback position into the store
+// while it runs, so a scrub over a playing timeline was overwritten and the
+// playhead snapped back. The scrub pauses for its own length, the way a ruler
+// click pauses, and hands playback back on release only if it took it away.
+describe('usePlayheadDrag and playback', () => {
+  it('pauses a playing timeline on grab, before the first write', () => {
+    useEditorStore.getState().setIsPlaying(true)
+    const { result } = mountScrub()
+
+    grab(result)
+    moveTo(2.5)
+
+    expect(setIsPlaying).toHaveBeenCalledTimes(1)
+    expect(setIsPlaying).toHaveBeenCalledWith(false)
+    expect(setIsPlaying.mock.invocationCallOrder[0]).toBeLessThan(setCurrentTime.mock.invocationCallOrder[0])
+    expect(useEditorStore.getState().isPlaying).toBe(false)
+  })
+
+  it('resumes playback on release when it was running at the grab', () => {
+    useEditorStore.getState().setIsPlaying(true)
+    const { result } = mountScrub()
+    grab(result)
+    moveTo(2.5)
+
+    release()
+
+    expect(setIsPlaying).toHaveBeenCalledTimes(2)
+    expect(setIsPlaying).toHaveBeenLastCalledWith(true)
+    expect(useEditorStore.getState().isPlaying).toBe(true)
+    expect(currentTime()).toBe(2.5)
+  })
+
+  it('leaves a paused timeline paused, through the grab and the release', () => {
+    const { result } = mountScrub()
+
+    grab(result)
+    moveTo(2.5)
+    release()
+
+    expect(setIsPlaying).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().isPlaying).toBe(false)
+  })
+
+  it('decides the resume per scrub: one started paused after a resumed one stays paused', () => {
+    useEditorStore.getState().setIsPlaying(true)
+    const { result, rerender } = mountScrub()
+    grab(result)
+    release()
+    expect(useEditorStore.getState().isPlaying).toBe(true)
+
+    useEditorStore.getState().setIsPlaying(false)
+    rerender()
+    setIsPlaying.mockClear()
+    grab(result)
+    moveTo(4)
+    release()
+
+    expect(setIsPlaying).not.toHaveBeenCalled()
+    expect(useEditorStore.getState().isPlaying).toBe(false)
   })
 })

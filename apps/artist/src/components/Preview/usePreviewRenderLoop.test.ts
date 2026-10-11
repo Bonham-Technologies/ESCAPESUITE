@@ -14,6 +14,7 @@ import {
   type PreviewRenderLoopDeps,
 } from './usePreviewRenderLoop'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
+import { useEditorStore } from '../../store/projectStore'
 import { FRAME_MS, installPreviewDoubles, last, settle, type PreviewDoubles } from '../../test/renderPreview'
 
 let doubles: PreviewDoubles
@@ -192,6 +193,95 @@ describe('usePreviewRenderLoop playback', () => {
     expect(store().isPlaying).toBe(false)
     expect(store().currentTime).toBe(1)
     expect(result.current.getDisplayTime()).toBe(1)
+  })
+})
+
+/**
+ * Replace the store's `setCurrentTime` with a spy that still writes, so a test
+ * can count the loop's store writes. Install it after the test's own seeks.
+ */
+function spyOnStoreTimeWrites() {
+  const write = vi.fn(store().setCurrentTime)
+  useEditorStore.setState({ setCurrentTime: write })
+  return write
+}
+
+// ESCSUITE-246: with loop playback on and the in and out points on the same
+// frame, every animation frame was already past the out point, so the loop
+// jumped back to the in point and wrote it to the store once a frame — about
+// sixty writes a second, every subscriber re-running — while still "playing".
+// A loop region shorter than one frame does not play: playback stops at the
+// out point, the way it stops at the end of the timeline with the loop off.
+describe('usePreviewRenderLoop and a loop region shorter than one frame', () => {
+  it('stops at the out point when the in and out points are the same time', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(2)
+    store().setOutPoint(2)
+    const { deps, play, seek } = harness()
+    seek(2)
+    const writes = spyOnStoreTimeWrites()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(false)
+    expect(writes.mock.calls.length).toBeLessThanOrEqual(2)
+    expect(store().currentTime).toBe(2)
+    expect(result.current.getDisplayTime()).toBe(2)
+  })
+
+  it('plays up to a zero-length loop from before it, and stops there', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(2)
+    store().setOutPoint(2)
+    const { deps, play, seek } = harness()
+    seek(1.5)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1000)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(2)
+  })
+
+  it('stops at the out point of a region shorter than a frame but not empty', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(2)
+    store().setOutPoint(2.01)
+    const { deps, play, seek } = harness()
+    seek(2)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(2.01)
+  })
+
+  it('still loops a half-second region', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(1)
+    store().setOutPoint(1.5)
+    const { deps, play, seek } = harness()
+    seek(1.4)
+    const writes = spyOnStoreTimeWrites()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1000)
+
+    expect(store().isPlaying).toBe(true)
+    // Looped back to the in point more than once, and is inside the region.
+    expect(writes.mock.calls.filter(([time]) => time === 1).length).toBeGreaterThanOrEqual(2)
+    expect(result.current.getDisplayTime()).toBeGreaterThanOrEqual(1)
+    expect(result.current.getDisplayTime()).toBeLessThan(1.5)
   })
 })
 
