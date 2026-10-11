@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getAllKeyframesForProperty, getAnimatedValues } from './animation'
+import { getAllKeyframesForProperty, getAnimatedValues, presetHandleTimes } from './animation'
 import type { ClipAnimation } from '../store/types'
 import { baseEffects, baseTransform } from '../test/fixtures/animation'
 
@@ -43,6 +43,57 @@ describe('getAllKeyframesForProperty', () => {
     expect(result).toHaveLength(3)
     expect(result[2].time).toBe(1)
     expect(result[2].value).toBe(0.5)
+  })
+})
+
+// ESCSUITE-282: the times the Animate In/Out presets put a handle at, for one
+// property — what the keyframe panel refuses an add at, so a custom keyframe
+// can never land over a preset handle and replace it in the merge.
+describe('presetHandleTimes (ESCSUITE-282)', () => {
+  const presets = (
+    inPreset: ClipAnimation['in']['type'],
+    outPreset: ClipAnimation['out']['type']
+  ): ClipAnimation => ({
+    in: { type: inPreset, duration: 0.5, easing: 'linear' },
+    out: { type: outPreset, duration: 0.5, easing: 'linear' },
+    keyframes: {},
+  })
+
+  it('has no handles for a clip with no animation', () => {
+    expect(presetHandleTimes('opacity', 2, undefined, baseTransform, baseEffects)).toEqual([])
+  })
+
+  it('has no handles when neither preset is on', () => {
+    expect(presetHandleTimes('opacity', 2, presets('none', 'none'), baseTransform, baseEffects)).toEqual([])
+  })
+
+  it('answers both ends of an in-preset', () => {
+    expect(presetHandleTimes('opacity', 2, presets('fade', 'none'), baseTransform, baseEffects)).toEqual([0, 0.5])
+  })
+
+  it('answers both ends of an out-preset, the last at the clip duration', () => {
+    expect(presetHandleTimes('opacity', 2, presets('none', 'fade'), baseTransform, baseEffects)).toEqual([1.5, 2])
+  })
+
+  it('answers every handle of both presets, in time order', () => {
+    expect(presetHandleTimes('opacity', 2, presets('fade', 'fade'), baseTransform, baseEffects)).toEqual([0, 0.5, 1.5, 2])
+  })
+
+  it('includes a preset\'s middle handle', () => {
+    // `pop` puts a third handle at 70% of the in-duration.
+    expect(presetHandleTimes('scaleX', 2, presets('pop', 'none'), baseTransform, baseEffects)).toEqual([0, 0.35, 0.5])
+  })
+
+  it('has no handles on a property the presets do not drive', () => {
+    expect(presetHandleTimes('x', 2, presets('fade', 'fade'), baseTransform, baseEffects)).toEqual([])
+  })
+
+  it('ignores the clip\'s own keyframes', () => {
+    const animation: ClipAnimation = {
+      ...presets('fade', 'none'),
+      keyframes: { opacity: [{ time: 1, value: 0.5, easing: 'linear' }] },
+    }
+    expect(presetHandleTimes('opacity', 2, animation, baseTransform, baseEffects)).toEqual([0, 0.5])
   })
 })
 
