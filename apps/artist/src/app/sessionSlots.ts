@@ -5,9 +5,9 @@
 // for its lifetime (`sessionLock.ts`), so a slot whose tab lock is free is the
 // work of a tab that closed or crashed. The prompt offers this tab's own slot
 // whenever it has one (a reload, or a tab the browser restored after a crash),
-// and otherwise the newest of the free ones — claiming that tab's lock while
-// the offer stands, so a second fresh tab opened with this one is offered the
-// next slot or none rather than the same session (ESCSUITE-283).
+// and otherwise the newest of the free ones — claiming that slot's offer lock
+// while the offer stands, so a second fresh tab opened with this one is offered
+// the next slot or none rather than the same session (ESCSUITE-283).
 // A slot is removed when it is restored (adopted by the restoring tab), when
 // it is declined, when its own tab starts a New Project, or here, at startup,
 // once it is older than `SESSION_SLOT_MAX_AGE_MS`.
@@ -17,18 +17,24 @@ import {
   saveSessionState,
   type SessionSlot,
 } from '../core/storage';
-import { claimTabLock, NO_HOLD } from './sessionLock';
+import { claimOfferLock, NO_HOLD, probeTabLock } from './sessionLock';
 import { SESSION_SLOT_MAX_AGE_MS } from './appConstants';
 
 /**
- * The slot the prompt offers, and how to let go of the departed tab's lock
- * claimed for it once the prompt is answered (`NO_HOLD` for this tab's own
- * slot and the ownerless legacy row, which nothing claims).
+ * The slot the prompt offers, how to let go of the offer claimed for it once
+ * the prompt is answered (`NO_HOLD` for this tab's own slot and the ownerless
+ * legacy row, which nothing claims), and whether the tab that wrote it has
+ * come back since — asked before either answer touches the slot, because the
+ * prompt can stay up indefinitely and the departed tab can reload meanwhile.
  */
 export interface OfferedSlot {
   slot: SessionSlot;
   release: () => void;
+  ownerReturned: () => Promise<boolean>;
 }
+
+/** This tab's own slot and the legacy row: no other tab owns either. */
+const NO_OWNER = (): Promise<boolean> => Promise.resolve(false);
 
 const hasMedia = (slot: SessionSlot): boolean => slot.session.sourceVideos.length > 0;
 
@@ -47,10 +53,12 @@ const hasMedia = (slot: SessionSlot): boolean => slot.session.sourceVideos.lengt
  *
  * Only a tab with no slot of its own is offered someone else's: the newest
  * slot with media whose tab is gone — the legacy row an older build shared
- * between tabs without a claim, since no tab owns it, and every other slot's
- * tab lock claimed, newest first, until one is taken (ESCSUITE-283). The claim
- * is held until the caller releases it, so a second fresh tab asking at the
- * same time finds that lock held and moves on to the next slot.
+ * between tabs without a probe or a claim, since no tab owns it, and every
+ * other slot's tab lock probed, newest first, and its offer claimed once the
+ * tab is found gone (ESCSUITE-283). The claim is held until the caller releases
+ * it, so a second fresh tab asking at the same time finds the offer held and
+ * moves on to the next slot; the tab lock is only probed, so the departed tab
+ * coming back still finds its own id free.
  */
 export async function findOfferableSlot(tabId: string, now: number): Promise<OfferedSlot | null> {
   const cutoff = now - SESSION_SLOT_MAX_AGE_MS;
@@ -68,13 +76,18 @@ export async function findOfferableSlot(tabId: string, now: number): Promise<Off
       candidates.push(slot);
     }
   }
-  if (own) return hasMedia(own) ? { slot: own, release: NO_HOLD } : null;
+  if (own) return hasMedia(own) ? { slot: own, release: NO_HOLD, ownerReturned: NO_OWNER } : null;
 
   candidates.sort((a, b) => b.session.timestamp - a.session.timestamp);
   for (const slot of candidates) {
-    if (slot.tabId === null) return { slot, release: NO_HOLD };
-    const release = await claimTabLock(slot.tabId);
-    if (release) return { slot, release };
+    const owner = slot.tabId;
+    if (owner === null) return { slot, release: NO_HOLD, ownerReturned: NO_OWNER };
+    if ((await probeTabLock(owner)) === 'held') continue;
+    const release = await claimOfferLock(owner);
+    if (release) {
+      const ownerReturned = async () => (await probeTabLock(owner)) === 'held';
+      return { slot, release, ownerReturned };
+    }
   }
   return null;
 }
@@ -85,13 +98,17 @@ export async function findOfferableSlot(tabId: string, now: number): Promise<Off
  * departed tab last saved — then the old row deleted — in that order, so a failed write leaves the session
  * where it was rather than nowhere. A failure is logged, never thrown: the
  * restore itself has already landed, and the autosave writes this tab's slot
- * again from its next tick.
+ * again from its next tick. Answers whether the old row is gone: while it is
+ * not, the caller keeps its claim on the offer, so no other tab adopts a
+ * second copy of it (ESCSUITE-283).
  */
-export async function adoptSessionSlot(slot: SessionSlot, tabId: string): Promise<void> {
+export async function adoptSessionSlot(slot: SessionSlot, tabId: string): Promise<boolean> {
   try {
     await saveSessionState({ ...slot.session, tabId, timestamp: Date.now() });
     await clearSessionState(slot.tabId);
+    return true;
   } catch (error) {
     console.error('Failed to adopt the restored session:', error);
+    return false;
   }
 }

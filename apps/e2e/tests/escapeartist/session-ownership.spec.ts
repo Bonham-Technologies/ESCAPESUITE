@@ -17,9 +17,10 @@ import { waitForAppReady } from '../../utils/ready'
  * editing, and a fresh tab C is offered A's session, not B's live one. Three
  * tabs in one browser context: one origin, one database, one lock manager.
  *
- * ESCSUITE-283: a fresh tab claims the departed tab's lock while that tab's
- * slot is on offer, so two fresh tabs opened together after A closes are not
- * both offered A's session — the second case below.
+ * ESCSUITE-283: a fresh tab claims a departed tab's slot through a lock of its
+ * own, `escapeartist-offer:<tabId>`, held while the slot is on offer (the tab
+ * lock itself is only probed), so two fresh tabs opened together after A
+ * closes are not both offered A's session — the second case below.
  */
 
 /** ESCAPEARTIST's autosave debounce (`AUTO_SAVE_DELAY`) is 2 s; give it room. */
@@ -182,8 +183,8 @@ test.describe('One session slot per ESCAPEARTIST tab (ESCSUITE-274)', () => {
       .toEqual({ name: 'Tab A', sources: 1, clips: 1 })
     await page.close()
 
-    // Two fresh tabs at once. Whichever asks first claims A's lock while the
-    // prompt is up; the other finds it held and, with no other slot, is
+    // Two fresh tabs at once. Whichever asks first claims A's offer while its
+    // prompt is up; the other finds the offer held and, with no other slot, is
     // offered nothing.
     const [first, second] = await Promise.all([
       (async () => {

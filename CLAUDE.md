@@ -181,7 +181,7 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   the page). Only in **Chromium and Firefox** — an allow-list (`core/workerDecodeEngine.ts`) of the
   engines whose worker output was measured against their own `<video>` (Chromium: export MAD
   0.000/255 at every compared frame across untagged, BT.709-tagged, full-range, matrix-only,
-  `colr`-only and trimmed sources; Firefox: 0.000–0.356 on the same sources, rotated sources
+  `colr`-only and trimmed sources; Firefox: 0.000–0.379 on the same sources, rotated sources
   refused to `<video>` — both since ESCSUITE-265, below); WebKit is not admitted (ESCSUITE-285:
   its `VideoDecoder` ignores `colorSpace`, 6.5–8.0/255 mean off its own `<video>` as ESCSUITE-262
   measured, and the fix would be a per-frame copy — it keeps the in-page path), and nor is any
