@@ -1,5 +1,13 @@
 # @escapesuite/shared
 
+## 1.4.8
+
+### Patch Changes
+
+- a2bfdd1: The shared storage can list every setting under a key prefix
+  
+  `listSettings(prefix)` returns every row of the `settings` store whose key starts with the prefix, with its key — what ESCAPEARTIST uses to find each tab's saved session.
+
 ## 1.4.7
 
 ### Patch Changes
