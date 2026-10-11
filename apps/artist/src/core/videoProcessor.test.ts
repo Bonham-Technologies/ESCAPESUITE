@@ -293,6 +293,84 @@ describe('videoProcessor', () => {
       expect(media.seeks).toEqual([Number.MAX_SAFE_INTEGER])
     })
 
+    // ESCSUITE-249: before `loadedmetadata` nothing bounded the wait, so a file
+    // the browser neither decoded nor rejected sat on "Processing..." forever.
+    describe('the metadata deadline (ESCSUITE-249)', () => {
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('rejects a video that never reports its metadata, at 15 s and not before', async () => {
+        vi.useFakeTimers()
+        media.script({ video: { silent: true } })
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+        const pending = extractVideoMetadata(new File(['x'], 'mute.mp4', { type: 'video/mp4' }))
+        let settled = false
+        pending.then(() => (settled = true), () => (settled = true))
+        const rejection = expect(pending).rejects.toThrow(
+          'Could not read mute.mp4 \u2014 the browser did not report its metadata within 15 s'
+        )
+
+        await vi.advanceTimersByTimeAsync(14_999)
+        expect(settled).toBe(false)
+        await vi.advanceTimersByTimeAsync(1)
+
+        await rejection
+        expect(revoke).toHaveBeenCalledTimes(1)
+        expect(vi.getTimerCount()).toBe(0)
+        revoke.mockRestore()
+      })
+
+      it('rejects an audio file that never reports its metadata the same way', async () => {
+        vi.useFakeTimers()
+        media.script({ audio: { silent: true } })
+        const pending = extractAudioMetadata(new File(['x'], 'mute.mp3', { type: 'audio/mp3' }))
+        const rejection = expect(pending).rejects.toThrow(
+          'Could not read mute.mp3 \u2014 the browser did not report its metadata within 15 s'
+        )
+
+        await vi.advanceTimersByTimeAsync(15_000)
+
+        await rejection
+      })
+
+      it('clears the deadline when loadedmetadata arrives first, so nothing rejects late', async () => {
+        vi.useFakeTimers()
+        media.script({ video: { duration: 4 } })
+
+        const metadata = await extractVideoMetadata(new File(['x'], 'ok.mp4', { type: 'video/mp4' }))
+
+        expect(metadata.duration).toBe(4)
+        expect(vi.getTimerCount()).toBe(0)
+        await vi.advanceTimersByTimeAsync(20_000)
+      })
+
+      it('clears the deadline when the element errors first', async () => {
+        vi.useFakeTimers()
+        media.script({ video: { fail: true } })
+
+        await expect(
+          extractVideoMetadata(new File(['x'], 'bad.mp4', { type: 'video/mp4' }))
+        ).rejects.toThrow('Failed to load video: bad.mp4')
+
+        expect(vi.getTimerCount()).toBe(0)
+      })
+
+      it('hands over to the end-seek probe\'s own 5 s deadline once metadata has arrived', async () => {
+        vi.useFakeTimers()
+        media.script({ video: { duration: Infinity, stallSeek: true } })
+        const pending = extractVideoMetadata(new File(['x'], 'slow.webm', { type: 'video/webm' }))
+        const rejection = expect(pending).rejects.toThrow(
+          'Could not determine the duration of slow.webm'
+        )
+
+        await vi.advanceTimersByTimeAsync(5000)
+
+        await rejection
+        expect(vi.getTimerCount()).toBe(0)
+      })
+    })
+
     it('rejects when the end seek never reports back', async () => {
       vi.useFakeTimers()
       try {

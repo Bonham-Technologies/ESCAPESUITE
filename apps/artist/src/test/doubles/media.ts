@@ -58,6 +58,8 @@ export interface VideoScript extends SeekScript {
   readyState: number
   /** Fire 'error' instead of 'loadedmetadata'/'loadeddata' when src is set. */
   fail: boolean
+  /** Fire nothing at all when src is set — a file the browser neither decodes nor rejects. */
+  silent?: boolean
   /**
    * Give the element `requestVideoFrameCallback` (ESCSUITE-276). Left unset —
    * the default — the element has none, as jsdom's does not, and the frame
@@ -87,6 +89,8 @@ export interface AudioScript extends SeekScript {
   duration: number
   /** Fire 'error' instead of 'loadedmetadata' when src is set. */
   fail: boolean
+  /** Fire nothing at all when src is set (see `VideoScript.silent`). */
+  silent?: boolean
 }
 
 export interface MediaDoubleScript {
@@ -265,6 +269,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     defineCurrentTime(el, s)
 
     defineSrc(el, () => {
+      if (s.silent) return
       if (s.fail) {
         el.dispatchEvent(new Event('error'))
         return
@@ -299,6 +304,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'load', vi.fn())
     defineCurrentTime(el, s)
     defineSrc(el, () => {
+      if (s.silent) return
       el.dispatchEvent(new Event(s.fail ? 'error' : 'loadedmetadata'))
     })
     audios.push(el)
