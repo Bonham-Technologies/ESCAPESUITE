@@ -71,6 +71,13 @@ describe('TextContentSection', () => {
     expect(textarea().style.height).toBe('0px')
   })
 
+  it('offers every family in the stack table, stored by its bare name', () => {
+    renderSection()
+
+    const values = Array.from(fontSelect().querySelectorAll('option')).map((o) => o.value)
+    expect(values).toEqual(['Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana', 'Courier New', 'Impact'])
+  })
+
   it('changes the font family', async () => {
     const user = userEvent.setup()
     const { onChange } = renderSection()

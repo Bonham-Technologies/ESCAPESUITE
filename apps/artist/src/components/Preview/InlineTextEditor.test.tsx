@@ -132,7 +132,7 @@ describe('InlineTextEditor', () => {
     // padding = fontSize * 0.15 = 6px
     expect(textarea.style.left).toBe('94px')
     expect(textarea.style.top).toBe('44px')
-    expect(textarea.style.fontFamily).toBe('Inter')
+    expect(textarea.style.fontFamily).toBe('Inter, sans-serif')
     expect(textarea.style.fontSize).toBe('40px')
     expect(textarea.style.fontWeight).toBe('700')
     expect(textarea.style.fontStyle).toBe('italic')

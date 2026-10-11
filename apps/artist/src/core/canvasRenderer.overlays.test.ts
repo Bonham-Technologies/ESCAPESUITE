@@ -164,13 +164,13 @@ describe('drawTextOverlayToCanvasAnimated', () => {
   it('builds the font string from style, weight, size and family', () => {
     draw(makeTextData({ fontStyle: 'italic', fontWeight: 'bold', fontSize: 32, fontFamily: 'Inter' }))
 
-    expect(ctx.stateFor('fillText')[0].font).toBe('italic bold 32px Inter')
+    expect(ctx.stateFor('fillText')[0].font).toBe('italic bold 32px Inter, sans-serif')
   })
 
   it('omits style and weight prefixes when they are the defaults', () => {
     draw(makeTextData({ fontSize: 20, fontFamily: 'Courier' }))
 
-    expect(ctx.stateFor('fillText')[0].font).toBe('20px Courier')
+    expect(ctx.stateFor('fillText')[0].font).toBe('20px Courier, sans-serif')
   })
 
   it('draws with the requested alignment on a middle baseline', () => {
