@@ -7,6 +7,7 @@ import {
   isStandaloneMode,
   EDITOR_URL,
   editorUrl,
+  editorUrlIsRelative,
   parseHostOrigin,
   resetHostOriginWarning,
 } from './index'
@@ -247,5 +248,47 @@ describe('parseHostOrigin', () => {
     parseHostOrigin('?title=Demo')
 
     expect(warn).not.toHaveBeenCalled()
+  })
+})
+
+describe('editorUrlIsRelative', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  const relativeFor = async (value?: string): Promise<boolean> => {
+    if (value !== undefined) vi.stubEnv('VITE_EDITOR_URL', value)
+    vi.resetModules()
+    const { editorUrlIsRelative: fresh } = await import('./index')
+    return fresh()
+  }
+
+  it('is true for the default, when VITE_EDITOR_URL is unset', () => {
+    expect(editorUrlIsRelative()).toBe(true)
+  })
+
+  it('is true for a root-absolute path', async () => {
+    expect(await relativeFor('/artist/')).toBe(true)
+  })
+
+  it('is true for a document-relative path', async () => {
+    expect(await relativeFor('artist/')).toBe(true)
+  })
+
+  it('is true for a value that is not a URL at all', async () => {
+    expect(await relativeFor('not a url')).toBe(true)
+  })
+
+  it('is true for an absolute URL on a scheme other than http(s)', async () => {
+    expect(await relativeFor('ftp://editor.example/')).toBe(true)
+  })
+
+  it('is false for an absolute https origin', async () => {
+    expect(await relativeFor('https://editor.example')).toBe(false)
+  })
+
+  it('is false for an absolute http URL with a path', async () => {
+    expect(await relativeFor('http://editor.example/path/')).toBe(false)
   })
 })
