@@ -16,22 +16,33 @@
 /** The `sessionStorage` key this tab's id is kept under. */
 export const TAB_ID_KEY = 'escapeartist-tab-id';
 
+/**
+ * A new id. `crypto.randomUUID` is exposed to secure contexts only, and an
+ * editor served over plain http from a LAN address has none — that tab must
+ * still start, so it gets a time-and-random id instead. Either is unique
+ * enough for what it names: one tab's slot among a handful.
+ */
+function mintTabId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
 /** This tab's id: the one it already has, or a new one kept for next time. */
 export function readTabId(): string {
   try {
     const stored = sessionStorage.getItem(TAB_ID_KEY);
     if (stored) return stored;
-    const minted = crypto.randomUUID();
+    const minted = mintTabId();
     sessionStorage.setItem(TAB_ID_KEY, minted);
     return minted;
   } catch {
-    return crypto.randomUUID();
+    return mintTabId();
   }
 }
 
 /** Give this tab a new id in place of the one it has — a duplicated tab's copy. */
 export function renewTabId(): string {
-  const minted = crypto.randomUUID();
+  const minted = mintTabId();
   try {
     sessionStorage.setItem(TAB_ID_KEY, minted);
   } catch {
