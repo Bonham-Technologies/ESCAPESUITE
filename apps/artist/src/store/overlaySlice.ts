@@ -167,7 +167,11 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
     // nothing in the `map` below (it bypasses on exactly this condition), and
     // the `set` would still run. Fix round 1: the guard has to mirror the
     // `map`'s own bypass, not just check the id exists.
-    if (!clips.some((c) => c.id === clipId && c.overlayType === 'text')) return false;
+    const target = clips.find((c) => c.id === clipId && c.overlayType === 'text');
+    if (!target) return false;
+    // ESCSUITE-250: ESCSUITE-101's "a no-op edit refuses" — every field in the
+    // patch already holds the value it is being given.
+    if ((Object.keys(textData) as Array<keyof TextOverlayData>).every((k) => target.textData?.[k] === textData[k])) return false;
 
     set((state) => {
       const newClips = state.project.timeline.clips.map(clip => {

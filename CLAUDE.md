@@ -3691,6 +3691,28 @@ changeset naming the `LOAD_PROJECT` change, and `'toString'` / `'__proto__'` row
 `hasOwnProperty` check the reason a test passes — are the last commit. `App.*rerender*` and every
 `*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-250 (finishing an inline text edit without
+changing the text no longer adds an undo step — `updateTextOverlayData` refuses a patch every field of which
+the clip already holds, with the ESCSUITE-87 `false` and no history entry, the ESCSUITE-101 shape — and a
+blank or whitespace-only commit restores the previous text instead of writing `''` and leaving a nameless,
+invisible clip; the editor closes either way): 99.83 / **99.38** / **96.43** / 99.75 against the
+99.83 / 99.37 / 96.41 / 99.75 that `main` at `cb202b8c` measures in the same sitting (the direct base the
+ESCSUITE-232 / 228 paragraph corrected the table row to) — statements up a hundredth, branches up two, lines
+and functions unmoved, and with one *fewer* uncovered arm: the base gives 5,594 / 5,802 branches and this
+branch 5,599 / 5,806, four new branches and five more covered, so the uncovered column falls 208 → 207
+(lines 8,653 / 8,667 → 8,655 / 8,669, statements 9,776 / 9,837 → 9,780 / 9,841, functions
+2,061 / 2,066 → 2,062 / 2,067, every denominator growing by exactly what the numerator did; the same
+14 / 61 / 5 uncovered). The movement is two files: `store/overlaySlice.ts` 58 → 60 (the per-field
+"already held" test, reached by the identical patch against the changed one — the first version carried a
+`held &&` operand whose false side no text clip can reach, which the review found and the fix round deleted
+rather than tested, the ESCSUITE-110 precedent) and `components/Preview/PreviewPlayer.tsx` 77 / 83 → 80 / 85
+(the blank-commit choice from both sides, and one pre-existing arm newly reached by the unchanged-text
+commit, whose store refusal the component now relies on rather than comparing a second time — the review's
+ruling: one decision, in the store, beats two). The four red cases (the unchanged commit, `''`, `'   '`, the
+store's refusal) were red before the fix; the ESCSUITE-160 inline-editor pins, `drawFrame.perf.test.ts`,
+every `*.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -3698,7 +3720,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.83 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.38 | 96.42 | 99.75 |
+| `@escapesuite/artist` | 99.83 | 99.38 | 96.43 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
 

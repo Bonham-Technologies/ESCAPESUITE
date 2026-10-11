@@ -315,6 +315,78 @@ describe('PreviewPlayer overlay drawing', () => {
     expect(preview.frame().of('fillText')).toHaveLength(1)
   })
 
+  // ESCSUITE-250: finishing an inline edit is a write only when it changes the
+  // text, and clearing the text restores what was there.
+  describe('committing an inline text edit (ESCSUITE-250)', () => {
+    const openEditor = async (text: string) => {
+      const clip = addText({ text })
+      const preview = await renderPreview()
+      fireEvent.doubleClick(preview.canvas, preview.at(960, 540))
+      await settle(FRAME_MS)
+      return { clip, textarea: screen.getByRole('textbox') as HTMLTextAreaElement }
+    }
+    const past = () => store().history.past.length
+    const current = (id: string) => store().project.timeline.clips.find((c) => c.id === id)!
+
+    it('adds no undo step when the text is committed unchanged', async () => {
+      const { clip, textarea } = await openEditor('Same')
+      const entries = past()
+      const before = store().project.timeline.clips
+
+      fireEvent.blur(textarea)
+      await settle(FRAME_MS)
+
+      expect(past()).toBe(entries)
+      expect(store().project.timeline.clips).toBe(before)
+      expect(current(clip.id).textData!.text).toBe('Same')
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    })
+
+    it.each(['', '   '])('restores the previous text when %j is committed', async (blank) => {
+      const { clip, textarea } = await openEditor('Keep me')
+      const entries = past()
+
+      fireEvent.change(textarea, { target: { value: blank } })
+      fireEvent.blur(textarea)
+      await settle(FRAME_MS)
+
+      expect(past()).toBe(entries)
+      expect(current(clip.id).textData!.text).toBe('Keep me')
+      expect(current(clip.id).name).toBe(clip.name)
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    })
+
+    it('writes once, and names the clip, when the text really changed', async () => {
+      const { clip, textarea } = await openEditor('Old')
+      const entries = past()
+
+      fireEvent.change(textarea, { target: { value: 'New' } })
+      fireEvent.blur(textarea)
+      await settle(FRAME_MS)
+
+      expect(past()).toBe(entries + 1)
+      expect(current(clip.id).textData!.text).toBe('New')
+      expect(current(clip.id).name).toBe('New')
+      expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    })
+
+    it('compares against the text in the store at commit time, not when editing began', async () => {
+      const { clip, textarea } = await openEditor('Start')
+
+      // Changed elsewhere (the inspector) while the editor is open.
+      act(() => { store().updateTextOverlayData(clip.id, { text: 'Elsewhere' }) })
+      const entries = past()
+
+      fireEvent.change(textarea, { target: { value: 'Start' } })
+      fireEvent.blur(textarea)
+      await settle(FRAME_MS)
+
+      // 'Start' differs from the live 'Elsewhere', so it is a real write.
+      expect(past()).toBe(entries + 1)
+      expect(current(clip.id).textData!.text).toBe('Start')
+    })
+  })
+
   it('restores the inline text editor as soon as the canvas remounts while editing (ESCSUITE-160)', async () => {
     addText({ text: 'Editing' })
     const preview = await renderPreview()

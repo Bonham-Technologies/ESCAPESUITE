@@ -2295,6 +2295,12 @@ The marquee selection layer takes no canvas element at all — it gates on
 `marqueeActive && marqueeStart && marqueeCurrent`, which come from pointer
 events already bound to a mounted canvas — so it never had this gap.
 
+**Committing the inline text editor (ESCSUITE-250).** `handleInlineTextCommit` writes only a
+text that is not blank (`trim() !== ''`): an empty or whitespace-only commit restores the
+previous text — no write, editing ends — because a text overlay with no text is nothing and
+`updateTextOverlayData` would otherwise name the clip `''`. An unchanged text is refused by the
+store, not the component, which compares against the live `textData` at commit time.
+
 ### ClipEditor (`src/components/ClipEditor/`)
 `ClipEditor.tsx` is wiring only — one call to `useClipEditorActions()`, the `!selectedClip`
 early return, and the JSX that hands each section the handful of props it needs. It holds no
@@ -2772,6 +2778,11 @@ a no-op as an unknown id:
 `if (!clips.some((c) => c.id === clipId && c.overlayType === 'text')) return false;` (and
 `'shape'` for its sibling). `removeClipKeyframe` needed nothing — ESCSUITE-101's `hasMatch` check
 already answers `false` for a clip the `find` doesn't locate.
+
+ESCSUITE-250 added the "nothing to do" arm to `updateTextOverlayData`: when every field in the
+patch already equals the clip's `textData` value it answers `false` with no history entry, so
+finishing an inline edit without changing the text, or a burst whose only edit is a no-op,
+pushes nothing.
 
 A review round found the same defect in two more places, neither one of "the thirteen actions
 above" because both used to return `void`: `updateClipBlendMode`, whose one caller
