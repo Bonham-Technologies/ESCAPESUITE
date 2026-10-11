@@ -57,3 +57,21 @@ describe('renewTabId', () => {
     expect(renewTabId()).toMatch(/^[0-9a-f-]{36}$/)
   })
 })
+
+describe('outside a secure context', () => {
+  it('still mints an id where crypto.randomUUID does not exist', () => {
+    // `crypto.randomUUID` is exposed to secure contexts only: an editor served
+    // over plain http from a LAN address has none, and must still start.
+    // jsdom's `randomUUID` lives on the prototype; an own `undefined` hides it.
+    Object.defineProperty(crypto, 'randomUUID', { value: undefined, configurable: true })
+    try {
+      const minted = readTabId()
+
+      expect(minted).toMatch(/^[0-9a-z]+-[0-9a-z]+$/)
+      expect(renewTabId()).not.toBe(minted)
+    } finally {
+      delete (crypto as { randomUUID?: unknown }).randomUUID
+    }
+  })
+})
+
