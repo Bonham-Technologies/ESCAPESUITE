@@ -116,7 +116,7 @@ const ROTATED_MP4 = resolvePath(FIXTURES, 'rotated.mp4')
 const FALLBACK_WARNING = 'falling back to HTMLVideoElement'
 const IN_PAGE_NOTICE = 'Decoding in the page; keep this tab in the foreground'
 /** `decoderConfigFor`'s refusal of a rotated track in a VideoDecoder that does not echo `rotation`. */
-const ROTATION_REFUSAL = "VideoDecoder cannot rotate its output"
+const ROTATION_REFUSAL = 'VideoDecoder cannot rotate its output'
 
 /**
  * Parity tolerance: mean absolute difference per RGB channel, out of 255.
@@ -703,7 +703,6 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
       // answers no frame, and the once-per-export notice is shown. The
       // orientation check below then holds because the export IS <video>.
       const details = await Promise.all(fallbackDetails)
-      console.log(`[ESCSUITE-262 rotation] framesReady ${run.framesReady}, notice ${run.inPageNoticeSeen}: ${details.join(' | ')}`)
       expectWorkerRefusedRotation(run, details)
     } else {
       expectWorkerDecoded(run)
