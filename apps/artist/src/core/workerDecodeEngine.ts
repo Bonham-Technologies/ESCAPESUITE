@@ -49,5 +49,13 @@ export interface EngineNavigator {
 export function isMeasuredWorkerDecodeEngine(nav: EngineNavigator | undefined): boolean {
   if (!nav) return false;
   if (nav.userAgentData?.brands?.some(({ brand }) => brand === 'Chromium')) return true;
+  return isFirefoxEngine(nav);
+}
+
+/**
+ * Firefox, by its `Gecko/` and `Firefox/` tokens — the one Firefox test, shared
+ * with the WebM exporter's colour relabel (ESCSUITE-284, `vpxColorLabel.ts`).
+ */
+export function isFirefoxEngine(nav: EngineNavigator): boolean {
   return /Gecko\//.test(nav.userAgent) && /Firefox\//.test(nav.userAgent);
 }
