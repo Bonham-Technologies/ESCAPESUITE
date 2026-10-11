@@ -3627,13 +3627,33 @@ dialog open at unmount), four of them red before the fix. The review's two MEDIU
 without the token bump) are the fix round. `App.*rerender*` and every `*.perf.test.ts` are byte-identical.
 **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/craft` was re-measured 2026-10-10 for ESCSUITE-230 (downloads are named from the take's own
+timestamp — `downloadFileStem(name, createdAt)` = `recording_YYYY-MM-DD_HH-mm-ss`, plus `_<label>` for a
+companion part — instead of from the locale-rendered display name, whose digits are not Latin in an Arabic,
+Persian, Hindi or Bengali locale and all became `_`, so every take downloaded as `recording_____…` and the
+files collided): 100.00 / 99.53 / **97.83** / 100.00 against the 100.00 / 99.53 / 97.82 / 100.00 that
+`main` at `cb202b8c` measures in the same sitting — branches up a hundredth, the other three unmoved at
+exactly 100, 99.53 and 100. Lines 2,400 → 2,407, statements 2,557 / 2,569 → 2,565 / 2,577, branches
+1,395 / 1,426 → 1,401 / 1,432 and functions 456 → 458, every new unit covered; the same 12 statements and
+31 branches uncovered, in the same four files. The six new branches are `utils/recordingFormat.ts`'s four
+(0 → 4: the companion-suffix choice and its empty-label side, reached by the ` — Webcam` name, a plain name
+and the degenerate trailing separator) and `hooks/useMp4Download.ts`'s two (53 → 55: the stored row's
+`recordedAt ?? 0`, reached by an ordinary row and by a legacy row that lacks the field — a reachable operand,
+since `SourceVideo.recordedAt` is optional and the store maps it to `createdAt` with the same fallback). The
+`ar-EG` case genuinely exercises Arabic-Indic digits (Node 26.7 ships full ICU) and lands on the same Latin
+stem as the `en-US` rendering of the same instant; the WebM and MP4 hook pins moved from the old
+`recording_10_10_2026…` shape to the new one, red before the fix. `App.library.test.tsx`'s default seed
+`recordedAt` became a fixed instant so its filename pins are deterministic; every ordering case there sets
+its own. No Playwright pin names the old shape (the e2e suite checks extensions only). `App.*rerender*` and
+every `*.perf.test.ts` are byte-identical. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.53 | 97.82 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.83 | 100.00 |
 | `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.67 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
