@@ -524,6 +524,7 @@ need `ffmpeg` and `ffprobe` on `PATH` and skip themselves (loudly) when the bina
 | `0` | Rendered and delivered. | One JSON `RenderOutcome` line with `"ok": true`. |
 | `1` | The job ran and failed (bad input file, encoder error, sink refused it, timeout). | One JSON `RenderOutcome` line with `"ok": false` and an `error` string. |
 | `2` | Usage or job-spec error — the job never started. Retrying identically will fail identically. | Empty. |
+| `2` | The job ran and was refused for its input: the output size is one the H.264 encoder refuses — `options.format: "mp4"` at a size with a side under 16 px, such as 64x8 or 3840x2, in a Chromium that encodes H.264 at 1280x720 (ESCSUITE-237). Retrying identically will fail identically; change the size, or render `webm` or `gif`, which are unaffected. | One JSON `RenderOutcome` line with `"ok": false`, the reason in `error` (`The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.`) and `"code": "OUTPUT_SIZE_UNSUPPORTED"`. |
 
 An exit `2` also covers a `volume` job whose output directory cannot be created or written by
 the user the process runs as (checked by writing and removing a private temp file before Chromium
@@ -533,7 +534,9 @@ launches; the message names the directory and the uid). Fix the mount's ownershi
 for a bad flag or environment variable (checked before anything binds), and `1` when it could
 not listen at all — `EADDRINUSE`, `EACCES` on a privileged port — which, unlike a `2`, may well
 succeed on a retry or another host. A render that fails inside `serve` is not an exit code at
-all: it is an `ok: false` in that request's response, and the server carries on. A second signal
+all: it is an `ok: false` in that request's response, and the server carries on — a 200, except
+for a render refused for its output size, which is a 400 (see [the status table](#post-render)'s
+`400` row). A second signal
 during the drain exits `130`; see [Shutdown](#shutdown).
 
 **stdout carries exactly one line and nothing else, ever.** Logs, progress and warnings all go
@@ -639,7 +642,10 @@ is a working loop; the contract it relies on is small:
   in-process lock does not close it for the documented one-process-per-job deployment.
 - **Retry on exit 1, never on exit 2.** Exit 1 is a failure that may be transient (a busy disk,
   a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
-  those to a dead-letter queue instead of a retry loop.
+  those to a dead-letter queue instead of a retry loop. That includes a job that ran and was
+  refused for its input — an MP4 at an output size H.264 refuses, whose outcome carries
+  `"code": "OUTPUT_SIZE_UNSUPPORTED"` (ESCSUITE-237). Before this it exited 1, inviting a retry
+  that could only fail the same way.
 - **Read `outputLocation` from the outcome**, don't reconstruct it — it differs per sink.
 - **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page — or a Chromium binary that
   never finishes launching — can't hold a worker slot indefinitely; the job then fails with
@@ -746,8 +752,9 @@ progress tears such a request down immediately instead of waiting for the next s
 
 | Status | When | Body |
 | --- | --- | --- |
-| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
+| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200, except for a job refused for its output size (the second `400` row). | `RenderOutcome` |
 | `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\", \"webm\", or \"gif\""}` |
+| `400` | The job ran and was refused for its input: an MP4 at an output size the H.264 encoder refuses (ESCSUITE-237) — the CLI's second exit `2`. Resending it can never succeed. | The `RenderOutcome`, with `"ok": false`, the reason in `error` and `"code": "OUTPUT_SIZE_UNSUPPORTED"`. |
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
@@ -763,7 +770,9 @@ progress tears such a request down immediately instead of waiting for the next s
 queued, run, and answered; the *job* is what failed, and the outcome says so. A 5xx would tell
 every well-behaved client to retry the HTTP call, which is exactly wrong for a job that will
 fail identically the second time. Branch on `ok`, not on the status code — the same rule as the
-CLI's exit 1.
+CLI's exit 1. The one failed render that is not a 200 is the one that can never succeed: a job
+refused for its output size answers 400 with its outcome as the body, the same status as an
+invalid spec, because that is what it is.
 
 Unknown job-spec fields (`qualitiy`, `options.resoluton`) come back as a `warnings` array — the
 same warnings the CLI writes to stderr. They never refuse a job on their own, so they ride along

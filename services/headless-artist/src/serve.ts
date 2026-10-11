@@ -1,5 +1,6 @@
 import http from 'node:http'
 import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
+import { isPermanentFailure } from './renderFailure'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 
@@ -432,7 +433,11 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
       const outcome = await runJob(spec, runDeps)
       // ok:false is still 200: the *request* succeeded, the job did not, and the outcome
       // says which. A 5xx here would tell a caller to retry the HTTP call, which is wrong.
-      send(res, 200, withWarnings({ ...outcome }))
+      // The exception is a job refused for its input (ESCSUITE-237: an output size H.264
+      // refuses): 400, as for an invalid spec, because resending it can never succeed.
+      const status = isPermanentFailure(outcome) ? 400 : 200
+      send(res, status, withWarnings({ ...outcome }))
+      return status
     })
 
     // A client that gives up while its job is still waiting has it taken back out of the queue:
@@ -453,8 +458,7 @@ export async function startServer(opts: ServeOptions): Promise<ServeHandle> {
     res.on('close', onClientGone)
 
     try {
-      await limited.promise
-      return 200
+      return await limited.promise
     } catch (err) {
       // 499, nginx's "client closed request": nobody will read it, it is for the access log.
       if (abandoned) return 499

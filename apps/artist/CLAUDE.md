@@ -4169,6 +4169,25 @@ predicate at all**:
   AAC encoder**. Before this ticket, exporting MP4 there ran to "Export complete!" and handed back
   a silent file, with a `console.warn` as the only trace.
 
+  **A refusal at the requested size is not yet a refusal by the browser** (ESCSUITE-237).
+  `parseProject` accepts any side from 2 to 7680, and Chromium's H.264 encoder refuses some of
+  those sizes — 64x8, 64x2, 2x2 and 3840x2 refused, 16x16 and 64x48 encoded, when the ticket
+  measured it — while encoding H.264 at every normal size; WebM and GIF rendered 3840x2 fine. So
+  when the ladder finds nothing at the requested size, `mp4OutputSizeRefusal()` walks the same
+  ladder once more at `MP4_REFERENCE_SIZE` (1280x720). If that passes, the size is at fault:
+  the probe resolves `{ video: false, audio, outputSizeReason }` with
+  `mp4OutputSizeReason(w, h)` — "The output size W×H is too small for H.264 — MP4 needs at
+  least 16×16; WebM and GIF are unaffected." — and `exportToMP4` throws an `ExportError` with
+  that message and `code: 'OUTPUT_SIZE_UNSUPPORTED'`, before any mix, media load or encoder,
+  which the headless kit reads as a permanent input error (exit 2, 400 under `serve`). If the
+  reference is refused too, nothing changes: `MP4_NO_CODEC_REASON`, no code. The reference probe
+  runs **only on that failure path**, so a normal export and the dialog's probe on a normal size
+  still ask one video question and one audio question — the suites count `isConfigSupported`
+  calls to hold that. `ExportError.code` is optional and every other throw leaves it unset. The
+  16x16 in the sentence is the ticket's measurement, not something a unit-test double can measure.
+  One known limit: an output *too large* for the ladder's Level 5.1 ceiling, in a browser that
+  encodes 1280x720, would also take the size branch and be called "too small".
+
   `hasMP4EncodeGlobals()` is what is left of the old synchronous check — `VideoEncoder`,
   `VideoDecoder` (MP4, unlike WebM, decodes through WebCodecs) and `VideoFrame`. Three callers:
   this probe's own short-circuit, `exportToMP4`'s door guard, and the dialog's choice between the
@@ -4219,15 +4238,15 @@ state neither had before — possible, but silent:
 | State | Shown |
 |---|---|
 | Both video formats possible, with sound (the common case) | No notice; both are offered as usual |
-| Only WebM is possible | MP4's radio is `disabled` with its "Not supported in this browser" hint, **and** `MP4_NO_CODEC_REASON` ("This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.") is a `role="status"` line in the main body — the ESCSUITE-22 say-it-before-the-click shape, which ESCSUITE-175 finally gave MP4 too. The primary WebM buttons stay enabled, which is what the sentence's second half promises |
+| Only WebM is possible | MP4's radio is `disabled` with its "Not supported in this browser" hint, **and** `MP4_NO_CODEC_REASON` ("This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.") is a `role="status"` line in the main body — the ESCSUITE-22 say-it-before-the-click shape, which ESCSUITE-175 finally gave MP4 too. The primary WebM buttons stay enabled, which is what the sentence's second half promises. When the probe traced the refusal to the **output size** (`mp4Support.outputSizeReason`, ESCSUITE-237: H.264 refused at the selected preset, accepted at 1280x720), the line is that sentence instead — "The output size W×H is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected." — and the radio's hint reads "Not supported at this output size" |
 | Only MP4 is possible | WebM's primary button is `disabled`, with `WEBM_NO_CODEC_REASON` ("This browser cannot encode WebM video — Chrome or Edge can.") in both a `title` and a visible main-body line, followed by "Choose MP4 under Advanced options to export anyway." |
 | A format is possible but has no sound (MP4 in Firefox 155; WebM in a browser with no Opus encoder) | The format stays fully offered and `noAudioNote(format)` — "MP4 export in this browser will have no sound (no AAC encoder). WebM keeps the audio." / "WebM export in this browser will have no sound (no Opus encoder). MP4 keeps the audio." — is a `role="status"` line in the **main body**, beside the background-tab note, read before the format is chosen rather than after. Hidden while GIF is selected (GIF has its own no-sound line) and for a format that is refused outright (there is no silent export to warn about then). A browser with **no `AudioEncoder` at all** makes both formats silent, and then both notes appear with the second sentence dropped (`noAudioNote(format, false)`): "WebM keeps the audio" and "MP4 keeps the audio" cannot both be true, which is the audio-side twin of the trap in the next row. After such an export the completion screen carries `exportedWithoutSoundReason(format)` ("Exported without sound — this browser has no AAC encoder." / "…no Opus encoder."), from the **result's** `audio: false` rather than from the probe — the file just handed over is the authority on its own contents — **and** from the dialog's own `projectHasAudio`, because the sentence asserts a loss (next paragraph) |
 | Neither video format is possible | One `role="alert"` row in the dialog's **main body**, not behind "Advanced options", carrying whichever cause actually applies — `EXPORT_NO_WEBCODECS_REASON` ("Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.") when `hasMP4EncodeGlobals()` is false, and `EXPORT_NO_VIDEO_CODEC_REASON` ("This browser cannot encode WebM video or MP4 video — Chrome or Edge can.") when WebCodecs is present and neither codec is (ESCSUITE-175: before MP4 had a real probe this state could only mean the globals were missing, so it said so unconditionally) — **followed by `GIF_ALWAYS_AVAILABLE_NOTE`** ("GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway."). Every download button, primary **and** Advanced, stays on screen, `disabled`, the same say-why-do-not-hide shape ESCAPECRAFT's MP4/M4A buttons and `separateTracksBlockedReason` use (`apps/craft/CLAUDE.md`'s "Download Formats"). Both video radios are `disabled`; the **GIF radio is not**, and choosing it enables an Advanced "Download GIF" button with no `title` — this is the one state where the dialog is still useful, and ESCSUITE-34 is why it is no longer a dead end. The two per-format sentences are **not** shown here: each names the other format as the way out, and with both gone both halves would be lies |
 
 `bothVideoFormatsBlockedReason` is the one expression that decides the last row, and
 `webmBlockedReason` / `mp4BlockedReason` each fall back to it (`?? WEBM_NO_CODEC_REASON`,
-`?? MP4_NO_CODEC_REASON`) so a disabled button's `title` and the body's own line can never
-disagree about why.
+`?? mp4Support.outputSizeReason ?? MP4_NO_CODEC_REASON`) so a disabled button's `title` and the
+body's own line can never disagree about why.
 
 **`projectHasAudio`, and why the completion sentence needs it** (ESCSUITE-175 fix round). The
 up-front note says "will have no sound", which is true and harmless for a silent project. The

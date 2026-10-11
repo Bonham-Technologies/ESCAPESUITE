@@ -187,15 +187,38 @@ export class ExportError extends Error {
   public readonly exportLog: ExportLogEntry[];
   public readonly frameIndex: number | undefined;
   public readonly totalFrames: number | undefined;
+  /**
+   * Set only on a failure that is a property of the *input* rather than of
+   * this browser or this run — today, an output size the H.264 encoder
+   * refuses ({@link ExportErrorCode}). `undefined` on every other throw. The
+   * headless kit reads it to fail such a job as a permanent input error (exit
+   * 2, or 400 under `serve`) rather than a retryable one (ESCSUITE-237).
+   */
+  public readonly code: ExportErrorCode | undefined;
 
-  constructor(message: string, exportLog: ExportLogEntry[], frameIndex?: number, totalFrames?: number) {
+  constructor(
+    message: string,
+    exportLog: ExportLogEntry[],
+    frameIndex?: number,
+    totalFrames?: number,
+    code?: ExportErrorCode
+  ) {
     super(message);
     this.name = 'ExportError';
     this.exportLog = exportLog;
     this.frameIndex = frameIndex;
     this.totalFrames = totalFrames;
+    this.code = code;
   }
 }
+
+/**
+ * The machine-readable causes an {@link ExportError} can carry. One today:
+ * the output size is one the H.264 encoder refuses, in a browser that encodes
+ * H.264 at the 1280x720 reference size (ESCSUITE-237) — so the job, not the
+ * browser, is what has to change.
+ */
+export type ExportErrorCode = 'OUTPUT_SIZE_UNSUPPORTED';
 
 /**
  * Check if abort was requested and throw if so
@@ -382,6 +405,48 @@ export const WEBM_NO_CODEC_REASON =
  */
 export const MP4_NO_CODEC_REASON =
   'This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.';
+
+/**
+ * Shown, and thrown, when the H.264 ladder refuses the requested output size but
+ * accepts the {@link MP4_REFERENCE_SIZE} (ESCSUITE-237): the browser encodes
+ * H.264, so {@link MP4_NO_CODEC_REASON} would be false, and the size is what has
+ * to change. `parseProject` accepts any side from 2 to 7680; Chromium's encoder
+ * refused 64x8, 64x2, 2x2 and 3840x2 and encoded 16x16 and 64x48 when the
+ * ticket measured it, which is where the 16x16 floor in the sentence comes from
+ * (a unit test's `isConfigSupported` double cannot measure a real encoder).
+ * WebM and GIF rendered 3840x2 fine, hence the second half.
+ */
+export function mp4OutputSizeReason(width: number, height: number): string {
+  return `The output size ${width}×${height} is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.`;
+}
+
+/**
+ * The size the H.264 ladder is asked about once the requested size has been
+ * refused — a size every H.264 encoder that exists at all can configure — so a
+ * refusal can be told apart as the size's or the browser's (ESCSUITE-237).
+ */
+export const MP4_REFERENCE_SIZE = { width: 1280, height: 720 } as const;
+
+/**
+ * Called only after the H.264 ladder found nothing at `width`x`height`: the
+ * sentence that blames the output size when the same ladder accepts the
+ * {@link MP4_REFERENCE_SIZE}, or `undefined` when it refuses that too and the
+ * browser really cannot encode H.264. Asked only on that failure path, so a
+ * normal export — and the dialog's probe on a normal size — pays nothing for it.
+ * One function for the exporter's refusal and the dialog's, so the two cannot
+ * disagree on which sizes are the size's fault.
+ */
+export async function mp4OutputSizeRefusal(
+  width: number,
+  height: number,
+  videoBitrate: number,
+  frameRate: number
+): Promise<string | undefined> {
+  const reference = await findSupportedVideoConfig(
+    mp4VideoCodecConfigs(MP4_REFERENCE_SIZE.width, MP4_REFERENCE_SIZE.height, videoBitrate, frameRate)
+  );
+  return reference ? mp4OutputSizeReason(width, height) : undefined;
+}
 
 /**
  * Shown when WebCodecs is present and neither video format can be encoded — so
@@ -602,6 +667,14 @@ export async function isAudioCodecSupported(config: AudioEncoderConfig): Promise
 export interface ExportFormatSupport {
   video: boolean;
   audio: boolean;
+  /**
+   * MP4 only, and only alongside `video: false`: the sentence to show when the
+   * refusal is the output size's, not the browser's — H.264 is refused at the
+   * size asked about and accepted at {@link MP4_REFERENCE_SIZE}
+   * ({@link mp4OutputSizeReason}, ESCSUITE-237). Absent when the browser cannot
+   * encode H.264 at all, which is {@link MP4_NO_CODEC_REASON}'s case.
+   */
+  outputSizeReason?: string;
 }
 
 /**
@@ -631,10 +704,15 @@ export async function isMP4ExportSupported(
   const found = await findSupportedVideoConfig(
     mp4VideoCodecConfigs(width, height, EXPORT_PROBE_BITRATE, EXPORT_PROBE_FRAMERATE)
   );
+  // The reference probe only on refusal (ESCSUITE-237): one video probe and one
+  // audio probe per preset change on the success path, as before.
+  const outputSizeReason = found === null
+    ? await mp4OutputSizeRefusal(width, height, EXPORT_PROBE_BITRATE, EXPORT_PROBE_FRAMERATE)
+    : undefined;
   const audio = await isAudioCodecSupported(
     aacEncoderConfig(EXPORT_AUDIO_SAMPLE_RATE, EXPORT_AUDIO_CHANNELS, AUDIO_PROBE_BITRATE)
   );
-  return { video: found !== null, audio };
+  return { video: found !== null, audio, outputSizeReason };
 }
 
 /**

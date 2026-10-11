@@ -37,6 +37,7 @@ import {
   EXPORT_AUDIO_SAMPLE_RATE,
   noAudioNote,
   MP4_NO_CODEC_REASON,
+  mp4OutputSizeRefusal,
   VIDEO_EXPORT_FRAME_RATE,
 } from './exportTypes';
 import type { ExportResult } from './exportTypes';
@@ -147,6 +148,17 @@ export async function exportToMP4(
   );
   if (!foundVideoConfig) {
     log('codec', 'No supported H.264 configuration at any profile or acceleration mode');
+    // Is that the size or the browser? The same ladder at the 1280x720
+    // reference size answers it, asked only here, on the failure path
+    // (ESCSUITE-237): a size H.264 refuses (64x8, 2x2, 3840x2 — all sizes
+    // `parseProject` accepts) in a browser that encodes H.264 is a problem
+    // with the input, and carries a code so the headless kit fails the job as
+    // one instead of as a retryable render failure.
+    const outputSizeReason = await mp4OutputSizeRefusal(width, height, videoBitrate, frameRate);
+    if (outputSizeReason) {
+      log('codec', `H.264 encodes at the reference size but not at ${width}x${height}`);
+      throw new ExportError(outputSizeReason, exportLog, undefined, undefined, 'OUTPUT_SIZE_UNSUPPORTED');
+    }
     // The dialog's own sentence, so a refusal reads the same before the click
     // and after it — and an `ExportError`, so it carries the trail and reaches
     // the dialog's diagnosed-codec-failure path rather than its generic one.
