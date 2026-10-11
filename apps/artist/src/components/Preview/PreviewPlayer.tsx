@@ -339,7 +339,9 @@ export function PreviewPlayer() {
 
   // Commit handler for inline text editing
   const handleInlineTextCommit = useCallback((newText: string) => {
-    if (editingTextClipId) {
+    // ESCSUITE-250: an empty commit restores the previous text (no write), and
+    // the store refuses an unchanged one — so only a real change writes.
+    if (editingTextClipId && newText.trim() !== '') {
       updateTextOverlayData(editingTextClipId, { text: newText });
     }
     setEditingTextClipId(null);
