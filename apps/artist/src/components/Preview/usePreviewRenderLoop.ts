@@ -382,6 +382,9 @@ export function usePreviewRenderLoop({
       return;
     }
 
+    // Where this run of the loop starts, on the timeline.
+    let startTimelineTime = currentTime;
+
     // Find active clips and set up audio
     const activeClips = getClipsAtTime(clips, tracks, currentTime);
 
@@ -391,13 +394,20 @@ export function usePreviewRenderLoop({
         .filter(c => c.timelinePosition > currentTime)
         .sort((a, b) => a.timelinePosition - b.timelinePosition)[0];
 
-      if (nextClip) {
-        setCurrentTime(nextClip.timelinePosition);
-      } else {
+      if (!nextClip) {
         setIsPlaying(false);
         setCurrentTime(timelineDuration);
+        return;
       }
-      return;
+
+      // Play on from the next clip (ESCSUITE-280). The loop starts there in
+      // this same run, on its own clock: `currentTime` is not a dependency of
+      // this effect, so returning here after the store write left playback
+      // "playing" with no loop running. The store gets the jumped-to time once
+      // so the timeline playhead moves; nothing is active yet, so the loop's
+      // first frame starts the clip's media through its clipsChanged branch.
+      startTimelineTime = nextClip.timelinePosition;
+      setCurrentTime(startTimelineTime);
     }
 
     // Collect all clips that have audio (videos and audio-only clips)
@@ -457,7 +467,6 @@ export function usePreviewRenderLoop({
 
     // Track playback start
     let playbackStartTime = performance.now();
-    let startTimelineTime = currentTime;
     let lastStoreUpdateTime = startTimelineTime;
 
     // Track last active clips to detect transitions
