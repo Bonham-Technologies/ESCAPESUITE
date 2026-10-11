@@ -21,14 +21,18 @@ import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
 import { clearAllRecordings } from '../../test/recordingsDb'
 import type { Recording } from '../../store/types'
 
-const { isEmbedded, isFileOrigin } = vi.hoisted(() => ({
+const { isEmbedded, isFileOrigin, isStandaloneMode, editorUrlIsRelative } = vi.hoisted(() => ({
   isEmbedded: vi.fn(() => false),
   isFileOrigin: vi.fn(() => false),
+  isStandaloneMode: vi.fn(() => false),
+  editorUrlIsRelative: vi.fn(() => false),
 }))
 vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@escapesuite/shared/config')>()),
   isEmbedded,
   isFileOrigin,
+  isStandaloneMode,
+  editorUrlIsRelative,
 }))
 
 vi.mock('../../utils/uploadToHost', () => ({ uploadToHost: vi.fn() }))
@@ -67,6 +71,8 @@ beforeEach(async () => {
   resetAppDoubles()
   isEmbedded.mockReturnValue(false)
   isFileOrigin.mockReturnValue(false)
+  isStandaloneMode.mockReturnValue(false)
+  editorUrlIsRelative.mockReturnValue(false)
   uploadToHostMock.mockResolvedValue('posted')
   useRecorderStore.setState({
     notice: null,
@@ -383,6 +389,42 @@ describe('RecordingsListPanel editor gate under a file origin (ESCSUITE-221)', (
 
   it('leaves it enabled when embedded, even from disk — the host receives SEND_TO_EDITOR', () => {
     isFileOrigin.mockReturnValue(true)
+    isEmbedded.mockReturnValue(true)
+    renderPanel()
+
+    expect(rowButton()).toBeEnabled()
+  })
+})
+
+describe('RecordingsListPanel editor gate in a standalone build over http (ESCSUITE-259)', () => {
+  const rowButton = () => screen.getByRole('button', { name: 'Open Take Seven in Editor' })
+
+  it('disables "Open in Editor" with the reason when the editor URL is relative', () => {
+    isStandaloneMode.mockReturnValue(true)
+    editorUrlIsRelative.mockReturnValue(true)
+    renderPanel()
+
+    expect(rowButton()).toBeDisabled()
+    expect(rowButton()).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
+  })
+
+  it('leaves it enabled when the build was given an absolute editor URL', () => {
+    isStandaloneMode.mockReturnValue(true)
+    renderPanel()
+
+    expect(rowButton()).toBeEnabled()
+  })
+
+  it('leaves it enabled in a hosted build, whatever the editor URL', () => {
+    editorUrlIsRelative.mockReturnValue(true)
+    renderPanel()
+
+    expect(rowButton()).toBeEnabled()
+  })
+
+  it('leaves it enabled when embedded, even in a standalone build with a relative URL', () => {
+    isStandaloneMode.mockReturnValue(true)
+    editorUrlIsRelative.mockReturnValue(true)
     isEmbedded.mockReturnValue(true)
     renderPanel()
 

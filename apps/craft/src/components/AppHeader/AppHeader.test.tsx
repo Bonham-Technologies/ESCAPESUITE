@@ -13,14 +13,16 @@ import type { RecordingState } from '../../store/types'
 import { EDITOR_FILE_ORIGIN_REASON } from '../../utils/sendToEditor'
 import styles from '../../App.module.css'
 
-const { isStandaloneMode, isFileOrigin } = vi.hoisted(() => ({
+const { isStandaloneMode, isFileOrigin, editorUrlIsRelative } = vi.hoisted(() => ({
   isStandaloneMode: vi.fn(() => false),
   isFileOrigin: vi.fn(() => false),
+  editorUrlIsRelative: vi.fn(() => false),
 }))
 vi.mock('@escapesuite/shared/config', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@escapesuite/shared/config')>()),
   isStandaloneMode,
   isFileOrigin,
+  editorUrlIsRelative,
 }))
 
 let openSpy: ReturnType<typeof vi.spyOn>
@@ -29,6 +31,7 @@ beforeEach(() => {
   useRecorderStore.setState({ countdownValue: 0 })
   isStandaloneMode.mockReturnValue(false)
   isFileOrigin.mockReturnValue(false)
+  editorUrlIsRelative.mockReturnValue(false)
   openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
 })
 
@@ -223,5 +226,35 @@ describe('AppHeader Open Editor under a file origin (ESCSUITE-221)', () => {
     expect(editor).toHaveAttribute('title', 'Open Editor')
     expect(editor).not.toHaveAttribute('aria-describedby')
     expect(screen.queryByText(EDITOR_FILE_ORIGIN_REASON)).not.toBeInTheDocument()
+  })
+})
+
+describe('AppHeader Open Editor in a standalone build over http (ESCSUITE-259)', () => {
+  it('is disabled with the reason when the editor URL is relative', async () => {
+    isStandaloneMode.mockReturnValue(true)
+    editorUrlIsRelative.mockReturnValue(true)
+    const user = userEvent.setup()
+    renderHeader()
+
+    const editor = screen.getByRole('button', { name: 'Open Editor in new window' })
+    expect(editor).toBeDisabled()
+    expect(editor).toHaveAccessibleDescription(EDITOR_FILE_ORIGIN_REASON)
+    expect(screen.getByText(EDITOR_FILE_ORIGIN_REASON)).toBeVisible()
+    await user.click(editor)
+    expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('stays enabled when the build was given an absolute editor URL', () => {
+    isStandaloneMode.mockReturnValue(true)
+    renderHeader()
+
+    expect(screen.getByRole('button', { name: 'Open Editor in new window' })).toBeEnabled()
+  })
+
+  it('stays enabled in a hosted build, whatever the editor URL', () => {
+    editorUrlIsRelative.mockReturnValue(true)
+    renderHeader()
+
+    expect(screen.getByRole('button', { name: 'Open Editor in new window' })).toBeEnabled()
   })
 })
