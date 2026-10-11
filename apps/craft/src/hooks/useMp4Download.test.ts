@@ -63,7 +63,7 @@ function metadata(id: string, name: string): SourceVideo {
     size: 1024,
     mediaType: 'video',
     source: 'recording',
-    recordedAt: 1_000,
+    recordedAt: new Date(2026, 9, 10, 15, 4, 5).getTime(),
   }
 }
 
@@ -163,7 +163,7 @@ describe('useMp4Download, start to finish', () => {
     })
 
     expect(converterModule.convertToMP4).toHaveBeenCalledTimes(1)
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.mp4' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.mp4' }])
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
     // A conversion that worked says nothing of its own, and clears whatever
     // the channel was still holding — see the notice test below.
@@ -759,6 +759,31 @@ describe('useMp4Download gating', () => {
   })
 })
 
+describe('useMp4Download download name', () => {
+  it('falls back to a dated stem for a legacy record with no recordedAt', async () => {
+    const { recordedAt: _omit, ...legacy } = metadata('old', 'Old Take')
+    await storeVideo('old', new Blob(['video-bytes'], { type: 'video/webm' }), legacy)
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('old', 'Old Take')
+    })
+
+    expect(clicks[0].download).toMatch(/^recording_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.mp4$/)
+  })
+
+  it('names a companion row by its label', async () => {
+    await seed('take-1', 'Recording x — Webcam')
+    const { result } = renderMp4Download()
+
+    await act(async () => {
+      await result.current.startMp4Download('take-1', 'Recording x — Webcam')
+    })
+
+    expect(clicks[0].download).toBe('recording_2026-10-10_15-04-05_webcam.mp4')
+  })
+})
+
 describe('useMp4Download audio-only (M4A)', () => {
   it('converts the take\'s audio and downloads it under a safe .m4a name', async () => {
     await seed('take-1', 'Standup Demo: 9/9')
@@ -772,7 +797,7 @@ describe('useMp4Download audio-only (M4A)', () => {
     // the picture thrown away afterwards.
     expect(converterModule.convertToM4A).toHaveBeenCalledTimes(1)
     expect(converterModule.convertToMP4).not.toHaveBeenCalled()
-    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'standup_demo__9_9.m4a' }])
+    expect(clicks).toEqual([{ href: 'blob:mock-url', download: 'recording_2026-10-10_15-04-05.m4a' }])
     expect(analyticsModule.track).toHaveBeenCalledWith('Recording Downloaded', undefined)
     expect(setNotice.mock.calls).toEqual([[null]])
   })
