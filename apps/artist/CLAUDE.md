@@ -206,6 +206,10 @@ pnpm lint                # Run ESLint
   answers at once without playing. Beside it, an optional `presentedFrames` script is the counter
   each callback reports; left unset the metadata carries none and the probe takes the fallback.
   `displayCappedVideo` reports no counter either, so its cases pin the fallback.
+  The real-browser pin is `apps/e2e/tests/escapeartist/frame-rate-probe.spec.ts` (ESCSUITE-277): nine committed
+  2 s `testsrc` fixtures in `apps/e2e/fixtures/frame-rate/` (H.264 at 24, 30, 60, 120 and 29.97 fps; VP9 WebM at
+  24, 30, 60 and 120) imported through the uploader on Chromium, each required to be stored `'measured'` at its own
+  rate (exact for the MP4s, the NTSC neighbour also accepted for a WebM). Run 5 times each in one sitting, 45 of 45 passed.
 - `exporter.ts`: the barrel over **three** export paths — two through WebCodecs +
   `mediabunny` for muxing, and one through neither:
   - **WebM** (`exportWebM.ts`): VP9 video + Opus audio, frame-by-frame encoding with audio mixing
