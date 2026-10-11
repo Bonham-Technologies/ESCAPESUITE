@@ -55,24 +55,25 @@ export interface RulerTick {
 }
 
 /**
- * The two spacings a ruler uses at this scale, in seconds. `minor` is the
- * smallest ladder step drawn at least `RULER_MIN_TICK_PX` wide; `label` is the
- * smallest ladder step at least `RULER_MIN_LABEL_PX` wide that is a whole
- * number of `minor` steps, so every labelled time is a tick. A scale too small
- * for either falls back to the ladder's last step.
+ * The two spacings a ruler uses at this scale, in seconds. `label` comes first:
+ * the smallest ladder step at least `RULER_MIN_LABEL_PX` wide, so labels never
+ * get coarser as the zoom grows. `minor` is then the smallest ladder step at
+ * least `RULER_MIN_TICK_PX` wide that divides `label` evenly, so every labelled
+ * time is a tick. A scale too small for a label falls back to the ladder's last
+ * step, and a tick too narrow to draw falls back to the label step itself.
  */
 export function rulerIntervals(pixelsPerSecond: number): { minor: number; label: number } {
-  const last = RULER_INTERVAL_LADDER[RULER_INTERVAL_LADDER.length - 1];
-  const minor =
-    RULER_INTERVAL_LADDER.find((step) => step * pixelsPerSecond >= RULER_MIN_TICK_PX) ?? last;
   const label =
+    RULER_INTERVAL_LADDER.find((step) => step * pixelsPerSecond >= RULER_MIN_LABEL_PX) ??
+    RULER_INTERVAL_LADDER[RULER_INTERVAL_LADDER.length - 1];
+  const minor =
     RULER_INTERVAL_LADDER.find((step) => {
-      const steps = step / minor;
+      const steps = label / step;
       return (
-        step * pixelsPerSecond >= RULER_MIN_LABEL_PX &&
+        step * pixelsPerSecond >= RULER_MIN_TICK_PX &&
         Math.abs(steps - Math.round(steps)) < 1e-9
       );
-    }) ?? last;
+    }) ?? label;
   return { minor, label };
 }
 

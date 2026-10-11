@@ -7,6 +7,8 @@ import styles from './Timeline.module.css';
 interface TimelineRulerProps {
   /** The ruler's scroll box. `Timeline` mirrors the track scroll onto it. */
   rulerRef: React.RefObject<HTMLDivElement | null>;
+  /** The scroll box the ruler follows; a focused marker hands it the ruler's offset. */
+  trackContainerRef: React.RefObject<HTMLDivElement | null>;
   /** How many seconds the ruler spans — the timeline's duration, or its floor. */
   duration: number;
   /** Horizontal scale of the timeline, in pixels per second of media. */
@@ -40,6 +42,7 @@ interface TimelineRulerProps {
  */
 export const TimelineRuler = React.memo(function TimelineRuler({
   rulerRef,
+  trackContainerRef,
   duration,
   pixelsPerSecond,
   width,
@@ -86,9 +89,17 @@ export const TimelineRuler = React.memo(function TimelineRuler({
                 e.stopPropagation();
                 onSeek(marker.time);
               }}
+              onFocus={() => {
+                // Tab to a flag out of view and the browser scrolls the ruler
+                // alone; the container is what the other panes follow.
+                const container = trackContainerRef.current;
+                if (container) container.scrollLeft = rulerRef.current!.scrollLeft;
+              }}
               onKeyDown={(e) => {
                 if (e.key === 'Delete' || e.key === 'Backspace') {
                   e.preventDefault();
+                  // Not also the window's Delete-the-selected-clips shortcut.
+                  e.stopPropagation();
                   onRemoveMarker(marker.id);
                 }
               }}

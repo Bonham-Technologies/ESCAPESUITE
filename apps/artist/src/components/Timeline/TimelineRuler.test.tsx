@@ -22,6 +22,7 @@ function renderRuler(props: Partial<Parameters<typeof TimelineRuler>[0]> = {}) {
   const { container } = render(
     <TimelineRuler
       rulerRef={createRef<HTMLDivElement>()}
+      trackContainerRef={createRef<HTMLDivElement>()}
       duration={DURATION}
       pixelsPerSecond={PPS}
       width={DURATION * PPS}
@@ -154,6 +155,12 @@ describe('TimelineRuler markers', () => {
 
     expect(onSeek).toHaveBeenCalledWith(marker.time)
     expect(onRulerClick).not.toHaveBeenCalled()
+  })
+
+  it('takes focus without a track container to hand the offset to', () => {
+    renderRuler({ markers: [marker] })
+
+    expect(() => fireEvent.focus(screen.getByRole('button', { name: flagName }))).not.toThrow()
   })
 
   it('seeks to the marker on keyboard activation too', async () => {

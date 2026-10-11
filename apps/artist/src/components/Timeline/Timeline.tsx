@@ -257,6 +257,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
       {/* Ruler */}
       <TimelineRuler
         rulerRef={rulerRef}
+        trackContainerRef={trackContainerRef}
         duration={minTimelineDuration}
         pixelsPerSecond={pixelsPerSecond}
         width={timelineWidth}
