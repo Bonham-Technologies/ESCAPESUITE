@@ -3934,13 +3934,41 @@ live one), `take-import`, `components`, the three `integration` specs, `errors/e
 every `*.perf.test.ts` are byte-identical; the autosave debounce is unchanged, one write per settle. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and shared's 100 / 98 / 92 / 100.
 
+`@escapesuite/craft` was re-measured 2026-10-11 for ESCSUITE-233 (a microphone-only take — ESCSUITE-143's
+`mediaType: 'audio'`, 0×0 — plays in the dialog with a speaker glyph over the same dark surface instead of a
+black 300×150 box: the one `<video>` element stays the playback engine, the keyboard target and the
+click-to-toggle surface, visually hidden by a class, and an `aria-hidden` SVG stands in for the picture;
+the error overlay says "This recording could not be played." / "It may be corrupted or in an unsupported
+format." for both media types; the controls' time readout and name get a CSS gap; and the row's media type
+reaches `App`'s `<VideoPlayer>` as one more value out of `useRecordingLibrary`, no new `App` store
+subscription): 100.00 / 99.53 / **97.85** / 100.00 against the 100.00 / 99.53 / 97.84 / 100.00 that `main`
+at `5e4d1a26` (the ESCSUITE-231 version-packages commit) measures in the same sitting — branches up a
+hundredth, the other three unmoved at exactly 100, 99.53 and 100. That base reads 97.84 where the
+ESCSUITE-231 paragraph recorded 97.83 from its own tree: the three wave-7 craft branches — 229, 230 and
+231 — each measured against `cb202b8c` and landed one after another, twelve new branches, twelve covered,
+and the row is corrected here to the direct measurement. Lines 2,423 → 2,428, statements
+2,585 / 2,597 → 2,590 / 2,602, branches 1,407 / 1,438 → 1,413 / 1,444 and functions 462 → 463, every new
+unit covered; the same 12 statements and 31 branches uncovered, in the same four files. The six new branches
+are `components/VideoPlayer/VideoPlayer.tsx`'s four (103 / 111 → 107 / 115: the `mediaType === 'audio'`
+class choice and the placeholder's render gate, each reached by the audio case against every video case
+that was already there; the file's eight pre-existing uncovered arms untouched) and
+`hooks/useRecordingLibrary.ts`'s two (16 → 18: the row's `mediaType === 'audio' ? 'audio' : 'video'` at
+Play, reached by an audio row and a video row, with the reset to `'video'` on the missing-bytes path and on
+Close pinned by the review's one follow-up case, which plays an audio row first so the reset is observable).
+The `SpeakerIcon` is the one new function. The `App.*rerender*` pins and every `*.perf.test.ts` are
+byte-identical: `App` threads one more prop and subscribes to nothing new. No Playwright pin used the old
+overlay sentences; the unit test that matched `/failed to load video/i` moved to the new copy, and the
+internal `Error('Failed to load video')` handed to `onError` is unchanged and still pinned by the
+`PlaybackDialog` suite. The gap itself is CSS, which jsdom cannot lay out, so its pin is that the readout and
+the name are separate, non-empty elements. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.53 | 97.83 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
 | `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.70 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
