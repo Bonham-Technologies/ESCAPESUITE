@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium } from 'playwright'
 import { runJob } from './run'
 import type { JobSpec } from './types'
+import { hasFfmpeg, probe } from '../test/ffprobe'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SERVICE_ROOT = path.resolve(HERE, '..')
@@ -20,6 +21,21 @@ const VERSIONS = { engineVersion: 'engine-test', kitVersion: 'kit-test' }
 
 /** Silences the driver's own progress/launch chatter; the assertions cover behaviour, not logs. */
 const quiet = () => {}
+
+/** The rate both video exporters encode at (`VIDEO_EXPORT_FRAME_RATE` in the artist bundle). */
+const VIDEO_FPS = 30
+
+/**
+ * The frame-count cross-check needs `ffprobe`, which the CI `e2e` job's runner is not
+ * guaranteed to have: the case asserts the integer-frames property unconditionally and
+ * asks `ffprobe` only when it is there, saying so when it is not.
+ */
+const FFPROBE = hasFfmpeg()
+if (!FFPROBE) {
+  console.warn(
+    '[run.chromium.test] ffprobe not on PATH: the encoded-duration case checks whole frames only, not the file',
+  )
+}
 
 let tmpRoot: string
 let workDir: string
@@ -217,6 +233,77 @@ describe('runJob (real Chromium)', () => {
     expect(manifest.format).toBe('gif')
     expect(manifest.byteLength).toBe(bytes.byteLength)
     expect(manifest.sha256).toMatch(/^[0-9a-f]{64}$/)
+  }, RENDER_TIMEOUT_MS)
+
+  // ESCSUITE-238: the video exporters encode whole frames at 30 fps, so a 0.75 s range is
+  // 23 frames — 0.766667 s of file. The manifest used to report the requested 0.75, and a
+  // consumer checking `durationSec` against the file within a millisecond rejected a valid
+  // render. It now reports the frames encoded times the frame period.
+  it.each(['mp4', 'webm'] as const)(
+    'reports the encoded duration of a %s render in whole frames, matching the file',
+    async (format) => {
+      const jobId = `e2e-frames-${format}`
+      const spec: JobSpec = {
+        ...makeSpec(jobId),
+        options: { format, quality: 'medium', timeRange: { start: 0, end: 0.75 } },
+      }
+
+      const outcome = await runJob(spec, { bundlePath: BUNDLE, workDir, versions: VERSIONS, log: quiet })
+
+      expect(outcome.ok).toBe(true)
+      const manifest = JSON.parse(
+        await fs.readFile(path.join(outDir, `${jobId}.manifest.json`), 'utf8'),
+      ) as { durationSec: number }
+      // A whole number of frame periods, and the right number: ceil(0.75 x 30) = 23.
+      const frames = manifest.durationSec * VIDEO_FPS
+      expect(Math.abs(frames - Math.round(frames))).toBeLessThan(1e-9)
+      expect(Math.round(frames)).toBe(23)
+      expect(manifest.durationSec).toBeCloseTo(23 / VIDEO_FPS, 9)
+
+      if (FFPROBE) {
+        const result = await probe(path.join(outDir, `${jobId}.${format}`))
+        const video = result.streams.find((s) => s.codec_type === 'video')
+        expect(Number(video?.nb_read_frames)).toBe(Math.round(frames))
+        // The README's contract: the manifest matches the file's VIDEO stream within one
+        // millisecond. Compared with the video stream's own duration where ffprobe reports one
+        // (MP4); a WebM stream has none, so that falls back to the container's — which holds
+        // only because the fixture is silent. A file with sound pads its container past the
+        // last video frame by up to one AAC (21.3 ms) or Opus (20 ms) frame.
+        const videoDuration = Number(video?.duration ?? result.format.duration)
+        expect(Math.abs(videoDuration - manifest.durationSec)).toBeLessThanOrEqual(0.001)
+      }
+    },
+    RENDER_TIMEOUT_MS,
+  )
+
+  // ESCSUITE-237: Chromium's H.264 encoder refuses 64x8 while encoding 1280x720, so the bundle
+  // throws an ExportError with `code: 'OUTPUT_SIZE_UNSUPPORTED'`. Playwright carries only an
+  // in-page error's message across the evaluate boundary; this pins that the code survives it
+  // too, which the CLI and the server map to exit 2 / 400.
+  it('carries an output size H.264 refuses across the page boundary as a coded failure', async () => {
+    const fixtureDir = path.dirname(MANIFEST)
+    const sizedDir = path.join(tmpRoot, 'fixture-64x8')
+    await fs.mkdir(sizedDir, { recursive: true })
+    for (const name of ['manifest.json', 'src-0.mp4']) {
+      await fs.copyFile(path.join(fixtureDir, name), path.join(sizedDir, name))
+    }
+    const project = JSON.parse(await fs.readFile(path.join(fixtureDir, 'project.json'), 'utf8'))
+    project.project.resolution = { width: 64, height: 8 }
+    await fs.writeFile(path.join(sizedDir, 'project.json'), JSON.stringify(project))
+
+    const outcome = await runJob(makeSpec('e2e-64x8', path.join(sizedDir, 'manifest.json')), {
+      bundlePath: BUNDLE,
+      workDir,
+      versions: VERSIONS,
+      log: quiet,
+    })
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome.code).toBe('OUTPUT_SIZE_UNSUPPORTED')
+    expect(outcome.error).toBe(
+      'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.',
+    )
+    expect(await fs.readdir(workDir)).toEqual([])
   }, RENDER_TIMEOUT_MS)
 
   it('returns ok:false and cleans up when the headless bundle is missing', async () => {

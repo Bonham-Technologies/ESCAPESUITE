@@ -228,9 +228,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // first time: `isMP4ExportSupported` used to read globals only, so a browser
   // with WebCodecs and no H.264 encoder had nothing to show up front and found
   // out mid-export.
+  // A refusal the probe traced to the output size rather than the browser
+  // (ESCSUITE-237: H.264 refused at this preset, accepted at 1280x720) says so
+  // in its own words — `MP4_NO_CODEC_REASON` would claim a browser that encodes
+  // H.264 cannot.
   const mp4BlockedReason = mp4Supported
     ? null
-    : bothVideoFormatsBlockedReason ?? MP4_NO_CODEC_REASON;
+    : bothVideoFormatsBlockedReason ?? mp4Support.outputSizeReason ?? MP4_NO_CODEC_REASON;
 
   // Whether this project has anything that could carry sound: a clip whose
   // track is present, visible and unmuted, whose source is not an image. That
@@ -899,7 +903,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                           />
                           <span>MP4 (H.264 + AAC)</span>
                           <span className={styles.radioHint}>
-                            {mp4Supported ? 'Best compatibility' : 'Not supported in this browser'}
+                            {mp4Supported
+                              ? 'Best compatibility'
+                              : mp4Support.outputSizeReason
+                                ? 'Not supported at this output size'
+                                : 'Not supported in this browser'}
                           </span>
                         </label>
                         {/* Never disabled: `gifenc` is pure JavaScript, so this is

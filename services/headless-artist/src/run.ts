@@ -5,6 +5,7 @@ import { loadBundle, loadManifest } from './loaders'
 import type { LoadedJob } from './loaders'
 import { buildManifest } from './manifest'
 import { renderInChromium } from './renderDriver'
+import { CodedRenderError } from './renderFailure'
 import { getSink } from './sinks'
 import type { JobSpec, RenderOutcome } from './types'
 
@@ -149,7 +150,15 @@ export async function runJob(spec: JobSpec, deps: RunJobDeps): Promise<RenderOut
   } catch (err) {
     const error = sanitizeErrorMessage(messageOf(err))
     log(`error: ${error}`)
-    return { jobId: spec.jobId, ok: false, error, durationMs: Date.now() - startedAt }
+    return {
+      jobId: spec.jobId,
+      ok: false,
+      error,
+      // A cause the bundle named (ESCSUITE-237) rides along, so the CLI and the server can tell
+      // a permanent input error from a failure a retry may fix.
+      ...(err instanceof CodedRenderError ? { code: err.code } : {}),
+      durationMs: Date.now() - startedAt,
+    }
   } finally {
     if (jobWorkDir !== undefined) {
       const dir = jobWorkDir

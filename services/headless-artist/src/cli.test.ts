@@ -536,6 +536,25 @@ describe('the exit code a render returns', () => {
     expect(stdout).toEqual([JSON.stringify(failed) + '\n'])
   })
 
+  // ESCSUITE-237: an output size H.264 refuses is a property of the job, not of this run, so
+  // it is a permanent input error — exit 2, which a broker never retries — while the outcome
+  // line still says why, the way every job that ran does.
+  it('exits 2 for a render refused because its output size is too small for H.264', async () => {
+    const refused: RenderOutcome = {
+      ok: false,
+      jobId: 'job-1',
+      error: 'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.',
+      code: 'OUTPUT_SIZE_UNSUPPORTED',
+      durationMs: 30,
+    }
+    vi.mocked(runJob).mockResolvedValue(refused)
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+    expect(stdout).toEqual([JSON.stringify(refused) + '\n'])
+  })
+
   it('exits 2 for a spec the parser refuses, without dumping usage over the reason', async () => {
     // 'avi' rather than the 'gif' this case used before ESCSUITE-34, which is a
     // format the kit now renders.

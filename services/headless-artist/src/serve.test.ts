@@ -443,6 +443,26 @@ describe('POST /render', () => {
     expect(await res.json()).toMatchObject({ ok: false, error: 'encoder died' })
   })
 
+  // ESCSUITE-237: the one failed job that is not a 200. An output size H.264 refuses is the
+  // spec's problem and always will be, the same as an invalid spec — so the same 400, with the
+  // outcome (and its code) as the body.
+  it('returns 400 when the render was refused because its output size is too small for H.264', async () => {
+    const refused = {
+      jobId: 'job-1',
+      ok: false,
+      error: 'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.',
+      code: 'OUTPUT_SIZE_UNSUPPORTED',
+      durationMs: 3,
+    }
+    vi.mocked(runJob).mockResolvedValue(refused)
+    await start()
+
+    const res = await postSpec(validSpec('job-1'))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual(refused)
+  })
+
   it('reports unknown job-spec fields as warnings alongside the outcome', async () => {
     await start()
 

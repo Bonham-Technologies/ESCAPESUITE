@@ -28,6 +28,7 @@ import {
   isAudioCodecSupported,
   noAudioNote,
   opusEncoderConfig,
+  VIDEO_EXPORT_FRAME_RATE,
   // Shared with exportMP4.ts, which re-exports it for existing callers — both
   // exporters import it from its actual home so neither depends on the other
   // (ESCSUITE-152 moved it here; ESCSUITE-29 Mechanism 1 is why this file
@@ -103,7 +104,7 @@ export async function exportToWebM(
   }
 
   const { videoBitrate, audioBitrate } = getQualitySettings(options.quality);
-  const frameRate = 30;
+  const frameRate = VIDEO_EXPORT_FRAME_RATE;
   const sampleRate = EXPORT_AUDIO_SAMPLE_RATE;
 
   // A timeline with no length cannot be mixed or encoded (ESCSUITE-257): refuse
@@ -465,7 +466,7 @@ export async function exportToWebM(
     // `audio` is false exactly when the Opus probe above refused: this browser
     // cannot carry sound in a WebM. Whether this project *had* any is the
     // dialog's question, not the exporter's — see `ExportResult`.
-    return { blob: new Blob([buffer], { type: 'video/webm' }), audio: !audioDropped };
+    return { blob: new Blob([buffer], { type: 'video/webm' }), audio: !audioDropped, framesEncoded: frameCount };
   } catch (error) {
     // Clean up resources on error. The release is the same one the success path
     // made and runs at most once: the two paths are not exclusive — the

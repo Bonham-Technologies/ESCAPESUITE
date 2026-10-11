@@ -16,5 +16,11 @@ export interface RenderOutcome {
   outputLocation?: string
   manifestLocation?: string
   error?: string
+  /**
+   * Set on a failure whose cause the bundle could name (ESCSUITE-237). The one code today is
+   * `OUTPUT_SIZE_UNSUPPORTED`: the output size is one the H.264 encoder refuses, a permanent
+   * input error — exit 2 from `render`, 400 from `serve`. Absent on every other outcome.
+   */
+  code?: string
   durationMs: number
 }

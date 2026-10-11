@@ -3,6 +3,7 @@ import { promises as fs, realpathSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectUnknownKeys, ensureSinkReady, parseJobSpec } from './jobSpec'
+import { isPermanentFailure } from './renderFailure'
 import { runJob } from './run'
 import type { RunJobDeps } from './run'
 import { startServer } from './serve'
@@ -458,7 +459,11 @@ export async function main(argv: string[], env: NodeJS.ProcessEnv): Promise<numb
 
     const outcome = await runJob(spec, deps)
     process.stdout.write(JSON.stringify(outcome) + '\n')
-    return outcome.ok ? EXIT_OK : EXIT_JOB_FAILED
+    // A job refused for its input (ESCSUITE-237: an output size H.264 refuses) exits 2 like a
+    // spec error — retrying it identically fails identically — but, unlike one, it ran, so its
+    // outcome line is printed above all the same.
+    if (outcome.ok) return EXIT_OK
+    return isPermanentFailure(outcome) ? EXIT_USAGE : EXIT_JOB_FAILED
   } catch (err) {
     // runJob never throws and the server catches its own handler errors, so anything
     // landing here is a usage, job-spec or bind problem.

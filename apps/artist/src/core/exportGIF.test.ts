@@ -277,6 +277,21 @@ describe('exportToGIF frames', () => {
     expect(frames()[0].delayMs).toBe(delayMs)
   })
 
+  // ESCSUITE-238: one field across all three formats, so the headless manifest
+  // reads the frame count the same way whichever exporter ran.
+  it.each([
+    [undefined, 1, 15],
+    [20, 0.51, 11],
+  ])('reports the frames it wrote at %s fps for %s s of timeline (%s)', async (fps, seconds, expected) => {
+    const result = await run({
+      clips: [makeClip({ duration: seconds, endTime: seconds })],
+      options: { fps: fps as ExportOptions['fps'] },
+    })
+
+    expect(result.framesEncoded).toBe(expected)
+    expect(result.framesEncoded).toBe(frames().length)
+  })
+
   it('falls back to 15 fps for a rate it does not offer', async () => {
     await run({ options: { fps: 7 as unknown as ExportOptions['fps'] } })
 

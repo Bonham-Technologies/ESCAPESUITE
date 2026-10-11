@@ -5,7 +5,7 @@ import {
   getBaseDimensions,
   getResolution,
   gifFrameDelayMs,
-  gifFrameRate,
+  VIDEO_EXPORT_FRAME_RATE,
 } from '../core/exportTypes'
 import { parseProject } from '../store/projectMigration'
 import { seedSources } from './seedSources'
@@ -53,16 +53,27 @@ function validateInput(request: RenderRequest): void {
 }
 
 /**
- * How long a GIF of `seconds` of timeline actually plays, which is not `seconds`:
- * the encoder writes `ceil(seconds x rate)` frames and gives each the same delay,
- * so the total is a whole number of those delays. Both rules come from the
- * exporter's own helpers rather than being derived a second time here — the frame
- * count mirrors `exportGIF.ts`, and `gifFrameDelayMs` owns the two roundings a
- * frame's on-screen time goes through on the way into the file (67 ms asked for at
- * 15 fps, 70 ms stored).
+ * How long the encoded file plays, in seconds: the frames the exporter encoded
+ * times one frame's on-screen time (ESCSUITE-238). Never the requested range —
+ * every exporter encodes whole frames, `ceil(range x rate)` of them, so a 0.75 s
+ * range at 30 fps is 23 frames and 0.766667 s of file, and a consumer comparing
+ * the manifest to the bytes within a millisecond must see the bytes' number.
+ *
+ * The count is the exporter's own (`ExportResult.framesEncoded`), not one
+ * recomputed here. The frame period is the exporter's too: the two video
+ * formats step by `VIDEO_EXPORT_FRAME_RATE`, and a GIF by the delay it
+ * **stores** — `gifFrameDelayMs` owns the two roundings a GIF frame's
+ * on-screen time goes through on the way into the file (67 ms asked for at
+ * 15 fps, 70 ms stored), so a 15 fps GIF of one second is 15 x 70 ms = 1.05 s.
  */
-function gifDurationSec(seconds: number, fps: number | undefined): number {
-  return (Math.ceil(seconds * gifFrameRate(fps)) * gifFrameDelayMs(fps)) / 1000
+function encodedDurationSec(
+  format: RenderMeta['format'],
+  framesEncoded: number,
+  fps: number | undefined,
+): number {
+  return format === 'gif'
+    ? (framesEncoded * gifFrameDelayMs(fps)) / 1000
+    : framesEncoded / VIDEO_EXPORT_FRAME_RATE
 }
 
 /**
@@ -122,8 +133,9 @@ async function render(
   // `{start: 0, end: 600}` encoded ~599 seconds of black and the signed manifest
   // agreed with the REQUEST rather than with the bytes (ESCSUITE-191 / hunt-j
   // J-9). `options.timeRange` is replaced in place with the clamped range, so
-  // the exporter call below — unchanged — and the duration derived from it
-  // after that call both read the clamped values, never the raw request. An
+  // the exporter call below — unchanged — encodes, and counts the frames the
+  // reported duration is derived from over, the clamped range, never the raw
+  // request. An
   // intersection that clamps to nothing (both bounds past the end, or both
   // before 0) is a field-naming failure rather than a render of zero frames.
   const fullDuration = calculateTimelineDuration(clips)
@@ -146,34 +158,22 @@ async function render(
   // the fallback for an unrecognised value, which is what it has always been.
   const format: RenderMeta['format'] =
     options.format === 'webm' ? 'webm' : options.format === 'gif' ? 'gif' : 'mp4'
-  // The exporters hand back `{ blob, audio }` since ESCSUITE-175; the kit's
-  // manifest describes the bytes, so only the blob is read here.
-  const { blob } = format === 'webm'
+  // The exporters hand back `{ blob, audio, framesEncoded }`; the kit's
+  // manifest describes the bytes, so the blob and the frame count are read
+  // here and `audio` is not.
+  const { blob, framesEncoded } = format === 'webm'
     ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
     : format === 'gif'
       ? await exportToGIF(clips, sourceVideos, options, progress, tracks, undefined, resolution)
       : await exportToMP4(clips, sourceVideos, options, progress, tracks, undefined, resolution)
 
-  // Describe the OUTPUT, not the project: honour the resolution option and timeRange
-  // the same way the engine does, so the manifest (Plan 2) matches the bytes.
+  // Describe the OUTPUT, not the project: honour the resolution option the
+  // same way the engine does, so the manifest (Plan 2) matches the bytes. The
+  // duration is the exporter's own frame count, not the (clamped) range — see
+  // `encodedDurationSec`.
   const base = getBaseDimensions(clips, tracks, sourceVideos)
   const out = getResolution(options.resolution, base.width, base.height, resolution)
-  // `options.timeRange`, if present, was already clamped to the timeline above —
-  // this reads the clamped values, never the caller's raw request.
-  const rangeStart = options.timeRange?.start ?? 0
-  const rangeEnd = options.timeRange?.end ?? fullDuration
-  // A GIF plays for as long as its frame delays say, and the format stores those
-  // in centiseconds: `exportToGIF` encodes `ceil(seconds x rate)` frames, each
-  // asked for at `round(1000 / rate)` ms and written as `round(that / 10)` cs, so
-  // a 15 fps GIF of a one-second range is 15 frames of 70 ms — 1.05 s of GIF, not
-  // 1. The manifest describes the bytes, so it reports those stored delays rather
-  // than the requested range; the two video formats encode the range itself and
-  // are unchanged. `gifFrameRate` and `gifFrameDelayMs` own the rate, its default
-  // and the rounding, the same way the exporter and `gifenc` do.
-  const rangeSeconds = rangeEnd - rangeStart
-  const durationSec = format === 'gif'
-    ? gifDurationSec(rangeSeconds, options.fps)
-    : rangeSeconds
+  const durationSec = encodedDurationSec(format, framesEncoded, options.fps)
 
   return {
     blob,

@@ -4169,6 +4169,26 @@ predicate at all**:
   AAC encoder**. Before this ticket, exporting MP4 there ran to "Export complete!" and handed back
   a silent file, with a `console.warn` as the only trace.
 
+  **A refusal at the requested size is not yet a refusal by the browser** (ESCSUITE-237).
+  `parseProject` accepts any side from 2 to 7680, and Chromium's H.264 encoder refuses some of
+  those sizes — 64x8, 64x2, 2x2 and 3840x2 refused, 16x16 and 64x48 encoded, when the ticket
+  measured it — while encoding H.264 at every normal size; WebM and GIF rendered 3840x2 fine. So
+  when the ladder finds nothing at the requested size, `mp4OutputSizeRefusal()` walks the same
+  ladder once more at `MP4_REFERENCE_SIZE` (1280x720). If that passes, the size is at fault:
+  the probe resolves `{ video: false, audio, outputSizeReason }` with
+  `mp4OutputSizeReason(w, h)`, which picks one of two sentences by the requested size — a side
+  under 16: "The output size W×H is too small for H.264 — MP4 needs at least 16×16; WebM and
+  GIF are unaffected."; otherwise (8K, say, past the ladder's Level 5.1 ceiling): "The output
+  size W×H is too large for H.264 in this browser; WebM and GIF are unaffected." — and
+  `exportToMP4` throws an `ExportError` with that message and `code: 'OUTPUT_SIZE_UNSUPPORTED'`
+  (the same code either way), before any mix, media load or encoder,
+  which the headless kit reads as a permanent input error (exit 2, 400 under `serve`). If the
+  reference is refused too, nothing changes: `MP4_NO_CODEC_REASON`, no code. The reference probe
+  runs **only on that failure path**, so a normal export and the dialog's probe on a normal size
+  still ask one video question and one audio question — the suites count `isConfigSupported`
+  calls to hold that. `ExportError.code` is optional and every other throw leaves it unset. The
+  16x16 in the sentence is the ticket's measurement, not something a unit-test double can measure.
+
   `hasMP4EncodeGlobals()` is what is left of the old synchronous check — `VideoEncoder`,
   `VideoDecoder` (MP4, unlike WebM, decodes through WebCodecs) and `VideoFrame`. Three callers:
   this probe's own short-circuit, `exportToMP4`'s door guard, and the dialog's choice between the
@@ -4219,15 +4239,15 @@ state neither had before — possible, but silent:
 | State | Shown |
 |---|---|
 | Both video formats possible, with sound (the common case) | No notice; both are offered as usual |
-| Only WebM is possible | MP4's radio is `disabled` with its "Not supported in this browser" hint, **and** `MP4_NO_CODEC_REASON` ("This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.") is a `role="status"` line in the main body — the ESCSUITE-22 say-it-before-the-click shape, which ESCSUITE-175 finally gave MP4 too. The primary WebM buttons stay enabled, which is what the sentence's second half promises |
+| Only WebM is possible | MP4's radio is `disabled` with its "Not supported in this browser" hint, **and** `MP4_NO_CODEC_REASON` ("This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.") is a `role="status"` line in the main body — the ESCSUITE-22 say-it-before-the-click shape, which ESCSUITE-175 finally gave MP4 too. The primary WebM buttons stay enabled, which is what the sentence's second half promises. When the probe traced the refusal to the **output size** (`mp4Support.outputSizeReason`, ESCSUITE-237: H.264 refused at the selected preset, accepted at 1280x720), the line is that sentence instead — "The output size W×H is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected." for a side under 16, "The output size W×H is too large for H.264 in this browser; WebM and GIF are unaffected." otherwise — and the radio's hint reads "Not supported at this output size" |
 | Only MP4 is possible | WebM's primary button is `disabled`, with `WEBM_NO_CODEC_REASON` ("This browser cannot encode WebM video — Chrome or Edge can.") in both a `title` and a visible main-body line, followed by "Choose MP4 under Advanced options to export anyway." |
 | A format is possible but has no sound (MP4 in Firefox 155; WebM in a browser with no Opus encoder) | The format stays fully offered and `noAudioNote(format)` — "MP4 export in this browser will have no sound (no AAC encoder). WebM keeps the audio." / "WebM export in this browser will have no sound (no Opus encoder). MP4 keeps the audio." — is a `role="status"` line in the **main body**, beside the background-tab note, read before the format is chosen rather than after. Hidden while GIF is selected (GIF has its own no-sound line) and for a format that is refused outright (there is no silent export to warn about then). A browser with **no `AudioEncoder` at all** makes both formats silent, and then both notes appear with the second sentence dropped (`noAudioNote(format, false)`): "WebM keeps the audio" and "MP4 keeps the audio" cannot both be true, which is the audio-side twin of the trap in the next row. After such an export the completion screen carries `exportedWithoutSoundReason(format)` ("Exported without sound — this browser has no AAC encoder." / "…no Opus encoder."), from the **result's** `audio: false` rather than from the probe — the file just handed over is the authority on its own contents — **and** from the dialog's own `projectHasAudio`, because the sentence asserts a loss (next paragraph) |
 | Neither video format is possible | One `role="alert"` row in the dialog's **main body**, not behind "Advanced options", carrying whichever cause actually applies — `EXPORT_NO_WEBCODECS_REASON` ("Exporting needs WebCodecs, which this browser does not provide. Chrome or Edge can export this project.") when `hasMP4EncodeGlobals()` is false, and `EXPORT_NO_VIDEO_CODEC_REASON` ("This browser cannot encode WebM video or MP4 video — Chrome or Edge can.") when WebCodecs is present and neither codec is (ESCSUITE-175: before MP4 had a real probe this state could only mean the globals were missing, so it said so unconditionally) — **followed by `GIF_ALWAYS_AVAILABLE_NOTE`** ("GIF export needs no WebCodecs — choose GIF under Advanced options to export anyway."). Every download button, primary **and** Advanced, stays on screen, `disabled`, the same say-why-do-not-hide shape ESCAPECRAFT's MP4/M4A buttons and `separateTracksBlockedReason` use (`apps/craft/CLAUDE.md`'s "Download Formats"). Both video radios are `disabled`; the **GIF radio is not**, and choosing it enables an Advanced "Download GIF" button with no `title` — this is the one state where the dialog is still useful, and ESCSUITE-34 is why it is no longer a dead end. The two per-format sentences are **not** shown here: each names the other format as the way out, and with both gone both halves would be lies |
 
 `bothVideoFormatsBlockedReason` is the one expression that decides the last row, and
 `webmBlockedReason` / `mp4BlockedReason` each fall back to it (`?? WEBM_NO_CODEC_REASON`,
-`?? MP4_NO_CODEC_REASON`) so a disabled button's `title` and the body's own line can never
-disagree about why.
+`?? mp4Support.outputSizeReason ?? MP4_NO_CODEC_REASON`) so a disabled button's `title` and the
+body's own line can never disagree about why.
 
 **`projectHasAudio`, and why the completion sentence needs it** (ESCSUITE-175 fix round). The
 up-front note says "will have no sound", which is true and harmless for a silent project. The
@@ -4751,8 +4771,8 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   (ESCSUITE-191, hunt-j J-9): `render()` clamps `{start, end}` to `[0, timelineDuration]`
   — an `end` past the timeline is pulled in to it, a negative `start` is floored at
   0 — and replaces `options.timeRange` with the clamped pair in place, so the
-  `exportToMP4`/`exportToWebM`/`exportToGIF` call below it and the `durationSec` derived
-  after it both read the clamped range, never the caller's raw request. Before this, a
+  `exportToMP4`/`exportToWebM`/`exportToGIF` call below it — and so the frame count the
+  `durationSec` is derived from — covers the clamped range, never the caller's raw request. Before this, a
   one-second project asked for `{start: 0, end: 600}` encoded roughly 599 seconds of
   black and the signed verification manifest reported `durationSec: 600` for it — the
   manifest describing the request rather than the bytes. A range whose clamped
@@ -4773,9 +4793,26 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   coarser delay — not the range itself unless `seconds x rate` happens to be a whole number (a
   1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = **1.05**). The verification manifest describes the bytes — the kit README tells
   callers to compare `durationSec` against `ffprobe` — so the headless path reports that rather
-  than the requested range; the two video formats encode the range itself and are unchanged.
+  than the requested range.
   `exportGIF.ts`'s own `addFrame` argument stays the first rounding (67 ms at 15 fps): `gifenc`
   does the second one, and `gifEncoder.test.ts` decodes the Graphic Control Extension to pin it.
+- **Every format's `meta.durationSec` is the encoded length — frames encoded x one frame
+  period** (ESCSUITE-238). The two video formats are no exception to the GIF rule above: they
+  encode whole frames at `VIDEO_EXPORT_FRAME_RATE` (30, in `core/exportTypes.ts`, the one constant
+  both video exporters step by), `ceil(range x 30)` of them, so a 0.75 s range is 23 frames and
+  **0.766667 s** of file — what `ffprobe -count_frames` measures. Before this ticket the headless
+  path reported the range itself, 0.75, for MP4 and WebM, and a consumer checking `durationSec`
+  against the file within a millisecond rejected a valid render. The count is not recomputed in
+  `headless/renderProject.ts`: every exporter returns it on `ExportResult.framesEncoded` (its own
+  frame loop's `frameCount`, set on the success path of all three), and `encodedDurationSec` there
+  multiplies it by `1 / VIDEO_EXPORT_FRAME_RATE` or by `gifFrameDelayMs(fps)`. The field is
+  required rather than optional so no reader of it has a fallback arm or a `NaN` to guard.
+  **It is the video length.** A consumer may compare it with the file's video stream (counted
+  frames x 1/30, or the stream's own duration) within one millisecond, but not with the
+  container's `format.duration`: the mix is sliced to exactly the range, and the audio encoders
+  write whole frames — AAC 1024 samples (21.3 ms at 48 kHz), Opus 20 ms — so the padded last audio
+  frame ends a few milliseconds after the last video frame (a 1 s MP4 with sound: 30 video frames,
+  `durationSec` 1, container about 1.0027 s).
 - Verified in real Chromium by `apps/e2e/tests/headless/render-bundle.spec.ts`
   (builds the bundle itself in `beforeAll`).
 - Design and plans: `docs/superpowers/specs/2026-06-07-headless-artist-design.md`.

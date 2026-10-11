@@ -20,6 +20,11 @@ export interface ProbeStream {
   height?: number
   /** ffprobe reports counted frames as a decimal string, not a number. */
   nb_read_frames?: string
+  /**
+   * The stream's own duration, a decimal string. Absent where the container declares none per
+   * stream — ffprobe reports none for a Matroska/WebM stream, whose duration is the segment's.
+   */
+  duration?: string
 }
 
 export interface ProbeResult {
@@ -56,7 +61,7 @@ export async function probe(file: string): Promise<ProbeResult> {
   const { stdout } = await execFileAsync('ffprobe', [
     '-v', 'error',
     '-count_frames',
-    '-show_entries', 'stream=codec_type,codec_name,width,height,nb_read_frames:format=duration',
+    '-show_entries', 'stream=codec_type,codec_name,width,height,nb_read_frames,duration:format=duration',
     '-of', 'json',
     file,
   ])

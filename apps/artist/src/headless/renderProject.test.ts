@@ -1,13 +1,39 @@
 // apps/artist/src/headless/renderProject.test.ts
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const { exportToMP4, exportToWebM, exportToGIF } = vi.hoisted(() => ({
-  // ESCSUITE-175: the three exporters return `{ blob, audio }` now, not a bare
-  // Blob — `audio` says whether the project's sound was dropped on the way out.
-  exportToMP4: vi.fn(async () => ({ blob: new Blob([new Uint8Array([9, 9, 9])], { type: 'video/mp4' }), audio: true })),
-  exportToWebM: vi.fn(async () => ({ blob: new Blob([new Uint8Array([8, 8])], { type: 'video/webm' }), audio: true })),
-  exportToGIF: vi.fn(async () => ({ blob: new Blob([new Uint8Array([7])], { type: 'image/gif' }), audio: false })),
-}))
+const { exportToMP4, exportToWebM, exportToGIF } = vi.hoisted(() => {
+  // ESCSUITE-238: every exporter reports how many frames it encoded, and the
+  // manifest's duration is derived from that count. The doubles count the way
+  // the real frame loops do — `ceil(range x rate)` over the range they were
+  // handed — so the duration cases below still describe the range arithmetic,
+  // and the one case that hands back a count of its own pins that the count,
+  // not the range, is what the duration is read from.
+  type Args = [
+    { timelinePosition?: number; duration: number }[],
+    unknown,
+    { timeRange?: { start: number; end: number }; fps?: number },
+  ]
+  const framesFor = ([clips, , options]: Args, rate: number): number => {
+    const end = options.timeRange?.end
+      ?? Math.max(0, ...clips.map((c) => (c.timelinePosition ?? 0) + c.duration))
+    const start = options.timeRange?.start ?? 0
+    return Math.ceil((end - start) * rate)
+  }
+  const gifRate = (fps: number | undefined) => (fps === 10 || fps === 20 ? fps : 15)
+  return {
+    // ESCSUITE-175: the three exporters return `{ blob, audio }` now, not a bare
+    // Blob — `audio` says whether the project's sound was dropped on the way out.
+    exportToMP4: vi.fn(async (...args: Args) => ({
+      blob: new Blob([new Uint8Array([9, 9, 9])], { type: 'video/mp4' }), audio: true, framesEncoded: framesFor(args, 30),
+    })),
+    exportToWebM: vi.fn(async (...args: Args) => ({
+      blob: new Blob([new Uint8Array([8, 8])], { type: 'video/webm' }), audio: true, framesEncoded: framesFor(args, 30),
+    })),
+    exportToGIF: vi.fn(async (...args: Args) => ({
+      blob: new Blob([new Uint8Array([7])], { type: 'image/gif' }), audio: false, framesEncoded: framesFor(args, gifRate(args[2].fps)),
+    })),
+  }
+})
 vi.mock('../core/exporter', () => ({ exportToMP4, exportToWebM, exportToGIF }))
 // Stands in for the real seeding: fills the fields the probe would supply.
 vi.mock('./seedSources', () => ({
@@ -21,6 +47,7 @@ import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, SourceVideoInput } from './types'
 import type { Clip, TextOverlay } from '../store/types'
 import { lastObjectUrl } from '../test/objectUrls'
+import { VIDEO_EXPORT_FRAME_RATE } from '../core/exportTypes'
 
 /** A legacy text overlay as an older ARTIST version stored it, on the timeline's array. */
 const legacyText = (): TextOverlay => ({
@@ -119,17 +146,65 @@ describe('renderProject', () => {
     expect(res.meta.durationSec).toBeCloseTo(1.05, 6)
   })
 
-  it('computes durationSec from timelinePosition + duration, not from source trim bounds', async () => {
-    // A clip starting at timelinePosition=5 with duration=3 ends at second 8.
-    // The source trim bounds (startTime=0, endTime=3) must NOT be used — that
-    // would give durationSec=3 instead of 8.
+  // ESCSUITE-238: a video export encodes whole frames at 30 fps, so a 0.75 s
+  // timeline is 23 frames — 0.766667 s of file, which is what `ffprobe
+  // -count_frames` measured. The manifest used to report the requested 0.75,
+  // and a consumer comparing it to the file within a millisecond rejected a
+  // valid render.
+  it.each(['mp4', 'webm'] as const)('reports a %s durationSec of the whole frames encoded, not the range', async (format) => {
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 0.75
+    input.options = { format } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    expect(res.meta.durationSec).toBe(23 / 30)
+    expect(res.meta.durationSec).toBeCloseTo(0.766667, 6)
+  })
+
+  it('reads the video duration from the frames the exporter encoded, not from the range', async () => {
+    // The count is the exporter's own: one it reports for a one-second range is
+    // the one the manifest describes, so the two can never disagree.
+    exportToMP4.mockResolvedValueOnce({
+      blob: new Blob([new Uint8Array([9])], { type: 'video/mp4' }), audio: true, framesEncoded: 7,
+    })
+
+    const res = await renderProject(baseInput())
+
+    expect(res.meta.durationSec).toBe(7 / 30)
+  })
+
+  it('reports a GIF durationSec of 0.75 s unchanged: frames x the stored delay', async () => {
+    const input = baseInput()
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 0
+    ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 0.75
+    input.options = { format: 'gif', fps: 15 } as RenderInput['options']
+
+    const res = await renderProject(input)
+
+    // ceil(0.75 x 15) = 12 frames of 70 ms.
+    expect(res.meta.durationSec).toBeCloseTo(0.84, 6)
+  })
+
+  // ESCSUITE-238: the duration is derived from the exporter's own frame count, not from the
+  // timeline. The clip spans 8 s (timelinePosition 5 + duration 3, trimmed 0-3 in its
+  // source), and the double reports a count that agrees with neither the range nor the trim,
+  // so only `framesEncoded / VIDEO_EXPORT_FRAME_RATE` gives the expected answer — and two
+  // counts mean a hard-coded one cannot pass both.
+  it.each([23, 16])('derives a video durationSec of %s frames from the count the exporter reports', async (frames) => {
+    exportToMP4.mockResolvedValueOnce({
+      blob: new Blob([new Uint8Array([9])], { type: 'video/mp4' }), audio: true, framesEncoded: frames,
+    })
     const input = baseInput()
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).timelinePosition = 5
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).duration = 3
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).startTime = 0
     ;(input.project.timeline.clips[0] as unknown as Record<string, unknown>).endTime = 3
+
     const res = await renderProject(input)
-    expect(res.meta.durationSec).toBe(8) // timelinePosition(5) + duration(3)
+
+    expect(res.meta.durationSec).toBe(frames / VIDEO_EXPORT_FRAME_RATE)
   })
 
   it('defaults options.resolution to project when the caller omits it', async () => {

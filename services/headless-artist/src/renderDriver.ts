@@ -4,6 +4,8 @@ import { pathToFileURL } from 'node:url'
 import { chromium } from 'playwright'
 import type { Browser, Page } from 'playwright'
 import type { LoadedJob } from './loaders'
+import { unwrapPageRender } from './renderFailure'
+import type { PageRenderResult } from './renderFailure'
 import { MAX_TIMEOUT_MS } from './timeouts'
 import type { RenderFileInput, RenderInput, RenderMeta } from './types'
 
@@ -125,8 +127,15 @@ function progressReporter(
   }
 }
 
-/** Runs inside the page — must reference nothing from this module's scope. */
-function evaluateRender(payload: RenderPayload): Promise<RenderMeta> {
+/**
+ * Runs inside the page — must reference nothing from this module's scope.
+ *
+ * A rejection crosses the evaluate boundary as its message alone, so an error that carries a
+ * string `code` (the bundle's `ExportError`, ESCSUITE-237) is returned as data instead, for
+ * `unwrapPageRender` to turn back into a `CodedRenderError` on the Node side. Every other
+ * rejection is rethrown untouched, so its message reaches the outcome exactly as before.
+ */
+function evaluateRender(payload: RenderPayload): Promise<PageRenderResult> {
   const target = window as unknown as HeadlessWindow
   return target.__renderProjectToFile(
     {
@@ -137,6 +146,13 @@ function evaluateRender(payload: RenderPayload): Promise<RenderMeta> {
       outputName: payload.outputName,
     },
     (percent) => target.__hlProgress(percent),
+  ).then(
+    (meta): PageRenderResult => ({ meta }),
+    (err: unknown): PageRenderResult => {
+      const code = (err as { code?: unknown } | null)?.code
+      if (typeof code !== 'string') throw err
+      return { failure: { message: (err as Error).message, code } }
+    },
   )
 }
 
@@ -164,9 +180,11 @@ async function driveRender(
 
   // The download fires from the anchor click inside the page, which happens just
   // before __renderProjectToFile resolves — so both are awaited together.
+  // A coded failure resolves rather than rejects (see `evaluateRender`), so it is unwrapped
+  // into a rejection here — inside the Promise.all, so it still cuts the download wait short.
   const [download, meta] = await Promise.all([
     page.waitForEvent('download'),
-    page.evaluate(evaluateRender, payload),
+    page.evaluate(evaluateRender, payload).then(unwrapPageRender),
   ])
   await download.saveAs(outputPath)
   return meta

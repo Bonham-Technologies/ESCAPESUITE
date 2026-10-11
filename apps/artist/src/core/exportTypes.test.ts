@@ -32,6 +32,7 @@ import {
   isAudioCodecSupported,
   isMP4ExportSupported,
   isWebMExportSupported,
+  mp4OutputSizeReason,
   mp4VideoCodecConfigs,
   noAudioNote,
   opusEncoderConfig,
@@ -630,6 +631,85 @@ describe('isMP4ExportSupported', () => {
   })
 })
 
+// ESCSUITE-237: Chromium's H.264 encoder refuses some sizes `parseProject`
+// accepts (64x8, 2x2, 3840x2 — 16x16 encodes), and the ladder finding nothing
+// used to be reported as "this browser cannot encode H.264" whatever the cause.
+// One reference size, 1280x720, through the same ladder tells the two apart —
+// and is asked only once the requested size has failed.
+describe('isMP4ExportSupported at a size H.264 refuses', () => {
+  /** An encoder that refuses any side under 16 px, the floor ESCSUITE-237 measured. */
+  const refusesUnder16 = (c: { width?: number; height?: number }) =>
+    (c.width ?? 0) >= 16 && (c.height ?? 0) >= 16
+
+  it('names the output size, not the browser, when 1280x720 encodes', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) => refusesUnder16(c as VideoEncoderConfig)
+      await expect(isMP4ExportSupported(64, 8)).resolves.toEqual({
+        video: false,
+        audio: true,
+        outputSizeReason: mp4OutputSizeReason(64, 8),
+      })
+      const configs = codecs.encoder.configs as VideoEncoderConfig[]
+      // The whole ladder at 64x8, then the reference ladder's first rung.
+      expect(configs).toHaveLength(11)
+      expect(configs.slice(0, 10).every((c) => c.width === 64 && c.height === 8)).toBe(true)
+      expect(configs[10]).toMatchObject({ width: 1280, height: 720 })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('names the output size as too large when 7680x4320 is refused and 1280x720 encodes', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = (c) => (c as VideoEncoderConfig).width <= 4096
+      const support = await isMP4ExportSupported(7680, 4320)
+      expect(support.video).toBe(false)
+      expect(support.outputSizeReason).toBe(
+        'The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.'
+      )
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('keeps the no-H.264 answer, with no size reason, when 1280x720 is refused too', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      codecs.encoder.answer = () => false
+      const support = await isMP4ExportSupported(64, 8)
+      expect(support).toEqual({ video: false, audio: true })
+      expect(support.outputSizeReason).toBeUndefined()
+      expect(codecs.encoder.configs).toHaveLength(20)
+    } finally {
+      codecs.uninstall()
+    }
+  })
+
+  it('never asks about the reference size when the requested size encodes', async () => {
+    const codecs = installWebCodecsDoubles()
+    try {
+      await isMP4ExportSupported(64, 48)
+      expect(codecs.encoder.configs).toHaveLength(1)
+      expect(codecs.encoder.configs[0]).toMatchObject({ width: 64, height: 48 })
+    } finally {
+      codecs.uninstall()
+    }
+  })
+})
+
+describe('ExportError code', () => {
+  it('carries the code it is given', () => {
+    const error = new ExportError('too small', [], undefined, undefined, 'OUTPUT_SIZE_UNSUPPORTED')
+    expect(error.code).toBe('OUTPUT_SIZE_UNSUPPORTED')
+  })
+
+  it('has no code when none is given, as every existing throw does', () => {
+    expect(new ExportError('anything', []).code).toBeUndefined()
+  })
+})
+
 describe('export reason sentences', () => {
   it('names the two browsers that can export, for the no-WebCodecs-at-all case', () => {
     expect(EXPORT_NO_WEBCODECS_REASON).toBe(
@@ -644,6 +724,26 @@ describe('export reason sentences', () => {
   it('says MP4 is out and names what is left, for the no-H.264 case', () => {
     expect(MP4_NO_CODEC_REASON).toBe(
       'This browser cannot encode H.264, so MP4 export is unavailable here. WebM and GIF are.'
+    )
+  })
+
+  it('calls an output size too large, not too small, when no side is under 16 (ESCSUITE-237)', () => {
+    // A size the ladder's Level 5.1 ceiling refuses (8K, which `parseProject`
+    // allows) in a browser that encodes 1280x720 is the size's fault too — but
+    // "too small" would be false.
+    expect(mp4OutputSizeReason(7680, 4320)).toBe(
+      'The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.'
+    )
+    // The boundary: 16 on both sides is not "too small".
+    expect(mp4OutputSizeReason(16, 16)).toMatch(/too large/)
+    expect(mp4OutputSizeReason(16, 15)).toMatch(/too small/)
+  })
+
+  it('names the requested size and the floor, for an output size H.264 refuses (ESCSUITE-237)', () => {
+    // 16x16 is the smallest size the ticket measured Chromium's H.264 encoder
+    // accepting (64x8, 64x2, 2x2 and 3840x2 refused; 16x16 and 64x48 encoded).
+    expect(mp4OutputSizeReason(64, 8)).toBe(
+      'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.'
     )
   })
 

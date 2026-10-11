@@ -4029,6 +4029,44 @@ at 30 fps) and the 276 cases that were already there. `drawFrame.perf.test.ts`, 
 callback at import, never per preview or export frame. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-11 for ESCSUITE-238 and
+ESCSUITE-237 (the headless render's `durationSec` is the encoded video length — every exporter returns a
+required `framesEncoded`, `VIDEO_EXPORT_FRAME_RATE` replaces the two hard-coded 30s, and
+`renderProject.ts` reports frames over that rate for MP4 and WebM as it already did frames × delay for GIF,
+comparable to the file's video stream within a millisecond; and an output size the H.264 ladder refuses is
+probed once more at 1280×720, only on the failure path, so that a size the browser could otherwise encode
+is reported as "too small" below 16 px a side or "too large" otherwise, with `code: 'OUTPUT_SIZE_UNSUPPORTED'`
+carried across the Playwright boundary as data and mapped by the kit to exit 2 / 400 as a permanent input
+error), each in one sitting against `main` at `5337c092` (the ESCSUITE-220 squash; the branch itself is cut
+from `08545f29`, its version-packages commit, which touches no source). **Artist**: 99.83 / 99.38 /
+**96.46** / 99.75 against 99.83 / 99.38 / 96.45 / 99.75 — branches up a hundredth, the other three unmoved.
+The base gives 5,612 / 5,818 branches and this branch 5,619 / 5,825: seven new branches, seven covered, the
+same 206 uncovered as before (lines 8,692 / 8,706 → 8,700 / 8,714, statements 9,820 / 9,881 → 9,828 / 9,889,
+functions 2,069 / 2,074 → 2,071 / 2,076, every denominator growing by exactly what the numerator did; the
+same 14 / 61 / 5 uncovered). The seven net three files moving up and one down: `core/exportTypes.ts` 129 / 133 →
+135 / 139 (the reference probe's pass-or-fail and the under-16 choice between the two sentences, reached by
+the 64×8, 16×15, 16×16 and 7680×4320 doubles against the refuses-everything one and the ladder that succeeds
+without a reference probe, pinned at one call; the same four pre-existing arms uncovered), `core/exportMP4.ts`
+130 / 147 → 132 / 149 (the coded refusal before any encoder; the same seventeen pre-existing arms uncovered),
+`components/Export/ExportDialog.tsx` 231 / 232 → 234 / 235 (the size reason on the MP4 radio; the same one
+pre-existing arm uncovered) and `headless/renderProject.ts` 39 / 42 → 35 / 38, which lost four arms — the
+video-format duration arithmetic over the requested range — and carries the same three pre-existing uncovered.
+**Kit**: **99.56** / **99.48** / **98.50** / **98.75** against 99.55 / 99.47 / 98.48 / 98.73 — every figure
+up a hundredth or two, with the uncovered column unmoved: lines 899 / 903 → 908 / 912, statements
+953 / 958 → 964 / 969, branches 587 / 596 → 595 / 604 and functions 156 / 158 → 159 / 161, every denominator
+growing by exactly what the numerator did (the same 4 / 5 / 9 / 2 uncovered, in the same ledgered places). The
+eight new branches are `src/renderFailure.ts`'s two on arrival (2 / 2: a coded failure rebuilt as an error,
+a plain one passed through), `src/run.ts`'s two (14 → 16: the code carried onto the outcome or not),
+`src/cli.ts`'s two (143 → 145: exit 2 for the code against exit 1 for every other render failure) and
+`src/serve.ts`'s two (84 / 91 → 86 / 93: 400 for the code against 200 with `ok: false`; the same seven
+pre-existing arms uncovered), each reached from both sides by the kit's unit cases through a stubbed
+driver. Outside vitest's measurement the kit's Chromium suite ran three times here with ffprobe on PATH,
+33 / 33 each: the 0.75 s MP4 and WebM renders report 23 frames and 0.766667 s and match ffprobe's frame
+count and stream duration within a millisecond, and a 64×8 render fails with the code. Both export
+`*.perf.test.ts` files and every rerender pin are byte-identical — a counter increment per frame is a
+statement, not a counted call. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's
+99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4036,9 +4074,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.83 | 99.36 | 96.38 | 99.75 |
+| `@escapesuite/artist` | 99.83 | 99.38 | 96.46 | 99.75 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.55 | 99.47 | 98.48 | 98.73 |
+| `@escapesuite/headless-artist` | 99.56 | 99.48 | 98.50 | 98.75 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

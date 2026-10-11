@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderInChromium } from './renderDriver'
+import { CodedRenderError } from './renderFailure'
 import { runJob } from './run'
 import type { JobSpec, RenderMeta } from './types'
 
@@ -194,6 +195,42 @@ describe('runJob', () => {
     expect(outcome).toMatchObject({ jobId: 'job-1', ok: false, error: 'render timed out after 1 ms' })
     expect(outcome.outputLocation).toBeUndefined()
     expect(await fs.readdir(workDir)).toEqual([])
+  })
+
+  // ESCSUITE-237: a failure the bundle traced to the input (an output size H.264 refuses)
+  // carries its code into the outcome, where the CLI and the server read it.
+  it('carries a coded render failure\'s code into the outcome', async () => {
+    const workDir = await makeTempDir()
+    const outDir = await makeTempDir()
+    vi.mocked(renderInChromium).mockRejectedValue(
+      new CodedRenderError('The output size 64×8 is too small for H.264', 'OUTPUT_SIZE_UNSUPPORTED'),
+    )
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: outDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome).toMatchObject({
+      jobId: 'job-1',
+      ok: false,
+      error: 'The output size 64×8 is too small for H.264',
+      code: 'OUTPUT_SIZE_UNSUPPORTED',
+    })
+  })
+
+  it('carries no code for a render failure that has none', async () => {
+    const workDir = await makeTempDir()
+    const outDir = await makeTempDir()
+    vi.mocked(renderInChromium).mockRejectedValue(new Error('Chromium page crashed'))
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: outDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome.ok).toBe(false)
+    expect(outcome).not.toHaveProperty('code')
   })
 
   it('returns ok:false when the sink config is invalid', async () => {

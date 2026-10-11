@@ -117,7 +117,7 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. **Video formats only — a `gif` render ignores it** (a GIF's size comes from its palette, its resolution and `fps`). It is accepted rather than rejected on a `gif` job, unlike `fps` on a video one, because `parseOptions` always fills a default in: rejecting it would refuse specs doing nothing wrong. |
 | `options.fps` | no | **`gif` only** — `10`, `15` (default) or `20`. Rejected for the other two formats, which always encode at 30. A GIF stores each frame's delay in centiseconds, so 10 and 20 fps are exact while 15 fps really plays at about 14.3. |
 | `options.resolution` | no | `project` (default) uses the project's own resolution; `1080p`, `720p`, `480p` and `360p` scale to that height, keeping the *project's* aspect ratio (falling back to the bottom-most media clip's native aspect only when the project has no resolution of its own). Odd dimensions are rounded up to even. All five are accepted for every format; ESCAPEARTIST's own export dialog offers `720p`, `480p` (its default) and `360p` for `gif`, because a GIF at 1080p is enormous and one at the project's own resolution is unpredictable. The kit applies no such narrowing and issues no size warning — ask for `{ "format": "gif", "resolution": "1080p" }` and you get exactly that, however large (see [Sizing and throughput](#sizing-and-throughput) on GIF memory, which grows with duration). |
-| `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both finite numbers, `start >= 0` and `start` strictly less than `end` — a non-finite bound (`NaN`, `Infinity`), a negative `start`, or `start >= end` is refused while the spec is parsed. Omit to render the whole timeline. The engine then clamps this to the project's own timeline before rendering: an `end` past the timeline's duration is pulled in to it and a `start` is floored at 0, so `{start: 0, end: 600}` against a 1-second project renders 1 second, not 600. If the clamped range is empty — both bounds fall after the end of the timeline, or both before its start — the render fails naming `options.timeRange` rather than encoding nothing or the un-clamped request. The verification manifest's `durationSec` always describes the CLAMPED range that was actually encoded, never the raw request. |
+| `options.timeRange` | no | `{ "start": <seconds>, "end": <seconds> }`, both finite numbers, `start >= 0` and `start` strictly less than `end` — a non-finite bound (`NaN`, `Infinity`), a negative `start`, or `start >= end` is refused while the spec is parsed. Omit to render the whole timeline. The engine then clamps this to the project's own timeline before rendering: an `end` past the timeline's duration is pulled in to it and a `start` is floored at 0, so `{start: 0, end: 600}` against a 1-second project renders 1 second, not 600. If the clamped range is empty — both bounds fall after the end of the timeline, or both before its start — the render fails naming `options.timeRange` rather than encoding nothing or the un-clamped request. The verification manifest's `durationSec` always describes the CLAMPED range that was actually encoded, never the raw request — in whole encoded frames (see the manifest's `durationSec`). |
 | `output.sink` | yes | `volume`, `command`, `webhook` or `s3`. |
 | `output.config` | yes | An object; its shape depends on the sink (see [Sinks](#sinks)), and is validated against that sink's own requirements as part of parsing. |
 
@@ -479,7 +479,7 @@ Every successful render is accompanied by `<jobId>.manifest.json`:
 | `jobId` | The job that produced it. |
 | `format` | `mp4`, `webm` or `gif`, as requested. |
 | `byteLength` | Size of the delivered file, re-read from disk after encoding. |
-| `durationSec` | Encoded duration — the CLAMPED `timeRange` length when one was given (never the raw request: an `end` past the timeline or a negative `start` is pulled back to it first, ESCSUITE-191), else the whole timeline. This describes the bytes delivered, not what the job spec asked for. For a `gif`, the frame delays it actually plays for: `ceil(seconds x fps)` frames of the delay the **file stores**, which is `round(1000 / fps)` ms quantised to whole centiseconds. At 15 fps that is 70 ms, not 67, so a 15 fps GIF of a 1 s range reports **1.05** — the figure `ffprobe` will agree with. 10 and 20 fps survive both roundings exactly, so `durationSec` is the range rounded up to a whole frame rather than up to a whole frame *and* a coarser delay — not the range itself unless `seconds x fps` is already a whole number (a 1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = 1.05). |
+| `durationSec` | The encoded **video** length, for every format: the frames the exporter encoded times one frame period. It describes the bytes delivered, not what the job spec asked for, and a consumer may compare it to the file's **video stream** within one millisecond — its counted frames x the frame period, or its own duration (`ffprobe -select_streams v -count_frames -show_entries stream=nb_read_frames,duration`). Compare against the video stream, not the container's `format.duration`: an `mp4` or `webm` carrying sound runs a few milliseconds longer, because the audio encoder writes whole frames (AAC 1024 samples, 21.3 ms at 48 kHz; Opus 20 ms) and pads the last one past the last video frame — a 1 s MP4 with sound is 30 video frames, `durationSec` 1, and about 1.0027 s of container. The frames cover the CLAMPED `timeRange` when one was given (never the raw request: an `end` past the timeline or a negative `start` is pulled back to it first, ESCSUITE-191), else the whole timeline, and are whole frames — `ceil(seconds x fps)` of them — so the duration is that range rounded **up** to a whole frame, not the range itself. For `mp4` and `webm` the rate is 30 fps and the period 1/30 s: a 0.75 s range is `ceil(22.5) = 23` frames and reports **0.766667**, which is what `ffprobe -count_frames` measures; before ESCSUITE-238 it reported the range, 0.75, and a sub-frame check rejected a valid render. For a `gif` the period is the delay the **file stores**, which is `round(1000 / fps)` ms quantised to whole centiseconds. At 15 fps that is 70 ms, not 67, so a 15 fps GIF of a 1 s range reports **1.05** — the figure `ffprobe` will agree with. 10 and 20 fps survive both roundings exactly, so `durationSec` is the range rounded up to a whole frame rather than up to a whole frame *and* a coarser delay (a 1.03 s range at 20 fps is `ceil(20.6) = 21` frames x 50 ms = 1.05). |
 | `width`, `height` | Encoded frame size after `options.resolution` is applied (not necessarily the project's own resolution). |
 | `gpu` | Whether Chromium was launched with GPU acceleration. |
 | `sha256` | SHA-256 of the delivered file, streamed while hashing. |
@@ -510,7 +510,8 @@ compare `width`, `height`, `durationSec` and the picture itself.
 To verify the *content* rather than the transport, probe the file you received and compare it
 against the manifest — `ffprobe -v error -show_streams -show_format out/acme-2026-09-07-0001.mp4`
 reports the codec (`h264` for MP4, `vp9` for WebM), the frame size, and the duration, which
-should match `width`, `height` and `durationSec`. This kit's own suite runs exactly those checks
+should match `width`, `height` and `durationSec` — the **video stream's** duration, not the
+container's, which a file with sound pads by up to one audio frame (see `durationSec` above). This kit's own suite runs exactly those checks
 on every CI run: it renders a known fixture to MP4 and to WebM, asserts the codec, the frame
 size, the frame count and the duration against golden expectations, decodes a middle frame and
 asserts its mean colour still matches the source, and re-hashes the delivered file to confirm the
@@ -524,6 +525,7 @@ need `ffmpeg` and `ffprobe` on `PATH` and skip themselves (loudly) when the bina
 | `0` | Rendered and delivered. | One JSON `RenderOutcome` line with `"ok": true`. |
 | `1` | The job ran and failed (bad input file, encoder error, sink refused it, timeout). | One JSON `RenderOutcome` line with `"ok": false` and an `error` string. |
 | `2` | Usage or job-spec error — the job never started. Retrying identically will fail identically. | Empty. |
+| `2` | The job ran and was refused for its input: the output size is one the H.264 encoder refuses — `options.format: "mp4"` at a size with a side under 16 px, such as 64x8 or 3840x2, or one too large for the encoder, in a Chromium that encodes H.264 at 1280x720 (ESCSUITE-237). Retrying identically will fail identically; change the size, or render `webm` or `gif`, which are unaffected. | One JSON `RenderOutcome` line with `"ok": false`, the reason in `error` (`The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.`, or for a size too large for it `The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.`) and `"code": "OUTPUT_SIZE_UNSUPPORTED"`. |
 
 An exit `2` also covers a `volume` job whose output directory cannot be created or written by
 the user the process runs as (checked by writing and removing a private temp file before Chromium
@@ -533,7 +535,9 @@ launches; the message names the directory and the uid). Fix the mount's ownershi
 for a bad flag or environment variable (checked before anything binds), and `1` when it could
 not listen at all — `EADDRINUSE`, `EACCES` on a privileged port — which, unlike a `2`, may well
 succeed on a retry or another host. A render that fails inside `serve` is not an exit code at
-all: it is an `ok: false` in that request's response, and the server carries on. A second signal
+all: it is an `ok: false` in that request's response, and the server carries on — a 200, except
+for a render refused for its output size, which is a 400 (see [the status table](#post-render)'s
+`400` row). A second signal
 during the drain exits `130`; see [Shutdown](#shutdown).
 
 **stdout carries exactly one line and nothing else, ever.** Logs, progress and warnings all go
@@ -639,7 +643,10 @@ is a working loop; the contract it relies on is small:
   in-process lock does not close it for the documented one-process-per-job deployment.
 - **Retry on exit 1, never on exit 2.** Exit 1 is a failure that may be transient (a busy disk,
   a webhook that was down, a timeout). Exit 2 means the spec is wrong and always will be; route
-  those to a dead-letter queue instead of a retry loop.
+  those to a dead-letter queue instead of a retry loop. That includes a job that ran and was
+  refused for its input — an MP4 at an output size H.264 refuses, whose outcome carries
+  `"code": "OUTPUT_SIZE_UNSUPPORTED"` (ESCSUITE-237). Before this it exited 1, inviting a retry
+  that could only fail the same way.
 - **Read `outputLocation` from the outcome**, don't reconstruct it — it differs per sink.
 - **Cap the render** with `HEADLESS_TIMEOUT_MS` so one wedged page — or a Chromium binary that
   never finishes launching — can't hold a worker slot indefinitely; the job then fails with
@@ -746,8 +753,9 @@ progress tears such a request down immediately instead of waiting for the next s
 
 | Status | When | Body |
 | --- | --- | --- |
-| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200. | `RenderOutcome` |
+| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200, except for a job refused for its output size (the second `400` row). | `RenderOutcome` |
 | `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\", \"webm\", or \"gif\""}` |
+| `400` | The job ran and was refused for its input: an MP4 at an output size the H.264 encoder refuses (ESCSUITE-237) — the CLI's second exit `2`. Resending it can never succeed. | The `RenderOutcome`, with `"ok": false`, the reason in `error` and `"code": "OUTPUT_SIZE_UNSUPPORTED"`. |
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |
@@ -763,7 +771,9 @@ progress tears such a request down immediately instead of waiting for the next s
 queued, run, and answered; the *job* is what failed, and the outcome says so. A 5xx would tell
 every well-behaved client to retry the HTTP call, which is exactly wrong for a job that will
 fail identically the second time. Branch on `ok`, not on the status code — the same rule as the
-CLI's exit 1.
+CLI's exit 1. The one failed render that is not a 200 is the one that can never succeed: a job
+refused for its output size answers 400 with its outcome as the body, the same status as an
+invalid spec, because that is what it is.
 
 Unknown job-spec fields (`qualitiy`, `options.resoluton`) come back as a `warnings` array — the
 same warnings the CLI writes to stderr. They never refuse a job on their own, so they ride along

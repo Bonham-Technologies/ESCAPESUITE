@@ -294,6 +294,18 @@ describe('exportToWebM muxing', () => {
 
     await expect(run()).rejects.toThrow('Export failed: no data was written to buffer')
   })
+
+  // ESCSUITE-238: the headless manifest derives the encoded duration from this
+  // count — whole frames at 30 fps, so a 0.75 s timeline is 23 frames.
+  it.each([
+    [CLIP_DURATION, 6],
+    [0.75, 23],
+  ])('reports the frames it encoded for %s s of timeline (%s)', async (seconds, expected) => {
+    const result = await run({ clips: [makeClip({ duration: seconds, endTime: seconds })] })
+
+    expect(result.framesEncoded).toBe(expected)
+    expect(result.framesEncoded).toBe(webcodecs.videoEncoders[0].encodes.length)
+  })
 })
 
 describe('exportToWebM audio', () => {

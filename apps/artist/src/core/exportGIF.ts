@@ -257,7 +257,7 @@ export async function exportToGIF(
     // A GIF never carries sound: the container has nowhere to put it, which is
     // why this is the one exporter whose result always reports it as dropped
     // (ESCSUITE-175). The dialog says so before the export too.
-    return { blob: new Blob([bytes], { type: 'image/gif' }), audio: false };
+    return { blob: new Blob([bytes], { type: 'image/gif' }), audio: false, framesEncoded: frameCount };
   } catch (error) {
     releaseSources();
 
