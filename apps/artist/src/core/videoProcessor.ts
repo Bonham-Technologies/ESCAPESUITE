@@ -18,6 +18,15 @@ const END_SEEK_TARGET = Number.MAX_SAFE_INTEGER;
 /** How long to wait for the end seek to report back before giving up. */
 const DURATION_PROBE_TIMEOUT_MS = 5000;
 
+/**
+ * How long to wait for `loadedmetadata` (or `error`) after the element's source
+ * is set (ESCSUITE-249). A file the browser neither decodes nor rejects used to
+ * leave its upload row on "Processing..." forever; this fails it so the row
+ * shows an error and can be dismissed. Generous, because a multi-gigabyte file
+ * on a slow disk legitimately takes a while to reach its header.
+ */
+export const METADATA_LOAD_TIMEOUT_MS = 15_000
+
 /** A duration we can build a clip from: a real, positive number of seconds. */
 function isUsableDuration(value: number): boolean {
   return Number.isFinite(value) && value > 0;
@@ -74,8 +83,19 @@ function settleMediaDuration(
     // timer armed, holding the element, the File and the URL for five seconds.
     let stopProbe = () => {};
 
+    // Armed here, where the listeners are attached: every caller sets `src`
+    // just before calling in, and the element cannot report before this turn
+    // of the event loop ends. Cleared by `loadedmetadata` (the end-seek probe
+    // has its own timer from there), by `error` and by `release`.
+    const metadataTimeout = setTimeout(() => {
+      fail(
+        `Could not read ${name} \u2014 the browser did not report its metadata within ${METADATA_LOAD_TIMEOUT_MS / 1000} s`
+      );
+    }, METADATA_LOAD_TIMEOUT_MS);
+
     // Everything that happens exactly once, on whichever path settles first.
     const release = () => {
+      clearTimeout(metadataTimeout);
       stopProbe();
       // `src` still points at a URL the caller is about to revoke, and some
       // browsers fire 'error' on a dangling src — which would re-enter `fail`
@@ -125,6 +145,7 @@ function settleMediaDuration(
     };
 
     element.onloadedmetadata = () => {
+      clearTimeout(metadataTimeout);
       if (isUsableDuration(element.duration)) {
         succeed(element.duration);
         return;

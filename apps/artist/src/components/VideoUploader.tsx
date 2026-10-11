@@ -1,3 +1,4 @@
+import { v4 as uuidv4 } from 'uuid';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { processMediaFile } from '../core/videoProcessor';
@@ -17,6 +18,12 @@ import styles from './VideoUploader.module.css';
 const UPLOAD_ROW_FADE_MS = 200;
 
 interface UploadProgress {
+  /**
+   * Minted per accepted file (ESCSUITE-249). Every state change and Dismiss
+   * matches on this, never on `fileName`, which is for display only: two drops
+   * of `clip.mp4` are two rows.
+   */
+  id: string;
   fileName: string;
   progress: number;
   status: 'uploading' | 'processing' | 'complete' | 'error';
@@ -240,7 +247,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
     const allFiles = Array.from(files);
 
     // Check for .veditor project files first
-    const projectFiles = allFiles.filter((file) => file.name.endsWith('.veditor'));
+    const projectFiles = allFiles.filter((file) => file.name.toLowerCase().endsWith('.veditor'));
     if (projectFiles.length > 0) {
       onProjectFile(projectFiles[0]);
       return;
@@ -251,17 +258,19 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
     );
 
     if (mediaFiles.length === 0) {
-      alert('Please select video, image, or audio files');
+      showNotification('Only video, image, audio and .veditor files can be imported.', 'error');
       return;
     }
 
     for (const file of mediaFiles) {
+      const uploadId = uuidv4();
       // Check available space before processing
       const currentInfo = await getStorageEstimate();
       if (currentInfo.available < file.size + 10 * 1024 * 1024) {
         setUploads((prev) => [
           ...prev,
           {
+            id: uploadId,
             fileName: file.name,
             progress: 0,
             status: 'error',
@@ -273,7 +282,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
 
       setUploads((prev) => [
         ...prev,
-        { fileName: file.name, progress: 0, status: 'processing' },
+        { id: uploadId, fileName: file.name, progress: 0, status: 'processing' },
       ]);
 
       try {
@@ -285,7 +294,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
 
         setUploads((prev) =>
           prev.map((u) =>
-            u.fileName === file.name ? { ...u, progress: 100, status: 'complete' } : u
+            u.id === uploadId ? { ...u, progress: 100, status: 'complete' } : u
           )
         );
 
@@ -300,11 +309,11 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         const id = window.setTimeout(() => {
           timers.delete(id);
           setUploads((prev) =>
-            prev.map((u) => (u.fileName === file.name ? { ...u, removing: true } : u))
+            prev.map((u) => (u.id === uploadId ? { ...u, removing: true } : u))
           );
           const fadeId = window.setTimeout(() => {
             timers.delete(fadeId);
-            setUploads((prev) => prev.filter((u) => u.fileName !== file.name));
+            setUploads((prev) => prev.filter((u) => u.id !== uploadId));
           }, UPLOAD_ROW_FADE_MS);
           timers.add(fadeId);
         }, 2000);
@@ -320,7 +329,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
 
         setUploads((prev) =>
           prev.map((u) =>
-            u.fileName === file.name
+            u.id === uploadId
               ? {
                   ...u,
                   status: 'error',
@@ -334,7 +343,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         refreshStorageInfo();
       }
     }
-  }, [addSourceVideo, refreshStorageInfo, onProjectFile]);
+  }, [addSourceVideo, refreshStorageInfo, onProjectFile, showNotification]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -376,8 +385,8 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
     [handleFiles]
   );
 
-  const handleClearError = useCallback((fileName: string) => {
-    setUploads((prev) => prev.filter((u) => u.fileName !== fileName));
+  const handleClearError = useCallback((uploadId: string) => {
+    setUploads((prev) => prev.filter((u) => u.id !== uploadId));
   }, []);
 
   return (
@@ -454,9 +463,9 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
 
       {uploads.length > 0 && (
         <div className={styles.uploadList}>
-          {uploads.map((upload, index) => (
+          {uploads.map((upload) => (
             <div
-              key={index}
+              key={upload.id}
               className={`${styles.uploadItem} ${upload.status === 'error' ? styles.uploadError : ''} ${upload.removing ? styles.uploadItemRemoving : ''}`}
             >
               <div className={styles.uploadInfo}>
@@ -480,7 +489,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
               {upload.status === 'error' && (
                 <button
                   className={styles.dismissButton}
-                  onClick={() => handleClearError(upload.fileName)}
+                  onClick={() => handleClearError(upload.id)}
                 >
                   Dismiss
                 </button>
