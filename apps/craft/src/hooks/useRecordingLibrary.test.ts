@@ -216,6 +216,23 @@ describe('useRecordingLibrary playback', () => {
       expect(vi.mocked(URL.revokeObjectURL).mock.calls.map(([u]) => u)).toEqual(['blob:a'])
     })
 
+    it('a superseded Play whose bytes are gone mints nothing and raises no notice', async () => {
+      await seed('take-2', 'B')
+      mintDistinct('blob:b')
+      const { result } = mountLibrary([listed('take-2', 'B', 20)])
+
+      await act(async () => {
+        await Promise.all([
+          result.current.handlePlayRecording('gone', 'Gone'),
+          result.current.handlePlayRecording('take-2', 'B'),
+        ])
+      })
+
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+      expect(setNotice).not.toHaveBeenCalled()
+      expect(result.current.playbackUrl).toBe('blob:b')
+    })
+
     it('Play then Close mints once and revokes once', async () => {
       await seed('take-1', 'First')
       const { result } = mountLibrary([listed('take-1', 'First', 10)])

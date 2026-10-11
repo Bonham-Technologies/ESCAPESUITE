@@ -4,8 +4,9 @@
 // The five handlers are plain functions, recreated on every render, exactly as
 // they were inline. Memoising them now would change how often the sidebar and
 // the playback dialog re-render, which is a behaviour change dressed as a
-// cleanup — so they stay as they are. The hook binds no effect.
-import { useState } from 'react';
+// cleanup — so they stay as they are. The hook's one effect is the unmount
+// cleanup that revokes the live playback URL (ESCSUITE-229).
+import { useEffect, useRef, useState } from 'react';
 import { deleteVideo, getVideoBlob, createBlobUrl, revokeBlobUrl } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { downloadBlob } from '../utils/downloadBlob';
@@ -49,6 +50,25 @@ export function useRecordingLibrary({
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [playbackDuration, setPlaybackDuration] = useState<number>(0);
+
+  // The one live playback handle, written synchronously where it is minted and
+  // nulled where it is revoked (ESCSUITE-229). The `playbackUrl` state is a
+  // closure value: two clicks before a re-render both read `null`, both mint,
+  // and the first would never be revoked. Every revoke goes through this ref.
+  const liveUrlRef = useRef<string | null>(null);
+  // Which Play owns the dialog: the latest click wins, an earlier read landing
+  // afterwards revokes what it minted instead of showing it.
+  const playTokenRef = useRef(0);
+
+  const revokeLiveUrl = () => {
+    if (liveUrlRef.current) {
+      revokeBlobUrl(liveUrlRef.current);
+      liveUrlRef.current = null;
+    }
+  };
+
+  // The dialog can be open when the app unmounts (the ESCSUITE-212 crash path).
+  useEffect(() => revokeLiveUrl, []);
 
   // Delete a recording, and the companions that belong to it
   const handleDeleteRecording = async (id: string) => {
@@ -104,13 +124,19 @@ export function useRecordingLibrary({
   // Play a recording
   const handlePlayRecording = async (id: string, name: string) => {
     // Clean up any existing playback
-    if (playbackUrl) {
-      revokeBlobUrl(playbackUrl);
-    }
+    revokeLiveUrl();
+    const token = ++playTokenRef.current;
 
     const blob = await getVideoBlob(id);
+    if (token !== playTokenRef.current) {
+      // A later click owns the dialog. Mint-and-revoke keeps this call's
+      // accounting trivially balanced: nothing it made outlives it.
+      if (blob) revokeBlobUrl(createBlobUrl(blob));
+      return;
+    }
     if (blob) {
       const url = createBlobUrl(blob);
+      liveUrlRef.current = url;
       setPlaybackUrl(url);
       setPlaybackName(name);
       // Pass known duration so the player doesn't depend on WebM metadata
@@ -137,9 +163,7 @@ export function useRecordingLibrary({
 
   // Close playback
   const handleClosePlayback = () => {
-    if (playbackUrl) {
-      revokeBlobUrl(playbackUrl);
-    }
+    revokeLiveUrl();
     setPlaybackUrl(null);
     setPlaybackName('');
     // The duration goes with the other two. Left standing, it was handed to
