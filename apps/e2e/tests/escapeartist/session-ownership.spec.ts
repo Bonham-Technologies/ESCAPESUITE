@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
-import { ARTIST_URL, importMediaAndAddToTimeline, seedTextClip } from '../../utils/artist'
+import { ARTIST_URL, importMediaAndAddToTimeline } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 /**
@@ -131,10 +131,13 @@ test.describe('One session slot per ESCAPEARTIST tab (ESCSUITE-274)', () => {
     })
 
     await test.step('(c) the second tab edits, into its own slot, and leaves the first tab\'s alone', async () => {
-      await seedTextClip(tabB)
+      // A real source, so B's slot is one the prompt would offer (a slot with
+      // no media never is): in (d) only B's live lock keeps it from being
+      // offered, and it is the newer of the two.
+      await importMediaAndAddToTimeline(tabB)
       await expect
         .poll(() => slotOf(tabB, idB), { timeout: 15_000 })
-        .toEqual({ name: 'Tab B', sources: 0, clips: 1 })
+        .toEqual({ name: 'Tab B', sources: 1, clips: 1 })
       await tabB.waitForTimeout(PAST_THE_DEBOUNCE_MS)
       expect(await slotOf(tabB, idA)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
     })
@@ -153,7 +156,7 @@ test.describe('One session slot per ESCAPEARTIST tab (ESCSUITE-274)', () => {
       await expect
         .poll(() => readSlots(tabC), { timeout: 15_000 })
         .toEqual({
-          [idB]: { name: 'Tab B', sources: 0, clips: 1 },
+          [idB]: { name: 'Tab B', sources: 1, clips: 1 },
           [idC]: { name: 'Tab A', sources: 1, clips: 1 },
         })
     })

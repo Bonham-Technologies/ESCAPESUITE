@@ -83,6 +83,19 @@ const flushStorage = () =>
     for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve))
   })
 
+/**
+ * Render, then let the startup question settle. The debounce is armed only
+ * once it has, and that is a lock probe and a listing of every slot away
+ * (ESCSUITE-274) — on a cold database open more than renderApp's own flush
+ * covers. Waiting here is what keeps the "writes nothing" cases below from
+ * passing only because the autosave had not started yet (fix round 1, LOW-7).
+ */
+const renderSettledApp = async () => {
+  const view = await renderApp()
+  await flushStorage()
+  return view
+}
+
 describe('App session storage', () => {
   beforeEach(async () => {
     resetStoreForTest()
@@ -101,11 +114,7 @@ describe('App session storage', () => {
 
   it('writes the session to storage once the debounce elapses', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    await renderApp()
-    // The debounce is armed once the startup question settles, and that is a
-    // probe and a listing of every slot away (ESCSUITE-274) — on the file's
-    // first, cold, database open more than renderApp's own flush covers.
-    await flushStorage()
+    await renderSettledApp()
 
     await act(async () => {
       vi.advanceTimersByTime(2500)
@@ -122,7 +131,7 @@ describe('App session storage', () => {
 
   it('writes nothing before the debounce elapses', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    await renderApp()
+    await renderSettledApp()
 
     await act(async () => {
       vi.advanceTimersByTime(1000)
@@ -139,7 +148,7 @@ describe('App session storage', () => {
   // these three tests are what pin that it still behaves the same.
   it('holds the write off while the playhead keeps moving', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    await renderApp()
+    await renderSettledApp()
 
     // 2 s of fake time — past the 2 s debounce — but never 2 s without a write.
     for (let i = 1; i <= 20; i++) {
@@ -155,7 +164,7 @@ describe('App session storage', () => {
 
   it('writes once the playhead settles, at the time it settled on', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    await renderApp()
+    await renderSettledApp()
 
     for (let i = 1; i <= 20; i++) {
       store().setCurrentTime(i * 0.1)
@@ -173,7 +182,7 @@ describe('App session storage', () => {
 
   it('clears the pending write on unmount', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
-    const { unmount } = await renderApp()
+    const { unmount } = await renderSettledApp()
 
     unmount()
     await act(async () => {

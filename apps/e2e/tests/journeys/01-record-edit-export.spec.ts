@@ -125,7 +125,7 @@ test.describe('Journey: Record, Edit, Export', () => {
       // ESCSUITE-177 review "Races" 1: waitForAppReady now resolves at
       // React's first commit (attachment), earlier than the old
       // `networkidle` ever did, which can land before ARTIST's own
-      // asynchronous `getSessionState()` has decided whether to raise the
+      // asynchronous `listSessionStates()` has decided whether to raise the
       // "Resume Previous Session?" prompt. `?suppressRestore=1` means
       // ARTIST never asks in the first place, rather than racing whichever
       // lands first.

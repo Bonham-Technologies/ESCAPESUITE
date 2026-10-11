@@ -245,6 +245,29 @@ function storedSessionName(page: Page): Promise<string | null> {
   })
 }
 
+/**
+ * How many per-tab session slots (`session:<tabId>`, ESCSUITE-274) ESCAPEARTIST
+ * has written. Since that ticket the autosave writes those rows and never
+ * `current-session` again, so a regression where `?suppressRestore=1` started
+ * autosaving would show here and not in `storedSessionName`.
+ */
+function sessionSlotCount(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    return new Promise<number>((resolve) => {
+      const request = indexedDB.open('video-editor-db')
+      request.onerror = () => resolve(-1)
+      request.onsuccess = () => {
+        const count = request.result
+          .transaction('settings', 'readonly')
+          .objectStore('settings')
+          .count(IDBKeyRange.bound('session:', 'session:\uffff'))
+        count.onerror = () => resolve(-1)
+        count.onsuccess = () => resolve(count.result)
+      }
+    })
+  })
+}
+
 /** Write a finished recording into ESCAPECRAFT's storage directly. */
 async function seedCraftRecording(page: Page, name: string): Promise<string> {
   return page.evaluate(async (recordingName) => {
@@ -461,6 +484,7 @@ test.describe('Host embedding contract', () => {
       // empty project.
       await page.waitForTimeout(ARTIST_AUTO_SAVE_DELAY + 500)
       expect(await storedSessionName(page)).toBe('Seeded Session')
+      expect(await sessionSlotCount(page)).toBe(0)
     })
   })
 

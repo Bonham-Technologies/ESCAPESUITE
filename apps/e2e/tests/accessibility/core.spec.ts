@@ -334,7 +334,7 @@ test.describe('ESCAPEARTIST Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     // ESCSUITE-177 review "Races" 2: waitForAppReady resolves at React's
     // first commit (attachment), which can land before ARTIST's
-    // asynchronous getSessionState() has decided whether to raise the
+    // asynchronous listSessionStates() has decided whether to raise the
     // "Resume Previous Session?" prompt — exactly the hazard
     // `?suppressRestore=1` exists to rule out below, in the one test in
     // this file ("the clip inspector's controls have associated labels")

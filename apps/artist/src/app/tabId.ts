@@ -19,12 +19,14 @@ export const TAB_ID_KEY = 'escapeartist-tab-id';
 /**
  * A new id. `crypto.randomUUID` is exposed to secure contexts only, and an
  * editor served over plain http from a LAN address has none — that tab must
- * still start, so it gets a time-and-random id instead. Either is unique
- * enough for what it names: one tab's slot among a handful.
+ * still start, so it gets 128 random bits from `crypto.getRandomValues`, which
+ * every context has, written as hex.
  */
 function mintTabId(): string {
   if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) =>
+    byte.toString(16).padStart(2, '0')
+  ).join('');
 }
 
 /** This tab's id: the one it already has, or a new one kept for next time. */
