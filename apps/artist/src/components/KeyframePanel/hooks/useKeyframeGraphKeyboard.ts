@@ -156,8 +156,10 @@ interface KeyframeGraphKeyboardOptions {
   onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory: boolean) => boolean;
   /**
    * `false` means nothing was written: the time already held a keyframe, and
-   * the host selected that one and announced it instead (ESCSUITE-248). Any
-   * other answer — `true`, or a host that returns nothing — is an add.
+   * the host selected that one and announced it instead (ESCSUITE-248), or it
+   * is an Animate In/Out handle's time and the host refused with its own notice
+   * (ESCSUITE-282). Any other answer — `true`, or a host that returns nothing —
+   * is an add.
    */
   onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => boolean | void;
   /** Returns whether the store removed the keyframe — as the two above do. */
@@ -317,9 +319,10 @@ export function useKeyframeGraphKeyboard({
     // is clamped to the clip's edge, and reading the curve anywhere other than
     // where the keyframe lands would make the curve jump when it does.
     const value = interpolateKeyframes(keyframes, time, defaultValue);
-    // A keyframe already there (ESCSUITE-248): the host selected it and said
-    // so through the panel's region, so this one says nothing — no keyframe
-    // was added — and leaves the selection where the host put it.
+    // A keyframe already there (ESCSUITE-248), or a preset handle's time
+    // (ESCSUITE-282): the host selected or refused and said so through the
+    // panel's region, so this one says nothing — no keyframe was added — and
+    // leaves the selection where the host put it.
     if (onAddKeyframe(property, time, value) === false) return;
     setActiveTime(time);
     setSelectedKeyframeTime(time);

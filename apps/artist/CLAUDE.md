@@ -1335,8 +1335,10 @@ Clips support animated properties via keyframes:
   selects), whether `time` is within `KEYFRAME_TIME_EPSILON` of any of the property's preset
   handles, asked of `utils/animation.ts`'s `presetHandleTimes(property, clipDuration, animation,
   transform, effects)`. That helper runs the same generators the merge does
-  (`presetKeyframesForProperty`, which `getAllKeyframesForProperty` now shares), so the panel and
-  the renderer cannot disagree about where a handle is, a `pop` preset's middle handle included.
+  (`presetKeyframesForProperty`, which `getAllKeyframesForProperty` now shares), so the panel reads
+  the handle times from the same generators the merge does, a `pop` preset's middle handle included
+  (`getAnimatedValues` still carries its own inline copy of that merge, so the two agree by
+  construction of the generators, not by sharing one merge).
   A refused add writes nothing, pushes no history entry, selects and opens nothing, answers
   `false` (so `addAtPlayhead` neither moves the active option nor announces an add), and the
   panel's one live region says "That time belongs to the Animate In/Out preset" through
@@ -1346,7 +1348,7 @@ Clips support animated properties via keyframes:
   time-0 keyframe at the base value when a property gets its first keyframe away from 0, which
   lands over an in-preset's 0 handle the same way: a fade-in clip whose first opacity keyframe is
   added at 2 s starts at full opacity instead of 0 (measured; not a transition hazard, since the
-  seed holds the base value the suppression would read anyway). Not yet filed.
+  seed holds the base value the suppression would read anyway). Filed as ESCSUITE-286.
 - **An audio-only clip is offered Volume alone (ESCSUITE-248 / M-19)**. The property list rendered
   Position, Scale, Rotation, Opacity and Blur for every clip, so a voice-over could be keyframed to
   move or fade, to no visible effect (the inspector already hides Transform for audio). The panel
