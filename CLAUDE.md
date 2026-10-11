@@ -3719,6 +3719,20 @@ store's refusal) were red before the fix; the ESCSUITE-160 inline-editor pins, `
 every `*.perf.test.ts` and the rerender pins are byte-identical. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/plan` was re-measured 2026-10-10 for ESCSUITE-240 (hub infra: the hub's content-hashed
+`/assets/*` chunks are served `Cache-Control: public, max-age=31536000, immutable` through a `vercel.json`
+`headers` entry — which `serve-dist.mjs` now carries through instead of forcing `no-store` on every path —
+`/favicon.ico` is a real 404 instead of the hub page at 200 (the catch-all excludes the file `favicon\.ico`
+rather than any `/favicon` segment; the hub's icon is a `data:` URI and nothing relied on the old
+exclusion), and the sitemap lists `/craft/` and `/artist/`): 100.00 / 100.00 / 100.00 / 100.00, identical on
+every count to `main` at `7873c436` in the same sitting — lines 82, statements 83, branches 21, functions 27,
+every one covered on both trees. The change touches no measured plan source (a public file, `vercel.json`,
+the e2e server and its pins), so nothing moved; the `serve-dist.mjs` change is covered by
+`serve-dist.test.mjs` (19 / 19), and the two production-layout pins — a hashed `/assets` chunk carrying the
+immutable header while the document does not, and `/favicon.ico` answering 404 and not `text/html` — were
+run here against `pnpm build:deploy` on Chromium: 25 / 25, and 5 / 5 for the spec after the review's
+follow-ups. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
