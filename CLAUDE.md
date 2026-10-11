@@ -4127,6 +4127,35 @@ one case each way. `keyframeGestures.perf.test.ts`, every other `*.perf.test.ts`
 byte-identical. The seed bug the implementer found beside it — ESCSUITE-166's first-write seed landing on
 an in-preset's 0 handle — is ESCSUITE-286. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-11 for ESCSUITE-280 and ESCSUITE-281 (starting playback with
+the playhead in a gap between clips plays on from the next clip instead of freezing in a playing state —
+the playback effect sets the loop's start time to that clip's start, writes it to the store once and falls
+through into the rAF loop rather than returning; and a pause lands on the frame the preview showed — the
+loop keeps the time of the last frame it drew, one number assignment per frame, and the playback effect's
+cleanup publishes it once at the pause transition, only when the store says playback stopped and still
+holds the loop's own last write, so a pause that comes with a seek keeps the seek's target; the scrub
+effect skips the one run that would seek every video back to the stale throttled position first):
+99.84 / **99.40** / **96.57** / 99.76 against the 99.84 / 99.39 / 96.55 / 99.76 that `main` at `89988d16`
+(the ESCSUITE-268 version-packages commit) measures in the same sitting — statements and branches each up
+a hundredth or two, lines and functions unmoved, and with *fewer* uncovered units: the base gives
+5,717 / 5,921 branches and this branch 5,724 / 5,927, six new branches and seven more covered, so the
+uncovered column falls 204 → 203; statements 10,018 / 10,079 → 10,028 / 10,088 with 61 → 60 uncovered;
+lines 8,857 / 8,871 → 8,865 / 8,879 and functions 2,113 / 2,118 on both (the same 14 lines and 5
+functions uncovered). All of the movement is `components/Preview/usePreviewRenderLoop.ts`
+(137 / 150 → 144 / 156 branches, 328 / 335 → 338 / 344 statements): the gap-play fall-through's
+next-clip choice, the cleanup write's two operands — playback stopped, and the store still holding the
+loop's own last write — the loop-back time reset and the scrub effect's skip, each reached from both
+sides by the eleven new render-loop cases and the new integration file that mounts the preview, the
+transport and the timeline together (Space, the Pause button, a playhead grab, a ruler click and Home),
+with the mid-play edit, unmount, same-batch seek, end-of-timeline and loop-back pins holding the other
+side; the one pre-existing arm newly reached is in the same file. Nine of the new cases were red before
+the fixes, and four mutants on the final tree each red their named cases. `drawFrame.perf.test.ts`'s
+store-write ceiling over a 480 ms play-then-pause window rises 2 → 3 with a dated comment — the one extra
+write is the pause transition's, none is per frame — and every other `*.perf.test.ts` and the rerender
+pins are byte-identical. The limit the review and the implementer both named — a seek to the value the
+store already holds within the throttle window cannot be told from a plain pause — is ESCSUITE-287.
+**No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4134,7 +4163,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.39 | 96.55 | 99.76 |
+| `@escapesuite/artist` | 99.84 | 99.40 | 96.57 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.56 | 99.48 | 98.50 | 98.75 |
 
