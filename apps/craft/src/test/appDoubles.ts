@@ -200,8 +200,10 @@ export const converterModule = {
 // --- utils/sendToEditor -----------------------------------------------------
 
 export const sendToEditorModule = {
-  EDITOR_FILE_ORIGIN_REASON:
+  EDITOR_UNREACHABLE_REASON:
     "Download this recording's WebM and import it into the offline ESCAPEARTIST file.",
+  // The App suites run as a hosted build over http: nothing blocks the editor.
+  editorBlockedReasonFor: (): string | null => null,
   sendToEditor: vi.fn<(id: string) => 'posted' | 'opened'>(() => 'opened'),
 }
 

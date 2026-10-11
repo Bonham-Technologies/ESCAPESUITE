@@ -1350,15 +1350,25 @@ recorded blob available there without re-uploading it. Outside an iframe,
 Editor" and the header's "Open Editor" button — honour `VITE_EDITOR_URL` via
 the shared `editorUrl()` helper.
 
-**Opened from disk (`file:`), both editor buttons are disabled** (ESCSUITE-221):
+**When the editor is unreachable — opened from disk (`file:`), or an offline build served over http with no absolute editor address — both editor buttons are disabled** (ESCSUITE-221, 259):
 `/artist/` would resolve to `file:///artist/`, and the downloaded ESCAPEARTIST file's name is the
 user's, so there is no URL to reach. `isFileOrigin()` (`@escapesuite/shared/config`, beside
 `isEmbedded()`) decides; the header button and `RecordingsListPanel` (via `RecordingsList`'s
-`editorBlockedReason`) keep the button, disable it and show `EDITOR_FILE_ORIGIN_REASON`
+`editorBlockedReason`) keep the button, disable it and show `EDITOR_UNREACHABLE_REASON`
 ("Download this recording's WebM and import it into the offline ESCAPEARTIST file.") as its title, its
 `aria-describedby` target and visible text. A *row's* button is disabled only when not embedded:
 embedded, it posts `SEND_TO_EDITOR` and works from any origin; the header button always opens
 the editor itself, so it is disabled from disk even embedded. The hosted build is unchanged.
+
+ESCSUITE-259 widened the gate from the protocol to the build and the URL: `editorBlockedReasonFor({ embedded })`
+(`src/utils/sendToEditor.ts`, the one reader both the header and `RecordingsListPanel` call) returns the
+sentence when `!embedded && (isFileOrigin() || (isStandaloneMode() && editorUrlIsRelative()))`, so the
+offline build served from a plain web server (an intranet share) is disabled too, since `/artist/` is a 404
+there. `editorUrlIsRelative()` (`@escapesuite/shared/config`, beside `EDITOR_URL`) is true unless
+`VITE_EDITOR_URL` is an absolute `http(s)://` URL, so a standalone build given a hosted ARTIST address keeps
+its buttons, and a hosted (`saas`) build never blocks over http. The header passes `embedded: false` (its
+button opens the editor itself). A sibling-file `?loadVideo=` link to a downloaded ESCAPEARTIST remains
+open in the ticket.
 
 **"Upload to host"** is the second host-routed action and the last one: an
 extra icon button on every library row, between the MP4 download and "Open in

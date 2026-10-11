@@ -266,6 +266,32 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
 })
 
 /**
+ * ESCSUITE-259: the same file served from a plain web server (this project's
+ * `serve` on 5184) has no ESCAPEARTIST at `/artist/` either, and the offline
+ * build is not given an absolute editor address, so the header button is
+ * disabled with the same reason rather than opening a 404.
+ */
+test.describe('ESCAPECRAFT Standalone - served over http', () => {
+  test('the header "Open Editor" is disabled with its reason, and a click opens nothing', async ({ page, context }) => {
+    const REASON = "Download this recording's WebM and import it into the offline ESCAPEARTIST file."
+    const opened: string[] = []
+    context.on('page', (popup) => opened.push(popup.url()))
+
+    await page.goto(CRAFT_URL)
+    await waitForAppReady(page, 'craft')
+
+    const header = page.getByRole('button', { name: 'Open Editor in new window' })
+    await expect(header).toBeDisabled()
+    await expect(header).toHaveAttribute('title', REASON)
+    await expect(header).toHaveAccessibleDescription(REASON)
+
+    await header.click({ force: true }).catch(() => {})
+    await page.waitForTimeout(500)
+    expect(opened).toEqual([])
+  })
+})
+
+/**
  * ESCSUITE-221: the released file is run from disk. `/artist/` there is
  * `file:///artist/`, a browser error page, so both editor buttons are disabled
  * with a reason instead. This is the one case that needs a real `file://`

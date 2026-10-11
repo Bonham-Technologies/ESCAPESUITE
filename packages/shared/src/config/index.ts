@@ -33,6 +33,13 @@ export const isFileOrigin = (): boolean =>
 const rawEditorUrl = import.meta.env.VITE_EDITOR_URL || '/artist/'
 export const EDITOR_URL = rawEditorUrl.replace(/\/+$/, '') + '/'
 
+// True unless `VITE_EDITOR_URL` names an absolute http(s) URL — unset, `/artist/`,
+// `artist/` and anything that is not a URL all resolve against whatever
+// document CRAFT was opened from, which for the offline single-file build is
+// not a place ESCAPEARTIST lives (ESCSUITE-259).
+// (`//host/` and a hostless `https://` are not values anyone sets; the regex does not chase them.)
+export const editorUrlIsRelative = (): boolean => !/^https?:\/\//i.test(rawEditorUrl)
+
 export const editorUrl = (params?: Record<string, string>): string => {
   if (!params || Object.keys(params).length === 0) return EDITOR_URL
   const query = new URLSearchParams(params).toString()
