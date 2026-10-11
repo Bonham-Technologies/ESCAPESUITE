@@ -4100,6 +4100,33 @@ count and stream duration within a millisecond, and a 64×8 render fails with th
 statement, not a counted call. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's
 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-11 for ESCSUITE-282 (adding a keyframe at an Animate In/Out
+handle's time is refused instead of replacing the handle: `utils/animation.ts` gains the pure
+`presetHandleTimes`, built on the same generators the merge runs — `presetKeyframesForProperty`, now shared
+by `getAllKeyframesForProperty` — and `KeyframePanel`'s `handleAddKeyframe`, reached by the graph's Enter,
+the graph's double-click and a row's double-click, refuses a time within `KEYFRAME_TIME_EPSILON` of any
+handle after the ESCSUITE-248 stored-keyframe check, writing nothing, pushing no history entry, changing no
+selection and saying "That time belongs to the Animate In/Out preset" through the panel's one live region;
+before this the custom keyframe replaced the handle and, no longer generated, survived ESCSUITE-139's
+transition suppression): 99.84 / 99.39 / 96.55 / 99.76, byte-identical on every percentage to the
+99.84 / 99.39 / 96.55 / 99.76 that `main` at `89988d16` (the ESCSUITE-268 version-packages commit) measures
+in the same sitting. The base gives 5,717 / 5,921 branches and this branch 5,721 / 5,925: four new branches,
+four covered, the same 204 uncovered as before (lines 8,857 / 8,871 → 8,866 / 8,880, statements
+10,018 / 10,079 → 10,029 / 10,090, functions 2,113 / 2,118 → 2,117 / 2,122, every denominator growing by
+exactly what the numerator did; the same 14 / 61 / 5 uncovered). The four are `utils/animation.ts`'s two
+(147 / 152 → 149 / 154: `presetHandleTimes`' no-animation return and the moved `|| []` defaults on the two
+generated lists, reached by a clip with no animation, by opacity under both fades and by a property the
+preset never touches; the file's same five pre-existing arms uncovered) and `KeyframePanel.tsx`'s two
+(74 / 84 → 76 / 86: the `handles.some(...)` refusal, reached by the eight refusals — the in-preset's 0 and
+0.5, the out-preset's `clipDuration`, 0.5005 within the epsilon, both double-click paths — against 0.5015
+just outside it, a clip with no preset, and the 248 free-time and track-add cases; the same ten
+pre-existing arms uncovered). The review's probe compared `presetHandleTimes` with the merge for every
+preset pair, every property and four clip lengths and found no disagreement; disabling the refusal reds
+eight cases including the ESCSUITE-139 suppression pin, and widening or narrowing the epsilon reds exactly
+one case each way. `keyframeGestures.perf.test.ts`, every other `*.perf.test.ts` and the rerender pins are
+byte-identical. The seed bug the implementer found beside it — ESCSUITE-166's first-write seed landing on
+an in-preset's 0 handle — is ESCSUITE-286. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
