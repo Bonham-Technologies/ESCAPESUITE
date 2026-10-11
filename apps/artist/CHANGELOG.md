@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.15.75
+
+### Patch Changes
+
+- 3208a3f: An output size too small for H.264 is reported as such — "MP4 needs at least 16×16; WebM and GIF are unaffected" — instead of claiming the browser cannot encode H.264.
+  
+  A project can be any size from 2 to 7680 pixels a side, and the browser's H.264 encoder refuses some of those — 64×8, 2×2, 3840×2 — while encoding H.264 perfectly well at every normal size. The export dialog and the MP4 export used to blame the browser for that ("This browser cannot encode H.264"). When MP4 is refused, the editor now checks whether H.264 works at an ordinary 1280×720; if it does, it says the output size is the problem — too small when a side is under 16 pixels, too large otherwise — and that WebM and GIF still work. Nothing extra is checked for an export that succeeds.
+- 3208a3f: The headless render's reported duration is the encoded length — whole frames at the export's frame rate — for MP4 and WebM, as it already was for GIF.
+  
+  A video export encodes whole frames at 30 fps, so a 0.75-second range becomes 23 frames and plays for 0.766667 seconds. The headless render used to report the 0.75 it was asked for, and anything that checked that figure against the file to within a millisecond turned down a perfectly good render. Every export now reports how many frames it encoded, and the headless render's duration is that count times one frame's length.
+
 ## 2.15.74
 
 ### Patch Changes
