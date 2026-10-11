@@ -54,6 +54,12 @@ const dispatch = async (message: { type: string; payload?: unknown }) => {
   })
 }
 
+/** The one ERROR a malformed inbound message gets (ESCSUITE-232): the code, and the field named. */
+const invalidMessageFor = (field: string) => ({
+  type: 'ERROR',
+  payload: { code: 'INVALID_MESSAGE', message: expect.stringContaining(field) },
+})
+
 beforeEach(() => {
   resetStoreForTest()
   store().clearHistory()
@@ -108,6 +114,21 @@ describe('inbound messages', () => {
       type: 'VIDEO_LOADED',
       payload: { id: sampleVideo.id, name: sampleVideo.name },
     })
+  })
+
+  it.each([
+    ['no payload', undefined],
+    ['a payload with no url', { href: 'https://host.example/clip.mp4' }],
+    ['a url that is not a string', { url: 42 }],
+  ])('LOAD_VIDEO answers %s with INVALID_MESSAGE and fetches nothing (ESCSUITE-232)', async (_label, payload) => {
+    await mountIntegration()
+
+    await dispatch({ type: 'LOAD_VIDEO', payload })
+
+    expect(loadVideoFromUrl).not.toHaveBeenCalled()
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledWith(invalidMessageFor('url'))
   })
 
   it('LOAD_VIDEO lands a video/webm that decodes no picture as audio (ESCSUITE-255)', async () => {
@@ -177,12 +198,19 @@ describe('inbound messages', () => {
     expect(deps.setProject).toHaveBeenCalledWith(expect.objectContaining({ name: 'From Host' }))
   })
 
-  it('LOAD_PROJECT ignores an empty payload', async () => {
+  it.each([
+    ['no payload', undefined],
+    ['null', null],
+    ['a string', 'not a project'],
+    ['a number', 7],
+  ])('LOAD_PROJECT answers %s with INVALID_MESSAGE and applies nothing (ESCSUITE-232)', async (_label, payload) => {
     await mountIntegration()
 
-    await dispatch({ type: 'LOAD_PROJECT' })
+    await dispatch({ type: 'LOAD_PROJECT', payload })
 
     expect(deps.setProject).not.toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledWith(invalidMessageFor('payload'))
   })
 
   it('LOAD_PROJECT answers a malformed payload with ERROR instead of applying it (ESCSUITE-102)', async () => {
@@ -275,12 +303,15 @@ describe('inbound messages', () => {
   it.each([
     ['an unknown theme name', { theme: 'sepia' }],
     ['a payload with no theme', { preference: 'light' }],
-  ])('SET_THEME ignores %s', async (_label, payload) => {
+    ['a theme that is not a string', { theme: 3 }],
+    ['no payload at all', undefined],
+  ])('SET_THEME answers %s with INVALID_MESSAGE and applies nothing (ESCSUITE-232)', async (_label, payload) => {
     await mountIntegration()
 
     await dispatch({ type: 'SET_THEME', payload })
 
-    expect(sendMessage).not.toHaveBeenCalled()
+    expect(sendMessage).toHaveBeenCalledTimes(1)
+    expect(sendMessage).toHaveBeenCalledWith(invalidMessageFor('theme'))
     expect(getTheme()).toBe(THEME_MODULE_DEFAULT)
   })
 
@@ -336,6 +367,59 @@ describe('the ?video= parameter', () => {
     expect(deps.addSourceVideo).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'mic-only', mediaType: 'audio' })
     )
+  })
+
+  it('adds nothing when the editor leaves before the fetch resolves (ESCSUITE-228)', async () => {
+    let arrive: (v: { blob: Blob; name: string }) => void = () => {}
+    vi.mocked(loadVideoFromUrl).mockReturnValue(
+      new Promise((resolve) => {
+        arrive = resolve
+      })
+    )
+    const { unmount } = await mountIntegration({ videos: ['https://host.example/a.mp4'] })
+    unmount()
+
+    await act(async () => {
+      arrive({ blob: new Blob(['x'], { type: 'video/mp4' }), name: 'a.mp4' })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(processMediaFile).not.toHaveBeenCalled()
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+  })
+
+  it('adds nothing when the editor leaves while the file is being probed (ESCSUITE-228)', async () => {
+    let probed: (v: typeof sampleVideo) => void = () => {}
+    vi.mocked(processMediaFile).mockReturnValue(
+      new Promise((resolve) => {
+        probed = resolve
+      })
+    )
+    const { unmount } = await mountIntegration({ videos: ['https://host.example/a.mp4'] })
+    unmount()
+
+    await act(async () => {
+      probed({ ...sampleVideo })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(processMediaFile).toHaveBeenCalledTimes(1)
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+  })
+
+  it('imports each url once under StrictMode, which runs the effect twice (ESCSUITE-228)', async () => {
+    deps = { ...deps, urlParams: { ...defaultUrlParams(), videos: ['https://host.example/a.mp4'] } }
+
+    renderHook(() => useHostIntegration(deps), { wrapper: StrictMode })
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(deps.addSourceVideo).toHaveBeenCalledTimes(1)
   })
 
   it('adds to the library and places nothing', async () => {

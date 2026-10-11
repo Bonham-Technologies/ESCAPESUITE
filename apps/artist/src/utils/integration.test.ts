@@ -5,6 +5,7 @@ import {
   parseUrlParams,
   __setHostOriginForTests,
   loadVideoFromUrl,
+  extractFilename,
   decodeProjectData,
   encodeProjectData,
   generateShareUrl,
@@ -567,6 +568,47 @@ describe('integration', () => {
       await loadVideoFromUrl('http://example.com/video.mp4', onProgress)
 
       expect(onProgress).toHaveBeenCalled()
+    })
+  })
+
+  describe('extractFilename (ESCSUITE-228)', () => {
+    it.each([
+      ['a data: URL is named Loaded media, not its payload', 'data:video/mp4;base64,AAAAIGZ0eXBpc29t', 'video/mp4', 'Loaded media.mp4'],
+      ['a file with an extension keeps its name', 'https://h.example/x.wav', 'audio/wav', 'x.wav'],
+      ['an extension that disagrees with the type is kept', 'https://h.example/x.mp4', 'audio/wav', 'x.mp4'],
+      ['an empty last segment falls back to the previous one', 'https://h.example/clips/', 'video/webm', 'clips.webm'],
+      ['no path at all is Loaded media', 'https://h.example/', 'video/webm', 'Loaded media.webm'],
+      ['an extensionless segment gets one from the type', 'https://h.example/clip', 'audio/mpeg', 'clip.mp3'],
+      ['an unknown type adds no extension', 'https://h.example/clip', 'application/x-weird', 'clip'],
+      ['an empty type adds no extension', 'https://h.example/clip', '', 'clip'],
+      ['a percent-encoded segment is decoded', 'https://h.example/my%20clip.mp4', 'video/mp4', 'my clip.mp4'],
+      ['type parameters are ignored', 'https://h.example/clip', 'audio/webm;codecs=opus', 'clip.webm'],
+      ['an unparseable URL is Loaded media', 'not a url', 'image/png', 'Loaded media.png'],
+      ['a malformed escape keeps the raw segment', 'https://h.example/100%.mp4', 'video/mp4', '100%.mp4'],
+    ])('%s', (_label, url, type, expected) => {
+      expect(extractFilename(url, type)).toBe(expected)
+    })
+
+    it('caps the stem at 120 characters and still adds the extension', () => {
+      const long = 'a'.repeat(300)
+      expect(extractFilename(`https://h.example/${long}`, 'video/mp4')).toBe(`${'a'.repeat(120)}.mp4`)
+    })
+
+    it('leaves a name under the cap alone', () => {
+      const exact = 'b'.repeat(120)
+      expect(extractFilename(`https://h.example/${exact}`, '')).toBe(exact)
+    })
+
+    it('names a fetched blob from its own filename and its response type', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        blob: () => Promise.resolve(new Blob(['x'], { type: 'audio/wav' })),
+        headers: new Headers({ 'content-type': 'audio/wav' }),
+        body: null,
+      } as Response))
+      const result = await loadVideoFromUrl('http://example.com/sounds/')
+      expect(result.name).toBe('sounds.wav')
+      expect(result.blob.type).toBe('audio/wav')
     })
   })
 

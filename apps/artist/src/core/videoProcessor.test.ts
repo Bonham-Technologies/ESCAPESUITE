@@ -945,6 +945,19 @@ describe('videoProcessor', () => {
       expect(media.videos).toHaveLength(0)
     })
 
+    it('stores an audio/wav file fetched from a URL as audio, the way ?video= and LOAD_VIDEO hand it over (ESCSUITE-228)', async () => {
+      media.script({ audio: { duration: 12 } })
+      // loadVideoFromUrl's blob wrapped in a File named for the URL, as both host paths do.
+      const fetched = new Blob(['RIFF'], { type: 'audio/wav' })
+
+      const metadata = await processMediaFile(new File([fetched], 'x.wav', { type: fetched.type }))
+
+      expect(metadata.mediaType).toBe('audio')
+      expect(metadata.width).toBe(0)
+      expect((await getVideo(metadata.id))?.metadata.mediaType).toBe('audio')
+      expect(media.videos).toHaveLength(0)
+    })
+
     it('rejects, as the video path always did, when the file will not decode', async () => {
       media.script({ video: { fail: true } })
 
