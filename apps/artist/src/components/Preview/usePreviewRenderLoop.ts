@@ -65,6 +65,15 @@ const DISPLAY_TIME_PUBLISH_MS = 100;
 const HAVE_CURRENT_DATA = 2;
 
 /**
+ * The shortest loop region playback will loop (ESCSUITE-246): one frame at the
+ * fastest rate the preview targets. A shorter region — the in and out points
+ * on the same time, most often — is past its out point on every animation
+ * frame, so looping it jumped back to the in point and wrote the store once a
+ * frame while appearing to play. Playback stops at the out point instead.
+ */
+const MIN_LOOP_LENGTH_S = 1 / 60;
+
+/**
  * Drive the preview canvas: redraw on media change, on scrub, and on play.
  */
 export function usePreviewRenderLoop({
@@ -471,7 +480,9 @@ export function usePreviewRenderLoop({
 
       // Check if we've reached the end of the timeline (or out point when looping with in/out)
       if (newTimelineTime >= loopEnd) {
-        if (loopPlaybackRef.current) {
+        // A region shorter than one frame does not loop: it stops at its end,
+        // like the end of the timeline with the loop off.
+        if (loopPlaybackRef.current && loopEnd - loopStart >= MIN_LOOP_LENGTH_S) {
           // Loop back to the beginning (or in point)
           // Reset playback start time to now, starting from loop start position
           playbackStartTime = performance.now();
@@ -501,12 +512,13 @@ export function usePreviewRenderLoop({
           animationFrameRef.current = requestAnimationFrame(animate);
           return;
         } else {
-          // Stop playback at the end
+          // Stop playback at the end — of the timeline, or of a loop region
+          // too short to loop (loopEnd is the timeline's end with the loop off)
           videoElementsRef.current.forEach(video => video.pause());
           audioElementsRef.current.forEach(audio => audio.pause());
           setIsPlaying(false);
-          setCurrentTime(timelineDuration);
-          publishDisplayTime(timelineDuration, true);
+          setCurrentTime(loopEnd);
+          publishDisplayTime(loopEnd, true);
           return;
         }
       }
