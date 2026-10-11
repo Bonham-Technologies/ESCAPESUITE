@@ -1,18 +1,19 @@
 import './styles/index.css'
 import App from './App'
 import { bootstrapApp } from '@escapesuite/shared/bootstrap'
+import { disposeLiveExport } from './components/Export/liveExport'
 
-// ESCSUITE-212: a render-time throw anywhere in the tree is caught by the
-// shared ErrorBoundary, which shows its own fallback panel regardless. ARTIST
-// holds no live *capture* a crash could leave running — no recorder, no open
-// MediaStream, unlike ESCAPECRAFT's useRecordingController — which is the gap
-// this app's onError would otherwise exist to close. An export in flight
-// still owns things that outlive the crashed render (a decodeWorker, its
-// encoders), and the ruling is to leave those running rather than tear them
-// down from an unrelated error — the panel's Reload ends them either way —
-// so this is a deliberate no-op rather than an omitted prop, visible at the
-// call site instead of looking like a follow-up nobody got to. The
-// boundary's own componentDidCatch already logs the error in dev.
-function onError(): void {}
+// ESCSUITE-212 / ESCSUITE-220: a render-time throw anywhere in the tree is
+// caught by the shared ErrorBoundary, which shows its own fallback panel
+// regardless. ARTIST holds no live capture, but an export in flight owns
+// things that outlive the crashed render — a decodeWorker, one or two
+// encoders, a muxer — and its only release paths are its own completion,
+// failure and Cancel, none of which a crash reaches. So onError stops it:
+// disposeLiveExport() aborts the run ExportDialog registered, exactly once,
+// and is a no-op when nothing is exporting. The boundary's own
+// componentDidCatch already logs the error in dev.
+function onError(): void {
+  disposeLiveExport()
+}
 
 bootstrapApp({ App, onError })
