@@ -3609,6 +3609,24 @@ and asserts the `role="alert"` panel and the Reload button — red before the bo
 throw escaped `render`). No measured file gained a unit. **No floor crossed**; plan's floors stay
 100 / 100 / 100 / 100.
 
+`@escapesuite/craft` was re-measured 2026-10-10 for ESCSUITE-229 (two quick clicks on Play no longer leak a
+playback object URL: the live URL is mirrored in a ref written at mint and nulled at revoke, so a second Play
+that lands before React re-renders revokes the first instead of orphaning it; a Play superseded while its read
+is still parked revokes what it minted and never shows; Close and unmount both bump the same attempt token
+before revoking, so a read landing after either can neither reopen the dialog nor leave a URL behind):
+100.00 / 99.53 / 97.82 / 100.00, byte-identical on every percentage to the 100.00 / 99.53 / 97.82 / 100.00
+that `main` at `cb202b8c` measures in the same sitting. Lines 2,400 → 2,413, statements 2,557 / 2,569 →
+2,572 / 2,584, branches 1,395 / 1,426 → 1,397 / 1,428 and functions 456 → 458, every new unit covered; the
+same 12 statements and 31 branches uncovered, in the same four files. All of the movement is
+`hooks/useRecordingLibrary.ts` (53 → 66 lines, 14 / 14 → 16 / 16 branches, 8 → 10 functions): the two new
+branches are the token comparison after the read lands — stale by a later Play, by Close or by unmount
+against the current one — reached from both sides by the six new cases (two synchronous Plays → two mints,
+the first revoked, one live URL; Play B during A's read → A revoked when it lands, never shown; Close during
+a pending read → nothing reopens; a read landing after unmount → its own mint revoked; Play then Close; the
+dialog open at unmount), four of them red before the fix. The review's two MEDIUMs (Close and unmount
+without the token bump) are the fix round. `App.*rerender*` and every `*.perf.test.ts` are byte-identical.
+**No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

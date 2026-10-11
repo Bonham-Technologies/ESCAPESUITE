@@ -173,6 +173,135 @@ describe('useRecordingLibrary playback', () => {
     expect(result.current.playbackDuration).toBe(0)
   })
 
+  // ESCSUITE-229: the live handle is tracked in a ref, not read from the state
+  // a click's closure captured.
+  describe('one live playback URL (ESCSUITE-229)', () => {
+    function mintDistinct(...urls: string[]) {
+      for (const u of urls) vi.mocked(URL.createObjectURL).mockReturnValueOnce(u)
+    }
+
+    it('two synchronous Plays leave exactly one live URL, the one shown', async () => {
+      await seed('take-1', 'First')
+      mintDistinct('blob:a', 'blob:b')
+      const { result } = mountLibrary([listed('take-1', 'First', 10)])
+
+      await act(async () => {
+        await Promise.all([
+          result.current.handlePlayRecording('take-1', 'First'),
+          result.current.handlePlayRecording('take-1', 'First'),
+        ])
+      })
+
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(2)
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:a')
+      expect(result.current.playbackUrl).toBe('blob:b')
+    })
+
+    it('a Play whose read lands after a later Play is revoked, never shown', async () => {
+      await seed('take-1', 'A')
+      await seed('take-2', 'B')
+      mintDistinct('blob:a', 'blob:b')
+      const { result } = mountLibrary([listed('take-1', 'A', 10), listed('take-2', 'B', 20)])
+
+      await act(async () => {
+        const first = result.current.handlePlayRecording('take-1', 'A')
+        const second = result.current.handlePlayRecording('take-2', 'B')
+        await second
+        await first
+      })
+
+      expect(result.current.playbackUrl).toBe('blob:b')
+      expect(result.current.playbackName).toBe('B')
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls.map(([u]) => u)).toEqual(['blob:a'])
+    })
+
+    it('a superseded Play whose bytes are gone mints nothing and raises no notice', async () => {
+      await seed('take-2', 'B')
+      mintDistinct('blob:b')
+      const { result } = mountLibrary([listed('take-2', 'B', 20)])
+
+      await act(async () => {
+        await Promise.all([
+          result.current.handlePlayRecording('gone', 'Gone'),
+          result.current.handlePlayRecording('take-2', 'B'),
+        ])
+      })
+
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+      expect(setNotice).not.toHaveBeenCalled()
+      expect(result.current.playbackUrl).toBe('blob:b')
+    })
+
+    it('a Play still reading when Close is pressed does not reopen the dialog', async () => {
+      await seed('take-1', 'First')
+      const { result } = mountLibrary([listed('take-1', 'First', 10)])
+
+      await act(async () => {
+        const pending = result.current.handlePlayRecording('take-1', 'First')
+        result.current.handleClosePlayback()
+        await pending
+      })
+
+      expect(result.current.playbackUrl).toBeNull()
+      expect(result.current.playbackName).toBe('')
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls.length).toBe(
+        vi.mocked(URL.createObjectURL).mock.calls.length,
+      )
+      expect(setNotice).not.toHaveBeenCalled()
+    })
+
+    it('a Play whose read lands after unmount revokes its own mint', async () => {
+      await seed('take-1', 'First')
+      const { result, unmount } = mountLibrary([listed('take-1', 'First', 10)])
+
+      let pending!: Promise<void>
+      await act(async () => {
+        pending = result.current.handlePlayRecording('take-1', 'First')
+        unmount()
+        await pending
+      })
+
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    })
+
+    it('Play then Close mints once and revokes once', async () => {
+      await seed('take-1', 'First')
+      const { result } = mountLibrary([listed('take-1', 'First', 10)])
+      await act(async () => {
+        await result.current.handlePlayRecording('take-1', 'First')
+      })
+      act(() => {
+        result.current.handleClosePlayback()
+      })
+
+      expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    })
+
+    it('revokes the live URL when the app unmounts with the dialog open', async () => {
+      await seed('take-1', 'First')
+      mintDistinct('blob:live')
+      const { result, unmount } = mountLibrary([listed('take-1', 'First', 10)])
+      await act(async () => {
+        await result.current.handlePlayRecording('take-1', 'First')
+      })
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+
+      unmount()
+
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:live')
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    })
+
+    it('unmounting with the dialog closed revokes nothing', () => {
+      const { unmount } = mountLibrary()
+      unmount()
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+    })
+  })
+
   it('has nothing to revoke when closing a dialog that was never opened', () => {
     const { result } = mountLibrary()
 

@@ -73,8 +73,8 @@ function App() {
   // inline, because that order is the behaviour: theme, capability bootstrap,
   // the preview attach and the stopAllStreams mirror, then the unmount
   // teardown that reaches stopAllStreams through that mirror, then the
-  // keyboard listener. useRecordingLibrary binds nothing, so where it sits
-  // among the others is free — it is called just before the shortcuts because
+  // keyboard listener. useRecordingLibrary binds only its own unmount
+  // cleanup, so where it sits among the others is free — it is called just before the shortcuts because
   // they need its playbackUrl.
   useThemeLifecycle();
   useCapabilityBootstrap({
