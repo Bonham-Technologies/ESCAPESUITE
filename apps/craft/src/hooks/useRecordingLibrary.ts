@@ -34,6 +34,7 @@ export interface RecordingLibrary {
   playbackUrl: string | null;
   playbackName: string;
   playbackDuration: number;
+  playbackMediaType: 'video' | 'audio';
   handleDeleteRecording: (id: string) => Promise<void>;
   handleSendToEditor: (id: string) => void;
   handlePlayRecording: (id: string, name: string) => Promise<void>;
@@ -50,6 +51,7 @@ export function useRecordingLibrary({
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null);
   const [playbackName, setPlaybackName] = useState<string>('');
   const [playbackDuration, setPlaybackDuration] = useState<number>(0);
+  const [playbackMediaType, setPlaybackMediaType] = useState<'video' | 'audio'>('video');
 
   // The one live playback handle, written synchronously where it is minted and
   // nulled where it is revoked (ESCSUITE-229). The `playbackUrl` state is a
@@ -149,6 +151,7 @@ export function useRecordingLibrary({
       // Pass known duration so the player doesn't depend on WebM metadata
       const recording = recordings.find(r => r.id === id);
       setPlaybackDuration(recording?.duration || 0);
+      setPlaybackMediaType(recording?.mediaType === 'audio' ? 'audio' : 'video');
     } else {
       // The row is drawn from metadata the store still holds, but the bytes
       // it names are gone — most commonly a delete from ARTIST's media
@@ -163,6 +166,7 @@ export function useRecordingLibrary({
       setPlaybackUrl(null);
       setPlaybackName('');
       setPlaybackDuration(0);
+      setPlaybackMediaType('video');
       setNotice(RECORDING_UNAVAILABLE);
       void refreshStorageSpace();
     }
@@ -178,6 +182,7 @@ export function useRecordingLibrary({
     // The duration goes with the other two. Left standing, it was handed to
     // the *next* recording opened whose own duration could not be found.
     setPlaybackDuration(0);
+    setPlaybackMediaType('video');
   };
 
   // Download a recording as WebM (instant — blob is already fixed during save)
@@ -199,6 +204,7 @@ export function useRecordingLibrary({
     playbackUrl,
     playbackName,
     playbackDuration,
+    playbackMediaType,
     handleDeleteRecording,
     handleSendToEditor,
     handlePlayRecording,

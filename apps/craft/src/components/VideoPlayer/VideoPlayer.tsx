@@ -36,11 +36,17 @@ interface VideoPlayerProps {
   title?: string;
   autoPlay?: boolean;
   knownDuration?: number; // Use this instead of video.duration for WebM files
+  /**
+   * `'audio'` for a take with no picture (ESCSUITE-233): the one `<video>`
+   * element stays the playback engine, visually hidden, and a speaker glyph is
+   * drawn over the same dark surface instead of a black 300x150 box.
+   */
+  mediaType?: 'video' | 'audio';
   onClose?: () => void;
   onError?: (error: Error) => void;
 }
 
-export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClose, onError }: VideoPlayerProps) {
+export function VideoPlayer({ src, title, autoPlay = true, knownDuration, mediaType, onClose, onError }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
   const [isPlaying, setIsPlaying] = useState(autoPlay);
@@ -335,7 +341,7 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
         <video
           ref={videoRef}
           key={src}
-          className={styles.video}
+          className={mediaType === 'audio' ? `${styles.video} ${styles.videoAudio}` : styles.video}
           src={src}
           autoPlay={autoPlay}
           preload="auto"
@@ -348,6 +354,14 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
           onPause={handlePause}
         />
 
+        {/* Audio-only take: the glyph stands in for the picture. The click
+            toggles playback through the wrapper, as it does on a video. */}
+        {mediaType === 'audio' && (
+          <div className={styles.audioPlaceholder} data-testid="audio-placeholder" aria-hidden="true">
+            <SpeakerIcon />
+          </div>
+        )}
+
         {/* Play overlay when paused */}
         {isLoaded && !isPlaying && !hasError && (
           <div className={styles.playOverlay}>
@@ -359,8 +373,8 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
         {hasError && (
           <div className={styles.errorOverlay}>
             <span className={styles.errorIcon}>!</span>
-            <p>Failed to load video</p>
-            <p className={styles.errorHint}>The video may be corrupted or in an unsupported format.</p>
+            <p>This recording could not be played.</p>
+            <p className={styles.errorHint}>It may be corrupted or in an unsupported format.</p>
           </div>
         )}
 
@@ -479,6 +493,15 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, onClos
 }
 
 // Icons
+function SpeakerIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" width="72" height="72">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function PlayIcon() {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24">

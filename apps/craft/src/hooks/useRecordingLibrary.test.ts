@@ -119,6 +119,31 @@ describe('useRecordingLibrary playback', () => {
     expect(result.current.playbackDuration).toBe(0)
   })
 
+  // ESCSUITE-233: the dialog draws a speaker glyph, not a black box, for a
+  // take with no picture, so the row's media type travels with the URL.
+  it('carries an audio row\'s media type to the dialog, and a video or unmarked row\'s as video', async () => {
+    await seed('take-1', 'Voice memo')
+    await seed('take-2', 'Screen')
+    await seed('take-3', 'Old')
+    const { result } = mountLibrary([
+      { ...listed('take-1', 'Voice memo', 3), mediaType: 'audio' },
+      { ...listed('take-2', 'Screen', 3), mediaType: 'video' },
+      listed('take-3', 'Old', 3),
+    ])
+
+    await act(async () => { await result.current.handlePlayRecording('take-1', 'Voice memo') })
+    expect(result.current.playbackMediaType).toBe('audio')
+    await act(async () => { await result.current.handlePlayRecording('take-2', 'Screen') })
+    expect(result.current.playbackMediaType).toBe('video')
+    await act(async () => { await result.current.handlePlayRecording('take-1', 'Voice memo') })
+    await act(async () => { await result.current.handlePlayRecording('take-3', 'Old') })
+    expect(result.current.playbackMediaType).toBe('video')
+
+    await act(async () => { await result.current.handlePlayRecording('take-1', 'Voice memo') })
+    act(() => { result.current.handleClosePlayback() })
+    expect(result.current.playbackMediaType).toBe('video')
+  })
+
   it('revokes the previous object URL before opening the next recording', async () => {
     await seed('take-1', 'First')
     await seed('take-2', 'Second')
@@ -142,7 +167,15 @@ describe('useRecordingLibrary playback', () => {
     // row is still listed here, but its bytes are gone from the shared
     // IndexedDB. Silence used to be indistinguishable from a dialog that just
     // never opened; now it is the one thing the app's notice channel is for.
-    const { result } = mountLibrary([listed('gone', 'Gone', 10)])
+    await seed('memo', 'Memo')
+    const { result } = mountLibrary([
+      { ...listed('memo', 'Memo', 3), mediaType: 'audio' },
+      listed('gone', 'Gone', 10),
+    ])
+    await act(async () => {
+      await result.current.handlePlayRecording('memo', 'Memo')
+    })
+    expect(result.current.playbackMediaType).toBe('audio')
 
     await act(async () => {
       await result.current.handlePlayRecording('gone', 'Gone')
@@ -150,6 +183,7 @@ describe('useRecordingLibrary playback', () => {
 
     expect(result.current.playbackUrl).toBeNull()
     expect(result.current.playbackName).toBe('')
+    expect(result.current.playbackMediaType).toBe('video')
     expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
     // The freed room is another tab's doing, but this tab's headroom reading
     // is stale the moment it discovers the bytes are gone.

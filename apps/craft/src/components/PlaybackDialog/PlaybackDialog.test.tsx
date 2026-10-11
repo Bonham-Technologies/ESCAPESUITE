@@ -114,6 +114,18 @@ describe('PlaybackDialog dismissal', () => {
   })
 })
 
+describe('PlaybackDialog media type', () => {
+  it('hands an audio recording to the player as audio, and a video one as video', () => {
+    const { unmount } = render(
+      <PlaybackDialog url="blob:a" name="Memo" duration={3} mediaType="audio" onClose={vi.fn()} />
+    )
+    expect(screen.getByTestId('audio-placeholder')).toBeInTheDocument()
+    unmount()
+    render(<PlaybackDialog url="blob:v" name="Screen" duration={3} mediaType="video" onClose={vi.fn()} />)
+    expect(screen.queryByTestId('audio-placeholder')).toBeNull()
+  })
+})
+
 describe('PlaybackDialog errors', () => {
   it('logs a video that will not load, and leaves the dialog standing', () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})

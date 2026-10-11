@@ -380,7 +380,57 @@ describe('VideoPlayer', () => {
     });
   });
 
+  // ESCSUITE-233. The one <video> element stays the playback engine; for an
+  // audio take a placeholder is drawn over the dark surface. Whether the
+  // <video> is visually hidden is CSS (VideoPlayer.module.css), which jsdom
+  // does not lay out, so the test pins the class and the DOM, not the pixels.
+  describe('audio-only recordings', () => {
+    it('draws a speaker placeholder, keeps the <video> element, and plays on a placeholder click', async () => {
+      render(<VideoPlayer {...defaultProps} mediaType="audio" />);
+
+      const placeholder = screen.getByTestId('audio-placeholder');
+      expect(placeholder.getAttribute('aria-hidden')).toBe('true');
+      expect(placeholder.querySelector('svg')).toBeTruthy();
+      const video = document.querySelector('video')!;
+      expect(video).toBeTruthy();
+      expect(video.className).toMatch(/videoAudio/);
+
+      fireEvent.click(placeholder);
+      expect(mockPlay).toHaveBeenCalled();
+    });
+
+    it('draws no placeholder for a video recording or when the type is unknown', () => {
+      const { unmount } = render(<VideoPlayer {...defaultProps} mediaType="video" />);
+      expect(screen.queryByTestId('audio-placeholder')).toBeNull();
+      expect(document.querySelector('video')!.className).not.toMatch(/videoAudio/);
+      unmount();
+      render(<VideoPlayer {...defaultProps} />);
+      expect(screen.queryByTestId('audio-placeholder')).toBeNull();
+    });
+  });
+
   describe('error handling', () => {
+    it('says "recording", not "video", in the error overlay', async () => {
+      render(<VideoPlayer {...defaultProps} />);
+      act(() => {
+        fireEvent.error(document.querySelector('video')!);
+      });
+      await waitFor(() => {
+        expect(screen.getByText('This recording could not be played.')).toBeTruthy();
+      });
+      expect(screen.getByText('It may be corrupted or in an unsupported format.')).toBeTruthy();
+    });
+
+    it('keeps the time readout and the name in separate elements', () => {
+      render(<VideoPlayer {...defaultProps} title="Recording 3" />);
+      const time = screen.getByText(/0:00 \/ /);
+      const name = screen.getByText('Recording 3');
+      expect(time).not.toBe(name);
+      expect(time.textContent!.trim()).not.toBe('');
+      expect(name.textContent!.trim()).not.toBe('');
+      expect(time.contains(name) || name.contains(time)).toBe(false);
+    });
+
     it('should show error overlay on video error', async () => {
       const onError = vi.fn();
       render(<VideoPlayer {...defaultProps} onError={onError} />);
@@ -391,7 +441,7 @@ describe('VideoPlayer', () => {
       });
 
       await waitFor(() => {
-        expect(screen.getByText(/failed to load video/i)).toBeTruthy();
+        expect(screen.getByText(/could not be played/i)).toBeTruthy();
       });
       expect(onError).toHaveBeenCalled();
     });

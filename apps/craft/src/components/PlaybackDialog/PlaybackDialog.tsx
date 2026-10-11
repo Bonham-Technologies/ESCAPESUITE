@@ -14,6 +14,8 @@ interface PlaybackDialogProps {
    * told rather than asked.
    */
   duration: number;
+  /** `'audio'` draws the player's speaker placeholder instead of a black picture. */
+  mediaType?: 'video' | 'audio';
   onClose: () => void;
 }
 
@@ -32,7 +34,7 @@ interface PlaybackDialogProps {
  * and focus returns to the library row that opened it. Escape and Tab are the
  * only keys it claims, so the player keeps Space, M and the arrows.
  */
-export function PlaybackDialog({ url, name, duration, onClose }: PlaybackDialogProps) {
+export function PlaybackDialog({ url, name, duration, mediaType, onClose }: PlaybackDialogProps) {
   const dialogRef = useDialogBehaviour(onClose);
 
   return (
@@ -62,6 +64,7 @@ export function PlaybackDialog({ url, name, duration, onClose }: PlaybackDialogP
           title={name}
           autoPlay
           knownDuration={duration}
+          mediaType={mediaType}
           onClose={onClose}
           onError={(error) => console.error('Video playback error:', error)}
         />
