@@ -6,13 +6,13 @@ import { test, expect } from '@playwright/test'
  * with* one of those words — without actually being under that directory —
  * matched no rewrite and 404'd on the real deployment (`/artist-guide`,
  * `/crafting-tips`, `/craftsmanship`, ...). The segment-anchored fix
- * (`/((?!(?:craft|artist|assets|favicon)(?:/|$)).*)`) routes every one of
+ * (`/((?!(?:craft|artist|assets|favicon\\.ico)(?:/|$)).*)`) routes every one of
  * those look-alikes to the hub SPA instead — verified directly: with the
  * fix applied, `resolveFile('/craftsmanship', ...)` resolves to the hub's
  * `index.html`, not a miss. `scripts/serve-dist.mjs` now derives its
  * rewrite table from `vercel.json` itself (see `serve-dist.test.mjs`'s
  * drift-guard test), so a genuine miss — a path actually excluded from the
- * catch-all (its first segment literally `assets` or `favicon`) that isn't
+ * catch-all (its first segment literally `assets`, or the file `favicon.ico`) that isn't
  * on disk either — reaches `dist/404.html` (a byte-for-byte copy of the
  * hub's `index.html`, so the SPA shell can still render its own not-found
  * UI) with a real 404 status, rather than silently falling through to the

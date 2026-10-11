@@ -298,7 +298,11 @@ test('resolveRequestPath: a path excluded from the catch-all and absent from dis
   const rewrites = realVercelConfig.rewrites ?? []
   const fileExists = (path) => new Set(['/index.html', '/craft/index.html', '/artist/index.html']).has(path)
   assert.equal(resolveRequestPath('/assets/does-not-exist.js', rewrites, fileExists), null)
+  // /favicon.ico (ESCSUITE-240) is excluded by name: absent from disk, a real miss.
   assert.equal(resolveRequestPath('/favicon.ico', rewrites, fileExists), null)
+  // The old `/favicon/...` segment exclusion is gone: that path is an ordinary
+  // hub path now, not a miss (nothing relies on a /favicon directory).
+  assert.equal(resolveRequestPath('/favicon/does-not-exist.ico', rewrites, fileExists), '/index.html')
   // But an ordinary hub-shaped path still resolves to the hub SPA.
   assert.equal(resolveRequestPath('/about', rewrites, fileExists), '/index.html')
 })

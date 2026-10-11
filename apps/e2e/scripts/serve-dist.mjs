@@ -301,7 +301,10 @@ function createRequestHandler(base) {
       // Tests rebuild dist between runs; never let the browser reuse stale bytes —
       // unless vercel.json's `headers` block set a Cache-Control of its own for
       // this path (ESCSUITE-240: the immutable `/assets/*` entry), which the
-      // suite must see exactly as Vercel sends it. A `writeHead` header would
+      // suite must see exactly as Vercel sends it. (A missing hashed /assets name
+      // carries the header on its 404 on Vercel too; that is harmless, since only
+      // a stale page requests it and the next deploy's HTML names a new hash.)
+      // A `writeHead` header would
       // otherwise override the `setHeader` one above.
       'Cache-Control': res.getHeader('Cache-Control') ?? 'no-store',
     })
