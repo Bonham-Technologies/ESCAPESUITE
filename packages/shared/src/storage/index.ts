@@ -177,6 +177,25 @@ export async function getSetting<T>(key: string): Promise<T | undefined> {
   return db.get('settings', key) as Promise<T | undefined>
 }
 
+/**
+ * Every `settings` row whose key starts with `prefix`, key and value, in key
+ * order. ESCAPEARTIST keeps one session slot per tab as a `session:<tabId>`
+ * row and finds them all with this (ESCSUITE-274). The range runs from the
+ * prefix to the prefix followed by the highest UTF-16 code unit, which holds
+ * every key that starts with it.
+ */
+export async function listSettings<T>(prefix: string): Promise<Array<{ key: string; value: T }>> {
+  const db = await getDB()
+  const range = IDBKeyRange.bound(prefix, `${prefix}\uffff`)
+  const tx = db.transaction('settings')
+  const [keys, values] = await Promise.all([
+    tx.store.getAllKeys(range),
+    tx.store.getAll(range),
+    tx.done,
+  ])
+  return keys.map((key, index) => ({ key: String(key), value: values[index] as T }))
+}
+
 // Storage utilities
 
 export async function getStorageEstimate(): Promise<{ used: number; quota: number; available: number }> {
