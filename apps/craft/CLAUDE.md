@@ -1360,6 +1360,16 @@ user's, so there is no URL to reach. `isFileOrigin()` (`@escapesuite/shared/conf
 embedded, it posts `SEND_TO_EDITOR` and works from any origin; the header button always opens
 the editor itself, so it is disabled from disk even embedded. The hosted build is unchanged.
 
+ESCSUITE-259 widened the gate from the protocol to the build and the URL: `editorBlockedReasonFor({ embedded })`
+(`src/utils/sendToEditor.ts`, the one reader both the header and `RecordingsListPanel` call) returns the
+sentence when `!embedded && (isFileOrigin() || (isStandaloneMode() && editorUrlIsRelative()))`, so the
+offline build served from a plain web server (an intranet share) is disabled too, since `/artist/` is a 404
+there. `editorUrlIsRelative()` (`@escapesuite/shared/config`, beside `EDITOR_URL`) is true unless
+`VITE_EDITOR_URL` is an absolute `http(s)://` URL, so a standalone build given a hosted ARTIST address keeps
+its buttons, and a hosted (`saas`) build never blocks over http. The header passes `embedded: false` (its
+button opens the editor itself). A sibling-file `?loadVideo=` link to a downloaded ESCAPEARTIST remains
+open in the ticket.
+
 **"Upload to host"** is the second host-routed action and the last one: an
 extra icon button on every library row, between the MP4 download and "Open in
 Editor", which posts `UPLOAD_RECORDING { id, name, blob, role?, takeId?, parts? }` to the
