@@ -9,6 +9,8 @@ import { KeyframeTrack } from './KeyframeTrack';
 import { KeyframeGraph } from './KeyframeGraph';
 import { ClipPreview } from './ClipPreview';
 import { nextMenuIndex } from '../../app/menuNavigation';
+import { KEYFRAME_TIME_EPSILON } from '../../utils/animation';
+import { announceWithMark } from './hooks/useKeyframeGraphKeyboard';
 import styles from './KeyframePanel.module.css';
 
 // Visual properties - transforms and effects
@@ -64,14 +66,21 @@ export function KeyframePanel() {
     return clipOnLockedTrack(project.timeline.clips, project.timeline.tracks, selectedClipId);
   }, [selectedClipId, project.timeline.clips, project.timeline.tracks]);
 
-  // Check if selected clip has audio (video with audio, or audio-only clip)
-  const clipHasAudio = useMemo(() => {
-    if (!selectedClip) return false;
-    const sourceMedia = sourceVideos.find(s => s.id === selectedClip.sourceVideoId);
-    if (!sourceMedia) return false;
-    // Audio clips or video clips with audio
-    return sourceMedia.mediaType === 'audio' || sourceMedia.hasAudio === true;
+  // The selected clip's source, which decides which rows the clip is offered.
+  // Undefined for a clip with no source media (a text or shape overlay).
+  const sourceMedia = useMemo(() => {
+    if (!selectedClip) return undefined;
+    return sourceVideos.find(s => s.id === selectedClip.sourceVideoId);
   }, [selectedClip, sourceVideos]);
+
+  // The audio section: an audio-only clip, or a video clip with sound.
+  const clipHasAudio = sourceMedia !== undefined &&
+    (sourceMedia.mediaType === 'audio' || sourceMedia.hasAudio === true);
+  // Its mirror, the picture section (ESCSUITE-248): every clip but an
+  // audio-only one. Keyframing Position or Opacity on a voice-over did nothing
+  // visible, and the inspector already hides Transform for audio. A clip with
+  // no source media at all is an overlay, which has a picture.
+  const clipHasPicture = sourceMedia?.mediaType !== 'audio';
 
   // Calculate time relative to clip
   const clipRelativeTime = useMemo(() => {
@@ -166,19 +175,63 @@ export function KeyframePanel() {
     return moveClipKeyframe(selectedClipId, property, originalTime, newTime, skipHistory);
   }, [selectedClipId, moveClipKeyframe]);
 
-  // Handle add keyframe. Both the graph's two add paths and the track's
-  // double-click (ESCSUITE-167 / m3) always supply the curve's own value at
-  // `time` — nothing left falls back to the clip's static default, which used
-  // to make a track double-click jump the shape it was adding to.
-  const handleAddKeyframe = useCallback((property: AnimatableProperty, time: number, value: number) => {
-    if (!selectedClip) return;
+  // The panel's one live region (see its render below for why it is always
+  // there). Two things speak through it: every property row's diamond drag
+  // (ESCSUITE-167 / M6, review round 1 MINOR 6) — only one diamond on one row
+  // can ever be dragging at a time, so eight per-row regions would carry a
+  // message only one of them could ever produce — and an add that selected a
+  // keyframe instead of writing one (ESCSUITE-248, below).
+  //
+  // Since ESCSUITE-183 the only thing a diamond drag reports is `''` — a
+  // landed drop, with nothing to say — because the clamp makes every landing a
+  // legal one and there is no refusal left for the row to raise, so the setter
+  // goes straight to the row. The add's sentence goes through
+  // `announceWithMark` instead: Enter pressed twice on the same keyframe says
+  // the same words twice, and an `aria-atomic` region whose text does not
+  // change is not re-read. The keyboard's own occupied-time refusal is
+  // announced through the graph's region (`useKeyframeGraphKeyboard.ts`).
+  const [panelMessage, setPanelMessage] = useState('');
 
-    setClipKeyframe(selectedClipId!, property, {
+  // A keyframe the graph is asked to select (ESCSUITE-248). The selection is
+  // the graph's own state, so the panel asks: a new object per request, which
+  // the graph applies once and then hands back through
+  // `clearGraphSelectRequest`, so a later remount of the graph (another clip,
+  // then this one again) does not select it a second time.
+  const [graphSelectRequest, setGraphSelectRequest] = useState<{ time: number } | null>(null);
+  const clearGraphSelectRequest = useCallback(() => setGraphSelectRequest(null), []);
+
+  // Handle add keyframe. Both the graph's two add paths (Enter, double-click)
+  // and the track's double-click land here, and all three always supply the
+  // curve's own value at `time` (ESCSUITE-167 / m3) — nothing left falls back
+  // to the clip's static default, which used to make a track double-click jump
+  // the shape it was adding to.
+  //
+  // A time that already holds a keyframe of this property — within
+  // `KEYFRAME_TIME_EPSILON`, the tolerance `setClipKeyframe` itself replaces at
+  // — is not an add (ESCSUITE-248). Writing used to overwrite that keyframe's
+  // easing with 'ease-in-out' and spend an undo step on it. It is selected in
+  // the graph instead (the graph opened on its property first, when the add
+  // came from a row whose graph is not showing), announced, and nothing is
+  // written. The answer is whether a keyframe was written, which the graph's
+  // Enter reads so as not to announce an add of its own.
+  const handleAddKeyframe = useCallback((property: AnimatableProperty, time: number, value: number): boolean => {
+    if (!selectedClip) return false;
+
+    const existing = (selectedClip.animation?.keyframes[property] ?? [])
+      .find(kf => Math.abs(kf.time - time) < KEYFRAME_TIME_EPSILON);
+    if (existing) {
+      if (selectedProperty !== property) setKeyframePanelSelectedProperty(property);
+      setGraphSelectRequest({ time: existing.time });
+      announceWithMark(setPanelMessage, `Keyframe at ${existing.time.toFixed(2)} s selected`);
+      return false;
+    }
+
+    return setClipKeyframe(selectedClip.id, property, {
       time,
       value,
       easing: 'ease-in-out',
     });
-  }, [selectedClip, selectedClipId, setClipKeyframe]);
+  }, [selectedClip, selectedProperty, setKeyframePanelSelectedProperty, setClipKeyframe]);
 
   // Handle keyframe value changed (from a graph drag or an arrow-key nudge).
   // `skipHistory` as above: set on a held key's auto-repeats only.
@@ -240,17 +293,31 @@ export function KeyframePanel() {
     return removeClipKeyframe(selectedClipId, property, time);
   }, [selectedClipId, removeClipKeyframe]);
 
+  // The rows this clip is offered: the picture rows unless it is audio-only,
+  // and Volume when it has sound (ESCSUITE-248). Never empty — a clip with no
+  // picture is an audio clip, which has sound.
+  const rowProperties = useMemo(
+    () => [
+      ...(clipHasPicture ? VISUAL_PROPERTIES : []),
+      ...(clipHasAudio ? AUDIO_PROPERTIES : []),
+    ].map(p => p.property),
+    [clipHasPicture, clipHasAudio]
+  );
+
+  // The property whose graph is open. The stored selection survives a change
+  // of clip (it is the panel's, not the clip's), so it can name a property
+  // this clip has no row for — a picture graph left open when the selection
+  // moves to an audio-only clip, or a Volume graph on a clip with no sound.
+  // Such a graph is not drawn (ESCSUITE-248): the stored selection is left as
+  // it is, so selecting a clip that has the row again shows it again.
+  const openProperty = rowProperties.includes(selectedProperty as AnimatableProperty)
+    ? selectedProperty
+    : null;
+
   // The rows' one tab stop and their arrow keys (ESCSUITE-243). The stop is
   // derived from the open row — no state of its own — and falls back to the
-  // first row when none is open or the open property has no row (a volume
-  // graph left open on a clip that has no audio).
-  const rowProperties = useMemo(
-    () => (clipHasAudio ? ALL_PROPERTIES : VISUAL_PROPERTIES).map(p => p.property),
-    [clipHasAudio]
-  );
-  const tabStopProperty = rowProperties.includes(selectedProperty as AnimatableProperty)
-    ? selectedProperty
-    : rowProperties[0];
+  // first row when no graph is open.
+  const tabStopProperty = openProperty ?? rowProperties[0];
   const rowTabIndex = (property: AnimatableProperty): 0 | -1 =>
     property === tabStopProperty ? 0 : -1;
 
@@ -277,22 +344,6 @@ export function KeyframePanel() {
       ?.querySelector<HTMLElement>(`button[data-property="${tabStopProperty}"]`)
       ?.focus();
   }, [tabStopProperty]);
-
-  // The one live region every property row's diamond drag shares
-  // (ESCSUITE-167 / M6, review round 1 MINOR 6): only one diamond on one row
-  // can ever be dragging at a time, so eight per-row regions would carry a
-  // message only one of them could ever produce.
-  //
-  // Since ESCSUITE-183 the only thing a diamond drag reports is `''` — a
-  // landed drop, with nothing to say — because the clamp makes every landing a
-  // legal one and there is no refusal left for the row to raise. The setter
-  // therefore goes straight to the row, with no alternating mark on the way:
-  // an empty region has nothing for the mark to help a screen reader re-read,
-  // and the occupied-time refusal that needed it is now the graph keyboard's
-  // alone, announced through the graph's own region (`announceWithMark`, in
-  // `hooks/useKeyframeGraphKeyboard.ts`, beside the `nudgeTime` that raises
-  // it).
-  const [keyframeDragMessage, setKeyframeDragMessage] = useState('');
 
   if (!isOpen) return null;
 
@@ -346,8 +397,8 @@ export function KeyframePanel() {
               onTimeChange={handlePreviewTimeChange}
             />
 
-            {/* Graph view when property selected */}
-            {selectedProperty && (
+            {/* Graph view when a property this clip has a row for is selected */}
+            {openProperty && (
               <div
                 className={styles.graphContainer}
                 ref={graphRegionRef}
@@ -355,7 +406,7 @@ export function KeyframePanel() {
               >
                 <div className={styles.graphHeader}>
                   <span className={styles.graphTitle}>
-                    {ALL_PROPERTIES.find(p => p.property === selectedProperty)?.label}
+                    {ALL_PROPERTIES.find(p => p.property === openProperty)?.label}
                   </span>
                   <button
                     type="button"
@@ -372,8 +423,8 @@ export function KeyframePanel() {
                   // are the graph's own state, and a keyframe at the same time
                   // on the next property — or the next clip — would otherwise
                   // inherit them.
-                  key={`${selectedClip.id}:${selectedProperty}`}
-                  property={selectedProperty}
+                  key={`${selectedClip.id}:${openProperty}`}
+                  property={openProperty}
                   clipDuration={selectedClip.duration}
                   animation={selectedClip.animation}
                   transform={selectedClip.transform}
@@ -385,12 +436,15 @@ export function KeyframePanel() {
                   onAddKeyframe={handleAddKeyframe}
                   onDeleteKeyframe={handleDeleteKeyframe}
                   onKeyframeEasingChanged={handleKeyframeEasingChanged}
+                  selectRequest={graphSelectRequest}
+                  onSelectRequestHandled={clearGraphSelectRequest}
                 />
               </div>
             )}
 
             {/* One group, one tab stop (ESCSUITE-243): the visual rows, the
-                audio header and the audio row, in the order the arrows walk. */}
+                audio header and the audio row, in the order the arrows walk.
+                An audio-only clip has no visual rows (ESCSUITE-248). */}
             <div
               className={styles.tracks}
               role="group"
@@ -398,7 +452,7 @@ export function KeyframePanel() {
               ref={tracksRef}
               onKeyDown={handleRowsKeyDown}
             >
-              {VISUAL_PROPERTIES.map(({ property, label }) => (
+              {clipHasPicture && VISUAL_PROPERTIES.map(({ property, label }) => (
                 <KeyframeTrack
                   key={property}
                   property={property}
@@ -416,7 +470,7 @@ export function KeyframePanel() {
                   locked={trackLocked}
                   onKeyframeMoved={handleKeyframeMoved}
                   onAddKeyframe={handleAddKeyframe}
-                  onAnnounce={setKeyframeDragMessage}
+                  onAnnounce={setPanelMessage}
                 />
               ))}
 
@@ -442,7 +496,7 @@ export function KeyframePanel() {
                       locked={trackLocked}
                       onKeyframeMoved={handleKeyframeMoved}
                       onAddKeyframe={handleAddKeyframe}
-                      onAnnounce={setKeyframeDragMessage}
+                      onAnnounce={setPanelMessage}
                     />
                   ))}
                 </>
@@ -456,10 +510,10 @@ export function KeyframePanel() {
 
             {/* Always rendered, never conditional: a live region has to exist
                 before its content changes for a screen reader to announce the
-                change. Shared by every property row's diamond drag — see
-                keyframeDragMessage above. */}
+                change. Shared by every property row's diamond drag and by an
+                add that selected a keyframe instead — see panelMessage above. */}
             <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
-              {keyframeDragMessage}
+              {panelMessage}
             </span>
           </>
         )}

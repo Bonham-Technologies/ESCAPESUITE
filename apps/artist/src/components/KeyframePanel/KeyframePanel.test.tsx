@@ -134,6 +134,77 @@ describe('KeyframePanel', () => {
     expect(screen.getByText('Volume')).toBeInTheDocument()
   })
 
+  // ESCSUITE-248 (M-19): an audio-only clip has no picture, and keyframing
+  // one of the picture properties on it did nothing visible.
+  describe('which rows a clip is offered (ESCSUITE-248)', () => {
+    const PICTURE = ['Position X', 'Position Y', 'Scale X', 'Scale Y', 'Rotation', 'Opacity', 'Blur']
+    const selectClipWithSource = (source: Partial<typeof video>) => {
+      store().addSourceVideo({ ...video, id: 'src', name: 'src', ...source })
+      const clip = addClip('clip1', 0, CLIP_DURATION)
+      useEditorStore.setState({
+        project: {
+          ...store().project,
+          timeline: { ...store().project.timeline, clips: [{ ...clip, sourceVideoId: 'src' }] },
+        },
+      })
+      store().setSelectedClipId('clip1')
+      store().setKeyframePanelOpen(true)
+    }
+
+    it('lists only Volume for an audio-only clip', () => {
+      selectClipWithSource({ mediaType: 'audio' })
+      render(<KeyframePanel />)
+
+      for (const label of PICTURE) expect(screen.queryByText(label)).not.toBeInTheDocument()
+      expect(screen.getByText('Audio')).toBeInTheDocument()
+      const group = screen.getByRole('group', { name: 'Animated properties' })
+      expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['Volume'])
+      expect(screen.getByRole('button', { name: 'Volume' }).tabIndex).toBe(0)
+    })
+
+    it('lists the picture rows and Volume for a video clip with sound', () => {
+      selectClipWithSource({ hasAudio: true })
+      render(<KeyframePanel />)
+
+      const group = screen.getByRole('group', { name: 'Animated properties' })
+      expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual([...PICTURE, 'Volume'])
+    })
+
+    it('lists the picture rows alone for a video clip without sound', () => {
+      selectClipWithSource({ hasAudio: false })
+      render(<KeyframePanel />)
+
+      const group = screen.getByRole('group', { name: 'Animated properties' })
+      expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(PICTURE)
+    })
+
+    it('closes a picture graph left open when the selection moves to an audio-only clip', () => {
+      store().addSourceVideo({ ...video, id: 'music', name: 'bed.mp3', mediaType: 'audio' })
+      openPanelWithClip()
+      const voice = addClip('clip2', 10, CLIP_DURATION)
+      useEditorStore.setState({
+        project: {
+          ...store().project,
+          timeline: {
+            ...store().project.timeline,
+            clips: store().project.timeline.clips.map((c) =>
+              c.id === voice.id ? { ...c, sourceVideoId: 'music' } : c
+            ),
+          },
+        },
+      })
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      expect(screen.getByRole('listbox', { name: 'Keyframes for Opacity' })).toBeInTheDocument()
+
+      store().setSelectedClipId('clip2')
+
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(document.body.querySelector(`.${panelStyles.graphHeader}`)).toBeNull()
+      expect(screen.getByRole('button', { name: 'Volume' }).tabIndex).toBe(0)
+    })
+  })
+
   it('leaves the audio section out when the clip has no source media', () => {
     const clip = addClip('clip1', 0, CLIP_DURATION)
     useEditorStore.setState({
@@ -151,6 +222,8 @@ describe('KeyframePanel', () => {
     render(<KeyframePanel />)
 
     expect(screen.queryByText('Volume')).not.toBeInTheDocument()
+    // No source to say otherwise, so the picture rows stay (ESCSUITE-248).
+    expect(screen.getByText('Opacity')).toBeInTheDocument()
   })
 
   it('closes the panel from the title bar button', async () => {
@@ -567,6 +640,137 @@ describe('KeyframePanel', () => {
 
       const added = keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 3) < 0.001)
       expect(added).toEqual({ time: 3, value: 0, easing: 'ease-in-out' })
+    })
+  })
+
+  // ESCSUITE-248 (M-15): every add path — the graph's Enter, the graph's
+  // double-click and a row's double-click — lands in the panel's one
+  // `handleAddKeyframe`, which used to write `easing: 'ease-in-out'` over
+  // whatever keyframe was already at that time and push an undo entry for it.
+  // A time that already holds a keyframe now selects it instead: no write, no
+  // history entry, the easing left alone, and the panel's one live region says
+  // so.
+  describe('adding where a keyframe already is (ESCSUITE-248)', () => {
+    const EXISTING = { time: 1.2, value: 0.5, easing: 'linear' as const }
+    const panelStatus = () =>
+      document.body.querySelector<HTMLElement>(`.${panelStyles.srOnly}[role="status"]`)!
+    const graphStatus = () =>
+      document.body.querySelector<HTMLElement>(`.${graphStyles.srOnly}[role="status"]`)!
+
+    beforeEach(() => {
+      openPanelWithClip()
+      store().setClipKeyframe('clip1', 'opacity', EXISTING)
+    })
+
+    function expectSelectedNotWritten(before: unknown, historyBefore: number) {
+      expect(keyframesOf('opacity')).toEqual(before)
+      expect(keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 1.2) < 0.001)!.easing).toBe('linear')
+      expect(store().history.past).toHaveLength(historyBefore)
+      expect(panelStatus()).toHaveTextContent('Keyframe at 1.20 s selected')
+      // Selected in the graph: the 1.2s keyframe is the active option and the
+      // easing control shows ITS easing, untouched.
+      expect(measureGraph().getAttribute('aria-activedescendant')).toBe('kf-opacity-1')
+      expect(screen.getByLabelText('Keyframe easing')).toHaveValue('linear')
+    }
+
+    it('selects the keyframe under the playhead on Enter instead of rewriting its easing', () => {
+      store().setKeyframePanelSelectedProperty('opacity')
+      // Inside KEYFRAME_TIME_EPSILON of 1.2, not on it.
+      store().setCurrentTime(1.2005)
+      render(<KeyframePanel />)
+      const before = keyframesOf('opacity')
+      const historyBefore = store().history.past.length
+      const svg = measureGraph()
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expectSelectedNotWritten(before, historyBefore)
+      // The graph's own region says nothing: no keyframe was added.
+      expect(graphStatus()).toHaveTextContent('')
+      expect(graphStatus().textContent).not.toMatch(/Opacity/)
+    })
+
+    it('makes a second Enter on the same keyframe a different string, so it is re-read', () => {
+      store().setKeyframePanelSelectedProperty('opacity')
+      store().setCurrentTime(1.2)
+      render(<KeyframePanel />)
+      const svg = measureGraph()
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+      const first = panelStatus().textContent
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(panelStatus()).toHaveTextContent('Keyframe at 1.20 s selected')
+      expect(panelStatus().textContent).not.toBe(first)
+    })
+
+    it('selects it on a graph double-click at that time', () => {
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      const before = keyframesOf('opacity')
+      const historyBefore = store().history.past.length
+      const svg = measureGraph()
+
+      // x = 50 + 100 * 1.2; the value axis is irrelevant to an occupied time.
+      fireEvent.doubleClick(svg, { clientX: 170, clientY: 40 })
+
+      expectSelectedNotWritten(before, historyBefore)
+    })
+
+    it('selects it on a row double-click, opening the row\'s graph to show it', () => {
+      render(<KeyframePanel />)
+      const before = keyframesOf('opacity')
+      const historyBefore = store().history.past.length
+      expect(document.body.querySelector(`.${graphStyles.graph}`)).toBeNull()
+
+      // 120px into a 430px row over a 4.3s clip = 1.2s.
+      fireEvent.doubleClick(measureTrackArea('Opacity'), { clientX: 220 })
+
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+      expectSelectedNotWritten(before, historyBefore)
+    })
+
+    it('selects it on a row double-click while that row\'s graph is already open', () => {
+      store().setKeyframePanelSelectedProperty('opacity')
+      render(<KeyframePanel />)
+      const before = keyframesOf('opacity')
+      const historyBefore = store().history.past.length
+
+      fireEvent.doubleClick(measureTrackArea('Opacity'), { clientX: 220 })
+
+      expect(store().keyframePanelState.selectedProperty).toBe('opacity')
+      expectSelectedNotWritten(before, historyBefore)
+    })
+
+    it('still adds one ease-in-out keyframe, as one undo step, on Enter at a free time', () => {
+      store().setKeyframePanelSelectedProperty('opacity')
+      store().setCurrentTime(3)
+      render(<KeyframePanel />)
+      const historyBefore = store().history.past.length
+      const svg = measureGraph()
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 3) < 0.001)!.easing).toBe('ease-in-out')
+      expect(keyframesOf('opacity')!.find((kf) => Math.abs(kf.time - 1.2) < 0.001)!.easing).toBe('linear')
+      expect(store().history.past).toHaveLength(historyBefore + 1)
+      expect(panelStatus()).toHaveTextContent('')
+      expect(graphStatus()).toHaveTextContent('Opacity')
+    })
+
+    it('adds on a property whose keyframe list is empty, even with another property animated', () => {
+      render(<KeyframePanel />)
+      const historyBefore = store().history.past.length
+
+      fireEvent.doubleClick(measureTrackArea('Rotation'), { clientX: 220 })
+
+      const rotation = keyframesOf('rotation')!
+      expect(rotation).toHaveLength(2) // the time-0 seed and the new one
+      expect(rotation[1].time).toBeCloseTo(1.2, 9)
+      expect(store().history.past).toHaveLength(historyBefore + 1)
     })
   })
 
@@ -1026,19 +1230,20 @@ describe('KeyframePanel', () => {
       expect(document.activeElement).toBe(row('Opacity'))
     })
 
-    it('Escape in a graph whose property has no row returns focus to the rows\' tab stop', () => {
+    // Until ESCSUITE-248 a Volume graph left open on a clip with no sound was
+    // still drawn, and this case pinned where Escape in it sent focus. Since
+    // then a graph whose property has no row is not drawn at all — the mirror
+    // of the picture graph closing on an audio-only clip — so there is no
+    // such graph to press Escape in, and the stored selection waits for a
+    // clip that has the row.
+    it('draws no graph for an open property the clip has no row for, and keeps the selection', () => {
       openPanelWithClip()
       store().setKeyframePanelSelectedProperty('volume')
       render(<KeyframePanel />)
-      const windowKeys = vi.fn()
-      window.addEventListener('keydown', windowKeys)
 
-      screen.getByRole('listbox').focus()
-      fireEvent.keyDown(screen.getByRole('listbox'), { key: 'Escape' })
-
-      window.removeEventListener('keydown', windowKeys)
-      expect(document.activeElement).toBe(row('Position X'))
-      expect(windowKeys).not.toHaveBeenCalled()
+      expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+      expect(store().keyframePanelState.selectedProperty).toBe('volume')
+      expect(row('Position X').tabIndex).toBe(0)
     })
 
     it('leaves every other key in the graph region to the graph and the editor', () => {

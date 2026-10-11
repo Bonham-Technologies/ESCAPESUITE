@@ -41,11 +41,26 @@ interface KeyframeGraphProps {
    */
   onKeyframeMoved: (property: AnimatableProperty, originalTime: number, newTime: number, skipHistory?: boolean) => boolean;
   onKeyframeValueChanged: (property: AnimatableProperty, time: number, newValue: number, skipHistory?: boolean) => boolean;
-  onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => void;
+  /**
+   * `false` when nothing was written because the time already held a keyframe
+   * (ESCSUITE-248) — the host selects that one through `selectRequest` and
+   * announces it; see `useKeyframeGraphKeyboard`'s option of the same name.
+   */
+  onAddKeyframe: (property: AnimatableProperty, time: number, value: number) => boolean | void;
   /** Returns whether the store removed the keyframe — as the two above do. */
   onDeleteKeyframe?: (property: AnimatableProperty, time: number) => boolean;
   /** Omit to hide the per-keyframe easing control entirely. */
   onKeyframeEasingChanged?: (property: AnimatableProperty, time: number, easing: EasingType) => void;
+  /**
+   * A keyframe the host wants selected (ESCSUITE-248): an add aimed at a time
+   * that already held one selects that one instead of writing. The selection
+   * is this component's own state, so the host asks rather than sets it; each
+   * request is a new object, applied once, after which the graph calls
+   * `onSelectRequestHandled` so the host can drop it and a later remount of
+   * the graph does not apply it again.
+   */
+  selectRequest?: { time: number } | null;
+  onSelectRequestHandled?: () => void;
 }
 
 // Property value ranges for display
@@ -76,6 +91,8 @@ export function KeyframeGraph({
   onAddKeyframe,
   onDeleteKeyframe,
   onKeyframeEasingChanged,
+  selectRequest,
+  onSelectRequestHandled,
 }: KeyframeGraphProps) {
   const svgRef = useRef<SVGSVGElement>(null);
 
@@ -155,6 +172,16 @@ export function KeyframeGraph({
     onAddKeyframe,
     onDeleteKeyframe,
   });
+
+  // The host's request to select a keyframe (ESCSUITE-248) — the same pair of
+  // writes a click on that keyframe makes. Only ever a custom keyframe: the
+  // host asks for one it found in the clip's own stored keyframes.
+  useEffect(() => {
+    if (!selectRequest) return;
+    setActiveTime(selectRequest.time);
+    setSelectedKeyframeTime(selectRequest.time);
+    onSelectRequestHandled?.();
+  }, [selectRequest, onSelectRequestHandled, setActiveTime]);
 
   // Calculate SVG dimensions and coordinate conversions
   const graphDimensions = useMemo(() => {

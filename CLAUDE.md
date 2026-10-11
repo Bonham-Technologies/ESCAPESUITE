@@ -3810,6 +3810,34 @@ left as the ESCSUITE-249 paragraph set it. `drawFrame.perf.test.ts`, `timelineGe
 `*.perf.test.ts` and the rerender pins are byte-identical — one store write per gesture, one comparison per
 frame that already happened. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-248 (adding a keyframe where one already is — the
+graph's Enter, the row's double-click and "Add Keyframe at Playhead" all land in one `handleAddKeyframe` — now
+selects that keyframe in the graph and says "Keyframe at 1.20 s selected" through the panel's live region,
+with no store write and no undo entry, instead of rewriting its easing to `ease-in-out` and spending an undo
+step on a no-op; and an audio clip's panel lists Volume only — one rule, "no row for the stored property, no
+graph drawn", which also closes a graph left open on a picture property when an audio clip is selected):
+99.83 / **99.38** / **96.42** / 99.75 against the 99.83 / 99.37 / 96.41 / 99.75 that `main` measures in the
+same sitting (`cb202b8c`; the commit this branch lands on differs in docs alone, so the artist source is
+identical) — statements and branches each up a hundredth, lines and functions unmoved. The base gives
+5,594 / 5,802 branches and this branch 5,609 / 5,817: fifteen new branches, fifteen covered, the same 208
+uncovered (lines 8,653 / 8,667 → 8,669 / 8,683, statements 9,776 / 9,837 → 9,794 / 9,855, functions
+2,061 / 2,066 → 2,064 / 2,069, every denominator growing by exactly what the numerator did; the same
+14 / 61 / 5 uncovered). The fifteen are `components/KeyframePanel/KeyframePanel.tsx`'s eleven (63 / 73 →
+74 / 84: the occupied-time test with `KEYFRAME_TIME_EPSILON`, the select request handed to the graph, the
+picture-section gate on the source's `mediaType`, the "no row for the stored property" rule; the file's ten
+pre-existing uncovered arms untouched), `KeyframeGraph.tsx`'s two (113 / 122 → 115 / 124: the `selectRequest`
+arm and its acknowledgement — the prop optional, its absent side reached by the unchanged perf file and the
+graph's own suite) and `hooks/useKeyframeGraphKeyboard.ts`'s two (98 → 100: the add handler's `false`, which
+stops the keyboard from moving the active keyframe to the playhead or announcing an add) — each reached from
+both sides by the eight red cases (Enter on an occupied time keeping `easing: 'linear'` and the history
+length, the double-click and the button on the same time, Enter on a free time still writing, an audio clip's
+Volume-only list, a video clip's full list, a graph on `opacity` closing when an audio clip is selected). The
+review (opus) approved both verdicts; its MEDIUM — an add at an Animate In/Out handle's time still writes a
+custom keyframe over the handle, pre-existing — is ESCSUITE-282, named in `apps/artist/CLAUDE.md`. The table
+row is left as the ESCSUITE-249 paragraph set it. `keyframeGestures.perf.test.ts`, every `*.perf.test.ts` and
+the rerender pins are byte-identical; the ESCSUITE-163 / 167 / 183 history pins are untouched. **No floor
+crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

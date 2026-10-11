@@ -802,6 +802,24 @@ describe('KeyframeGraph keyboard access', () => {
       expect(onAddKeyframe.mock.calls[0][2]).toBeCloseTo(0.17, 6)
     })
 
+    // ESCSUITE-248: the host answers `false` when the time already held a
+    // keyframe and it selected that one instead of writing. Nothing was added,
+    // so the graph's own region must not say one was, and the active option is
+    // left to the host's selection rather than moved to the playhead here.
+    it('announces nothing and moves nothing when the host reports it wrote nothing', () => {
+      opacityKeyframes()
+      const { container, onAddKeyframe } = renderGraph('opacity', { playheadTime: 3 })
+      onAddKeyframe.mockReturnValue(false)
+      const svg = graphSvg(container)
+      svg.focus()
+
+      fireEvent.keyDown(svg, { key: 'Enter' })
+
+      expect(onAddKeyframe).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole('status')).toHaveTextContent('')
+      expect(svg.getAttribute('aria-activedescendant')).toBeNull()
+    })
+
     it('adds at the property default on a graph with no keyframes', () => {
       const { container, onAddKeyframe } = renderGraph('opacity', { playheadTime: 2 })
       const svg = graphSvg(container)
