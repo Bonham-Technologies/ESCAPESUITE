@@ -463,3 +463,12 @@
 .audioBadge {
   background: rgba(74, 158, 255, 0.9);
 }
+
+/* Files from earlier sessions (ESCSUITE-268): the line beside Clear Unused / Clear All. */
+.orphanedImports {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
