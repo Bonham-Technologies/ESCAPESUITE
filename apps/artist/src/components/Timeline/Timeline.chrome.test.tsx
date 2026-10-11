@@ -145,9 +145,36 @@ describe('Timeline markers', () => {
     store().addMarker(3, 'Cut here')
     const { root } = renderTimeline()
 
-    const flag = screen.getByTitle(/^Cut here \(0:03\)/)
+    const flag = screen.getByRole('button', { name: /^Marker Cut here at 0:03/ })
     expect(flag).toHaveStyle({ left: '150px' })
     expect(root.querySelectorAll(`.${styles.markerLine}`)).toHaveLength(1)
+  })
+
+  it('seeks to the marker\'s exact time on Enter, and the ruler elsewhere still seeks by position', async () => {
+    const user = userEvent.setup()
+    store().addMarker(3, 'Cut here')
+    renderTimeline()
+    store().setCurrentTime(7)
+
+    screen.getByRole('button', { name: /^Marker Cut here/ }).focus()
+    await user.keyboard('{Enter}')
+    expect(store().currentTime).toBe(3)
+
+    store().setCurrentTime(7)
+    fireEvent.click(screen.getByRole('group', { name: 'Timeline ruler' }), { clientX: 250 })
+    expect(store().currentTime).toBe(5)
+  })
+
+  it('re-aligns the tracks with the ruler when a marker outside the window takes focus', () => {
+    store().addMarker(40, 'Far away')
+    const { ruler, trackContainer } = renderTimeline()
+    // jsdom does not scroll on focus; the browser would have scrolled the ruler.
+    ruler.scrollLeft = 400
+    expect(trackContainer.scrollLeft).toBe(0)
+
+    fireEvent.focus(screen.getByRole('button', { name: /^Marker Far away/ }))
+
+    expect(trackContainer.scrollLeft).toBe(400)
   })
 
   it('removes a marker when its flag is double-clicked', async () => {
@@ -155,7 +182,7 @@ describe('Timeline markers', () => {
     store().addMarker(3, 'Cut here')
     renderTimeline()
 
-    await user.dblClick(screen.getByTitle(/^Cut here/))
+    await user.dblClick(screen.getByRole('button', { name: /^Marker Cut here/ }))
 
     expect(store().markers).toHaveLength(0)
   })

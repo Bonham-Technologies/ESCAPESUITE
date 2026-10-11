@@ -21,9 +21,21 @@ export type { TrimOrigin };
 /** How many pixels one second of timeline occupies at zoom 1. */
 export const PIXELS_PER_SECOND_BASE = 50;
 
-/** Ruler tick spacing, in seconds: a tick every second, labelled every five. */
-export const RULER_MAJOR_INTERVAL = 5;
-export const RULER_MINOR_INTERVAL = 1;
+/**
+ * The tick intervals a ruler may use, in seconds, finest first. The ruler picks
+ * from this ladder by zoom (`rulerIntervals`), so a frame-level view is not one
+ * label per screen and a zoomed-out one is not a smear of ticks.
+ */
+export const RULER_INTERVAL_LADDER: readonly number[] = [0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60];
+
+/** The narrowest a tick may be drawn from its neighbour, in pixels. */
+export const RULER_MIN_TICK_PX = 50;
+
+/** The narrowest two time labels may sit apart, in pixels. */
+export const RULER_MIN_LABEL_PX = 80;
+
+/** The smallest scale the zoom control reaches: zoom 0.1, in pixels per second. */
+export const MIN_PIXELS_PER_SECOND = PIXELS_PER_SECOND_BASE * 0.1;
 
 /** How close to a clip's edges the razor refuses to split, in seconds. */
 export const MIN_SPLIT_DISTANCE = 0.1;
@@ -41,22 +53,65 @@ export interface RulerTick {
   x: number;
   /** Major ticks carry a time label; minor ones are bare. */
   isMajor: boolean;
+  /** The label a major tick shows; empty for a minor one. */
+  label: string;
+}
+
+/**
+ * The two spacings a ruler uses at this scale, in seconds. `label` comes first:
+ * the smallest ladder step at least `RULER_MIN_LABEL_PX` wide, so labels never
+ * get coarser as the zoom grows. `minor` is then the smallest ladder step at
+ * least `RULER_MIN_TICK_PX` wide that divides `label` evenly, so every labelled
+ * time is a tick. The scale is held at the timeline's minimum zoom, so a label
+ * step and a dividing tick step always exist on the ladder.
+ */
+export function rulerIntervals(pixelsPerSecond: number): { minor: number; label: number } {
+  const pps = Math.max(pixelsPerSecond, MIN_PIXELS_PER_SECOND);
+  const label = RULER_INTERVAL_LADDER.find((step) => step * pps >= RULER_MIN_LABEL_PX)!;
+  const minor = RULER_INTERVAL_LADDER.find((step) => {
+    const steps = label / step;
+    return step * pps >= RULER_MIN_TICK_PX && Math.abs(steps - Math.round(steps)) < 1e-9;
+  })!;
+  return { minor, label };
+}
+
+/**
+ * A ruler label for `time`, with as many decimals as the labelled step needs
+ * to tell neighbours apart: none from a second up, tenths for 0.1 and 0.5,
+ * hundredths for 0.25.
+ */
+export function formatRulerTime(time: number, labelInterval: number): string {
+  const decimals = labelInterval >= 1 ? 0 : labelInterval === 0.25 ? 2 : 1;
+  const scale = 10 ** decimals;
+  const units = Math.round(time * scale);
+  const wholeSeconds = Math.floor(units / scale);
+  const minutes = Math.floor(wholeSeconds / 60);
+  const secs = (wholeSeconds % 60).toString().padStart(2, '0');
+  if (decimals === 0) return `${minutes}:${secs}`;
+  const fraction = (units % scale).toString().padStart(decimals, '0');
+  return `${minutes}:${secs}.${fraction}`;
 }
 
 /**
  * The ticks a ruler of `duration` seconds shows at this scale: one every
- * `RULER_MINOR_INTERVAL`, up to and including the tick at or past the end.
+ * minor interval of `rulerIntervals`, up to and including the tick at or past
+ * the end, the labelled ones carrying their label.
  */
 export function getRulerTicks(duration: number, pixelsPerSecond: number): RulerTick[] {
+  const { minor, label } = rulerIntervals(pixelsPerSecond);
   const ticks: RulerTick[] = [];
-  const totalTicks = Math.ceil(duration / RULER_MINOR_INTERVAL);
+  const totalTicks = Math.ceil(duration / minor);
+  const labelEvery = Math.round(label / minor);
 
   for (let i = 0; i <= totalTicks; i++) {
-    const time = i * RULER_MINOR_INTERVAL;
+    // Rounded to the millisecond so 3 * 0.1 is 0.3, not 0.30000000000000004.
+    const time = Math.round(i * minor * 1000) / 1000;
+    const isMajor = i % labelEvery === 0;
     ticks.push({
       time,
       x: timeToPixels(time, pixelsPerSecond),
-      isMajor: time % RULER_MAJOR_INTERVAL === 0,
+      isMajor,
+      label: isMajor ? formatRulerTime(time, label) : '',
     });
   }
 

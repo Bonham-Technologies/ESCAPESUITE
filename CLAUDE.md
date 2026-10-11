@@ -3838,6 +3838,37 @@ row is left as the ESCSUITE-249 paragraph set it. `keyframeGestures.perf.test.ts
 the rerender pins are byte-identical; the ESCSUITE-163 / 167 / 183 history pins are untouched. **No floor
 crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-10 for ESCSUITE-251 (timeline chrome from the keyboard: a
+track's name is a "Rename track" button — click, Enter or double-click open the labelled input, Enter commits,
+Escape cancels, focus returns to the button a tick later; each marker flag is a named button — Delete or
+Backspace removes it, with propagation stopped so the window cascade does not also delete the selected clips,
+and a click or Enter seeks to the marker's own time through a new `onSeek` rather than the ruler's pixel math;
+Tabbing to an off-screen marker copies the ruler's `scrollLeft` into the track container so the one-way scroll
+sync re-aligns everything; and the ruler's labels follow the zoom — the label step is the smallest ladder step
+at least 80 px wide, the minor tick the smallest step at least 50 px wide that divides it, over
+`[0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60]` s, monotone across the ×1.25 zoom ladder, the input clamped at the
+timeline's `MIN_PIXELS_PER_SECOND` so no fallback arm is left for a zoom the app cannot reach):
+99.83 / **99.38** / **96.42** / 99.75 against the 99.83 / 99.37 / 96.41 / 99.75 that `main` measures in the
+same sitting (`cb202b8c`; the commit this branch lands on differs in docs alone, so the artist source is
+identical) — statements and branches each up a hundredth, lines and functions unmoved. The base gives
+5,594 / 5,802 branches and this branch 5,618 / 5,826: twenty-four new branches, twenty-four covered, the same
+208 uncovered (lines 8,653 / 8,667 → 8,694 / 8,708, statements 9,776 / 9,837 → 9,822 / 9,883, functions
+2,061 / 2,066 → 2,072 / 2,077, every denominator growing by exactly what the numerator did; the same
+14 / 61 / 5 uncovered). The twenty-four are `components/Timeline/timelineGeometry.ts`'s ten (32 → 42: the
+label-step and minor-step searches and the label format's tenths / hundredths choice, each reached by the
+10, 50, 100, 500 px/s cases and the monotone sweep), `TimelineRuler.tsx`'s six (11 → 17: the Delete /
+Backspace arm with its `stopPropagation`, the marker's own seek, the focus copy with and without a track
+container), `TrackHeader.tsx`'s four (46 → 50: the button's click and keyboard paths into the editor and the
+deferred focus return) and `useTimelineSeek.ts`'s four (21 → 25: `handleSeekTo`'s pause-if-playing and clamp)
+— each from both sides by the forty-two red cases across three rounds. Three review rounds (opus, then two
+scoped) put the last of them there: round 2 stopped the Delete key from reaching the window cascade (a
+selected clip survived, red before), made the label step monotone and re-aligned the ruler after a keyboard
+focus; round 3 clamped the zoom instead of keeping two fallbacks only a sub-1 px/s zoom could reach. The
+table row is left as the ESCSUITE-249 paragraph set it. `timelineGestures.perf.test.ts` — still 61 ticks at
+the perf scene's 50 px/s — every other `*.perf.test.ts` and the rerender pins are byte-identical; the ruler's
+new props are a stable ref and a memoised callback, so it re-renders no more often per pointer frame. **No
+floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

@@ -7,6 +7,8 @@ import styles from './Timeline.module.css';
 interface TimelineRulerProps {
   /** The ruler's scroll box. `Timeline` mirrors the track scroll onto it. */
   rulerRef: React.RefObject<HTMLDivElement | null>;
+  /** The scroll box the ruler follows; a focused marker hands it the ruler's offset. */
+  trackContainerRef: React.RefObject<HTMLDivElement | null>;
   /** How many seconds the ruler spans — the timeline's duration, or its floor. */
   duration: number;
   /** Horizontal scale of the timeline, in pixels per second of media. */
@@ -17,6 +19,8 @@ interface TimelineRulerProps {
   inPoint: number | null;
   outPoint: number | null;
   onRulerClick: (e: React.MouseEvent) => void;
+  /** Seek to an exact time; a marker flag uses it instead of the ruler's pixel maths. */
+  onSeek: (time: number) => void;
   onRemoveMarker: (markerId: string) => void;
   onInPointMouseDown: (e: React.MouseEvent) => void;
   onOutPointMouseDown: (e: React.MouseEvent) => void;
@@ -38,6 +42,7 @@ interface TimelineRulerProps {
  */
 export const TimelineRuler = React.memo(function TimelineRuler({
   rulerRef,
+  trackContainerRef,
   duration,
   pixelsPerSecond,
   width,
@@ -45,6 +50,7 @@ export const TimelineRuler = React.memo(function TimelineRuler({
   inPoint,
   outPoint,
   onRulerClick,
+  onSeek,
   onRemoveMarker,
   onInPointMouseDown,
   onOutPointMouseDown,
@@ -61,28 +67,49 @@ export const TimelineRuler = React.memo(function TimelineRuler({
         aria-label="Timeline ruler"
       >
         <div className={styles.rulerContent} style={{ width }}>
-          {getRulerTicks(duration, pixelsPerSecond).map(({ time, x, isMajor }) => (
+          {getRulerTicks(duration, pixelsPerSecond).map(({ time, x, isMajor, label }) => (
             <div
               key={time}
               className={`${styles.tick} ${isMajor ? styles.tickMajor : styles.tickMinor}`}
               style={{ left: x }}
             >
-              {isMajor && <span className={styles.tickLabel}>{formatTime(time)}</span>}
+              {isMajor && <span className={styles.tickLabel}>{label}</span>}
             </div>
           ))}
           {markers.map((marker) => (
-            <div
+            <button
+              type="button"
               key={marker.id}
               className={styles.markerFlag}
               style={{ left: timeToPixels(marker.time, pixelsPerSecond), '--marker-color': marker.color } as React.CSSProperties}
-              title={`${marker.label} (${formatTime(marker.time)}) - Double-click to remove`}
+              aria-label={`Marker ${marker.label} at ${formatTime(marker.time)} — Delete to remove`}
+              onClick={(e) => {
+                // Not the ruler's pixel maths: a keyboard activation has no
+                // pointer position, and a mouse click should land on the marker.
+                e.stopPropagation();
+                onSeek(marker.time);
+              }}
+              onFocus={() => {
+                // Tab to a flag out of view and the browser scrolls the ruler
+                // alone; the container is what the other panes follow.
+                const container = trackContainerRef.current;
+                if (container) container.scrollLeft = rulerRef.current!.scrollLeft;
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Delete' || e.key === 'Backspace') {
+                  e.preventDefault();
+                  // Not also the window's Delete-the-selected-clips shortcut.
+                  e.stopPropagation();
+                  onRemoveMarker(marker.id);
+                }
+              }}
               onDoubleClick={(e) => {
                 e.stopPropagation();
                 onRemoveMarker(marker.id);
               }}
             >
-              <div className={styles.markerFlagHead} />
-            </div>
+              <span className={styles.markerFlagHead} />
+            </button>
           ))}
 
           {/* In/Out point markers in ruler */}

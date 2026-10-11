@@ -168,6 +168,29 @@ describe('useTimelineSeek on the ruler', () => {
   })
 })
 
+describe('useTimelineSeek to an exact time', () => {
+  it('seeks to the time it is given, with no pointer maths', () => {
+    addClip('clip1', 0, 4)
+    const { result } = mountSeek()
+
+    act(() => result.current.handleSeekTo(3))
+
+    expect(actions.setCurrentTime).toHaveBeenCalledWith(3)
+    expect(actions.setIsPlaying).not.toHaveBeenCalled()
+  })
+
+  it('pauses playback first and clamps to the end of the timeline', () => {
+    addClip('clip1', 0, 4)
+    store().setIsPlaying(true)
+    const { result } = mountSeek()
+
+    act(() => result.current.handleSeekTo(90))
+
+    expect(actions.setIsPlaying).toHaveBeenCalledWith(false)
+    expect(actions.setCurrentTime).toHaveBeenCalledWith(4)
+  })
+})
+
 describe('useTimelineSeek on the track area', () => {
   /** An element that reads as bare track space. */
   const bare = () => {

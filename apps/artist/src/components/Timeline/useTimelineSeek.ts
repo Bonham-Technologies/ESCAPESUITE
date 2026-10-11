@@ -53,6 +53,8 @@ export interface TimelineSeekDeps {
 export interface TimelineSeek {
   /** `onClick` for the ruler. */
   handleRulerClick: (e: React.MouseEvent) => void;
+  /** Seek to an exact time (a marker's), pausing first; no pixel maths. */
+  handleSeekTo: (time: number) => void;
   /** `onClick` for the track container. */
   handleTrackClick: (e: React.MouseEvent) => void;
 }
@@ -87,6 +89,18 @@ export function useTimelineSeek({
       setCurrentTime(clampedTime);
     },
     [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying, rulerRef]
+  );
+
+  // Seek to a time the caller already knows — a marker flag's own — so a
+  // keyboard activation (clientX 0) and a mouse click land on the same instant.
+  const handleSeekTo = useCallback(
+    (time: number) => {
+      if (isPlaying) {
+        setIsPlaying(false);
+      }
+      setCurrentTime(clampTime(time, timelineDuration || minTimelineDuration));
+    },
+    [timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
   );
 
   // Handle click on track to seek, pause, and deselect.
@@ -129,5 +143,5 @@ export function useTimelineSeek({
     [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying, trackContainerRef, marqueeJustFinishedRef]
   );
 
-  return { handleRulerClick, handleTrackClick };
+  return { handleRulerClick, handleSeekTo, handleTrackClick };
 }

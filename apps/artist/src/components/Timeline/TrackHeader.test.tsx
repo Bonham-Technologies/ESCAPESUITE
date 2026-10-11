@@ -60,10 +60,10 @@ describe('TrackHeader layout', () => {
     expect(root).toHaveStyle({ height: '88px' })
   })
 
-  it('shows the track name with its rename hint', () => {
+  it('shows the track name as a button named for what it does', () => {
     renderHeader({ track: makeTrack({ name: 'Dialogue' }) })
 
-    const name = screen.getByTitle('Double-click to rename')
+    const name = screen.getByRole('button', { name: 'Rename track Dialogue' })
     expect(name).toHaveTextContent('Dialogue')
     expect(name).toHaveClass(styles.trackName)
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
@@ -169,23 +169,82 @@ describe('TrackHeader mute', () => {
 })
 
 describe('TrackHeader renaming', () => {
+  it('is reached by Tab and opened with Enter, into a named field', async () => {
+    const user = userEvent.setup()
+    renderHeader({ track: makeTrack({ name: 'Dialogue' }) })
+
+    const button = screen.getByRole('button', { name: 'Rename track Dialogue' })
+    // Tab through the header until the rename button has focus.
+    for (let i = 0; i < 10 && document.activeElement !== button; i++) await user.tab()
+    expect(button).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+
+    const field = screen.getByRole('textbox', { name: 'Track name' })
+    expect(field).toHaveValue('Dialogue')
+    expect(field).toHaveFocus()
+  })
+
+  it('opens on Space and on a plain click as well', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+
+    screen.getByRole('button', { name: /^Rename track/ }).focus()
+    await user.keyboard(' ')
+    expect(screen.getByRole('textbox', { name: 'Track name' })).toBeInTheDocument()
+  })
+
+  it('opens on a single click', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+
+    await user.click(screen.getByRole('button', { name: /^Rename track/ }))
+
+    expect(screen.getByRole('textbox', { name: 'Track name' })).toBeInTheDocument()
+  })
+
+  it('opens on a double-click event alone', () => {
+    renderHeader()
+
+    fireEvent.doubleClick(screen.getByRole('button', { name: /^Rename track/ }))
+
+    expect(screen.getByRole('textbox', { name: 'Track name' })).toBeInTheDocument()
+  })
+
+  it('hands focus back to the rename button after Enter or Escape, not after a blur', async () => {
+    const user = userEvent.setup()
+    renderHeader()
+
+    await user.click(screen.getByRole('button', { name: /^Rename track/ }))
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('button', { name: /^Rename track/ })).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: /^Rename track/ }))
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('button', { name: /^Rename track/ })).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: /^Rename track/ }))
+    fireEvent.blur(screen.getByRole('textbox'))
+    expect(screen.getByRole('button', { name: /^Rename track/ })).not.toHaveFocus()
+  })
+
   it('opens an editor seeded with the current name on double-click', async () => {
     const user = userEvent.setup()
     renderHeader({ track: makeTrack({ name: 'Dialogue' }) })
 
-    await user.dblClick(screen.getByTitle('Double-click to rename'))
+    await user.dblClick(screen.getByRole('button', { name: /^Rename track/ }))
 
     const field = screen.getByRole('textbox')
     expect(field).toHaveClass(styles.trackNameInput)
     expect(field).toHaveValue('Dialogue')
-    expect(screen.queryByTitle('Double-click to rename')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Rename track/ })).not.toBeInTheDocument()
   })
 
   it('commits a trimmed name on Enter and closes the editor', async () => {
     const user = userEvent.setup()
     const { calls } = renderHeader()
 
-    await user.dblClick(screen.getByTitle('Double-click to rename'))
+    await user.dblClick(screen.getByRole('button', { name: /^Rename track/ }))
     await user.clear(screen.getByRole('textbox'))
     await user.type(screen.getByRole('textbox'), '  Music  {Enter}')
 
@@ -197,7 +256,7 @@ describe('TrackHeader renaming', () => {
     const user = userEvent.setup()
     const { calls } = renderHeader()
 
-    await user.dblClick(screen.getByTitle('Double-click to rename'))
+    await user.dblClick(screen.getByRole('button', { name: /^Rename track/ }))
     await user.clear(screen.getByRole('textbox'))
     await user.type(screen.getByRole('textbox'), 'Score')
     fireEvent.blur(screen.getByRole('textbox'))
@@ -209,7 +268,7 @@ describe('TrackHeader renaming', () => {
     const user = userEvent.setup()
     const { calls } = renderHeader()
 
-    await user.dblClick(screen.getByTitle('Double-click to rename'))
+    await user.dblClick(screen.getByRole('button', { name: /^Rename track/ }))
     await user.clear(screen.getByRole('textbox'))
     await user.type(screen.getByRole('textbox'), '   ')
     fireEvent.blur(screen.getByRole('textbox'))
@@ -222,7 +281,7 @@ describe('TrackHeader renaming', () => {
     const user = userEvent.setup()
     const { calls } = renderHeader()
 
-    await user.dblClick(screen.getByTitle('Double-click to rename'))
+    await user.dblClick(screen.getByRole('button', { name: /^Rename track/ }))
     await user.clear(screen.getByRole('textbox'))
     await user.type(screen.getByRole('textbox'), 'Nope{Escape}')
 
@@ -234,7 +293,7 @@ describe('TrackHeader renaming', () => {
     const user = userEvent.setup()
     const { calls } = renderHeader()
 
-    await user.dblClick(screen.getByTitle('Double-click to rename'))
+    await user.dblClick(screen.getByRole('button', { name: /^Rename track/ }))
     await user.type(screen.getByRole('textbox'), 'x')
 
     expect(screen.getByRole('textbox')).toHaveValue('Track 1x')

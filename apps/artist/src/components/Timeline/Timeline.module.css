@@ -159,6 +159,11 @@
   padding: 2px 4px;
   border-radius: var(--radius-sm);
   transition: background var(--transition-fast);
+  /* A button that reads as the text it renames. */
+  border: 0;
+  background: none;
+  font-family: inherit;
+  text-align: left;
 }
 
 .trackName:hover {
@@ -696,9 +701,14 @@
   transform: translateX(-50%);
   cursor: pointer;
   z-index: 10;
+  /* A button that reads as the flag it is. */
+  border: 0;
+  background: none;
+  padding: 0;
 }
 
 .markerFlagHead {
+  display: block;
   width: 0;
   height: 0;
   border-left: 6px solid transparent;
