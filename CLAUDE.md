@@ -4157,6 +4157,36 @@ pins are byte-identical. The limit the review and the implementer both named —
 store already holds within the throttle window cannot be told from a plain pause — is ESCSUITE-287.
 **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-11 for ESCSUITE-283 and ESCSUITE-285 (a departed tab's saved
+session is claimed by the first new tab it is offered to: `claimOfferLock` in `app/sessionLock.ts` takes
+`escapeartist-offer:<id>` with one `ifAvailable` request kept until released, `findOfferableSlot` claims
+while it iterates and moves on when the claim answers `null`, the claim is released on decline and on a
+successful adoption, kept on a failed adoption and otherwise by tab death, and the per-tab liveness lock is
+never claimed — so a returning owner finds its own lock free and is offered its own slot first, while a
+stale offer in another tab re-probes the owner at answer time; and the WebKit decode-worker ruling
+recorded in `core/workerDecodeEngine.ts`'s comment and the engine table, with no behaviour change):
+99.84 / 99.39 / **96.56** / 99.76 against the 99.84 / 99.39 / 96.55 / 99.76 that `main` at `89988d16`
+(the ESCSUITE-268 version-packages commit) measures in the same sitting — branches up a hundredth, the
+other three unmoved. The base gives 5,717 / 5,921 branches and this branch 5,730 / 5,934: thirteen new
+branches, thirteen covered, the same 204 uncovered as before (lines 8,857 / 8,871 → 8,886 / 8,900,
+statements 10,018 / 10,079 → 10,053 / 10,114, functions 2,113 / 2,118 → 2,123 / 2,128, every denominator
+growing by exactly what the numerator did; the same 14 / 61 / 5 uncovered). The thirteen are
+`app/sessionLock.ts`'s five (8 → 13: `claimOfferLock`'s no-Web-Locks, lock-held and rejecting arms, each
+reached by the double's lone-tab, held and rejecting cases against the granted one), `app/sessionSlots.ts`'s
+two (14 → 16: the legacy row's no-op release and the claimed-or-`null` choice, reached by the legacy row,
+a claimed slot and a slot another tab holds) and `app/useSessionRestore.ts`'s six (18 → 24: the
+owner-returned probe before each answer, the failed-adoption hold and the release on decline, restore and
+failed restore, reached from both sides by the returning-owner, stale-offer, failed-adoption and plain
+restore / decline cases); every one of the three files measures 100 on all four. Red-first: 22 cases
+failed across the three suites before the fix, among them both "two fresh tabs" cases, which were offered
+the same slot. Two review rounds put the offer lock there: the first design claimed the departed tab's
+liveness lock, so a returning owner looked like a duplicate — claiming the tab lock instead reds fourteen
+cases on the final tree. The table row is left as the ESCSUITE-280 / 281 paragraph set it (96.57), which
+lands first and reads higher; this branch measures a hundredth below it on its own tree. Outside vitest's
+measurement, `apps/e2e/tests/escapeartist/session-ownership.spec.ts` gains the two-fresh-tabs case and ran
+twice here on Chromium and Firefox, 4 / 4 each. `App.*rerender*` and every `*.perf.test.ts` are
+byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
