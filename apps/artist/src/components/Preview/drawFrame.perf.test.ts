@@ -313,7 +313,10 @@ describe('preview render loop', () => {
     // every frame, so a 480 ms window is 2 store writes and not 30. Measured
     // 2026-09-12: 2. Deliberately exact rather than 2x measured — it is derived
     // from the loop's own 200 ms throttle constant, so slack would only hide
-    // that constant changing.
-    expect(storeTimeUpdates).toBeLessThanOrEqual(Math.floor((FRAME_MS * TICKS) / 200))
+    // that constant changing. Plus one: the window ends in a pause, and since
+    // ESCSUITE-281 the loop publishes the last frame it drew once as it stops,
+    // so the paused playhead is the frame shown rather than the last 200 ms
+    // write. Measured 2026-10-11: 3. One per pause transition, none per frame.
+    expect(storeTimeUpdates).toBeLessThanOrEqual(Math.floor((FRAME_MS * TICKS) / 200) + 1)
   })
 })
