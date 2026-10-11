@@ -167,7 +167,15 @@ describe('useRecordingLibrary playback', () => {
     // row is still listed here, but its bytes are gone from the shared
     // IndexedDB. Silence used to be indistinguishable from a dialog that just
     // never opened; now it is the one thing the app's notice channel is for.
-    const { result } = mountLibrary([listed('gone', 'Gone', 10)])
+    await seed('memo', 'Memo')
+    const { result } = mountLibrary([
+      { ...listed('memo', 'Memo', 3), mediaType: 'audio' },
+      listed('gone', 'Gone', 10),
+    ])
+    await act(async () => {
+      await result.current.handlePlayRecording('memo', 'Memo')
+    })
+    expect(result.current.playbackMediaType).toBe('audio')
 
     await act(async () => {
       await result.current.handlePlayRecording('gone', 'Gone')
@@ -175,6 +183,7 @@ describe('useRecordingLibrary playback', () => {
 
     expect(result.current.playbackUrl).toBeNull()
     expect(result.current.playbackName).toBe('')
+    expect(result.current.playbackMediaType).toBe('video')
     expect(setNotice).toHaveBeenCalledWith(RECORDING_UNAVAILABLE)
     // The freed room is another tab's doing, but this tab's headroom reading
     // is stale the moment it discovers the bytes are gone.

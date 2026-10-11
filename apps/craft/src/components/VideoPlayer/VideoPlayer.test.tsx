@@ -385,7 +385,7 @@ describe('VideoPlayer', () => {
   // <video> is visually hidden is CSS (VideoPlayer.module.css), which jsdom
   // does not lay out, so the test pins the class and the DOM, not the pixels.
   describe('audio-only recordings', () => {
-    it('draws a speaker placeholder and keeps the <video> element playing', async () => {
+    it('draws a speaker placeholder, keeps the <video> element, and plays on a placeholder click', async () => {
       render(<VideoPlayer {...defaultProps} mediaType="audio" />);
 
       const placeholder = screen.getByTestId('audio-placeholder');
