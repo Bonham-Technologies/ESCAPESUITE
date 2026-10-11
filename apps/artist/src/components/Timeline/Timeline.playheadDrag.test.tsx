@@ -9,7 +9,7 @@
 // The track container's left edge is at client X 0 and one second is 50px, so
 // client X 300 is 6s.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render } from '@testing-library/react'
 import { Timeline } from './Timeline'
 import { PreviewPlayer } from '../Preview/PreviewPlayer'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
@@ -25,7 +25,13 @@ beforeEach(() => {
   resetStoreForTest()
 })
 
-afterEach(() => {
+afterEach(async () => {
+  // Stop the animation loop before unmounting, so no frame is left in flight.
+  if (store().isPlaying) {
+    store().setIsPlaying(false)
+    await settle(20)
+  }
+  cleanup()
   doubles.uninstall()
   vi.useRealTimers()
   vi.clearAllMocks()

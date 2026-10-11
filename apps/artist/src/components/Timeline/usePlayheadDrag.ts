@@ -15,13 +15,15 @@
 // handler refuses to seek for the click that ends one.
 //
 // A scrub pauses playback for its own length (ESCSUITE-246). The preview's
-// render loop writes the playback position into the store while it runs, so a
-// scrub over a playing timeline was overwritten within a few frames of release
-// and the playhead snapped back. The grab pauses, the way a ruler click does
-// (`useTimelineSeek`), before the first write; the release resumes only if
-// playback was running at the grab, so a scrub that starts paused ends paused.
-// The render loop restarts from the store's `currentTime`, which is where the
-// pointer let go.
+// render loop writes the playback position into the store while it runs (every
+// 200 ms), so a scrub over a playing timeline was overwritten within 200 ms
+// (about 12 frames) of release, and mid-gesture too, and the playhead snapped
+// back. The grab pauses, the way a ruler click does (`useTimelineSeek`), before
+// the first write; the release resumes only if playback was running at the
+// grab, so a scrub that starts paused ends paused. The render loop restarts
+// from the store's `currentTime`: where the pointer let go, or — for a grab
+// with no move — where the timeline playhead was drawn at mousedown, up to
+// ~200 ms behind the preview's readout, the same as Space and Pause.
 import type * as React from 'react';
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { clampTime, pointerTime } from './timelineGeometry';
