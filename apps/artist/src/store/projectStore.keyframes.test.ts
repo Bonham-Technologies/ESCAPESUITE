@@ -375,10 +375,10 @@ describe('projectStore remaining behaviours', () => {
         addClip('clip1', 0, 4);
         store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 0.5, easing: 'ease-out' } });
 
-        store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5 });
+        store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5, easing: 'linear' });
 
         expect(store().project.timeline.clips[0].animation!.keyframes.opacity).toEqual([
-          { time: 2, value: 0.5 },
+          { time: 2, value: 0.5, easing: 'linear' },
         ]);
         expect(opacityAt(0)).toBe(0);
       });
@@ -387,7 +387,7 @@ describe('projectStore remaining behaviours', () => {
         addClip('clip1', 0, 4);
         store().updateClipAnimation('clip1', { out: { type: 'fade', duration: 0.5, easing: 'ease-in' } });
 
-        store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5 });
+        store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5, easing: 'linear' });
 
         expect(store().project.timeline.clips[0].animation!.keyframes.opacity!.map((kf) => kf.time)).toEqual([0, 2]);
       });
@@ -396,7 +396,7 @@ describe('projectStore remaining behaviours', () => {
         addClip('clip1', 0, 4);
         store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 0.5, easing: 'ease-out' } });
 
-        store().setClipKeyframe('clip1', 'blur', { time: 2, value: 4 });
+        store().setClipKeyframe('clip1', 'blur', { time: 2, value: 4, easing: 'linear' });
 
         expect(store().project.timeline.clips[0].animation!.keyframes.blur!.map((kf) => kf.time)).toEqual([0, 2]);
       });
