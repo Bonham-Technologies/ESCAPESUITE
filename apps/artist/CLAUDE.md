@@ -390,8 +390,13 @@ pnpm lint                # Run ESLint
   `useProjectActions` says "Failed to load project: \<reason\>" for one, and shows the writer's one
   refusal (an index past the cap, unreachable in practice) on its own. **The format sets no project
   size limit**: a `.veditor` is limited by the browser's download size and its storage quota, not by
-  the format. Measured 2026-10-12 on macOS: a project of about N GiB saved and reopened in Chromium
-  153 and Firefox 155 with the heap flat. WebKit carries the ESCSUITE-258 Blob-in-IndexedDB caveat.
+  the format. Measured 2026-10-12 on macOS: a project of about 2 GiB (two synthetic H.264 MP4s,
+  2,122,572,687 bytes together) saved and reopened in Chromium 153 and Firefox 155 with the heap
+  flat — Chromium's `JSHeapUsedSize` after a forced GC moved 17.7 → 17.9 MB across the save and
+  15.5 → 16.9 MB across the reopen; Firefox exposes no heap figure to automation, so its claim rests
+  on the tab process's resident memory, 259.3 → 260.1 MB and 238.4 → 258.1 MB. The reopen was into a
+  fresh profile with empty storage, so every source byte was really written (about 2.12 GB of
+  storage used afterwards). WebKit carries the ESCSUITE-258 Blob-in-IndexedDB caveat.
   An older ESCAPEARTIST opening a v2 file fails at `JSON.parse` with its own "Failed to load
   project". The ESCSUITE-241 save budget, its refusal and its short-read check are gone with the
   string they guarded. The picker asks for `application/octet-stream` and filters by the `.veditor`
