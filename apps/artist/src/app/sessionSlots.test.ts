@@ -7,7 +7,7 @@
 // recording double; the locks are the Web Locks double the ESCSUITE-227 suites
 // use, installed on `navigator` the way the browser provides it.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { adoptSessionSlot, findOfferableSlot } from './sessionSlots'
+import { adoptSessionSlot, findOfferableSlot, slotAtAnswer } from './sessionSlots'
 import { claimOfferLock, holdTabLock, offerLockName, probeTabLock, tabLockName } from './sessionLock'
 import { SESSION_SLOT_MAX_AGE_MS } from './appConstants'
 import {
@@ -356,5 +356,36 @@ describe('adoptSessionSlot', () => {
     vi.mocked(clearSessionState).mockRejectedValueOnce(new Error('blocked'))
 
     await expect(adoptSessionSlot(slot('crashed', NOW - 1_000), 'me')).resolves.toBe(false)
+  })
+})
+
+// ESCSUITE-289: an answer to the prompt reads the offered slot again, because
+// its tab can come back, save newer work into it and close again — or start
+// fresh and remove it — while the prompt is up.
+describe('slotAtAnswer', () => {
+  it('answers unchanged when the slot still holds the save that was offered', async () => {
+    const offeredSlot = slot('crashed', NOW - 60_000)
+    vi.mocked(listSessionStates).mockResolvedValue([slot('other', NOW - 1_000), slot('crashed', NOW - 60_000)])
+
+    await expect(slotAtAnswer(offeredSlot)).resolves.toBe('unchanged')
+  })
+
+  it('answers with the newer save when the slot was saved again since', async () => {
+    const newer = slot('crashed', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([newer])
+
+    await expect(slotAtAnswer(slot('crashed', NOW - 60_000))).resolves.toBe(newer)
+  })
+
+  it('answers removed when the slot is gone, whatever other slots there are', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('other', NOW - 60_000)])
+
+    await expect(slotAtAnswer(slot('crashed', NOW - 60_000))).resolves.toBe('removed')
+  })
+
+  it('reads the ownerless shared row by its own key', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('crashed', NOW - 1_000), slot(null, NOW - 60_000)])
+
+    await expect(slotAtAnswer(slot(null, NOW - 60_000))).resolves.toBe('unchanged')
   })
 })
