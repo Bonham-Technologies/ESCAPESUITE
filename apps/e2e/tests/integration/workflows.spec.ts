@@ -105,38 +105,41 @@ test.describe('Project Save and Reload', () => {
 
     // Open the file the way a user drops one in, in a context with no stored media.
     const context = await browser.newContext()
-    const fresh = await context.newPage()
-    await fresh.goto('http://localhost:5175')
-    await waitForAppReady(fresh, 'artist')
-    await fresh
-      .locator('input[type="file"]')
-      .setInputFiles({ name: 'reopened.veditor', mimeType: 'application/octet-stream', buffer: bytes })
+    // Closed in a `finally`, so a failed expectation does not leak the context.
+    try {
+      const fresh = await context.newPage()
+      await fresh.goto('http://localhost:5175')
+      await waitForAppReady(fresh, 'artist')
+      await fresh
+        .locator('input[type="file"]')
+        .setInputFiles({ name: 'reopened.veditor', mimeType: 'application/octet-stream', buffer: bytes })
 
-    await expect(fresh.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
-    await expect(fresh.getByText(/^1 clip · 1 track$/)).toBeVisible()
-    // The source's tile is in the media library...
-    await expect(fresh.getByTitle('source.mp4', { exact: true })).toBeVisible()
-    // ...and its bytes were written to this context's storage, whole.
-    const storedSizes = await fresh.evaluate(
-      () =>
-        new Promise<number[]>((resolve, reject) => {
-          const request = indexedDB.open('video-editor-db')
-          request.onerror = () => reject(new Error('open failed'))
-          request.onsuccess = () => {
-            const db = request.result
-            const all = db.transaction('videos', 'readonly').objectStore('videos').getAll()
-            all.onerror = () => reject(new Error('read failed'))
-            all.onsuccess = () => {
-              resolve((all.result as Array<{ blob: Blob }>).map((record) => record.blob.size))
-              db.close()
+      await expect(fresh.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
+      await expect(fresh.getByText(/^1 clip · 1 track$/)).toBeVisible()
+      // The source's tile is in the media library...
+      await expect(fresh.getByTitle('source.mp4', { exact: true })).toBeVisible()
+      // ...and its bytes were written to this context's storage, whole.
+      const storedSizes = await fresh.evaluate(
+        () =>
+          new Promise<number[]>((resolve, reject) => {
+            const request = indexedDB.open('video-editor-db')
+            request.onerror = () => reject(new Error('open failed'))
+            request.onsuccess = () => {
+              const db = request.result
+              const all = db.transaction('videos', 'readonly').objectStore('videos').getAll()
+              all.onerror = () => reject(new Error('read failed'))
+              all.onsuccess = () => {
+                resolve((all.result as Array<{ blob: Blob }>).map((record) => record.blob.size))
+                db.close()
+              }
             }
-          }
-        })
-    )
-    const fixtureSize = (await readFile(ARTIST_FIXTURE_MP4)).length
-    expect(storedSizes).toEqual([fixtureSize])
-
-    await context.close()
+          })
+      )
+      const fixtureSize = (await readFile(ARTIST_FIXTURE_MP4)).length
+      expect(storedSizes).toEqual([fixtureSize])
+    } finally {
+      await context.close()
+    }
   })
 
   // "project persists across page reload" used to write a hand-rolled record
