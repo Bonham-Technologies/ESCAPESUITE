@@ -406,16 +406,28 @@ function assertRangesTile(videos: VeditorVideoV2[], payloadBytes: number, bundle
 }
 
 /**
- * Copies `length` bytes from `start` to `destPath`. A ranged read stream, not a buffer: the
- * source never has to fit in memory. A zero-length range writes an empty file, because
- * `createReadStream` rejects `end < start`.
+ * Copies source `id`'s `length` bytes from `start` to `destPath`. A ranged read stream, not a
+ * buffer: the source never has to fit in memory. A zero-length range writes an empty file,
+ * because `createReadStream` rejects `end < start`. A ranged read stops quietly at the end of the
+ * file, so a bundle cut short after `loadBundle`'s stat would otherwise yield a short source: the
+ * copy is measured and refused by name instead.
  */
-async function copyRange(sourcePath: string, start: number, length: number, destPath: string): Promise<void> {
+async function copyRange(
+  bundlePath: string,
+  id: string,
+  start: number,
+  length: number,
+  destPath: string,
+): Promise<void> {
   if (length === 0) {
     await fs.writeFile(destPath, '')
     return
   }
-  await pipeline(createReadStream(sourcePath, { start, end: start + length - 1 }), createWriteStream(destPath))
+  await pipeline(createReadStream(bundlePath, { start, end: start + length - 1 }), createWriteStream(destPath))
+  const copied = (await fs.stat(destPath)).size
+  if (copied < length) {
+    throw new Error(`bundle "${bundlePath}" source "${id}" ended early: expected ${length} bytes, copied ${copied}`)
+  }
 }
 
 /**
@@ -493,13 +505,14 @@ async function loadBundleV2(bundlePath: string, head: Buffer, size: number, tmpR
   const videos = checkVideos(entries, project, assertVeditorVideoV2)
   assertRangesTile(videos, size - payloadStart, bundlePath)
   return materialiseSources(project, videos, tmpRoot, (video, destPath) =>
-    copyRange(bundlePath, payloadStart + video.data.offset, video.data.length, destPath),
+    copyRange(bundlePath, video.id, payloadStart + video.data.offset, video.data.length, destPath),
   )
 }
 
 /**
- * Loads a `.veditor` bundle, the editor's own save format, of either version. The first 16 bytes
- * decide: the v2 magic takes the ranged path, and anything else is read as version 1 JSON. For
+ * Loads a `.veditor` bundle, the editor's own save format, of either version. The first bytes
+ * decide: a file opening with the v2 magic takes the ranged path (and is refused if it ends before
+ * its 16-byte header does), and anything else is read as version 1 JSON. For
  * large media saved by an older editor (version 1), prefer `loadManifest`, or open the project in
  * a current ESCAPEARTIST and save it again.
  */
@@ -513,7 +526,12 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
     throw new Error(`bundle "${bundlePath}" could not be read`)
   }
 
-  if (head.length === V2_HEADER_BYTES && head.subarray(0, V2_MAGIC.length).equals(V2_MAGIC)) {
+  // The magic alone decides the version: a file that opens with it but stops short of a whole
+  // header is a broken version 2 file, not a version 1 file that happens to fail to parse.
+  if (head.subarray(0, V2_MAGIC.length).equals(V2_MAGIC)) {
+    if (head.length < V2_HEADER_BYTES) {
+      throw new Error(`bundle "${bundlePath}" ends before its header does`)
+    }
     return loadBundleV2(bundlePath, head, size, tmpRoot)
   }
   return loadBundleV1(bundlePath, tmpRoot)
