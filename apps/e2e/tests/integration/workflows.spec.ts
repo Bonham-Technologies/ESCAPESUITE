@@ -1,6 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { readFile } from 'node:fs/promises'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
-import { seedTextClip, openExportDialog, openExportAdvancedOptions } from '../../utils/artist'
+import {
+  seedTextClip,
+  openExportDialog,
+  openExportAdvancedOptions,
+  importMediaAndAddToTimeline,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
@@ -73,17 +79,35 @@ test.describe('Export After Editing', () => {
 })
 
 test.describe('Project Save and Reload', () => {
-  test('project can be saved', async ({ page }) => {
+  // ESCSUITE-260: "Save Project" downloads a v2 `.veditor` container
+  // (core/projectFileFormat.ts), not JSON, and the uploader opens it again.
+  test('a saved project is a v2 container and reopens through the uploader', async ({ page }) => {
+    test.setTimeout(60_000)
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+    await importMediaAndAddToTimeline(page)
 
-    // "Save Project" downloads a `.veditor` file (core/projectManager.ts) —
-    // the real consequence of the click, not just that a button exists.
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Save project' }).click()
     const download = await downloadPromise
-
     expect(download.suggestedFilename()).toMatch(/\.veditor$/)
+    const savedPath = await download.path()
+    expect(savedPath).toBeTruthy()
+    const bytes = await readFile(savedPath!)
+    expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a])
+
+    // Start over, then open the file the way a user drops one in.
+    page.once('dialog', (dialog) => dialog.accept())
+    await page.getByRole('button', { name: 'File menu' }).click()
+    await page.getByRole('menuitem', { name: /New Project/ }).click()
+    await expect(page.getByText(/^1 clip · 1 track$/)).toHaveCount(0)
+
+    await page
+      .locator('input[type="file"]')
+      .setInputFiles({ name: 'reopened.veditor', mimeType: 'application/octet-stream', buffer: bytes })
+
+    await expect(page.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible()
   })
 
   // "project persists across page reload" used to write a hand-rolled record

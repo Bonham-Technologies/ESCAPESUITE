@@ -111,7 +111,7 @@ One JSON object, one render. Pass it as a file (`--job path.json`) or on stdin (
 | --- | --- | --- |
 | `jobId` | yes | Matches `/^[A-Za-z0-9._-]{1,128}$/`, and may not be `.` or `..`. It names the output files and a scratch directory, so it must be a safe single path segment. |
 | `input` | yes | Exactly one of `bundle` or `manifest`. Both take a single `path`. |
-| `input.bundle.path` | — | A `.veditor` file exported from the editor. |
+| `input.bundle.path` | — | A `.veditor` file saved from the editor (version 1 or 2). |
 | `input.manifest.path` | — | A manifest JSON file (see [Inputs](#inputs)). |
 | `options.format` | yes | `mp4` (H.264 + AAC), `webm` (VP9 + Opus) or `gif` (animated GIF, 256 colours per frame, no audio). |
 | `options.quality` | no | `low`, `medium` or `high`. Default `high`. Video/audio bitrate: low 2 Mbps / 128 kbps, medium 5 Mbps / 192 kbps, high 10 Mbps / 256 kbps. **Video formats only — a `gif` render ignores it** (a GIF's size comes from its palette, its resolution and `fps`). It is accepted rather than rejected on a `gif` job, unlike `fps` on a video one, because `parseOptions` always fills a default in: rejecting it would refuse specs doing nothing wrong. |
@@ -195,19 +195,54 @@ later otherwise:
 
 ### `.veditor` bundle
 
-The editor's own export format: one JSON document holding the project and every source video
-base64-encoded inline.
+The editor's own save format. A bundle is either of the two versions ESCAPEARTIST has written, and
+the loader tells them apart by the first bytes.
+
+**Version 2** (ESCAPEARTIST since ESCSUITE-260) is a binary container:
+
+```
+offset 0   8 bytes  magic  89 56 45 44 0D 0A 1A 0A
+offset 8   u32 LE   container version = 2
+offset 12  u32 LE   N = index length in bytes (at most 64 MiB)
+offset 16  N bytes  UTF-8 JSON index
+offset 16+N         every source's (and thumbnail's) raw bytes, back to back in index order
+```
+
+```json
+{ "version": 2, "project": { … }, "editor": { … }, "videos": [ { "id": "src-0", "name": "clip.mp4", "mimeType": "video/mp4", "meta": { … }, "data": { "offset": 0, "length": 1048576 }, "thumbnail": { "offset": 1048576, "length": 4096, "mimeType": "image/jpeg" } } ] }
+```
+
+Offsets count from the payload's first byte. The loader reads the 16-byte header and the index and
+nothing else into memory. It checks that the ranges tile the payload exactly: no gap, no overlap,
+nothing missing (a truncated download is refused before any temp file is created) and nothing after
+the last source. It then copies each source to a temp file with a ranged read, and measures the
+copy: a bundle cut short after it was checked is refused rather than rendered from a short source.
+A version 2 bundle of any size needs no more heap than a manifest does. Thumbnails are checked as
+part of the tiling but never copied, and `editor` (the in/out points and markers) is ignored; the
+engine uses neither.
+
+**Version 1** is one JSON document holding the project and every source base64-encoded inline:
 
 ```json
 { "version": 1, "project": { … }, "videos": [ { "id": "src-0", "name": "clip.mp4", "mimeType": "video/mp4", "data": "<base64>" } ] }
 ```
 
-Only `"version": 1` is accepted, and each `videos[].id` must be a safe file-name token
-(`/^[A-Za-z0-9._-]{1,128}$/`, not `.` or `..`) because it becomes one. The loader decodes each
-video to a temp file in chunks and deletes them when the job ends, but **the JSON document
-itself is parsed whole into memory** — a 4 GB bundle needs more than 4 GB of heap. It is fine
-for small projects and for round-tripping something straight out of the editor; for anything
-large, use a manifest.
+The loader decodes each video to a temp file in chunks, but **the JSON document itself is parsed whole
+into memory**. A 4 GB version 1 bundle needs more than 4 GB of heap, and one past Node's maximum
+string length (about 512 Mi characters) cannot be read at all. Open it in a current ESCAPEARTIST and
+save it again to get a version 2 bundle, or use a manifest.
+
+Either way, each `videos[].id` must be a safe file-name token (`/^[A-Za-z0-9._-]{1,128}$/`, not `.`
+or `..`) because it becomes one, and the temp files are deleted when the job ends. A malformed
+bundle is refused before Chromium launches, naming the problem, for example:
+`bundle "<path>" has version 3, but this build supports versions 1 and 2`,
+`bundle "<path>" is truncated: it declares 2147483648 bytes of media but holds 10`, or
+`bundle video #0 field "data" must be {"offset", "length"}, each a whole number of bytes >= 0`.
+A file that opens with the version 2 magic but is shorter than its 16-byte header is refused as
+`bundle "<path>" ends before its header does`, rather than being read as a version 1 file that
+happens not to parse. A source whose ranged copy comes back short, because the file shrank after
+it was checked, fails the job as `bundle "<path>" source "<id>" ended early: expected N bytes,
+copied M`.
 
 A `videos[]` entry may also carry `"meta"`, the same object ESCAPEARTIST's own `.veditor` export
 writes beside each video's bytes (`id`/`name`/`mimeType` excluded — those are already the
@@ -978,8 +1013,9 @@ Rules of thumb:
 - **Encoding is CPU-bound** and scales with cores. A server with 8–16 cores does far better
   than the numbers above; a GPU does better still at high resolutions.
 - **Memory scales with resolution**, not with duration — frames are streamed, not accumulated.
-  4 GB is comfortable for 1080p; budget 8 GB or more for 4K. A `.veditor` input is the
-  exception: it also needs headroom for the whole JSON document.
+  4 GB is comfortable for 1080p; budget 8 GB or more for 4K. A version 1 `.veditor` input is
+  the exception: it also needs headroom for the whole JSON document. A version 2 one does not,
+  because its sources are copied by ranged reads.
 - **`gif` is the other exception, and it does scale with duration.** The GIF format has no
   streaming muxer, so the encoder accumulates the entire output in one growing buffer and then
   copies it once, into the `Blob` handed back — peak page memory is roughly **twice the finished
