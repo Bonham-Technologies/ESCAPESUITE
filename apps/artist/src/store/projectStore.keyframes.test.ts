@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
+import { getAnimatedValues } from '../utils/animation'
 import type { SourceVideo } from './types'
 import { addClip, resetStoreForTest, store } from '../test/fixtures/projectStore'
 
@@ -362,6 +363,44 @@ describe('projectStore remaining behaviours', () => {
 
       expect(store().project.timeline.clips[0].animation!.keyframes.opacity!.map((kf) => kf.time)).toEqual([0, 2])
     })
+    // ESCSUITE-286: the first-write seed lands on an in-preset's time-0 handle
+    // and, because a stored keyframe wins the merge, erased the fade-in.
+    describe('first-write seed on a preset handle (ESCSUITE-286)', () => {
+      const opacityAt = (t: number) => {
+        const c = store().project.timeline.clips.find((x) => x.id === 'clip1')!;
+        return getAnimatedValues(t, c.duration, c.animation, c.transform, c.effects).opacity;
+      };
+
+      it('does not seed over an Animate In handle at 0: the fade-in survives', () => {
+        addClip('clip1', 0, 4);
+        store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 0.5, easing: 'ease-out' } });
+
+        store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5, easing: 'linear' });
+
+        expect(store().project.timeline.clips[0].animation!.keyframes.opacity).toEqual([
+          { time: 2, value: 0.5, easing: 'linear' },
+        ]);
+        expect(opacityAt(0)).toBe(0);
+      });
+
+      it('still seeds when only an Animate Out preset is set', () => {
+        addClip('clip1', 0, 4);
+        store().updateClipAnimation('clip1', { out: { type: 'fade', duration: 0.5, easing: 'ease-in' } });
+
+        store().setClipKeyframe('clip1', 'opacity', { time: 2, value: 0.5, easing: 'linear' });
+
+        expect(store().project.timeline.clips[0].animation!.keyframes.opacity!.map((kf) => kf.time)).toEqual([0, 2]);
+      });
+
+      it('still seeds a property the in-preset does not touch', () => {
+        addClip('clip1', 0, 4);
+        store().updateClipAnimation('clip1', { in: { type: 'fade', duration: 0.5, easing: 'ease-out' } });
+
+        store().setClipKeyframe('clip1', 'blur', { time: 2, value: 4, easing: 'linear' });
+
+        expect(store().project.timeline.clips[0].animation!.keyframes.blur!.map((kf) => kf.time)).toEqual([0, 2]);
+      });
+    });
   })
 
   describe('keyframe panel state', () => {

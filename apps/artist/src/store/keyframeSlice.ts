@@ -25,7 +25,7 @@ import type { EditorState, ClipTransform, AnimatableProperty, Keyframe } from '.
 import { DEFAULT_ANIMATION, DEFAULT_KEYFRAME_PANEL_STATE } from './types';
 import { pushToHistory } from './storeHistory';
 import { clipOnLockedTrack } from './trackLock';
-import { KEYFRAME_TIME_EPSILON } from '../utils/animation';
+import { KEYFRAME_TIME_EPSILON, presetHandleTimes } from '../utils/animation';
 
 export type KeyframeSlice = Pick<EditorState, 'keyframePanelState' | 'setClipKeyframe' | 'removeClipKeyframe' | 'moveClipKeyframe' | 'clearClipKeyframes' | 'setKeyframePanelOpen' | 'setKeyframePanelPosition' | 'setKeyframePanelSize' | 'setKeyframePanelSelectedProperty' | 'setKeyframePanelZoom'>;
 
@@ -71,7 +71,15 @@ export const createKeyframeSlice: StateCreator<EditorState, [], [], KeyframeSlic
         // on whether `newKeyframes` happens to lack one at 0 — that was true on every
         // later write too, so a keyframe at 0 the user deleted, or dragged away from 0,
         // silently came back on the next unrelated edit (ESCSUITE-166).
-        if (currentKeyframes.length === 0 && Math.abs(keyframe.time) >= 0.001) {
+        //
+        // ESCSUITE-286: not when a preset handle already occupies 0. The stored seed would
+        // win the merge over the generated handle (an Animate In fade's opacity 0), so the
+        // first custom keyframe erased the fade-in. The preset already defines the
+        // property's start there — the same "a handle's time is occupied" rule as 282.
+        const presetOccupiesZero = presetHandleTimes(
+          property, clip.duration, currentAnimation, clip.transform, clip.effects
+        ).some(t => Math.abs(t) < KEYFRAME_TIME_EPSILON);
+        if (currentKeyframes.length === 0 && Math.abs(keyframe.time) >= 0.001 && !presetOccupiesZero) {
           // Get the base value for this property from the clip's transform/effects/overlayData
           let baseValue: number;
           if (property === 'blur') {
