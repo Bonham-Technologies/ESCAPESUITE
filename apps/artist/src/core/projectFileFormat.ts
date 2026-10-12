@@ -100,7 +100,8 @@ export function formatSize(bytes: number): string {
 
 /**
  * The parts of a v2 file, ready for `new Blob(parts)`: the header, the index
- * bytes, then every source (and its thumbnail, when it has one) by reference.
+ * bytes, then every source (and its thumbnail, when it has a non-empty one) by
+ * reference.
  * The index is built here from the sources' sizes, so its offsets cannot
  * disagree with the parts that follow it.
  */
@@ -123,7 +124,9 @@ export function encodeProjectFile(
     };
     payload.push(source.blob);
     offset += source.blob.size;
-    if (source.thumbnail) {
+    // An empty thumbnail is left out, as v1's `''` was: a zero-length range
+    // would restore as an empty thumbnail, a broken tile in the library.
+    if (source.thumbnail && source.thumbnail.size > 0) {
       video.thumbnail = { offset, length: source.thumbnail.size, mimeType: source.thumbnail.type };
       payload.push(source.thumbnail);
       offset += source.thumbnail.size;
