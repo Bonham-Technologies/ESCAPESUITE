@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -1041,6 +1041,29 @@ describe('loadBundle version 2 (ESCSUITE-260)', () => {
     }
   })
 
+  // A file cut short between the loader's stat and its copy: the stat still reports the whole
+  // bundle, so the ranges tile, but the ranged read stops at the new end of the file. The copy
+  // is checked against the range, rather than handing the engine a silently short source.
+  it('refuses a source the file no longer holds all of when it is copied, and leaves no temp dir', async () => {
+    const dir = await makeTempDir()
+    const { index, payload } = await fixtureV2()
+    const whole = assembleV2(index, payload)
+    const bundlePath = await writeBundle(dir, whole.subarray(0, whole.length - 10))
+    const realStat = fs.stat
+    const stat = vi
+      .spyOn(fs, 'stat')
+      .mockImplementationOnce(async (file) => Object.assign(await realStat(file), { size: whole.length }))
+    try {
+      await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+        `bundle "${bundlePath}" source "src-0" ended early: expected ${payload.length} bytes, copied ${payload.length - 10}`,
+      )
+      expect(stat.mock.calls[0][0]).toBe(bundlePath)
+      await expectNoTempDir(dir)
+    } finally {
+      stat.mockRestore()
+    }
+  })
+
   it('still takes a JSON bundle down the version 1 path', async () => {
     const job = await loadBundle(veditorFixture, await makeTempDir())
     try {
@@ -1066,6 +1089,18 @@ describe('loadBundle version 2 (ESCSUITE-260)', () => {
 
     it('a newer container version', () =>
       refused((index, payload) => assembleV2(index, payload, { version: 3 }), 'has version 3, but this build supports versions 1 and 2'))
+
+    // The magic alone decides the version: a file that opens with it but stops short of 16
+    // bytes is a broken v2 header, not a v1 file that happens to fail JSON.parse.
+    it('a file that opens with the magic and ends before its 16-byte header does', () =>
+      refused(() => Buffer.from(V2_HEADER_PREFIX), 'ends before its header does'))
+
+    it('a magic-prefixed file one byte short of a whole header', () =>
+      refused(() => Buffer.concat([Buffer.from(V2_HEADER_PREFIX), Buffer.alloc(3)]), 'ends before its header does'))
+
+    // Exactly 16 bytes is a whole header (an index length of 0), so it goes on to the index.
+    it('a whole 16-byte header and nothing after it', () =>
+      refused(() => assembleV2('', Buffer.alloc(0)), 'has an index that is not valid JSON'))
 
     it('a header naming a version no ESCAPEARTIST writes', () =>
       refused(
