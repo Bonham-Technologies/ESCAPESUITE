@@ -12,6 +12,7 @@ import {
   revokeSourceThumbnails,
 } from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
+import { parseProject } from '../store/projectMigration';
 import {
   ProjectFileError,
   assertRangesTile,
@@ -352,6 +353,22 @@ async function rollBack(written: string[]): Promise<void> {
 }
 
 /**
+ * Refuses, before any source is written, a project `parseProject` refuses: a
+ * hand-edited file, or one a newer editor wrote. Both loaders call it ahead of
+ * `restoreSources`, so a refused project leaves nothing in the shared DB and
+ * has nothing to roll back; it used to be judged by the hook only after every
+ * new source had been stored. The reason is the one `parseProject` gives, shown
+ * as "Failed to load project: <reason>". The project is still handed back
+ * unmigrated: `useProjectActions` runs `parseProject` again on what this
+ * returns, as the host's `LOAD_PROJECT` path does, and takes the migrated
+ * project from there.
+ */
+function assertProjectParses(project: unknown, editor: unknown): void {
+  const parsed = parseProject(project, editor);
+  if (!parsed.ok) throw new ProjectFileError(parsed.reason);
+}
+
+/**
  * The restore loop both file versions share, with its progress reports. A
  * throw anywhere in it (a write, a thumbnail write, a metadata probe, a v1
  * source's base64) rolls back what this load stored, revokes the thumbnail
@@ -383,7 +400,8 @@ async function restoreSources(
 /**
  * A v1 file: one JSON document with every source base64-encoded inside it.
  * Unchanged since before ESCSUITE-260 except that each source now goes
- * through the shared `restoreSource`.
+ * through the shared `restoreSource`, and the project is validated before
+ * any of them is stored.
  */
 async function loadJsonFile(
   file: File,
@@ -396,6 +414,7 @@ async function loadJsonFile(
       `Project file version ${projectFile.version} is newer than supported version ${JSON_FILE_VERSION}`
     );
   }
+  assertProjectParses(projectFile.project, projectFile.editor);
 
   const sourceVideos = await restoreSources(
     projectFile.videos.length,
@@ -444,8 +463,8 @@ async function assertRoomFor(index: ProjectFileIndex, existing: StoredSource[]):
 }
 
 /**
- * A v2 container (ESCSUITE-260). The ranges are checked before anything is
- * written, and each part is a lazy slice of `file`, handed straight to
+ * A v2 container (ESCSUITE-260). The ranges, the project and the free space
+ * are checked before anything is written, and each part is a lazy slice of `file`, handed straight to
  * storage and to the metadata probes. A source never enters the JS heap.
  */
 async function loadContainer(
@@ -455,6 +474,7 @@ async function loadContainer(
   onProgress?: (progress: number, message: string) => void
 ): Promise<LoadedFile> {
   assertRangesTile(index, payloadStart, file.size);
+  assertProjectParses(index.project, index.editor);
   const existing = await Promise.all(index.videos.map((video) => getVideo(video.id)));
   await assertRoomFor(index, existing);
 
@@ -498,7 +518,8 @@ export async function loadProject(
 
   onProgress?.(100, 'Project loaded!');
 
-  // Handed back as found: `parseProject` validates it (a file is untrusted).
+  // Validated already (`assertProjectParses`) but handed back unmigrated, as
+  // found: the hook's own `parseProject` migrates it and clamps the editor block.
   return { project, sourceVideos: loaded.sourceVideos, editor: loaded.editor };
 }
 
