@@ -982,6 +982,11 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
   const one = (data: unknown) => [{ id: refusedId, name: 'v.mp4', mimeType: 'video/mp4', data }]
 
   it.each([
+    [
+      'a file that opens with the magic and stops short of a whole header',
+      () => fileOf([Uint8Array.of(0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a, 2, 0, 0, 0)]),
+      /^the file ends before its header does: it is 12 bytes and a header is 16$/,
+    ],
     ['a newer container version', () => rawV2File(indexWith([]), [], { version: 3 }), /newer ESCAPEARTIST/],
     [
       'an index longer than the cap',

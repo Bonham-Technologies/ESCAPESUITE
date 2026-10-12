@@ -240,6 +240,23 @@ describe('readProjectFileIndex', () => {
     await expect(readProjectFileIndex(new Blob(['{}']))).resolves.toBeNull()
   })
 
+  // Final review fix 3: the headless kit already refuses this by name. The
+  // magic alone decides the version, so a magic-prefixed file cut short of a
+  // whole header is a broken v2 file, not a v1 file to fail as JSON.
+  it('refuses a file that opens with the magic but ends before its header does', async () => {
+    const twelve = new Blob([Uint8Array.of(...MAGIC, 2, 0, 0, 0)])
+    expect(await refusal(twelve)).toBe('the file ends before its header does: it is 12 bytes and a header is 16')
+    expect(await refusal(new Blob([MAGIC]))).toBe(
+      'the file ends before its header does: it is 8 bytes and a header is 16'
+    )
+  })
+
+  it('answers null for a 12-byte file that does not open with the magic', async () => {
+    const twelve = Uint8Array.of(...MAGIC, 2, 0, 0, 0)
+    twelve[3] = 0x45 // 'E' where the magic has 'D'
+    await expect(readProjectFileIndex(new Blob([twelve]))).resolves.toBeNull()
+  })
+
   it('reads back what the writer wrote, the payload starting right after the index', async () => {
     const meta = { duration: 9, width: 64, height: 48, frameRate: 30 }
     const parts = encodeProjectFile(project(), { inPoint: 1, outPoint: 2, markers: [] }, [
