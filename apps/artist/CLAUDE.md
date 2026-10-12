@@ -1395,11 +1395,11 @@ Clips support animated properties via keyframes:
   panel's one live region says "That time belongs to the Animate In/Out preset" through
   `announceWithMark`, so a second Enter is re-read. A time just outside the epsilon adds as before.
   To key a value at a handle's time, change the preset instead (or set it to None and keyframe by
-  hand). Not covered here: `setClipKeyframe`'s first-write seed (ESCSUITE-166) still stores a
-  time-0 keyframe at the base value when a property gets its first keyframe away from 0, which
-  lands over an in-preset's 0 handle the same way: a fade-in clip whose first opacity keyframe is
-  added at 2 s starts at full opacity instead of 0 (measured; not a transition hazard, since the
-  seed holds the base value the suppression would read anyway). Filed as ESCSUITE-286.
+  hand). `setClipKeyframe`'s first-write seed (ESCSUITE-166) obeys the same rule (ESCSUITE-286): when
+  `presetHandleTimes` for the property holds a time within `KEYFRAME_TIME_EPSILON` of 0 — an
+  Animate In fade's opacity 0, say — no time-0 seed is stored, so the first custom keyframe added
+  at 2 s no longer erases the fade-in; a clip with no preset, an Animate Out only, or an in-preset
+  on a different property still seeds as before.
 - **An audio-only clip is offered Volume alone (ESCSUITE-248 / M-19)**. The property list rendered
   Position, Scale, Rotation, Opacity and Blur for every clip, so a voice-over could be keyframed to
   move or fade, to no visible effect (the inspector already hides Transform for audio). The panel
