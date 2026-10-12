@@ -345,46 +345,45 @@ pnpm lint                # Run ESLint
   by both exporters. See "Export Resolution" below
 - `projectManager.ts`: Project save/load to `.veditor` files.
   **Container (ESCSUITE-260)**: `saveProject` writes the v2 container defined in
-  `projectFileFormat.ts`: 16 header bytes (`89 56 45 44 0D 0A 1A 0A`, then the container version 2 and
-  the index length N as little-endian u32s), N bytes of UTF-8 JSON index (`{ version: 2, project,
-  editor?, videos: [{ id, name, mimeType, meta?, data: { offset, length }, thumbnail?: { offset,
-  length, mimeType } }] }`, offsets counted from the payload's first byte), then every used source's and
-  thumbnail's bytes back to back in index order. The stored `Blob`s go into
-  `new Blob([...], { type: 'application/octet-stream' })` **by reference**: no source byte is read on
-  save, there is no `FileReader` and no base64, and the only bytes built in JS are the header and the
-  index (whose bulk is waveform peaks). `loadProject` sniffs the first 16 bytes. A v2 header goes
-  through `readProjectFileIndex`: a version above 2 is refused as "newer", and an N over
-  `MAX_INDEX_BYTES` (64 MiB) or past the file's end is refused before the index is read. The
-  index's shape and every offset and length (a non-negative safe integer) are validated, and a source
-  id the index lists twice is refused. Then
-  `assertRangesTile` requires the ranges to tile the payload exactly, in order, ending at the file's
-  size: a gap, an overlap, a truncated download (named as "declares X of media and holds Y") and
-  trailing bytes are each refused. Each part is then `file.slice`d straight into `storeVideo` /
-  `storeThumbnail` and the metadata probes, so a source never enters the JS heap. Anything else
-  (every file an older build wrote, and anything that is not a project) takes the unchanged v1 path:
-  `file.text()`, `JSON.parse`, `base64ToBlob`. **Before any write**, the v2 path sums the data and
-  thumbnail lengths of every entry whose id is not already stored (a present row writes nothing,
-  ESCSUITE-151). It refuses, by name, a load that needs more than `getStorageEstimate()` says is free:
-  "This project needs 1.5 GiB of storage and this browser has 1.0 GiB free." The check is skipped when
-  `quota` is 0 (no estimate API, so nothing was measured) or the estimate rejects (one
-  `console.warn`), a negative `available` counts as nothing free, and no margin is added because the
-  sum is exact. The estimate is approximate, so **a load that
-  throws after it started writing rolls back** what it wrote. Every id this call stored is deleted
-  through `deleteVideo` (video and thumbnail rows), each in its own `try`/`catch` with one
+  `projectFileFormat.ts`: 16 header bytes (`89 56 45 44 0D 0A 1A 0A`, then the container version 2
+  and the index length N as little-endian u32s), N bytes of UTF-8 JSON index (`{ version: 2,
+  project, editor?, videos: [{ id, name, mimeType, meta?, data: { offset, length }, thumbnail?: {
+  offset, length, mimeType } }] }`, offsets counted from the payload's first byte), then every used
+  source's and thumbnail's bytes back to back in index order. The stored `Blob`s go into
+  `new Blob([...], { type: 'application/octet-stream' })` **by reference**: no source byte is read
+  on save, there is no `FileReader` and no base64, and the only bytes built in JS are the header and
+  the index (whose bulk is waveform peaks). `loadProject` sniffs the first 16 bytes. A v2 header
+  goes through `readProjectFileIndex`: a version above 2 is refused as "newer", and an N over
+  `MAX_INDEX_BYTES` (64 MiB) or past the file's end is refused before the index is read. The index's
+  shape and every offset and length (a non-negative safe integer) are validated, and a source id the
+  index lists twice is refused. Then `assertRangesTile` requires the ranges to tile the payload
+  exactly, in order, ending at the file's size: a gap, an overlap, a truncated download (named as
+  "declares X of media and holds Y") and trailing bytes are each refused. Each part is then
+  `file.slice`d straight into `storeVideo` / `storeThumbnail` and the metadata probes, so a source
+  never enters the JS heap. Anything else (every file an older build wrote, and anything that is not
+  a project) takes the unchanged v1 path: `file.text()`, `JSON.parse`, `base64ToBlob`. **Before any
+  write**, the v2 path sums the data and thumbnail lengths of every entry whose id is not already
+  stored (a present row writes nothing, ESCSUITE-151). It refuses, by name, a load that needs more
+  than `getStorageEstimate()` says is free: "This project needs 1.5 GiB of storage and this browser
+  has 1.0 GiB free." The check is skipped when `quota` is 0 (no estimate API, so nothing was
+  measured) or the estimate rejects (one `console.warn`), a negative `available` counts as nothing
+  free, and no margin is added because the sum is exact. The estimate is approximate, so **a load
+  that throws after it started writing rolls back** what it wrote. Every id this call stored is
+  deleted through `deleteVideo` (video and thumbnail rows), each in its own `try`/`catch` with one
   `console.warn` per failure, and the thumbnail URLs the load minted are revoked. An id that was
-  present before the load is never touched, and the
-  original error is rethrown. The rollback lives in the loop both versions share (`restoreSources`),
-  so it covers a v1 load too. A row it cannot delete is unreferenced and shows in ESCSUITE-268's
-  "files from earlier sessions" list. Every refusal is a `ProjectFileError` whose message is shown:
+  present before the load is never touched, and the original error is rethrown. The rollback lives
+  in the loop both versions share (`restoreSources`), so it covers a v1 load too. A row it cannot
+  delete is unreferenced and shows in ESCSUITE-268's "files from earlier sessions" list. Every v2
+  refusal, and the storage pre-check, is a `ProjectFileError` whose message is shown:
   `useProjectActions` says "Failed to load project: \<reason\>" for one, and shows the writer's one
   refusal (an index past the cap, unreachable in practice) on its own. **The format sets no project
   size limit**: a `.veditor` is limited by the browser's download size and its storage quota, not by
-  the format. Measured 2026-10-12 on macOS: a project of about N GB saved and reopened in Chromium 153
-  and Firefox 155 with the heap flat. WebKit carries the ESCSUITE-258 Blob-in-IndexedDB caveat. An
-  older ESCAPEARTIST opening a v2 file fails at `JSON.parse` with its own "Failed to load project". The
-  ESCSUITE-241 save budget, its refusal and its short-read check are gone with the string they
-  guarded. The picker asks for `application/octet-stream` and filters by the
-  `.veditor` extension; the fallback input's `accept` is `.veditor`.
+  the format. Measured 2026-10-12 on macOS: a project of about N GiB saved and reopened in Chromium
+  153 and Firefox 155 with the heap flat. WebKit carries the ESCSUITE-258 Blob-in-IndexedDB caveat.
+  An older ESCAPEARTIST opening a v2 file fails at `JSON.parse` with its own "Failed to load
+  project". The ESCSUITE-241 save budget, its refusal and its short-read check are gone with the
+  string they guarded. The picker asks for `application/octet-stream` and filters by the `.veditor`
+  extension; the fallback input's `accept` is `.veditor`.
   **Editor block (ESCSUITE-245)**: `ProjectFile` and the session snapshot (`SessionState`) both carry
   an optional `editor: { inPoint, outPoint, markers }` BESIDE `project` — the in/out points and the
   markers live in the store outside `Project` (the undoable document and the headless kit's input,
@@ -407,8 +406,8 @@ pnpm lint                # Run ESLint
   The host's `LOAD_PROJECT` passes no block and the kit ignores it. `ExportDialog` still derives its
   `timeRange` from the store's points, so a restored range is honoured by the next export. The
   autosave's store subscription re-arms on a point or marker change as it does on the playhead.
-  **File format**: each entry in `ProjectFile.videos` carries the video's base64 bytes and,
-  since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
+  **File format**: in a v1 file, each entry in `ProjectFile.videos` carries the video's base64 bytes
+  and, since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
   `duration`/`width`/`height`/`frameRate` plus whatever of `frameRateSource` (ESCSUITE-276),
   `mediaType`, `source`, `recordedAt`,
   `waveformData`, `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
@@ -5049,7 +5048,8 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   run build:headless`) and calls `__renderProjectToFile` through the file input, never
   `__renderProject`'s base64 path — see `services/headless-artist/README.md` for the job spec,
   sinks, and how to build/pack the kit. Its `.veditor` bundle loader (`loaders.ts`'s
-  `loadBundle`, which reads v1 JSON and, since ESCSUITE-260, the v2 container by ranged copies) forwards each `videos[]` entry's optional `meta` — the same object
+  `loadBundle`, which reads v1 JSON and, since ESCSUITE-260, the v2 container by ranged copies)
+  forwards each `videos[]` entry's optional `meta` — the same object
   `projectManager.ts`'s `saveProject` writes — into that source's `SourceVideoInput`, ahead of
   anything `seedSources` would otherwise probe from the bytes (ESCSUITE-150). Without it, an
   ESCAPECRAFT audio-only take (microphone alone, screen and webcam both off) — typed

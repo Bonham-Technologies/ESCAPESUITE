@@ -6,6 +6,7 @@ import {
   openExportDialog,
   openExportAdvancedOptions,
   importMediaAndAddToTimeline,
+  ARTIST_FIXTURE_MP4,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -81,7 +82,13 @@ test.describe('Export After Editing', () => {
 test.describe('Project Save and Reload', () => {
   // ESCSUITE-260: "Save Project" downloads a v2 `.veditor` container
   // (core/projectFileFormat.ts), not JSON, and the uploader opens it again.
-  test('a saved project is a v2 container and reopens through the uploader', async ({ page }) => {
+  // The reopen is in a fresh browser context, whose IndexedDB is empty, so the
+  // load cannot take the "row already present" path: it has to slice the
+  // source out of the file and write it (`storeVideo`), quota check included.
+  test('a saved project is a v2 container and reopens through the uploader', async ({
+    page,
+    browser,
+  }) => {
     test.setTimeout(60_000)
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
@@ -96,18 +103,40 @@ test.describe('Project Save and Reload', () => {
     const bytes = await readFile(savedPath!)
     expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a])
 
-    // Start over, then open the file the way a user drops one in.
-    page.once('dialog', (dialog) => dialog.accept())
-    await page.getByRole('button', { name: 'File menu' }).click()
-    await page.getByRole('menuitem', { name: /New Project/ }).click()
-    await expect(page.getByText(/^1 clip · 1 track$/)).toHaveCount(0)
-
-    await page
+    // Open the file the way a user drops one in, in a context with no stored media.
+    const context = await browser.newContext()
+    const fresh = await context.newPage()
+    await fresh.goto('http://localhost:5175')
+    await waitForAppReady(fresh, 'artist')
+    await fresh
       .locator('input[type="file"]')
       .setInputFiles({ name: 'reopened.veditor', mimeType: 'application/octet-stream', buffer: bytes })
 
-    await expect(page.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible()
+    await expect(fresh.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
+    await expect(fresh.getByText(/^1 clip · 1 track$/)).toBeVisible()
+    // The source's tile is in the media library...
+    await expect(fresh.getByTitle('source.mp4', { exact: true })).toBeVisible()
+    // ...and its bytes were written to this context's storage, whole.
+    const storedSizes = await fresh.evaluate(
+      () =>
+        new Promise<number[]>((resolve, reject) => {
+          const request = indexedDB.open('video-editor-db')
+          request.onerror = () => reject(new Error('open failed'))
+          request.onsuccess = () => {
+            const db = request.result
+            const all = db.transaction('videos', 'readonly').objectStore('videos').getAll()
+            all.onerror = () => reject(new Error('read failed'))
+            all.onsuccess = () => {
+              resolve((all.result as Array<{ blob: Blob }>).map((record) => record.blob.size))
+              db.close()
+            }
+          }
+        })
+    )
+    const fixtureSize = (await readFile(ARTIST_FIXTURE_MP4)).length
+    expect(storedSizes).toEqual([fixtureSize])
+
+    await context.close()
   })
 
   // "project persists across page reload" used to write a hand-rolled record

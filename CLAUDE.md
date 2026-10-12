@@ -337,10 +337,10 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   (via Playwright) outside the browser, for servers or GPU boxes with no UI involved. A job spec
   names its input as either a self-contained `.veditor` `bundle` (v1 or v2) or a `manifest` (a
   small JSON pointing at source media already on disk, for a large project) and writes to one of
-  four output sinks —
-  `volume`, `command`, `webhook`, `s3` — each producing a verification manifest (hash, dimensions,
-  duration) alongside the render. `services/headless-artist/README.md` is the protocol reference,
-  the way the Integration API section above links `apps/artist/src/utils/integration.ts`.
+  four output sinks — `volume`, `command`, `webhook`, `s3` — each producing a verification manifest
+  (hash, dimensions, duration) alongside the render. `services/headless-artist/README.md` is the
+  protocol reference, the way the Integration API section above links
+  `apps/artist/src/utils/integration.ts`.
 - The reference container (`services/headless-artist/Dockerfile`) runs `tini` as PID 1, so the Chromium helper
   processes a `serve` render orphans are reaped instead of accumulating as zombies; it runs as `pwuser`,
   **uid 1001** (not 1000 — that is `ubuntu` in the Playwright base image); and a `volume` job whose output

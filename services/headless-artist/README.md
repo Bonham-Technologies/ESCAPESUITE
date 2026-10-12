@@ -217,8 +217,8 @@ nothing else into memory. It checks that the ranges tile the payload exactly: no
 nothing missing (a truncated download is refused before any temp file is created) and nothing after
 the last source. It then copies each source to a temp file with a ranged read, and measures the
 copy: a bundle cut short after it was checked is refused rather than rendered from a short source.
-A version 2 bundle of any size needs no more heap than a manifest does. Thumbnails are checked as
-part of the tiling but never copied, and `editor` (the in/out points and markers) is ignored; the
+A version 2 bundle needs heap only for its index (at most 64 MiB of JSON), never for its media, whatever
+its size. Thumbnails are checked as part of the tiling but never copied, and `editor` (the in/out points and markers) is ignored; the
 engine uses neither.
 
 **Version 1** is one JSON document holding the project and every source base64-encoded inline:
@@ -227,10 +227,10 @@ engine uses neither.
 { "version": 1, "project": { … }, "videos": [ { "id": "src-0", "name": "clip.mp4", "mimeType": "video/mp4", "data": "<base64>" } ] }
 ```
 
-The loader decodes each video to a temp file in chunks, but **the JSON document itself is parsed whole
-into memory**. A 4 GB version 1 bundle needs more than 4 GB of heap, and one past Node's maximum
-string length (about 512 Mi characters) cannot be read at all. Open it in a current ESCAPEARTIST and
-save it again to get a version 2 bundle, or use a manifest.
+The loader decodes each video to a temp file in chunks, but **the JSON document itself is read and
+parsed whole in memory**. A version 1 bundle past Node's maximum string length (about 512 Mi
+characters) cannot be read at all, and a smaller one needs heap of at least its own size. Open it in a
+current ESCAPEARTIST and save it again to get a version 2 bundle, or use a manifest.
 
 Either way, each `videos[].id` must be a safe file-name token (`/^[A-Za-z0-9._-]{1,128}$/`, not `.`
 or `..`) because it becomes one, and the temp files are deleted when the job ends. A malformed
@@ -1013,7 +1013,7 @@ Rules of thumb:
 - **Encoding is CPU-bound** and scales with cores. A server with 8–16 cores does far better
   than the numbers above; a GPU does better still at high resolutions.
 - **Memory scales with resolution**, not with duration — frames are streamed, not accumulated.
-  4 GB is comfortable for 1080p; budget 8 GB or more for 4K. A version 1 `.veditor` input is
+  4 GiB is comfortable for 1080p; budget 8 GiB or more for 4K. A version 1 `.veditor` input is
   the exception: it also needs headroom for the whole JSON document. A version 2 one does not,
   because its sources are copied by ranged reads.
 - **`gif` is the other exception, and it does scale with duration.** The GIF format has no
@@ -1029,7 +1029,7 @@ Rules of thumb:
   timeline is a multi-gigabyte file and needs several times that in RAM; keep GIF jobs short and
   small, which is what the resolution and `fps` limits are for.
 - **Disk**: the scratch directory holds one complete output for the duration of the job, plus
-  decoded temp files for a `.veditor` input.
+  the temp files a `.veditor` input's sources are copied (version 2) or decoded (version 1) into.
 - **Fixed overhead** per job is a Chromium launch — a second or two. It is not worth batching
   around, but it does mean very short clips are dominated by it.
 
