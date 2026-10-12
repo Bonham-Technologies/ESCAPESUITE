@@ -10,7 +10,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
-import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
+import {
+  SESSION_KEPT_NOTICE,
+  SESSION_NEWER_NOTICE,
+  SESSION_REMOVED_NOTICE,
+  useSessionRestore,
+  type SessionRestoreDeps,
+} from './useSessionRestore'
 import { holdTabLock, offerLockName } from './sessionLock'
 import { TAB_ID_KEY } from './tabId'
 import {
@@ -591,6 +597,226 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     })
   })
 
+  // ESCSUITE-289: the prompt is built from the slot as it was when it was
+  // offered, and it can stay up indefinitely. The departed tab can come back,
+  // save newer work into the same slot and close again — its lock free once
+  // more, so ESCSUITE-283's owner probe says "gone" — or come back and start
+  // fresh, deleting the slot. Both answers read the slot again first, and a
+  // slot that changed or went is not deleted or adopted on the old prompt's say.
+  describe('an answer reads the offered slot again first (ESCSUITE-289)', () => {
+    const offeredAt = () => savedSession({ tabId: 'tab-a', timestamp: Date.now() - 60_000 })
+    const savedLater = () =>
+      savedSession({
+        tabId: 'tab-a',
+        timestamp: Date.now() - 1_000,
+        project: { ...savedSession().project, name: 'Newer work' },
+      })
+
+    /** A fresh tab with tab A's slot on offer. */
+    const offerTabA = async (session: SessionState) => {
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(session, 'tab-a')])
+      sessionStorage.setItem(TAB_ID_KEY, 'fresh-b')
+      const view = mountRestore()
+      await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
+      return view
+    }
+
+    /** Tab A comes back, saves newer work into its slot, and closes again. */
+    const tabASavesAndCloses = async (newer: SessionState) => {
+      const release = holdTabLock('tab-a', fake.locks)
+      await flushLocks()
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(newer, 'tab-a')])
+      release()
+      await flushLocks()
+    }
+
+    /** Tab A comes back, starts fresh, and its slot is gone. */
+    const tabARemovesItsSlot = () => {
+      vi.mocked(listSessionStates).mockResolvedValue([])
+    }
+
+    it('Start Fresh leaves a slot saved again since the offer alone, says so, and lets go of the offer', async () => {
+      const { result } = await offerTabA(offeredAt())
+      await tabASavesAndCloses(savedLater())
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() =>
+        expect(deps.showNotification).toHaveBeenCalledWith(SESSION_KEPT_NOTICE, 'info')
+      )
+      await flushLocks()
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+      expect(result.current.showSessionPrompt).toBe(false)
+      expect(result.current.sessionRestored).toBe(true)
+    })
+
+    it('Restore of a slot saved again since the offer adopts nothing and offers the newer save instead', async () => {
+      const older = offeredAt()
+      const newer = savedLater()
+      const { result } = await offerTabA(older)
+      await tabASavesAndCloses(newer)
+
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      expect(deps.setProject).not.toHaveBeenCalled()
+      expect(deps.addSourceVideo).not.toHaveBeenCalled()
+      expect(saveSessionState).not.toHaveBeenCalled()
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(deps.showNotification).toHaveBeenCalledWith(SESSION_NEWER_NOTICE, 'info')
+      expect(deps.showNotification).not.toHaveBeenCalledWith('Session restored', 'success')
+      // The prompt stays up, rebuilt from the newer save, and the offer is
+      // still this tab's: the slot is the same tab's, and that tab is gone.
+      expect(result.current.showSessionPrompt).toBe(true)
+      expect(result.current.sessionRestored).toBe(false)
+      expect(result.current.pendingSession).toBe(newer)
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(true)
+    })
+
+    it('restoring the re-offered save adopts that save, and lets go of the offer', async () => {
+      const older = offeredAt()
+      const newer = savedLater()
+      const { result } = await offerTabA(older)
+      await tabASavesAndCloses(newer)
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      await act(async () => {
+        await result.current.handleRestoreSession(newer)
+      })
+
+      expect(deps.setProject).toHaveBeenCalledTimes(1)
+      expect(deps.setProject).toHaveBeenCalledWith(newer.project)
+      expect(deps.showNotification).toHaveBeenCalledWith('Session restored', 'success')
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('tab-a'))
+      expect(saveSessionState).toHaveBeenCalledWith({ ...newer, tabId: 'fresh-b', timestamp: expect.any(Number) })
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+    })
+
+    it('Start Fresh on the re-offered save deletes that save', async () => {
+      const older = offeredAt()
+      const { result } = await offerTabA(older)
+      await tabASavesAndCloses(savedLater())
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('tab-a'))
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+    })
+
+    it('a Restore that read thumbnails for the stale save frees them', async () => {
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
+      const older = offeredAt()
+      const { result } = await offerTabA(older)
+      await tabASavesAndCloses(savedLater())
+
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      expect(revokeSourceThumbnails).toHaveBeenCalledWith([
+        { ...older.sourceVideos[0], thumbnailUrl: lastObjectUrl() },
+      ])
+    })
+
+    it('Start Fresh on a slot removed since the offer deletes nothing, throws nothing, and says so', async () => {
+      const { result } = await offerTabA(offeredAt())
+      tabARemovesItsSlot()
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() =>
+        expect(deps.showNotification).toHaveBeenCalledWith(SESSION_REMOVED_NOTICE, 'info')
+      )
+      await flushLocks()
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+      expect(result.current.showSessionPrompt).toBe(false)
+      expect(result.current.sessionRestored).toBe(true)
+    })
+
+    it('Restore of a slot removed since the offer adopts nothing, closes the prompt and says so', async () => {
+      const older = offeredAt()
+      const { result } = await offerTabA(older)
+      tabARemovesItsSlot()
+
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      expect(deps.setProject).not.toHaveBeenCalled()
+      expect(saveSessionState).not.toHaveBeenCalled()
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(deps.showNotification).toHaveBeenCalledWith(SESSION_REMOVED_NOTICE, 'info')
+      expect(result.current.showSessionPrompt).toBe(false)
+      expect(result.current.pendingSession).toBeNull()
+      expect(result.current.sessionRestored).toBe(true)
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+    })
+
+    it('a Start Fresh whose re-read fails deletes nothing and still lets go of the offer', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const { result } = await offerTabA(offeredAt())
+      vi.mocked(listSessionStates).mockRejectedValue(new Error('db closed'))
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('tab-a'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(deps.showNotification).not.toHaveBeenCalled()
+    })
+
+    it('a Restore whose re-read fails is refused the way a failed read is, frees what it read, and the slot is left', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
+      const older = offeredAt()
+      const { result } = await offerTabA(older)
+      vi.mocked(listSessionStates).mockRejectedValue(new Error('db closed'))
+
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      expect(deps.setProject).not.toHaveBeenCalled()
+      expect(deps.showNotification).toHaveBeenCalledWith('Failed to restore session', 'error')
+      expect(revokeSourceThumbnails).toHaveBeenCalledWith([{ ...older.sourceVideos[0], thumbnailUrl: lastObjectUrl() }])
+      expect(clearSessionState).not.toHaveBeenCalled()
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+    })
+
+    it('a slot unchanged since the offer is answered as before: Start Fresh deletes it', async () => {
+      const { result } = await offerTabA(offeredAt())
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('tab-a'))
+      expect(deps.showNotification).not.toHaveBeenCalled()
+    })
+
+    it('a slot unchanged since the offer is answered as before: Restore adopts it', async () => {
+      const older = offeredAt()
+      const { result } = await offerTabA(older)
+
+      await act(async () => {
+        await result.current.handleRestoreSession(older)
+      })
+
+      expect(deps.setProject).toHaveBeenCalledWith(older.project)
+      expect(deps.showNotification).toHaveBeenCalledWith('Session restored', 'success')
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('tab-a'))
+    })
+  })
+
   it('still offers a session when the browser rejects the lock requests', async () => {
     // A lock manager that rejects (SecurityError on an opaque origin) is
     // treated as no lock manager at all: a lone tab, which is offered its
@@ -673,8 +899,10 @@ describe('answering the prompt', () => {
     expect(result.current.showSessionPrompt).toBe(false)
     expect(result.current.pendingSession).toBeNull()
     expect(result.current.sessionRestored).toBe(true)
-    // The question is settled, so the effect must not go looking again.
-    expect(listSessionStates).toHaveBeenCalledTimes(1)
+    // The question is settled, so the effect must not go looking again: one
+    // read for the startup check, and one for the answer's own look at the
+    // offered slot (ESCSUITE-289).
+    expect(listSessionStates).toHaveBeenCalledTimes(2)
   })
 
   it('rebuilds a source thumbnail from what is actually stored, not the dead handle the session carried', async () => {

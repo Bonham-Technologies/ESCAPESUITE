@@ -120,12 +120,15 @@ describe('a ?loadVideo= handoff and the startup session question', () => {
     await renderApp()
     await flushImport()
 
+    const session = savedSession()
     await act(async () => {
-      answerSessionRead(savedSession())
+      answerSessionRead(session)
       await Promise.resolve()
     })
     expect(await screen.findByText('Resume Previous Session?')).toBeVisible()
     expect(clipNames()).toEqual([])
+    // The answer reads the offered slot again (ESCSUITE-289): unchanged.
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
 
     await act(async () => {
       screen.getByText('Restore Session').click()

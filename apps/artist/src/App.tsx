@@ -310,9 +310,14 @@ function App() {
       {/* Loading overlay */}
       {isLoading && <LoadingOverlay />}
 
-      {/* Session restore prompt */}
+      {/* Session restore prompt. Keyed on the save it offers: a Restore that
+          finds the slot saved again since rebuilds the prompt from the newer
+          save (ESCSUITE-289), and that is a new question — mounted afresh, so
+          the click that answered the old one does not leave both buttons
+          disabled. */}
       {showSessionPrompt && pendingSession && (
         <SessionRestorePrompt
+          key={pendingSession.timestamp}
           session={pendingSession}
           onRestore={handleRestoreSession}
           onDecline={handleDeclineSession}

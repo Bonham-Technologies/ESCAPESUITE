@@ -377,6 +377,52 @@ describe('one session slot per tab (ESCSUITE-274)', () => {
     expect(store().project.name).toBe('Tab A')
   })
 
+  it('a Restore that finds the slot saved again since shows the newer save, with both answers live again (ESCSUITE-289)', async () => {
+    await saveSessionState(storedSession('tab-a', 'Older work', Date.now() - 120_000))
+    await renderApp()
+    await flushStorage()
+    expect(await screen.findByText('Older work')).toBeInTheDocument()
+    // Tab A comes back, saves newer work into its slot, and closes again.
+    const releaseA = holdTabLock('tab-a', fake.locks)
+    await flushLocks()
+    await saveSessionState(storedSession('tab-a', 'Newer work', Date.now() - 1_000))
+    releaseA()
+    await flushLocks()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Session' }))
+    await flushStorage()
+
+    expect(await screen.findByText('Newer work')).toBeInTheDocument()
+    expect(store().project.name).not.toBe('Older work')
+    // The rebuilt prompt is a new question: its buttons are not left disabled
+    // by the click that answered the old one.
+    expect(screen.getByRole('button', { name: 'Restore Session' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Start Fresh' })).toBeEnabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restore Session' }))
+    await flushStorage()
+
+    expect(store().project.name).toBe('Newer work')
+    const slots = await slotsByTab()
+    expect(slots['tab-a']).toBeUndefined()
+    expect(slots[THIS_TAB]).toMatchObject({ project: { name: 'Newer work' } })
+  })
+
+  it('a Start Fresh that finds the slot saved again since keeps the newer save (ESCSUITE-289)', async () => {
+    await saveSessionState(storedSession('tab-a', 'Older work', Date.now() - 120_000))
+    await renderApp()
+    await flushStorage()
+    expect(await screen.findByText('Older work')).toBeInTheDocument()
+    const newer = storedSession('tab-a', 'Newer work', Date.now() - 1_000)
+    await saveSessionState(newer)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Start Fresh' }))
+    await flushStorage()
+
+    expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
+    expect((await slotsByTab())['tab-a']).toEqual(newer)
+  })
+
   it('Start Fresh deletes the slot it was offered and nothing else', async () => {
     const live = storedSession('tab-b', 'Tab B', Date.now() - 1_000)
     await saveSessionState(storedSession('tab-a', 'Tab A', Date.now() - 120_000))
