@@ -897,8 +897,10 @@ describe('answering the prompt', () => {
     expect(result.current.showSessionPrompt).toBe(false)
     expect(result.current.pendingSession).toBeNull()
     expect(result.current.sessionRestored).toBe(true)
-    // The question is settled, so the effect must not go looking again.
-    expect(listSessionStates).toHaveBeenCalledTimes(1)
+    // The question is settled, so the effect must not go looking again: one
+    // read for the startup check, and one for the answer's own look at the
+    // offered slot (ESCSUITE-289).
+    expect(listSessionStates).toHaveBeenCalledTimes(2)
   })
 
   it('rebuilds a source thumbnail from what is actually stored, not the dead handle the session carried', async () => {

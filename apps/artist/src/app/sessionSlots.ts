@@ -10,7 +10,9 @@
 // the next slot or none rather than the same session (ESCSUITE-283).
 // A slot is removed when it is restored (adopted by the restoring tab), when
 // it is declined, when its own tab starts a New Project, or here, at startup,
-// once it is older than `SESSION_SLOT_MAX_AGE_MS`.
+// once it is older than `SESSION_SLOT_MAX_AGE_MS` — and an answer to the prompt
+// reads the offered slot again first, so a slot saved again or removed since it
+// was offered is neither deleted nor adopted on the old prompt's say (ESCSUITE-289).
 import {
   clearSessionState,
   listSessionStates,
@@ -111,4 +113,22 @@ export async function adoptSessionSlot(slot: SessionSlot, tabId: string): Promis
     console.error('Failed to adopt the restored session:', error);
     return false;
   }
+}
+
+/**
+ * The offered slot as storage holds it when the prompt is answered
+ * (ESCSUITE-289): `'unchanged'` when it still holds the save that was offered,
+ * the slot as it is now when its tab has saved again since — come back, saved
+ * newer work and closed again, so its lock is free once more and
+ * `ownerReturned()` cannot tell — and `'removed'` when it is gone (its tab came
+ * back and started fresh, or another window's answer took it). A slot is found
+ * by its tab id, its row's key, and a save is told apart by its `timestamp`,
+ * which every autosave stamps afresh.
+ */
+export type SlotAtAnswer = 'unchanged' | 'removed' | SessionSlot;
+
+export async function slotAtAnswer(offered: SessionSlot): Promise<SlotAtAnswer> {
+  const now = (await listSessionStates()).find((slot) => slot.tabId === offered.tabId);
+  if (!now) return 'removed';
+  return now.session.timestamp === offered.session.timestamp ? 'unchanged' : now;
 }

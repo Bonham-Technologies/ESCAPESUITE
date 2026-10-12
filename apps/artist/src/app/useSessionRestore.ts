@@ -15,11 +15,22 @@
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
+import {
+  clearSessionState,
+  resolveThumbnailUrl,
+  revokeSourceThumbnails,
+  type SessionState,
+} from '../core/storage';
 import { repairEditorBlock } from '../store/projectMigration';
 import { applyEditorBlock } from './editorBlock';
 import { probeTabLock } from './sessionLock';
-import { adoptSessionSlot, findOfferableSlot, type OfferedSlot } from './sessionSlots';
+import {
+  adoptSessionSlot,
+  findOfferableSlot,
+  slotAtAnswer,
+  type OfferedSlot,
+  type SlotAtAnswer,
+} from './sessionSlots';
 import { readTabId, renewTabId } from './tabId';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
@@ -56,6 +67,16 @@ export interface SessionRestore {
 
 /** Why a restore of a stale offer is refused (ESCSUITE-283); logged, never shown. */
 const OWNER_RETURNED = 'The tab that saved this session is open again';
+
+// What the prompt says when its slot has moved on since it was offered
+// (ESCSUITE-289): saved again by its tab, which came back and closed again, or
+// removed. Each is shown once, on the answer that found it.
+/** Restore found a newer save: the prompt now offers that one. */
+export const SESSION_NEWER_NOTICE = 'That session changed in another window — here is the newer one.';
+/** Start Fresh found a newer save: it was kept, and is offered again next time. */
+export const SESSION_KEPT_NOTICE = 'That session changed in another window, so it was kept for next time.';
+/** Either answer found the slot gone: nothing to delete or adopt. */
+export const SESSION_REMOVED_NOTICE = 'That session was removed in another window.';
 
 export function useSessionRestore({
   suppressRestore,
@@ -134,6 +155,7 @@ export function useSessionRestore({
     const offered = offeredSlotRef.current!;
 
     let restoredSourceVideos: SourceVideo[];
+    let atAnswer: SlotAtAnswer;
     try {
       restoredSourceVideos = await Promise.all(
         session.sourceVideos.map(async (video) => ({
@@ -148,6 +170,11 @@ export function useSessionRestore({
       // still has its slot adopted — two copies, never a loss (a documented
       // limit; see apps/artist/CLAUDE.md, "The limits this leaves").
       if (await offered.ownerReturned()) throw new Error(OWNER_RETURNED);
+      // A slot saved again or removed since it was offered (ESCSUITE-289): read
+      // last, as close to the commit as it can be. A read that fails is a failed
+      // restore, below. A save landing between this read and the adoption is
+      // still adopted over — a documented limit, as for the owner check above.
+      atAnswer = await slotAtAnswer(offered.slot);
     } catch (error) {
       console.error('Failed to restore session:', error);
       // Only settle the question if nobody declined while we were reading —
@@ -172,6 +199,33 @@ export function useSessionRestore({
     // Declined while the reads were in flight: that answer already ran and
     // closed the prompt, so this restore must not override it.
     if (restoreAttemptRef.current !== attempt) return;
+
+    if (atAnswer !== 'unchanged') {
+      // The prompt was offering a save that is no longer there (ESCSUITE-289).
+      // Nothing is adopted, and the thumbnails just read for it are freed.
+      restoreAttemptRef.current = null;
+      revokeSourceThumbnails(restoredSourceVideos);
+      if (atAnswer === 'removed') {
+        // Nothing left to restore: the prompt closes, the way a failed restore's does.
+        offered.release();
+        setShowSessionPrompt(false);
+        setPendingSession(null);
+        setSessionRestored(true);
+        showNotification(SESSION_REMOVED_NOTICE, 'info');
+      } else {
+        // Saved again by its tab, which has closed again — `ownerReturned()`
+        // just said so. The prompt is rebuilt from the newer save and stays up.
+        // The offer claim is kept rather than let go and claimed again: it is
+        // the same tab's offer lock, and a release followed at once by an
+        // `ifAvailable` request for it can find it not yet let go and offer
+        // nothing. Nothing else could be offered over it: it is the same tab's
+        // slot, now newer than when it was found the newest free one.
+        offeredSlotRef.current = { ...offered, slot: atAnswer };
+        setPendingSession(atAnswer.session);
+        showNotification(SESSION_NEWER_NOTICE, 'info');
+      }
+      return;
+    }
 
     setProject(session.project);
     restoredSourceVideos.forEach(addSourceVideo);
@@ -210,17 +264,27 @@ export function useSessionRestore({
     // slot deleted is the one offered, whichever tab's it was (ESCSUITE-274) —
     // unless its tab has come back while the prompt was up (ESCSUITE-283): that
     // slot is a live tab's work again, and is left alone. The offer is let go
-    // once the delete settles either way.
+    // once the delete settles either way. And the slot is read again first
+    // (ESCSUITE-289): its tab may have come back, saved newer work into it and
+    // closed again, or removed it. A newer save is kept — the user turned down
+    // the older one, not this — and offered again on the next startup; a
+    // removed one leaves nothing to delete. Either is said once. A re-read that
+    // fails deletes nothing, the safe side, and is logged.
     const offered = offeredSlotRef.current!;
     offered
       .ownerReturned()
-      .then((returned) => (returned ? undefined : clearSessionState(offered.slot.tabId)))
+      .then(async (returned) => {
+        if (returned) return;
+        const atAnswer = await slotAtAnswer(offered.slot);
+        if (atAnswer === 'unchanged') return clearSessionState(offered.slot.tabId);
+        showNotification(atAnswer === 'removed' ? SESSION_REMOVED_NOTICE : SESSION_KEPT_NOTICE, 'info');
+      })
       .catch(console.error)
       .then(offered.release);
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
-  }, []);
+  }, [showNotification]);
 
   // Check for saved session on mount
   useEffect(() => {
