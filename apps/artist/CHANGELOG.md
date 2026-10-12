@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.15.78
+
+### Patch Changes
+
+- a4d9f61: Starting playback with the playhead in a gap between clips plays on from the next clip instead of freezing in a playing state.
+  
+  Pressing Space or Play with the playhead between clips, or letting go of a dragged playhead in a gap while the timeline was playing, used to move the playhead to the start of the next clip and leave it there: the button showed Pause but nothing moved. Playback now carries on from that clip. With no clip after the gap, playback still stops at the end of the timeline.
+- a4d9f61: Pausing — Space, the Pause button or grabbing the playhead — resumes from the exact frame shown, not up to 200 ms earlier.
+  
+  The timeline's playhead only caught up with playback a few times a second, so pausing left it, and the next Play, up to a fifth of a second behind the picture you stopped on. Pausing now leaves the playhead on that picture. Clicking the ruler while playing still lands exactly where you clicked.
+
 ## 2.15.77
 
 ### Patch Changes
