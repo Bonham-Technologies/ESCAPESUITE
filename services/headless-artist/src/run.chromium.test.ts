@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium } from 'playwright'
+import { loadBundle } from './loaders'
 import { runJob } from './run'
 import type { JobSpec } from './types'
 import { hasFfmpeg, probe } from '../test/ffprobe'
@@ -234,6 +235,53 @@ describe('runJob (real Chromium)', () => {
     // Both renders' scratch dirs, and their bundle temp files, are gone.
     expect(await fs.readdir(workDir)).toEqual([])
   }, 2 * RENDER_TIMEOUT_MS)
+
+  // ESCSUITE-290: the parity case above proves the v2 index is read right; this one proves each
+  // source's bytes were copied from the right range. Two sources of different lengths and
+  // contents, so two ranges swapped (the right number of bytes from the wrong offset) cannot pass.
+  // `loadBundle` needs no browser: the same bundle, as v1 base64 JSON and as a v2 container, is
+  // loaded and the temp files compared byte for byte (a straight comparison, so no ffprobe).
+  it('copies every source of a v2 .veditor bundle byte for byte as a v1 bundle does', async () => {
+    const v1Fixture = JSON.parse(await fs.readFile(path.join(SERVICE_ROOT, 'test/fixtures/project.veditor'), 'utf8'))
+    const first = await fs.readFile(path.join(SERVICE_ROOT, 'test/fixtures/manifest/src-0.mp4'))
+    // Distinct length and distinct bytes from `first`; never decoded, only copied.
+    const second = Buffer.from(Array.from({ length: 777 }, (_, i) => (i * 31 + 7) % 256))
+    expect(second.length).not.toBe(first.length)
+    const sources = [
+      { id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4', bytes: first },
+      { id: 'src-1', name: 'src-1.mp4', mimeType: 'video/mp4', bytes: second },
+    ]
+
+    const v1Path = path.join(tmpRoot, 'bytes-v1.veditor')
+    await fs.writeFile(
+      v1Path,
+      JSON.stringify({
+        version: 1,
+        project: v1Fixture.project,
+        videos: sources.map(({ bytes, ...rest }) => ({ ...rest, data: bytes.toString('base64') })),
+      }),
+    )
+    const { index, payload } = v2IndexAndPayload(v1Fixture.project, sources)
+    const v2Path = path.join(tmpRoot, 'bytes-v2.veditor')
+    await fs.writeFile(v2Path, assembleV2(index, payload))
+
+    const fromV1 = await loadBundle(v1Path, tmpRoot)
+    const fromV2 = await loadBundle(v2Path, tmpRoot)
+    try {
+      expect(fromV2.project).toEqual(fromV1.project)
+      const videos = index.videos as Array<{ id: string; data: { length: number } }>
+      expect(videos.map((v) => v.id)).toEqual(['src-0', 'src-1'])
+      for (const video of videos) {
+        const v1Bytes = await fs.readFile(fromV1.sourceFiles[video.id])
+        const v2Bytes = await fs.readFile(fromV2.sourceFiles[video.id])
+        expect(v2Bytes.length, `${video.id}: v2 length vs index`).toBe(video.data.length)
+        expect(v2Bytes.equals(v1Bytes), `${video.id}: v2 bytes equal v1 bytes`).toBe(true)
+      }
+    } finally {
+      await fromV1.cleanup()
+      await fromV2.cleanup()
+    }
+  })
 
   it('renders the same job as a GIF', async () => {
     const spec: JobSpec = {

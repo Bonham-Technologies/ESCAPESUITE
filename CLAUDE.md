@@ -4269,6 +4269,21 @@ temp directory behind. Outside vitest's measurement the kit's Chromium suite ran
 v2 bundle to the same manifest. Every `*.perf.test.ts` and rerender pin is byte-identical — nothing here
 runs per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
 
+`@escapesuite/headless-artist` was re-measured 2026-10-12 for ESCSUITE-290 (the kit's Chromium v1-vs-v2
+`.veditor` parity case compares every restored source's bytes — the v2 temp file's length against the
+index entry's size, and its bytes against the v1 copy's — over a two-source bundle whose sources differ in
+length and content, so a copy of the right length from the wrong offset can no longer pass on identical
+project JSON): 99.59 / 99.51 / 98.59 / 98.86, byte-identical on every count to the 99.59 / 99.51 / 98.59 /
+98.86 that `main` at `fed88166` (the ESCSUITE-260 version-packages commit) measures — lines 976 / 980,
+statements 1,034 / 1,039, branches 632 / 641, functions 174 / 176 on both trees, the same 4 / 5 / 9 / 2
+uncovered. The change is one case in `src/run.chromium.test.ts`, a file `test:coverage` does not run, so
+no numerator or denominator moves; the case itself needs no browser (it calls `loadBundle` directly) and
+sits in the Chromium file so that `test:e2e` and CI's `e2e` job run it. Its red proof: with the payload
+chunk order reversed in `test/veditorV2.ts` — the ranges still tile, the wrong bytes sit at each offset —
+it fails with `src-0: v2 bytes equal v1 bytes: expected false to be true`; the mutation was reverted. The
+kit Chromium suite ran here with ffprobe on PATH: 35 passed / 1 skipped, one more than before. **No floor
+crossed**; the kit's floors stay 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
