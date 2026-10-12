@@ -1,10 +1,26 @@
-# ESCSUITE-260 — `.veditor` v2 container — design proposal
+# ESCSUITE-260 — `.veditor` v2 container — design
 
-**Status:** draft for the operator, 2026-10-11. Jira: ESCSUITE-260. Base: `main` at `89988d16`.
-**Scope:** ESCAPEARTIST (`apps/artist`), and — recommended — the headless kit (`services/headless-artist`).
+**Status:** approved by the operator 2026-10-12 (all five questions answered; see Decisions). Jira:
+ESCSUITE-260. Base: `main` at `89988d16`.
+**Scope:** ESCAPEARTIST (`apps/artist`) and the headless kit (`services/headless-artist`).
 **Ticket rulings already made:** write v2 only, read v1 and v2; `parseProject` still validates the
 project JSON; the kit either learns v2 or is told it is v1-only; the ESCSUITE-241 budget goes from
-the writer. Changeset `@escapesuite/artist: minor`.
+the writer. Changesets `@escapesuite/artist: minor` and `@escapesuite/headless-artist: minor`.
+
+## Decisions (operator, 2026-10-12)
+
+1. **Format:** the custom binary container with a leading JSON index (B below). Zip was declined:
+   its mandatory CRC-32 pass reads every source byte through JS on save, which is the cost this
+   ticket removes, and nobody has asked to open a project in an unzip tool.
+2. **Extension:** keep `.veditor`; the loader sniffs the first 8 bytes. Every drop route, picker
+   filter, kit path and doc stays as it is. An older build opening a v2 file fails at `JSON.parse`
+   with its existing "Failed to load project"; the changeset says so.
+3. **Kit:** learns v2 in this ticket, with a kit minor changeset and a Chromium parity case.
+4. **Quota on load:** both halves in scope — a headroom pre-check that refuses by name before any
+   write, and a best-effort rollback of the sources a failed load already wrote. See "Quota and
+   rollback on load".
+5. **Sizes:** no number is promised. The docs say the file is limited by the browser's download
+   size and storage quota, not by the format, and record one manual measurement as evidence.
 
 ## Goal
 
@@ -87,7 +103,7 @@ the heap on load.
 - **Hand-rolled stored zip** drops the dependency but keeps the CRC pass and the ZIP64 work:
   roughly 200 lines of format code, for an interoperability benefit nobody has asked for.
 
-### B. Binary container, leading JSON index (recommended)
+### B. Binary container, leading JSON index (chosen)
 
 ```
 offset 0   8 bytes  magic  89 56 45 44 0D 0A 1A 0A   ("\x89VED\r\n\x1a\n", PNG-style)
@@ -170,8 +186,8 @@ says "Failed to load project". That cannot be fixed retroactively, and the chang
     `base64Length`, `sourceBytes` and `formatMiB`. `base64ToBlob` stays for v1.
 - `useProjectActions.ts`: both save paths show `ProjectFileError`'s message (the only writer refusal
   left), and `loadProjectFile`'s catch shows `Failed to load project: <reason>` for a
-  `ProjectFileError`. A corrupt or truncated v2 file is thereby refused by name, through the same
-  sentence shape `parseProject` failures already use.
+  `ProjectFileError`. A corrupt or truncated v2 file, and a file that will not fit in storage, are
+  thereby refused by name, through the same sentence shape `parseProject` failures already use.
 
 ## Size bounds: what replaces the 241 budget
 
@@ -185,7 +201,36 @@ says "Failed to load project". That cannot be fixed retroactively, and the chang
 - **Offsets and lengths** must be `Number.isSafeInteger` and ≥ 0 (exact to 2^53); the header's u32
   only bounds the index.
 - **The real ceilings are the browser's:** blob-URL download size, and IndexedDB quota on load.
-  Open question 4 asks whether load should pre-check quota.
+  Neither is promised as a number (decision 5). The docs and changeset say "limited by the
+  browser's download size and storage quota, not by the format", name those two places, and record
+  the manual check below as "verified at about N GB on Chromium and Firefox on macOS, 2026-10-12" —
+  evidence, not a guarantee.
+
+## Quota and rollback on load (decision 4)
+
+Both halves live in `loadProject`'s v2 path and are written so the v1 path can share them
+(`loadProject` already walks both through one per-source helper).
+
+- **Pre-check.** After the index is parsed and the ranges are checked, and before any write, sum the
+  `data.length` and `thumbnail.length` of every entry whose id is **not** already present in storage
+  (a present row writes nothing, ESCSUITE-151), and compare it with `getStorageEstimate().available`
+  from `@escapesuite/shared/storage`. If the total exceeds the headroom, throw `ProjectFileError`
+  with "This project needs 1.8 GB of storage and this browser has 0.9 GB free." (both figures from
+  one `formatGiB`/`formatMiB` helper picking the unit by size). The estimate is approximate and
+  per-browser, so a load that passes can still fail at write time; the check removes the common case,
+  and the rollback covers the rest. A browser with no `navigator.storage.estimate` reports
+  `available: 0` from the shared helper today, which would refuse every load — so the check is
+  skipped when `quota` is 0 (nothing was measured), not when `available` is 0. No buffer is added
+  beyond the sum: `hasSpaceForFile`'s 10 MB margin is for one import; here the sum is exact.
+- **Rollback.** `loadProject` keeps a list of the ids it has written (`storeVideo` succeeded) in
+  this call. If any later `storeVideo`, `storeThumbnail` or probe throws, it deletes each written id
+  through `deleteVideo` (`packages/shared/src/storage/index.ts`, which deletes the `videos` row and
+  the `thumbnails` row for that id), each in its own `try`/`catch`
+  with one `console.warn` per failure, then rethrows the original error. Ids that were present before
+  the load are never deleted. Rollback is best-effort: a row it fails to delete is unreferenced and
+  appears in ESCSUITE-268's "files from earlier sessions" list, which is the backstop.
+- `useProjectActions.ts` shows the pre-check's sentence through the same `Failed to load project:
+  <reason>` shape as every other `ProjectFileError`.
 
 ## v1 compatibility
 
@@ -198,7 +243,7 @@ says "Failed to load project". That cannot be fixed retroactively, and the chang
 - `apps/e2e/tests/accessibility/core.spec.ts`'s `{}` seed file and `workflows.spec.ts`'s
   suffix-only download check are unaffected.
 
-## Kit (recommended: learn v2)
+## Kit (decision 3: learns v2)
 
 `loadBundle` opens the file with `fs.open` and reads 16 bytes. If the magic matches, it reads `N`
 bytes and parses the index. It runs the existing validators: `assertVeditorVideo` adapted so a v2
@@ -248,6 +293,15 @@ Artist (`core/projectFileFormat.test.ts`, `core/projectManager.test.ts`, `app/us
 
    Each refusal is checked to write nothing to IndexedDB, and `loadProjectFile` shows
    `Failed to load project: <reason>`.
+5a. **Quota pre-check:** with `getStorageEstimate` stubbed to `{ quota: 4 GiB, available: 1 GiB }`
+   and a file declaring 1.5 GiB of new media, `loadProject` throws the sentence naming both figures
+   and writes nothing; with an id already present, that entry's bytes are not counted and the load
+   proceeds; with `quota: 0` (no estimate API) the check is skipped; a total exactly equal to the
+   headroom is accepted.
+5b. **Rollback:** `storeVideo` resolves for the first source and rejects for the second → the first
+   id is deleted, the original error is rethrown, and an id that was present before the load is not
+   deleted; `deleteVideo` itself rejecting is warned once and does not mask the original error; a
+   thumbnail write rejecting rolls back its own video too.
 6. The writer refuses an index past the cap, with `maxIndexBytes` lowered; the save-and-load dialog
    stays open on it.
 7. The ESCSUITE-241 budget suite is deleted with the code it tested; its "refuses" cases are the red
@@ -267,8 +321,10 @@ Kit (`loaders.test.ts`, `run.chromium.test.ts`):
 E2E (CI runs it; the implementer does not): `workflows.spec.ts` saves, asserts the download starts
 with the magic, reopens it through the uploader and finds the clip.
 
-Manual, before merge: save and reopen a project with a source of about 600 MB in Chromium and
-Firefox, watching the heap stay flat. WebKit is subject to the ESCSUITE-258 Blob-in-IDB caveat.
+Manual, before merge (decision 5): save and reopen a project with sources adding up to about 2 GB in
+Chromium and Firefox on this machine, watching the heap stay flat, and record the measured size,
+browsers and date in the ticket and the changelog as evidence rather than a promise. WebKit is
+subject to the ESCSUITE-258 Blob-in-IDB caveat.
 
 ## Coverage expectations
 
@@ -296,19 +352,7 @@ Firefox, watching the heap stay flat. WebKit is subject to the ESCSUITE-258 Blob
   `@escapesuite/headless-artist: minor` if the kit is adopted. The text should say that projects
   of any size save now, and that older builds cannot open the new files.
 
-## Open questions for the operator
+## Open questions
 
-1. **Format:** approve B (a custom container with a leading index) over a zip? The only thing zip
-   adds is opening the file in an OS unzip tool, at the cost of a CRC pass over every byte, ZIP64,
-   and probably a dependency.
-2. **Extension:** keep `.veditor` and sniff (recommended), or move to a new extension so the OS and
-   old builds can tell the two apart?
-3. **Kit scope:** have the kit learn v2 in this ticket, with a kit minor changeset and a Chromium
-   parity case (recommended)? Or declare it v1-only and send v2 users to manifests?
-4. **Quota on load:** now that multi-GB files are possible, should `loadProject` check
-   `getStorageEstimate()` headroom against the sources it would write, and refuse by name, before
-   writing any? And should a load that fails partway delete the sources it already wrote? Neither is
-   done today, and v1 has the same gap. These could be in scope or a follow-up ticket.
-5. **Sizes to promise:** promise no number and say "limited by the browser's download and storage
-   quota"? Or name a tested ceiling (for example 2 GB) in the docs and changeset, backed by the
-   manual check?
+None. The five questions this proposal put to the operator (format, extension, kit scope, quota on
+load, sizes to promise) were answered on 2026-10-12 and are recorded under "Decisions" at the top.
