@@ -4,6 +4,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { loadBundle, loadManifest, writeBase64ToFile } from './loaders'
+import { V2_HEADER_PREFIX, assembleV2, v2IndexAndPayload, type V2Source } from '../test/veditorV2'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const fixturesDir = path.join(here, '..', 'test', 'fixtures')
@@ -448,14 +449,16 @@ describe('loadBundle', () => {
     await job.cleanup()
   })
 
-  it('rejects a bundle with an unsupported version', async () => {
+  it('rejects a JSON bundle with a version above 1, naming both versions it does read', async () => {
     const dir = await makeTempDir()
     const veditor = JSON.parse(await fs.readFile(veditorFixture, 'utf8'))
     veditor.version = 2
     const badPath = path.join(dir, 'bad.veditor')
     await fs.writeFile(badPath, JSON.stringify(veditor))
 
-    await expect(loadBundle(badPath, dir)).rejects.toThrow(/version/)
+    await expect(loadBundle(badPath, dir)).rejects.toThrow(
+      `bundle "${badPath}" has version 2, but this build supports versions 1 and 2 (version 2 is the binary container, not JSON)`,
+    )
   })
 
   it('throws naming the clip and source id when a clip references an unknown source', async () => {
@@ -944,5 +947,271 @@ describe('loadManifest project $ref', () => {
     await expect(loadManifest(manifestPath)).rejects.toThrow(
       `project file "${path.join(dir, 'project.json')}" does not contain a project object`,
     )
+  })
+})
+
+describe('loadBundle version 2 (ESCSUITE-260)', () => {
+  const sourcePath = path.join(manifestFixtureDir, 'src-0.mp4')
+  const fixtureProject = async () => JSON.parse(await fs.readFile(veditorFixture, 'utf8')).project
+
+  /** The fixture project over its own source, as a v2 index and payload, plus any `extra` sources. */
+  async function fixtureV2(extra: V2Source[] = []) {
+    const bytes = await fs.readFile(sourcePath)
+    return v2IndexAndPayload(await fixtureProject(), [
+      { id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4', bytes },
+      ...extra,
+    ])
+  }
+
+  async function writeBundle(dir: string, bytes: Buffer): Promise<string> {
+    const bundlePath = path.join(dir, 'bundle.veditor')
+    await fs.writeFile(bundlePath, bytes)
+    return bundlePath
+  }
+
+  const videosOf = (index: Record<string, unknown>) => index.videos as Record<string, unknown>[]
+
+  async function expectNoTempDir(dir: string): Promise<void> {
+    const entries = await fs.readdir(dir)
+    expect(entries.filter((entry) => entry.startsWith('headless-artist-'))).toEqual([])
+  }
+
+  it('reads the 16-byte header both packages pin, spelled out byte by byte', async () => {
+    const dir = await makeTempDir()
+    const { index, payload } = await fixtureV2()
+    const indexBytes = Buffer.from(JSON.stringify(index))
+    const length = Buffer.alloc(4)
+    length.writeUInt32LE(indexBytes.length)
+    const header = Buffer.from([0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a, 0x02, 0x00, 0x00, 0x00])
+    expect([...header]).toEqual([...V2_HEADER_PREFIX])
+
+    const job = await loadBundle(await writeBundle(dir, Buffer.concat([header, length, indexBytes, payload])), dir)
+    try {
+      expect(job.project.id).toBe('fixture')
+      expect(job.sourceVideos).toEqual([{ id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4' }])
+      expect((await fs.readFile(job.sourceFiles['src-0'])).equals(await fs.readFile(sourcePath))).toBe(true)
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  // Review Focus 5.
+  it('copies each source byte for byte, forwards meta, and does not copy thumbnails', async () => {
+    const dir = await makeTempDir()
+    const { index, payload } = await fixtureV2([
+      {
+        id: 'src-1',
+        name: 'mic.webm',
+        mimeType: 'video/webm;codecs=opus',
+        bytes: Buffer.from('the second source'),
+        meta: { mediaType: 'audio', width: 0, height: 0 },
+        thumbnail: { bytes: Buffer.from([0xff, 0xd8, 0xff]), mimeType: 'image/jpeg' },
+      },
+    ])
+
+    const job = await loadBundle(await writeBundle(dir, assembleV2(index, payload)), dir)
+    try {
+      expect(job.sourceVideos).toEqual([
+        { id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4' },
+        { mediaType: 'audio', width: 0, height: 0, id: 'src-1', name: 'mic.webm', mimeType: 'video/webm;codecs=opus' },
+      ])
+      expect((await fs.readFile(job.sourceFiles['src-0'])).equals(await fs.readFile(sourcePath))).toBe(true)
+      expect((await fs.readFile(job.sourceFiles['src-1'])).toString()).toBe('the second source')
+      expect((await fs.readdir(path.dirname(job.sourceFiles['src-0']))).sort()).toEqual(['src-0.mp4', 'src-1.webm'])
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  // Review Focus 2.
+  it('writes an empty temp file for a zero-length range, and the next source is still whole', async () => {
+    const dir = await makeTempDir()
+    const project = await fixtureProject()
+    const { index, payload } = v2IndexAndPayload(project, [
+      { id: 'empty', name: 'empty.mp4', mimeType: 'video/mp4', bytes: Buffer.alloc(0) },
+      { id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4', bytes: await fs.readFile(sourcePath) },
+    ])
+
+    const job = await loadBundle(await writeBundle(dir, assembleV2(index, payload)), dir)
+    try {
+      expect((await fs.stat(job.sourceFiles.empty)).size).toBe(0)
+      expect((await fs.readFile(job.sourceFiles['src-0'])).equals(await fs.readFile(sourcePath))).toBe(true)
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  it('still takes a JSON bundle down the version 1 path', async () => {
+    const job = await loadBundle(veditorFixture, await makeTempDir())
+    try {
+      expect(job.sourceVideos).toEqual([{ id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4' }])
+    } finally {
+      await job.cleanup()
+    }
+  })
+
+  it('names a directory it could not read', async () => {
+    const dir = await makeTempDir()
+    await expect(loadBundle(dir, dir)).rejects.toThrow(`bundle "${dir}" could not be read`)
+  })
+
+  describe('refuses, before any temp file exists', () => {
+    async function refused(build: (index: Record<string, unknown>, payload: Buffer) => Buffer, message: string) {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2()
+      const bundlePath = await writeBundle(dir, build(index, payload))
+      await expect(loadBundle(bundlePath, dir)).rejects.toThrow(`bundle "${bundlePath}" ${message}`)
+      await expectNoTempDir(dir)
+    }
+
+    it('a newer container version', () =>
+      refused((index, payload) => assembleV2(index, payload, { version: 3 }), 'has version 3, but this build supports versions 1 and 2'))
+
+    it('a header naming a version no ESCAPEARTIST writes', () =>
+      refused(
+        (index, payload) => assembleV2(index, payload, { version: 1 }),
+        'has a binary header naming version 1, which no ESCAPEARTIST writes',
+      ))
+
+    it('an index over the cap', () =>
+      refused(
+        (index, payload) => assembleV2(index, payload, { indexLength: 64 * 1024 * 1024 + 1 }),
+        'declares a 67108865-byte index, over the 67108864-byte limit',
+      ))
+
+    it('an index exactly at the cap that runs past the end of the file', () =>
+      refused((index, payload) => assembleV2(index, payload, { indexLength: 64 * 1024 * 1024 }), 'ends before its index does'))
+
+    it('an index that is not JSON', () =>
+      refused((_index, payload) => assembleV2('{oops', payload), 'has an index that is not valid JSON'))
+
+    it('an index that is a list', () =>
+      refused((_index, payload) => assembleV2([], payload), 'has an index that does not declare "version": 2'))
+
+    it('an index of another version', () =>
+      refused(
+        (index, payload) => assembleV2({ ...index, version: 1 }, payload),
+        'has an index that does not declare "version": 2',
+      ))
+
+    it('an index with no project', () =>
+      refused((index, payload) => assembleV2({ ...index, project: undefined }, payload), 'is missing "project"'))
+
+    it('an index whose videos are not a list', () =>
+      refused((index, payload) => assembleV2({ ...index, videos: {} }, payload), 'is missing "videos"'))
+
+    it('a 2 GiB-claimed source in a file that holds a few bytes', () =>
+      refused((index, payload) => {
+        videosOf(index)[0].data = { offset: 0, length: 2 ** 31 }
+        return assembleV2(index, payload.subarray(0, 10))
+      }, 'is truncated: it declares 2147483648 bytes of media but holds 10'))
+
+    it('trailing bytes after the last source', () =>
+      refused(
+        (index, payload) => assembleV2(index, Buffer.concat([payload, Buffer.from([1, 2])])),
+        'has 2 bytes after its last source',
+      ))
+
+    it('a gap before the first source', () =>
+      refused((index, payload) => {
+        const data = videosOf(index)[0].data as { offset: number; length: number }
+        videosOf(index)[0].data = { offset: 1, length: data.length - 1 }
+        return assembleV2(index, payload)
+      }, 'video #0 field "data" starts at byte 1 of the media, expected 0'))
+
+    it('an overlap', async () => {
+      const dir = await makeTempDir()
+      const { index, payload } = v2IndexAndPayload(await fixtureProject(), [
+        { id: 'src-0', name: 'src-0.mp4', mimeType: 'video/mp4', bytes: await fs.readFile(sourcePath) },
+        { id: 'src-1', name: 'b.mp4', mimeType: 'video/mp4', bytes: Buffer.from([1, 2, 3]) },
+      ])
+      const second = videosOf(index)[1].data as { offset: number; length: number }
+      videosOf(index)[1].data = { offset: second.offset - 1, length: 4 }
+      const bundlePath = await writeBundle(dir, assembleV2(index, payload))
+
+      await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+        `video #1 field "data" starts at byte ${second.offset - 1} of the media, expected ${second.offset}`,
+      )
+      await expectNoTempDir(dir)
+    })
+
+    // Review Focus 5. The fixture's source is L bytes, so its thumbnail must start at L;
+    // it is declared at L + 1.
+    it('a thumbnail range out of place', async () => {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2()
+      const data = videosOf(index)[0].data as { offset: number; length: number }
+      videosOf(index)[0].thumbnail = { offset: data.length + 1, length: 1, mimeType: 'image/jpeg' }
+      const bundlePath = await writeBundle(dir, assembleV2(index, Buffer.concat([payload, Buffer.from([0, 9])])))
+
+      await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+        `bundle "${bundlePath}" video #0 field "thumbnail" starts at byte ${data.length + 1} of the media, expected ${data.length}`,
+      )
+      await expectNoTempDir(dir)
+    })
+  })
+
+  describe('refuses a malformed entry, naming the field', () => {
+    async function refusedEntry(edit: (video: Record<string, unknown>) => void, message: string) {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2()
+      edit(videosOf(index)[0])
+      const bundlePath = await writeBundle(dir, assembleV2(index, payload))
+      await expect(loadBundle(bundlePath, dir)).rejects.toThrow(message)
+      await expectNoTempDir(dir)
+    }
+
+    it('an entry that is not an object', async () => {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2()
+      ;(index.videos as unknown[])[0] = null
+      await expect(loadBundle(await writeBundle(dir, assembleV2(index, payload)), dir)).rejects.toThrow(
+        'bundle video #0 must be an object',
+      )
+    })
+
+    it('an id that is not a string', () =>
+      refusedEntry((video) => (video.id = 7), 'bundle video #0 field "id" must be a string'))
+
+    it('a missing type', () =>
+      refusedEntry((video) => delete video.mimeType, 'bundle video #0 is missing "mimeType"'))
+
+    it.each([
+      ['a v1 base64 string', 'AAAA'],
+      ['an offset that is not whole', { offset: 1.5, length: 3 }],
+      ['a negative length', { offset: 0, length: -1 }],
+    ])('a data range that is %s', (_case, data) =>
+      refusedEntry(
+        (video) => (video.data = data),
+        'bundle video #0 field "data" must be {"offset", "length"}, each a whole number of bytes >= 0',
+      ))
+
+    it('a thumbnail that is not a byte range', () =>
+      refusedEntry(
+        (video) => (video.thumbnail = 'x'),
+        'bundle video #0 field "thumbnail" must be {"offset", "length"}, each a whole number of bytes >= 0',
+      ))
+
+    it('a meta.mediaType that is not video, image or audio', () =>
+      refusedEntry(
+        (video) => (video.meta = { mediaType: 'hologram' }),
+        'bundle video #0 field "meta.mediaType" must be one of video, image, audio',
+      ))
+
+    it('an id that would escape the temp directory', () =>
+      refusedEntry((video) => (video.id = '../evil'), 'is not a safe file name'))
+
+    it('a clip that references a source the bundle does not hold', () =>
+      refusedEntry((video) => (video.id = 'renamed'), 'clip "clip-0" references unknown source "src-0"'))
+
+    it('two entries under one id', async () => {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2([
+        { id: 'src-0', name: 'again.mp4', mimeType: 'video/mp4', bytes: Buffer.from([1]) },
+      ])
+      await expect(loadBundle(await writeBundle(dir, assembleV2(index, payload)), dir)).rejects.toThrow(
+        'duplicate source id "src-0"',
+      )
+    })
   })
 })
