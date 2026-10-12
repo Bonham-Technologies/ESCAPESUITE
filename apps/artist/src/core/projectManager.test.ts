@@ -1102,6 +1102,19 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
       )
     })
 
+    // Final review fix 2: the needed figure rounds up and the free one down,
+    // so a refusal never names the same figure twice.
+    it.each([
+      [Math.round(100.5 * MiB), Math.round(100.2 * MiB), 'needs 101 MiB of storage and this browser has 100 MiB free'],
+      [Math.round(1.04 * GiB), Math.round(1.02 * GiB), 'needs 1.1 GiB of storage and this browser has 1.0 GiB free'],
+    ])('names a shortfall of %d over %d bytes as two different figures', async (needed, free, words) => {
+      const a = uniqueId('q-round')
+      const { file } = virtualV2File(encodeProjectFile(createTestProject(a), undefined, [source(a, needed)]))
+      vi.mocked(getStorageEstimate).mockResolvedValueOnce({ used: 0, quota: 4 * GiB, available: free })
+
+      await expect(loadProject(file)).rejects.toThrow(`This project ${words}.`)
+    })
+
     it('accepts a load that needs exactly what is free', async () => {
       const a = uniqueId('q-equal')
       const { file } = virtualV2File(encodeProjectFile(createTestProject(a), undefined, [source(a, GiB)]))

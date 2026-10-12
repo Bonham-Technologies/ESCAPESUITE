@@ -206,8 +206,24 @@ describe('formatSize', () => {
     [GiB, '1.0 GiB'],
     [1.5 * GiB, '1.5 GiB'],
     [1840 * MiB, '1.8 GiB'],
-  ])('writes %d bytes as %s', (bytes, words) => {
+    [Math.round(1.04 * GiB), '1.1 GiB'],
+    [0, '0 MiB'],
+  ])('writes %d bytes as %s, rounding up', (bytes, words) => {
     expect(formatSize(bytes)).toBe(words)
+  })
+
+  // Final review fix 2: a figure that is held or free rounds down, so a
+  // sentence naming it beside a needed figure never shows the same number twice.
+  it.each([
+    [1, '0 MiB'],
+    [MiB, '1 MiB'],
+    [1.5 * MiB, '1 MiB'],
+    [Math.round(100.2 * MiB), '100 MiB'],
+    [GiB, '1.0 GiB'],
+    [Math.round(1.02 * GiB), '1.0 GiB'],
+    [1840 * MiB, '1.7 GiB'],
+  ])('writes %d bytes as %s, rounding down', (bytes, words) => {
+    expect(formatSize(bytes, { round: 'down' })).toBe(words)
   })
 })
 
@@ -484,9 +500,17 @@ describe('assertRangesTile', () => {
     )
   })
 
+  // 1203 MiB is 1.17 GiB: the held figure rounds down (final review fix 2),
+  // so this read "holds 1.2 GiB" before.
   it('names a gigabyte shortfall in GiB', () => {
     expect(tileError(tiled([v(0, 1840 * MiB)]), 100, 100 + 1203 * MiB)).toMatch(
-      /^the file is incomplete: it declares 1\.8 GiB of media and holds 1\.2 GiB /
+      /^the file is incomplete: it declares 1\.8 GiB of media and holds 1\.1 GiB /
+    )
+  })
+
+  it('never names the declared and the held size as the same figure', () => {
+    expect(tileError(tiled([v(0, 3 * MiB)]), 100, 100 + 2.5 * MiB)).toMatch(
+      /^the file is incomplete: it declares 3 MiB of media and holds 2 MiB /
     )
   })
 
