@@ -209,12 +209,20 @@ function parseIndex(value: unknown): ProjectFileIndex {
   if (!isRecord(value) || value.version !== CONTAINER_VERSION || !Array.isArray(value.videos)) {
     fail('its index is not a version 2 project index');
   }
+  const videos = (value.videos as unknown[]).map(parseVideo);
+  // One id, one row in the shared DB: a second entry would restore over the
+  // first, or be taken for a source the same load had just written.
+  const ids = new Set<string>();
+  for (const { id } of videos) {
+    if (ids.has(id)) fail(`the index lists source "${id}" twice`);
+    ids.add(id);
+  }
   return {
     version: CONTAINER_VERSION,
     // Handed back as found, as the v1 path does: `parseProject` validates both.
     project: value.project as Project,
     editor: value.editor as EditorBlock | undefined,
-    videos: (value.videos as unknown[]).map(parseVideo),
+    videos,
   };
 }
 
