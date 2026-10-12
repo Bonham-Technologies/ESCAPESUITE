@@ -1420,7 +1420,7 @@ Clips support animated properties via keyframes:
   line and the scrubber both froze, and `Enter` (`useKeyframeGraphKeyboard.ts`'s `addAtPlayhead`)
   added a keyframe at the stale offset instead of where the timeline actually was. The override was
   also never scoped to a clip, so it survived a clip switch too. There was nothing for an override
-  to add: `handlePreviewTimeChange` already calls `setCurrentTime` synchronously, so the store's
+  to add: `handlePreviewTimeChange` already calls `seekTo` (`setCurrentTime` before ESCSUITE-287) synchronously, so the store's
   `currentTime` *is* the preview the instant a scrub happens — `playheadTime` is now derived from it
   alone, the same way `clipRelativeTime` beside it already was (reporting 0 rather than clamping to
   an edge when the playhead sits outside the clip, the one difference between the two derivations).
@@ -1932,16 +1932,37 @@ store once, in the playback effect's cleanup — the one path every pauser goes 
 the pause branch: a pause that comes with a seek (a ruler click, Home, a step, a marker) writes
 `setIsPlaying(false)` and its target in one batch, and drawing or writing the playback position
 there raced it. The cleanup writes only when the store says playback has stopped (so an edit
-that restarts the effect mid-playback, or an unmount, writes nothing) **and** the store still
-holds the loop's own last write — a seek changed it, and keeps its target. A loop-back counts as
-the loop's write, and a pause between it and the next frame lands on the in point the readout
-shows. The end of the timeline is unaffected: that arm wrote the end itself, which is not the
-loop's last throttled write, so the cleanup leaves it. Known limit: a seek whose target is
-exactly the value the store already holds — Home or ← within the first 200 ms of playing from 0, a
-marker on the in point clicked within 200 ms of a loop-back, or a marker on the jumped-to clip's start
-within 200 ms of a gap jump — cannot be told from a plain pause (filed as ESCSUITE-287), because a
-`setCurrentTime` of an unchanged value leaves no trace in the store, and lands on the paused
-frame instead. Because the cleanup runs before the scrub effect in the same commit, the scrub
+that restarts the effect mid-playback, or an unmount, writes nothing) **and** no seek has
+happened since the loop's own last write — a seek keeps its target. A loop-back counts as the
+loop's write, and a pause between it and the next frame lands on the in point the readout shows.
+The end of the timeline is unaffected: that arm wrote the end itself, which is not the loop's
+last throttled write, so the cleanup leaves it.
+
+**A seek is told from a plain pause by a count, not by the value** (ESCSUITE-287). The store has
+two writers of `currentTime`: `setCurrentTime` is the render loop's own (its 200 ms writes, the
+loop-back, the gap jump, the end of the timeline, the pause write above) and counts nothing;
+`seekTo(time)` (`store/playbackSlice.ts`) is everyone else's — the ruler and track clicks and a
+marker flag (`useTimelineSeek`), a playhead scrub (`usePlayheadDrag`, whose dep keeps the name
+`setCurrentTime` only because the pinned `timelineGestures.perf.test.ts` builds it by hand;
+`Timeline` passes `seekTo`), the transport's Home/End/←/→ and their buttons (`PlaybackControls`),
+the clip preview's scrub (`KeyframePanel`), "Go to clip" (`useClipEditorActions`) and a session
+restore — and adds one to `seekSequence`. It writes the time as given (every caller already
+clamps to its own bounds) and pushes no undo entry. The two marker jumps (Shift+M, Ctrl+M) and
+`resetProject` write the playhead inside their own `set`, and add one too. The loop reads the
+count when it starts and again at each of its own writes, and the pause write needs it unmoved:
+re-reading at each write, rather than only at the start, is what lets a seek made mid-play
+without a pause (a marker jump) — which the loop's next 200 ms write overwrites — leave a later
+plain pause landing on the frame shown. The value check (the store still holds the loop's last
+write) stays beside the count, and must: the loop's own stop arms — the end of the timeline, and a
+loop region shorter than one frame — call `setIsPlaying(false)` and `setCurrentTime(loopEnd)`
+without counting a seek, and only the value check keeps the cleanup from overwriting `loopEnd`
+with the earlier frame time (`usePreviewRenderLoop.test.ts`'s "stops at the end of the timeline
+when loop playback is off" pins it). It also catches any other write that bypasses `seekTo`.
+Before this, a seek to the value
+the store already held — Home or ← within the first 200 ms of playing from 0, a marker on the in
+point clicked within 200 ms of a loop-back, a marker on the jumped-to clip's start within 200 ms
+of a gap jump, New Project in the first 200 ms — looked like a plain pause and landed on the
+frame time instead. Cost: one `getState()` per 200 ms write, nothing per frame. Because the cleanup runs before the scrub effect in the same commit, the scrub
 effect's run for that render would seek every video back to the stale throttled position and
 paint it before the write's own re-render corrected it; it now returns when the store's
 `currentTime` no longer matches its render's, leaving the paint to the run that follows. The

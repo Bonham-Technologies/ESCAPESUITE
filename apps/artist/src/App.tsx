@@ -62,7 +62,7 @@ function App() {
   const rippleDeleteClip = useEditorStore((state) => state.rippleDeleteClip);
   const activeTool = useEditorStore((state) => state.activeTool);
   const duplicateClip = useEditorStore((state) => state.duplicateClip);
-  const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
+  const seekTo = useEditorStore((state) => state.seekTo);
   const setSelectedClipId = useEditorStore((state) => state.setSelectedClipId);
   const clearHistory = useEditorStore((state) => state.clearHistory);
   const keyframePanelOpen = useEditorStore((state) => state.keyframePanelState.isOpen);
@@ -109,7 +109,7 @@ function App() {
     suppressRestore: urlParams.suppressRestore,
     setProject,
     addSourceVideo,
-    setCurrentTime,
+    seekTo,
     setSelectedClipId,
     setZoom,
     clearHistory,

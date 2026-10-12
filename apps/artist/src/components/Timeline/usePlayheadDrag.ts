@@ -39,6 +39,13 @@ export interface PlayheadDragDeps {
   /** Playback state: a scrub pauses it, and hands it back on release. */
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
+  /**
+   * Writes the scrubbed time. `Timeline` hands it the store's `seekTo`, so a
+   * scrub counts as a seek (ESCSUITE-287). The field keeps its old name
+   * because `timelineGestures.perf.test.ts`, a pinned file, builds these deps
+   * by hand with the store's `setCurrentTime` — which moves the playhead just
+   * the same and is all a listener-count measurement needs.
+   */
   setCurrentTime: (time: number) => void;
 }
 

@@ -50,7 +50,7 @@ export function KeyframePanel() {
     moveClipKeyframe,
     setClipKeyframe,
     removeClipKeyframe,
-    setCurrentTime,
+    seekTo,
   } = useEditorStore();
 
   const { isOpen, selectedProperty } = keyframePanelState;
@@ -114,9 +114,9 @@ export function KeyframePanel() {
   // timeline, which `playheadTime` above then reads back.
   const handlePreviewTimeChange = useCallback((time: number) => {
     if (selectedClip) {
-      setCurrentTime(selectedClip.timelinePosition + time);
+      seekTo(selectedClip.timelinePosition + time);
     }
-  }, [selectedClip, setCurrentTime]);
+  }, [selectedClip, seekTo]);
 
   // Draggable panel hook
   const {

@@ -41,7 +41,8 @@ export interface SessionRestoreDeps {
   suppressRestore: boolean;
   setProject: (project: Project) => void;
   addSourceVideo: (video: SourceVideo) => void;
-  setCurrentTime: (time: number) => void;
+  /** Puts the playhead back where the session left it: a seek (ESCSUITE-287). */
+  seekTo: (time: number) => void;
   setSelectedClipId: (id: string | null) => void;
   setZoom: (zoom: number) => void;
   clearHistory: () => void;
@@ -86,7 +87,7 @@ export function useSessionRestore({
   suppressRestore,
   setProject,
   addSourceVideo,
-  setCurrentTime,
+  seekTo,
   setSelectedClipId,
   setZoom,
   clearHistory,
@@ -240,7 +241,7 @@ export function useSessionRestore({
 
     setProject(session.project);
     restoredSourceVideos.forEach(addSourceVideo);
-    setCurrentTime(session.currentTime);
+    seekTo(session.currentTime);
     setSelectedClipId(session.selectedClipId);
     setZoom(session.zoom);
     // ESCSUITE-245: the app's own autosave is repaired, not refused — a block
@@ -265,7 +266,7 @@ export function useSessionRestore({
     setPendingSession(null);
     setSessionRestored(true);
     showNotification('Session restored', 'success');
-  }, [setProject, addSourceVideo, setCurrentTime, setSelectedClipId, setZoom, clearHistory, showNotification, tabId]);
+  }, [setProject, addSourceVideo, seekTo, setSelectedClipId, setZoom, clearHistory, showNotification, tabId]);
 
   const handleDeclineSession = useCallback(() => {
     // Cancel a restore in flight — see restoreAttemptRef's comment above.

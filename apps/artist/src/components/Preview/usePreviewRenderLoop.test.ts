@@ -472,6 +472,72 @@ describe('usePreviewRenderLoop pausing (ESCSUITE-281)', () => {
     expect(store().currentTime).toBe(3.3)
   })
 
+  // ESCSUITE-287: the value check above cannot see a seek to the time the
+  // store already holds, so every seeker counts itself in `seekSequence` and
+  // the pause write yields to any seek since the loop's own last write.
+  it('keeps a same-batch seek to the time the store already holds', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(100)
+    // Drawn ahead of 0, not yet written: the store still holds 0.
+    expect(last(drawnTimes(deps))).toBeGreaterThan(0)
+    expect(store().currentTime).toBe(0)
+
+    act(() => {
+      deps.isPlayingRef.current = false
+      store().setIsPlaying(false)
+      store().seekTo(0)
+    })
+    await settle(0)
+
+    expect(store().currentTime).toBe(0)
+  })
+
+  it('keeps a project reset made within the first 200 ms on 0', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(100)
+    expect(last(drawnTimes(deps))).toBeGreaterThan(0)
+
+    act(() => {
+      deps.isPlayingRef.current = false
+      store().resetProject()
+    })
+    await settle(0)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(0)
+  })
+
+  it('still lands on the frame shown when a seek made mid-play was overwritten by the loop', async () => {
+    addClip('clip1', 0, 4)
+    store().addMarker(0.3)
+    const { deps, play, pause } = harness()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(100)
+    // Shift+M while playing: a seek that does not pause. The loop runs on its
+    // own clock and its next 200 ms write replaces it.
+    act(() => {
+      store().goToNextMarker()
+    })
+    expect(store().currentTime).toBe(0.3)
+    await settle(1050)
+    const shown = last(drawnTimes(deps))
+
+    pause()
+    await settle(0)
+
+    expect(store().currentTime).toBe(shown)
+  })
+
   it('writes nothing when the loop restarts for an edit made during playback', async () => {
     addClip('clip1', 0, 4)
     const { deps, play } = harness()

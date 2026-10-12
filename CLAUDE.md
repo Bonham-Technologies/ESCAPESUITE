@@ -4332,6 +4332,35 @@ the kept save is not promised for next time — and corrected two comments and t
 re-reviewed clean. Outside vitest's measurement,
 `apps/e2e/tests/escapeartist/session-ownership.spec.ts` ran on Chromium and Firefox: 4 passed. The
 `App.*rerender*` pins and every `*.perf.test.ts` are byte-identical: `App.tsx`'s one new prop is a `key`.
+
+`@escapesuite/artist` was re-measured 2026-10-12 for ESCSUITE-287 (a seek to the time the store already
+holds still lands when it pauses playback: a `seekTo(time)` action in the playback slice writes
+`currentTime` and increments a `seekSequence`, every seeker goes through it — the ruler, track and marker-flag
+clicks, the playhead scrub, Home / End / ← / → and their buttons, the clip-preview scrub, Go to clip, session
+restore, with the two marker jumps and New Project counting a seek through one shared `seekFields` helper —
+and the render loop's ESCSUITE-281 pause write yields when the sequence has moved since playback started or
+since the loop's own last write, keeping the value check beside it for the loop's own stop arms, which write
+the end of the timeline without counting a seek): 99.84 / 99.41 / 96.62 / 99.76, byte-identical on every
+percentage to the 99.84 / 99.41 / 96.62 / 99.76 that `main` at `fed88166` (the ESCSUITE-260
+version-packages commit) measures in the same sitting. The base gives 5,814 / 6,017 branches and this
+branch 5,815 / 6,018: one new branch, covered, the same 203 uncovered as before (lines 9,004 / 9,018 →
+9,009 / 9,023, statements 10,176 / 10,236 → 10,182 / 10,242, functions 2,148 / 2,153 → 2,151 / 2,156,
+every denominator growing by exactly what the numerator did; the same 14 / 60 / 5 uncovered). The one branch
+is `components/Preview/usePreviewRenderLoop.ts`'s (144 / 156 → 145 / 157) sequence comparison in the
+playback effect's cleanup, reached from the yield side by the three red cases — Home within 200 ms of play
+from 0 (`expected 0.1 to be +0`), a marker on the in point within 200 ms of a loop-back (`expected 1.096 to
+be 1`), New Project in the first 200 ms (`expected 0.096 to be +0`) — and from the write side by the
+ESCSUITE-280 / 281 cases, which are unchanged (Space, the Pause button and a playhead grab land on the
+frame shown; a same-batch seek to a different value still wins), plus the pin that reading the sequence only
+at playback start would break a plain Space after a mid-play seek the loop later overwrote (`expected 1.04
+to be 1.136` with that mistake); the file's twelve pre-existing uncovered arms are untouched. The three new
+functions are `store/playbackSlice.ts`'s `seekTo`, `seekFields` and the setter they share (8 → 11), each
+pinned by a store case; the four seek sites that used to spell `seekSequence + 1` by hand now call the
+helper. The review (opus) read "Ready to merge: Yes" with three minors; one fix round named the value
+check's real reason and added the helper, re-reviewed clean; the `usePlayheadDrag` dependency that keeps its
+`setCurrentTime` name while `Timeline` hands it `seekTo` — so that `timelineGestures.perf.test.ts` stays
+byte-identical — is ESCSUITE-291. `drawFrame.perf.test.ts`, every other `*.perf.test.ts` and the rerender
+pins are byte-identical: one number is read through `getState()` at the pause transition, nothing per frame.
 **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is

@@ -35,7 +35,8 @@ export interface TimelineSeekDeps {
   /** Playback state: a seek pauses it. */
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
-  setCurrentTime: (time: number) => void;
+  /** The store's `seekTo`: a click is a seek, and the render loop's pause write yields to it (ESCSUITE-287). */
+  seekTo: (time: number) => void;
   setSelectedClipId: (id: string | null) => void;
   clearMultiSelection: () => void;
   /** True while the playhead is being scrubbed: the track click stands down. */
@@ -67,7 +68,7 @@ export function useTimelineSeek({
   minTimelineDuration,
   isPlaying,
   setIsPlaying,
-  setCurrentTime,
+  seekTo,
   setSelectedClipId,
   clearMultiSelection,
   isDraggingPlayhead,
@@ -86,9 +87,9 @@ export function useTimelineSeek({
       const rect = rulerRef.current.getBoundingClientRect();
       const time = pointerTime(e.clientX, rect.left, rulerRef.current.scrollLeft, pixelsPerSecond);
       const clampedTime = clampTime(time, timelineDuration || minTimelineDuration);
-      setCurrentTime(clampedTime);
+      seekTo(clampedTime);
     },
-    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying, rulerRef]
+    [pixelsPerSecond, timelineDuration, minTimelineDuration, seekTo, isPlaying, setIsPlaying, rulerRef]
   );
 
   // Seek to a time the caller already knows — a marker flag's own — so a
@@ -98,9 +99,9 @@ export function useTimelineSeek({
       if (isPlaying) {
         setIsPlaying(false);
       }
-      setCurrentTime(clampTime(time, timelineDuration || minTimelineDuration));
+      seekTo(clampTime(time, timelineDuration || minTimelineDuration));
     },
-    [timelineDuration, minTimelineDuration, setCurrentTime, isPlaying, setIsPlaying]
+    [timelineDuration, minTimelineDuration, seekTo, isPlaying, setIsPlaying]
   );
 
   // Handle click on track to seek, pause, and deselect.
@@ -132,7 +133,7 @@ export function useTimelineSeek({
       const rect = trackContainerRef.current.getBoundingClientRect();
       const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
       const clampedTime = clampTime(time, timelineDuration || minTimelineDuration);
-      setCurrentTime(clampedTime);
+      seekTo(clampedTime);
 
       // Deselect clip only when clicking on empty track space
       if (!isClickOnClip) {
@@ -140,7 +141,7 @@ export function useTimelineSeek({
         setSelectedClipId(null);
       }
     },
-    [pixelsPerSecond, timelineDuration, minTimelineDuration, setCurrentTime, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying, trackContainerRef, marqueeJustFinishedRef]
+    [pixelsPerSecond, timelineDuration, minTimelineDuration, seekTo, setSelectedClipId, clearMultiSelection, isDraggingPlayhead, dragState, isPlaying, setIsPlaying, trackContainerRef, marqueeJustFinishedRef]
   );
 
   return { handleRulerClick, handleSeekTo, handleTrackClick };
