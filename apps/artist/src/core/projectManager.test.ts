@@ -22,7 +22,15 @@ import {
 // The real storage layer, running on the fake-indexeddb installed by
 // src/test/setup.ts — save/load really round-trips through IndexedDB here.
 import { parseProject } from '../store/projectMigration'
-import { deleteVideo, getAllVideoMetadata, getThumbnail, getVideo, storeThumbnail, storeVideo } from './storage'
+import {
+  deleteVideo,
+  getAllVideoMetadata,
+  getStorageEstimate,
+  getThumbnail,
+  getVideo,
+  storeThumbnail,
+  storeVideo,
+} from './storage'
 import type { EditorBlock, Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { lastObjectUrl } from '../test/objectUrls'
@@ -41,6 +49,10 @@ vi.mock('./storage', async (importOriginal) => {
     getStorageEstimate: vi.fn(actual.getStorageEstimate),
   }
 })
+
+// The real functions behind the spies, for a test that lets one call through
+// and fails the next.
+const actualStorage = await vi.importActual<typeof import('./storage')>('./storage')
 
 let idCounter = 0
 const uniqueId = (prefix: string) => `${prefix}-${Date.now()}-${idCounter++}`
@@ -1015,6 +1027,250 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
     expect((error as Error).message).toMatch(reason)
     expect(storeVideo).not.toHaveBeenCalled()
     expect(storeThumbnail).not.toHaveBeenCalled()
+  })
+})
+
+describe('loading a project into storage that may be full (ESCSUITE-260)', () => {
+  let media: MediaDoubles
+  const meta: SourceVideoMeta = { duration: 9, width: 64, height: 48, frameRate: 30 }
+  const source = (id: string, size: number, thumbnail = 0) => ({
+    id,
+    name: `${id}.mp4`,
+    mimeType: 'video/mp4',
+    meta,
+    blob: untouchable(size, 'video/mp4'),
+    ...(thumbnail > 0 ? { thumbnail: untouchable(thumbnail, 'image/jpeg') } : {}),
+  })
+  const estimate = (used: number, quota: number) =>
+    vi.mocked(getStorageEstimate).mockResolvedValueOnce({ used, quota, available: quota - used })
+  const seed = async (id: string) => {
+    await actualStorage.storeVideo(id, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(id))
+  }
+  // mockReset, not mockClear: it also drops a once-queued value a case left
+  // unconsumed, and restores the pass-through implementation. Done on both
+  // sides, so nothing queued here reaches the describes that follow.
+  const resetSpies = () => {
+    vi.mocked(storeVideo).mockReset()
+    vi.mocked(storeThumbnail).mockReset()
+    vi.mocked(deleteVideo).mockReset()
+    vi.mocked(getStorageEstimate).mockReset()
+  }
+
+  beforeEach(() => {
+    media = installMediaElementDoubles()
+    resetSpies()
+  })
+
+  afterEach(() => {
+    media.uninstall()
+    resetSpies()
+  })
+
+  describe('the pre-check', () => {
+    it('refuses, before any write, a load that needs more than the browser has free', async () => {
+      const a = uniqueId('q-a')
+      const b = uniqueId('q-b')
+      const { file } = virtualV2File(
+        encodeProjectFile(createTestProject(a), undefined, [source(a, GiB, 256 * MiB), source(b, 256 * MiB)])
+      )
+      estimate(3 * GiB, 4 * GiB)
+
+      const error = await loadProject(file).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(ProjectFileError)
+      expect((error as Error).message).toBe(
+        'This project needs 1.5 GiB of storage and this browser has 1.0 GiB free.'
+      )
+      expect(storeVideo).not.toHaveBeenCalled()
+      expect(storeThumbnail).not.toHaveBeenCalled()
+    })
+
+    it('names a smaller shortfall in MiB', async () => {
+      const a = uniqueId('q-mib')
+      const { file } = virtualV2File(encodeProjectFile(createTestProject(a), undefined, [source(a, 200 * MiB)]))
+      estimate(GiB - 100 * MiB, GiB)
+
+      await expect(loadProject(file)).rejects.toThrow(
+        'This project needs 200 MiB of storage and this browser has 100 MiB free.'
+      )
+    })
+
+    it('accepts a load that needs exactly what is free', async () => {
+      const a = uniqueId('q-equal')
+      const { file } = virtualV2File(encodeProjectFile(createTestProject(a), undefined, [source(a, GiB)]))
+      estimate(3 * GiB, 4 * GiB)
+      vi.mocked(storeVideo).mockResolvedValueOnce(undefined)
+
+      const { sourceVideos } = await loadProject(file)
+
+      expect(sourceVideos.map((v) => v.id)).toEqual([a])
+      expect(storeVideo).toHaveBeenCalledTimes(1)
+    })
+
+    // Review Focus 4.
+    it('does not count a source that is already stored, however large the file says it is', async () => {
+      const present = uniqueId('q-present')
+      const fresh = uniqueId('q-new')
+      await seed(present)
+      vi.mocked(storeVideo).mockClear()
+      const { file } = virtualV2File(
+        encodeProjectFile(createTestProject(present), undefined, [source(present, 1.5 * GiB), source(fresh, 512 * MiB)])
+      )
+      estimate(3 * GiB, 4 * GiB)
+      vi.mocked(storeVideo).mockResolvedValueOnce(undefined)
+
+      const { sourceVideos } = await loadProject(file)
+
+      expect(sourceVideos.map((v) => v.id)).toEqual([present, fresh])
+      expect(vi.mocked(storeVideo).mock.calls.map(([id]) => id)).toEqual([fresh])
+      await actualStorage.deleteVideo(present)
+    })
+
+    it('skips the check when the browser measured nothing (quota 0, no estimate API)', async () => {
+      const a = uniqueId('q-unmeasured')
+      const { file } = virtualV2File(encodeProjectFile(createTestProject(a), undefined, [source(a, 1.5 * GiB)]))
+      estimate(0, 0)
+      vi.mocked(storeVideo).mockResolvedValueOnce(undefined)
+
+      await expect(loadProject(file)).resolves.toBeDefined()
+      expect(storeVideo).toHaveBeenCalledTimes(1)
+    })
+
+    // Review Focus 4.
+    it('accepts a load that writes nothing when usage is already over quota', async () => {
+      const present = uniqueId('q-over')
+      await seed(present)
+      vi.mocked(storeVideo).mockClear()
+      const { file } = virtualV2File(encodeProjectFile(createTestProject(present), undefined, [source(present, GiB)]))
+      estimate(5 * GiB, 4 * GiB)
+
+      await expect(loadProject(file)).resolves.toBeDefined()
+      expect(storeVideo).not.toHaveBeenCalled()
+      await actualStorage.deleteVideo(present)
+    })
+  })
+
+  describe('the rollback', () => {
+    it('deletes what it wrote when a later write fails, and rethrows the original error', async () => {
+      const first = uniqueId('rb-first')
+      const second = uniqueId('rb-second')
+      const failure = new Error('QuotaExceededError')
+      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(failure)
+
+      const error = await loadProject(
+        v2File(createTestProject(first), [
+          { id: first, meta, bytes: [1] },
+          { id: second, meta, bytes: [2] },
+        ])
+      ).catch((e: unknown) => e)
+
+      expect(error).toBe(failure)
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+      expect(await getVideo(first)).toBeUndefined()
+    })
+
+    it('never deletes a source that was stored before the load', async () => {
+      const present = uniqueId('rb-present')
+      const first = uniqueId('rb-new-1')
+      const second = uniqueId('rb-new-2')
+      await seed(present)
+      vi.mocked(storeVideo).mockClear()
+      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(new Error('disk full'))
+
+      await expect(
+        loadProject(
+          v2File(createTestProject(present), [
+            { id: present, meta, bytes: [1] },
+            { id: first, meta, bytes: [2] },
+            { id: second, meta, bytes: [3] },
+          ])
+        )
+      ).rejects.toThrow('disk full')
+
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+      expect(await getVideo(present)).toBeDefined()
+      await actualStorage.deleteVideo(present)
+    })
+
+    it('warns once when a delete fails, and still rethrows the original error', async () => {
+      const first = uniqueId('rb-warn')
+      const second = uniqueId('rb-warn-2')
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const deleteFailure = new Error('database closed')
+      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(new Error('disk full'))
+      vi.mocked(deleteVideo).mockRejectedValueOnce(deleteFailure)
+
+      await expect(
+        loadProject(
+          v2File(createTestProject(first), [
+            { id: first, meta, bytes: [1] },
+            { id: second, meta, bytes: [2] },
+          ])
+        )
+      ).rejects.toThrow('disk full')
+
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(`Could not remove source ${first} after a project load failed:`, deleteFailure)
+      warn.mockRestore()
+      await actualStorage.deleteVideo(first)
+    })
+
+    it('rolls back its own video when its thumbnail write fails', async () => {
+      const id = uniqueId('rb-thumb')
+      vi.mocked(storeThumbnail).mockRejectedValueOnce(new Error('thumbnail write failed'))
+
+      await expect(
+        loadProject(v2File(createTestProject(id), [{ id, meta, bytes: [1], thumbnail: { bytes: [2], type: 'image/jpeg' } }]))
+      ).rejects.toThrow('thumbnail write failed')
+
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[id]])
+      expect(await getVideo(id)).toBeUndefined()
+    })
+
+    // Review Focus 3.
+    it("rolls back when a later source's metadata probe fails", async () => {
+      const first = uniqueId('rb-probe-1')
+      const second = uniqueId('rb-probe-2')
+      media.script({ video: { fail: true } })
+
+      await expect(
+        loadProject(
+          v2File(createTestProject(first), [
+            { id: first, meta, bytes: [1] },
+            { id: second, bytes: [2] }, // no meta: probed, and the probe fails
+          ])
+        )
+      ).rejects.toThrow(`Failed to load video: ${second}.mp4`)
+
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+      expect(await getVideo(first)).toBeUndefined()
+    })
+
+    // Review Focus 3: the loop is shared, so a v1 file rolls back too.
+    it('rolls back a v1 load too', async () => {
+      const first = uniqueId('rb-v1-1')
+      const second = uniqueId('rb-v1-2')
+      const file = new File(
+        [
+          JSON.stringify({
+            version: 1,
+            project: createTestProject(first),
+            videos: [
+              { id: first, name: 'a.mp4', mimeType: 'video/mp4', data: base64Of([1, 2, 3]), meta },
+              { id: second, name: 'b.mp4', mimeType: 'video/mp4', data: '***not base64***', meta },
+            ],
+          } satisfies ProjectFile),
+        ],
+        'old.veditor',
+        { type: 'application/json' }
+      )
+
+      // atob's InvalidCharacterError: a DOMException, so asserted as any rejection.
+      await expect(loadProject(file)).rejects.toBeTruthy()
+
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+      expect(await getVideo(first)).toBeUndefined()
+    })
   })
 })
 
