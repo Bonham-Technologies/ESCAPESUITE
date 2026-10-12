@@ -1,8 +1,28 @@
 // Project save/load functionality
 
 import type { Project, SourceVideo, Clip, EditorBlock } from '../store/types';
-import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
+import {
+  deleteVideo,
+  getStorageEstimate,
+  getVideo,
+  storeVideo,
+  storeThumbnail,
+  getThumbnail,
+  resolveThumbnailUrl,
+  revokeSourceThumbnails,
+} from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
+import { parseProject } from '../store/projectMigration';
+import {
+  ProjectFileError,
+  assertRangesTile,
+  encodeProjectFile,
+  formatSize,
+  readProjectFileIndex,
+  sliceRange,
+  type ProjectFileIndex,
+  type ProjectFileSource,
+} from './projectFileFormat';
 
 /**
  * The `SourceVideo` fields a saved project persists alongside each video's
@@ -26,6 +46,12 @@ import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
  */
 export type SourceVideoMeta = Omit<SourceVideo, 'id' | 'name' | 'mimeType' | 'size' | 'thumbnailUrl'>;
 
+/**
+ * A v1 `.veditor`: one JSON document with every source base64-encoded inside
+ * it. Only read now: `saveProject` writes the v2 container
+ * (`projectFileFormat.ts`, ESCSUITE-260), and `loadProject` still opens every
+ * v1 file an older build wrote.
+ */
 export interface ProjectFile {
   version: number;
   project: Project;
@@ -51,85 +77,12 @@ export interface ProjectFile {
   }[];
 }
 
-const CURRENT_VERSION = 1;
-
 /**
- * The most base64 a `.veditor` file may hold in total (ESCSUITE-241).
- *
- * The whole file is one JSON string, built by `JSON.stringify` from per-source
- * strings that `FileReader.readAsDataURL` produced, and V8 cannot hold a string
- * longer than 2^29 - 24 characters (about 512 Mi). Past that `readAsDataURL`
- * fires `load` with an empty string and no error, and `JSON.stringify` throws.
- * It is a budget on the TOTAL, not on one source, because several sources
- * under the ceiling each still add up in the one string. 256 MiB leaves half
- * the engine limit for the JSON around the data and for the data URL prefix.
+ * The version a v1 (JSON) `.veditor` declares. The writer produces v2
+ * (`projectFileFormat.ts`); this is what the v1 loader accepts and what
+ * `exportProjectMetadata`'s metadata-only JSON still says.
  */
-export const MAX_PROJECT_FILE_BASE64_BYTES = 256 * 1024 * 1024;
-
-const MIB = 1024 * 1024;
-
-/** Base64 length of `bytes` bytes of input. */
-const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3);
-
-const formatMiB = (bytes: number): string => `${Math.ceil(bytes / MIB)} MiB`;
-
-/** Base64 length back to the source bytes it encodes (3 per 4 characters). */
-const sourceBytes = (base64Chars: number): number => (base64Chars * 3) / 4;
-
-/**
- * Thrown by `saveProject`, before it reads any bytes, when the project's
- * sources would not fit in one `.veditor` file. The message is meant to be
- * shown to the user as it is.
- */
-export class ProjectTooLargeError extends Error {
-  name = 'ProjectTooLargeError';
-
-  constructor(
-    /** Base64 characters the file would need. */
-    public readonly total: number,
-    /** `MAX_PROJECT_FILE_BASE64_BYTES`. */
-    public readonly limit: number,
-    largest: { name: string; size: number },
-    /** The sources' and thumbnails' own bytes — what the sentence shows, rounded up. */
-    public readonly sourceTotal: number = sourceBytes(total)
-  ) {
-    super(
-      `This project is too large to save as a .veditor file: its sources add up to ${Math.ceil(sourceTotal / MIB)} MiB ` +
-        `and the format holds about ${Math.floor(sourceBytes(limit) / MIB)} MiB. Export the timeline instead, ` +
-        `or remove the largest source (${largest.name}, ${formatMiB(largest.size)}).`
-    );
-  }
-}
-
-/**
- * Convert a Blob to base64 string.
- *
- * Rejects when the browser hands back less than the blob holds: past its own
- * string limit Chromium fires `load` with an empty result and no error, which
- * used to be written into the file as a missing `data` key.
- */
-async function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      const comma = typeof result === 'string' ? result.indexOf(',') : -1;
-      const base64 = comma >= 0 ? (result as string).slice(comma + 1) : '';
-      const expected = 4 * Math.floor(blob.size / 3);
-      if (base64.length < expected || (blob.size > 0 && base64.length === 0)) {
-        reject(
-          new Error(
-            `Could not encode a source of ${blob.size} bytes for the project file: the browser returned ${base64.length} characters.`
-          )
-        );
-        return;
-      }
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
+const JSON_FILE_VERSION = 1;
 
 /**
  * Convert base64 string to Blob
@@ -144,7 +97,11 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 }
 
 /**
- * Save project to a downloadable file
+ * Save the project and the sources its timeline uses as a v2 `.veditor`
+ * (ESCSUITE-260). The stored blobs are IndexedDB handles: they go into the
+ * file by reference, so no source byte is read, and the only bytes built here
+ * are the header and the index. There is no size budget. The file is limited
+ * by the browser's download size, not by the format.
  */
 export async function saveProject(
   project: Project,
@@ -159,48 +116,11 @@ export async function saveProject(
   const usedVideoIds = new Set(project.timeline.clips.map((c) => c.sourceVideoId));
   const usedVideos = sourceVideos.filter((v) => usedVideoIds.has(v.id));
 
-  const projectFile: ProjectFile = {
-    version: CURRENT_VERSION,
-    project,
-    ...(editor && { editor }),
-    videos: [],
-  };
-
-  // Decide the budget before any byte is read or any progress reported. The
-  // stored blobs are handles, so their sizes cost nothing.
-  const stored: { video: SourceVideo; blob: Blob; thumbnail: Blob | undefined }[] = [];
-  let total = 0;
-  let sourceTotal = 0;
-  let largest: { name: string; size: number } | undefined;
+  const sources: ProjectFileSource[] = [];
   for (const video of usedVideos) {
     const videoData = await getVideo(video.id);
     if (!videoData) continue;
     const thumbnail = await getThumbnail(video.id);
-    total += base64Length(videoData.blob.size) + (thumbnail ? base64Length(thumbnail.size) : 0);
-    sourceTotal += videoData.blob.size + (thumbnail?.size ?? 0);
-    if (!largest || videoData.blob.size > largest.size) {
-      largest = { name: video.name, size: videoData.blob.size };
-    }
-    stored.push({ video, blob: videoData.blob, thumbnail });
-  }
-  if (total > MAX_PROJECT_FILE_BASE64_BYTES) {
-    throw new ProjectTooLargeError(total, MAX_PROJECT_FILE_BASE64_BYTES, largest!, sourceTotal);
-  }
-
-  // Export each video with its data
-  for (let i = 0; i < stored.length; i++) {
-    const { video, blob: videoBlob, thumbnail } = stored[i];
-    onProgress?.(
-      ((i + 1) / stored.length) * 80,
-      `Exporting video ${i + 1}/${stored.length}...`
-    );
-
-    const base64Data = await blobToBase64(videoBlob);
-
-    let thumbnailBase64: string | undefined;
-    if (thumbnail) {
-      thumbnailBase64 = await blobToBase64(thumbnail);
-    }
 
     const meta: SourceVideoMeta = {
       duration: video.duration,
@@ -220,21 +140,19 @@ export async function saveProject(
       hasWebcam: video.hasWebcam,
     };
 
-    projectFile.videos.push({
+    sources.push({
       id: video.id,
       name: video.name,
       mimeType: video.mimeType,
-      data: base64Data,
-      thumbnail: thumbnailBase64,
       meta,
+      blob: videoData.blob,
+      thumbnail,
     });
   }
 
   onProgress?.(90, 'Creating project file...');
 
-  // Create JSON file
-  const jsonContent = JSON.stringify(projectFile);
-  const blob = new Blob([jsonContent], { type: 'application/json' });
+  const blob = new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
 
   // Download file
   const url = URL.createObjectURL(blob);
@@ -279,8 +197,306 @@ async function resolveMetaDimensions(
   return { width: probed.width, height: probed.height };
 }
 
+/** What either file version says about one source, beside its bytes. */
+interface SourceEntry {
+  id: string;
+  name: string;
+  mimeType: string;
+  meta?: SourceVideoMeta;
+}
+
+/** The row already in the shared DB under a source's id, if there is one. */
+type StoredSource = Awaited<ReturnType<typeof getVideo>>;
+
+/** A file's contents once its sources are restored, before `loadProject` stamps `modified`. */
+interface LoadedFile {
+  project: Project;
+  editor?: unknown;
+  sourceVideos: SourceVideo[];
+}
+
 /**
- * Load project from a file
+ * Restore one source from either file version (ESCSUITE-260): `blob` is the
+ * source's bytes, decoded from v1 base64 or sliced out of a v2 payload, and
+ * `thumbnail` likewise. One helper for both versions, so the metadata
+ * recovery and the identity rules below cannot drift between them.
+ *
+ * `existing` is the row already stored under this id, looked up by the
+ * caller. A `.veditor` load restores the bytes ARTIST needs; it is not
+ * authority over metadata it does not own (ESCSUITE-151). It decides two
+ * things below: which five fields describe CRAFT's take identity, and whether
+ * this source's bytes and thumbnail are written to the DB at all.
+ */
+async function restoreSource(
+  entry: SourceEntry,
+  blob: Blob,
+  thumbnail: Blob | undefined,
+  existing: StoredSource,
+  /** Every id this load has stored so far; `restoreSources` deletes them if the load fails. */
+  written: string[]
+): Promise<SourceVideo> {
+  // A file saved since ESCSUITE-97 carries the live SourceVideo's own
+  // fields in `meta`: waveform peaks, take identity, the real frame rate.
+  // Those are trusted in preference to a blob probe. But `meta` came out of
+  // `JSON.parse`, not the type checker: a hand-edited or corrupted file can
+  // still carry a `duration`/`width`/`height` that is not a usable number
+  // (review round 1), so each is validated and, only when it fails, recovered
+  // from the blob rather than stored unquestioned. The common case, a `meta`
+  // written by this same `saveProject`, never touches the blob at all. This
+  // runs the same way whether or not `existing` is set: a present source's
+  // own duration, dimensions and waveform are still worth restoring from the
+  // file being reopened. Review round 1 tried reusing `existing.metadata`
+  // wholesale instead, which silently dropped a reopened CRAFT take's
+  // waveform (CRAFT never computes one) and let a stored non-finite duration
+  // bypass this same recovery.
+  //
+  // An older file has no `meta` at all. If this id is already in the shared
+  // DB, the stored record is still strictly more than a blob probe can ever
+  // recover (waveform peaks, `hasAudio`, `recordedAt`), so it is trusted over
+  // re-probing (review round 2). "Trusted" still means run through the same
+  // `resolveStoredDuration`/`resolveMetaDimensions` recovery the `meta`
+  // branch uses, not copied unquestioned: the stored record can itself carry
+  // a `duration: Infinity` or an unusable dimension (review round 3). Only a
+  // source this DB has never heard of falls back to reconstructing
+  // everything from the blob, through `extractMetadataFromBlob`.
+  let metadata: SourceVideo;
+  if (entry.meta) {
+    const duration = await resolveStoredDuration(blob, {
+      ...entry.meta,
+      name: entry.name,
+    } as SourceVideo);
+    const { width, height } = await resolveMetaDimensions(blob, entry.meta, entry);
+    metadata = {
+      ...entry.meta,
+      id: entry.id,
+      name: entry.name,
+      mimeType: entry.mimeType,
+      size: blob.size,
+      duration,
+      width,
+      height,
+    };
+  } else if (existing) {
+    const duration = await resolveStoredDuration(blob, existing.metadata);
+    const { width, height } = await resolveMetaDimensions(blob, existing.metadata, existing.metadata);
+    metadata = { ...existing.metadata, duration, width, height };
+  } else {
+    metadata = await extractMetadataFromBlob(blob, entry);
+  }
+
+  // A stored thumbnail (below) is the only legitimate source of a live
+  // `thumbnailUrl`, never a value that arrived in the file itself. `meta` is
+  // typed to exclude `thumbnailUrl`, but nothing stops a hand-edited file
+  // from smuggling one in through the spread above, and it must not reach
+  // IndexedDB via `storeVideo` (ESCSUITE-96 is exactly the failure a stale
+  // `blob:` handle in storage causes) or survive into the returned
+  // `SourceVideo` when the file has no real thumbnail (review round 1).
+  delete metadata.thumbnailUrl;
+
+  if (existing) {
+    // CRAFT's take identity belongs to whatever is already stored under this
+    // id, never to the file: these five fields are the only ones
+    // `source: 'recording'` means anything for (apps/craft/src/core/storage.ts),
+    // and a `.veditor` carrying an identical-looking `meta` must not be able
+    // to assert them over what CRAFT, or an earlier load, actually wrote
+    // (ESCSUITE-151).
+    metadata.source = existing.metadata.source;
+    metadata.takeId = existing.metadata.takeId;
+    metadata.role = existing.metadata.role;
+    metadata.startOffset = existing.metadata.startOffset;
+    metadata.overlayPlacement = existing.metadata.overlayPlacement;
+    // A `blob:` handle never survives a reload on its own (ESCSUITE-96), so
+    // it is refreshed from what is actually stored. The file's own thumbnail
+    // is not written for an id already present.
+    metadata.thumbnailUrl = await resolveThumbnailUrl(entry.id);
+  } else {
+    // Not in the shared DB, so restoring it resurrects a copy under an
+    // identity CRAFT no longer recognises as live. `source: 'recording'`
+    // would put a take the user deleted in CRAFT back into CRAFT's library,
+    // and `takeId`/`role`/`startOffset`/`overlayPlacement` describe a take
+    // group this copy is not part of (ESCSUITE-151). Cleared outright, not
+    // set to `'import'`: ARTIST's own importers never write a `source`.
+    delete metadata.source;
+    delete metadata.takeId;
+    delete metadata.role;
+    delete metadata.startOffset;
+    delete metadata.overlayPlacement;
+
+    await storeVideo(entry.id, blob, metadata);
+    // Recorded as soon as the row exists, so a thumbnail write that fails
+    // next still rolls this video back.
+    written.push(entry.id);
+    if (thumbnail) {
+      await storeThumbnail(entry.id, thumbnail);
+      metadata.thumbnailUrl = await resolveThumbnailUrl(entry.id);
+    }
+  }
+
+  return metadata;
+}
+
+/**
+ * Delete every source this load stored, best-effort, each on its own: one that
+ * cannot be deleted is warned about and left. It is unreferenced, and
+ * ESCSUITE-268's "files from earlier sessions" list offers it for removal.
+ * Only ids this call stored are ever here, so a source that was present before
+ * the load is never touched.
+ */
+async function rollBack(written: string[]): Promise<void> {
+  for (const id of written) {
+    try {
+      await deleteVideo(id);
+    } catch (error) {
+      console.warn(`Could not remove source ${id} after a project load failed:`, error);
+    }
+  }
+}
+
+/**
+ * Refuses, before any source is written, a project `parseProject` refuses: a
+ * hand-edited file, or one a newer editor wrote. Both loaders call it ahead of
+ * `restoreSources`, so a refused project leaves nothing in the shared DB and
+ * has nothing to roll back; it used to be judged by the hook only after every
+ * new source had been stored. The reason is the one `parseProject` gives, shown
+ * as "Failed to load project: <reason>". The project is still handed back
+ * unmigrated: `useProjectActions` runs `parseProject` again on what this
+ * returns, as the host's `LOAD_PROJECT` path does, and takes the migrated
+ * project from there.
+ */
+function assertProjectParses(project: unknown, editor: unknown): void {
+  const parsed = parseProject(project, editor);
+  if (!parsed.ok) throw new ProjectFileError(parsed.reason);
+}
+
+/**
+ * The restore loop both file versions share, with its progress reports. A
+ * throw anywhere in it (a write, a thumbnail write, a metadata probe, a v1
+ * source's base64) rolls back what this load stored, revokes the thumbnail
+ * URLs it minted, then rethrows the original error (ESCSUITE-260).
+ */
+async function restoreSources(
+  count: number,
+  restoreOne: (i: number, written: string[]) => Promise<SourceVideo>,
+  onProgress?: (progress: number, message: string) => void
+): Promise<SourceVideo[]> {
+  onProgress?.(10, 'Restoring videos...');
+  const restored: SourceVideo[] = [];
+  const written: string[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      onProgress?.(10 + ((i + 1) / count) * 80, `Restoring video ${i + 1}/${count}...`);
+      restored.push(await restoreOne(i, written));
+    }
+  } catch (error) {
+    await rollBack(written);
+    // Nothing will own the handles minted so far: a rolled-back source's
+    // points at a deleted row, and a present source's is never handed on.
+    revokeSourceThumbnails(restored);
+    throw error;
+  }
+  return restored;
+}
+
+/**
+ * A v1 file: one JSON document with every source base64-encoded inside it.
+ * Unchanged since before ESCSUITE-260 except that each source now goes
+ * through the shared `restoreSource`, and the project is validated before
+ * any of them is stored.
+ */
+async function loadJsonFile(
+  file: File,
+  onProgress?: (progress: number, message: string) => void
+): Promise<LoadedFile> {
+  const projectFile: ProjectFile = JSON.parse(await file.text());
+
+  if (projectFile.version > JSON_FILE_VERSION) {
+    throw new Error(
+      `Project file version ${projectFile.version} is newer than supported version ${JSON_FILE_VERSION}`
+    );
+  }
+  assertProjectParses(projectFile.project, projectFile.editor);
+
+  const sourceVideos = await restoreSources(
+    projectFile.videos.length,
+    async (i, written) => {
+      const videoData = projectFile.videos[i];
+      const blob = base64ToBlob(videoData.data, videoData.mimeType);
+      // v1 never recorded a thumbnail's type; every one ESCAPEARTIST wrote was a JPEG.
+      const thumbnail = videoData.thumbnail ? base64ToBlob(videoData.thumbnail, 'image/jpeg') : undefined;
+      return restoreSource(videoData, blob, thumbnail, await getVideo(videoData.id), written);
+    },
+    onProgress
+  );
+  return { project: projectFile.project, editor: projectFile.editor, sourceVideos };
+}
+
+/**
+ * Refuses, before anything is written, a v2 load whose new media will not fit
+ * in what the browser says is free (ESCSUITE-260). A source already stored
+ * writes nothing (ESCSUITE-151) and is not counted. The sum is exact, so no
+ * margin is added. The estimate is approximate and per-browser, so a load
+ * that passes can still fail while writing; `restoreSources`' rollback covers
+ * that. With no `navigator.storage.estimate`, the shared helper answers all
+ * zeros. A quota of 0 means nothing was measured, and the check is skipped
+ * rather than refusing every load; so is an estimate that rejects. A negative
+ * `available` (usage already over quota) counts as nothing free.
+ */
+async function assertRoomFor(index: ProjectFileIndex, existing: StoredSource[]): Promise<void> {
+  const needed = index.videos.reduce(
+    (sum, video, i) => (existing[i] ? sum : sum + video.data.length + (video.thumbnail?.length ?? 0)),
+    0
+  );
+  let estimate: Awaited<ReturnType<typeof getStorageEstimate>>;
+  try {
+    estimate = await getStorageEstimate();
+  } catch (error) {
+    console.warn('Could not read the storage estimate; loading without the free-space check:', error);
+    return;
+  }
+  const { quota, available } = estimate;
+  const free = Math.max(0, available);
+  if (quota > 0 && needed > free) {
+    throw new ProjectFileError(
+      `This project needs ${formatSize(needed)} of storage and this browser has ${formatSize(free, { round: 'down' })} free.`
+    );
+  }
+}
+
+/**
+ * A v2 container (ESCSUITE-260). The ranges, the project and the free space
+ * are checked before anything is written, and each part is a lazy slice of `file`, handed straight to
+ * storage and to the metadata probes. A source never enters the JS heap.
+ */
+async function loadContainer(
+  file: File,
+  index: ProjectFileIndex,
+  payloadStart: number,
+  onProgress?: (progress: number, message: string) => void
+): Promise<LoadedFile> {
+  assertRangesTile(index, payloadStart, file.size);
+  assertProjectParses(index.project, index.editor);
+  const existing = await Promise.all(index.videos.map((video) => getVideo(video.id)));
+  await assertRoomFor(index, existing);
+
+  const sourceVideos = await restoreSources(
+    index.videos.length,
+    async (i, written) => {
+      const video = index.videos[i];
+      const blob = sliceRange(file, payloadStart, video.data, video.mimeType);
+      const thumbnail = video.thumbnail
+        ? sliceRange(file, payloadStart, video.thumbnail, video.thumbnail.mimeType)
+        : undefined;
+      return restoreSource(video, blob, thumbnail, existing[i], written);
+    },
+    onProgress
+  );
+  return { project: index.project, editor: index.editor, sourceVideos };
+}
+
+/**
+ * Load a project from a `.veditor` file of either version. The first 16 bytes
+ * decide: a v2 header goes through the index and slices, and anything else
+ * takes the v1 path. A v2 file this refuses throws `ProjectFileError`.
  */
 export async function loadProject(
   file: File,
@@ -288,167 +504,23 @@ export async function loadProject(
 ): Promise<{ project: Project; sourceVideos: SourceVideo[]; editor?: unknown }> {
   onProgress?.(0, 'Reading project file...');
 
-  // Read file content
-  const content = await file.text();
-  const projectFile: ProjectFile = JSON.parse(content);
-
-  // Validate version
-  if (projectFile.version > CURRENT_VERSION) {
-    throw new Error(
-      `Project file version ${projectFile.version} is newer than supported version ${CURRENT_VERSION}`
-    );
-  }
-
-  onProgress?.(10, 'Restoring videos...');
-
-  const sourceVideos: SourceVideo[] = [];
-
-  // Restore videos to IndexedDB
-  for (let i = 0; i < projectFile.videos.length; i++) {
-    const videoData = projectFile.videos[i];
-    onProgress?.(
-      10 + ((i + 1) / projectFile.videos.length) * 80,
-      `Restoring video ${i + 1}/${projectFile.videos.length}...`
-    );
-
-    // Convert base64 back to blob
-    const blob = base64ToBlob(videoData.data, videoData.mimeType);
-
-    // Is this id already in the shared DB? A `.veditor` load restores the
-    // bytes ARTIST needs; it is not authority over metadata it does not own
-    // (ESCSUITE-151). Checked up front because it decides two things below:
-    // which five fields describe CRAFT's take identity, and whether this
-    // video's bytes/thumbnail get written to the DB at all.
-    const existing = await getVideo(videoData.id);
-
-    // A file saved since ESCSUITE-97 carries the live SourceVideo's own
-    // fields in `meta` — waveform peaks, take identity, the real frame rate —
-    // so those are trusted in preference to a blob probe. But `meta` came out
-    // of `JSON.parse`, not the type checker: a hand-edited or corrupted file
-    // can still carry a `duration`/`width`/`height` that is not a usable
-    // number (review round 1), so each is validated and, only when it fails,
-    // recovered from the blob rather than stored unquestioned. The common
-    // case — a `meta` written by this same `saveProject` — never touches the
-    // blob at all. This runs the same way whether or not `existing` is set:
-    // a present source's own duration/dimensions/waveform are still worth
-    // restoring from the file being reopened (review round 1 tried reusing
-    // `existing.metadata` wholesale instead, which silently dropped a
-    // reopened CRAFT take's waveform — CRAFT never computes one — and let a
-    // stored non-finite duration bypass this same recovery).
-    //
-    // An older file has no `meta` at all. If this id is already in the shared
-    // DB, the stored record is still strictly more than a blob probe can ever
-    // recover — waveform peaks, `hasAudio`, `recordedAt` — so it is trusted
-    // over re-probing (review round 2: re-probing here silently dropped all
-    // three and replaced a known-good stored duration with a re-derived one,
-    // for a file that happens to predate ESCSUITE-97 referencing a source
-    // that happens to still be live). "Trusted" still means run through the
-    // same `resolveStoredDuration`/`resolveMetaDimensions` recovery the
-    // file-`meta` branch above uses, not copied unquestioned: the stored
-    // record can itself predate ESCSUITE-97 (or otherwise carry a
-    // `duration: Infinity`/unusable dimension of its own), and round 2's
-    // first attempt at this branch copied it straight through — reintroducing
-    // the exact Infinity bug ESCSUITE-97 fixed, just one layer further out
-    // (review round 3). Only a source this DB has never heard of — a
-    // genuinely old file, old source — falls back to reconstructing
-    // everything from the blob (through `extractMetadataFromBlob`, which
-    // itself now goes through the same duration probe every other importer
-    // uses).
-    let metadata: SourceVideo;
-    if (videoData.meta) {
-      const duration = await resolveStoredDuration(blob, {
-        ...videoData.meta,
-        name: videoData.name,
-      } as SourceVideo);
-      const { width, height } = await resolveMetaDimensions(blob, videoData.meta, videoData);
-      metadata = {
-        ...videoData.meta,
-        id: videoData.id,
-        name: videoData.name,
-        mimeType: videoData.mimeType,
-        size: blob.size,
-        duration,
-        width,
-        height,
-      };
-    } else if (existing) {
-      const duration = await resolveStoredDuration(blob, existing.metadata);
-      const { width, height } = await resolveMetaDimensions(blob, existing.metadata, existing.metadata);
-      metadata = { ...existing.metadata, duration, width, height };
-    } else {
-      metadata = await extractMetadataFromBlob(blob, videoData);
-    }
-
-    // A stored thumbnail (below) is the only legitimate source of a live
-    // `thumbnailUrl` — never a value that arrived in the file itself. `meta`
-    // is typed to exclude `thumbnailUrl`, but nothing stops a hand-edited
-    // file from smuggling one in through the `...videoData.meta` spread
-    // above, and it must not reach IndexedDB via `storeVideo` below
-    // (ESCSUITE-96 is exactly the failure mode a stale `blob:` handle in
-    // storage causes) or survive into the returned `SourceVideo` when the
-    // file has no real thumbnail to resolve over it (review round 1).
-    delete metadata.thumbnailUrl;
-
-    if (existing) {
-      // CRAFT's take identity belongs to whatever is already stored under
-      // this id, never to the file: these five fields are the only ones
-      // `source: 'recording'` means anything for
-      // (`getAllVideoMetadata().filter(v => v.source === 'recording')`,
-      // apps/craft/src/core/storage.ts), and a `.veditor` that happens to
-      // carry an identical-looking `meta` must not be able to assert them
-      // over what CRAFT (or an earlier load) actually wrote (ESCSUITE-151).
-      metadata.source = existing.metadata.source;
-      metadata.takeId = existing.metadata.takeId;
-      metadata.role = existing.metadata.role;
-      metadata.startOffset = existing.metadata.startOffset;
-      metadata.overlayPlacement = existing.metadata.overlayPlacement;
-      // thumbnailUrl is a live `blob:` handle that never survives a reload on
-      // its own (ESCSUITE-96) — refreshed here from what's actually stored;
-      // the file's own embedded thumbnail (if any) is not written, matching
-      // `storeThumbnail` being skipped below for an id already present.
-      metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
-    } else {
-      // This id is not already in the shared DB, so restoring it resurrects a
-      // copy under an identity CRAFT no longer recognises as live. A
-      // `source: 'recording'` here would put a take the user deleted in
-      // CRAFT straight back into CRAFT's own library, and
-      // `takeId`/`role`/`startOffset`/`overlayPlacement` describe a
-      // take-group this restored copy is not part of (ESCSUITE-151). Cleared
-      // outright, not set to `'import'`: ARTIST's own importers
-      // (`core/videoProcessor.ts`) never write a `source` on a dragged-in
-      // file either — it's simply absent.
-      delete metadata.source;
-      delete metadata.takeId;
-      delete metadata.role;
-      delete metadata.startOffset;
-      delete metadata.overlayPlacement;
-
-      // Store video
-      await storeVideo(videoData.id, blob, metadata);
-
-      // Store thumbnail if present
-      if (videoData.thumbnail) {
-        const thumbnailBlob = base64ToBlob(videoData.thumbnail, 'image/jpeg');
-        await storeThumbnail(videoData.id, thumbnailBlob);
-        metadata.thumbnailUrl = await resolveThumbnailUrl(videoData.id);
-      }
-    }
-
-    sourceVideos.push(metadata);
-  }
+  const container = await readProjectFileIndex(file);
+  const loaded = container
+    ? await loadContainer(file, container.index, container.payloadStart, onProgress)
+    : await loadJsonFile(file, onProgress);
 
   onProgress?.(95, 'Finalizing...');
 
-  // Update project timestamps
   const project: Project = {
-    ...projectFile.project,
+    ...loaded.project,
     modified: Date.now(),
   };
 
   onProgress?.(100, 'Project loaded!');
 
-  // Handed back as found: `parseProject` validates it (a file is untrusted).
-  return { project, sourceVideos, editor: projectFile.editor };
+  // Validated already (`assertProjectParses`) but handed back unmigrated, as
+  // found: the hook's own `parseProject` migrates it and clamps the editor block.
+  return { project, sourceVideos: loaded.sourceVideos, editor: loaded.editor };
 }
 
 /**
@@ -549,7 +621,7 @@ export async function showOpenProjectDialog(): Promise<File | null> {
         types: [
           {
             description: 'Video Editor Project',
-            accept: { 'application/json': ['.veditor'] },
+            accept: { 'application/octet-stream': ['.veditor'] },
           },
         ],
       });
@@ -566,7 +638,9 @@ export async function showOpenProjectDialog(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.veditor,application/json';
+    // The extension is what filters: a v2 file is binary (ESCSUITE-260), and a
+    // v1 file an older build wrote carries the same extension.
+    input.accept = '.veditor';
 
     input.onchange = () => {
       const file = input.files?.[0] || null;
@@ -586,7 +660,7 @@ export async function showOpenProjectDialog(): Promise<File | null> {
  */
 export function exportProjectMetadata(project: Project): string {
   const metadata = {
-    version: CURRENT_VERSION,
+    version: JSON_FILE_VERSION,
     project,
     exportedAt: Date.now(),
   };

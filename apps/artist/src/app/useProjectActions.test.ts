@@ -8,7 +8,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
-import { loadProject, saveProject, showOpenProjectDialog, ProjectTooLargeError } from '../core/projectManager'
+import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
+import { ProjectFileError } from '../core/projectFileFormat'
 import { analytics } from '../utils/analytics'
 import { revokeSourceThumbnails } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
@@ -102,8 +103,13 @@ describe('saving', () => {
   })
 })
 
-describe('a save the project is too large for (ESCSUITE-241)', () => {
-  const refusal = () => new ProjectTooLargeError(420, 256, { name: 'Recording 3', size: 400 })
+// The writer's one refusal (ESCSUITE-260): an index past MAX_INDEX_BYTES.
+// Unreachable in practice, and shown by name when it happens. The class is the
+// real one: core/projectFileFormat is not mocked, so `instanceof` means the
+// same here and in the hook.
+describe('a save the writer refuses (ESCSUITE-260)', () => {
+  const refusal = () =>
+    new ProjectFileError("This project's index is 70000000 bytes, over the 67108864-byte limit a project file can hold.")
 
   it('shows the refusal\'s own sentence, not the generic one, and does not count a save', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -276,6 +282,27 @@ describe('opening a project', () => {
     expect(result.current.isLoading).toBe(false)
     // loadProject itself is what threw — there is nothing it minted to revoke.
     expect(revokeSourceThumbnails).not.toHaveBeenCalled()
+  })
+
+  it('names a project file it refused, in the sentence a malformed project uses (ESCSUITE-260)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockRejectedValue(
+      new ProjectFileError('This project needs 1.5 GiB of storage and this browser has 1.0 GiB free.')
+    )
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      'Failed to load project: This project needs 1.5 GiB of storage and this browser has 1.0 GiB free.',
+      'error'
+    )
+    expect(deps.resetProject).not.toHaveBeenCalled()
+    expect(revokeSourceThumbnails).not.toHaveBeenCalled()
+    expect(result.current.isLoading).toBe(false)
   })
 
   it('rejects a malformed project without emptying the editor first (ESCSUITE-102), and revokes the incoming thumbnails loadProject already minted', async () => {

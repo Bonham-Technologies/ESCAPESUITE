@@ -335,11 +335,12 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `serve` (`http.createServer` with `GET /healthz`, `POST /render`, a bounded FIFO job queue, a
   1 MB body cap and a sink allow-list) — that renders ESCAPEARTIST projects in headless Chromium
   (via Playwright) outside the browser, for servers or GPU boxes with no UI involved. A job spec
-  names its input as either a self-contained `bundle` or a `manifest` (a small JSON pointing at
-  source media already on disk, for a large project) and writes to one of four output sinks —
-  `volume`, `command`, `webhook`, `s3` — each producing a verification manifest (hash, dimensions,
-  duration) alongside the render. `services/headless-artist/README.md` is the protocol reference,
-  the way the Integration API section above links `apps/artist/src/utils/integration.ts`.
+  names its input as either a self-contained `.veditor` `bundle` (v1 or v2) or a `manifest` (a
+  small JSON pointing at source media already on disk, for a large project) and writes to one of
+  four output sinks — `volume`, `command`, `webhook`, `s3` — each producing a verification manifest
+  (hash, dimensions, duration) alongside the render. `services/headless-artist/README.md` is the
+  protocol reference, the way the Integration API section above links
+  `apps/artist/src/utils/integration.ts`.
 - The reference container (`services/headless-artist/Dockerfile`) runs `tini` as PID 1, so the Chromium helper
   processes a `serve` render orphans are reaped instead of accumulating as zombies; it runs as `pwuser`,
   **uid 1001** (not 1000 — that is `ubuntu` in the Playwright base image); and a `volume` job whose output
@@ -4218,6 +4219,56 @@ VP8 export and the patched exports read back in all three readers, 0 of 45 frame
 `exportWebM.perf.test.ts`, every other `*.perf.test.ts` and the rerender pins are byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-12 for ESCSUITE-260 (the
+`.veditor` file is a binary container: a 16-byte header — the magic `89 56 45 44 0D 0A 1A 0A`, a u32 version
+2 and a u32 index length capped at 64 MiB — then a JSON index naming the project, the editor block and each
+source's `meta`, byte range and optional thumbnail range, then every part's raw bytes tiling the payload
+exactly; `saveProject` builds the file as one `Blob` of parts that hold the stored source `Blob`s by identity
+and reads no byte of them, so the ESCSUITE-241 budget, `ProjectTooLargeError` and the FileReader path are
+gone; `loadProject` sniffs the first 8 bytes, reads a v2 file through the index and `blob.slice` — every
+refusal a `ProjectFileError` shown as `Failed to load project: <reason>`, a truncated file named by its
+shortfall, a duplicate source id refused — checks the storage estimate before its first write ("This project
+needs 1.5 GiB of storage and this browser has 1.0 GiB free.", skipped when no quota is reported or the
+estimate rejects), rolls back the sources a failed load wrote and revokes their thumbnail URLs, and still
+reads v1 through the same per-source helper, with `parseProject` run on both paths before any source is written; the kit reads v2 bundles with a capped index read, tiling
+against the file size and ranged copies that check their own length), each in one sitting against `main` at
+`e0798044` (the ESCSUITE-284 version-packages commit; `cd95ad08`, the commit this branch lands on, differs
+from it in docs alone). **Artist**: 99.84 / **99.41** / **96.62** / 99.76 against
+99.84 / 99.40 / 96.59 / 99.76 — statements up a hundredth, branches up three, lines and functions unmoved.
+That base reads 96.59 where the table row recorded 96.57 from the ESCSUITE-280 / 281 tree: the wave-10
+branches landed one after another, the drift ESCSUITE-91 and 113 recorded, and the row is corrected here to
+the direct measurement. The base gives 5,751 / 5,954 branches and this branch 5,814 / 6,017: sixty-three
+new branches, sixty-three covered, the same 203 uncovered as before (lines 8,910 / 8,924 → 9,004 / 9,018,
+statements 10,082 / 10,142 → 10,176 / 10,236, functions 2,129 / 2,134 → 2,148 / 2,153, every denominator
+growing by exactly what the numerator did; the same 14 / 60 / 5 uncovered). The movement is three files:
+`core/projectFileFormat.ts` arrives at 100 on all four — 96 lines, 98 statements, 69 branches, 15 functions —
+with every refusal (a version above 2, an index over the cap or past the file, an index that is not JSON or
+not the index shape, an offset or length that is not a safe non-negative integer, a duplicate id, a magic-prefixed
+file shorter than its header, a gap, an overlap, a range out of order, a shortfall, trailing bytes — and the
+writer's zero-byte thumbnail and its rounding, up for a need and down for what is free or held, so a refusal
+never prints two equal figures) reached from both sides by `projectFileFormat.test.ts`'s 70 cases on hand-built
+bytes; `core/projectManager.ts` went 56 / 56 → 48 / 48 branches and 177 → 173 statements while gaining four
+functions (26 → 30), because the 241 pre-pass and `blobToBase64` took their fully covered arms out as the shared
+`restoreSource` / `restoreSources`, `assertProjectParses`, `assertRoomFor` and `rollBack` came in — each reached
+from both sides by the v2 round trips, the project refused by name before any write on both versions, the 2 GiB virtual file whose slices refuse to be
+read, the present-id and new-id cases, the quota refusal, the equal-boundary and over-quota acceptances, the
+quota-0 and rejecting-estimate skips, and the rollback cases that read real fake-indexeddb rows after the
+failure; and `app/useProjectActions.ts` 22 / 22 → 24 / 24 (the `instanceof ProjectFileError` choice on
+save and on load, each from both sides). **Kit**: **99.59** / **99.51** / **98.59** / **98.86** against
+99.56 / 99.48 / 98.50 / 98.75 — every figure up, with the uncovered column unmoved: lines 908 / 912 →
+976 / 980, statements 964 / 969 → 1,034 / 1,039, branches 595 / 604 → 632 / 641 and functions
+159 / 161 → 174 / 176, every denominator growing by exactly what the numerator did (the same 4 / 5 / 9 / 2
+uncovered, in the same ledgered places). All thirty-seven new branches are `src/loaders.ts`'s
+(116 / 116 → 153 / 153): the 16-byte sniff and the magic-prefixed short file refused by name, the version,
+the 64 MiB cap and the past-the-end check before the index is read, the index shape, the shared entry
+validation with a range-typed `data`, the tiling against `stat.size`, the zero-length range that writes an
+empty file, and the copy that checks its own byte count — each reached from both sides by the loader
+suite's 108 cases over real temp files, byte-for-byte copies included, and none of the refusals leaving a
+temp directory behind. Outside vitest's measurement the kit's Chromium suite ran here with ffprobe on PATH:
+34 passed, 1 skipped (the Linux-only font oracle), the new case rendering the same project from a v1 and a
+v2 bundle to the same manifest. Every `*.perf.test.ts` and rerender pin is byte-identical — nothing here
+runs per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4225,9 +4276,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.40 | 96.57 | 99.76 |
+| `@escapesuite/artist` | 99.84 | 99.41 | 96.62 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.56 | 99.48 | 98.50 | 98.75 |
+| `@escapesuite/headless-artist` | 99.59 | 99.51 | 98.59 | 98.86 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

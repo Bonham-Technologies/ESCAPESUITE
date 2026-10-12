@@ -7,6 +7,7 @@ import { chromium } from 'playwright'
 import { runJob } from './run'
 import type { JobSpec } from './types'
 import { hasFfmpeg, probe } from '../test/ffprobe'
+import { assembleV2, v2IndexAndPayload } from '../test/veditorV2'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const SERVICE_ROOT = path.resolve(HERE, '..')
@@ -189,6 +190,50 @@ describe('runJob (real Chromium)', () => {
     // The scratch dir this job rendered into is gone.
     expect(await fs.readdir(workDir)).toEqual([])
   }, RENDER_TIMEOUT_MS)
+
+  // ESCSUITE-260: the same project from a v1 JSON bundle and from a v2 container renders alike.
+  // The v2 bundle is built here over test/fixtures/manifest/src-0.mp4, exactly the bytes the v1
+  // fixture embeds, so the media is identical and only the container differs.
+  it('renders the same project from a v1 and a v2 .veditor bundle alike', async () => {
+    const v1Path = path.join(SERVICE_ROOT, 'test/fixtures/project.veditor')
+    const v1 = JSON.parse(await fs.readFile(v1Path, 'utf8'))
+    const source = await fs.readFile(path.join(SERVICE_ROOT, 'test/fixtures/manifest/src-0.mp4'))
+    const { index, payload } = v2IndexAndPayload(v1.project, [
+      { id: v1.videos[0].id, name: v1.videos[0].name, mimeType: v1.videos[0].mimeType, bytes: source },
+    ])
+    const v2Path = path.join(tmpRoot, 'project-v2.veditor')
+    await fs.writeFile(v2Path, assembleV2(index, payload))
+
+    const render = async (jobId: string, bundle: string) => {
+      const outcome = await runJob(
+        {
+          jobId,
+          input: { bundle: { path: bundle } },
+          options: { format: 'mp4', quality: 'medium' },
+          output: { sink: 'volume', config: { dir: outDir } },
+        },
+        { bundlePath: BUNDLE, workDir, versions: VERSIONS, log: quiet },
+      )
+      expect(outcome.ok).toBe(true)
+      return JSON.parse(await fs.readFile(path.join(outDir, `${jobId}.manifest.json`), 'utf8')) as {
+        width: number
+        height: number
+        durationSec: number
+      }
+    }
+
+    const fromV1 = await render('e2e-veditor-v1', v1Path)
+    const fromV2 = await render('e2e-veditor-v2', v2Path)
+
+    expect(fromV1).toMatchObject({ width: 64, height: 48 })
+    expect({ width: fromV2.width, height: fromV2.height, durationSec: fromV2.durationSec }).toEqual({
+      width: fromV1.width,
+      height: fromV1.height,
+      durationSec: fromV1.durationSec,
+    })
+    // Both renders' scratch dirs, and their bundle temp files, are gone.
+    expect(await fs.readdir(workDir)).toEqual([])
+  }, 2 * RENDER_TIMEOUT_MS)
 
   it('renders the same job as a GIF', async () => {
     const spec: JobSpec = {

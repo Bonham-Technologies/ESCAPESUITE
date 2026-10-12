@@ -17,7 +17,8 @@
 // callbacks that need it only ever read `clips.length`, and it is the
 // dependency both of them carried inline.
 import { useCallback, useState } from 'react';
-import { saveProject, loadProject, showOpenProjectDialog, ProjectTooLargeError } from '../core/projectManager';
+import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
+import { ProjectFileError } from '../core/projectFileFormat';
 import { revokeSourceThumbnails } from '../core/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
@@ -98,7 +99,7 @@ export function useProjectActions({
     } catch (error) {
       console.error('Save failed:', error);
       showNotification(
-        error instanceof ProjectTooLargeError ? error.message : 'Failed to save project',
+        error instanceof ProjectFileError ? error.message : 'Failed to save project',
         'error'
       );
     } finally {
@@ -170,7 +171,13 @@ export function useProjectActions({
     } catch (error) {
       console.error('Load failed:', error);
       if (mintedButNotYetOwned) revokeSourceThumbnails(mintedButNotYetOwned);
-      showNotification('Failed to load project', 'error');
+      // A refused file names its reason (ESCSUITE-260): a damaged or cut-off
+      // v2 file, or one that will not fit in storage. Anything else, such as a
+      // v1 file that is not JSON, keeps the bare sentence.
+      showNotification(
+        error instanceof ProjectFileError ? `Failed to load project: ${error.message}` : 'Failed to load project',
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }
@@ -216,7 +223,7 @@ export function useProjectActions({
     } catch (error) {
       console.error('Failed to save current project:', error);
       showNotification(
-        error instanceof ProjectTooLargeError ? error.message : 'Failed to save project',
+        error instanceof ProjectFileError ? error.message : 'Failed to save project',
         'error'
       );
       return;
