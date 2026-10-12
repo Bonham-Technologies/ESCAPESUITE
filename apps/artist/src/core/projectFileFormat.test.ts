@@ -335,6 +335,15 @@ describe('readProjectFileIndex', () => {
     expect(await refusal(rawV2(indexWith([entry(), null]), [1, 2, 3]))).toBe('video #1 has no id, name or type')
   })
 
+  it('refuses an index that lists the same source id twice, and takes two distinct ids', async () => {
+    const second = { offset: 3, length: 1 }
+    expect(await refusal(rawV2(indexWith([entry(), entry({ data: second })]), [1, 2, 3, 4]))).toBe(
+      'the index lists source "v" twice'
+    )
+    const read = await readProjectFileIndex(rawV2(indexWith([entry(), entry({ id: 'w', data: second })]), [1, 2, 3, 4]))
+    expect(read!.index.videos.map((video) => video.id)).toEqual(['v', 'w'])
+  })
+
   it('refuses a meta that is not an object, and takes an entry with no meta', async () => {
     expect(await refusal(rawV2(indexWith([entry({ meta: 'x' })]), [1, 2, 3]))).toBe(
       "video #0's meta is not an object"
