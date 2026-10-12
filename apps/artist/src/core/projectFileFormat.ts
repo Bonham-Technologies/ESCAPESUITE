@@ -151,3 +151,150 @@ export function encodeProjectFile(
   view.setUint32(12, indexBytes.length, true);
   return [header, indexBytes, ...payload];
 }
+
+function fail(reason: string): never {
+  throw new ProjectFileError(reason);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** A non-negative whole number JavaScript holds exactly: an offset or a length. */
+function isByteCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function readRange(value: unknown, where: string): ByteRange {
+  if (!isRecord(value) || !isByteCount(value.offset) || !isByteCount(value.length)) {
+    fail(`${where} is not a byte range`);
+  }
+  return { offset: value.offset as number, length: value.length as number };
+}
+
+function parseVideo(value: unknown, i: number): ProjectFileIndexVideo {
+  const at = `video #${i}`;
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    typeof value.name !== 'string' ||
+    typeof value.mimeType !== 'string'
+  ) {
+    fail(`${at} has no id, name or type`);
+  }
+  if (value.meta !== undefined && !isRecord(value.meta)) {
+    fail(`${at}'s meta is not an object`);
+  }
+  const video: ProjectFileIndexVideo = {
+    id: value.id as string,
+    name: value.name as string,
+    mimeType: value.mimeType as string,
+    // Shape only: `restoreSource` recovers an unusable duration or dimension
+    // from the blob, exactly as it does for a v1 file's `meta`.
+    meta: value.meta as SourceVideoMeta | undefined,
+    data: readRange(value.data, `${at}'s data`),
+  };
+  if (value.thumbnail !== undefined) {
+    const range = readRange(value.thumbnail, `${at}'s thumbnail`);
+    const mimeType = (value.thumbnail as Record<string, unknown>).mimeType;
+    if (typeof mimeType !== 'string') {
+      fail(`${at}'s thumbnail has no type`);
+    }
+    video.thumbnail = { ...range, mimeType };
+  }
+  return video;
+}
+
+function parseIndex(value: unknown): ProjectFileIndex {
+  if (!isRecord(value) || value.version !== CONTAINER_VERSION || !Array.isArray(value.videos)) {
+    fail('its index is not a version 2 project index');
+  }
+  return {
+    version: CONTAINER_VERSION,
+    // Handed back as found, as the v1 path does: `parseProject` validates both.
+    project: value.project as Project,
+    editor: value.editor as EditorBlock | undefined,
+    videos: (value.videos as unknown[]).map(parseVideo),
+  };
+}
+
+/** True when `bytes` starts with a full v2 header's magic. */
+export function isV2Header(bytes: Uint8Array): boolean {
+  return bytes.length >= HEADER_BYTES && MAGIC.every((byte, i) => bytes[i] === byte);
+}
+
+/**
+ * The index of a v2 file, and where its payload starts. Two small slices are
+ * read, the header and the index, and never the payload. Answers `null` when
+ * the file is not v2 (every v1 file, and anything else), so the caller sniffs
+ * exactly once. A v2 file this refuses throws `ProjectFileError`.
+ */
+export async function readProjectFileIndex(
+  blob: Blob
+): Promise<{ index: ProjectFileIndex; payloadStart: number } | null> {
+  const head = new Uint8Array(await blob.slice(0, HEADER_BYTES).arrayBuffer());
+  if (!isV2Header(head)) return null;
+
+  const view = new DataView(head.buffer);
+  const version = view.getUint32(8, true);
+  if (version > CONTAINER_VERSION) {
+    fail(`this file was saved by a newer ESCAPEARTIST (format version ${version}); update ESCAPEARTIST to open it`);
+  }
+  if (version !== CONTAINER_VERSION) {
+    fail(`its header names format version ${version}, which no ESCAPEARTIST writes`);
+  }
+  const indexLength = view.getUint32(12, true);
+  if (indexLength > MAX_INDEX_BYTES) {
+    fail(`its index claims ${indexLength} bytes, over the ${MAX_INDEX_BYTES}-byte limit`);
+  }
+  const payloadStart = HEADER_BYTES + indexLength;
+  if (payloadStart > blob.size) {
+    fail(`the file ends before its index does: it is ${blob.size} bytes and its index runs to byte ${payloadStart}`);
+  }
+
+  const text = await blob.slice(HEADER_BYTES, payloadStart).text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    fail('its index is not valid JSON');
+  }
+  return { index: parseIndex(parsed), payloadStart };
+}
+
+/**
+ * The index's ranges, in order (each source, then its thumbnail), must tile
+ * the payload exactly: no gap, no overlap, nothing out of order, ending at
+ * the file's last byte. Checked before anything is written, so a truncated
+ * download is refused by name rather than half-loaded.
+ */
+export function assertRangesTile(index: ProjectFileIndex, payloadStart: number, size: number): void {
+  let expected = 0;
+  index.videos.forEach((video, i) => {
+    const ranges: Array<[string, ByteRange]> = video.thumbnail
+      ? [['data', video.data], ['thumbnail', video.thumbnail]]
+      : [['data', video.data]];
+    for (const [part, range] of ranges) {
+      if (range.offset !== expected) {
+        fail(`video #${i}'s ${part} starts at byte ${range.offset} of the media, where byte ${expected} was expected`);
+      }
+      expected += range.length;
+    }
+  });
+  const held = size - payloadStart;
+  if (expected > held) {
+    fail(
+      `the file is incomplete: it declares ${formatSize(expected)} of media and holds ${formatSize(held)} ` +
+        `(${held} of ${expected} bytes), so it was probably cut off while downloading`
+    );
+  }
+  if (expected < held) {
+    fail(`the file has ${held - expected} bytes after its last source`);
+  }
+}
+
+/** One part of the payload, lazily: nothing is read until a consumer reads the slice. */
+export function sliceRange(blob: Blob, payloadStart: number, range: ByteRange, type: string): Blob {
+  const start = payloadStart + range.offset;
+  return blob.slice(start, start + range.length, type);
+}
