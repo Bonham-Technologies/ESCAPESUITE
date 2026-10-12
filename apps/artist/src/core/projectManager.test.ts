@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
+import { File as NodeFile } from 'node:buffer'
 import {
   exportProjectMetadata,
   extractMetadataFromBlob,
@@ -9,21 +10,31 @@ import {
   MAX_PROJECT_FILE_BASE64_BYTES,
   ProjectTooLargeError,
   type ProjectFile,
+  type SourceVideoMeta,
 } from './projectManager'
+import { HEADER_BYTES, MAX_INDEX_BYTES, ProjectFileError, encodeProjectFile } from './projectFileFormat'
 // The real storage layer, running on the fake-indexeddb installed by
 // src/test/setup.ts — save/load really round-trips through IndexedDB here.
 import { parseProject } from '../store/projectMigration'
 import { deleteVideo, getAllVideoMetadata, getThumbnail, getVideo, storeThumbnail, storeVideo } from './storage'
-import type { Project, SourceVideo } from '../store/types'
+import type { EditorBlock, Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { lastObjectUrl } from '../test/objectUrls'
 import { installFileReaderDouble } from '../test/doubles/fileReader'
 
-// Pass-through spies so a test can see (and, for the budget cases, fake the
-// size of) what saveProject asks storage for. Everything else is the real layer.
+// Pass-through spies, so a test can see (and, for the 2 GiB and quota cases,
+// fake) what save and load ask storage for. Everything else is the real layer.
 vi.mock('./storage', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./storage')>()
-  return { ...actual, getVideo: vi.fn(actual.getVideo), getThumbnail: vi.fn(actual.getThumbnail) }
+  return {
+    ...actual,
+    getVideo: vi.fn(actual.getVideo),
+    getThumbnail: vi.fn(actual.getThumbnail),
+    storeVideo: vi.fn(actual.storeVideo),
+    storeThumbnail: vi.fn(actual.storeThumbnail),
+    deleteVideo: vi.fn(actual.deleteVideo),
+    getStorageEstimate: vi.fn(actual.getStorageEstimate),
+  }
 })
 
 let idCounter = 0
@@ -80,6 +91,117 @@ function decodeBase64(base64: string): number[] {
   const bytes: number[] = []
   for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i))
   return bytes
+}
+
+const MiB = 1024 * 1024
+const GiB = 1024 * MiB
+
+/** A Blob that reports `size` and refuses every way of reading it. */
+function untouchable(size: number, type: string): Blob {
+  const blob = new Blob([], { type })
+  Object.defineProperty(blob, 'size', { value: size })
+  for (const read of ['arrayBuffer', 'text', 'stream', 'slice', 'bytes']) {
+    Object.defineProperty(blob, read, {
+      value: () => {
+        throw new Error(`${read}() read a source`)
+      },
+    })
+  }
+  return blob
+}
+
+/**
+ * A File the loader can slice, built from the writer's parts. Node's File:
+ * src/test/setup.ts makes Node's Blob the global one, and jsdom's File would
+ * turn a Node Blob part into the text "[object Blob]".
+ */
+const fileOf = (parts: BlobPart[], name = 'project.veditor'): File =>
+  new NodeFile(parts as ConstructorParameters<typeof NodeFile>[0], name) as unknown as File
+
+interface V2Source {
+  id: string
+  name?: string
+  mimeType?: string
+  meta?: SourceVideoMeta
+  bytes: number[]
+  thumbnail?: { bytes: number[]; type: string }
+}
+
+/** A v2 `.veditor` written by the real writer over real bytes. */
+function v2File(project: Project, sources: V2Source[], editor?: EditorBlock): File {
+  return fileOf(
+    encodeProjectFile(
+      project,
+      editor,
+      sources.map((source) => {
+        const mimeType = source.mimeType ?? 'video/mp4'
+        return {
+          id: source.id,
+          name: source.name ?? `${source.id}.mp4`,
+          mimeType,
+          meta: source.meta,
+          blob: new Blob([new Uint8Array(source.bytes)], { type: mimeType }),
+          thumbnail:
+            source.thumbnail && new Blob([new Uint8Array(source.thumbnail.bytes)], { type: source.thumbnail.type }),
+        }
+      })
+    )
+  )
+}
+
+/** Hand-built v2 bytes, for files the writer would never produce. */
+function rawV2File(
+  index: unknown,
+  payload: number[] = [],
+  header: { version?: number; indexLength?: number } = {}
+): File {
+  const indexBytes = new TextEncoder().encode(typeof index === 'string' ? index : JSON.stringify(index))
+  const head = new Uint8Array(HEADER_BYTES)
+  head.set([0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a])
+  const view = new DataView(head.buffer)
+  view.setUint32(8, header.version ?? 2, true)
+  view.setUint32(12, header.indexLength ?? indexBytes.length, true)
+  return fileOf([head, indexBytes, new Uint8Array(payload)])
+}
+
+/**
+ * A `.veditor` as large as its parts claim, without the bytes. `slice` hands
+ * back the real header and index. Any other range returns an empty marker
+ * Blob and is recorded, so a test can see exactly which ranges the loader cut
+ * and that it never read the file whole.
+ */
+function virtualV2File(parts: BlobPart[]) {
+  const header = parts[0] as Uint8Array<ArrayBuffer>
+  const indexBytes = parts[1] as Uint8Array<ArrayBuffer>
+  const payloadStart = HEADER_BYTES + indexBytes.length
+  const size = payloadStart + parts.slice(2).reduce<number>((sum, part) => sum + (part as Blob).size, 0)
+  const cuts: Array<{ start: number; end: number; type: string; marker: Blob }> = []
+  const wholeReads: string[] = []
+  const file = {
+    name: 'huge.veditor',
+    type: '',
+    size,
+    slice(start = 0, end = size, type = '') {
+      if (start === 0 && end === HEADER_BYTES) return new Blob([header])
+      if (start === HEADER_BYTES && end === payloadStart) return new Blob([indexBytes])
+      const marker = new Blob([], { type })
+      cuts.push({ start, end, type, marker })
+      return marker
+    },
+    text: () => {
+      wholeReads.push('text')
+      return Promise.reject(new Error('read the whole file'))
+    },
+    arrayBuffer: () => {
+      wholeReads.push('arrayBuffer')
+      return Promise.reject(new Error('read the whole file'))
+    },
+    stream: () => {
+      wholeReads.push('stream')
+      throw new Error('read the whole file')
+    },
+  }
+  return { file: file as unknown as File, cuts, wholeReads, payloadStart }
 }
 
 describe('exportProjectMetadata', () => {
@@ -686,6 +808,313 @@ describe('loadProject', () => {
     const { project: loaded } = await loadProject(veditorFile({ project }, videoId))
 
     expect(loaded.timeline.clips[0].crop).toEqual(crop)
+  })
+})
+
+describe('loadProject, version 2 (ESCSUITE-260)', () => {
+  let media: MediaDoubles
+  const meta = (overrides: Partial<SourceVideoMeta> = {}): SourceVideoMeta => ({
+    duration: 12,
+    width: 640,
+    height: 360,
+    frameRate: 24,
+    ...overrides,
+  })
+
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { duration: 42, videoWidth: 1280, videoHeight: 720 } })
+    vi.mocked(storeVideo).mockClear()
+    vi.mocked(storeThumbnail).mockClear()
+  })
+
+  afterEach(() => {
+    media.uninstall()
+  })
+
+  it('reads the bytes, meta, editor block, crop and the thumbnail in its own type', async () => {
+    const id = uniqueId('v2')
+    const project = createTestProject(id)
+    project.timeline.clips[0].crop = { left: 0.25, top: 0.1, right: 0, bottom: 0 }
+    const editor: EditorBlock = { inPoint: 1, outPoint: 4, markers: [] }
+    const file = v2File(
+      project,
+      [
+        {
+          id,
+          name: 'clip.webm',
+          mimeType: 'video/webm',
+          meta: meta({ waveformData: [{ min: -1, max: 1 }] }),
+          bytes: [0, 1, 255],
+          thumbnail: { bytes: [9, 8, 7], type: 'image/png' },
+        },
+      ],
+      editor
+    )
+
+    const progress: Array<[number, string]> = []
+    const loaded = await loadProject(file, (p, m) => progress.push([p, m]))
+
+    expect(loaded.project.timeline.clips[0].crop).toEqual({ left: 0.25, top: 0.1, right: 0, bottom: 0 })
+    expect(loaded.project.modified).toBeGreaterThan(1234567890000)
+    expect(loaded.editor).toEqual(editor)
+    expect(loaded.sourceVideos[0]).toMatchObject({
+      id,
+      name: 'clip.webm',
+      mimeType: 'video/webm',
+      duration: 12,
+      width: 640,
+      height: 360,
+      frameRate: 24,
+      size: 3,
+      waveformData: [{ min: -1, max: 1 }],
+    })
+    expect(loaded.sourceVideos[0].thumbnailUrl).toBe(lastObjectUrl())
+    const stored = await getVideo(id)
+    expect(Array.from(new Uint8Array(await stored!.blob.arrayBuffer()))).toEqual([0, 1, 255])
+    expect(stored!.blob.type).toBe('video/webm')
+    const thumb = await getThumbnail(id)
+    expect(Array.from(new Uint8Array(await thumb!.arrayBuffer()))).toEqual([9, 8, 7])
+    expect(thumb!.type).toBe('image/png') // v1 always wrote image/jpeg
+    expect(media.videos).toHaveLength(0)
+    expect(progress[0]).toEqual([0, 'Reading project file...'])
+    expect(progress).toContainEqual([10, 'Restoring videos...'])
+    expect(progress).toContainEqual([90, 'Restoring video 1/1...'])
+    expect(progress[progress.length - 1]).toEqual([100, 'Project loaded!'])
+
+    await deleteVideo(id)
+  })
+
+  it('loads a v2 project that holds no sources', async () => {
+    const loaded = await loadProject(v2File(createTestProject('none'), []))
+    expect(loaded.sourceVideos).toEqual([])
+    expect(loaded.editor).toBeUndefined()
+  })
+
+  // Review Focus 1.
+  it('round trips a project whose names and markers are not ASCII', async () => {
+    const id = uniqueId('unicode')
+    const project = { ...createTestProject(id), name: 'Café — 日本' }
+    const editor: EditorBlock = {
+      inPoint: null,
+      outPoint: null,
+      markers: [{ id: 'm', time: 1, label: 'Ünïcødé ✓', color: '#ffcc00' }],
+    }
+
+    const loaded = await loadProject(v2File(project, [{ id, name: 'クリップ.mp4', meta: meta(), bytes: [4, 5] }], editor))
+
+    expect(loaded.project.name).toBe('Café — 日本')
+    expect(loaded.editor).toEqual(editor)
+    expect(loaded.sourceVideos[0].name).toBe('クリップ.mp4')
+    expect(Array.from(new Uint8Array(await (await getVideo(id))!.blob.arrayBuffer()))).toEqual([4, 5])
+
+    await deleteVideo(id)
+  })
+
+  it('loads a 2 GiB file by slicing it, never reading it whole', async () => {
+    const a = uniqueId('huge-a')
+    const b = uniqueId('huge-b')
+    const { file, cuts, wholeReads, payloadStart } = virtualV2File(
+      encodeProjectFile(createTestProject(a), undefined, [
+        {
+          id: a,
+          name: 'a.mp4',
+          mimeType: 'video/mp4',
+          meta: meta(),
+          blob: untouchable(1536 * MiB, 'video/mp4'),
+          thumbnail: untouchable(MiB, 'image/jpeg'),
+        },
+        { id: b, name: 'b.webm', mimeType: 'video/webm', meta: meta(), blob: untouchable(511 * MiB, 'video/webm') },
+      ])
+    )
+    expect(file.size - payloadStart).toBe(2 * GiB)
+    vi.mocked(storeVideo).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined)
+    vi.mocked(storeThumbnail).mockResolvedValueOnce(undefined)
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(wholeReads).toEqual([])
+    expect(cuts.map(({ start, end, type }) => ({ start, end, type }))).toEqual([
+      { start: payloadStart, end: payloadStart + 1536 * MiB, type: 'video/mp4' },
+      { start: payloadStart + 1536 * MiB, end: payloadStart + 1537 * MiB, type: 'image/jpeg' },
+      { start: payloadStart + 1537 * MiB, end: payloadStart + 2048 * MiB, type: 'video/webm' },
+    ])
+    expect(vi.mocked(storeVideo).mock.calls.map(([id, blob]) => [id, blob])).toEqual([
+      [a, cuts[0].marker],
+      [b, cuts[2].marker],
+    ])
+    expect(vi.mocked(storeVideo).mock.calls[0][1]).toBe(cuts[0].marker)
+    expect(vi.mocked(storeVideo).mock.calls[1][1]).toBe(cuts[2].marker)
+    expect(vi.mocked(storeThumbnail).mock.calls).toEqual([[a, cuts[1].marker]])
+    expect(vi.mocked(storeThumbnail).mock.calls[0][1]).toBe(cuts[1].marker)
+    expect(sourceVideos.map((source) => source.id)).toEqual([a, b])
+  })
+
+  it('resurrects bytes but not CRAFT take identity for a source CRAFT no longer has (ESCSUITE-151)', async () => {
+    const id = uniqueId('v2-deleted-take')
+    const take: SourceVideo = {
+      id,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      takeId: id,
+      role: 'screen',
+      startOffset: 0,
+      overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+      hasWebcam: true,
+    }
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), take)
+    await deleteVideo(id)
+
+    const takeMeta: SourceVideoMeta = {
+      duration: take.duration,
+      width: take.width,
+      height: take.height,
+      frameRate: take.frameRate,
+      mediaType: take.mediaType,
+      source: take.source,
+      takeId: take.takeId,
+      role: take.role,
+      startOffset: take.startOffset,
+      overlayPlacement: take.overlayPlacement,
+      hasWebcam: take.hasWebcam,
+    }
+    const { sourceVideos } = await loadProject(
+      v2File(createTestProject(id), [{ id, name: take.name, mimeType: take.mimeType, meta: takeMeta, bytes: [1, 2, 3] }])
+    )
+
+    expect(sourceVideos[0].source).toBeUndefined()
+    expect(sourceVideos[0].takeId).toBeUndefined()
+    expect(sourceVideos[0].role).toBeUndefined()
+    expect(sourceVideos[0].startOffset).toBeUndefined()
+    expect(sourceVideos[0].overlayPlacement).toBeUndefined()
+    expect(sourceVideos[0].duration).toBe(12)
+    expect(sourceVideos[0].hasWebcam).toBe(true)
+    const restored = (await getAllVideoMetadata()).find((v) => v.id === id)
+    expect(restored!.source).toBeUndefined()
+    expect(restored!.takeId).toBeUndefined()
+
+    await deleteVideo(id)
+  })
+
+  it("keeps a present source's own CRAFT identity and writes nothing for it (ESCSUITE-151)", async () => {
+    const id = uniqueId('v2-present')
+    const stored: SourceVideo = {
+      id,
+      name: 'take.webm',
+      duration: 12,
+      width: 1280,
+      height: 720,
+      frameRate: 24,
+      mimeType: 'video/webm',
+      size: 3,
+      mediaType: 'video',
+      source: 'recording',
+      takeId: id,
+      role: 'screen',
+      startOffset: 0,
+      hasWebcam: true,
+    }
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), stored)
+    vi.mocked(storeVideo).mockClear()
+
+    const { sourceVideos } = await loadProject(
+      v2File(createTestProject(id), [
+        {
+          id,
+          name: 'take.webm',
+          mimeType: 'video/webm',
+          meta: meta({ duration: 20, frameRate: 30, waveformData: [{ min: -1, max: 1 }] }),
+          bytes: [1, 2, 3],
+          thumbnail: { bytes: [5], type: 'image/jpeg' },
+        },
+      ])
+    )
+
+    expect(sourceVideos[0]).toMatchObject({
+      duration: 20,
+      frameRate: 30,
+      waveformData: [{ min: -1, max: 1 }],
+      source: 'recording',
+      takeId: id,
+      role: 'screen',
+      startOffset: 0,
+    })
+    expect(storeVideo).not.toHaveBeenCalled()
+    expect(storeThumbnail).not.toHaveBeenCalled()
+    expect((await getVideo(id))!.metadata).toEqual(stored)
+
+    await deleteVideo(id)
+  })
+
+  it('sends a file whose magic is one byte off down the v1 path, where it fails as JSON', async () => {
+    const bytes = new Uint8Array(
+      await rawV2File({ version: 2, project: createTestProject('x'), videos: [] }).arrayBuffer()
+    )
+    bytes[3] = 0x45 // 'E' where the magic has 'D'
+
+    const error = await loadProject(fileOf([bytes])).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(SyntaxError)
+    expect(error).not.toBeInstanceOf(ProjectFileError)
+    expect(storeVideo).not.toHaveBeenCalled()
+  })
+
+  const refusedId = 'refused'
+  const indexWith = (videos: unknown[]) => ({ version: 2, project: createTestProject(refusedId), videos })
+  const one = (data: unknown) => [{ id: refusedId, name: 'v.mp4', mimeType: 'video/mp4', data }]
+
+  it.each([
+    ['a newer container version', () => rawV2File(indexWith([]), [], { version: 3 }), /newer ESCAPEARTIST/],
+    [
+      'an index longer than the cap',
+      () => rawV2File('', [], { indexLength: MAX_INDEX_BYTES + 1 }),
+      /over the 67108864-byte limit/,
+    ],
+    ['an index past the end of the file', () => rawV2File('{}', [], { indexLength: 4096 }), /ends before its index does/],
+    ['an index that is not JSON', () => rawV2File('{oops'), /not valid JSON/],
+    [
+      'a range that is not a safe integer',
+      () => rawV2File(indexWith(one({ offset: 0, length: 2 ** 53 })), [1, 2, 3]),
+      /data is not a byte range/,
+    ],
+    ['a gap', () => rawV2File(indexWith(one({ offset: 1, length: 2 })), [1, 2, 3]), /starts at byte 1 of the media/],
+    [
+      'an overlap',
+      () =>
+        rawV2File(
+          indexWith([...one({ offset: 0, length: 3 }), { id: 'other', name: 'o.mp4', mimeType: 'video/mp4', data: { offset: 2, length: 1 } }]),
+          [1, 2, 3, 4]
+        ),
+      /video #1's data starts at byte 2/,
+    ],
+    [
+      'sources out of order',
+      () =>
+        rawV2File(
+          indexWith([...one({ offset: 1, length: 3 }), { id: 'other', name: 'o.mp4', mimeType: 'video/mp4', data: { offset: 0, length: 1 } }]),
+          [1, 2, 3, 4]
+        ),
+      /video #0's data starts at byte 1/,
+    ],
+    [
+      'a truncated payload',
+      () => rawV2File(indexWith(one({ offset: 0, length: 10 })), [1, 2, 3]),
+      /\(3 of 10 bytes\), so it was probably cut off while downloading/,
+    ],
+    ['trailing junk', () => rawV2File(indexWith(one({ offset: 0, length: 3 })), [1, 2, 3, 4, 5]), /2 bytes after its last source/],
+  ])('refuses %s by name, and writes nothing', async (_case, build, reason) => {
+    const error = await loadProject(build()).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toMatch(reason)
+    expect(storeVideo).not.toHaveBeenCalled()
+    expect(storeThumbnail).not.toHaveBeenCalled()
   })
 })
 
