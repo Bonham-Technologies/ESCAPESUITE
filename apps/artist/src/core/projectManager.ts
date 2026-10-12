@@ -438,7 +438,7 @@ async function assertRoomFor(index: ProjectFileIndex, existing: StoredSource[]):
   const free = Math.max(0, available);
   if (quota > 0 && needed > free) {
     throw new ProjectFileError(
-      `This project needs ${formatSize(needed)} of storage and this browser has ${formatSize(free)} free.`
+      `This project needs ${formatSize(needed)} of storage and this browser has ${formatSize(free, { round: 'down' })} free.`
     );
   }
 }

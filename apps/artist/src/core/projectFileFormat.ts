@@ -93,9 +93,18 @@ export interface ProjectFileSource {
   thumbnail?: Blob;
 }
 
-/** Bytes as the user reads them: whole MiB below 1 GiB, GiB to one decimal from there. */
-export function formatSize(bytes: number): string {
-  return bytes >= GIB ? `${(bytes / GIB).toFixed(1)} GiB` : `${Math.ceil(bytes / MIB)} MiB`;
+/**
+ * Bytes as the user reads them: whole MiB below 1 GiB, GiB to one decimal from
+ * there. A figure that is needed or declared rounds up (the default); one that
+ * is free or held passes `round: 'down'`. A sentence that names one of each
+ * about a shortfall therefore never shows the same figure twice: 100.5 MiB
+ * needed against 100.2 MiB free reads "101 MiB" and "100 MiB".
+ */
+export function formatSize(bytes: number, { round = 'up' }: { round?: 'up' | 'down' } = {}): string {
+  const whole = round === 'down' ? Math.floor : Math.ceil;
+  // `bytes * 10` is a whole number and GIB a power of two, so the tenths are
+  // exact and never land a hair past a boundary.
+  return bytes >= GIB ? `${(whole((bytes * 10) / GIB) / 10).toFixed(1)} GiB` : `${whole(bytes / MIB)} MiB`;
 }
 
 /**
@@ -309,7 +318,7 @@ export function assertRangesTile(index: ProjectFileIndex, payloadStart: number, 
   const held = size - payloadStart;
   if (expected > held) {
     fail(
-      `the file is incomplete: it declares ${formatSize(expected)} of media and holds ${formatSize(held)} ` +
+      `the file is incomplete: it declares ${formatSize(expected)} of media and holds ${formatSize(held, { round: 'down' })} ` +
         `(${held} of ${expected} bytes), so it was probably cut off while downloading`
     );
   }
