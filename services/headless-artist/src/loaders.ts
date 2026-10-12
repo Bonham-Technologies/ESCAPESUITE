@@ -1,4 +1,4 @@
-import { createWriteStream, promises as fs } from 'node:fs'
+import { createReadStream, createWriteStream, promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -115,16 +115,24 @@ function assertSourceMeta(value: unknown, context: string): asserts value is Ved
   }
 }
 
+/** A v2 entry's string fields: `data` is a byte range there, not a base64 string. */
+const VEDITOR_V2_VIDEO_FIELDS = ['id', 'name', 'mimeType'] as const
+
 /**
- * Validates one `videos[i]` entry. Without this a malformed bundle reaches the write loop as
- * `undefined`s — a `null` entry crashes on the property read, and a missing `mimeType` or
- * `name` quietly produces a `.bin` temp file the editor cannot decode.
+ * Validates what a `videos[i]` entry of either version shares: an object, `fields` present as
+ * strings, and an optional `meta`. Without this a malformed bundle reaches the write loop as
+ * `undefined`s. A `null` entry crashes on the property read, and a missing `mimeType` or `name`
+ * quietly produces a `.bin` temp file the editor cannot decode.
  */
-function assertVeditorVideo(value: unknown, index: number): asserts value is VeditorVideo {
+function assertVeditorEntry(
+  value: unknown,
+  index: number,
+  fields: readonly string[],
+): asserts value is Record<string, unknown> {
   if (!isRecord(value)) {
     throw new Error(`bundle video #${index} must be an object`)
   }
-  for (const field of VEDITOR_VIDEO_FIELDS) {
+  for (const field of fields) {
     if (value[field] === undefined) {
       throw new Error(`bundle video #${index} is missing "${field}"`)
     }
@@ -134,6 +142,31 @@ function assertVeditorVideo(value: unknown, index: number): asserts value is Ved
   }
   if (value.meta !== undefined) {
     assertSourceMeta(value.meta, `bundle video #${index}`)
+  }
+}
+
+/** One version 1 entry: `data` (and `thumbnail`, which the kit ignores) are base64 strings. */
+function assertVeditorVideo(value: unknown, index: number): asserts value is VeditorVideo {
+  assertVeditorEntry(value, index, VEDITOR_VIDEO_FIELDS)
+}
+
+/** A non-negative whole number JavaScript holds exactly. */
+function isByteCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0
+}
+
+function assertByteRange(value: unknown, context: string): asserts value is ByteRange {
+  if (!isRecord(value) || !isByteCount(value.offset) || !isByteCount(value.length)) {
+    throw new Error(`${context} must be {"offset", "length"}, each a whole number of bytes >= 0`)
+  }
+}
+
+/** One version 2 entry: `data` and the optional `thumbnail` are ranges of the payload. */
+function assertVeditorVideoV2(value: unknown, index: number): asserts value is VeditorVideoV2 {
+  assertVeditorEntry(value, index, VEDITOR_V2_VIDEO_FIELDS)
+  assertByteRange(value.data, `bundle video #${index} field "data"`)
+  if (value.thumbnail !== undefined) {
+    assertByteRange(value.thumbnail, `bundle video #${index} field "thumbnail"`)
   }
 }
 
@@ -223,64 +256,90 @@ interface VeditorVideo {
   meta?: VeditorVideoMeta
 }
 
-interface VeditorBundle {
-  version: number
-  project: Project
-  videos: VeditorVideo[]
+/**
+ * The v2 `.veditor` container (ESCSUITE-260): 16 header bytes (this magic, then the container
+ * version and the index length as little-endian u32s), the UTF-8 JSON index, then every source's
+ * (and thumbnail's) raw bytes back to back, in index order, with offsets counted from the
+ * payload's first byte. Spelled out here rather than imported from apps/artist. Nothing in this
+ * package imports the apps, the same reason the validators above are copies. Both packages'
+ * tests pin the same header bytes literally, so the two readers cannot drift apart unnoticed.
+ */
+const V2_MAGIC = Buffer.from([0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a])
+const V2_HEADER_BYTES = 16
+const V2_VERSION = 2
+/** ESCAPEARTIST's `MAX_INDEX_BYTES`: a corrupt header must not make the loader read gigabytes as text. */
+const V2_MAX_INDEX_BYTES = 64 * 1024 * 1024
+
+interface ByteRange {
+  offset: number
+  length: number
 }
 
-/**
- * Loads a `.veditor` bundle (the editor's own export format). The whole JSON file is parsed in
- * memory, but each video's base64 `data` is decoded and streamed to a temp file in chunks —
- * never as one giant `Buffer.from(wholeString)`. For large media, prefer `loadManifest`, which
- * references files on disk directly instead of round-tripping through base64.
- */
-export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir()): Promise<LoadedJob> {
-  let raw: string
+/** What both versions' entries share once validated. */
+interface VeditorEntry {
+  id: string
+  name: string
+  mimeType: string
+  meta?: VeditorVideoMeta
+}
+
+interface VeditorVideoV2 extends VeditorEntry {
+  data: ByteRange
+  thumbnail?: ByteRange
+}
+
+/** Up to `length` bytes of the file from `position`; fewer only at the end of the file. */
+async function readBytes(filePath: string, position: number, length: number): Promise<Buffer> {
+  const handle = await fs.open(filePath, 'r')
   try {
-    raw = await fs.readFile(bundlePath, 'utf8')
-  } catch {
-    throw new Error(`bundle "${bundlePath}" could not be read`)
+    const buffer = Buffer.alloc(length)
+    const { bytesRead } = await handle.read(buffer, 0, length, position)
+    return buffer.subarray(0, bytesRead)
+  } finally {
+    await handle.close()
   }
+}
 
-  let bundle: unknown
-  try {
-    bundle = JSON.parse(raw)
-  } catch {
-    throw new Error(`bundle "${bundlePath}" is not valid JSON`)
-  }
-
-  if (!isRecord(bundle)) {
-    throw new Error(`bundle "${bundlePath}" must be a JSON object`)
-  }
-
-  if (bundle.version !== 1) {
-    if (typeof bundle.version === 'number' && bundle.version > 1) {
-      throw new Error(
-        `bundle "${bundlePath}" has version ${bundle.version}, but this build only supports version 1`,
-      )
-    }
-    throw new Error(`bundle "${bundlePath}" must declare "version": 1`)
-  }
-
-  const project = (bundle as unknown as VeditorBundle).project
-  if (!isRecord(project)) {
+/** The project and the entries list both versions carry, before the entries are validated. */
+function readBundleBody(
+  bundle: Record<string, unknown>,
+  bundlePath: string,
+): { project: Project; videos: unknown[] } {
+  if (!isRecord(bundle.project)) {
     throw new Error(`bundle "${bundlePath}" is missing "project"`)
   }
-
-  const videos = (bundle as unknown as VeditorBundle).videos
-  if (!Array.isArray(videos)) {
+  if (!Array.isArray(bundle.videos)) {
     throw new Error(`bundle "${bundlePath}" is missing "videos"`)
   }
+  return { project: bundle.project as unknown as Project, videos: bundle.videos }
+}
 
+/** Each entry valid, its id a safe and unique file name, every clip's source present. Before mkdtemp. */
+function checkVideos<V extends VeditorEntry>(
+  videos: unknown[],
+  project: Project,
+  assertVideo: (value: unknown, index: number) => asserts value is V,
+): V[] {
   const sourceIds = new Set<string>()
-  videos.forEach((video: unknown, index: number) => {
-    assertVeditorVideo(video, index)
+  videos.forEach((video, index) => {
+    assertVideo(video, index)
     assertSafeFileId(video.id, 'bundle video')
     assertUniqueSourceId(video.id, sourceIds)
   })
   validateClipReferences(project, sourceIds)
+  return videos as V[]
+}
 
+/**
+ * Writes each source to a temp file through `writeSource`, and builds the job. The temp
+ * directory is removed if any write fails.
+ */
+async function materialiseSources<V extends VeditorEntry>(
+  project: Project,
+  videos: V[],
+  tmpRoot: string,
+  writeSource: (video: V, destPath: string) => Promise<void>,
+): Promise<LoadedJob> {
   const dir = await fs.mkdtemp(path.join(tmpRoot, 'headless-artist-'))
 
   const sourceFiles: Record<string, string> = {}
@@ -288,16 +347,16 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
 
   try {
     for (const video of videos) {
-      // Every field was validated above, before mkdtemp — nothing here can be undefined.
+      // Every field was validated before mkdtemp, so nothing here can be undefined.
       // Strip a `;codecs=...` parameter before the lookup, so "video/webm;codecs=vp9,opus"
       // still resolves to "webm" rather than falling through to the name or ".bin", and
       // lower-case it first so "Video/WebM" does too.
       const mimeBase = video.mimeType.split(';')[0].trim().toLowerCase()
       const ext = MIME_TO_EXTENSION[mimeBase] ?? extensionOf(video.name) ?? 'bin'
       const destPath = path.join(dir, `${video.id}.${ext}`)
-      await writeBase64ToFile(video.data, destPath)
+      await writeSource(video, destPath)
       sourceFiles[video.id] = destPath
-      // `meta` first so the entry's own id/name/mimeType — the source of truth — always win,
+      // `meta` first, so the entry's own id/name/mimeType (the source of truth) always win,
       // the same order `projectManager.ts`'s `loadProject` applies to the identical `meta`.
       sourceVideos.push({ ...video.meta, id: video.id, name: video.name, mimeType: video.mimeType })
     }
@@ -317,6 +376,147 @@ export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir
       await fs.rm(dir, { recursive: true, force: true })
     },
   }
+}
+
+/**
+ * The entries' ranges, in order (each source, then its thumbnail), must tile the payload
+ * exactly: no gap, no overlap, nothing missing, nothing after the last source. A thumbnail is
+ * checked here and never copied; the engine does not use it.
+ */
+function assertRangesTile(videos: VeditorVideoV2[], payloadBytes: number, bundlePath: string): void {
+  let expected = 0
+  videos.forEach((video, index) => {
+    const ranges: Array<[string, ByteRange]> = [['data', video.data]]
+    if (video.thumbnail) ranges.push(['thumbnail', video.thumbnail])
+    for (const [field, range] of ranges) {
+      if (range.offset !== expected) {
+        throw new Error(
+          `bundle "${bundlePath}" video #${index} field "${field}" starts at byte ${range.offset} of the media, expected ${expected}`,
+        )
+      }
+      expected += range.length
+    }
+  })
+  if (expected > payloadBytes) {
+    throw new Error(`bundle "${bundlePath}" is truncated: it declares ${expected} bytes of media but holds ${payloadBytes}`)
+  }
+  if (expected < payloadBytes) {
+    throw new Error(`bundle "${bundlePath}" has ${payloadBytes - expected} bytes after its last source`)
+  }
+}
+
+/**
+ * Copies `length` bytes from `start` to `destPath`. A ranged read stream, not a buffer: the
+ * source never has to fit in memory. A zero-length range writes an empty file, because
+ * `createReadStream` rejects `end < start`.
+ */
+async function copyRange(sourcePath: string, start: number, length: number, destPath: string): Promise<void> {
+  if (length === 0) {
+    await fs.writeFile(destPath, '')
+    return
+  }
+  await pipeline(createReadStream(sourcePath, { start, end: start + length - 1 }), createWriteStream(destPath))
+}
+
+/**
+ * A version 1 bundle: one JSON document with each source base64-encoded inside it. The whole
+ * document is parsed in memory, but each source's base64 is decoded and streamed to a temp file
+ * in chunks, never as one giant `Buffer.from(wholeString)`.
+ */
+async function loadBundleV1(bundlePath: string, tmpRoot: string): Promise<LoadedJob> {
+  // `loadBundle` has already read this file's first bytes, so a read failure here is a race,
+  // not a case to name.
+  const raw = await fs.readFile(bundlePath, 'utf8')
+
+  let bundle: unknown
+  try {
+    bundle = JSON.parse(raw)
+  } catch {
+    throw new Error(`bundle "${bundlePath}" is not valid JSON`)
+  }
+
+  if (!isRecord(bundle)) {
+    throw new Error(`bundle "${bundlePath}" must be a JSON object`)
+  }
+
+  if (bundle.version !== 1) {
+    if (typeof bundle.version === 'number' && bundle.version > 1) {
+      throw new Error(
+        `bundle "${bundlePath}" has version ${bundle.version}, but this build supports versions 1 and 2 (version 2 is the binary container, not JSON)`,
+      )
+    }
+    throw new Error(`bundle "${bundlePath}" must declare "version": 1`)
+  }
+
+  const { project, videos: entries } = readBundleBody(bundle, bundlePath)
+  const videos = checkVideos(entries, project, assertVeditorVideo)
+  return materialiseSources(project, videos, tmpRoot, (video, destPath) => writeBase64ToFile(video.data, destPath))
+}
+
+/**
+ * A version 2 bundle (ESCSUITE-260). Only the header and the index are read into memory. The
+ * ranges are checked to tile the payload before any temp file exists, then each source is copied
+ * with a ranged read, so a bundle of any size needs no more heap than a manifest does.
+ */
+async function loadBundleV2(bundlePath: string, head: Buffer, size: number, tmpRoot: string): Promise<LoadedJob> {
+  const version = head.readUInt32LE(8)
+  if (version !== V2_VERSION) {
+    throw new Error(
+      version > V2_VERSION
+        ? `bundle "${bundlePath}" has version ${version}, but this build supports versions 1 and 2`
+        : `bundle "${bundlePath}" has a binary header naming version ${version}, which no ESCAPEARTIST writes`,
+    )
+  }
+  const indexLength = head.readUInt32LE(12)
+  if (indexLength > V2_MAX_INDEX_BYTES) {
+    throw new Error(
+      `bundle "${bundlePath}" declares a ${indexLength}-byte index, over the ${V2_MAX_INDEX_BYTES}-byte limit`,
+    )
+  }
+  const payloadStart = V2_HEADER_BYTES + indexLength
+  if (payloadStart > size) {
+    throw new Error(`bundle "${bundlePath}" ends before its index does`)
+  }
+
+  const raw = await readBytes(bundlePath, V2_HEADER_BYTES, indexLength)
+  let index: unknown
+  try {
+    index = JSON.parse(raw.toString('utf8'))
+  } catch {
+    throw new Error(`bundle "${bundlePath}" has an index that is not valid JSON`)
+  }
+  if (!isRecord(index) || index.version !== V2_VERSION) {
+    throw new Error(`bundle "${bundlePath}" has an index that does not declare "version": 2`)
+  }
+
+  const { project, videos: entries } = readBundleBody(index, bundlePath)
+  const videos = checkVideos(entries, project, assertVeditorVideoV2)
+  assertRangesTile(videos, size - payloadStart, bundlePath)
+  return materialiseSources(project, videos, tmpRoot, (video, destPath) =>
+    copyRange(bundlePath, payloadStart + video.data.offset, video.data.length, destPath),
+  )
+}
+
+/**
+ * Loads a `.veditor` bundle, the editor's own save format, of either version. The first 16 bytes
+ * decide: the v2 magic takes the ranged path, and anything else is read as version 1 JSON. For
+ * large media saved by an older editor (version 1), prefer `loadManifest`, or open the project in
+ * a current ESCAPEARTIST and save it again.
+ */
+export async function loadBundle(bundlePath: string, tmpRoot: string = os.tmpdir()): Promise<LoadedJob> {
+  let size: number
+  let head: Buffer
+  try {
+    size = (await fs.stat(bundlePath)).size
+    head = await readBytes(bundlePath, 0, V2_HEADER_BYTES)
+  } catch {
+    throw new Error(`bundle "${bundlePath}" could not be read`)
+  }
+
+  if (head.length === V2_HEADER_BYTES && head.subarray(0, V2_MAGIC.length).equals(V2_MAGIC)) {
+    return loadBundleV2(bundlePath, head, size, tmpRoot)
+  }
+  return loadBundleV1(bundlePath, tmpRoot)
 }
 
 interface ManifestSource {
