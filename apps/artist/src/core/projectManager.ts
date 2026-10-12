@@ -1,11 +1,21 @@
 // Project save/load functionality
 
 import type { Project, SourceVideo, Clip, EditorBlock } from '../store/types';
-import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
+import {
+  deleteVideo,
+  getStorageEstimate,
+  getVideo,
+  storeVideo,
+  storeThumbnail,
+  getThumbnail,
+  resolveThumbnailUrl,
+} from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
 import {
+  ProjectFileError,
   assertRangesTile,
   encodeProjectFile,
+  formatSize,
   readProjectFileIndex,
   sliceRange,
   type ProjectFileIndex,
@@ -219,7 +229,9 @@ async function restoreSource(
   entry: SourceEntry,
   blob: Blob,
   thumbnail: Blob | undefined,
-  existing: StoredSource
+  existing: StoredSource,
+  /** Every id this load has stored so far; `restoreSources` deletes them if the load fails. */
+  written: string[]
 ): Promise<SourceVideo> {
   // A file saved since ESCSUITE-97 carries the live SourceVideo's own
   // fields in `meta`: waveform peaks, take identity, the real frame rate.
@@ -309,6 +321,9 @@ async function restoreSource(
     delete metadata.overlayPlacement;
 
     await storeVideo(entry.id, blob, metadata);
+    // Recorded as soon as the row exists, so a thumbnail write that fails
+    // next still rolls this video back.
+    written.push(entry.id);
     if (thumbnail) {
       await storeThumbnail(entry.id, thumbnail);
       metadata.thumbnailUrl = await resolveThumbnailUrl(entry.id);
@@ -318,17 +333,45 @@ async function restoreSource(
   return metadata;
 }
 
-/** The restore loop both file versions share, with its progress reports. */
+/**
+ * Delete every source this load stored, best-effort, each on its own: one that
+ * cannot be deleted is warned about and left. It is unreferenced, and
+ * ESCSUITE-268's "files from earlier sessions" list offers it for removal.
+ * Only ids this call stored are ever here, so a source that was present before
+ * the load is never touched.
+ */
+async function rollBack(written: string[]): Promise<void> {
+  for (const id of written) {
+    try {
+      await deleteVideo(id);
+    } catch (error) {
+      console.warn(`Could not remove source ${id} after a project load failed:`, error);
+    }
+  }
+}
+
+/**
+ * The restore loop both file versions share, with its progress reports. A
+ * throw anywhere in it (a write, a thumbnail write, a metadata probe, a v1
+ * source's base64) rolls back what this load stored, then rethrows the
+ * original error (ESCSUITE-260).
+ */
 async function restoreSources(
   count: number,
-  restoreOne: (i: number) => Promise<SourceVideo>,
+  restoreOne: (i: number, written: string[]) => Promise<SourceVideo>,
   onProgress?: (progress: number, message: string) => void
 ): Promise<SourceVideo[]> {
   onProgress?.(10, 'Restoring videos...');
   const restored: SourceVideo[] = [];
-  for (let i = 0; i < count; i++) {
-    onProgress?.(10 + ((i + 1) / count) * 80, `Restoring video ${i + 1}/${count}...`);
-    restored.push(await restoreOne(i));
+  const written: string[] = [];
+  try {
+    for (let i = 0; i < count; i++) {
+      onProgress?.(10 + ((i + 1) / count) * 80, `Restoring video ${i + 1}/${count}...`);
+      restored.push(await restoreOne(i, written));
+    }
+  } catch (error) {
+    await rollBack(written);
+    throw error;
   }
   return restored;
 }
@@ -352,16 +395,41 @@ async function loadJsonFile(
 
   const sourceVideos = await restoreSources(
     projectFile.videos.length,
-    async (i) => {
+    async (i, written) => {
       const videoData = projectFile.videos[i];
       const blob = base64ToBlob(videoData.data, videoData.mimeType);
       // v1 never recorded a thumbnail's type; every one ESCAPEARTIST wrote was a JPEG.
       const thumbnail = videoData.thumbnail ? base64ToBlob(videoData.thumbnail, 'image/jpeg') : undefined;
-      return restoreSource(videoData, blob, thumbnail, await getVideo(videoData.id));
+      return restoreSource(videoData, blob, thumbnail, await getVideo(videoData.id), written);
     },
     onProgress
   );
   return { project: projectFile.project, editor: projectFile.editor, sourceVideos };
+}
+
+/**
+ * Refuses, before anything is written, a v2 load whose new media will not fit
+ * in what the browser says is free (ESCSUITE-260). A source already stored
+ * writes nothing (ESCSUITE-151) and is not counted. The sum is exact, so no
+ * margin is added. The estimate is approximate and per-browser, so a load
+ * that passes can still fail while writing; `restoreSources`' rollback covers
+ * that. With no `navigator.storage.estimate`, the shared helper answers all
+ * zeros. A quota of 0 means nothing was measured, and the check is skipped
+ * rather than refusing every load. A negative `available` (usage already over
+ * quota) counts as nothing free.
+ */
+async function assertRoomFor(index: ProjectFileIndex, existing: StoredSource[]): Promise<void> {
+  const needed = index.videos.reduce(
+    (sum, video, i) => (existing[i] ? sum : sum + video.data.length + (video.thumbnail?.length ?? 0)),
+    0
+  );
+  const { quota, available } = await getStorageEstimate();
+  const free = Math.max(0, available);
+  if (quota > 0 && needed > free) {
+    throw new ProjectFileError(
+      `This project needs ${formatSize(needed)} of storage and this browser has ${formatSize(free)} free.`
+    );
+  }
 }
 
 /**
@@ -377,16 +445,17 @@ async function loadContainer(
 ): Promise<LoadedFile> {
   assertRangesTile(index, payloadStart, file.size);
   const existing = await Promise.all(index.videos.map((video) => getVideo(video.id)));
+  await assertRoomFor(index, existing);
 
   const sourceVideos = await restoreSources(
     index.videos.length,
-    async (i) => {
+    async (i, written) => {
       const video = index.videos[i];
       const blob = sliceRange(file, payloadStart, video.data, video.mimeType);
       const thumbnail = video.thumbnail
         ? sliceRange(file, payloadStart, video.thumbnail, video.thumbnail.mimeType)
         : undefined;
-      return restoreSource(video, blob, thumbnail, existing[i]);
+      return restoreSource(video, blob, thumbnail, existing[i], written);
     },
     onProgress
   );
