@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { File as NodeFile } from 'node:buffer'
 import {
   exportProjectMetadata,
@@ -7,12 +7,18 @@ import {
   loadProject,
   saveProject,
   showOpenProjectDialog,
-  MAX_PROJECT_FILE_BASE64_BYTES,
-  ProjectTooLargeError,
   type ProjectFile,
   type SourceVideoMeta,
 } from './projectManager'
-import { HEADER_BYTES, MAX_INDEX_BYTES, ProjectFileError, encodeProjectFile } from './projectFileFormat'
+import {
+  HEADER_BYTES,
+  MAX_INDEX_BYTES,
+  ProjectFileError,
+  encodeProjectFile,
+  readProjectFileIndex,
+  sliceRange,
+  type ProjectFileIndex,
+} from './projectFileFormat'
 // The real storage layer, running on the fake-indexeddb installed by
 // src/test/setup.ts — save/load really round-trips through IndexedDB here.
 import { parseProject } from '../store/projectMigration'
@@ -20,7 +26,6 @@ import { deleteVideo, getAllVideoMetadata, getThumbnail, getVideo, storeThumbnai
 import type { EditorBlock, Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { lastObjectUrl } from '../test/objectUrls'
-import { installFileReaderDouble } from '../test/doubles/fileReader'
 
 // Pass-through spies, so a test can see (and, for the 2 GiB and quota cases,
 // fake) what save and load ask storage for. Everything else is the real layer.
@@ -84,14 +89,6 @@ const sourceVideo = (id: string, name = 'test.mp4', mimeType = 'video/mp4'): Sou
 })
 
 const base64Of = (bytes: number[]) => btoa(String.fromCharCode(...bytes))
-
-/** The bytes the JSON writer produced, decoded back from base64. */
-function decodeBase64(base64: string): number[] {
-  const binary = atob(base64)
-  const bytes: number[] = []
-  for (let i = 0; i < binary.length; i++) bytes.push(binary.charCodeAt(i))
-  return bytes
-}
 
 const MiB = 1024 * 1024
 const GiB = 1024 * MiB
@@ -248,242 +245,69 @@ describe('importProjectMetadata', () => {
   })
 })
 
-describe('saveProject size budget (ESCSUITE-241)', () => {
-  const MiB = 1024 * 1024
-  let clickSpy: ReturnType<typeof vi.spyOn>
-  let createObjectURL: ReturnType<typeof vi.spyOn>
-  let fileReader: ReturnType<typeof installFileReaderDouble>
-  let readSpy: Mock<() => void>
-
-  beforeEach(() => {
-    clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
-    createObjectURL = vi.spyOn(URL, 'createObjectURL')
-    fileReader = installFileReaderDouble()
-    // Count byte reads: the budget must be decided before any is made.
-    const Installed = (globalThis as unknown as { FileReader: new () => { readAsDataURL(b: Blob): void } }).FileReader
-    readSpy = vi.fn<() => void>()
-    const original = Installed.prototype.readAsDataURL
-    Installed.prototype.readAsDataURL = function (this: unknown, b: Blob) {
-      readSpy()
-      return original.call(this, b)
-    }
-    vi.mocked(getVideo).mockClear()
-  })
-
-  afterEach(() => {
-    fileReader.uninstall()
-    clickSpy.mockRestore()
-    createObjectURL.mockRestore()
-  })
-
-  /** A Blob that reports a size without holding the bytes. */
-  const fakeBlob = (size: number) => {
-    const blob = new Blob([])
-    Object.defineProperty(blob, 'size', { value: size })
-    return blob
-  }
-  const fakeStored = (id: string, size: number) => {
-    vi.mocked(getVideo).mockImplementationOnce(async () => ({ blob: fakeBlob(size), metadata: sourceVideo(id) }))
-  }
-  const projectUsing = (ids: string[]): Project => {
-    const project = createTestProject(ids[0])
-    project.timeline.clips = ids.map((id, i) => ({ ...project.timeline.clips[0], id: `clip${i}`, sourceVideoId: id }))
-    return project
-  }
-
-  it('the budget is 256 MiB of base64', () => {
-    expect(MAX_PROJECT_FILE_BASE64_BYTES).toBe(256 * MiB)
-  })
-
-  it('writes the file as before when the sources are under the budget', async () => {
-    const id = uniqueId('small')
-    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/mp4' }), sourceVideo(id))
-    await saveProject(createTestProject(id), [sourceVideo(id)])
-    expect(clickSpy).toHaveBeenCalledTimes(1)
-  })
-
-  // onProgress(0, 'Preparing project data...') precedes the budget check by
-  // design; no export step does.
-  it('refuses one source over the budget, naming the totals and the largest source, before reading anything', async () => {
-    const id = uniqueId('big')
-    fakeStored(id, 200 * MiB) // 4 x ceil(200 MiB / 3) is about 267 MiB of base64
-    const onProgress = vi.fn()
-    const error = await saveProject(projectUsing([id]), [sourceVideo(id, 'Recording 3')], onProgress).catch((e) => e)
-
-    expect(error).toBeInstanceOf(ProjectTooLargeError)
-    expect(error.name).toBe('ProjectTooLargeError')
-    expect(error.limit).toBe(MAX_PROJECT_FILE_BASE64_BYTES)
-    expect(error.total).toBe(4 * Math.ceil((200 * MiB) / 3))
-    expect(error.message).toContain('This project is too large to save as a .veditor file')
-    expect(error.message).toContain('the format holds about 192 MiB')
-    expect(error.message).toContain('its sources add up to 200 MiB')
-    expect(error.message).toContain('Recording 3, 200 MiB')
-    expect(readSpy).not.toHaveBeenCalled()
-    expect(onProgress).not.toHaveBeenCalledWith(expect.any(Number), expect.stringContaining('Exporting'))
-    expect(clickSpy).not.toHaveBeenCalled()
-    expect(createObjectURL).not.toHaveBeenCalled()
-  })
-
-  it('a source exactly at the budget is not refused, and one byte over is', async () => {
-    const at = uniqueId('edge')
-    // 4 x ceil(n / 3) = 256 MiB  =>  n = 192 MiB
-    fakeStored(at, 192 * MiB)
-    vi.mocked(getThumbnail).mockImplementationOnce(async () => undefined)
-    const progress: string[] = []
-    // The fake blob then fails the short-read check: what matters is that the
-    // export loop was entered, which is the only place 'Exporting' is reported.
-    const result = await saveProject(projectUsing([at]), [sourceVideo(at)], (_p, m) => progress.push(m)).catch((e) => e)
-    expect(result).not.toBeInstanceOf(ProjectTooLargeError)
-    expect(progress).toContain('Exporting video 1/1...')
-
-    const over = uniqueId('over')
-    fakeStored(over, 192 * MiB + 1) // 4 x ceil((192 MiB + 1) / 3) is 4 bytes more
-    vi.mocked(getThumbnail).mockImplementationOnce(async () => undefined)
-    const refused = await saveProject(projectUsing([over]), [sourceVideo(over)]).catch((e) => e)
-    expect(refused).toBeInstanceOf(ProjectTooLargeError)
-    expect(refused.total).toBeGreaterThan(MAX_PROJECT_FILE_BASE64_BYTES)
-  })
-
-  it('counts every source together, not each on its own', async () => {
-    const a = uniqueId('a')
-    const b = uniqueId('b')
-    fakeStored(a, 120 * MiB)
-    fakeStored(b, 100 * MiB)
-    const error = await saveProject(projectUsing([a, b]), [sourceVideo(a, 'First'), sourceVideo(b, 'Second')]).catch((e) => e)
-
-    expect(error).toBeInstanceOf(ProjectTooLargeError)
-    expect(error.total).toBe(4 * Math.ceil((120 * MiB) / 3) + 4 * Math.ceil((100 * MiB) / 3))
-    expect(error.message).toContain('First, 120 MiB')
-    expect(readSpy).not.toHaveBeenCalled()
-  })
-
-  it('counts the thumbnail in the total', async () => {
-    const id = uniqueId('thumb')
-    fakeStored(id, 190 * MiB) // under on its own
-    vi.mocked(getThumbnail).mockImplementationOnce(async () => fakeBlob(10 * MiB))
-    const error = await saveProject(projectUsing([id]), [sourceVideo(id)]).catch((e) => e)
-
-    expect(error).toBeInstanceOf(ProjectTooLargeError)
-    expect(error.total).toBe(4 * Math.ceil((190 * MiB) / 3) + 4 * Math.ceil((10 * MiB) / 3))
-  })
-
-  describe('a short read from the browser', () => {
-    const useReader = (result: string | null) => {
-      class Reader {
-        result = result
-        onloadend: (() => void) | null = null
-        onerror: (() => void) | null = null
-        readAsDataURL() {
-          queueMicrotask(() => this.onloadend?.())
-        }
-      }
-      ;(globalThis as unknown as { FileReader: unknown }).FileReader = Reader
-    }
-    const store10 = async () => {
-      const id = uniqueId('short')
-      await storeVideo(id, new Blob([new Uint8Array(10)], { type: 'video/mp4' }), sourceVideo(id))
-      return id
-    }
-
-    it('rejects an empty result instead of writing a file with no video', async () => {
-      const id = await store10()
-      useReader('')
-      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
-      expect(clickSpy).not.toHaveBeenCalled()
-    })
-
-    it('rejects a null result, which browsers report after an error', async () => {
-      const id = await store10()
-      useReader(null)
-      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
-    })
-
-    it('rejects a result with no base64 part', async () => {
-      const id = await store10()
-      useReader('data:video/mp4;base64,')
-      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
-    })
-
-    it('rejects a truncated result', async () => {
-      const id = await store10()
-      useReader('data:video/mp4;base64,AAAA') // 4 < 4 x floor(10 / 3) = 12
-      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/10 bytes/)
-    })
-
-    it('rejects an empty result for a blob too small to need any full base64 group', async () => {
-      const id = uniqueId('tiny')
-      await storeVideo(id, new Blob([new Uint8Array(2)], { type: 'video/mp4' }), sourceVideo(id))
-      useReader('data:video/mp4;base64,')
-      await expect(saveProject(createTestProject(id), [sourceVideo(id)])).rejects.toThrow(/2 bytes/)
-    })
-
-    it('accepts an empty result for an empty blob', async () => {
-      const id = uniqueId('empty')
-      await storeVideo(id, new Blob([], { type: 'video/mp4' }), sourceVideo(id))
-      useReader('data:video/mp4;base64,')
-      await saveProject(createTestProject(id), [sourceVideo(id)])
-      expect(clickSpy).toHaveBeenCalledTimes(1)
-    })
-
-    it('accepts a complete result', async () => {
-      const id = await store10()
-      useReader('data:video/mp4;base64,' + 'A'.repeat(16))
-      await saveProject(createTestProject(id), [sourceVideo(id)])
-      expect(clickSpy).toHaveBeenCalledTimes(1)
-    })
-  })
-})
+/** A project whose clips use each of `ids`, in order. */
+const projectUsing = (ids: string[]): Project => {
+  const project = createTestProject(ids[0])
+  project.timeline.clips = ids.map((id, i) => ({ ...project.timeline.clips[0], id: `clip${i}`, sourceVideoId: id }))
+  return project
+}
 
 describe('saveProject', () => {
   let clickSpy: ReturnType<typeof vi.spyOn>
   let createObjectURL: ReturnType<typeof vi.spyOn>
-  let fileReader: ReturnType<typeof installFileReaderDouble>
 
   beforeEach(() => {
     // jsdom would try to navigate on a real anchor click; the click itself is
     // what we assert on, so intercept it and read the anchor it was made on.
     clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     createObjectURL = vi.spyOn(URL, 'createObjectURL')
-    fileReader = installFileReaderDouble()
   })
 
   afterEach(() => {
-    fileReader.uninstall()
     clickSpy.mockRestore()
     createObjectURL.mockRestore()
+    // A case that throws before its once-queued storage stubs are consumed
+    // must not hand them to the next case.
+    vi.mocked(getVideo).mockReset()
+    vi.mocked(getThumbnail).mockReset()
   })
 
-  /** The .veditor payload handed to URL.createObjectURL for download. */
-  async function capturedProjectFile(): Promise<ProjectFile> {
+  /** The .veditor handed to URL.createObjectURL for download, read back through the v2 reader. */
+  async function capturedSave(): Promise<{ file: File; index: ProjectFileIndex; payloadStart: number }> {
     const blob = createObjectURL.mock.calls.at(-1)![0] as Blob
-    expect(blob.type).toBe('application/json')
-    return JSON.parse(await blob.text()) as ProjectFile
+    expect(blob.type).toBe('application/octet-stream')
+    const file = fileOf([blob], 'saved.veditor')
+    const container = await readProjectFileIndex(file)
+    return { file, index: container!.index, payloadStart: container!.payloadStart }
   }
 
-  it('embeds the stored video bytes and thumbnail, and triggers a download', async () => {
+  const bytesAt = async (file: File, payloadStart: number, range: { offset: number; length: number }) =>
+    Array.from(new Uint8Array(await sliceRange(file, payloadStart, range, '').arrayBuffer()))
+
+  it('writes a v2 container holding the stored bytes and thumbnail, and triggers a download', async () => {
     const videoId = uniqueId('vid')
     const bytes = [0, 1, 2, 255, 254, 253]
     await storeVideo(videoId, new Blob([new Uint8Array(bytes)], { type: 'video/mp4' }), sourceVideo(videoId))
     await storeThumbnail(videoId, new Blob([new Uint8Array([9, 8, 7])], { type: 'image/jpeg' }))
 
-    const project = createTestProject(videoId)
     const progress: Array<[number, string]> = []
-    await saveProject(project, [sourceVideo(videoId)], (p, m) => progress.push([p, m]))
+    await saveProject(createTestProject(videoId), [sourceVideo(videoId)], (p, m) => progress.push([p, m]))
 
-    const saved = await capturedProjectFile()
-    expect(saved.version).toBe(1)
-    expect(saved.project.id).toBe('project1')
-    expect(saved.videos).toHaveLength(1)
-    expect(saved.videos[0].id).toBe(videoId)
-    expect(saved.videos[0].mimeType).toBe('video/mp4')
-    // Binary data survives the base64 round trip byte for byte.
-    expect(decodeBase64(saved.videos[0].data)).toEqual(bytes)
-    expect(decodeBase64(saved.videos[0].thumbnail!)).toEqual([9, 8, 7])
+    const { file, index, payloadStart } = await capturedSave()
+    expect(index.version).toBe(2)
+    expect(index.project.id).toBe('project1')
+    expect(index.videos).toHaveLength(1)
+    expect(index.videos[0].id).toBe(videoId)
+    expect(index.videos[0].mimeType).toBe('video/mp4')
+    expect(await bytesAt(file, payloadStart, index.videos[0].data)).toEqual(bytes)
+    expect(index.videos[0].thumbnail!.mimeType).toBe('image/jpeg')
+    expect(await bytesAt(file, payloadStart, index.videos[0].thumbnail!)).toEqual([9, 8, 7])
 
-    expect(progress[0]).toEqual([0, 'Preparing project data...'])
-    expect(progress).toContainEqual([80, 'Exporting video 1/1...'])
-    expect(progress).toContainEqual([90, 'Creating project file...'])
-    expect(progress[progress.length - 1]).toEqual([100, 'Project saved!'])
+    expect(progress).toEqual([
+      [0, 'Preparing project data...'],
+      [90, 'Creating project file...'],
+      [100, 'Project saved!'],
+    ])
 
     expect(clickSpy).toHaveBeenCalledTimes(1)
     const anchor = clickSpy.mock.contexts[0] as HTMLAnchorElement
@@ -493,17 +317,17 @@ describe('saveProject', () => {
     expect(document.body.contains(anchor)).toBe(false)
   })
 
-  it('omits the thumbnail field when none is stored', async () => {
+  it('omits the thumbnail when none is stored', async () => {
     const videoId = uniqueId('vid')
     await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(videoId))
 
     await saveProject(createTestProject(videoId), [sourceVideo(videoId)])
 
-    const saved = await capturedProjectFile()
-    expect(saved.videos[0].thumbnail).toBeUndefined()
+    const { index } = await capturedSave()
+    expect(index.videos[0].thumbnail).toBeUndefined()
   })
 
-  it('exports only the videos the timeline actually uses', async () => {
+  it('writes only the videos the timeline actually uses', async () => {
     const usedId = uniqueId('used')
     const unusedId = uniqueId('unused')
     await storeVideo(usedId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(usedId))
@@ -511,18 +335,18 @@ describe('saveProject', () => {
 
     await saveProject(createTestProject(usedId), [sourceVideo(usedId), sourceVideo(unusedId)])
 
-    const saved = await capturedProjectFile()
-    expect(saved.videos.map((v) => v.id)).toEqual([usedId])
+    const { index } = await capturedSave()
+    expect(index.videos.map((v) => v.id)).toEqual([usedId])
   })
 
   it('skips a referenced video whose blob is no longer in storage', async () => {
     const missingId = uniqueId('gone')
     await saveProject(createTestProject(missingId), [sourceVideo(missingId)])
 
-    const saved = await capturedProjectFile()
-    expect(saved.videos).toEqual([])
+    const { index } = await capturedSave()
+    expect(index.videos).toEqual([])
     // The project itself is still written out.
-    expect(saved.project.timeline.clips).toHaveLength(1)
+    expect(index.project.timeline.clips).toHaveLength(1)
   })
 
   it('names the file "project.veditor" when the project has no name', async () => {
@@ -541,13 +365,86 @@ describe('saveProject', () => {
 
     await saveProject(project, [sourceVideo(videoId)])
 
-    const written = await capturedProjectFile()
-    expect(written.project.timeline.clips[0].crop).toEqual({
-      left: 0.25,
-      top: 0.1,
-      right: 0,
-      bottom: 0,
-    })
+    const { index } = await capturedSave()
+    expect(index.project.timeline.clips[0].crop).toEqual({ left: 0.25, top: 0.1, right: 0, bottom: 0 })
+  })
+
+  // Review Focus 2.
+  it('saves and reopens a source of zero bytes', async () => {
+    const videoId = uniqueId('zero')
+    await storeVideo(videoId, new Blob([], { type: 'video/mp4' }), sourceVideo(videoId))
+
+    await saveProject(createTestProject(videoId), [sourceVideo(videoId)])
+    const { file, index } = await capturedSave()
+    expect(index.videos[0].data).toEqual({ offset: 0, length: 0 })
+
+    await deleteVideo(videoId)
+    const media = installMediaElementDoubles()
+    try {
+      const { sourceVideos } = await loadProject(file)
+      expect(sourceVideos[0].size).toBe(0)
+      expect((await getVideo(videoId))!.blob.size).toBe(0)
+    } finally {
+      media.uninstall()
+      await deleteVideo(videoId)
+    }
+  })
+
+  // Spec test 1, and the red form of the deleted ESCSUITE-241 refusals: twice
+  // the old 256 MiB budget, with sources that throw if anything reads them.
+  it('saves sources twice the old budget without reading a byte of them', async () => {
+    const a = uniqueId('big-a')
+    const b = uniqueId('big-b')
+    const bigA = untouchable(200 * MiB, 'video/mp4')
+    const thumbA = untouchable(64 * 1024, 'image/jpeg')
+    const bigB = untouchable(312 * MiB, 'video/webm')
+    vi.mocked(getVideo)
+      .mockImplementationOnce(async () => ({ blob: bigA, metadata: sourceVideo(a) }))
+      .mockImplementationOnce(async () => ({ blob: bigB, metadata: sourceVideo(b, 'b.webm', 'video/webm') }))
+    vi.mocked(getThumbnail)
+      .mockImplementationOnce(async () => thumbA)
+      .mockImplementationOnce(async () => undefined)
+    // Record what saveProject hands `new Blob` instead of letting Node's Blob
+    // add up 512 MiB of reported sizes over empty handles. Refuse any FileReader.
+    const RealBlob = globalThis.Blob
+    const RealFileReader = globalThis.FileReader
+    const made: Array<{ parts: BlobPart[]; type?: string }> = []
+    vi.stubGlobal(
+      'Blob',
+      class {
+        constructor(parts: BlobPart[], options?: BlobPropertyBag) {
+          made.push({ parts, type: options?.type })
+        }
+      }
+    )
+    vi.stubGlobal(
+      'FileReader',
+      class {
+        constructor() {
+          throw new Error('FileReader read a source on save')
+        }
+      }
+    )
+    try {
+      await saveProject(projectUsing([a, b]), [sourceVideo(a, 'First'), sourceVideo(b, 'Second', 'video/webm')])
+    } finally {
+      vi.stubGlobal('Blob', RealBlob)
+      vi.stubGlobal('FileReader', RealFileReader)
+    }
+
+    expect(made).toHaveLength(1)
+    expect(made[0].type).toBe('application/octet-stream')
+    const parts = made[0].parts
+    expect(parts[2]).toBe(bigA)
+    expect(parts[3]).toBe(thumbA)
+    expect(parts[4]).toBe(bigB)
+    const index = JSON.parse(new TextDecoder().decode(parts[1] as Uint8Array)) as ProjectFileIndex
+    expect(index.videos.map((v) => [v.id, v.name, v.data])).toEqual([
+      [a, 'First', { offset: 0, length: 200 * MiB }],
+      [b, 'Second', { offset: 200 * MiB + 64 * 1024, length: 312 * MiB }],
+    ])
+    expect(index.videos[0].thumbnail).toEqual({ offset: 200 * MiB, length: 64 * 1024, mimeType: 'image/jpeg' })
+    expect(clickSpy).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -1124,27 +1021,24 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
 describe('project file metadata round trip (ESCSUITE-97)', () => {
   let clickSpy: ReturnType<typeof vi.spyOn>
   let createObjectURL: ReturnType<typeof vi.spyOn>
-  let fileReader: ReturnType<typeof installFileReaderDouble>
   let media: MediaDoubles
 
   beforeEach(() => {
     clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     createObjectURL = vi.spyOn(URL, 'createObjectURL')
-    fileReader = installFileReaderDouble()
     media = installMediaElementDoubles()
   })
 
   afterEach(() => {
-    fileReader.uninstall()
     clickSpy.mockRestore()
     createObjectURL.mockRestore()
     media.uninstall()
   })
 
-  /** The .veditor payload handed to URL.createObjectURL for download. */
-  async function capturedProjectFile(): Promise<ProjectFile> {
-    const blob = createObjectURL.mock.calls.at(-1)![0] as Blob
-    return JSON.parse(await blob.text()) as ProjectFile
+  /** The .veditor handed to URL.createObjectURL for download, and its index. */
+  async function captured(): Promise<{ file: File; index: ProjectFileIndex }> {
+    const file = fileOf([createObjectURL.mock.calls.at(-1)![0] as Blob], 'take.veditor')
+    return { file, index: (await readProjectFileIndex(file))!.index }
   }
 
   it('carries waveformData, take identity and the flags TimelineTrack reads through a save, and resolves a headerless take instead of reintroducing Infinity', async () => {
@@ -1176,9 +1070,9 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), take)
 
     await saveProject(createTestProject(videoId), [take])
-    const saved = await capturedProjectFile()
+    const saved = await captured()
 
-    expect(saved.videos[0].meta).toEqual({
+    expect(saved.index.videos[0].meta).toEqual({
       duration: 12,
       width: 1280,
       height: 720,
@@ -1206,7 +1100,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     // of a probe that happened to work.
     media.script({ video: { duration: Infinity, durationAfterSeek: 12, durationStaysUnknown: true } })
 
-    const reopened = new File([JSON.stringify(saved)], 'take.veditor', { type: 'application/json' })
+    const reopened = saved.file
     const { sourceVideos } = await loadProject(reopened)
 
     expect(sourceVideos).toHaveLength(1)
@@ -1242,7 +1136,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     await storeVideo(videoId, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), take)
 
     await saveProject(createTestProject(videoId), [take])
-    const saved = await capturedProjectFile()
+    const saved = await captured()
 
     // CRAFT deleted the take after the project was saved: the row is gone
     // from the shared DB entirely, so this load genuinely resurrects it.
@@ -1254,7 +1148,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     // other import.
     media.script({ video: { duration: Infinity, durationAfterSeek: 12, durationStaysUnknown: true } })
 
-    const reopened = new File([JSON.stringify(saved)], 'take.veditor', { type: 'application/json' })
+    const reopened = saved.file
     const { sourceVideos } = await loadProject(reopened)
 
     expect(sourceVideos).toHaveLength(1)
@@ -1773,35 +1667,30 @@ describe('showOpenProjectDialog', () => {
 describe('the editor block in the project file (ESCSUITE-245)', () => {
   let clickSpy: ReturnType<typeof vi.spyOn>
   let createObjectURL: ReturnType<typeof vi.spyOn>
-  let fileReader: ReturnType<typeof installFileReaderDouble>
   let media: MediaDoubles
 
   beforeEach(() => {
     clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     createObjectURL = vi.spyOn(URL, 'createObjectURL')
-    fileReader = installFileReaderDouble()
     media = installMediaElementDoubles({ video: { duration: 42, videoWidth: 1280, videoHeight: 720 } })
   })
 
   afterEach(() => {
     media.uninstall()
-    fileReader.uninstall()
     clickSpy.mockRestore()
     createObjectURL.mockRestore()
   })
 
   const marker = (id: string, time: number) => ({ id, time, label: id, color: '#ffcc00' })
-  const lastFile = async (): Promise<File> => {
-    const blob = createObjectURL.mock.calls.at(-1)![0] as Blob
-    return new File([await blob.text()], 'p.veditor', { type: 'application/json' })
-  }
+  const lastFile = async (): Promise<File> =>
+    fileOf([createObjectURL.mock.calls.at(-1)![0] as Blob], 'p.veditor')
 
   it('writes the range and markers beside the project, not inside it', async () => {
     const id = uniqueId('ed')
     const editor = { inPoint: 1, outPoint: 4, markers: [marker('b', 3), marker('a', 1)] }
     await saveProject(createTestProject(id), [], undefined, editor)
 
-    const saved = JSON.parse(await (await lastFile()).text())
+    const saved = (await readProjectFileIndex(await lastFile()))!.index
     expect(saved.editor).toEqual(editor)
     expect('editor' in saved.project).toBe(false)
   })
