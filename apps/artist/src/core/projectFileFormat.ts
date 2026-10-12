@@ -226,22 +226,36 @@ function parseIndex(value: unknown): ProjectFileIndex {
   };
 }
 
+/** True when `bytes` opens with the eight magic bytes, however long it is. */
+function startsWithMagic(bytes: Uint8Array): boolean {
+  return MAGIC.every((byte, i) => bytes[i] === byte);
+}
+
 /** True when `bytes` starts with a full v2 header's magic. */
 export function isV2Header(bytes: Uint8Array): boolean {
-  return bytes.length >= HEADER_BYTES && MAGIC.every((byte, i) => bytes[i] === byte);
+  return bytes.length >= HEADER_BYTES && startsWithMagic(bytes);
 }
 
 /**
  * The index of a v2 file, and where its payload starts. Two small slices are
  * read, the header and the index, and never the payload. Answers `null` when
- * the file is not v2 (every v1 file, and anything else), so the caller sniffs
- * exactly once. A v2 file this refuses throws `ProjectFileError`.
+ * the file does not open with the magic (every v1 file, and anything else), so
+ * the caller sniffs exactly once. A v2 file this refuses, one cut short of its
+ * header included, throws `ProjectFileError`.
  */
 export async function readProjectFileIndex(
   blob: Blob
 ): Promise<{ index: ProjectFileIndex; payloadStart: number } | null> {
   const head = new Uint8Array(await blob.slice(0, HEADER_BYTES).arrayBuffer());
-  if (!isV2Header(head)) return null;
+  if (!isV2Header(head)) {
+    // The magic alone decides the version, as it does in the headless kit: a
+    // file that opens with it but stops short of a whole header is a broken
+    // v2 file, refused by name, not a v1 file left to fail as JSON.
+    if (startsWithMagic(head)) {
+      fail(`the file ends before its header does: it is ${blob.size} bytes and a header is ${HEADER_BYTES}`);
+    }
+    return null;
+  }
 
   const view = new DataView(head.buffer);
   const version = view.getUint32(8, true);
