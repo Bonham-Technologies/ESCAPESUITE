@@ -201,4 +201,30 @@ describe('a seek to the time the store already holds still lands (ESCSUITE-287)'
     expect(store().isPlaying).toBe(false)
     expect(store().currentTime).toBe(1)
   })
+
+  it('every seeker the editor mounts counts as a seek', async () => {
+    addClip('clip1', 0, 10)
+    store().addMarker(4)
+    const { playhead, ruler, getByTitle } = await renderEditor()
+
+    const counts = (seek: () => void): number => {
+      const before = store().seekSequence
+      seek()
+      return store().seekSequence - before
+    }
+
+    expect(counts(() => fireEvent.click(ruler, { clientX: 300 }))).toBe(1)
+    expect(counts(() => fireEvent.click(screen.getByRole('button', { name: /^Marker / })))).toBe(1)
+    expect(counts(() => fireEvent.keyDown(window, { code: 'ArrowLeft', key: 'ArrowLeft' }))).toBe(1)
+    expect(counts(() => fireEvent.keyDown(window, { code: 'ArrowRight', key: 'ArrowRight' }))).toBe(1)
+    expect(counts(() => fireEvent.click(getByTitle('Go to end (End)')))).toBe(1)
+    expect(counts(() => fireEvent.keyDown(window, { code: 'Home', key: 'Home' }))).toBe(1)
+
+    fireEvent.mouseDown(playhead)
+    await settle(0)
+    expect(counts(() => fireEvent.mouseMove(document, { clientX: 100 }))).toBe(1)
+    fireEvent.mouseUp(document)
+    await settle(0)
+    expect(store().currentTime).toBe(2)
+  })
 })

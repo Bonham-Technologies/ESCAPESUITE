@@ -75,7 +75,7 @@ beforeEach(() => {
     suppressRestore: false,
     setProject: vi.fn(),
     addSourceVideo: vi.fn(),
-    setCurrentTime: vi.fn(),
+    seekTo: vi.fn(),
     setSelectedClipId: vi.fn(),
     setZoom: vi.fn(),
     clearHistory: vi.fn(),
@@ -890,7 +890,7 @@ describe('answering the prompt', () => {
       0,
       session.sourceVideos
     )
-    expect(deps.setCurrentTime).toHaveBeenCalledWith(7)
+    expect(deps.seekTo).toHaveBeenCalledWith(7)
     expect(deps.setSelectedClipId).toHaveBeenCalledWith('clip-1')
     expect(deps.setZoom).toHaveBeenCalledWith(2)
     expect(deps.clearHistory).toHaveBeenCalled()

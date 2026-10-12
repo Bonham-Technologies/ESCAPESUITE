@@ -13,7 +13,8 @@
 //
 // The loop runs off `performance.now()` rather than React state: the store
 // learns the new time only every 200ms, and once more, exactly, when a pause
-// stops the loop (ESCSUITE-281); the loop calls no React setter at all per
+// stops the loop (ESCSUITE-281) — unless a seek came with the pause, which
+// keeps its target (ESCSUITE-287); the loop calls no React setter at all per
 // frame. The timecode readout instead subscribes to the playhead
 // (`subscribeDisplayTime` / `getDisplayTime`), so a frame re-renders one span
 // rather than the whole preview subtree — and only ten times a second.
@@ -478,6 +479,11 @@ export function usePreviewRenderLoop({
     // last drew — what a pause publishes (ESCSUITE-281).
     let lastStoreUpdateTime = startTimelineTime;
     let frameTime = startTimelineTime;
+    // The store's seek count as of that write (ESCSUITE-287). Re-read at each
+    // of the loop's own writes, not only here: a seek made mid-play without a
+    // pause (a marker jump, a clip-preview scrub) is overwritten by the next
+    // 200 ms write, and must not stop a later plain pause from publishing.
+    let seekSequenceAtLastWrite = useEditorStore.getState().seekSequence;
 
     // Track last active clips to detect transitions
     let lastActiveClipIds = new Set(activeClips.map(c => c.clip.id));
@@ -526,6 +532,7 @@ export function usePreviewRenderLoop({
           publishDisplayTime(loopStart, true);
           lastActiveClipIds = new Set();
           lastStoreUpdateTime = loopStart;
+          seekSequenceAtLastWrite = useEditorStore.getState().seekSequence;
           frameTime = loopStart;
 
           // Continue animation loop
@@ -664,6 +671,7 @@ export function usePreviewRenderLoop({
       if (newTimelineTime - lastStoreUpdateTime > 0.2) {
         setCurrentTime(newTimelineTime);
         lastStoreUpdateTime = newTimelineTime;
+        seekSequenceAtLastWrite = useEditorStore.getState().seekSequence;
       }
 
       // Draw the composited frame (even if there are no active clips - shows black)
@@ -689,12 +697,18 @@ export function usePreviewRenderLoop({
       // once, here, as the loop stops — every pauser (Space, the Pause button,
       // a grab of the playhead) goes through this cleanup. Only when this is a
       // pause (the effect is not just restarting for an edit, or unmounting
-      // mid-playback) and only when the store still holds the loop's own last
-      // write: a pause that came with a seek — a ruler click, Home, a step —
-      // wrote its target in the same batch, and must keep it. That is also
-      // why the pause branch above writes nothing.
-      const { isPlaying: stillPlaying, currentTime: storeTime } = useEditorStore.getState();
-      if (!stillPlaying && storeTime === lastStoreUpdateTime) {
+      // mid-playback) and only when no seek has happened since the loop's own
+      // last write: a pause that came with a seek — a ruler click, Home, a
+      // step, a marker — wrote its target in the same batch, and must keep it.
+      // That is also why the pause branch above writes nothing.
+      //
+      // A seek is seen two ways. The seek count (ESCSUITE-287) catches every
+      // seeker, a seek to the time the store already held included — Home in
+      // the first 200 ms of playing from 0, a marker on the in point just
+      // after a loop-back — which the value alone cannot. The value check
+      // stays for a write that bypasses `seekTo`.
+      const { isPlaying: stillPlaying, currentTime: storeTime, seekSequence } = useEditorStore.getState();
+      if (!stillPlaying && storeTime === lastStoreUpdateTime && seekSequence === seekSequenceAtLastWrite) {
         setCurrentTime(frameTime);
       }
     };

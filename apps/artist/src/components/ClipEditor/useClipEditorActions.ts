@@ -214,7 +214,7 @@ export function useClipEditorActions(): ClipEditorActions {
 
   const removeClipFromTimeline = useEditorStore((state) => state.removeClipFromTimeline);
   const splitClip = useEditorStore((state) => state.splitClip);
-  const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
+  const seekTo = useEditorStore((state) => state.seekTo);
   const updateClipTransform = useEditorStore((state) => state.updateClipTransform);
   const updateClipBlendMode = useEditorStore((state) => state.updateClipBlendMode);
   const updateClipEffects = useEditorStore((state) => state.updateClipEffects);
@@ -281,8 +281,8 @@ export function useClipEditorActions(): ClipEditorActions {
 
   const handleGoToClip = useCallback(() => {
     if (!selectedClip) return;
-    setCurrentTime(clipPosition);
-  }, [selectedClip, clipPosition, setCurrentTime]);
+    seekTo(clipPosition);
+  }, [selectedClip, clipPosition, seekTo]);
 
   const handleTransformChange = useCallback(
     (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => {

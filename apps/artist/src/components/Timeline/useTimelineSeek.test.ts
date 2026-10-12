@@ -30,7 +30,7 @@ let rulerRef: { current: HTMLDivElement | null }
 let marqueeJustFinishedRef: { current: boolean }
 let actions: {
   setIsPlaying: MockInstance
-  setCurrentTime: MockInstance
+  seekTo: MockInstance
   setSelectedClipId: MockInstance
   clearMultiSelection: MockInstance
 }
@@ -53,7 +53,7 @@ beforeEach(() => {
   const state = useEditorStore.getState()
   actions = {
     setIsPlaying: vi.fn(state.setIsPlaying),
-    setCurrentTime: vi.fn(state.setCurrentTime),
+    seekTo: vi.fn(state.seekTo),
     setSelectedClipId: vi.fn(state.setSelectedClipId),
     clearMultiSelection: vi.fn(state.clearMultiSelection),
   }
@@ -79,7 +79,7 @@ const deps = (): TimelineSeekDeps => {
     marqueeJustFinishedRef,
     ...(actions as unknown as Pick<
       TimelineSeekDeps,
-      'setIsPlaying' | 'setCurrentTime' | 'setSelectedClipId' | 'clearMultiSelection'
+      'setIsPlaying' | 'seekTo' | 'setSelectedClipId' | 'clearMultiSelection'
     >),
     ...overrides,
   }
@@ -104,7 +104,7 @@ describe('useTimelineSeek on the ruler', () => {
 
     act(() => result.current.handleRulerClick(clickAt(2.5, ruler)))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(2.5)
+    expect(actions.seekTo).toHaveBeenCalledWith(2.5)
     expect(currentTime()).toBe(2.5)
   })
 
@@ -115,7 +115,7 @@ describe('useTimelineSeek on the ruler', () => {
 
     act(() => result.current.handleRulerClick(clickAt(2.5, ruler)))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(4.5)
+    expect(actions.seekTo).toHaveBeenCalledWith(4.5)
   })
 
   it('pauses playback before seeking', () => {
@@ -144,7 +144,7 @@ describe('useTimelineSeek on the ruler', () => {
 
     act(() => result.current.handleRulerClick(clickAt(90, ruler)))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(4)
+    expect(actions.seekTo).toHaveBeenCalledWith(4)
   })
 
   it('seeks anywhere in the ruler it draws when the timeline is empty', () => {
@@ -154,7 +154,7 @@ describe('useTimelineSeek on the ruler', () => {
 
     act(() => result.current.handleRulerClick(clickAt(2.5, ruler)))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(2.5)
+    expect(actions.seekTo).toHaveBeenCalledWith(2.5)
   })
 
   it('does nothing when the ruler has gone', () => {
@@ -164,7 +164,7 @@ describe('useTimelineSeek on the ruler', () => {
 
     act(() => result.current.handleRulerClick(clickAt(2.5, ruler)))
 
-    expect(actions.setCurrentTime).not.toHaveBeenCalled()
+    expect(actions.seekTo).not.toHaveBeenCalled()
   })
 })
 
@@ -175,7 +175,7 @@ describe('useTimelineSeek to an exact time', () => {
 
     act(() => result.current.handleSeekTo(3))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(3)
+    expect(actions.seekTo).toHaveBeenCalledWith(3)
     expect(actions.setIsPlaying).not.toHaveBeenCalled()
   })
 
@@ -187,7 +187,7 @@ describe('useTimelineSeek to an exact time', () => {
     act(() => result.current.handleSeekTo(90))
 
     expect(actions.setIsPlaying).toHaveBeenCalledWith(false)
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(4)
+    expect(actions.seekTo).toHaveBeenCalledWith(4)
   })
 })
 
@@ -220,7 +220,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(2.5)
+    expect(actions.seekTo).toHaveBeenCalledWith(2.5)
     expect(actions.clearMultiSelection).toHaveBeenCalled()
     expect(actions.setSelectedClipId).toHaveBeenCalledWith(null)
     expect(useEditorStore.getState().selectedClipId).toBeNull()
@@ -233,7 +233,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, onClip())))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(2.5)
+    expect(actions.seekTo).toHaveBeenCalledWith(2.5)
     expect(actions.clearMultiSelection).not.toHaveBeenCalled()
     expect(useEditorStore.getState().selectedClipId).toBe('clip1')
   })
@@ -256,7 +256,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(30, bare())))
 
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(30)
+    expect(actions.seekTo).toHaveBeenCalledWith(30)
   })
 
   it('does nothing for the click that ended a marquee, and forgets it happened', () => {
@@ -266,13 +266,13 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
 
-    expect(actions.setCurrentTime).not.toHaveBeenCalled()
+    expect(actions.seekTo).not.toHaveBeenCalled()
     expect(actions.clearMultiSelection).not.toHaveBeenCalled()
     expect(marqueeJustFinishedRef.current).toBe(false)
 
     // The next click is an ordinary one again.
     act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
-    expect(actions.setCurrentTime).toHaveBeenCalledWith(2.5)
+    expect(actions.seekTo).toHaveBeenCalledWith(2.5)
   })
 
   it('does nothing while a clip is being dragged', () => {
@@ -282,7 +282,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
 
-    expect(actions.setCurrentTime).not.toHaveBeenCalled()
+    expect(actions.seekTo).not.toHaveBeenCalled()
   })
 
   it('does nothing while the playhead is being scrubbed', () => {
@@ -292,7 +292,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
 
-    expect(actions.setCurrentTime).not.toHaveBeenCalled()
+    expect(actions.seekTo).not.toHaveBeenCalled()
   })
 
   it('does nothing when the track area has gone', () => {
@@ -302,7 +302,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, bare())))
 
-    expect(actions.setCurrentTime).not.toHaveBeenCalled()
+    expect(actions.seekTo).not.toHaveBeenCalled()
   })
 
   it('neither seeks nor deselects for a click on the playhead', () => {
@@ -312,7 +312,7 @@ describe('useTimelineSeek on the track area', () => {
 
     act(() => result.current.handleTrackClick(clickAt(2.5, onPlayhead())))
 
-    expect(actions.setCurrentTime).not.toHaveBeenCalled()
+    expect(actions.seekTo).not.toHaveBeenCalled()
     expect(actions.clearMultiSelection).not.toHaveBeenCalled()
     expect(useEditorStore.getState().selectedClipId).toBe('clip1')
   })

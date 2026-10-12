@@ -54,6 +54,9 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
       project: createEmptyProject(),
       sourceVideos: [],
       currentTime: 0,
+      // A seek to 0: a reset that stops playback inside the render loop's
+      // 200 ms window must not get the loop's last frame time (ESCSUITE-287).
+      seekSequence: state.seekSequence + 1,
       isPlaying: false,
       selectedClipId: null,
       selectedClipIds: new Set<string>(),

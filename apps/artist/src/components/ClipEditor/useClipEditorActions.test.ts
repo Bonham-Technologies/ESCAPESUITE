@@ -36,7 +36,7 @@ import type { Clip, SourceVideo } from '../../store/types'
 const ACTIONS = [
   'removeClipFromTimeline',
   'splitClip',
-  'setCurrentTime',
+  'seekTo',
   'updateClipTransform',
   'updateClipBlendMode',
   'updateClipEffects',
@@ -360,7 +360,7 @@ describe('useClipEditorActions clip actions', () => {
 
     act(() => result.current.handleGoToClip())
 
-    expect(spies.setCurrentTime).toHaveBeenCalledWith(3)
+    expect(spies.seekTo).toHaveBeenCalledWith(3)
     expect(store().currentTime).toBe(3)
   })
 

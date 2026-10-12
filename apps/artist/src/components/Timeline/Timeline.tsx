@@ -56,7 +56,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const snapEnabled = useEditorStore((state) => state.snapEnabled);
   const snapThreshold = useEditorStore((state) => state.snapThreshold);
 
-  const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
+  const seekTo = useEditorStore((state) => state.seekTo);
   const setSelectedClipId = useEditorStore((state) => state.setSelectedClipId);
   const toggleClipSelection = useEditorStore((state) => state.toggleClipSelection);
   const moveSelectedClips = useEditorStore((state) => state.moveSelectedClips);
@@ -153,7 +153,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     timelineDuration,
     isPlaying,
     setIsPlaying,
-    setCurrentTime,
+    setCurrentTime: seekTo,
   });
 
   // Dragging the in/out point markers on the ruler
@@ -244,7 +244,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     minTimelineDuration,
     isPlaying,
     setIsPlaying,
-    setCurrentTime,
+    seekTo,
     setSelectedClipId,
     clearMultiSelection,
     isDraggingPlayhead,

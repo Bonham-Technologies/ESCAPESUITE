@@ -54,7 +54,10 @@ export function PlaybackControls({ modalOpen = false }: PlaybackControlsProps) {
   const timelineDuration = useEditorStore((state) => state.project.timeline.duration);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const setIsPlaying = useEditorStore((state) => state.setIsPlaying);
-  const setCurrentTime = useEditorStore((state) => state.setCurrentTime);
+  // Every move of the playhead here is a seek (ESCSUITE-287): the render
+  // loop's pause write yields to it even when it lands on the time the store
+  // already held.
+  const seekTo = useEditorStore((state) => state.seekTo);
 
   useEffect(() => installFocusModalityTracker(), []);
 
@@ -67,23 +70,23 @@ export function PlaybackControls({ modalOpen = false }: PlaybackControlsProps) {
 
   const handleStepBackward = useCallback(() => {
     setIsPlaying(false);
-    setCurrentTime(Math.max(0, currentTime - 1));
-  }, [currentTime, setCurrentTime, setIsPlaying]);
+    seekTo(Math.max(0, currentTime - 1));
+  }, [currentTime, seekTo, setIsPlaying]);
 
   const handleStepForward = useCallback(() => {
     setIsPlaying(false);
-    setCurrentTime(Math.min(timelineDuration, currentTime + 1));
-  }, [currentTime, timelineDuration, setCurrentTime, setIsPlaying]);
+    seekTo(Math.min(timelineDuration, currentTime + 1));
+  }, [currentTime, timelineDuration, seekTo, setIsPlaying]);
 
   const handleGoToStart = useCallback(() => {
     setIsPlaying(false);
-    setCurrentTime(0);
-  }, [setCurrentTime, setIsPlaying]);
+    seekTo(0);
+  }, [seekTo, setIsPlaying]);
 
   const handleGoToEnd = useCallback(() => {
     setIsPlaying(false);
-    setCurrentTime(timelineDuration);
-  }, [timelineDuration, setCurrentTime, setIsPlaying]);
+    seekTo(timelineDuration);
+  }, [timelineDuration, seekTo, setIsPlaying]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

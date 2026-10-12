@@ -953,6 +953,7 @@ describe('KeyframePanel', () => {
       store().setSelectedClipId('clip1')
       store().setKeyframePanelOpen(true)
       render(<KeyframePanel />)
+      const seeks = store().seekSequence
 
       const scrubber = document.body.querySelector<HTMLElement>('[class*="scrubber"]')!
       scrubber.getBoundingClientRect = () =>
@@ -961,6 +962,8 @@ describe('KeyframePanel', () => {
 
       const expected = (100 / 430) * CLIP_DURATION
       expect(store().currentTime).toBeCloseTo(2 + expected, 6)
+      // A seek, so a pause in the same batch keeps it (ESCSUITE-287).
+      expect(store().seekSequence).toBeGreaterThan(seeks)
       expect(screen.getByText(`${expected.toFixed(2)}s / ${CLIP_DURATION.toFixed(2)}s`)).toBeInTheDocument()
     })
 

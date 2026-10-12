@@ -588,6 +588,14 @@ export interface EditorState {
   // Playback state
   currentTime: number;
   isPlaying: boolean;
+  /**
+   * How many seeks have happened (ESCSUITE-287): `seekTo`, a marker jump and a
+   * project reset each add one; the render loop's own `setCurrentTime` writes
+   * add none. The loop compares it at a pause, so a seek in the same batch
+   * wins even when it lands on the time the store already held. A count, not a
+   * position: only whether it moved matters.
+   */
+  seekSequence: number;
 
   // Selection state
   selectedClipId: string | null;
@@ -802,7 +810,19 @@ export interface EditorState {
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => boolean;
 
   // Actions - Playback
+  /**
+   * The render loop's own writer of the playback position: its 200 ms
+   * throttled writes, the loop-back, the end of the timeline and the pause.
+   * Counts no seek. Everything else that moves the playhead calls `seekTo`.
+   */
   setCurrentTime: (time: number) => void;
+  /**
+   * Move the playhead for the user (ESCSUITE-287): a ruler or track click, a
+   * marker, Home/End, a step, a scrub, a session restore. Writes `time` as
+   * given — every caller already clamps to its own bounds — adds one to
+   * `seekSequence`, and pushes no undo entry.
+   */
+  seekTo: (time: number) => void;
   setIsPlaying: (playing: boolean) => void;
 
   // Actions - Selection
