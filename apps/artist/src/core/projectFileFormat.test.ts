@@ -135,6 +135,36 @@ describe('encodeProjectFile', () => {
     expect(indexOf(parts).videos).toEqual([])
   })
 
+  // Final review fix 4: v1 skipped an empty thumbnail (its `''` is falsy), and
+  // a zero-length range would restore as an empty thumbnail, a broken tile.
+  it('writes no thumbnail for a stored thumbnail of zero bytes, and keeps a non-empty one', () => {
+    const parts = encodeProjectFile(project(), undefined, [
+      {
+        id: 'empty-thumb',
+        name: 'e.mp4',
+        mimeType: 'video/mp4',
+        meta,
+        blob: new Blob([new Uint8Array([1, 2])], { type: 'video/mp4' }),
+        thumbnail: new Blob([], { type: 'image/jpeg' }),
+      },
+      {
+        id: 'real-thumb',
+        name: 'r.mp4',
+        mimeType: 'video/mp4',
+        meta,
+        blob: new Blob([new Uint8Array([3])], { type: 'video/mp4' }),
+        thumbnail: new Blob([new Uint8Array([9])], { type: 'image/jpeg' }),
+      },
+    ])
+
+    const [empty, real] = indexOf(parts).videos
+    expect('thumbnail' in empty).toBe(false)
+    expect(real.data).toEqual({ offset: 2, length: 1 })
+    expect(real.thumbnail).toEqual({ offset: 3, length: 1, mimeType: 'image/jpeg' })
+    // The empty thumbnail is not a part of the file either.
+    expect(parts).toHaveLength(5)
+  })
+
   // Review Focus 2.
   it('gives an empty source a zero-length range and starts the next one where it started', () => {
     const parts = encodeProjectFile(project(), undefined, [
