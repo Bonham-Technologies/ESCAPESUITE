@@ -4284,6 +4284,28 @@ it fails with `src-0: v2 bytes equal v1 bytes: expected false to be true`; the m
 kit Chromium suite ran here with ffprobe on PATH: 35 passed / 1 skipped, one more than before. **No floor
 crossed**; the kit's floors stay 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-12 for ESCSUITE-286 (`setClipKeyframe`'s first-write seed —
+ESCSUITE-166's time-0 keyframe at the base value, once per property — is skipped when an Animate In preset
+handle occupies time 0, so the first custom keyframe on a fade-in clip no longer replaces the preset's
+opacity-0 handle with opacity 1 and erases the fade-in; the same "a handle's time is occupied" rule
+ESCSUITE-282 applies to the explicit add paths, now applied to the one writer that could still land there):
+99.84 / 99.41 / 96.62 / 99.76, byte-identical on every percentage to the 99.84 / 99.41 / 96.62 / 99.76 that
+`main` at `fed88166` (the ESCSUITE-260 version-packages commit) measures in the same sitting. The base gives
+5,814 / 6,017 branches and this branch 5,815 / 6,018: one new branch, covered, the same 203 uncovered as
+before (lines 9,004 / 9,018 → 9,006 / 9,020, statements 10,176 / 10,236 → 10,178 / 10,238, functions
+2,148 / 2,153 → 2,149 / 2,154, every denominator growing by exactly what the numerator did; the same
+14 / 60 / 5 uncovered). The one branch and the one function are both `store/keyframeSlice.ts`'s
+(73 / 84 → 74 / 85, 36 / 36 → 37 / 37): the "does a preset handle sit within `KEYFRAME_TIME_EPSILON` of 0"
+test on the seed, read through ESCSUITE-282's `presetHandleTimes`, reached from the skip side by the fade-in
+clip whose first custom keyframe at 2 s leaves the stored list holding only that keyframe and the evaluated
+opacity at 0 still reading 0 (red before the fix: `expected [ {time:0,value:1,easing:'ease-out'},
+{time:2,value:0.5} ] to deeply equal [ {time:2,value:0.5} ]`), and from the seed side by the 166 pins, an
+Animate Out-only preset and a property the preset does not touch; the file's eleven pre-existing uncovered
+arms are untouched. The review (sonnet) approved with two minors shipped as is: `presetHandleTimes` runs once
+per keyframe write, a user gesture, never per frame; and a first keyframe within 0.001 s of 0 is an explicit
+add 282 already refuses. The `*.perf.test.ts` files and the rerender pins are byte-identical; the 166 and 282
+pins are untouched. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
