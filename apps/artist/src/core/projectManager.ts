@@ -9,6 +9,7 @@ import {
   storeThumbnail,
   getThumbnail,
   resolveThumbnailUrl,
+  revokeSourceThumbnails,
 } from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
 import {
@@ -353,8 +354,8 @@ async function rollBack(written: string[]): Promise<void> {
 /**
  * The restore loop both file versions share, with its progress reports. A
  * throw anywhere in it (a write, a thumbnail write, a metadata probe, a v1
- * source's base64) rolls back what this load stored, then rethrows the
- * original error (ESCSUITE-260).
+ * source's base64) rolls back what this load stored, revokes the thumbnail
+ * URLs it minted, then rethrows the original error (ESCSUITE-260).
  */
 async function restoreSources(
   count: number,
@@ -371,6 +372,9 @@ async function restoreSources(
     }
   } catch (error) {
     await rollBack(written);
+    // Nothing will own the handles minted so far: a rolled-back source's
+    // points at a deleted row, and a present source's is never handed on.
+    revokeSourceThumbnails(restored);
     throw error;
   }
   return restored;
@@ -415,15 +419,22 @@ async function loadJsonFile(
  * that passes can still fail while writing; `restoreSources`' rollback covers
  * that. With no `navigator.storage.estimate`, the shared helper answers all
  * zeros. A quota of 0 means nothing was measured, and the check is skipped
- * rather than refusing every load. A negative `available` (usage already over
- * quota) counts as nothing free.
+ * rather than refusing every load; so is an estimate that rejects. A negative
+ * `available` (usage already over quota) counts as nothing free.
  */
 async function assertRoomFor(index: ProjectFileIndex, existing: StoredSource[]): Promise<void> {
   const needed = index.videos.reduce(
     (sum, video, i) => (existing[i] ? sum : sum + video.data.length + (video.thumbnail?.length ?? 0)),
     0
   );
-  const { quota, available } = await getStorageEstimate();
+  let estimate: Awaited<ReturnType<typeof getStorageEstimate>>;
+  try {
+    estimate = await getStorageEstimate();
+  } catch (error) {
+    console.warn('Could not read the storage estimate; loading without the free-space check:', error);
+    return;
+  }
+  const { quota, available } = estimate;
   const free = Math.max(0, available);
   if (quota > 0 && needed > free) {
     throw new ProjectFileError(
