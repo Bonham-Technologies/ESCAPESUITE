@@ -1861,7 +1861,7 @@ describe('showOpenProjectDialog', () => {
     vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(function (this: HTMLInputElement) {
       clicked = true
       expect(this.type).toBe('file')
-      expect(this.accept).toBe('.veditor,application/json')
+      expect(this.accept).toBe('.veditor')
       if (outcome === 'cancel') {
         ;(this as unknown as { oncancel: () => void }).oncancel()
         return
@@ -1883,7 +1883,7 @@ describe('showOpenProjectDialog', () => {
 
     await expect(showOpenProjectDialog()).resolves.toBe(file)
     expect(picker).toHaveBeenCalledWith({
-      types: [{ description: 'Video Editor Project', accept: { 'application/json': ['.veditor'] } }],
+      types: [{ description: 'Video Editor Project', accept: { 'application/octet-stream': ['.veditor'] } }],
     })
   })
 

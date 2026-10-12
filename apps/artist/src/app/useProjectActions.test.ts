@@ -284,6 +284,27 @@ describe('opening a project', () => {
     expect(revokeSourceThumbnails).not.toHaveBeenCalled()
   })
 
+  it('names a project file it refused, in the sentence a malformed project uses (ESCSUITE-260)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
+    vi.mocked(loadProject).mockRejectedValue(
+      new ProjectFileError('This project needs 1.5 GiB of storage and this browser has 1.0 GiB free.')
+    )
+    const { result } = mountActions({ clipCount: 0 })
+
+    await act(async () => {
+      await result.current.handleLoadProject()
+    })
+
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      'Failed to load project: This project needs 1.5 GiB of storage and this browser has 1.0 GiB free.',
+      'error'
+    )
+    expect(deps.resetProject).not.toHaveBeenCalled()
+    expect(revokeSourceThumbnails).not.toHaveBeenCalled()
+    expect(result.current.isLoading).toBe(false)
+  })
+
   it('rejects a malformed project without emptying the editor first (ESCSUITE-102), and revokes the incoming thumbnails loadProject already minted', async () => {
     vi.mocked(showOpenProjectDialog).mockResolvedValue(projectFile())
     // A file that parses as JSON but is not a shape parseProject accepts —
