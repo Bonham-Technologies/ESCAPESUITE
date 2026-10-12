@@ -1953,7 +1953,12 @@ count when it starts and again at each of its own writes, and the pause write ne
 re-reading at each write, rather than only at the start, is what lets a seek made mid-play
 without a pause (a marker jump) — which the loop's next 200 ms write overwrites — leave a later
 plain pause landing on the frame shown. The value check (the store still holds the loop's last
-write) stays beside the count for a write that bypasses `seekTo`. Before this, a seek to the value
+write) stays beside the count, and must: the loop's own stop arms — the end of the timeline, and a
+loop region shorter than one frame — call `setIsPlaying(false)` and `setCurrentTime(loopEnd)`
+without counting a seek, and only the value check keeps the cleanup from overwriting `loopEnd`
+with the earlier frame time (`usePreviewRenderLoop.test.ts`'s "stops at the end of the timeline
+when loop playback is off" pins it). It also catches any other write that bypasses `seekTo`.
+Before this, a seek to the value
 the store already held — Home or ← within the first 200 ms of playing from 0, a marker on the in
 point clicked within 200 ms of a loop-back, a marker on the jumped-to clip's start within 200 ms
 of a gap jump, New Project in the first 200 ms — looked like a plain pause and landed on the

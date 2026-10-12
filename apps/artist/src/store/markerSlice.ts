@@ -7,6 +7,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { StateCreator } from 'zustand';
 import type { EditorState } from './types';
+import { seekFields } from './playbackSlice';
 
 export type MarkerSlice = Pick<EditorState, 'markers' | 'addMarker' | 'removeMarker' | 'updateMarker' | 'clearMarkers' | 'setMarkers' | 'goToNextMarker' | 'goToPreviousMarker'>;
 
@@ -44,7 +45,7 @@ export const createMarkerSlice: StateCreator<EditorState, [], [], MarkerSlice> =
   goToNextMarker: () => set((state) => {
     const nextMarker = state.markers.find((m) => m.time > state.currentTime);
     if (nextMarker) {
-      return { currentTime: nextMarker.time, seekSequence: state.seekSequence + 1 };
+      return seekFields(state, nextMarker.time);
     }
     return {};
   }),
@@ -53,7 +54,7 @@ export const createMarkerSlice: StateCreator<EditorState, [], [], MarkerSlice> =
     const previousMarkers = state.markers.filter((m) => m.time < state.currentTime);
     if (previousMarkers.length > 0) {
       const prevMarker = previousMarkers[previousMarkers.length - 1];
-      return { currentTime: prevMarker.time, seekSequence: state.seekSequence + 1 };
+      return seekFields(state, prevMarker.time);
     }
     return {};
   }),

@@ -706,7 +706,13 @@ export function usePreviewRenderLoop({
       // seeker, a seek to the time the store already held included — Home in
       // the first 200 ms of playing from 0, a marker on the in point just
       // after a loop-back — which the value alone cannot. The value check
-      // stays for a write that bypasses `seekTo`.
+      // stays for the loop's own stop arms: the end of the timeline and a loop
+      // region shorter than one frame call `setIsPlaying(false)` and
+      // `setCurrentTime(loopEnd)` without counting a seek, and only the value
+      // check keeps this cleanup from overwriting `loopEnd` with the earlier
+      // frame time (pinned by "stops at the end of the timeline when loop
+      // playback is off"). It also catches any other write that bypasses
+      // `seekTo`. Do not drop it in favour of the count.
       const { isPlaying: stillPlaying, currentTime: storeTime, seekSequence } = useEditorStore.getState();
       if (!stillPlaying && storeTime === lastStoreUpdateTime && seekSequence === seekSequenceAtLastWrite) {
         setCurrentTime(frameTime);

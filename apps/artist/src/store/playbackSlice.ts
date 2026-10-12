@@ -12,6 +12,16 @@ import type { EditorState } from './types';
 
 export type PlaybackSlice = Pick<EditorState, 'currentTime' | 'isPlaying' | 'seekSequence' | 'inPoint' | 'outPoint' | 'setCurrentTime' | 'seekTo' | 'setIsPlaying' | 'setInPoint' | 'setOutPoint' | 'clearInOutPoints'>;
 
+/**
+ * The fields a seek writes: the new playhead and one more on `seekSequence`
+ * (ESCSUITE-287). `seekTo` and every action that moves the playhead inside its
+ * own `set` updater (the marker jumps, `resetProject`) spread it, so none can
+ * move the playhead and forget the count.
+ */
+export function seekFields(state: Pick<EditorState, 'seekSequence'>, time: number): Pick<EditorState, 'currentTime' | 'seekSequence'> {
+  return { currentTime: time, seekSequence: state.seekSequence + 1 };
+}
+
 export const createPlaybackSlice: StateCreator<EditorState, [], [], PlaybackSlice> = (set) => ({
   currentTime: 0,
   isPlaying: false,
@@ -21,7 +31,7 @@ export const createPlaybackSlice: StateCreator<EditorState, [], [], PlaybackSlic
 
   // Playback actions
   setCurrentTime: (time: number) => set({ currentTime: time }),
-  seekTo: (time: number) => set((state) => ({ currentTime: time, seekSequence: state.seekSequence + 1 })),
+  seekTo: (time: number) => set((state) => seekFields(state, time)),
   setIsPlaying: (playing: boolean) => set({ isPlaying: playing }),
 
   // In/Out point actions

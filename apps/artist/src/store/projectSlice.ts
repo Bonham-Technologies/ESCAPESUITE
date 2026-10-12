@@ -11,6 +11,7 @@ import { createEmptyProject, calculateTimelineDuration } from './projectFactory'
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
 import { pruneSelection } from './selectionPrune';
+import { seekFields } from './playbackSlice';
 import { revokeSourceThumbnails, revokeThumbnailUrl } from '../core/storage';
 
 export type ProjectSlice = Pick<EditorState, 'project' | 'sourceVideos' | 'setProject' | 'resetProject' | 'setProjectResolution' | 'addSourceVideo' | 'removeSourceVideosPermanently' | 'setSourceThumbnail'>;
@@ -53,10 +54,9 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
     return {
       project: createEmptyProject(),
       sourceVideos: [],
-      currentTime: 0,
       // A seek to 0: a reset that stops playback inside the render loop's
       // 200 ms window must not get the loop's last frame time (ESCSUITE-287).
-      seekSequence: state.seekSequence + 1,
+      ...seekFields(state, 0),
       isPlaying: false,
       selectedClipId: null,
       selectedClipIds: new Set<string>(),
