@@ -12,13 +12,13 @@
 // The track container's and the ruler's left edges are at client X 0 and one
 // second is 50px, so client X 300 is 6s.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { cleanup, fireEvent, render } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { PreviewPlayer } from './PreviewPlayer'
 import { PlaybackControls } from './PlaybackControls'
 import { Timeline } from '../Timeline/Timeline'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 import { setRect } from '../../test/doubles/layout'
-import { installPreviewDoubles, settle, type PreviewDoubles } from '../../test/renderPreview'
+import { FRAME_MS, installPreviewDoubles, settle, type PreviewDoubles } from '../../test/renderPreview'
 import styles from '../Timeline/Timeline.module.css'
 
 let doubles: PreviewDoubles
@@ -154,5 +154,51 @@ describe('pausing lands on the frame shown (ESCSUITE-281)', () => {
 
     expect(store().isPlaying).toBe(false)
     expect(store().currentTime).toBe(0)
+  })
+})
+
+// ESCSUITE-287: the loop's pause write yielded to a same-batch seek only when
+// the seek changed the store's value. A seek to the value the store already
+// holds — inside the loop's 200 ms throttle window, where the store still has
+// the position playback started from or looped back to — looked like a plain
+// pause, and the frame time overwrote it. Every seeker now counts itself in
+// the store's seek sequence, and the pause write yields to any seek at all.
+describe('a seek to the time the store already holds still lands (ESCSUITE-287)', () => {
+  it('Home within the first 200 ms of playing from 0 lands on 0', async () => {
+    addClip('clip1', 0, 10)
+    await renderEditor()
+    store().setIsPlaying(true)
+    await settle(100)
+    // The loop has drawn ahead of 0 but not yet written the store.
+    expect(store().isPlaying).toBe(true)
+    expect(store().currentTime).toBe(0)
+
+    fireEvent.keyDown(window, { code: 'Home', key: 'Home' })
+    await settle(100)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(0)
+  })
+
+  it('a marker on the in point, clicked within 200 ms of a loop-back, lands on the in point', async () => {
+    addClip('clip1', 0, 10)
+    store().setLoopPlayback(true)
+    store().setInPoint(1)
+    store().setOutPoint(2)
+    store().addMarker(1)
+    store().setCurrentTime(1.9)
+    await renderEditor()
+    store().setIsPlaying(true)
+    // 1.9 + 7 frames of 16 ms crosses the out point and loops back to 1; the
+    // frames after it run on to about 1.09, short of the next 200 ms write.
+    await settle(FRAME_MS * 7 + 90)
+    expect(store().isPlaying).toBe(true)
+    expect(store().currentTime).toBe(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /^Marker / }))
+    await settle(100)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(1)
   })
 })
