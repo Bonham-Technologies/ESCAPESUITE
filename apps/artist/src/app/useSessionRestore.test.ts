@@ -775,8 +775,9 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       expect(deps.showNotification).not.toHaveBeenCalled()
     })
 
-    it('a Restore whose re-read fails is refused the way a failed read is, and the slot is left', async () => {
+    it('a Restore whose re-read fails is refused the way a failed read is, frees what it read, and the slot is left', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(getThumbnail).mockResolvedValue(new Blob(['thumb'], { type: 'image/jpeg' }))
       const older = offeredAt()
       const { result } = await offerTabA(older)
       vi.mocked(listSessionStates).mockRejectedValue(new Error('db closed'))
@@ -787,6 +788,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
       expect(deps.setProject).not.toHaveBeenCalled()
       expect(deps.showNotification).toHaveBeenCalledWith('Failed to restore session', 'error')
+      expect(revokeSourceThumbnails).toHaveBeenCalledWith([{ ...older.sourceVideos[0], thumbnailUrl: lastObjectUrl() }])
       expect(clearSessionState).not.toHaveBeenCalled()
       await flushLocks()
       expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
