@@ -560,6 +560,32 @@ describe('loadProject', () => {
     expect(sourceVideos).toEqual([])
   })
 
+  // Final review fix 1: parseProject runs before any source is copied, so a
+  // refused project leaves nothing behind in the shared DB.
+  it('refuses a project parseProject refuses, by name, before storing any of its sources', async () => {
+    const videoId = uniqueId('v1-refused')
+    const noTimeline: Partial<Project> = createTestProject(videoId)
+    delete noTimeline.timeline
+    const file = veditorFile(
+      {
+        project: noTimeline as Project,
+        videos: [{ id: videoId, name: 'v.mp4', mimeType: 'video/mp4', data: base64Of([1, 2, 3]) }],
+      },
+      videoId
+    )
+    vi.mocked(storeVideo).mockClear()
+    vi.mocked(deleteVideo).mockClear()
+
+    const error = await loadProject(file).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe('Project has no timeline')
+    expect(storeVideo).not.toHaveBeenCalled()
+    // Refused before the restore loop: there is nothing to roll back.
+    expect(deleteVideo).not.toHaveBeenCalled()
+    expect(await getVideo(videoId)).toBeUndefined()
+  })
+
   it('resurrects bytes but not CRAFT take identity for a source CRAFT no longer has (ESCSUITE-151)', async () => {
     const videoId = uniqueId('deleted-take')
     const take: SourceVideo = {
@@ -980,6 +1006,37 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
   const refusedId = 'refused'
   const indexWith = (videos: unknown[]) => ({ version: 2, project: createTestProject(refusedId), videos })
   const one = (data: unknown) => [{ id: refusedId, name: 'v.mp4', mimeType: 'video/mp4', data }]
+
+  // Final review fix 1: parseProject runs before any source is copied, so a
+  // refused project (hand-edited, or from a newer editor) leaves nothing behind.
+  it.each([
+    [
+      'a project with no timeline',
+      () => {
+        const project: Partial<Project> = createTestProject(refusedId)
+        delete project.timeline
+        return { project }
+      },
+      'Project has no timeline',
+    ],
+    [
+      'an editor block whose in point is after its out point',
+      () => ({ project: createTestProject(refusedId), editor: { inPoint: 5, outPoint: 1, markers: [] } }),
+      'editor.inPoint must be before editor.outPoint',
+    ],
+  ])('refuses %s by name before storing any of its sources', async (_case, build, reason) => {
+    vi.mocked(deleteVideo).mockClear()
+    const file = rawV2File({ version: 2, ...build(), videos: one({ offset: 0, length: 3 }) }, [1, 2, 3])
+
+    const error = await loadProject(file).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe(reason)
+    expect(storeVideo).not.toHaveBeenCalled()
+    expect(storeThumbnail).not.toHaveBeenCalled()
+    // Refused before the restore loop: there is nothing to roll back.
+    expect(deleteVideo).not.toHaveBeenCalled()
+  })
 
   it.each([
     [
@@ -2065,14 +2122,16 @@ describe('the editor block in the project file (ESCSUITE-245)', () => {
     expect(parsed.ok && parsed.editor).toBeUndefined()
   })
 
-  it('hands back a malformed block as it found it, for parseProject to refuse by name', async () => {
+  // Final review fix 1: loadProject now runs parseProject itself, before any
+  // write, so a malformed block is refused there by name (it was handed back
+  // for the hook's parseProject to refuse, after the sources were stored).
+  it('refuses a malformed block by name, through parseProject', async () => {
     const id = uniqueId('ed')
     await saveProject(createTestProject(id), [], undefined, { inPoint: 5, outPoint: 1, markers: [] })
 
-    const loaded = await loadProject(await lastFile())
-    const parsed = parseProject(loaded.project, loaded.editor)
-    expect(parsed.ok).toBe(false)
-    if (!parsed.ok) expect(parsed.reason).toContain('editor.inPoint')
+    const error = await loadProject(await lastFile()).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toContain('editor.inPoint')
   })
 })
 
