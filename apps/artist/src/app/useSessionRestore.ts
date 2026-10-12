@@ -73,8 +73,12 @@ const OWNER_RETURNED = 'The tab that saved this session is open again';
 // removed. Each is shown once, on the answer that found it.
 /** Restore found a newer save: the prompt now offers that one. */
 export const SESSION_NEWER_NOTICE = 'That session changed in another window — here is the newer one.';
-/** Start Fresh found a newer save: it was kept, and is offered again next time. */
-export const SESSION_KEPT_NOTICE = 'That session changed in another window, so it was kept for next time.';
+/**
+ * Start Fresh found a newer save: it was not deleted. It stays in storage and is
+ * offered like any other departed tab's slot — not necessarily to this tab,
+ * whose own slot comes first on a reload.
+ */
+export const SESSION_KEPT_NOTICE = 'That session was changed in another window, so it was not deleted.';
 /** Either answer found the slot gone: nothing to delete or adopt. */
 export const SESSION_REMOVED_NOTICE = 'That session was removed in another window.';
 
@@ -154,7 +158,10 @@ export function useSessionRestore({
     restoreAttemptRef.current = attempt;
     const offered = offeredSlotRef.current!;
 
-    let restoredSourceVideos: SourceVideo[];
+    // Empty until the thumbnail reads land, so a refusal after them — the
+    // owner back (ESCSUITE-283), a re-read that fails (ESCSUITE-289) — can free
+    // what they minted, and one before them has nothing to free.
+    let restoredSourceVideos: SourceVideo[] = [];
     let atAnswer: SlotAtAnswer;
     try {
       restoredSourceVideos = await Promise.all(
@@ -177,6 +184,8 @@ export function useSessionRestore({
       atAnswer = await slotAtAnswer(offered.slot);
     } catch (error) {
       console.error('Failed to restore session:', error);
+      // Nothing read here is ever shown: free the thumbnails it minted.
+      revokeSourceThumbnails(restoredSourceVideos);
       // Only settle the question if nobody declined while we were reading —
       // a decline already ran this exact landing (fresh project, question
       // settled) and there is nothing this failure should add to it beyond
@@ -213,13 +222,15 @@ export function useSessionRestore({
         setSessionRestored(true);
         showNotification(SESSION_REMOVED_NOTICE, 'info');
       } else {
-        // Saved again by its tab, which has closed again — `ownerReturned()`
-        // just said so. The prompt is rebuilt from the newer save and stays up.
-        // The offer claim is kept rather than let go and claimed again: it is
-        // the same tab's offer lock, and a release followed at once by an
-        // `ifAvailable` request for it can find it not yet let go and offer
-        // nothing. Nothing else could be offered over it: it is the same tab's
-        // slot, now newer than when it was found the newest free one.
+        // Saved again by its tab since the offer. The owner probe above ran
+        // before this re-read, so a tab that came back between the two is
+        // re-offered while it is live — and the next answer's probe refuses it
+        // then. The prompt is re-offered in place from the newer save and stays
+        // up, under the same offer claim rather than one let go and claimed
+        // again: a release followed at once by an `ifAvailable` request for the
+        // same lock can find it not yet let go and offer nothing. (It is not a
+        // fresh `findOfferableSlot` run, so a slot another tab has left since,
+        // newer still, is not considered, and the media check is not repeated.)
         offeredSlotRef.current = { ...offered, slot: atAnswer };
         setPendingSession(atAnswer.session);
         showNotification(SESSION_NEWER_NOTICE, 'info');

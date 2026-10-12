@@ -9,9 +9,10 @@ interface SessionRestorePromptProps {
   /** Restore the session. Handed the same session back. */
   onRestore: (session: SessionState) => void;
   /**
-   * Start fresh. **Destructive**: `useSessionRestore`'s `handleDeclineSession`
-   * calls `clearSessionState()` on the offered slot, so the saved session is
-   * gone afterwards.
+   * Start fresh. **Destructive** as a rule: `useSessionRestore`'s
+   * `handleDeclineSession` deletes the offered slot — unless its tab has come
+   * back (ESCSUITE-283) or the slot was saved again or removed since it was
+   * offered (ESCSUITE-289), in which case it deletes nothing.
    */
   onDecline: () => void;
 }
