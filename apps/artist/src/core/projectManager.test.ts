@@ -33,7 +33,7 @@ import {
 } from './storage'
 import type { EditorBlock, Project, SourceVideo } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
-import { lastObjectUrl } from '../test/objectUrls'
+import { OBJECT_URL_PATTERN, lastObjectUrl } from '../test/objectUrls'
 
 // Pass-through spies, so a test can see (and, for the 2 GiB and quota cases,
 // fake) what save and load ask storage for. Everything else is the real layer.
@@ -1083,6 +1083,8 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
       )
       expect(storeVideo).not.toHaveBeenCalled()
       expect(storeThumbnail).not.toHaveBeenCalled()
+      // Refused before the restore loop: there is nothing to roll back.
+      expect(deleteVideo).not.toHaveBeenCalled()
     })
 
     it('names a smaller shortfall in MiB', async () => {
@@ -1136,6 +1138,25 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
       expect(storeVideo).toHaveBeenCalledTimes(1)
     })
 
+    it('skips the check when the estimate itself rejects, and says why once', async () => {
+      const a = uniqueId('q-rejected')
+      const { file } = virtualV2File(encodeProjectFile(createTestProject(a), undefined, [source(a, 1.5 * GiB)]))
+      const cause = new Error('estimate unavailable')
+      vi.mocked(getStorageEstimate).mockRejectedValueOnce(cause)
+      vi.mocked(storeVideo).mockResolvedValueOnce(undefined)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+      await expect(loadProject(file)).resolves.toBeDefined()
+
+      expect(storeVideo).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalledWith(
+        'Could not read the storage estimate; loading without the free-space check:',
+        cause
+      )
+      warn.mockRestore()
+    })
+
     // Review Focus 4.
     it('accepts a load that writes nothing when usage is already over quota', async () => {
       const present = uniqueId('q-over')
@@ -1167,6 +1188,54 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
       expect(error).toBe(failure)
       expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
       expect(await getVideo(first)).toBeUndefined()
+    })
+
+    it("revokes the thumbnail URL it minted for a source it rolled back, once", async () => {
+      const first = uniqueId('rb-url-1')
+      const second = uniqueId('rb-url-2')
+      let minted = ''
+      vi.mocked(storeVideo)
+        .mockImplementationOnce(actualStorage.storeVideo)
+        .mockImplementationOnce(async () => {
+          // The first source's thumbnail handle is the last one minted before this write.
+          minted = lastObjectUrl()
+          throw new Error('disk full')
+        })
+      vi.mocked(URL.revokeObjectURL).mockClear()
+
+      await expect(
+        loadProject(
+          v2File(createTestProject(first), [
+            { id: first, meta, bytes: [1], thumbnail: { bytes: [9], type: 'image/jpeg' } },
+            { id: second, meta, bytes: [2] },
+          ])
+        )
+      ).rejects.toThrow('disk full')
+
+      expect(minted).toMatch(OBJECT_URL_PATTERN)
+      expect(vi.mocked(URL.revokeObjectURL).mock.calls).toEqual([[minted]])
+      expect(await getVideo(first)).toBeUndefined()
+    })
+
+    it('revokes nothing when the load succeeds', async () => {
+      const first = uniqueId('rb-url-ok-1')
+      const second = uniqueId('rb-url-ok-2')
+      vi.mocked(URL.revokeObjectURL).mockClear()
+
+      const { sourceVideos } = await loadProject(
+        v2File(createTestProject(first), [
+          { id: first, meta, bytes: [1], thumbnail: { bytes: [9], type: 'image/jpeg' } },
+          { id: second, meta, bytes: [2], thumbnail: { bytes: [8], type: 'image/jpeg' } },
+        ])
+      )
+
+      expect(sourceVideos.map((v) => v.thumbnailUrl)).toEqual([
+        expect.stringMatching(OBJECT_URL_PATTERN),
+        expect.stringMatching(OBJECT_URL_PATTERN),
+      ])
+      expect(URL.revokeObjectURL).not.toHaveBeenCalled()
+      await actualStorage.deleteVideo(first)
+      await actualStorage.deleteVideo(second)
     })
 
     it('never deletes a source that was stored before the load', async () => {
