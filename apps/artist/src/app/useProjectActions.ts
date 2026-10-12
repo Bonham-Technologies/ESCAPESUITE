@@ -171,7 +171,13 @@ export function useProjectActions({
     } catch (error) {
       console.error('Load failed:', error);
       if (mintedButNotYetOwned) revokeSourceThumbnails(mintedButNotYetOwned);
-      showNotification('Failed to load project', 'error');
+      // A refused file names its reason (ESCSUITE-260): a damaged or cut-off
+      // v2 file, or one that will not fit in storage. Anything else, such as a
+      // v1 file that is not JSON, keeps the bare sentence.
+      showNotification(
+        error instanceof ProjectFileError ? `Failed to load project: ${error.message}` : 'Failed to load project',
+        'error'
+      );
     } finally {
       setIsLoading(false);
     }

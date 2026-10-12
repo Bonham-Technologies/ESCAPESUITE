@@ -589,7 +589,7 @@ export async function showOpenProjectDialog(): Promise<File | null> {
         types: [
           {
             description: 'Video Editor Project',
-            accept: { 'application/json': ['.veditor'] },
+            accept: { 'application/octet-stream': ['.veditor'] },
           },
         ],
       });
@@ -606,7 +606,9 @@ export async function showOpenProjectDialog(): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.veditor,application/json';
+    // The extension is what filters: a v2 file is binary (ESCSUITE-260), and a
+    // v1 file an older build wrote carries the same extension.
+    input.accept = '.veditor';
 
     input.onchange = () => {
       const file = input.files?.[0] || null;
