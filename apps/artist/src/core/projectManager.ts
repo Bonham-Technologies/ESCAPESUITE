@@ -3,7 +3,14 @@
 import type { Project, SourceVideo, Clip, EditorBlock } from '../store/types';
 import { getVideo, storeVideo, storeThumbnail, getThumbnail, resolveThumbnailUrl } from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
-import { assertRangesTile, readProjectFileIndex, sliceRange, type ProjectFileIndex } from './projectFileFormat';
+import {
+  assertRangesTile,
+  encodeProjectFile,
+  readProjectFileIndex,
+  sliceRange,
+  type ProjectFileIndex,
+  type ProjectFileSource,
+} from './projectFileFormat';
 
 /**
  * The `SourceVideo` fields a saved project persists alongside each video's
@@ -27,6 +34,12 @@ import { assertRangesTile, readProjectFileIndex, sliceRange, type ProjectFileInd
  */
 export type SourceVideoMeta = Omit<SourceVideo, 'id' | 'name' | 'mimeType' | 'size' | 'thumbnailUrl'>;
 
+/**
+ * A v1 `.veditor`: one JSON document with every source base64-encoded inside
+ * it. Only read now: `saveProject` writes the v2 container
+ * (`projectFileFormat.ts`, ESCSUITE-260), and `loadProject` still opens every
+ * v1 file an older build wrote.
+ */
 export interface ProjectFile {
   version: number;
   project: Project;
@@ -60,84 +73,6 @@ export interface ProjectFile {
 const JSON_FILE_VERSION = 1;
 
 /**
- * The most base64 a `.veditor` file may hold in total (ESCSUITE-241).
- *
- * The whole file is one JSON string, built by `JSON.stringify` from per-source
- * strings that `FileReader.readAsDataURL` produced, and V8 cannot hold a string
- * longer than 2^29 - 24 characters (about 512 Mi). Past that `readAsDataURL`
- * fires `load` with an empty string and no error, and `JSON.stringify` throws.
- * It is a budget on the TOTAL, not on one source, because several sources
- * under the ceiling each still add up in the one string. 256 MiB leaves half
- * the engine limit for the JSON around the data and for the data URL prefix.
- */
-export const MAX_PROJECT_FILE_BASE64_BYTES = 256 * 1024 * 1024;
-
-const MIB = 1024 * 1024;
-
-/** Base64 length of `bytes` bytes of input. */
-const base64Length = (bytes: number): number => 4 * Math.ceil(bytes / 3);
-
-const formatMiB = (bytes: number): string => `${Math.ceil(bytes / MIB)} MiB`;
-
-/** Base64 length back to the source bytes it encodes (3 per 4 characters). */
-const sourceBytes = (base64Chars: number): number => (base64Chars * 3) / 4;
-
-/**
- * Thrown by `saveProject`, before it reads any bytes, when the project's
- * sources would not fit in one `.veditor` file. The message is meant to be
- * shown to the user as it is.
- */
-export class ProjectTooLargeError extends Error {
-  name = 'ProjectTooLargeError';
-
-  constructor(
-    /** Base64 characters the file would need. */
-    public readonly total: number,
-    /** `MAX_PROJECT_FILE_BASE64_BYTES`. */
-    public readonly limit: number,
-    largest: { name: string; size: number },
-    /** The sources' and thumbnails' own bytes — what the sentence shows, rounded up. */
-    public readonly sourceTotal: number = sourceBytes(total)
-  ) {
-    super(
-      `This project is too large to save as a .veditor file: its sources add up to ${Math.ceil(sourceTotal / MIB)} MiB ` +
-        `and the format holds about ${Math.floor(sourceBytes(limit) / MIB)} MiB. Export the timeline instead, ` +
-        `or remove the largest source (${largest.name}, ${formatMiB(largest.size)}).`
-    );
-  }
-}
-
-/**
- * Convert a Blob to base64 string.
- *
- * Rejects when the browser hands back less than the blob holds: past its own
- * string limit Chromium fires `load` with an empty result and no error, which
- * used to be written into the file as a missing `data` key.
- */
-async function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result;
-      const comma = typeof result === 'string' ? result.indexOf(',') : -1;
-      const base64 = comma >= 0 ? (result as string).slice(comma + 1) : '';
-      const expected = 4 * Math.floor(blob.size / 3);
-      if (base64.length < expected || (blob.size > 0 && base64.length === 0)) {
-        reject(
-          new Error(
-            `Could not encode a source of ${blob.size} bytes for the project file: the browser returned ${base64.length} characters.`
-          )
-        );
-        return;
-      }
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
-  });
-}
-
-/**
  * Convert base64 string to Blob
  */
 function base64ToBlob(base64: string, mimeType: string): Blob {
@@ -150,7 +85,11 @@ function base64ToBlob(base64: string, mimeType: string): Blob {
 }
 
 /**
- * Save project to a downloadable file
+ * Save the project and the sources its timeline uses as a v2 `.veditor`
+ * (ESCSUITE-260). The stored blobs are IndexedDB handles: they go into the
+ * file by reference, so no source byte is read, and the only bytes built here
+ * are the header and the index. There is no size budget. The file is limited
+ * by the browser's download size, not by the format.
  */
 export async function saveProject(
   project: Project,
@@ -165,48 +104,11 @@ export async function saveProject(
   const usedVideoIds = new Set(project.timeline.clips.map((c) => c.sourceVideoId));
   const usedVideos = sourceVideos.filter((v) => usedVideoIds.has(v.id));
 
-  const projectFile: ProjectFile = {
-    version: JSON_FILE_VERSION,
-    project,
-    ...(editor && { editor }),
-    videos: [],
-  };
-
-  // Decide the budget before any byte is read or any progress reported. The
-  // stored blobs are handles, so their sizes cost nothing.
-  const stored: { video: SourceVideo; blob: Blob; thumbnail: Blob | undefined }[] = [];
-  let total = 0;
-  let sourceTotal = 0;
-  let largest: { name: string; size: number } | undefined;
+  const sources: ProjectFileSource[] = [];
   for (const video of usedVideos) {
     const videoData = await getVideo(video.id);
     if (!videoData) continue;
     const thumbnail = await getThumbnail(video.id);
-    total += base64Length(videoData.blob.size) + (thumbnail ? base64Length(thumbnail.size) : 0);
-    sourceTotal += videoData.blob.size + (thumbnail?.size ?? 0);
-    if (!largest || videoData.blob.size > largest.size) {
-      largest = { name: video.name, size: videoData.blob.size };
-    }
-    stored.push({ video, blob: videoData.blob, thumbnail });
-  }
-  if (total > MAX_PROJECT_FILE_BASE64_BYTES) {
-    throw new ProjectTooLargeError(total, MAX_PROJECT_FILE_BASE64_BYTES, largest!, sourceTotal);
-  }
-
-  // Export each video with its data
-  for (let i = 0; i < stored.length; i++) {
-    const { video, blob: videoBlob, thumbnail } = stored[i];
-    onProgress?.(
-      ((i + 1) / stored.length) * 80,
-      `Exporting video ${i + 1}/${stored.length}...`
-    );
-
-    const base64Data = await blobToBase64(videoBlob);
-
-    let thumbnailBase64: string | undefined;
-    if (thumbnail) {
-      thumbnailBase64 = await blobToBase64(thumbnail);
-    }
 
     const meta: SourceVideoMeta = {
       duration: video.duration,
@@ -226,21 +128,19 @@ export async function saveProject(
       hasWebcam: video.hasWebcam,
     };
 
-    projectFile.videos.push({
+    sources.push({
       id: video.id,
       name: video.name,
       mimeType: video.mimeType,
-      data: base64Data,
-      thumbnail: thumbnailBase64,
       meta,
+      blob: videoData.blob,
+      thumbnail,
     });
   }
 
   onProgress?.(90, 'Creating project file...');
 
-  // Create JSON file
-  const jsonContent = JSON.stringify(projectFile);
-  const blob = new Blob([jsonContent], { type: 'application/json' });
+  const blob = new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
 
   // Download file
   const url = URL.createObjectURL(blob);
