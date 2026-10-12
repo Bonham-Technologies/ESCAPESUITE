@@ -16,6 +16,11 @@ import { waitForAppReady } from '../../utils/ready'
  * releases its lock, standing in for a crash — tab B, open throughout, goes on
  * editing, and a fresh tab C is offered A's session, not B's live one. Three
  * tabs in one browser context: one origin, one database, one lock manager.
+ *
+ * ESCSUITE-283: a fresh tab claims a departed tab's slot through a lock of its
+ * own, `escapeartist-offer:<tabId>`, held while the slot is on offer (the tab
+ * lock itself is only probed), so two fresh tabs opened together after A
+ * closes are not both offered A's session — the second case below.
  */
 
 /** ESCAPEARTIST's autosave debounce (`AUTO_SAVE_DELAY`) is 2 s; give it room. */
@@ -160,5 +165,58 @@ test.describe('One session slot per ESCAPEARTIST tab (ESCSUITE-274)', () => {
           [idC]: { name: 'Tab A', sources: 1, clips: 1 },
         })
     })
+  })
+
+  test('two fresh tabs opened together after a tab closes: only one is offered its session (ESCSUITE-283)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000)
+    const context = page.context()
+
+    // Tab A: a real source and a clip, autosaved into A's own slot, then closed.
+    await page.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab A')}`)
+    await waitForAppReady(page, 'artist')
+    const idA = (await tabIdOf(page))!
+    await importMediaAndAddToTimeline(page)
+    await expect
+      .poll(() => slotOf(page, idA), { timeout: 15_000 })
+      .toEqual({ name: 'Tab A', sources: 1, clips: 1 })
+    await page.close()
+
+    // Two fresh tabs at once. Whichever asks first claims A's offer while its
+    // prompt is up; the other finds the offer held and, with no other slot, is
+    // offered nothing.
+    const [first, second] = await Promise.all([
+      (async () => {
+        const tab = await context.newPage()
+        await tab.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab C')}`)
+        await waitForAppReady(tab, 'artist')
+        return tab
+      })(),
+      (async () => {
+        const tab = await context.newPage()
+        await tab.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab D')}`)
+        await waitForAppReady(tab, 'artist')
+        return tab
+      })(),
+    ])
+    const promptOf = (tab: Page) => tab.getByRole('dialog', { name: 'Resume Previous Session?' })
+
+    // Give both startup checks well past a lock request and a storage read.
+    await expect
+      .poll(async () => (await promptOf(first).count()) + (await promptOf(second).count()), { timeout: 15_000 })
+      .toBe(1)
+    await first.waitForTimeout(1_500)
+    const offeredTo = (await promptOf(first).count()) === 1 ? first : second
+    const passedOver = offeredTo === first ? second : first
+    await expect(promptOf(passedOver)).toHaveCount(0)
+    await expect(promptOf(offeredTo).getByText('Tab A', { exact: true })).toBeVisible()
+
+    // Restoring adopts it once: A's row is gone and exactly one tab holds it.
+    const idOffered = (await tabIdOf(offeredTo))!
+    await offeredTo.getByRole('button', { name: 'Restore Session' }).click()
+    await expect
+      .poll(() => readSlots(offeredTo), { timeout: 15_000 })
+      .toEqual({ [idOffered]: { name: 'Tab A', sources: 1, clips: 1 } })
   })
 })

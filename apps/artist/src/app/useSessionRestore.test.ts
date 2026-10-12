@@ -11,7 +11,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { StrictMode } from 'react'
 import { useSessionRestore, type SessionRestoreDeps } from './useSessionRestore'
-import { holdTabLock } from './sessionLock'
+import { holdTabLock, offerLockName } from './sessionLock'
 import { TAB_ID_KEY } from './tabId'
 import {
   clearSessionState,
@@ -353,8 +353,8 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
     act(() => result.current.handleDeclineSession())
 
-    expect(clearSessionState).toHaveBeenCalledTimes(1)
-    expect(clearSessionState).toHaveBeenCalledWith('crashed')
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledTimes(1))
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed'))
   })
 
   it('offers the row an older build shared between tabs, and deletes it when declined', async () => {
@@ -366,7 +366,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
     act(() => result.current.handleDeclineSession())
 
-    expect(clearSessionState).toHaveBeenCalledWith(null)
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(null))
   })
 
   it('adopts the row an older build shared between tabs when it is restored', async () => {
@@ -382,6 +382,213 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
     await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(null))
     expect(saveSessionState).toHaveBeenCalledWith({ ...legacy, tabId: THIS_TAB, timestamp: expect.any(Number) })
+  })
+
+  // ESCSUITE-283: the tab a departed tab's slot is offered to holds that
+  // slot's offer lock (`escapeartist-offer:<id>`) until it answers, so two fresh
+  // tabs opened together after a crash are not both offered — and do not both
+  // adopt — the same session. Fix round 1: the departed tab's liveness lock is
+  // never held by another tab, so that tab coming back is offered its own slot,
+  // and an answer to the stale offer leaves the returned tab's slot alone.
+  describe('a departed tab\'s slot is claimed while it is on offer (ESCSUITE-283)', () => {
+    const crashedEarly = () => savedSession({ tabId: 'crashed-early', timestamp: Date.now() - 60_000 })
+    const crashedLate = () => savedSession({ tabId: 'crashed-late', timestamp: Date.now() - 1_000 })
+
+    /** Mount a tab under `tabId` — a fresh tab, or a departed tab coming back. */
+    const mountTab = (tabId: string) => {
+      sessionStorage.setItem(TAB_ID_KEY, tabId)
+      return mountRestore()
+    }
+
+    it('two fresh tabs opened one after the other: the second is offered the next slot, not the first one\'s', async () => {
+      const early = crashedEarly()
+      const late = crashedLate()
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(early, 'crashed-early'), slotOf(late, 'crashed-late')])
+
+      const first = mountTab('fresh-1')
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+      const second = mountTab('fresh-2')
+      await waitFor(() => expect(second.result.current.showSessionPrompt).toBe(true))
+
+      expect(first.result.current.pendingSession).toBe(late)
+      expect(second.result.current.pendingSession).toBe(early)
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(true)
+      expect(fake.isHeld(offerLockName('crashed-early'))).toBe(true)
+    })
+
+    it('two fresh tabs opened in the same tick: exactly one is offered the one slot', async () => {
+      // Both mounts before either startup check has run a single step. This
+      // pins the outcome (exactly one prompt), not the offer claim: the two
+      // tabs' simultaneous probes of the departed tab's lock collide in the
+      // locks double — as they would in a browser — so the second skips the
+      // slot before it ever asks for the offer, and this case stays green with
+      // the claim removed. The claim itself is pinned by the sequential case
+      // above and by sessionSlots.test.ts / sessionLock.test.ts.
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashedLate(), 'crashed-late')])
+
+      const tabs = [mountTab('fresh-1'), mountTab('fresh-2')]
+      await Promise.all(tabs.map((tab) => waitFor(() => expect(tab.result.current.sessionRestored || tab.result.current.showSessionPrompt).toBe(true))))
+
+      expect(tabs.filter((tab) => tab.result.current.showSessionPrompt)).toHaveLength(1)
+      expect(tabs.filter((tab) => tab.result.current.sessionRestored)).toHaveLength(1)
+      expect(clearSessionState).not.toHaveBeenCalled()
+    })
+
+    it('a departed tab coming back while its slot is on offer elsewhere keeps its id and is offered its own slot', async () => {
+      // Tab A reloads after a renderer crash (or is restored lazily by the
+      // browser) while a fresh tab's prompt is offering A's slot.
+      const sessionA = savedSession({ tabId: 'tab-a' })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(sessionA, 'tab-a')])
+      const fresh = mountTab('fresh-b')
+      await waitFor(() => expect(fresh.result.current.showSessionPrompt).toBe(true))
+
+      const tabA = mountTab('tab-a')
+      await waitFor(() => expect(tabA.result.current.showSessionPrompt).toBe(true))
+
+      expect(tabA.result.current.tabId).toBe('tab-a')
+      expect(sessionStorage.getItem(TAB_ID_KEY)).toBe('tab-a')
+      expect(tabA.result.current.pendingSession).toBe(sessionA)
+    })
+
+    it('the stale offer\'s Start Fresh leaves the returned tab\'s slot alone, and lets go of the offer', async () => {
+      const sessionA = savedSession({ tabId: 'tab-a' })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(sessionA, 'tab-a')])
+      const fresh = mountTab('fresh-b')
+      await waitFor(() => expect(fresh.result.current.showSessionPrompt).toBe(true))
+      // Tab A is back and holds its own lock, as its autosave does.
+      holdTabLock('tab-a', fake.locks)
+      await flushLocks()
+
+      act(() => fresh.result.current.handleDeclineSession())
+
+      expect(fresh.result.current.showSessionPrompt).toBe(false)
+      expect(fresh.result.current.sessionRestored).toBe(true)
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('tab-a'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
+    })
+
+    it('the stale offer\'s Restore is refused the way a failed restore is: nothing adopted, the offer let go', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const sessionA = savedSession({ tabId: 'tab-a' })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(sessionA, 'tab-a')])
+      const fresh = mountTab('fresh-b')
+      await waitFor(() => expect(fresh.result.current.showSessionPrompt).toBe(true))
+      holdTabLock('tab-a', fake.locks)
+      await flushLocks()
+
+      await act(async () => {
+        await fresh.result.current.handleRestoreSession(sessionA)
+      })
+
+      expect(deps.setProject).not.toHaveBeenCalled()
+      expect(deps.addSourceVideo).not.toHaveBeenCalled()
+      expect(deps.showNotification).toHaveBeenCalledWith('Failed to restore session', 'error')
+      expect(fresh.result.current.showSessionPrompt).toBe(false)
+      expect(fresh.result.current.sessionRestored).toBe(true)
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+      expect(saveSessionState).not.toHaveBeenCalled()
+      expect(clearSessionState).not.toHaveBeenCalled()
+    })
+
+    it('declining releases the claim once the slot is deleted', async () => {
+      let deleted: () => void = () => {}
+      vi.mocked(clearSessionState).mockImplementationOnce(
+        () => new Promise<void>((resolve) => { deleted = resolve })
+      )
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashedLate(), 'crashed-late')])
+      const { result } = mountTab('fresh-1')
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+      act(() => result.current.handleDeclineSession())
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed-late'))
+      await flushLocks()
+      // Still held while the delete is out: no other tab is offered a row on
+      // its way out of storage.
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(true)
+
+      deleted()
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false)
+    })
+
+    it('declining releases the claim even when the delete fails', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(clearSessionState).mockRejectedValueOnce(new Error('blocked'))
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashedLate(), 'crashed-late')])
+      const { result } = mountTab('fresh-1')
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed-late'))
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false))
+    })
+
+    it('restoring releases the claim once the adoption has deleted the old row', async () => {
+      let deleted: () => void = () => {}
+      vi.mocked(clearSessionState).mockImplementationOnce(
+        () => new Promise<void>((resolve) => { deleted = resolve })
+      )
+      const late = crashedLate()
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(late, 'crashed-late')])
+      const { result } = mountTab('fresh-1')
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+      await act(async () => {
+        await result.current.handleRestoreSession(late)
+      })
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed-late'))
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(true)
+
+      deleted()
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false)
+    })
+
+    it('a restore whose adoption fails keeps the claim, so no other tab adopts a second copy of the row still there', async () => {
+      // LOW-1: the session landed here, but the old row is still in storage.
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(saveSessionState).mockRejectedValueOnce(new Error('quota'))
+      const late = crashedLate()
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(late, 'crashed-late')])
+      const { result } = mountTab('fresh-1')
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+      await act(async () => {
+        await result.current.handleRestoreSession(late)
+      })
+      await vi.waitFor(() => expect(saveSessionState).toHaveBeenCalled())
+      await flushLocks()
+
+      expect(deps.showNotification).toHaveBeenCalledWith('Session restored', 'success')
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(true)
+      const next = mountTab('fresh-2')
+      await waitFor(() => expect(next.result.current.sessionRestored).toBe(true))
+      expect(next.result.current.showSessionPrompt).toBe(false)
+    })
+
+    it('a failed restore releases the claim and leaves the slot for the next tab', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      vi.mocked(getThumbnail).mockRejectedValue(new Error('storage exploded'))
+      const late = crashedLate()
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(late, 'crashed-late')])
+      const first = mountTab('fresh-1')
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+
+      await act(async () => {
+        await first.result.current.handleRestoreSession(late)
+      })
+      await flushLocks()
+
+      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false)
+      expect(clearSessionState).not.toHaveBeenCalled()
+      const next = mountTab('fresh-2')
+      await waitFor(() => expect(next.result.current.showSessionPrompt).toBe(true))
+      expect(next.result.current.pendingSession).toBe(late)
+    })
   })
 
   it('still offers a session when the browser rejects the lock requests', async () => {
@@ -575,7 +782,7 @@ describe('answering the prompt', () => {
     // "Start Fresh" while the restore's reads are still in flight.
     act(() => result.current.handleDeclineSession())
 
-    expect(clearSessionState).toHaveBeenCalled()
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalled())
     expect(result.current.showSessionPrompt).toBe(false)
     expect(result.current.sessionRestored).toBe(true)
 
@@ -696,7 +903,7 @@ describe('answering the prompt', () => {
 
     act(() => result.current.handleDeclineSession())
 
-    expect(clearSessionState).toHaveBeenCalled()
+    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalled())
     expect(deps.setProject).not.toHaveBeenCalled()
     expect(deps.showNotification).not.toHaveBeenCalled()
     expect(result.current.showSessionPrompt).toBe(false)

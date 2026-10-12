@@ -15,11 +15,11 @@
 // object: it is the only field this concern reads, and the dependency the
 // effect carried inline was `urlParams.suppressRestore`.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { clearSessionState, resolveThumbnailUrl, type SessionSlot, type SessionState } from '../core/storage';
+import { clearSessionState, resolveThumbnailUrl, type SessionState } from '../core/storage';
 import { repairEditorBlock } from '../store/projectMigration';
 import { applyEditorBlock } from './editorBlock';
 import { probeTabLock } from './sessionLock';
-import { adoptSessionSlot, findOfferableSlot } from './sessionSlots';
+import { adoptSessionSlot, findOfferableSlot, type OfferedSlot } from './sessionSlots';
 import { readTabId, renewTabId } from './tabId';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
@@ -54,6 +54,9 @@ export interface SessionRestore {
   handleDeclineSession: () => void;
 }
 
+/** Why a restore of a stale offer is refused (ESCSUITE-283); logged, never shown. */
+const OWNER_RETURNED = 'The tab that saved this session is open again';
+
 export function useSessionRestore({
   suppressRestore,
   setProject,
@@ -72,8 +75,15 @@ export function useSessionRestore({
   const [tabId, setTabId] = useState(readTabId);
   // The slot the prompt is offering: declining deletes it, restoring adopts
   // it. A ref, not state — `pendingSession` already renders the prompt, and
-  // the two answers read this only when they run.
-  const offeredSlotRef = useRef<SessionSlot | null>(null);
+  // the two answers read this only when they run. It carries the release for
+  // the offer lock this tab claimed while the slot is on offer (ESCSUITE-283):
+  // every way the prompt closes lets go of it — except a restore whose
+  // adoption failed, which keeps it while the old row is still in storage —
+  // and a tab that dies with the prompt up lets go of it with its page. It
+  // also carries `ownerReturned`, which both answers ask first: the departed
+  // tab may have come back while the prompt was up and been offered its own
+  // slot, and the offer here is then stale.
+  const offeredSlotRef = useRef<OfferedSlot | null>(null);
 
   // Which restore is still allowed to land, or none. Set at the top of
   // `handleRestoreSession`, checked again after its `await` settles — either
@@ -121,6 +131,7 @@ export function useSessionRestore({
     if (restoreAttemptRef.current) return; // already restoring — see the ref's own comment
     const attempt = {};
     restoreAttemptRef.current = attempt;
+    const offered = offeredSlotRef.current!;
 
     let restoredSourceVideos: SourceVideo[];
     try {
@@ -130,6 +141,13 @@ export function useSessionRestore({
           thumbnailUrl: await resolveThumbnailUrl(video.id),
         }))
       );
+      // A stale offer (ESCSUITE-283): the tab that wrote this slot is open
+      // again and has been offered it itself. Adopting it would take its work
+      // out from under it, so this is refused the way a failed read is. An
+      // owner that comes back after this check and before the adoption below
+      // still has its slot adopted — two copies, never a loss (a documented
+      // limit; see apps/artist/CLAUDE.md, "The limits this leaves").
+      if (await offered.ownerReturned()) throw new Error(OWNER_RETURNED);
     } catch (error) {
       console.error('Failed to restore session:', error);
       // Only settle the question if nobody declined while we were reading —
@@ -140,7 +158,9 @@ export function useSessionRestore({
         restoreAttemptRef.current = null;
         // The saved session is left in storage — this was not the user's
         // answer, so a reload should still offer it, the same way a failed
-        // startup lookup leaves it in place (see the effect below).
+        // startup lookup leaves it in place (see the effect below) — and the
+        // claim on it is let go, so another tab may offer it too (ESCSUITE-283).
+        offered.release();
         setShowSessionPrompt(false);
         setPendingSession(null);
         setSessionRestored(true);
@@ -166,10 +186,16 @@ export function useSessionRestore({
     clearHistory();
     // Another tab's slot — one that closed or crashed, or the legacy shared
     // row — becomes this tab's (ESCSUITE-274). Not awaited: the restore has
-    // landed, and the adoption logs its own failure. This tab's own slot (a
-    // reload) is already where it belongs.
-    const offered = offeredSlotRef.current!;
-    if (offered.tabId !== tabId) void adoptSessionSlot(offered, tabId);
+    // landed, and the adoption logs its own failure (it never rejects). The
+    // offer is let go once the old row is gone, so no other tab is offered it
+    // on its way out — and kept if the adoption failed and the row is still
+    // there, so no other tab adopts a second copy of it (ESCSUITE-283). This
+    // tab's own slot (a reload) is already where it belongs, and claimed nothing.
+    if (offered.slot.tabId !== tabId) {
+      void adoptSessionSlot(offered.slot, tabId).then((adopted) => {
+        if (adopted) offered.release();
+      });
+    }
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
@@ -181,8 +207,16 @@ export function useSessionRestore({
     restoreAttemptRef.current = null;
     // Not awaited: the answer lands now whatever storage does about it. The
     // catch is only so a rejection is logged rather than left unhandled. The
-    // slot deleted is the one offered, whichever tab's it was (ESCSUITE-274).
-    clearSessionState(offeredSlotRef.current!.tabId).catch(console.error);
+    // slot deleted is the one offered, whichever tab's it was (ESCSUITE-274) —
+    // unless its tab has come back while the prompt was up (ESCSUITE-283): that
+    // slot is a live tab's work again, and is left alone. The offer is let go
+    // once the delete settles either way.
+    const offered = offeredSlotRef.current!;
+    offered
+      .ownerReturned()
+      .then((returned) => (returned ? undefined : clearSessionState(offered.slot.tabId)))
+      .catch(console.error)
+      .then(offered.release);
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
@@ -215,10 +249,10 @@ export function useSessionRestore({
           ownId = renewTabId();
           setTabId(ownId);
         }
-        const slot = await findOfferableSlot(ownId, Date.now());
-        if (slot) {
-          offeredSlotRef.current = slot;
-          setPendingSession(slot.session);
+        const offered = await findOfferableSlot(ownId, Date.now());
+        if (offered) {
+          offeredSlotRef.current = offered;
+          setPendingSession(offered.slot.session);
           setShowSessionPrompt(true);
         } else {
           setSessionRestored(true);
