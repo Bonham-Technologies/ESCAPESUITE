@@ -166,9 +166,10 @@ function rawV2File(
 
 /**
  * A `.veditor` as large as its parts claim, without the bytes. `slice` hands
- * back the real header and index. Any other range returns an empty marker
- * Blob and is recorded, so a test can see exactly which ranges the loader cut
- * and that it never read the file whole.
+ * back the real header and index. Any other range returns an `untouchable`
+ * marker Blob of that range's size and is recorded, so a test can see exactly
+ * which ranges the loader cut, that it never read the file whole, and that it
+ * never read a cut part either.
  */
 function virtualV2File(parts: BlobPart[]) {
   const header = parts[0] as Uint8Array<ArrayBuffer>
@@ -184,7 +185,7 @@ function virtualV2File(parts: BlobPart[]) {
     slice(start = 0, end = size, type = '') {
       if (start === 0 && end === HEADER_BYTES) return new Blob([header])
       if (start === HEADER_BYTES && end === payloadStart) return new Blob([indexBytes])
-      const marker = new Blob([], { type })
+      const marker = untouchable(end - start, type)
       cuts.push({ start, end, type, marker })
       return marker
     },
@@ -823,8 +824,10 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
 
   beforeEach(() => {
     media = installMediaElementDoubles({ video: { duration: 42, videoWidth: 1280, videoHeight: 720 } })
-    vi.mocked(storeVideo).mockClear()
-    vi.mocked(storeThumbnail).mockClear()
+    // mockReset, not mockClear: it also drops a once-queued value a case left
+    // unconsumed, and restores the pass-through implementation.
+    vi.mocked(storeVideo).mockReset()
+    vi.mocked(storeThumbnail).mockReset()
   })
 
   afterEach(() => {
