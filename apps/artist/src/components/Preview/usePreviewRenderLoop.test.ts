@@ -285,6 +285,233 @@ describe('usePreviewRenderLoop and a loop region shorter than one frame', () => 
   })
 })
 
+// ESCSUITE-280: starting playback with the playhead in a gap between clips
+// wrote the next clip's start to the store and returned without starting the
+// animation loop — `currentTime` is not one of the playback effect's
+// dependencies, so nothing started it later. The transport showed Pause,
+// `isPlaying` stayed true and the playhead sat frozen on the next clip's start.
+// The loop now starts in the same run, on its own clock, from that clip.
+describe('usePreviewRenderLoop starting in a gap (ESCSUITE-280)', () => {
+  it('plays on from the next clip when playback starts in a gap', async () => {
+    addClip('first', 0, 2)
+    addClip('second', 4, 2)
+    const { deps, play, seek } = harness()
+    seek(3)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    vi.mocked(deps.drawFrame).mockClear()
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(true)
+    // Past the next clip's start, not parked on it.
+    expect(store().currentTime).toBeGreaterThan(4)
+    const times = drawnTimes(deps)
+    expect(times.length).toBeGreaterThan(10)
+    expect(times[0]).toBeGreaterThanOrEqual(4)
+    expect(last(times)).toBeGreaterThan(4.4)
+  })
+
+  it('writes the jumped-to time to the store once, before the first frame', async () => {
+    addClip('first', 0, 2)
+    addClip('second', 4, 2)
+    const { deps, play, seek } = harness()
+    seek(3)
+    const writes = spyOnStoreTimeWrites()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(0)
+
+    expect(writes.mock.calls).toEqual([[4]])
+    expect(store().currentTime).toBe(4)
+  })
+
+  it('starts the next clip\'s video from its own start once the loop reaches it', async () => {
+    const second = addClip('second', 4, 2)
+    store().updateClip(second.id, { startTime: 1, endTime: 3 })
+    addClip('first', 0, 2)
+    const { deps, play, seek } = harness()
+    const element = deps.videoElementsRef.current.get(video.id)!
+    seek(3)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(FRAME_MS * 3)
+
+    expect(element.play).toHaveBeenCalled()
+    // Its source time: the clip's own start plus however far the loop has got.
+    expect(element.currentTime).toBeGreaterThanOrEqual(1)
+    expect(element.currentTime).toBeLessThan(1.2)
+  })
+
+  it('stops at the end, as before, when no clip follows the gap', async () => {
+    addClip('only', 0, 2)
+    const { deps, play, seek } = harness()
+    seek(2.5)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    vi.mocked(deps.drawFrame).mockClear()
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(2)
+  })
+})
+
+// ESCSUITE-281: the loop writes the store only every 200 ms of playback, and
+// the pause path wrote no position, so a pause resumed from up to 200 ms plus
+// a frame behind the frame on screen. The loop now publishes the time of the
+// last frame it drew once, when it stops for a pause — and only when the store
+// still holds the loop's own last write, so a pause that comes with a seek (a
+// ruler click, Home) keeps the seek's target.
+describe('usePreviewRenderLoop pausing (ESCSUITE-281)', () => {
+  /** One frame at the fastest rate the preview targets. */
+  const ONE_FRAME_S = 1 / 60
+
+  it('leaves the store on the last frame drawn, not the last 200 ms write', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play, pause } = harness()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1150)
+    const shown = last(drawnTimes(deps))
+
+    pause()
+    await settle(0)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(shown)
+    expect(store().currentTime).toBeGreaterThanOrEqual(1.15 - ONE_FRAME_S)
+    expect(store().currentTime).toBeLessThanOrEqual(1.15)
+  })
+
+  it('lands on the frame shown when paused before the first 200 ms write', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play, pause } = harness()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(100)
+    const shown = last(drawnTimes(deps))
+
+    pause()
+    await settle(0)
+
+    expect(shown).toBeGreaterThan(0)
+    expect(store().currentTime).toBe(shown)
+  })
+
+  it('writes the paused position once, and redraws from it', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play, pause } = harness()
+    // Installed before the hook mounts: swapping the store's setter later
+    // would re-run the playback effect with it.
+    const writes = spyOnStoreTimeWrites()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1150)
+    const shown = last(drawnTimes(deps))
+    const throttled = last(writes.mock.calls)[0]
+    writes.mockClear()
+    vi.mocked(deps.drawFrame).mockClear()
+
+    pause()
+    await settle(0)
+
+    expect(throttled).toBeLessThan(shown)
+    expect(writes.mock.calls).toEqual([[shown]])
+    // The paused frame is drawn at the position the store now holds, and
+    // never at the stale one the store held when the pause was rendered.
+    expect(drawnTimes(deps).length).toBeGreaterThan(0)
+    expect(drawnTimes(deps).every((time) => time === shown)).toBe(true)
+  })
+
+  it('lands on the in point when paused between a loop-back and the next frame', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(1)
+    store().setOutPoint(2)
+    const { deps, play, pause, seek } = harness()
+    seek(1.9)
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    // 1.9 + 7 frames of 16 ms crosses the out point: the seventh frame loops
+    // back and draws nothing, and the pause lands before the eighth.
+    await settle(FRAME_MS * 7)
+    expect(last(drawnTimes(deps))).toBeGreaterThan(1.9)
+    expect(result.current.getDisplayTime()).toBe(1)
+
+    pause()
+    await settle(0)
+
+    // What the readout showed, not the last frame drawn before the loop-back.
+    expect(store().currentTime).toBe(1)
+  })
+
+  it('keeps a seek that pauses in the same batch on the seek\'s target', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1150)
+
+    // The ruler click's shape: pause, then write the clicked time, one batch.
+    act(() => {
+      deps.isPlayingRef.current = false
+      store().setIsPlaying(false)
+      store().setCurrentTime(3.3)
+    })
+    await settle(0)
+
+    expect(store().currentTime).toBe(3.3)
+  })
+
+  it('writes nothing when the loop restarts for an edit made during playback', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+    const writes = spyOnStoreTimeWrites()
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1150)
+    const before = store().currentTime
+    writes.mockClear()
+
+    // A new clip re-runs the playback effect while it is still playing.
+    act(() => {
+      addClip('extra', 6, 1)
+    })
+    await settle(0)
+
+    expect(store().isPlaying).toBe(true)
+    expect(writes).not.toHaveBeenCalled()
+    expect(store().currentTime).toBe(before)
+  })
+
+  it('writes nothing when unmounted mid-playback', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, play } = harness()
+
+    const writes = spyOnStoreTimeWrites()
+    const { unmount } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1150)
+    const before = store().currentTime
+    writes.mockClear()
+
+    act(() => unmount())
+
+    expect(writes).not.toHaveBeenCalled()
+    expect(store().currentTime).toBe(before)
+  })
+})
+
 describe('usePreviewRenderLoop scrubbing', () => {
   it('draws the uncached frame straight away when there is nothing to seek', async () => {
     const { deps } = harness()

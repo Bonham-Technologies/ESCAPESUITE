@@ -1859,6 +1859,44 @@ No notice: the play control is left to the user. The comparison sits inside the
 arm for it. The same comparison also covers a loop with no in/out points over a timeline shorter
 than a frame.
 
+**Playback started in a gap plays on from the next clip** (ESCSUITE-280). With the playhead
+between clips, the playback effect in `usePreviewRenderLoop.ts` used to write the next clip's
+start to the store and return without starting the animation loop; `currentTime` is not one of
+that effect's dependencies, so nothing started it later, and the transport showed Pause with
+`isPlaying` true and the playhead frozen on the next clip's start. Space, the Play button and a
+playhead drag released in a gap during playback (ESCSUITE-246) all reached it. The effect now
+sets the loop's start timeline time to that clip's start and falls through into the loop in the
+same run, on the loop's own clock — the jump is not a store write that re-runs the effect. The
+store still gets the jumped-to time once, so the timeline playhead moves; nothing is active at
+the start yet, so the loop's first frame starts the clip's media through its `clipsChanged`
+branch, which seeks each element to its source time. With no clip after the gap, playback stops
+at the end of the timeline as before.
+
+**A pause lands on the frame the preview was showing** (ESCSUITE-281). The loop writes the
+store's `currentTime` only every 200 ms of playback, and the playback effect's pause branch
+writes no position, so Space, the Pause button and a grab of the playhead (ESCSUITE-246) used to
+resume from up to 200 ms plus a frame behind the readout. The loop now keeps the time of the last
+frame it drew in a local (one number assignment a frame, no allocation) and publishes it to the
+store once, in the playback effect's cleanup — the one path every pauser goes through. Not from
+the pause branch: a pause that comes with a seek (a ruler click, Home, a step, a marker) writes
+`setIsPlaying(false)` and its target in one batch, and drawing or writing the playback position
+there raced it. The cleanup writes only when the store says playback has stopped (so an edit
+that restarts the effect mid-playback, or an unmount, writes nothing) **and** the store still
+holds the loop's own last write — a seek changed it, and keeps its target. A loop-back counts as
+the loop's write, and a pause between it and the next frame lands on the in point the readout
+shows. The end of the timeline is unaffected: that arm wrote the end itself, which is not the
+loop's last throttled write, so the cleanup leaves it. Known limit: a seek whose target is
+exactly the value the store already holds — Home or ← within the first 200 ms of playing from 0, a
+marker on the in point clicked within 200 ms of a loop-back, or a marker on the jumped-to clip's start
+within 200 ms of a gap jump — cannot be told from a plain pause (filed as ESCSUITE-287), because a
+`setCurrentTime` of an unchanged value leaves no trace in the store, and lands on the paused
+frame instead. Because the cleanup runs before the scrub effect in the same commit, the scrub
+effect's run for that render would seek every video back to the stale throttled position and
+paint it before the write's own re-render corrected it; it now returns when the store's
+`currentTime` no longer matches its render's, leaving the paint to the run that follows. The
+pause transition costs one store write (`drawFrame.perf.test.ts`'s 480 ms window, which ends in
+a pause, counts it), and nothing per frame beyond the assignment.
+
 **The preview draws through `core/canvasRenderer.ts`**, the same renderer an export
 uses, with `PREVIEW_DRAW_OPTIONS` (in `drawFrame.ts`) for the difference that is the
 preview's alone: `quiet` (not-yet-decoded media is ordinary mid-scrub, and this frame
@@ -1978,7 +2016,7 @@ component.
 | `AudioWaveform.tsx` | The canvas waveform inside a clip. Resamples the clip's *visible window* — not its whole box — so detail follows zoom instead of being frozen at a whole-clip cap (ESCSUITE-13); the CSS size and the backing store are always the same clamped number, so a canvas never stretches past what it actually holds |
 | `useScrollSync.ts` | Keeping the ruler, the headers and the track container pointed at the same place, and the `ResizeObserver` that tells the virtualiser how wide the container is |
 | `useTrackAreaCache.ts` | One gesture's worth of track-area geometry: the container's client origin and each `[data-track-id]` row's box in the container's own **layout space**, taken on mousedown so a move reads only `scrollLeft`/`scrollTop`. Dropped and re-taken on `scroll` (captured — scroll does not bubble) and on window `resize`, the two things that move the box under a live gesture. Invalidation is **event-based**, so a layout change that fires neither — an autosave or an undo changing a row's height mid-drag — would leave it stale where the old per-frame measurement absorbed it; unreachable through the UI today (a clip drag writes nothing until release, and no control resizes a track while a pointer is down), and if row heights ever become dynamic the hook to reach for is the `ResizeObserver` `useScrollSync` already installs on this container, not a third listener |
-| `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime`. A scrub pauses playback for its own length (ESCSUITE-246): the preview's render loop writes the playback position into the store while it runs, so a scrub over a playing timeline was overwritten within 200 ms (about 12 frames) of release, and mid-gesture too, and the playhead snapped back. The grab reads `isPlaying` into a ref and calls `setIsPlaying(false)` before the first write — the ruler click's shape (`useTimelineSeek.ts`) — and the release calls `setIsPlaying(true)` only if that ref says playback was running, so a scrub started paused ends paused; the loop restarts from the store's `currentTime`, which is where the pointer let go. One store write each way per gesture, none per move (`timelineGestures.perf.test.ts` is unchanged). A grab with no move resumes where the timeline playhead was drawn at mousedown — the store's last throttled write, up to ~200 ms behind the preview's readout — the same as Space and Pause. Known limit (ESCSUITE-280): a resume that lands in a gap between clips stalls "playing" without advancing, the existing behaviour of starting playback in a gap, which the drag's resume now reaches too |
+| `usePlayheadDrag.ts` | The playhead scrub: `isDraggingPlayhead` (which the marquee and the track click both read) and the document listeners that write `currentTime`. A scrub pauses playback for its own length (ESCSUITE-246): the preview's render loop writes the playback position into the store while it runs, so a scrub over a playing timeline was overwritten within 200 ms (about 12 frames) of release, and mid-gesture too, and the playhead snapped back. The grab reads `isPlaying` into a ref and calls `setIsPlaying(false)` before the first write — the ruler click's shape (`useTimelineSeek.ts`) — and the release calls `setIsPlaying(true)` only if that ref says playback was running, so a scrub started paused ends paused; the loop restarts from the store's `currentTime`, which is where the pointer let go. One store write each way per gesture, none per move (`timelineGestures.perf.test.ts` is unchanged). A grab with no move resumes from the frame the preview was showing at mousedown: the grab's pause makes the render loop publish its last frame to the store as it stops (ESCSUITE-281), as Space and Pause do — it used to resume from the store's last throttled write, up to ~200 ms behind the readout. A resume that lands in a gap between clips plays on from the next clip (ESCSUITE-280; it used to stall "playing" without advancing, as starting playback in a gap did) |
 | `useInOutDrag.ts` | The in and out marker drags — one pair of listeners for both handles, asking which flag is up to decide which point started the gesture. Which point it is currently *writing* can change mid-gesture (ESCSUITE-165): dragging the in handle past the out point flips the gesture to the out handle, writing both points explicitly in the one move that crosses, so `playbackSlice.ts`'s own swap-on-cross invariant — correct for a direct write from outside a gesture — never fires mid-drag and the region never collapses to one mousemove's width. The stationary point is read live (off the same `inPoint`/`outPoint` refs the hook mirrors every render) at the instant of each crossing, not snapshotted once at mousedown, so a write to it from outside the gesture — the keyboard's I/O shortcuts, the Toolbar's in/out buttons, both of which call `setInPoint`/`setOutPoint` directly — is what a crossing sees rather than something it silently discards |
 | `useClipDrag.ts` | Dragging a clip, and the three other readings of the same mousedown (razor split, ctrl/cmd toggle, locked-track refusal). `dragState` is the preview; the store is written on release — which is why the snap points and the track rows are both taken once, on the mousedown, and never re-taken per frame. A drop that changed both the row and the time writes twice there, and the second write carries `skipHistory` so the whole drag is one undo step (ESCSUITE-79, below). A drop by a **multi-selection** is the other branch of that same commit: one `moveSelectedClips` carrying both deltas, all-or-nothing (ESCSUITE-80, below). The grab point (where the pointer took hold of the clip) is also taken once on mousedown, but as a TIME — `pixelsPerSecond` can change mid-drag (`+`/`-` zoom needs no pointer of its own), and a pixel distance measured at the old zoom would describe the wrong grab point once the pixel grid underneath it has changed. `handleMouseMove` re-derives the pixel offset from the grabbed time and the *current* `pixelsPerSecond` on every move (`timeToPixels`, the twin of the `pixelsToTime` the rest of the file already uses), rather than from a pixel figure cached at whatever zoom the gesture started at (ESCSUITE-168). `DragState` used to also carry that pixel distance as `offsetX`, read by nothing at all, inside this hook or out — deleted rather than kept as a write-only field (ESCSUITE-181); the grab point the moves actually use, `offsetSecondsRef`, lives beside `snapPointsRef` instead |
 | `useTrimDrag.ts` | Dragging a clip's edge: a store write on every move, always re-derived from the origin recorded on mousedown, plus the ripple tool's shift of everything after it. The per-move write makes `clips` a fresh array every frame, which is exactly why the listeners hang off `trimState` and not off the clips |

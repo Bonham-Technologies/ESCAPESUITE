@@ -85,6 +85,27 @@ describe('Timeline playhead drag during playback', () => {
     expect(store().currentTime).toBeLessThan(6.5)
   })
 
+  // ESCSUITE-280: the release resumes playback, and a resume in a gap between
+  // clips used to park the playhead on the next clip's start, "playing" and
+  // never advancing.
+  it('plays on from the next clip when the pointer lets go in a gap', async () => {
+    addClip('first', 0, 4)
+    addClip('second', 8, 4)
+    const { playhead } = await renderEditor()
+
+    store().setIsPlaying(true)
+    await settle(1000)
+
+    fireEvent.mouseDown(playhead)
+    fireEvent.mouseMove(document, { clientX: 300 })
+    fireEvent.mouseUp(document)
+
+    await settle(500)
+    expect(store().isPlaying).toBe(true)
+    expect(store().currentTime).toBeGreaterThan(8)
+    expect(store().currentTime).toBeLessThan(8.6)
+  })
+
   it('leaves a paused project paused after a drag', async () => {
     addClip('clip1', 0, 10)
     const { playhead } = await renderEditor()
