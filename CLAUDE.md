@@ -4306,6 +4306,34 @@ per keyframe write, a user gesture, never per frame; and a first keyframe within
 add 282 already refuses. The `*.perf.test.ts` files and the rerender pins are byte-identical; the 166 and 282
 pins are untouched. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-12 for ESCSUITE-289 (an answer to the "Resume Previous
+Session?" prompt re-reads the offered slot: if the slot changed or vanished while the prompt was open — its
+owner came back, saved newer work and left again — Restore shows the newer save in place (the prompt rebuilt
+from it, keyed on its timestamp, the offer claim kept) and Start Fresh refuses, keeps the newer save, releases
+the claim and says so once, instead of deleting it or adopting the stale snapshot over it; a restore refused
+after its thumbnail reads now revokes what it minted): 99.84 / 99.41 / **96.63** / 99.76 against the
+99.84 / 99.41 / 96.62 / 99.76 that `main` at `fed88166` (the ESCSUITE-260 version-packages commit) measures
+in the same sitting — branches up a hundredth, the other three unmoved. The base gives 5,814 / 6,017 branches
+and this branch 5,826 / 6,029: twelve new branches, twelve covered, the same 203 uncovered as before (lines
+9,004 / 9,018 → 9,029 / 9,043, statements 10,176 / 10,236 → 10,205 / 10,265, functions 2,148 / 2,153 →
+2,150 / 2,155, every denominator growing by exactly what the numerator did; the same 14 / 60 / 5
+uncovered). The twelve are `app/useSessionRestore.ts`'s eight (24 → 32: the slot-at-answer comparison —
+timestamp and tab id — on each answer, the removed-slot arm, the re-offer-or-refuse choice, and the revoke
+on a refusal that had read thumbnails) and `app/sessionSlots.ts`'s four (16 → 20: the re-read's
+`'removed'` / `'changed'` / unchanged shape), each reached from both sides by the thirteen red cases — offer
+at t1, slot rewritten at t2 with the owner gone again, Start Fresh → the t2 slot survives and the claim is
+released; Restore → the t2 snapshot is what the re-offered prompt adopts; the slot deleted between offer and
+answer → both answers clean; the re-read rejecting → the thumbnails already read are revoked — against the
+ESCSUITE-274 / 283 cases, which are unchanged. Two new functions are the slot re-read and the comparison.
+The review (opus) read "Ready to merge: Yes" with five minors; one fix round closed the thumbnail leak on a
+refused restore (red first: `Number of calls: 0`), replaced "kept for next time" with "That session was
+changed in another window, so it was not deleted." — a reload of the same tab offers its own slot first, so
+the kept save is not promised for next time — and corrected two comments and the stale `onDecline` doc,
+re-reviewed clean. Outside vitest's measurement,
+`apps/e2e/tests/escapeartist/session-ownership.spec.ts` ran on Chromium and Firefox: 4 passed. The
+`App.*rerender*` pins and every `*.perf.test.ts` are byte-identical: `App.tsx`'s one new prop is a `key`.
+**No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4313,7 +4341,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.41 | 96.62 | 99.76 |
+| `@escapesuite/artist` | 99.84 | 99.41 | 96.63 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.51 | 98.59 | 98.86 |
 
