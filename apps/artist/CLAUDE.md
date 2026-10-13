@@ -1942,9 +1942,8 @@ last throttled write, so the cleanup leaves it.
 two writers of `currentTime`: `setCurrentTime` is the render loop's own (its 200 ms writes, the
 loop-back, the gap jump, the end of the timeline, the pause write above) and counts nothing;
 `seekTo(time)` (`store/playbackSlice.ts`) is everyone else's — the ruler and track clicks and a
-marker flag (`useTimelineSeek`), a playhead scrub (`usePlayheadDrag`, whose dep keeps the name
-`setCurrentTime` only because the pinned `timelineGestures.perf.test.ts` builds it by hand;
-`Timeline` passes `seekTo`), the transport's Home/End/←/→ and their buttons (`PlaybackControls`),
+marker flag (`useTimelineSeek`), a playhead scrub (`usePlayheadDrag`, whose dependency is named
+`seekTo` and which `Timeline` fills with the store's), the transport's Home/End/←/→ and their buttons (`PlaybackControls`),
 the clip preview's scrub (`KeyframePanel`), "Go to clip" (`useClipEditorActions`) and a session
 restore — and adds one to `seekSequence`. It writes the time as given (every caller already
 clamps to its own bounds) and pushes no undo entry. The two marker jumps (Shift+M, Ctrl+M) and

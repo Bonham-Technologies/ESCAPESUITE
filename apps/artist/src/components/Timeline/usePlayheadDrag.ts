@@ -39,14 +39,7 @@ export interface PlayheadDragDeps {
   /** Playback state: a scrub pauses it, and hands it back on release. */
   isPlaying: boolean;
   setIsPlaying: (playing: boolean) => void;
-  /**
-   * Writes the scrubbed time. `Timeline` hands it the store's `seekTo`, so a
-   * scrub counts as a seek (ESCSUITE-287). The field keeps its old name
-   * because `timelineGestures.perf.test.ts`, a pinned file, builds these deps
-   * by hand with the store's `setCurrentTime` — which moves the playhead just
-   * the same and is all a listener-count measurement needs.
-   */
-  setCurrentTime: (time: number) => void;
+  seekTo: (time: number) => void;
 }
 
 /** The scrub in progress, and the way to start one. */
@@ -63,7 +56,7 @@ export function usePlayheadDrag({
   timelineDuration,
   isPlaying,
   setIsPlaying,
-  setCurrentTime,
+  seekTo,
 }: PlayheadDragDeps): PlayheadDrag {
   const [isDraggingPlayhead, setIsDraggingPlayhead] = useState(false);
   /** Whether playback was running when this scrub began: the release resumes it. */
@@ -88,7 +81,7 @@ export function usePlayheadDrag({
       const rect = trackContainerRef.current.getBoundingClientRect();
       const time = pointerTime(e.clientX, rect.left, trackContainerRef.current.scrollLeft, pixelsPerSecond);
       const clampedTime = clampTime(time, timelineDuration);
-      setCurrentTime(clampedTime);
+      seekTo(clampedTime);
     };
 
     const handleMouseUp = () => {
@@ -106,7 +99,7 @@ export function usePlayheadDrag({
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [isDraggingPlayhead, pixelsPerSecond, timelineDuration, setCurrentTime, setIsPlaying, trackContainerRef]);
+  }, [isDraggingPlayhead, pixelsPerSecond, timelineDuration, seekTo, setIsPlaying, trackContainerRef]);
 
   return { isDraggingPlayhead, handlePlayheadMouseDown };
 }

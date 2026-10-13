@@ -545,7 +545,7 @@ describe('usePlayheadDrag and useInOutDrag per-move work', () => {
         trackContainerRef: containerRef,
         pixelsPerSecond: PPS,
         timelineDuration: useEditorStore.getState().project.timeline.duration,
-        setCurrentTime: useEditorStore.getState().setCurrentTime,
+        seekTo: useEditorStore.getState().seekTo,
       } as PlayheadDragDeps)
     )
 
