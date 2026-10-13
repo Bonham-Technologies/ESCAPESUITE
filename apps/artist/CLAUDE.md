@@ -4348,7 +4348,9 @@ file and no fallback. WebM's shape now matches MP4's:
   identical report would be mislabelled the other way, its colours shifted by the same ~25/255 in the
   opposite direction, with nothing in CI to notice (CI's e2e runs Chromium only); that residual risk,
   and retiring the gate, are **ESCSUITE-288**, the upstream report against Firefox's WebCodecs
-  encoder. Every measurement here was on **macOS**, with Playwright's Firefox 155 build: Firefox on
+  encoder — filed 2026-10-12 as https://bugzilla.mozilla.org/show_bug.cgi?id=2081037; when a Firefox
+  release resolves it, re-run the probe below and retire the gate or narrow it to the new report.
+  Every measurement here was on **macOS**, with Playwright's Firefox 155 build: Firefox on
   Linux, Windows and Android passes the `Gecko/` + `Firefox/` gate **unmeasured** (Android may hand
   VP8/VP9 to a platform encoder that converts or reports differently).
   WebKit's WebM colour has not been measured and is left alone. Firefox's H.264 (MP4) encoder

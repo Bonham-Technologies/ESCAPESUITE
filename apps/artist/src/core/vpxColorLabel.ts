@@ -33,8 +33,11 @@
  * sRGB transfer at full range the way Chromium does, say — falls out of the gate
  * on its own. One that fixes the pixels but keeps this identical report would be
  * mislabelled the other way; that residual risk is ESCSUITE-288, the upstream
- * report. Measured on macOS only (Playwright's Firefox 155 build); Firefox on
- * Linux, Windows and Android passes the engine gate unmeasured.
+ * report — https://bugzilla.mozilla.org/show_bug.cgi?id=2081037 (filed
+ * 2026-10-12). When a Firefox release resolves it, re-run the ESCSUITE-284 probe
+ * and retire this gate or narrow it to the new report. Measured on macOS only
+ * (Playwright's Firefox 155 build); Firefox on Linux, Windows and Android passes
+ * the engine gate unmeasured.
  */
 export function relabelFirefoxVpxMeta(
   meta: EncodedVideoChunkMetadata | undefined
