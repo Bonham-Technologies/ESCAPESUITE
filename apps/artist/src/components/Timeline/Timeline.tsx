@@ -153,7 +153,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     timelineDuration,
     isPlaying,
     setIsPlaying,
-    setCurrentTime: seekTo,
+    seekTo,
   });
 
   // Dragging the in/out point markers on the ruler

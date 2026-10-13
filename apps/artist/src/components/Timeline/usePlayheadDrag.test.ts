@@ -1,7 +1,7 @@
 // The playhead scrub's lifecycle: what it binds, what it writes, when it stops.
 //
 // A scrub has no preview and nothing to commit — the store's `currentTime` is
-// the thing being dragged — so these tests watch `setCurrentTime` and the
+// the thing being dragged — so these tests watch `seekTo` and the
 // document listeners, and they watch that `isDraggingPlayhead` goes back down
 // on release, because the marquee and the track click both refuse to act while
 // it is up.
@@ -26,7 +26,7 @@ const DURATION = 10
 let addListener: MockInstance
 let removeListener: MockInstance
 let containerRef: { current: HTMLDivElement | null }
-let setCurrentTime: MockInstance
+let seekTo: MockInstance
 let setIsPlaying: MockInstance
 
 beforeEach(() => {
@@ -39,7 +39,7 @@ beforeEach(() => {
   document.body.appendChild(container)
   containerRef = { current: container }
 
-  setCurrentTime = vi.fn(useEditorStore.getState().setCurrentTime)
+  seekTo = vi.fn(useEditorStore.getState().seekTo)
   setIsPlaying = vi.fn(useEditorStore.getState().setIsPlaying)
 })
 
@@ -57,7 +57,7 @@ const deps = (): PlayheadDragDeps => ({
   timelineDuration: DURATION,
   isPlaying: useEditorStore.getState().isPlaying,
   setIsPlaying: setIsPlaying as unknown as (playing: boolean) => void,
-  setCurrentTime: setCurrentTime as unknown as (time: number) => void,
+  seekTo: seekTo as unknown as (time: number) => void,
 })
 
 const mountScrub = () => renderHook(() => usePlayheadDrag(deps()))
@@ -134,7 +134,7 @@ describe('usePlayheadDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(setCurrentTime).toHaveBeenCalledWith(2.5)
+    expect(seekTo).toHaveBeenCalledWith(2.5)
     expect(currentTime()).toBe(2.5)
   })
 
@@ -145,7 +145,7 @@ describe('usePlayheadDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(setCurrentTime).toHaveBeenCalledWith(4.5)
+    expect(seekTo).toHaveBeenCalledWith(4.5)
   })
 
   it('will not scrub before the start of the timeline', () => {
@@ -154,7 +154,7 @@ describe('usePlayheadDrag following the pointer', () => {
 
     moveTo(-3)
 
-    expect(setCurrentTime).toHaveBeenCalledWith(0)
+    expect(seekTo).toHaveBeenCalledWith(0)
   })
 
   it('will not scrub past the end of the timeline', () => {
@@ -163,7 +163,7 @@ describe('usePlayheadDrag following the pointer', () => {
 
     moveTo(DURATION + 5)
 
-    expect(setCurrentTime).toHaveBeenCalledWith(DURATION)
+    expect(seekTo).toHaveBeenCalledWith(DURATION)
   })
 
   it('writes nothing once the track area has gone', () => {
@@ -173,7 +173,7 @@ describe('usePlayheadDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(setCurrentTime).not.toHaveBeenCalled()
+    expect(seekTo).not.toHaveBeenCalled()
   })
 
   it('writes nothing for a pointer that moves without the playhead held', () => {
@@ -181,7 +181,7 @@ describe('usePlayheadDrag following the pointer', () => {
 
     moveTo(2.5)
 
-    expect(setCurrentTime).not.toHaveBeenCalled()
+    expect(seekTo).not.toHaveBeenCalled()
     expect(currentTime()).toBe(0)
   })
 
@@ -193,7 +193,7 @@ describe('usePlayheadDrag following the pointer', () => {
     release()
     moveTo(5)
 
-    expect(setCurrentTime).toHaveBeenCalledTimes(1)
+    expect(seekTo).toHaveBeenCalledTimes(1)
     expect(currentTime()).toBe(2.5)
   })
 })
@@ -212,7 +212,7 @@ describe('usePlayheadDrag and playback', () => {
 
     expect(setIsPlaying).toHaveBeenCalledTimes(1)
     expect(setIsPlaying).toHaveBeenCalledWith(false)
-    expect(setIsPlaying.mock.invocationCallOrder[0]).toBeLessThan(setCurrentTime.mock.invocationCallOrder[0])
+    expect(setIsPlaying.mock.invocationCallOrder[0]).toBeLessThan(seekTo.mock.invocationCallOrder[0])
     expect(useEditorStore.getState().isPlaying).toBe(false)
   })
 

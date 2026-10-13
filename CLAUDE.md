@@ -4363,6 +4363,20 @@ byte-identical — is ESCSUITE-291. `drawFrame.perf.test.ts`, every other `*.per
 pins are byte-identical: one number is read through `getState()` at the pause transition, nothing per frame.
 **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-12 for ESCSUITE-291 (`usePlayheadDrag`'s dependency is named
+`seekTo`, which is what `Timeline` has handed it since ESCSUITE-287, instead of `setCurrentTime`; the doc
+comment that explained the mismatch is gone, and `tsc` is the pin — a caller passing `{ setCurrentTime }` no
+longer typechecks): 99.84 / 99.41 / 96.63 / 99.76, identical on every count to the 99.84 / 99.41 / 96.63 /
+99.76 that `main` at `dbb38c32` (the ESCSUITE-287 version-packages commit) measures in the same sitting —
+lines 9,036 / 9,050, statements 10,213 / 10,273, branches 5,828 / 6,031, functions 2,154 / 2,159 on both
+trees, the same 14 / 60 / 203 / 5 uncovered. A rename adds no unit. The one `*.perf.test.ts` change in the
+repository's history that is not a ceiling or a count is here: `timelineGestures.perf.test.ts:548` reads
+`seekTo: useEditorStore.getState().seekTo` where it read `setCurrentTime: useEditorStore.getState().setCurrentTime`,
+the pin's hand-built deps following the hook's field — one `set` per move either way, and nothing the pin
+counts (listeners, rects, snap points, renders per move) can move. Every other perf file and the rerender
+pins are byte-identical. No changeset: a pure rename. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
