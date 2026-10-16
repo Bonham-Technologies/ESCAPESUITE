@@ -22,7 +22,7 @@ import type {
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
-import { createAudioGapFiller, type AudioGapFiller } from './audioGapFiller';
+import { createAudioCapture, type AudioCapture, type AudioCaptureOptions } from './audioWorkletCapture';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
 // muxer; re-exported here because this is where every caller imports it from.
@@ -73,9 +73,6 @@ interface LevelMeter {
  * `recorder.perf.test.ts` and `webcodecsRecorder.perf.test.ts`.
  */
 const AUDIO_LEVEL_INTERVAL_MS = 80;
-
-/** Samples per `onaudioprocess` buffer, for the mix and every audio companion. */
-const SCRIPT_PROCESSOR_BUFFER = 4096;
 
 /**
  * How often the frame path re-reads `getOutputTimestamp()` (ESCSUITE-296).
@@ -159,8 +156,9 @@ interface VideoCompanionPipeline extends CompanionPipelineBase {
 
 /**
  * One audio source of a separate-tracks take, in its own Opus-only WebM: its
- * own `MediaStreamAudioSourceNode`, its own `ScriptProcessorNode`, its own
- * `AudioEncoder`, its own output.
+ * own `MediaStreamAudioSourceNode`, its own audio capture (an AudioWorklet
+ * node, or the ScriptProcessorNode fallback — see `audioWorkletCapture.ts`),
+ * its own `AudioEncoder`, its own output.
  *
  * It is a *second* tap on a track the mix is already reading, not a diversion
  * of it: the primary output keeps the mixed audio exactly as before, so a
@@ -174,24 +172,17 @@ interface AudioCompanionPipeline extends CompanionPipelineBase {
   encoder: AudioEncoder | null;
   packetSource: EncodedAudioPacketSource | null;
   /**
-   * Kept so `cleanup()` can disconnect it — and read by `onaudioprocess` as its
-   * own gate: `null` means this pipeline has finished with the node, which is
-   * how an `ended` track or a failed encoder stops the callback without waiting
-   * for the audio thread to notice the disconnect.
-   */
-  processor: ScriptProcessorNode | null;
-  /**
-   * Microseconds of audio this pipeline has encoded — its own presentation
-   * clock, reset by `start()` and advanced by its own sample count.
+   * This pipeline's audio capture — its own node, its own stamps — and what an
+   * `ended` track or a failed encoder stops. Null only while the companion is
+   * still being set up; `cleanup()` closes it through the recorder's
+   * `captures` registry, not through here.
    *
-   * Per pipeline rather than shared with `audioTimestamp`, and that is the
-   * point: three callbacks advancing one counter would interleave and stamp
-   * each other's audio. What they share is the *origin* — one `start()`, one
-   * `AudioContext`, one gate — which is what puts the parts on one timeline.
+   * Per pipeline rather than shared, and that is the point: three pipelines
+   * advancing one counter would interleave and stamp each other's audio. What
+   * they share is the *origin* — one `start()`, one `AudioContext`, one render
+   * clock — which is what puts the parts on one timeline.
    */
-  timestampUs: number;
-  /** This pipeline's own silence for its own lost callbacks (ESCSUITE-296). */
-  gapFiller: AudioGapFiller;
+  capture: AudioCapture | null;
 }
 
 type CompanionPipeline = VideoCompanionPipeline | AudioCompanionPipeline;
@@ -256,9 +247,6 @@ export class WebCodecsRecorder {
   private frameCount = 0;
   /** The primary (screen or webcam) pipeline's own frame bookkeeping. */
   private screenTiming: FrameTiming = newFrameTiming();
-  private audioTimestamp = 0;
-  /** The mix's silence for its lost callbacks; null for a take with no audio. */
-  private mixGapFiller: AudioGapFiller | null = null;
 
   /**
    * The audio context whose clock this take's video is stamped in, or null for
@@ -339,6 +327,14 @@ export class WebCodecsRecorder {
   private sourceNodes: MediaStreamAudioSourceNode[] = [];
 
   /**
+   * Every audio capture this take built — the mix's and one per audio
+   * companion (ESCSUITE-299). `start()`, `pause()` and `resume()` drive them
+   * all; `stop()` waits for each to deliver what is still on its way before
+   * the encoders are flushed; `cleanup()` closes them.
+   */
+  private captures: AudioCapture[] = [];
+
+  /**
    * Set by `cleanup()` and never cleared, because a WebCodecsRecorder records
    * one take: the recorder is finished with, whether it stopped, was cancelled
    * or failed.
@@ -349,7 +345,6 @@ export class WebCodecsRecorder {
   private disposed = false;
 
   // Audio capture
-  private audioWorklet: ScriptProcessorNode | null = null;
   private mixedAudioStream: MediaStream | null = null;
 
   // Configuration
@@ -620,9 +615,7 @@ export class WebCodecsRecorder {
       });
       this.abortIfDisposed();
 
-      // Set up audio capture using ScriptProcessorNode
-      // (AudioWorklet would be better but requires more setup)
-      this.setupAudioCapture();
+      await this.setupAudioCapture();
     }
 
     // A separate-tracks take (ESCSUITE-14): the webcam gets its own encoder and
@@ -762,8 +755,8 @@ export class WebCodecsRecorder {
    *
    * Every companion gets one, camera and microphone alike: an unplugged
    * microphone leaves a live `MediaStreamAudioSourceNode` feeding silence into
-   * a `ScriptProcessorNode` that goes on firing, so without this the part came
-   * out as long as the take and inaudible for most of it.
+   * a capture that goes on running, so without this the part came out as long
+   * as the take and inaudible for most of it.
    */
   private watchCompanionTrack(companion: CompanionPipeline, track: MediaStreamTrack): void {
     const { trackLabel } = COMPANION_PARTS[companion.role];
@@ -847,19 +840,8 @@ export class WebCodecsRecorder {
         output,
         target,
         packetSource,
-        processor: null,
+        capture: null,
         encodedCount: 0,
-        timestampUs: 0,
-        // The encoder is read when a gap is filled, not now: the gate in
-        // `onaudioprocess` below has already proved it is there by then.
-        gapFiller: createAudioGapFiller({
-          sampleRate: this.sampleRate,
-          bufferLength: SCRIPT_PROCESSOR_BUFFER,
-          numberOfChannels: 2,
-          label: COMPANION_PARTS[role].trackLabel,
-          readCurrentTime: () => context.currentTime,
-          encode: (data) => companion.encoder!.encode(data),
-        }),
         failed: false,
       };
 
@@ -887,7 +869,7 @@ export class WebCodecsRecorder {
         bitrate: 128000,
       });
       companion.encoder = encoder;
-      // Before the source node and the ScriptProcessor below, which are built
+      // Before the source node and the audio capture below, which are built
       // outside this try and would be built onto a closed AudioContext — and
       // onto a `sourceNodes` registry that has already been swept.
       this.abortIfDisposed();
@@ -898,76 +880,25 @@ export class WebCodecsRecorder {
       return;
     }
 
-    // A second tap on the track the mix is already reading. The
-    // ScriptProcessorNode is the same node the mix uses — 4096 samples at
-    // 48kHz, ~85ms chunks — rather than an AudioWorklet, because this class
-    // has exactly one audio-capture mechanism and a second one in the same
-    // take would be two things to keep in step for no gain.
+    // A second tap on the track the mix is already reading, through the same
+    // kind of capture the mix uses — this class has exactly one audio-capture
+    // mechanism per take, and a second one in the same take would be two
+    // things to keep in step for no gain.
     const source = this.createSourceNode(context, new MediaStream([track]));
-    const processor = context.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 2, 2);
-    // Owned by the pipeline from the moment it exists, because the callback
-    // below reads it as its gate: a disconnected node is one this pipeline has
-    // finished with, and `endCompanion` / `failCompanion` are what disconnect
-    // it. Chrome stops firing `onaudioprocess` on a node with no downstream
-    // connection, but a gate that depends on the audio thread noticing is not
-    // a gate — and the encoder is deliberately kept alive after an `ended`, so
-    // `stop()` can still flush the tail of the part.
-    companion.processor = processor;
-
-    processor.onaudioprocess = (event) => {
-      if (
-        !this.isRecordingActive ||
-        this.isPausedState ||
-        !companion.processor ||
-        !companion.encoder
-      ) {
-        return;
-      }
-
-      const leftChannel = event.inputBuffer.getChannelData(0);
-      const rightChannel = event.inputBuffer.getChannelData(1);
-      const numberOfFrames = leftChannel.length;
-
-      const planarData = new Float32Array(numberOfFrames * 2);
-      for (let i = 0; i < numberOfFrames; i++) {
-        planarData[i] = leftChannel[i];
-        planarData[numberOfFrames + i] = rightChannel[i];
-      }
-
-      try {
-        companion.timestampUs = companion.gapFiller.fill(
-          event.playbackTime,
-          numberOfFrames,
-          companion.timestampUs
-        );
-        const audioData = new AudioData({
-          format: 'f32-planar',
-          sampleRate: this.sampleRate,
-          numberOfFrames,
-          numberOfChannels: 2,
-          timestamp: companion.timestampUs,
-          data: planarData,
-        });
-
-        // try/finally, because `encode()` throws on a codec that has been
-        // closed under us: `close()` as the next statement leaked the decoded
-        // buffer once per callback, ~11.7 times a second, for as long as the
-        // encoder kept refusing.
-        try {
-          companion.encoder.encode(audioData);
-        } finally {
-          audioData.close();
-        }
-
-        companion.timestampUs += (numberOfFrames / this.sampleRate) * 1_000_000;
+    companion.capture = await this.createCapture(context, source, {
+      label: trackLabel,
+      onChunk: (data) => {
+        // Null once the encoder has failed: the worklet's chunks still on
+        // their way to the page when it did are dropped here, never encoded
+        // into a closed codec.
+        const encoder = companion.encoder;
+        if (!encoder) return;
+        encoder.encode(data);
         companion.encodedCount++;
-      } catch (e) {
-        console.error('Audio encoding error:', e);
-      }
-    };
-
-    source.connect(processor);
-    processor.connect(context.destination);
+      },
+    });
+    // Its encoder gave up before there was a capture to stop (`endCompanion`).
+    if (companion.failed) void companion.capture.stop();
 
     this.companions.push(companion);
     this.watchCompanionTrack(companion, track);
@@ -1005,7 +936,9 @@ export class WebCodecsRecorder {
    * planar array, build an `AudioData`, throw `InvalidStateError` out of
    * `encode()` and log once per buffer, ~11.7 times a second for the rest of the
    * take. (The `AudioData` itself is closed in a `finally` now, so that much no
-   * longer leaks — but the work is still wasted.) An *ended* track, by contrast,
+   * longer leaks — but the work is still wasted.) A capture stopped here may
+   * still deliver chunks already on their way to the page (the AudioWorklet
+   * path); the null encoder is what drops them. An *ended* track, by contrast,
    * keeps its encoder, because `stop()` still has to flush the tail of a part
    * that is worth delivering.
    *
@@ -1026,16 +959,22 @@ export class WebCodecsRecorder {
    *
    * For a video companion that is `readerActive`, which ends
    * `captureFromTrackProcessor`; for an audio one it is the
-   * `ScriptProcessorNode`, which only stops firing once it is disconnected
-   * from the graph. The encoder is deliberately left alone: `stop()` still has
-   * to flush it to get the tail of the part into the file.
+   * capture, which is stopped: an AudioWorklet capture still delivers what
+   * its source rendered before the end — the chunks queued on their way to the
+   * page and the tail it flushes — and then lets its node go; the fallback
+   * just disconnects. The encoder is deliberately left alone: `stop()` still
+   * has to flush it to get the tail of the part into the file.
+   *
+   * An audio companion whose encoder fails while it is still being set up has
+   * no capture yet: nothing to stop, and nothing may throw here, inside the
+   * encoder's error callback. Its `failed` flag is the mark —
+   * `initializeAudioCompanion` stops the capture the moment it is built.
    */
   private endCompanion(companion: CompanionPipeline): void {
     if (companion.kind === 'video') {
       companion.readerActive = false;
-    } else {
-      companion.processor?.disconnect();
-      companion.processor = null;
+    } else if (companion.capture) {
+      void companion.capture.stop();
     }
   }
 
@@ -1233,70 +1172,45 @@ export class WebCodecsRecorder {
   }
 
   /**
-   * Set up audio capture using ScriptProcessorNode
+   * Capture the mix into the primary's audio encoder — through an AudioWorklet
+   * where the browser has one, else through a ScriptProcessorNode
+   * (`audioWorkletCapture.ts`, ESCSUITE-299).
    */
-  private setupAudioCapture(): void {
+  private async setupAudioCapture(): Promise<void> {
     if (!this.audioContext || !this.mixedAudioStream) return;
 
     const source = this.createSourceNode(this.audioContext, this.mixedAudioStream);
-
-    // Use ScriptProcessorNode for audio capture
-    // Buffer size of 4096 samples at 48kHz = ~85ms chunks
-    this.audioWorklet = this.audioContext.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 2, 2);
-    const context = this.audioContext;
-    const gapFiller = createAudioGapFiller({
-      sampleRate: this.sampleRate,
-      bufferLength: SCRIPT_PROCESSOR_BUFFER,
-      numberOfChannels: 2,
+    await this.createCapture(this.audioContext, source, {
       label: 'The recording',
-      readCurrentTime: () => context.currentTime,
-      // Only ever called past the gate below, which has checked the encoder.
-      encode: (data) => this.audioEncoder!.encode(data),
+      // Never null while a chunk can arrive: `stop()` waits for every capture
+      // before it closes the encoder, and `cleanup()` closes the captures
+      // before it nulls it.
+      onChunk: (data) => this.audioEncoder!.encode(data),
     });
-    this.mixGapFiller = gapFiller;
+  }
 
-    this.audioWorklet.onaudioprocess = (event) => {
-      if (!this.isRecordingActive || this.isPausedState || !this.audioEncoder) return;
-
-      const leftChannel = event.inputBuffer.getChannelData(0);
-      const rightChannel = event.inputBuffer.getChannelData(1);
-      const numberOfFrames = leftChannel.length;
-
-      // Create planar data for AudioData
-      const planarData = new Float32Array(numberOfFrames * 2);
-      for (let i = 0; i < numberOfFrames; i++) {
-        planarData[i] = leftChannel[i];
-        planarData[numberOfFrames + i] = rightChannel[i];
-      }
-
-      try {
-        this.audioTimestamp = gapFiller.fill(event.playbackTime, numberOfFrames, this.audioTimestamp);
-        const audioData = new AudioData({
-          format: 'f32-planar',
-          sampleRate: this.sampleRate,
-          numberOfFrames,
-          numberOfChannels: 2,
-          timestamp: this.audioTimestamp,
-          data: planarData,
-        });
-
-        // try/finally for the same reason the audio companion's is: `encode()`
-        // throws on a codec that has been closed under us, and `close()` as the
-        // next statement leaked the decoded buffer once per callback.
-        try {
-          this.audioEncoder.encode(audioData);
-        } finally {
-          audioData.close();
-        }
-
-        this.audioTimestamp += (numberOfFrames / this.sampleRate) * 1_000_000;
-      } catch (e) {
-        console.error('Audio encoding error:', e);
-      }
-    };
-
-    source.connect(this.audioWorklet);
-    this.audioWorklet.connect(this.audioContext.destination);
+  /**
+   * Build one audio capture and put it on the registry `cleanup()` closes.
+   *
+   * Building it awaits (the AudioWorklet module loads once per take), and a
+   * `dispose()` can land inside that await: `cleanup()` has then already swept
+   * `captures`, so the capture it finishes building is closed here instead —
+   * its node let go, nothing left running on a closed context — and setup
+   * stops.
+   */
+  private async createCapture(
+    context: AudioContext,
+    source: AudioNode,
+    options: AudioCaptureOptions
+  ): Promise<AudioCapture> {
+    const capture = await createAudioCapture(context, source, options);
+    if (this.disposed) {
+      capture.close();
+    } else {
+      this.captures.push(capture);
+    }
+    this.abortIfDisposed();
+    return capture;
   }
 
   /**
@@ -1318,8 +1232,7 @@ export class WebCodecsRecorder {
     this.pausedDuration = 0;
     this.frameCount = 0;
     this.screenTiming = newFrameTiming();
-    this.audioTimestamp = 0;
-    this.mixGapFiller?.reanchor();
+    for (const capture of this.captures) capture.start();
 
     // Non-null here: `setUpTake()` builds the context before the video encoder
     // this method has just checked for.
@@ -1348,9 +1261,6 @@ export class WebCodecsRecorder {
       if (companion.kind === 'video') {
         companion.timing = newFrameTiming();
         companion.readerActive = true;
-      } else {
-        companion.timestampUs = 0;
-        companion.gapFiller.reanchor();
       }
     }
     this.startCompanionCaptures();
@@ -1633,6 +1543,7 @@ export class WebCodecsRecorder {
     if (this.isRecordingActive && !this.isPausedState) {
       this.pauseStartTime = performance.now();
       if (this.clockContext) this.pauseStartContext = this.contextNow(this.pauseStartTime);
+      for (const capture of this.captures) capture.pause();
       this.isPausedState = true;
       this.callbacks.onPause?.();
     }
@@ -1649,12 +1560,10 @@ export class WebCodecsRecorder {
         this.readOutputTimestamp(this.clockContext, now);
         this.pausedContextSeconds += this.contextTimeAt(now) - this.pauseStartContext;
       }
-      // The callbacks dropped while paused are the pause, not lost audio: the
-      // first buffer after it is taken as given, by every audio pipeline.
-      this.mixGapFiller?.reanchor();
-      for (const companion of this.companions) {
-        if (companion.kind === 'audio') companion.gapFiller.reanchor();
-      }
+      // Every audio pipeline takes the pause out of its own stamps: the render
+      // frames it spanned (AudioWorklet), or the callbacks it dropped
+      // (ScriptProcessorNode, whose gap filler re-anchors here).
+      for (const capture of this.captures) capture.resume();
       this.isPausedState = false;
       this.callbacks.onResume?.();
     }
@@ -1671,6 +1580,11 @@ export class WebCodecsRecorder {
     for (const companion of this.companions) {
       if (companion.kind === 'video') companion.readerActive = false;
     }
+    // Asked now, with the rest of the capture, so nothing recorded after the
+    // stop is taken: the fallback stops counting at once, and the AudioWorklet
+    // closes its open span at the render position the take ended on — its
+    // flushed tail is cut there.
+    const audioStopped = Promise.all(this.captures.map((capture) => capture.stop()));
 
     // Stop frame capture (setTimeout-based)
     if (this.frameInterval) {
@@ -1684,6 +1598,11 @@ export class WebCodecsRecorder {
     for (const companion of this.companions) {
       if (companion.kind === 'video') await this.releaseCompanionReader(companion);
     }
+
+    // Every audio capture's tail — and, on the AudioWorklet path, every chunk
+    // still queued on its way to the page — reaches its encoder before that
+    // encoder is flushed. Never rejects.
+    await audioStopped;
 
     try {
       // Flush encoders
@@ -1959,10 +1878,8 @@ export class WebCodecsRecorder {
     }
     this.outputs.length = 0;
 
-    if (this.audioWorklet) {
-      this.audioWorklet.disconnect();
-      this.audioWorklet = null;
-    }
+    for (const capture of this.captures) capture.close();
+    this.captures.length = 0;
 
     // A source node is released only when the AudioContext closes, which is
     // late for the mix's taps and never for a companion's — its pipeline is
@@ -1992,12 +1909,8 @@ export class WebCodecsRecorder {
     this.trackEndedHandlers.clear();
 
     for (const companion of this.companions) {
-      if (companion.kind === 'video') {
-        void this.releaseCompanionReader(companion);
-      } else {
-        companion.processor?.disconnect();
-        companion.processor = null;
-      }
+      // An audio companion's capture was closed with the rest, above.
+      if (companion.kind === 'video') void this.releaseCompanionReader(companion);
       companion.encoder = null;
       companion.output = null;
       companion.target = null;

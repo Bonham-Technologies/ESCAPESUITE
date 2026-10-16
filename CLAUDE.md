@@ -303,7 +303,14 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   that means a **same-origin URL only**; a cross-origin one is refused before it leaves the page,
   and `loadVideoFromUrl` says so by naming the origin and the likely Content-Security-Policy
   cause, rather than a bare `Failed to fetch` (ESCSUITE-130). A self-hosted or standalone build
-  fetches under whatever `connect-src` it sets itself.
+  fetches under whatever `connect-src` it sets itself. The same policy's `script-src` carries
+  `blob:` (ESCSUITE-299): ESCAPECRAFT loads its AudioWorklet audio-capture module from a `blob:`
+  URL, a worklet module is fetched under `script-src`, and without it every hosted take would
+  quietly fall back to the ScriptProcessorNode capture. It admits nothing an injected script could
+  not already do under the policy's `'unsafe-inline'`. Pinned by
+  `apps/e2e/tests/production/csp-audio-worklet.spec.ts` (under the served policy, and its inverse)
+  and by `serve-dist.test.mjs`'s drift guard; a self-hosted build that sends its own policy needs
+  the same.
 - **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
   Recommended for production hosts — and **required** of a host that offers CRAFT's "Upload to
   host" (ESCSUITE-176): that message carries the recording's **bytes**, not just an id, and
@@ -4501,13 +4508,51 @@ a take is never filled. ESCSUITE-299 (an `AudioWorklet` capture with a render-th
 heuristic. The suite measured 1,467 green with a 20 s per-test timeout because the drift matrix was loading
 the machine. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/craft` was re-measured 2026-10-16 for ESCSUITE-299 (a WebCodecs take's audio — the mix and
+both separate-tracks companions — is captured through an `AudioWorklet` in `core/audioWorkletCapture.ts`:
+the processor source as a string constant loaded from a `blob:` URL, render quanta accumulated into
+4096-frame chunks posted with their buffers transferred and stamped from the render position, each chunk
+cut to the recorded spans the capture opens at `start()` and `resume()` and closes at `pause()` and
+`stop()`, so a late chunk is judged by where it was rendered and the tail ends at the stop frame; the
+`ScriptProcessorNode` path with ESCSUITE-296's gap filler is the fallback, chosen once per take when
+`audioWorklet` is missing or `addModule` rejects and named in one `console.info` line; `blob:` joins the
+hosted `script-src` so the module loads on escapesuite.io): 100.00 / **99.57** / **97.93** / 100.00 against
+the 100.00 / 99.56 / 97.91 / 100.00 that `main` at `a326f811` (the ESCSUITE-296 rig merge; its craft source
+is the ESCSUITE-296 release's) measures in the same sitting — statements up a hundredth, branches up two,
+lines and functions still exactly 100. The base gives 1,458 / 1,489 branches and this branch 1,471 / 1,502:
+thirteen new branches, thirteen covered, the same 31 uncovered as before (lines 2,549 → 2,624, statements
+2,718 / 2,730 → 2,806 / 2,818, functions 475 → 496, every denominator growing by exactly what the numerator
+did; the same 12 statements uncovered, in the same four files). The net thirteen is two files moving in
+opposite directions: `core/audioWorkletCapture.ts` arrives at 100 on all four — 120 lines, 129 statements,
+20 branches, 23 functions: the path choice (`audioWorklet` absent, `addModule` rejecting, the per-context
+cache, the worklet-or-fallback ternary), `close()`'s idempotence and its settle, the `'flushed'` message, a
+piece whose span intersection is empty, `stop()`'s once-only latch and its already-closed resolve, the open
+span closed at the stop frame or no span to close, the flush timer fired and cleared, the encode
+`try` / `catch` on both paths and the fallback's not-recording and ended arms — each reached from both sides
+by the module's 38 cases through an `AudioWorkletNode` double that delivers chunks as the real port does,
+late and never lost, and by the recorder's 15 worklet cases — while `core/webcodecs-recorder.ts` goes
+275 / 289 → 268 / 282, its three `ScriptProcessorNode` call sites having become one `createCapture()` and
+its `captures` registry (the disposed-while-loading arm, the companion's gone-encoder guard pinned by "no
+error is logged", and `endCompanion`'s refusal of a companion with no capture yet, each from both sides),
+with the same fourteen pre-existing arms uncovered. The processor string's own branches are not measured by
+v8 but run in the tests, because the double evaluates the real source. The one deliberate perf-pin change is
+`webcodecsRecorder.perf.test.ts`'s new worklet law — one `AudioData` created, encoded once and closed per
+posted chunk, one flush message and one disconnect per take; three nodes, thirty-six `AudioData` and one
+`addModule` for a separate-tracks take — beside the fallback laws it already held; `recorder.perf.test.ts`,
+`compositor.perf.test.ts`, `converter.perf.test.ts` and every `App.*rerender*` are byte-identical. Outside
+vitest's measurement: `apps/e2e/tests/production/csp-audio-worklet.spec.ts` under the served
+Content-Security-Policy (a take on the worklet path with no violation; the inverse with `blob:` stripped
+from the served header falling back, Chromium naming the refused `blob:` module only in the recorder's own
+fallback line — it fires no `securitypolicyviolation` and prints no refusal) and `serve-dist.test.mjs`'s directive
+pin, 19 / 19. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.56 | 97.91 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.57 | 97.93 | 100.00 |
 | `@escapesuite/artist` | 99.84 | 99.41 | 96.64 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.61 | 98.87 |

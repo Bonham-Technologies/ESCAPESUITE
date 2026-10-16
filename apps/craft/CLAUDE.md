@@ -405,6 +405,12 @@ the Help button.
   own `FrameTiming`, and an `AudioEncoder` and its own Opus-only output for each audio source the
   take really has — all of them on that same clock, and none of them taking the mixed audio off
   the primary
+- `audioWorkletCapture.ts`: `createAudioCapture()` — how every audio pipeline of a WebCodecs take
+  (the mix and each audio companion) takes its audio off the graph: an AudioWorklet where the
+  browser has one, the ScriptProcessorNode and ESCSUITE-296's gap filler where it does not (see
+  "Frame timestamps and keyframes" → "The audio capture: an AudioWorklet, with a fallback")
+- `audioGapFiller.ts`: ESCSUITE-296's silence for callbacks the page never saw — the
+  ScriptProcessorNode fallback's only, since ESCSUITE-299
 - `webcodecsSupport.ts`: `isWebCodecsRecordingSupported()` and `canRecordSeparateTracks()` — the
   two synchronous capability questions, in a module that imports nothing, so a *component* can
   ask one without pulling `mediabunny` into its graph (`WebcamOverlaySettingsPanel` does).
@@ -672,7 +678,8 @@ immediately — `compositor.perf.test.ts` counts a second of 60 Hz ticks as exac
 ### Recorder lifecycle
 
 The recorder is created **and `initialize()`d before the countdown starts**, so from that moment
-it already owns an AudioContext, a ScriptProcessorNode, an rAF audio-level monitor that loops
+it already owns an AudioContext, an audio capture node (an AudioWorkletNode, or a ScriptProcessorNode
+on the fallback path), an rAF audio-level monitor that loops
 forever and — on the WebCodecs fallback capture path — a `<video>` appended to the document.
 **Every exit from a take therefore has to `dispose()` it**: cancelling the countdown, cancelling
 the recording, a recorder error, a start that failed (`initialize()` can throw *after* the audio
@@ -737,15 +744,17 @@ webcam and one `kind: 'audio'` pipeline per audio source the take really has —
 encoder, its own Mediabunny `Output` and its own `failed` flag. **Every companion watches its own
 track's `ended`** (`watchCompanionTrack()`, one handler per role): it warns
 `'<Track> track ended: <label>'` and calls `endCompanion()`, which stops that pipeline's capture —
-`readerActive = false` for the camera, `processor.disconnect()` and `processor = null` for an audio
-source — while the screen keeps recording, and `stop()` then finalizes a **shorter** part, or none
-at all if nothing was ever encoded. The encoder is deliberately left open there, because `stop()`
-still has to flush the tail of the part into the file. An unplugged microphone is why the audio
-half exists: a dead `MediaStreamAudioSourceNode` goes on feeding silence to a
-`ScriptProcessorNode` that goes on firing, so without it the part came out as long as the take and
-inaudible for most of it. The `onaudioprocess` gate reads `companion.processor` for exactly this
-reason — a disconnected node is one its pipeline has finished with, and a gate that depends on the
-audio thread noticing the disconnect is not a gate.
+`readerActive = false` for the camera, `capture.stop()` for an audio source — while the screen keeps
+recording, and `stop()` then finalizes a **shorter** part, or none at all if nothing was ever
+encoded. The encoder is deliberately left open there, because `stop()` still has to flush the tail
+of the part into the file. An unplugged microphone is why the audio half exists: a dead
+`MediaStreamAudioSourceNode` goes on feeding silence to a capture that goes on running, so without
+it the part came out as long as the take and inaudible for most of it. Stopping an AudioWorklet
+capture (ESCSUITE-299) still delivers what was rendered before the end — the chunks queued on their
+way to the page and the tail the processor flushes — and then lets the node go; stopping the
+ScriptProcessorNode fallback disconnects it, and its own gate stops counting at once rather than
+waiting for the audio thread to notice the disconnect. A *failed* companion's capture is stopped
+the same way, and the chunks still on their way are dropped by its nulled encoder.
 
 `failCompanion()` is `endCompanion()` **plus the `failed` flag** (and, for an audio pipeline, a
 nulled encoder): the difference between the two is whether what was already encoded is still worth
@@ -812,6 +821,8 @@ under the callback is ~11.7 times a second for the rest of the take.
 **A take can be thrown away while it is still being set up, and then nothing more may be
 built** (ESCSUITE-73). `initialize()` awaits half a dozen times — the fallback capture
 `<video>` starting, the AudioContext resuming, `Output.start()`, each codec's `configure()`,
+the AudioWorklet module loading (ESCSUITE-299: `createCapture()` closes a capture that finishes
+building after a dispose, rather than putting it on a registry `cleanup()` has already swept),
 each companion — and `dispose()` lands inside one of those awaits for real: the screen's
 unmount teardown calls `disposeRecorder()` synchronously while `handleStartRecording` is still
 parked on the `initialize()` it started, and the recorder's own `onError` does the same when
@@ -1115,9 +1126,10 @@ beside it as the guard that the monitor call stays where it is.
 **Audio companions are a second tap, never a diversion.** The primary output keeps the mixed
 `AudioEncoder` and the mixed Opus track exactly as before — a screen-only download still has
 sound, and the composite MP4 has the mix to draw on without decoding a single part. Each companion adds its own
-`MediaStreamAudioSourceNode` on the same track, its own `ScriptProcessorNode` (4096 samples, the
-same node the mix uses — this class has one audio-capture mechanism, and a second one in the same
-take would be two things to keep in step for no gain), its own `AudioEncoder` and its own
+`MediaStreamAudioSourceNode` on the same track, its own audio capture (the same kind the mix uses —
+an AudioWorkletNode, or a 4096-sample ScriptProcessorNode on the fallback path; one take has one
+audio-capture mechanism, decided once, because two in the same take would be two things to keep in
+step for no gain), its own `AudioEncoder` and its own
 Opus-only `Output`. A companion exists exactly when its source is in the mix: the conditions
 are the ones `initialize()` already asks when it wires the mix — a toggle AND the stream it names
 (`config.microphoneEnabled` with `micStream`, `config.systemAudioEnabled` with an audio track on
@@ -1244,26 +1256,25 @@ claim. `webcodecs-recorder.test.ts` pins the property directly — "stamps both 
 one clock — same tick, same timestamp": two frames captured at one clock reading carry the same
 timestamp, each stream's first frame is a keyframe, and a pause is excluded from both.
 
-**The audio pipelines follow the same rule with a different unit.** The primary's mix counts its
-own samples into `audioTimestamp`; each audio companion counts its own into its own
-`timestampUs`, reset by the same `start()`. Per pipeline rather than shared, and that is the
-point: three `onaudioprocess` callbacks advancing one counter would interleave and stamp each
-other's audio. What they share is the **origin** — one `start()`, one `AudioContext`, one
-`isRecordingActive` / `isPausedState` gate, one sample rate — which is what puts every part of a
-take on one timeline. Paused time is excluded from all of them identically, because a buffer
-dropped while paused is never counted. The residual risk is one 4096-sample buffer (~85 ms) if a
-callback lands exactly across `start()`, which is the same risk the mix already carries against
-the two video pipelines.
+**The audio pipelines follow the same rule with a different unit.** Each audio pipeline — the mix
+and every audio companion — has its own capture with its own stamps, reset by the same `start()`.
+Per pipeline rather than shared, and that is the point: three pipelines advancing one counter would
+interleave and stamp each other's audio. What they share is the **origin** — one `start()`, one
+`AudioContext`, one render clock, one sample rate — which is what puts every part of a take on one
+timeline. How each capture stamps is the next two sections.
 
-**Two clocks, made one (ESCSUITE-296).** The audio is counted in **context time** — samples
-`onaudioprocess` delivered, at the rate the AudioContext renders — and the video used to be stamped
+**Two clocks, made one (ESCSUITE-296).** The audio is counted in **context time** — at the rate the
+AudioContext renders: the render position itself on the AudioWorklet path (ESCSUITE-299, below),
+the samples `onaudioprocess` delivered on the ScriptProcessorNode fallback — and the video used to be stamped
 in `performance.now()`. Nothing compared them, so a take drifted out of sync linearly with its
 length: every callback the page never received took 85.3 ms out of the audio, an output device's
 crystal running ε fast against the system clock put the audio ε·T behind, and a context that
 ignored the 48 kHz request was stamped and labelled as 48 kHz anyway. Three fixes, in
 `webcodecs-recorder.ts` and `core/audioGapFiller.ts`:
-1. **Lost audio is filled — the rise in the baseline deficit, in render quanta.** One
-   `createAudioGapFiller()` per pipeline (the mix and each audio companion). What the ESCSUITE-296
+1. **Lost audio is filled — the rise in the baseline deficit, in render quanta.** *Since ESCSUITE-299
+   this is the ScriptProcessorNode fallback's alone* (`createAudioGapFiller()` is called from
+   `audioWorkletCapture.ts`'s fallback arm and nowhere else): the AudioWorklet path loses nothing and
+   has nothing to fill. One filler per pipeline (the mix and each audio companion). What the ESCSUITE-296
    rig measured in headless Chromium 156, which every earlier version of this rule got wrong, and
    which nobody should have to re-derive:
    - **`playbackTime` is read at dispatch**, not from the buffer's position: under jank it sits one
@@ -1281,7 +1292,9 @@ ignored the 48 kHz request was stamped and labelled as 48 kHz anyway. Three fixe
    anchor. The reference is the event's `playbackTime` (dispatch-time is harmless: only minimums
    are used), else the context's `currentTime` read in the callback, else none, and then the event
    takes exactly the old path (what keeps `webcodecsRecorder.perf.test.ts`'s
-   one-`AudioData`-per-callback law exact). Lateness only raises a deficit, so the **baseline** —
+   one-`AudioData`-per-callback law exact on the fallback path; the AudioWorklet path's law is one
+   `AudioData` created, encoded once and closed per posted chunk — the deliberate pin change
+   ESCSUITE-299 made, 2026-10-16). Lateness only raises a deficit, so the **baseline** —
    the minimum over the last 8 events or 4 s of them, whichever is more (47 at 48 kHz) — ignores
    it, and lost content raises it for good. The first full window's baseline is the **anchor**, so
    a constant dispatch latency is never filled; a baseline two quanta or more above the anchor is
@@ -1330,6 +1343,72 @@ hangs, the rig's busy-loop jank, sustained 0–60 ms lateness, a constant latenc
 including the rig's ~43 ms a minute, whole-buffer losses, three pipelines losing independently,
 `currentTime` in place of `playbackTime`) — and
 `audioGapFiller.test.ts` pins the helper, one case per guard.
+
+**The audio capture: an AudioWorklet, with a fallback (ESCSUITE-299).** The gap filler above is a
+heuristic because Chromium computes `playbackTime` when the main thread *dispatches* an
+`AudioProcessingEvent`. An `AudioWorkletProcessor.process()` runs on the render thread for every
+128-frame quantum without exception and reads the render position exactly (`currentFrame`), and
+what it posts over its `MessagePort` is queued, never dropped. So `core/audioWorkletCapture.ts`'s
+`createAudioCapture(context, source, { onChunk, label })` — one per audio pipeline, hiding which
+path is live — captures through an AudioWorklet wherever it can:
+
+- **The processor** (`AUDIO_CAPTURE_WORKLET_SOURCE`, registered as `'escapecraft-capture'`) is
+  loaded with `addModule()` from a `text/javascript` Blob URL — there is no file to serve it from
+  in a single-file build — and the URL is revoked once `addModule()` settles. It gathers quanta into
+  chunks of `CHUNK_FRAMES` (4096, the ~85 ms a ScriptProcessor buffer was) per channel and posts
+  `{ frame, channels }`, `frame` the render position of the chunk's first sample, the two
+  `Float32Array`s transferred. The node is two channels, explicit, connected to the destination
+  (silent) so the engine pulls it; an input with nothing connected is recorded as silence, the
+  quantum's length read from the node's output rather than assumed to be 128.
+- **Stamping is by render position, never by arrival.** The take is a list of recorded spans of the
+  render clock — `start()` opens one, `pause()` closes it, `resume()` opens the next, each read as
+  `round(currentTime × sampleRate)`, the same frame count `currentFrame` reports. What a chunk
+  rendered inside a span is encoded, stamped
+  `round((frame − span start + frames recorded before the span) / sampleRate × 1e6)` µs, at
+  `sampleRate = audioContext.sampleRate`, planar f32; a chunk that straddles `start()`, a pause or a
+  resume is cut there to the frame. So a chunk the page receives seconds late is neither lost nor
+  mis-stamped, the audio starts at 0 and runs on across a pause with no gap and no overlap, and
+  **pause and resume reconcile the two clocks**: the recorder reads the video's paused time
+  (`pausedContextSeconds`, from `getOutputTimestamp()`) and the audio's paused render frames
+  (`currentTime`) at the same two moments on the same render clock, so the two subtract the same
+  pause, to within a render quantum (2.7 ms), never cumulative.
+- **`stop()`** (asked at the top of the recorder's `stop()`, awaited before any encoder is flushed)
+  closes the open span at the render position it is called at — so the tail is cut where the take
+  ended, not where the render thread got to the message — and posts `'flush'`; the processor posts
+  its partial tail and `{ flushed: true }` behind every chunk still queued, and the capture closes the node and its port when that acknowledgement arrives —
+  after `FLUSH_TIMEOUT_MS` (1 s) without one it warns once and closes anyway, so a render thread that
+  has stopped cannot hold a take hostage. A chunk that arrives after that is ignored. `close()` (the
+  recorder's `cleanup()`) lets the node go at once and settles a pending `stop()`.
+- **The fallback**: a context with no `audioWorklet` (a browser without one, or an insecure
+  context) or whose `addModule()` rejects gets ESCSUITE-296's ScriptProcessorNode capture from the
+  same call, exactly as it was — the samples delivered counted into the stamps, the gap filler
+  filling what the page never saw, the context-time video clock unchanged.
+- **The choice is made once per `AudioContext`** — once per take, however many pipelines it has —
+  and logged once with `console.info`, naming the path (and, for a refused module, the error).
+
+**The hosted CSP admits the module.** A worklet module is fetched under `script-src`, so
+`vercel.json`'s `script-src` carries `blob:` (ESCSUITE-299; before it, every hosted take was refused
+the module and quietly fell back). `apps/e2e/tests/production/csp-audio-worklet.spec.ts` records a
+take under the policy `serve-dist.mjs` serves and expects the AudioWorklet line and no violation,
+and — with `blob:` stripped from the served `script-src` — the ScriptProcessorNode line naming the
+refused `blob:` module (Chromium 156 fires no `securitypolicyviolation` and prints no refusal for a
+blocked worklet module; the recorder's own line is the one trace); `serve-dist.test.mjs` pins `blob:` in the policy without a browser. The dev
+server, the standalone file and the headless kit send no policy. A self-hosted build that sends its
+own needs `blob:` in `script-src` too, or it gets the fallback.
+
+**An audio companion whose encoder fails before its capture exists** — which the real API cannot do
+(an error callback is a task, and setup has only microtasks between `configure()` and the capture
+being set), but a double can — is refused without throwing inside the error callback: `endCompanion`
+finds no capture to stop, the `failed` flag is the mark, and `initializeAudioCompanion` stops the
+capture the moment it is built.
+
+`webcodecsRecorder.audioWorklet.test.ts` drives takes through the AudioWorklet double in
+`src/test/doubles/audio.ts` (`enableAudioWorkletDouble()`; off by default, so every older suite
+keeps the fallback), which runs the real processor source: a 10-minute take with 1 % of chunks
+held behind a 2.5 s hang ends on the render clock within a chunk with no silence inserted and every
+chunk encoded once; a 44.1 kHz context stamps from `frame / 44100`; a pause leaves no seam; the tail
+is flushed and a late chunk ignored; each fallback is engaged with the filler live.
+`audioWorkletCapture.test.ts` pins the module, the processor included.
 
 `webcodecs-recorder.test.ts` pins all of it against a scripted `performance.now()`: a 30 fps
 source, a 15 fps source (the bug above), the strictly-increasing guard under a frozen clock,
