@@ -103,7 +103,20 @@ test.describe('ESCAPECRAFT audio capture under the hosted CSP (ESCSUITE-299)', (
       `console:\n${consoleLog.messages.join('\n')}`
     ).toHaveLength(1)
     expect(consoleLog.matching(WORKLET_LINE)).toEqual([])
+    // Evidence of the refusal itself, whichever way the browser gives it: a
+    // `securitypolicyviolation` on the document whose directive is
+    // `script-src` (or `script-src-elem`) and whose blocked URI is the blob:,
+    // or Chromium's console line for it. A run on 2026-10-16 saw no matching
+    // violation event — Chromium may report a blocked worklet module only on
+    // the console — so either one passes, and a failure prints both.
     const violations = await cspViolations(page)
-    expect(violations.some((v) => /^script-src/.test(v) && v.includes('blob'))).toBe(true)
+    const byEvent = violations.some((v) => /^script-src/.test(v) && v.includes('blob'))
+    const byConsole =
+      consoleLog.matching(/Refused to load the script 'blob:[^']*'.*script-src/).length > 0
+    expect(
+      byEvent || byConsole,
+      `no sign of the refusal itself.\nCSP violations: ${JSON.stringify(violations)}\n` +
+        `console:\n${consoleLog.messages.join('\n')}`
+    ).toBe(true)
   })
 })
