@@ -1255,6 +1255,39 @@ dropped while paused is never counted. The residual risk is one 4096-sample buff
 callback lands exactly across `start()`, which is the same risk the mix already carries against
 the two video pipelines.
 
+**Two clocks, made one (ESCSUITE-296).** The audio is counted in **context time** — samples
+`onaudioprocess` delivered, at the rate the AudioContext renders — and the video used to be stamped
+in `performance.now()`. Nothing compared them, so a take drifted out of sync linearly with its
+length: every callback the main thread missed (Chromium drops a `ScriptProcessorNode` buffer
+outright when the page is still busy with the last one) took 85.3 ms out of the audio, an output
+device's crystal running ε fast against the system clock put the audio ε·T behind, and a context
+that ignored the 48 kHz request was stamped and labelled as 48 kHz anyway. Three fixes, in
+`webcodecs-recorder.ts` and `core/audioGapFiller.ts`: (1) **lost buffers are filled** — every
+event's `playbackTime` is the context time of its buffer, so a gap of half a buffer or more past
+where the last one ended is encoded as zero-valued `AudioData` (4096-sample chunks from one reused
+zero buffer, stamped contiguously) before the real buffer; one `createAudioGapFiller()` per
+pipeline, the mix and each audio companion, re-anchored at `start()` and every resume so a pause
+is never filled, and capped at `MAX_GAP_FILL_SECONDS` (5 s) with one warning per pipeline — a
+longer stall is a device switch, not a dropped callback, and its remainder stays a step; an event
+with **no** `playbackTime` takes exactly the old path, which is what keeps
+`webcodecsRecorder.perf.test.ts`'s one-`AudioData`-per-callback law exact; (2) **video is stamped
+in context time** — `start()` reads `audioContext.getOutputTimestamp()`, and if it is usable
+(present, finite, non-zero) every frame is stamped with the context seconds elapsed since
+`start()`, extrapolated on `performance.now()` from that pairing and re-read every
+`CONTEXT_CLOCK_REFRESH_MS` (2 s) on the frame path and at every resume, with pause time excluded
+in context seconds; the strictly-increasing and keyframe rules above are unchanged. A context with
+no `getOutputTimestamp()`, one that reports zeros because it has not rendered yet, or a
+non-finite reading gives the whole take today's `performance.now()` stamps (an unusable *refresh*
+keeps the last good anchor); `getDuration()` stays on `performance.now()`, so on a context-clock
+take it differs from the muxed length by ε·T — a third of a second an hour at 100 ppm, and the
+saved duration is read from the blob anyway; (3) **the context's real rate** —
+`audioContext.sampleRate`, read once after it is built, with one `console.warn` naming it when the
+engine did not honour the 48 kHz request — is the rate of every `AudioData`, every audio
+timestamp, every gap filled and every audio encoder's `configure()`. What a user sees: a long
+recording stays in sync to its last frame instead of the sound sliding further from the picture
+every minute. `webcodecsRecorder.audioClock.test.ts` (which replaced the hunt's probe) drives
+10- and 60-minute simulated takes through it, and `audioGapFiller.test.ts` pins the helper.
+
 `webcodecs-recorder.test.ts` pins all of it against a scripted `performance.now()`: a 30 fps
 source, a 15 fps source (the bug above), the strictly-increasing guard under a frozen clock,
 keyframes at 0 / 400 / 800 / 1200 ms, paused time excluded from the stamps, and — on the
