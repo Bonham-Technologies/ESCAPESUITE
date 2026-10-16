@@ -541,6 +541,30 @@ recorded frame rate specifically (ESCSUITE-86: it settled why the screen take re
 and the benchmark keeps `setInterval` as its default painter regardless, so every other
 `taskMsPerFrame` figure stays comparable).
 
+**The A/V drift rig** (`apps/e2e/tests/perf/craft-av-drift.spec.ts`, ESCSUITE-296/297) sits
+beside the benchmarks and is neither a benchmark nor a regression test: a measurement, run by
+hand one arm at a time, that records a real 180 s ESCAPECRAFT take against `mockSyntheticMedia`
+devices carrying opt-in sync markers (a flash and a beep every 10 s and a per-frame paint-time
+timecode), instruments every `ScriptProcessorNode` callback and audio clock in the page
+(`utils/avDrift.ts`), downloads the raw WebM and the MP4 / M4A conversions, and leaves the
+numbers for `apps/e2e/scripts/av-drift-report.mjs` to read with ffprobe (`-fps_mode passthrough`
+for the per-frame timecode): lost callbacks, the audio PTS gaps, the last audio packet against
+the last video frame, and the marker drift slope in ms per minute with its standard error. It is
+opt-in twice over — its own config, `playwright.av-drift.config.ts` (`pnpm --filter
+@escapesuite/e2e run test:av-drift`), which `playwright.perf.config.ts` ignores by name and
+`playwright.config.ts` by directory, **and** `AV_DRIFT=1` — so neither `pnpm test:e2e` nor
+`pnpm perf` ever starts a three-minute take; the arm is chosen by `AV_DRIFT_MODE`
+(`screen` | `pip` | `tracks` | `mic`), `AV_DRIFT_LOAD` (`idle` | `cpu4` | `jank`) and
+`AV_DRIFT_SECONDS`, and the results land in the gitignored `apps/e2e/av-drift-results/`. The
+only `expect`s are tripwires that the take it measured is the take it meant to. It is what found
+and then confirmed the ESCSUITE-296 fix: on the unfixed recorder the CPU-throttled screen take
+lost 5 callbacks and drifted −428 ms over 180 s (5 × 85.3 ms predicted −427), and on the fixed
+one the two-track take that lost a callback drifted −2 ms; the before and after tables are on
+the ticket. The CPU-throttled arms are not deterministic — how many callbacks Chromium drops
+varies run to run — so a comparison reads the arm that lost callbacks on both trees, and the
+rig reads the callbacks rather than the gap filler, so a fill count is inferred from the
+end-to-end drift rather than read out.
+
 CI runs them in their own workflow, `.github/workflows/perf.yml` (ESCSUITE-26): on every
 push to `main` or `dev`, on a pull request that carries the **`perf` label** (add the label,
 then push or re-run — the workflow listens for `labeled` and `synchronize`), and by hand via
