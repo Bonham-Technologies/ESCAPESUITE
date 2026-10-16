@@ -54,6 +54,55 @@ function repairClipTransforms(project: Project): Project {
   return { ...project, timeline: { ...project.timeline, clips: repairedClips } };
 }
 
+/**
+ * How long a repaired legacy overlay lasts: the length an overlay added in the
+ * editor gets (`overlaySlice.ts`'s `addTextOverlayClip` / `addShapeOverlayClip`,
+ * `duration ?? 5`).
+ */
+const REPAIRED_OVERLAY_DURATION = 5;
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+/**
+ * Repair a legacy overlay whose `startTime` / `endTime` are not two finite
+ * numbers (ESCSUITE-300). They are timeline times `convertLegacyOverlays` turns
+ * into a clip's position and length, and such a pair used to convert into a
+ * NaN-length clip that parsed and was refused only at export. A file the app
+ * once wrote in this shape is repaired rather than refused (the ESCSUITE-173 /
+ * 255 split): the overlay starts at its `startTime` when that is a finite
+ * number, else at 0, and lasts `REPAIRED_OVERLAY_DURATION`. A finite pair is
+ * left to the conversion, inverted or not: it has always clamped that to its
+ * 0.1 s minimum, and a file that loads today converts exactly as it did. One
+ * `console.warn` names how many were repaired. A legacy overlay has no source,
+ * so there is no media length to take instead. Returns the very same project
+ * when nothing needs repair.
+ */
+function repairLegacyOverlayWindows(project: Project): Project {
+  const timeline = project.timeline;
+  let repaired = 0;
+  const repair = <T extends { startTime: number; endTime: number }>(overlays: T[]): T[] => {
+    // Typed as a list, but absent in an old file: `parseProject` has already
+    // refused a non-falsy value that is not a list, and a falsy one is "no
+    // overlays" and is kept as it is.
+    if (!Array.isArray(overlays)) return overlays;
+    return overlays.map((overlay) => {
+      if (isFiniteNumber(overlay.startTime) && isFiniteNumber(overlay.endTime)) return overlay;
+      repaired++;
+      const startTime = isFiniteNumber(overlay.startTime) ? overlay.startTime : 0;
+      return { ...overlay, startTime, endTime: startTime + REPAIRED_OVERLAY_DURATION };
+    });
+  };
+  const textOverlays = repair(timeline.textOverlays);
+  const shapeOverlays = repair(timeline.shapeOverlays);
+  if (repaired === 0) return project;
+  console.warn(
+    `Repaired the start and end times of ${repaired} legacy overlay${repaired === 1 ? '' : 's'}; ` +
+      `each now lasts ${REPAIRED_OVERLAY_DURATION} s`
+  );
+  return { ...project, timeline: { ...timeline, textOverlays, shapeOverlays } };
+}
+
 // Ensure timeline has tracks and overlays arrays (migration helper)
 function ensureTimelineHasTracks(project: Project): Project {
   // Ensure resolution exists (migration for older projects)
@@ -61,6 +110,7 @@ function ensureTimelineHasTracks(project: Project): Project {
     project = { ...project, resolution: { width: 1920, height: 1080 } };
   }
   project = repairClipTransforms(project);
+  project = repairLegacyOverlayWindows(project);
 
   const timeline = project.timeline;
   let needsMigration = false;

@@ -27,6 +27,12 @@ const ITERATIONS = 600
 // fixed, so a check dropped anywhere lowers `refused` and a new over-strict one
 // lowers `accepted`. A change that moves an input across the line on purpose
 // updates the numbers here and says why.
+//
+// Re-measured 2026-10-16 for ESCSUITE-300: still 354 / 246. The 11 inputs
+// whose legacy overlay window the migration now repairs parsed before too,
+// into a NaN-length clip; they move from "parsed but unexportable" to
+// "parsed and sound", which the duration check in `assertShape` now asserts,
+// not across the parsed / refused line.
 const FLOORS = { accepted: 354, refused: 246 }
 
 const transform = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }
@@ -163,6 +169,8 @@ describe('parseProject under seeded mutation (ESCSUITE-294)', () => {
   })
 
   it(`answers ${ITERATIONS} mutated projects with a project or a reason, and never throws`, async () => {
+    // The ESCSUITE-300 repair warns once per parse it repairs; quiet here.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const rng = createRng(SEED)
     const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
@@ -180,6 +188,7 @@ describe('parseProject under seeded mutation (ESCSUITE-294)', () => {
         tally[outcome.value.ok ? 'accepted' : 'refused']++
       }
     }
+    warn.mockRestore()
     expectTallyAtLeast(tally, FLOORS, SEED)
   })
 })
