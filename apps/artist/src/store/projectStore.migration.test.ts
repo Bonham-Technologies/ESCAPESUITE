@@ -466,6 +466,34 @@ describe('parseProject (ESCSUITE-102)', () => {
     })
   })
 
+  // ESCSUITE-293: `kind` marks the one caption track. Absent on every other
+  // track, and on every track in every file written before it.
+  describe('a track\'s kind (ESCSUITE-293)', () => {
+    const withKind = (kind: unknown) => {
+      const project = validProject() as unknown as { timeline: { tracks: Record<string, unknown>[] } }
+      project.timeline.tracks = [
+        project.timeline.tracks[0],
+        { id: 't2', name: 'Captions', index: 1, visible: true, locked: false, muted: false, volume: 1, height: 60, kind },
+      ]
+      return project
+    }
+
+    it('keeps a captions track marked as one through the load', () => {
+      const result = parseProject(withKind('captions'))
+      expect(result.ok && result.project.timeline.tracks.map((track) => track.kind)).toEqual([undefined, 'captions'])
+    })
+
+    it.each([
+      ['another word', 'subtitles'],
+      ['the right word in another case', 'Captions'],
+      ['a number', 1],
+      ['null', null],
+      ['an object', { kind: 'captions' }],
+    ])('refuses a kind that is %s, by name', (_label, kind) => {
+      expect(parseProject(withKind(kind))).toEqual({ ok: false, reason: "timeline.tracks[1].kind must be 'captions'" })
+    })
+  })
+
   it('migrates a project with no tracks at all, rather than rejecting it', () => {
     // ensureTimelineHasTracks's own migration branch handles an absent/empty
     // `tracks` array — parseProject must let that through, not reject it.
