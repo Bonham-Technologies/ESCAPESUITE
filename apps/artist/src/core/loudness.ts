@@ -20,11 +20,14 @@
 //   dropped (relative gate). Integrated loudness = −0.691 + 10·log10(mean
 //   energy of what is left).
 // * **True peak**: the sample peak and the peaks between samples, read by 4×
-//   oversampling each channel with a 16-tap-per-phase Hann-windowed sinc —
+//   oversampling each channel with a 24-tap-per-phase Hann-windowed sinc —
 //   BS.1770-4 Annex 2 asks for 4× oversampling through an interpolation
-//   low-pass and leaves the filter to the implementer; this one reads an
-//   fs/4 tone at 45° (every sample at −3 dB, the waveform at 0 dB) within
-//   0.02 dB, well inside EBU Tech 3341's +0.2 / −0.4 dB.
+//   low-pass and leaves the filter to the implementer. This one reads an fs/4
+//   tone at 45° (every sample at −3 dB, the waveform at 0 dB) well inside EBU
+//   Tech 3341's +0.2 / −0.4 dB, and full-band white noise at the same figure
+//   ffmpeg's `ebur128` prints (−3.6 dBTP, measured 2026-10-16); 16 taps read
+//   that noise 0.6 dB low. Content right up at Nyquist still reads about
+//   0.5 dB under a band-limited ideal, as ffmpeg's does.
 //
 // The open-source storytold/filmcraft meter (`crates/audio-dsp/src/
 // loudness.rs`) was read as a cross-check of the constants and of the Tech
@@ -153,7 +156,7 @@ function interleavedLanes(data: Float32Array, channelCount: number): Lanes {
 // --- True peak: 4× oversampling --------------------------------------------
 
 /** Half the interpolator's support: each in-between point reads 2·TAPS_HALF samples around it. */
-const TAPS_HALF = 8;
+const TAPS_HALF = 12;
 const TAPS = 2 * TAPS_HALF;
 
 /**
@@ -209,7 +212,7 @@ function forwardPeak(d: Float32Array, o: number, stride: number, frames: number,
 
 /**
  * The most any oversampled point can exceed the largest sample it is built
- * from: the largest sum of |taps| of the three phases (≈ 1.3; at least 1,
+ * from: the largest sum of |taps| of the three phases (≈ 2.3; at least 1,
  * since each phase sums to 1).
  */
 const INTERPOLATION_GAIN = Math.max(
@@ -221,7 +224,9 @@ const INTERPOLATION_GAIN = Math.max(
  * the 48 multiply-adds can be skipped wherever they cannot change the answer:
  * the meter skips a frame whose bound cannot beat the peak already found, the
  * limiter one whose bound cannot reach the ceiling. Without it the true-peak
- * read is ~90 % of the meter's cost.
+ * read is ~90 % of the meter's cost; with it, a minute of speech-like stereo
+ * meters in ~0.2 s and a minute of a steady tone (where nothing can be
+ * skipped) in ~0.5 s (measured 2026-10-16, Node 26, x86_64).
  *
  * The bound is the largest sample of the aligned TAPS-sample chunk frame n is
  * in and of its two neighbours, which together contain [n − TAPS_HALF + 1,
