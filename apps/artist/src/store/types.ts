@@ -10,6 +10,8 @@ import type {
   OverlayPlacement,
 } from '@escapesuite/shared/types'
 
+import type { CaptionCue, CaptionStyle } from '../core/captions'
+
 // Re-export shared types
 export type { MediaType, MediaSource, WaveformPeak, SourceVideo, RecordingRole, OverlayPlacement }
 
@@ -812,6 +814,13 @@ export interface EditorState {
   // trackId can never land on one — findEmptyTrack already skips locked tracks.
   addTextOverlayClip: (textData?: Partial<TextOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
   addShapeOverlayClip: (shapeData?: Partial<ShapeOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
+  /**
+   * ESCSUITE-293: a caption file's cues as text clips on the one `kind:
+   * 'captions'` track — created at the top ("Captions") on the first import,
+   * appended to after. One write and one history entry for the whole file; the
+   * selection is left alone. `null`, writing nothing, when that track is locked.
+   */
+  addCaptionCues: (cues: CaptionCue[], style: CaptionStyle) => { trackId: string; added: number } | null;
   /** `boolean` for the same reason as the clip actions above (ESCSUITE-87). */
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => boolean;
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => boolean;

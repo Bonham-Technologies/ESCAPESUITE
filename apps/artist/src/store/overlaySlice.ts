@@ -11,7 +11,10 @@ import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
 
-export type OverlaySlice = Pick<EditorState, 'addTextOverlayClip' | 'addShapeOverlayClip' | 'updateTextOverlayData' | 'updateShapeOverlayData'>;
+export type OverlaySlice = Pick<
+  EditorState,
+  'addTextOverlayClip' | 'addShapeOverlayClip' | 'addCaptionCues' | 'updateTextOverlayData' | 'updateShapeOverlayData'
+>;
 
 export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice> = (set, get) => ({
   // Overlay clip actions (new clip-based overlays)
@@ -157,6 +160,64 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
     });
 
     return newClip;
+  },
+
+  // ESCSUITE-293. Not `addTextOverlayClip` in a loop: that pushes a history
+  // entry and moves the selection per call. One `set`, one entry, the
+  // selection untouched. The caption track is found by its marker, never by
+  // `findEmptyTrack` — an import keeps to its own track — and is made at the
+  // top the first time. Its lock refuses the whole import (ESCSUITE-84), with
+  // ESCSUITE-87's `null`.
+  addCaptionCues: (cues, style) => {
+    const state = get();
+    const { tracks: currentTracks, clips } = state.project.timeline;
+    const existing = currentTracks.find((track) => track.kind === 'captions');
+    if (existing?.locked) return null; // ESCSUITE-84
+
+    let tracks = currentTracks;
+    let captionTrack = existing;
+    if (!captionTrack) {
+      captionTrack = { ...createTrackAtTop(currentTracks, 'Captions'), kind: 'captions' };
+      tracks = [...currentTracks, captionTrack];
+    }
+    const trackId = captionTrack.id;
+
+    const added: Clip[] = cues.map((cue) => {
+      const duration = cue.end - cue.start;
+      return {
+        id: uuidv4(),
+        sourceVideoId: '',
+        name: cue.text,
+        startTime: 0,
+        endTime: duration,
+        duration,
+        trackId,
+        timelinePosition: cue.start,
+        blendMode: 'normal',
+        transform: { ...DEFAULT_TRANSFORM },
+        effects: { ...DEFAULT_EFFECTS },
+        transition: { ...DEFAULT_TRANSITION },
+        overlayType: 'text',
+        textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...style, text: cue.text },
+      };
+    });
+    const newClips = [...clips, ...added];
+
+    set({
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          tracks,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    });
+
+    return { trackId, added: added.length };
   },
 
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => {
