@@ -1351,6 +1351,8 @@ describe('exportToWebM loudness (ESCSUITE-292)', () => {
     const { loudness } = await run({ clips, options: { loudnessTarget: -14 } })
 
     expect(loudness).toBeUndefined()
+  })
+})
 
 // ESCSUITE-293: a caption is an ordinary text clip on the `kind: 'captions'`
 // track, so it is burned in by the same text renderer as any title — while its
