@@ -780,6 +780,26 @@ describe('VideoUploader', () => {
       }
     })
 
+    // Review M3: imported onto a hidden track, nothing appears in the picture;
+    // the one notice says why rather than a second one.
+    it('says the Captions track is hidden, in the same notice, when it is', async () => {
+      renderUploader()
+      selectFiles([file('first.srt', '', SRT)])
+      await waitFor(() => expect(captionTrack()).toBeDefined())
+      store().updateTrack(captionTrack()!.id, { visible: false })
+      showNotification.mockClear()
+
+      selectFiles([file('second.srt', '', SRT)])
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith(
+          'Imported 2 captions onto the Captions track. The Captions track is hidden.',
+          'success'
+        )
+      )
+      expect(showNotification).toHaveBeenCalledTimes(1)
+    })
+
     it('refuses while the Captions track is locked', async () => {
       renderUploader()
       selectFiles([file('first.srt', '', SRT)])
