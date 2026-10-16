@@ -4637,6 +4637,42 @@ corrects it. Every `*.perf.test.ts` and `*rerender*` file is byte-identical: the
 and the sidecar one serialization on click, nothing per frame. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-16 for ESCSUITE-298 and ESCSUITE-300 (a damaged v1 — JSON,
+base64-sources — `.veditor` is refused by name through `ProjectFileError` the way the v2 reader has been
+since ESCSUITE-260, instead of surfacing a raw `SyntaxError` or `TypeError` behind a bare "Failed to load
+project"; and a legacy text or shape overlay whose `startTime` / `endTime` window is unusable — a
+non-finite bound, or a difference that overflows — is repaired in the migration to a 5 s window starting
+at its own usable start or at 0, with one `console.warn` per parse counting the repairs, instead of
+parsing into a `NaN`- or `Infinity`-length clip that failed only at export): 99.84 / 99.41 / **96.66** /
+99.76 against the 99.84 / 99.41 / 96.64 / 99.76 that `main` at `a326f811` measures (the ESCSUITE-296 rig
+merge; its artist source is identical to `368c976d`'s, whose base summary is reused) — branches up two
+hundredths, the other three unmoved. The base gives 5,847 / 6,050 branches and this branch 5,885 / 6,088:
+thirty-eight new branches, thirty-eight covered, the same 203 uncovered as before (lines 9,049 / 9,063 →
+9,090 / 9,104, statements 10,230 / 10,290 → 10,281 / 10,341, functions 2,156 / 2,161 → 2,164 / 2,169, every
+denominator growing by exactly what the numerator did; the same 14 / 60 / 5 uncovered). The thirty-eight
+are `core/projectManager.ts`'s twenty-three (48 → 71: `readJsonFile`'s refusals — text that is not JSON,
+a top level that is not an object, a version above 1, `project` not an object, `videos` not a list, a
+`videos[i]` entry's `id` / `name` / `mimeType` / `data` not strings, a thumbnail neither a string nor
+`null`, a `meta` that is not an object, an id listed twice, and `data` or a thumbnail that is not base64,
+refused inside the rollback so a source stored before it is removed again — each reached from both sides
+by the 22 red cases and the v1 round-trip cases that were already there) and `store/projectMigration.ts`'s
+fifteen (212 → 227: `repairLegacyOverlayWindows`' three operands — a non-finite start, a non-finite end,
+an overflowing difference — the usable-start-or-0 choice and the once-per-parse warning, each from both
+sides by the missing, `NaN`, string, `-1.7e308 / 1.7e308` and reversed-overflow rows against the usable
+fixtures, which are pinned bit-identical; inverted and zero-length finite pairs keep today's 0.1 s clamp,
+pinned, because those files load today). The `loadProject` fuzz no longer skips a file that lost its magic
+(39 accepted / 100 refused → 39 / 111) and a new v1 loop mutates a real v1 file (seed `0x5eed0298`:
+67 / 233); the parseProject fuzz's shape check now asserts every parsed clip has a positive finite
+duration — it found seed `0x5eed0294` iteration 159 at `NaN`, now pinned — and its floors stay 354 / 246,
+the repaired inputs having been accepted before and parsing with a real length now. Against the pre-fix
+loader the new fuzz goes red with `escaped as SyntaxError`. A handful of hand-edited v1 shapes the app
+never wrote (a list `meta`, a duplicate id, a non-string `id` or `name`, a missing `mimeType`) used to
+load and are refused now, stated in the changeset. The suite is measured with `--testTimeout 20000` as the
+load-flake guard, 5,640 green. This branch was measured against the same base as ESCSUITE-292's and 293's
+and lands after both, so its table row is this branch's own figure, two to four hundredths below what
+`main` reads once all three are in; the next direct measurement corrects it. Every `*.perf.test.ts` and
+`*rerender*` file is byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4644,7 +4680,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.43 | 96.68 | 99.77 |
+| `@escapesuite/artist` | 99.84 | 99.41 | 96.66 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.64 | 98.87 |
 
