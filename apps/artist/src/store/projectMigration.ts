@@ -66,12 +66,14 @@ const isFiniteNumber = (value: unknown): value is number =>
 
 /**
  * Repair a legacy overlay whose `startTime` / `endTime` are not two finite
- * numbers (ESCSUITE-300). They are timeline times `convertLegacyOverlays` turns
+ * numbers a finite length apart (ESCSUITE-300). They are timeline times `convertLegacyOverlays` turns
  * into a clip's position and length, and such a pair used to convert into a
  * NaN-length clip that parsed and was refused only at export. A file the app
  * once wrote in this shape is repaired rather than refused (the ESCSUITE-173 /
- * 255 split): the overlay starts at its `startTime` when that is a finite
- * number, else at 0, and lasts `REPAIRED_OVERLAY_DURATION`. A finite pair is
+ * 255 split): the overlay starts at its `startTime` (clamped at 0, as the
+ * conversion clamps a position) when that is a finite number, else at 0, and
+ * lasts `REPAIRED_OVERLAY_DURATION`. A pair like -1.7e308 / 1.7e308 is two
+ * finite numbers whose difference is `Infinity`, and is repaired the same way. A finite pair is
  * left to the conversion, inverted or not: it has always clamped that to its
  * 0.1 s minimum, and a file that loads today converts exactly as it did. One
  * `console.warn` names how many were repaired. A legacy overlay has no source,
@@ -87,9 +89,17 @@ function repairLegacyOverlayWindows(project: Project): Project {
     // overlays" and is kept as it is.
     if (!Array.isArray(overlays)) return overlays;
     return overlays.map((overlay) => {
-      if (isFiniteNumber(overlay.startTime) && isFiniteNumber(overlay.endTime)) return overlay;
+      if (
+        isFiniteNumber(overlay.startTime) &&
+        isFiniteNumber(overlay.endTime) &&
+        Number.isFinite(overlay.endTime - overlay.startTime)
+      ) {
+        return overlay;
+      }
       repaired++;
-      const startTime = isFiniteNumber(overlay.startTime) ? overlay.startTime : 0;
+      // Clamped at 0 as the conversion clamps a position: a huge negative start
+      // would otherwise swallow the 5 s it is given.
+      const startTime = isFiniteNumber(overlay.startTime) ? Math.max(0, overlay.startTime) : 0;
       return { ...overlay, startTime, endTime: startTime + REPAIRED_OVERLAY_DURATION };
     });
   };

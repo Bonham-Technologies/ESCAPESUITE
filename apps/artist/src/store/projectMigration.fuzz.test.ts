@@ -32,7 +32,9 @@ const ITERATIONS = 600
 // whose legacy overlay window the migration now repairs parsed before too,
 // into a NaN-length clip; they move from "parsed but unexportable" to
 // "parsed and sound", which the duration check in `assertShape` now asserts,
-// not across the parsed / refused line.
+// not across the parsed / refused line. Unchanged again after fix round 1,
+// which also repairs a finite pair whose length overflows: no committed-seed
+// input has one.
 const FLOORS = { accepted: 354, refused: 246 }
 
 const transform = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }
