@@ -43,6 +43,8 @@ import {
   makeTrack,
 } from '../test/fixtures/clipFixtures'
 import type { Clip, ExportOptions, ExportProgress, SourceVideo, Track } from '../store/types'
+import { DEFAULT_TEXT_OVERLAY_DATA } from '../store/types'
+import { captionStyleFor } from './captions'
 
 vi.mock('mediabunny', async () => {
   const { createMediabunnyDouble } = await import('../test/doubles/mediabunny')
@@ -1349,5 +1351,41 @@ describe('exportToWebM loudness (ESCSUITE-292)', () => {
     const { loudness } = await run({ clips, options: { loudnessTarget: -14 } })
 
     expect(loudness).toBeUndefined()
+
+// ESCSUITE-293: a caption is an ordinary text clip on the `kind: 'captions'`
+// track, so it is burned in by the same text renderer as any title — while its
+// cue is up, and not a frame before or after. No renderer change was needed;
+// this pins that it stays that way.
+describe('burning in captions (ESCSUITE-293)', () => {
+  /** The index of every frame that drew `text`, frames being counted by their one `setTransform`. */
+  const framesDrawing = (text: string): number[] => {
+    const hits: number[] = []
+    let frame = -1
+    for (const call of ctx().calls) {
+      if (call.method === 'setTransform') frame++
+      if (call.method === 'fillText' && call.args[0] === text && hits[hits.length - 1] !== frame) hits.push(frame)
+    }
+    return hits
+  }
+
+  it('draws a caption while its cue is up, and not before or after it', async () => {
+    const clips = [
+      makeClip({ duration: 0.4, endTime: 0.4 }),
+      makeClip({
+        id: 'caption',
+        sourceVideoId: '',
+        trackId: 'captions',
+        overlayType: 'text',
+        textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...captionStyleFor({ width: 640, height: 360 }), text: 'Burned in' },
+        timelinePosition: 0.15,
+        duration: 0.1,
+        endTime: 0.1,
+      }),
+    ]
+    const tracks = [makeTrack(), makeTrack({ id: 'captions', name: 'Captions', index: 1, kind: 'captions' })]
+
+    await run({ clips, tracks })
+
+    expect(framesDrawing('Burned in')).toEqual([5, 6, 7])
   })
 })
