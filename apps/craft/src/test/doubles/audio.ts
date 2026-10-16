@@ -208,7 +208,14 @@ export interface AudioContextDoubleControl {
  * side), first in first out, and never dropped while the port is open — but
  * possibly late: with `holdMessages` set it waits in the node's `inbox` until
  * the test calls `deliver()`. A closed port delivers nothing more, as a real
- * one does.
+ * one does. What the page posts to the processor is cloned with its transfer
+ * list the same way (ESCSUITE-303: the capture hands each chunk's buffers back
+ * for the processor's pool), and every buffer that crosses either way is
+ * logged by lineage in the node's `transfers`.
+ *
+ * The scope's `Float32Array` counts every `new Float32Array(…)` the processor
+ * makes, in the context's `processorArrayAllocations` (ESCSUITE-303): the
+ * allocations on the render thread, which a pool exists to stop.
  */
 export interface AudioWorkletDoubleControl {
   /** What `addModule()` rejects with; null (the default) resolves. */
@@ -273,6 +280,29 @@ interface ProcessorPortDouble {
 /** Handed to the processor base class while its node is constructing it. */
 let constructingPort: ProcessorPortDouble | null = null
 
+/**
+ * Which buffer is which, across transfers: an `ArrayBuffer` that crosses a
+ * port arrives as a new object, so a buffer is followed by a lineage id — given
+ * the first time it is transferred, and carried by every copy it arrives as.
+ */
+const lineage = new WeakMap<ArrayBuffer, number>()
+let nextLineage = 1
+
+/**
+ * Structured-clone `data` with `transfer` as a real port does (each buffer in
+ * `transfer` detached on the sending side), and follow each buffer's lineage
+ * to the copy that arrives.
+ */
+function carry(data: unknown, transfer: Transferable[]): { data: unknown; ids: number[] } {
+  const sent = structuredClone({ data, transfer }, { transfer })
+  const ids = transfer.map((buffer, i) => {
+    const id = lineage.get(buffer as ArrayBuffer) ?? nextLineage++
+    lineage.set(sent.transfer[i] as ArrayBuffer, id)
+    return id
+  })
+  return { data: sent.data, ids }
+}
+
 /** `AudioWorkletProcessor`: all it gives a subclass is its port. */
 class AudioWorkletProcessorDouble {
   readonly port: ProcessorPortDouble
@@ -315,13 +345,18 @@ export class AudioWorkletNodeDouble {
   /** The page's end of the port. */
   readonly port: {
     onmessage: ((event: { data: unknown }) => void) | null
-    postMessage: Mock<(data: unknown) => void>
+    postMessage: Mock<(data: unknown, transfer?: Transferable[]) => void>
     close: Mock<() => void>
   }
   /** Posted by the processor, not yet handed to the page — oldest first. */
   readonly inbox: unknown[] = []
   /** Every message the processor posted, as it posted it (before cloning). */
   readonly posted: Array<{ data: unknown; transfer: Transferable[] }> = []
+  /**
+   * Every transfer across the port, in order: which way it went, and the
+   * lineage id of each buffer it carried (see `carry()`).
+   */
+  readonly transfers: Array<{ to: 'page' | 'processor'; ids: number[] }> = []
   /** Set when `process()` returned false: the engine stops calling it. */
   finished = false
   private portClosed = false
@@ -346,9 +381,11 @@ export class AudioWorkletNodeDouble {
     this.options = options
     this.port = {
       onmessage: null,
-      postMessage: vi.fn((data: unknown) => {
+      postMessage: vi.fn((data: unknown, transfer: Transferable[] = []) => {
         if (this.portClosed || control.audioWorklet?.processorDeaf) return
-        queueMicrotask(() => this.processorPort.onmessage?.({ data }))
+        const sent = carry(data, transfer)
+        this.transfers.push({ to: 'processor', ids: sent.ids })
+        queueMicrotask(() => this.processorPort.onmessage?.({ data: sent.data }))
       }),
       close: vi.fn(() => {
         this.portClosed = true
@@ -358,7 +395,9 @@ export class AudioWorkletNodeDouble {
       onmessage: null,
       postMessage: (data: unknown, transfer: Transferable[] = []) => {
         this.posted.push({ data, transfer })
-        this.inbox.push(structuredClone(data, { transfer }))
+        const sent = carry(data, transfer)
+        this.transfers.push({ to: 'page', ids: sent.ids })
+        this.inbox.push(sent.data)
         if (!control.audioWorklet?.holdMessages) queueMicrotask(() => this.deliver())
       },
     }
@@ -475,6 +514,8 @@ export class AudioContextDoubleInstance {
   renderedFrames = 0
   /** `currentFrame` as the processor being called sees it. */
   renderingFrame = 0
+  /** Every `new Float32Array(…)` the worklet scope's processors have made. */
+  processorArrayAllocations = 0
   /** Present only when `control.outputClock` was set at construction. */
   getOutputTimestamp?: ReturnType<typeof vi.fn<() => { contextTime: number; performanceTime: number }>>
 
@@ -496,6 +537,13 @@ export class AudioContextDoubleInstance {
           this.registeredProcessors.set(name, processor)
         },
         AudioWorkletProcessor: AudioWorkletProcessorDouble,
+        // The real constructor, counted: what it makes is a plain Float32Array.
+        Float32Array: new Proxy(Float32Array, {
+          construct: (target, args) => {
+            this.processorArrayAllocations++
+            return Reflect.construct(target, args)
+          },
+        }),
       }
       Object.defineProperties(scope, {
         currentFrame: { get: () => this.renderingFrame },

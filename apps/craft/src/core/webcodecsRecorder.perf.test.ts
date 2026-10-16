@@ -342,7 +342,12 @@ describe('WebCodecsRecorder work ceilings', () => {
 
       await recorder.stop()
       // Exact: the stop flushes the tail once and the node is let go once.
-      expect(context.workletNodes[0].port.postMessage).toHaveBeenCalledTimes(1)
+      // ESCSUITE-303, 2026-10-16: a deliberate pin change. The page's port now
+      // also hands each chunk's buffers back to the processor's pool — one
+      // recycle per chunk the page handled — so the flush is counted by itself.
+      const sent = context.workletNodes[0].port.postMessage.mock.calls.map(([message]) => message)
+      expect(sent.filter(message => message === 'flush')).toHaveLength(1)
+      expect(sent.filter(message => message !== 'flush')).toHaveLength(CHUNKS)
       expect(context.workletNodes[0].disconnect).toHaveBeenCalledTimes(1)
       expect(lastAudioEncoder().flushCalls).toBe(1)
       expect(allFramesClosed()).toBe(true)

@@ -4673,6 +4673,31 @@ and lands after both, so its table row is this branch's own figure, two to four 
 `main` reads once all three are in; the next direct measurement corrects it. Every `*.perf.test.ts` and
 `*rerender*` file is byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-16 for ESCSUITE-303 (the AudioWorklet capture's chunk buffers
+are recycled over the worklet port as a pool of at most `POOL_PAIRS = 4` pairs — the main side hands each
+chunk's two `Float32Array`s back once the `AudioData` has copied them, the processor takes a recycled pair
+when one is waiting and allocates only when the pool is empty, a recycle beyond the cap or of the wrong
+length is dropped and one after `close()` is ignored, and a quantum with no input connected is now written
+as zeros rather than relying on a fresh array — so a warm take allocates nothing per chunk where ESCSUITE-299
+allocated two): 100.00 / 99.57 / 97.93 / 100.00, byte-identical on every percentage to the
+100.00 / 99.57 / 97.93 / 100.00 that `main` at `5167472e` (the ESCSUITE-299 version-packages commit)
+measures in the same sitting. The base gives 1,471 / 1,502 branches and this branch 1,473 / 1,504: two new
+branches, two covered, the same 31 uncovered as before (lines 2,624 → 2,626, statements 2,806 / 2,818 →
+2,810 / 2,822, functions 496 → 497, every denominator growing by exactly what the numerator did; the same 12
+statements uncovered, in the same four files). Both are `core/audioWorkletCapture.ts`'s (20 → 22): the
+main side's recycle-or-not choice around a chunk that arrives after `close()`, reached from both sides by the
+module's ten new cases; the one new function is the recycle post. The processor string's own branches — the
+pool take-or-allocate, the cap, the length check, the zero-fill for a silent quantum — are not measured by v8
+but run in the tests, because the `AudioWorkletNode` double evaluates the real source and now counts the
+processor's allocations and routes a recycle message back to it: a 20-chunk take allocates 10 arrays where it
+allocated 40 and none per chunk once the pool is warm, every posted buffer is by identity one that was
+recycled or freshly allocated, and the silence-after-reuse case was red before the zero-fill. One deliberate
+perf-pin change in `webcodecsRecorder.perf.test.ts`, called out in the PR: the worklet law counted the port's
+`postMessage` once (the flush); the recycles ride the same port, so the law now counts the flush at exactly 1
+and the recycles at exactly one per chunk. `recorder.perf.test.ts`, `compositor.perf.test.ts`,
+`converter.perf.test.ts` and every `App.*rerender*` are byte-identical; the fallback path is untouched.
+**No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

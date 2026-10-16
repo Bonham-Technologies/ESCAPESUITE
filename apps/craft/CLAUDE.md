@@ -1357,7 +1357,14 @@ path is live — captures through an AudioWorklet wherever it can:
   in a single-file build — and the URL is revoked once `addModule()` settles. It gathers quanta into
   chunks of `CHUNK_FRAMES` (4096, the ~85 ms a ScriptProcessor buffer was) per channel and posts
   `{ frame, channels }`, `frame` the render position of the chunk's first sample, the two
-  `Float32Array`s transferred. The node is two channels, explicit, connected to the destination
+  `Float32Array`s transferred. Once the page has encoded a chunk (copied planar first, so nothing
+  keeps the channels) it posts `{ recycle: channels }` back, transferred — even a chunk that kept
+  nothing, since the node lives until `close()`, and never after `close()` — and the processor fills
+  its next chunk from that pool, allocating a fresh pair only when the pool is empty (ESCSUITE-303:
+  two fresh arrays per chunk were ~32 KB of garbage on the render thread every ~85 ms). The pool
+  keeps at most `POOL_PAIRS` (4) pairs and drops a fifth, and a pair that is not `CHUNK_FRAMES` long
+  (a sliced tail); a recycled pair is never cleared up front, so a quantum with nothing connected
+  writes its zeros rather than assuming them. The node is two channels, explicit, connected to the destination
   (silent) so the engine pulls it; an input with nothing connected is recorded as silence, the
   quantum's length read from the node's output rather than assumed to be 128.
 - **Stamping is by render position, never by arrival.** The take is a list of recorded spans of the
@@ -1408,7 +1415,11 @@ keeps the fallback), which runs the real processor source: a 10-minute take with
 held behind a 2.5 s hang ends on the render clock within a chunk with no silence inserted and every
 chunk encoded once; a 44.1 kHz context stamps from `frame / 44100`; a pause leaves no seam; the tail
 is flushed and a late chunk ignored; each fallback is engaged with the filler live.
-`audioWorkletCapture.test.ts` pins the module, the processor included.
+`audioWorkletCapture.test.ts` pins the module, the processor included — and the pool, through the
+double's count of every `new Float32Array` the processor makes (`processorArrayAllocations`) and its
+lineage log of every buffer that crosses the port (`transfers`): a 20-chunk take with the page five
+chunks behind once allocates exactly ten arrays, none after warm-up with the page up to four behind,
+and never posts a buffer the page still holds.
 
 `webcodecs-recorder.test.ts` pins all of it against a scripted `performance.now()`: a 30 fps
 source, a 15 fps source (the bug above), the strictly-increasing guard under a frozen clock,
