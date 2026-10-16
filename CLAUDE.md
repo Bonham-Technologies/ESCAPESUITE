@@ -303,7 +303,14 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   that means a **same-origin URL only**; a cross-origin one is refused before it leaves the page,
   and `loadVideoFromUrl` says so by naming the origin and the likely Content-Security-Policy
   cause, rather than a bare `Failed to fetch` (ESCSUITE-130). A self-hosted or standalone build
-  fetches under whatever `connect-src` it sets itself.
+  fetches under whatever `connect-src` it sets itself. The same policy's `script-src` carries
+  `blob:` (ESCSUITE-299): ESCAPECRAFT loads its AudioWorklet audio-capture module from a `blob:`
+  URL, a worklet module is fetched under `script-src`, and without it every hosted take would
+  quietly fall back to the ScriptProcessorNode capture. It admits nothing an injected script could
+  not already do under the policy's `'unsafe-inline'`. Pinned by
+  `apps/e2e/tests/production/csp-audio-worklet.spec.ts` (under the served policy, and its inverse)
+  and by `serve-dist.test.mjs`'s drift guard; a self-hosted build that sends its own policy needs
+  the same.
 - **`?hostOrigin=<origin>`** (both apps): the host's own origin, e.g. `https://host.example`.
   Recommended for production hosts — and **required** of a host that offers CRAFT's "Upload to
   host" (ESCSUITE-176): that message carries the recording's **bytes**, not just an id, and

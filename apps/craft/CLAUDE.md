@@ -1384,11 +1384,20 @@ path is live — captures through an AudioWorklet wherever it can:
 - **The choice is made once per `AudioContext`** — once per take, however many pipelines it has —
   and logged once with `console.info`, naming the path (and, for a refused module, the error).
 
-**On the hosted deployment the module is refused.** `vercel.json`'s Content-Security-Policy has
-`script-src 'self' 'unsafe-inline' https://vercel.live`, and a worklet module is fetched under
-`script-src`; a `blob:` URL is not in it, so `addModule()` rejects and every hosted take falls back
-to the ScriptProcessorNode until that policy admits `blob:` or the processor is served from
-`'self'`. The dev server, the standalone file and the headless kit send no such policy.
+**The hosted CSP admits the module.** A worklet module is fetched under `script-src`, so
+`vercel.json`'s `script-src` carries `blob:` (ESCSUITE-299; before it, every hosted take was refused
+the module and quietly fell back). `apps/e2e/tests/production/csp-audio-worklet.spec.ts` records a
+take under the policy `serve-dist.mjs` serves and expects the AudioWorklet line and no violation,
+and — with `blob:` stripped from the served `script-src` — the ScriptProcessorNode line and a
+`script-src` violation; `serve-dist.test.mjs` pins `blob:` in the policy without a browser. The dev
+server, the standalone file and the headless kit send no policy. A self-hosted build that sends its
+own needs `blob:` in `script-src` too, or it gets the fallback.
+
+**An audio companion whose encoder fails before its capture exists** — which the real API cannot do
+(an error callback is a task, and setup has only microtasks between `configure()` and the capture
+being set), but a double can — is refused without throwing inside the error callback: `endCompanion`
+finds no capture to stop, the `failed` flag is the mark, and `initializeAudioCompanion` stops the
+capture the moment it is built.
 
 `webcodecsRecorder.audioWorklet.test.ts` drives takes through the AudioWorklet double in
 `src/test/doubles/audio.ts` (`enableAudioWorkletDouble()`; off by default, so every older suite
