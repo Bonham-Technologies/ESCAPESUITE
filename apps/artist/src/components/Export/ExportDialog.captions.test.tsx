@@ -150,6 +150,17 @@ describe('ExportDialog — caption sidecar (ESCSUITE-293)', () => {
     expect((await lastDownload(clicked)).text).toBe('1\n00:00:06,000 --> 00:00:07,000\nKept\n')
   })
 
+  it('renders closed without throwing for a caption clip whose textData is null', () => {
+    const { trackId } = store().addCaptionCues([{ start: 6, end: 7, text: 'Kept' }], style)!
+    const project = store().project
+    const clips = project.timeline.clips.map((clip) =>
+      clip.trackId === trackId ? { ...clip, textData: null as unknown as undefined } : clip
+    )
+    store().setProject({ ...project, timeline: { ...project.timeline, clips } })
+
+    expect(() => render(<ExportDialog isOpen={false} onClose={vi.fn()} />)).not.toThrow()
+  })
+
   it('names the files "export" for a project with no name, as the video is', async () => {
     store().setProject({ ...store().project, name: '' })
     store().addCaptionCues([{ start: 6, end: 7, text: 'Hi' }], style)

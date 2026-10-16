@@ -166,11 +166,15 @@ function checkParsed(parsed: ParsedCaptions, format: CaptionFormat, context: Fuz
   // every cue that comes back is one that was written, in order.
   const written = serializeCaptions(parsed.cues, format)
   const mayChange = parsed.cues.some((cue) => (format === 'vtt' ? /-->/ : /-->|</).test(cue.text))
+  // Only SRT's tag-shape loss can take a cue's every word, and so every cue
+  // (a `-->` written as `→` loses nothing); any other refusal of the writer's
+  // own output breaks the contract.
+  const mayLoseWords = format === 'srt' && parsed.cues.some((cue) => cue.text.includes('<'))
   let reread: ParsedCaptions
   try {
     reread = parseCaptions(written, format)
   } catch (error) {
-    if (mayChange && error instanceof CaptionParseError) return
+    if (mayLoseWords && error instanceof CaptionParseError) return
     throw fuzzFailure(context, `its own serialization was refused: ${(error as Error).message}`)
   }
   if (!mayChange) {

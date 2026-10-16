@@ -1143,7 +1143,10 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   "Export Section" range does not shift or trim it.
 - **Fuzz.** `core/captions.fuzz.test.ts` (house harness): 1000 byte mutations per format, decoded
   non-fatally; every input parses or is a `CaptionParseError`, every parse is a valid cue list whose
-  serialization reads back as the same cues, with exact tally floors on the committed seeds (SRT
+  serialization reads back as the same cues — exactly for WebVTT unless a cue holds a `-->` (written
+  as `→`), and for SRT unless one holds a `-->` or a `<` (tag-shaped text is lost); otherwise every
+  cue read back is one that was written, in order, and only an SRT file whose tag-shaped text was all
+  it had may come back refused — with exact tally floors on the committed seeds (SRT
   416 / 584, WebVTT 449 / 551 since review round 1).
 - **Out of scope, and why:** automatic captioning (no speech model runs in the browser here);
   SCC, CEA-608/708 and TTML (broadcast formats no browser tool of this kind is asked for, each a

@@ -327,6 +327,11 @@ describe('parseCaptions — a timing line inside a cue starts the next cue', () 
     })
   })
 
+  it.each(['srt', 'vtt'] as const)('keeps "12:34 --> hello" in cue text as text, not a new cue (%s)', (format) => {
+    const text = `${format === 'vtt' ? 'WEBVTT\n\n' : ''}00:00:01.000 --> 00:00:02.000\nSaid\n12:34 --> hello`
+    expect(parseCaptions(text, format)).toEqual({ cues: [{ start: 1, end: 2, text: 'Said\n12:34 --> hello' }], dropped: [] })
+  })
+
   it('keeps a line with --> as text when either side is not a timestamp', () => {
     const text = '00:00:01,000 --> 00:00:02,000\nnope --> 00:00:04,000\n00:00:03,000 --> later'
     expect(parseCaptions(text, 'srt').cues).toEqual([
