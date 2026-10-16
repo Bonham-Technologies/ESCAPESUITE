@@ -65,6 +65,20 @@ describe('buildManifest', () => {
     expect(manifest.createdAt).toBe('2026-01-02T03:04:05.000Z')
   })
 
+  // ESCSUITE-292: the mix's loudness, as measured and as normalised.
+  it('records the render\'s loudness when it measured one', async () => {
+    const filePath = await makeFile(Buffer.from('abc'))
+    const loudness = { measuredLufs: -21.4, truePeakDbtp: -4.1, gainDb: 5.4, targetLufs: -16 as const }
+    const manifest = await buildManifest('job-l', filePath, { ...baseMeta, loudness }, versions)
+    expect(manifest.loudness).toEqual(loudness)
+  })
+
+  it('leaves loudness out when the render had no sound to measure', async () => {
+    const filePath = await makeFile(Buffer.from('abc'))
+    const manifest = await buildManifest('job-n', filePath, baseMeta, versions)
+    expect('loudness' in manifest).toBe(false)
+  })
+
   it('defaults createdAt to the current time when not given', async () => {
     const filePath = await makeFile(Buffer.from('abc'))
     const before = Date.now()

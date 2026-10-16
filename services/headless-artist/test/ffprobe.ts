@@ -232,3 +232,36 @@ export async function frameEdgeRGB(
   }
   return frameRegionRGB(file, frameIndex, left, top, size, size)
 }
+
+/**
+ * ffmpeg's own EBU R128 integrated loudness of a file's audio, in LUFS — the reference the kit's
+ * Chromium parity case holds ESCAPEARTIST's meter to (ESCSUITE-292). `ebur128` prints a running
+ * log and then a summary; the summary's `I:` line is the last one, printed to one decimal.
+ */
+export async function integratedLoudness(file: string): Promise<number> {
+  const { stderr } = await execFileAsync('ffmpeg', [
+    '-hide_banner', '-nostats',
+    '-i', file,
+    '-filter_complex', 'ebur128',
+    '-f', 'null', '-',
+  ])
+  const readings = [...stderr.matchAll(/I:\s+(-?\d+(?:\.\d+)?) LUFS/g)]
+  if (readings.length === 0) throw new Error(`ebur128 printed no integrated loudness for "${file}"`)
+  return Number(readings[readings.length - 1][1])
+}
+
+/**
+ * Writes `seconds` of seeded stereo pink noise at 48 kHz to `file` as 16-bit PCM WAV: a programme
+ * with a real spectrum (not a lone tone, which only exercises one point of the K-weighting curve)
+ * that Chromium's `decodeAudioData` reads sample for sample as ffmpeg does.
+ */
+export async function writePinkNoiseWav(file: string, seconds: number, amplitude: number): Promise<void> {
+  await execFileAsync('ffmpeg', [
+    '-v', 'error', '-y',
+    '-f', 'lavfi',
+    '-i', `anoisesrc=color=pink:amplitude=${amplitude}:sample_rate=48000:duration=${seconds}:seed=292`,
+    '-ac', '2',
+    '-c:a', 'pcm_s16le',
+    file,
+  ])
+}
