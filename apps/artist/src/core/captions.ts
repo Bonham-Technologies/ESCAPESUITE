@@ -61,11 +61,19 @@ export class CaptionParseError extends Error {
  */
 const TIMESTAMP = /^(?:(\d{1,5}):)?([0-5]\d):([0-5]\d)[,.](\d{1,3})$/;
 
-/** Any markup tag: `<b>`, `</i>`, `<c.yellow>`, `<v Name>`, `<00:00:03.000>`, `<font color=…>`. */
-const TAG = /<[^>]*>/g;
+/**
+ * The formats' own markup, and nothing else (review M1): WebVTT's `b`, `i`,
+ * `u`, `c`, `v`, `ruby`, `rt` and `lang` — a class after a `.`, an annotation
+ * after a space — their closing forms, its timestamp tags (`<00:03.000>`,
+ * `<00:00:03.000>`), and SRT's `<font …>`, in either case. Any other `<…>` is
+ * caption text: `Press <Enter> now` keeps `<Enter>`. Inside a tag nothing may
+ * be a `<`, a `>` or a line break, so a failed match costs one step and a line
+ * of nothing but `<` is read in one pass.
+ */
+const TAG = /<\/?(?:b|i|u|c|v|ruby|rt|lang|font)(?:[.\s][^<>\n]*)?>|<(?:\d{1,5}:)?\d{2}:\d{2}\.\d{3}>/gi;
 
 /** A voice tag, opening or closing — the speaker's name is in it, and goes with it. */
-const VOICE_TAG = /^<\/?v[\s.>]/;
+const VOICE_TAG = /^<\/?v[\s.>]/i;
 
 /** The WebVTT escapes, decoded in one pass so `&amp;lt;` reads as `&lt;` and not `<`. */
 const VTT_ENTITY = /&(amp|lt|gt|nbsp|lrm|rlm);/g;
@@ -259,14 +267,15 @@ function formatTimestamp(ms: number, separator: ',' | '.'): string {
  * back exactly that line — line by line, because that is how it reads tags.
  */
 const WRITE_LINE: Record<CaptionFormat, (line: string) => string> = {
-  // SRT has no escapes: a tag in the text would be read as markup, so it is
-  // left out, as any SRT reader would treat it.
-  // A line that would read as timing is written with an empty tag inside its
-  // arrow, which the parser strips: it reads back as the same text, not as
-  // the start of another cue (review I2). WebVTT's escaped `>` already does it.
+  // SRT has no escapes, so a literal tag — which a parse can leave behind,
+  // since it strips in one pass — has an empty `<i></i>` put after each `<`,
+  // which the parser strips back out (review M1); and a line that would read
+  // as timing gets one inside its arrow, so it reads back as the same text and
+  // not as the start of another cue (review I2). Other lines are written as
+  // they are. WebVTT's escapes cover both.
   srt: (line) => {
-    const stripped = line.replace(TAG, '');
-    return isTimingLine(stripped) ? stripped.replace(/-->/g, '--<i></i>>') : stripped;
+    const literal = line.search(TAG) >= 0 ? line.replace(/</g, '<<i></i>') : line;
+    return isTimingLine(literal) ? literal.replace(/-->/g, '--<i></i>>') : literal;
   },
   vtt: (line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
 };
@@ -275,11 +284,12 @@ const WRITE_LINE: Record<CaptionFormat, (line: string) => string> = {
  * Write cues as an `.srt` (1-based indices, `,` before the milliseconds) or a
  * `.vtt` (the `WEBVTT` header, `.`), in the order given.
  *
- * Round-trip stable on its own output: `parseCaptions` reads it back to cues
- * that write out to the same text. So a cue a reader would drop — no words, or
- * no length once rounded to the millisecond — is not written, a blank line
- * inside a cue's text (which would end the block) is left out, and each line is
- * trimmed the way the parser trims it.
+ * Round-trip stable: `parseCaptions` reads it back to the cues it was given
+ * (to the millisecond) — exactly, for cues it parsed itself. So a cue a reader
+ * would drop — no words, or no length once rounded — is not written, a blank
+ * line inside a cue's text (which would end the block) is left out, each line
+ * is trimmed the way the parser trims it, and text the parser would take for
+ * markup or a timing line is written so that it is not (`WRITE_LINE`).
  */
 export function serializeCaptions(cues: CaptionCue[], format: CaptionFormat): string {
   const separator = format === 'srt' ? ',' : '.';
