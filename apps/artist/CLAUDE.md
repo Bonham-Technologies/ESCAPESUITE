@@ -4736,6 +4736,64 @@ frame. Two consequences outside this file: a Playwright `getByText` of "Encoding
 `apps/e2e/tests/accessibility/screen-reader.spec.ts` › "ESCAPEARTIST announces export progress"
 is the end-to-end pin, driving a real MP4 export.
 
+### Export Loudness (`src/core/loudness.ts`) (ESCSUITE-292)
+
+Every MP4 and WebM export measures its mix — ITU-R BS.1770-4 integrated loudness and true
+peak, read the EBU R128 way — and, when the export dialog's **Audio loudness** choice names a
+target, normalises it onto that target under a **−1 dBTP** true-peak limiter. GIF has no sound
+and measures nothing.
+
+- **Where it runs.** One call, `exportLoudness(audioData, channels, sampleRate, target)`, after
+  `extractAndMixAudio` has mixed and the exporter has sliced the mix to the exported range, and
+  before the encoder is fed: in `exportMP4.ts` right after the slice (the AAC probe has already
+  run, so a browser with no AAC encoder has no mix and measures nothing); in `exportWebM.ts`
+  right after the Opus probe (so a WebM that cannot carry sound is not measured either). It
+  measures the **exported range**, not the whole timeline. One pass over the mix — nothing per
+  video frame; the export and preview `*.perf.test.ts` ceilings are untouched.
+- **The meter.** K-weighting is two biquads (high shelf, RLB high-pass) derived for any rate by
+  the bilinear transform; at 48 kHz they reproduce BS.1770-4's printed table to eight decimals
+  (`loudness.test.ts` checks the table). Mean square per channel over 400 ms blocks stepped
+  every 100 ms, channel weights L/R/C 1.0, surrounds 1.41, LFE 0; the −70 LUFS absolute gate
+  then the −10 LU relative gate; integrated = −0.691 + 10·log10(gated mean). A trailing partial
+  block is dropped. **True peak** is a 4× read through a 24-tap-per-phase Hann-windowed sinc;
+  it agrees with ffmpeg's `ebur128` on full-band white noise (both read ~0.7 dB under a 128-tap
+  reference there, so content right at Nyquist can pass the ceiling by that much). The 72
+  multiply-adds per sample are skipped wherever a cheap window bound proves they cannot change
+  the answer, which brings a minute of speech-like stereo to ~0.2 s (a steady tone, where nothing
+  can be skipped, ~0.5 s). The mix is read in place through a stride (it is interleaved), never
+  copied apart; the only allocations are one number per 100 ms of programme and the limiter's
+  fourteen-slot gain delay line. Filter state is kept out of subnormal numbers by a −400 dB offset,
+  which an x86 CPU otherwise processes an order of magnitude slower through every silent gap.
+- **Normalising.** `gainForTarget` is `target − measured`, and says whether the gained true peak
+  would pass the ceiling. When it would not, the gain is a plain multiply (the limiter's detector
+  reads exactly the peaks the meter measured, so it could never engage). When it would,
+  `applyInterleavedGainWithLimiter` runs: **stereo-linked, instant attack, 5 ms hold, 50 ms
+  release, no look-ahead** beyond the interpolator's own twelve samples, its detector the meter's
+  4× peak around each sample. Sample peaks are held exactly; the true peak to within about
+  0.1 dB on the fixtures. A limited mix lands a little quieter than the target. 5 ms / 50 ms are
+  sample counts at 48 kHz, the export's only rate (the signature takes no rate).
+- **Nothing to say.** No mix, digital silence, nothing above −70 LUFS for 400 ms, or less than
+  one 400 ms block: `exportLoudness` returns `undefined`, the mix is untouched and the result
+  carries no `loudness`. A gain target on such a mix is a no-op.
+- **Where it shows.** `ExportResult.loudness` (`{ measuredLufs, truePeakDbtp, gainDb, targetLufs,
+  limited }`) → the dialog's completion sentence, "Export complete! Measured −18.3 LUFS · gain
+  +4.3 dB · limited" (the gain only when a target was set, "limited" only when the limiter
+  engaged), through the progress message, so the dialog's **one** live region announces it with
+  the completion — no second region and no new dialog state. The choice is in the Advanced panel
+  beside Quality (hidden for GIF, kept in `advancedOptions` like Quality), off by default,
+  persisted in `lastExportSettings.loudnessTarget` and read back through `loudnessTargetOrOff`,
+  so a stale or foreign value is off. The primary "Download WebM" button uses fixed defaults and
+  so never normalises, exactly as it never uses the Quality choice; it still measures. The host's
+  `EXPORT_COMPLETE` message is unchanged.
+- **Headless.** A job's `options.loudnessTarget` reaches the exporter through the options spread
+  in `renderProject.ts`, and the measurement reaches `RenderMeta.loudness` as the kit manifest's
+  four fields, `{ measuredLufs, truePeakDbtp, gainDb, targetLufs }` (no `limited`). The kit's
+  Chromium suite holds `measuredLufs` to ffmpeg's `ebur128` within ±0.3 LU on seeded pink noise
+  and the delivered WebM to a −23 LUFS target within ±0.5 LU.
+- Written from the public specification; storytold/filmcraft's `crates/audio-dsp/src/loudness.rs`
+  was read as a cross-check of the K-weighting constants and the Tech 3341 cases, not ported, so
+  there is no NOTICE entry.
+
 ### Black Flash Prevention (`src/core/elementFrames.ts`, `src/core/canvasRenderer.ts`)
 To prevent black frames during export:
 - **Seek timeout**: 500ms for reliable seeking. One-shot, and since ESCSUITE-159 the two
