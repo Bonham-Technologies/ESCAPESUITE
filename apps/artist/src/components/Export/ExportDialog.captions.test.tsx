@@ -33,8 +33,9 @@ const captionsRow = () => screen.queryByRole('group', { name: 'Captions' })
 
 /** The file the last download handed over: its bytes as text, its type and its name. */
 async function lastDownload(clicked: HTMLAnchorElement[]) {
-  const blob = vi.mocked(URL.createObjectURL).mock.calls.at(-1)![0] as Blob
-  return { text: await blob.text(), type: blob.type, name: clicked.at(-1)!.download }
+  const calls = vi.mocked(URL.createObjectURL).mock.calls
+  const blob = calls[calls.length - 1][0] as Blob
+  return { text: await blob.text(), type: blob.type, name: clicked[clicked.length - 1].download }
 }
 
 describe('ExportDialog — caption sidecar (ESCSUITE-293)', () => {
