@@ -1070,7 +1070,8 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   line — a `-->` with a timestamp on each side — met inside a cue's text starts the next cue (the
   WebVTT rule, applied to both formats; in SRT a line of digits right before it is that cue's
   index), so a file missing the blank line between two cues does not import as one caption with
-  the next timing burned in as words (review I2). A lone index ending an SRT file — a hand-edited
+  the next timing burned in as words (review I2); the writer, for its part, writes a `-->` in cue
+  text as `→` so that its own output never meets this rule. A lone index ending an SRT file — a hand-edited
   file often stops there — is ignored rather than refused (review M5).
 - **Dropped, and named once each** (`DroppedFeature`, listed in a fixed order): cue settings or
   SRT coordinates after the timing → `positioning`; the formats' own tags inside text, words kept
@@ -1090,13 +1091,18 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   line in its first two lines (bar the lone trailing SRT index above), and a file with no cue left
   once the drops are made.
 - **Writing.** `serializeCaptions(cues, format)`: SRT with 1-based indices and `,`, WebVTT with the
-  header and `.`, milliseconds rounded, never negative. It is the parser's inverse and round-trip
-  stable on its own output, so it leaves out what a reader would drop (a cue with no words, or no
-  length once rounded) and writes each line the way the parser reads it back: trimmed, blank lines
-  left out, `& < >` escaped for WebVTT. SRT has no escapes, so a line holding a literal tag gets an
-  empty `<i></i>` after each `<`, and a line that would read as timing gets one inside its arrow
-  (`--<i></i>>`): the parser strips them and reads back the same text. Cues `parseCaptions`
-  produced read back exactly (the fuzz holds this).
+  header and `.`, milliseconds rounded, never negative. It leaves out what a reader would drop (a
+  cue with no words, or no length once rounded), trims each line and leaves out blank lines, and
+  otherwise writes the text **as it is**, in both formats — no padding, no escapes, because a
+  sidecar is a file people open and hand to platforms (fix round 2). The one substitution: a `-->`
+  in cue text is written as `→` (U+2192). Neither format can carry that token in cue text — the
+  parser takes a timing line inside a cue as the start of the next one (above) — and the arrow
+  keeps the meaning. So `parseCaptions(serializeCaptions(cues))` gives back the same cues, line
+  breaks, spacing and non-tag brackets like `<Enter>` included, with `→` for `-->`, and with **one
+  documented loss**: caption text shaped like a tag the formats recognise (`<i>`, `<b>`, `<c.x>`,
+  `<v Name>` …) is written as it is and so is stripped as markup on re-import; in WebVTT, text
+  shaped like one of its escapes (`&lt;`, `&amp;` …) is likewise decoded on re-import. The fuzz holds
+  exact read-back wherever none of those shapes occurs.
 - **The track marker.** `Track.kind?: 'captions'` (absent on every other track and in every older
   file). `parseProject` refuses a present `kind` that is not exactly `'captions'` with
   `timeline.tracks[i].kind must be 'captions'`; the migration passes tracks through by spread, so
