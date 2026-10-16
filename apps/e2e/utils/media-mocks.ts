@@ -109,6 +109,44 @@ interface SyntheticMediaBuilders {
   makeAudioTrack(): MediaStreamTrack
 }
 
+/** Seconds between sync markers when `markers` is on — a flash and a beep each. */
+export const MARKER_PERIOD_MS = 10_000
+
+/** How long each flash and each beep lasts when `markers` is on. */
+export const MARKER_PULSE_MS = 100
+
+/**
+ * The marker schedule a `markers: true` document keeps on
+ * `window.__markers`: `t0` is the `performance.now()` the schedule counts
+ * from, `scheduled` every beep placed (its index, the context time it was
+ * placed at and the wall time it stands for), `missed` the indices skipped
+ * because their time had already passed when they were scheduled.
+ */
+export interface MarkerState {
+  t0: number
+  period: number
+  pulse: number
+  scheduled: { k: number; contextTime: number; wallMs: number }[]
+  missed: number[]
+}
+
+/** Options shared by `installSyntheticMediaBuilders` and `mockSyntheticMedia`. */
+export interface SyntheticMediaOptions {
+  width?: number
+  height?: number
+  painter?: 'interval' | 'raf'
+  /**
+   * A/V drift rig only (ESCSUITE-296, `tests/perf/craft-av-drift.spec.ts`):
+   * paint the whole frame white and gate a 1 kHz tone on for
+   * {@link MARKER_PULSE_MS} at the head of every {@link MARKER_PERIOD_MS},
+   * both on one `performance.now()` schedule, with the tone silent in between;
+   * and stamp every frame with its paint time as a 32-cell timecode strip
+   * along the top-left edge (decoded by `scripts/av-drift-report.mjs`).
+   * Off by default; with it off nothing about the synthetic media changes.
+   */
+  markers?: boolean
+}
+
 /**
  * Install `window.__syntheticMedia` — a real canvas-backed video track
  * builder and a silent oscillator-backed audio track builder — once per
@@ -122,7 +160,7 @@ interface SyntheticMediaBuilders {
  */
 export async function installSyntheticMediaBuilders(
   page: Page,
-  options: { width?: number; height?: number; painter?: 'interval' | 'raf' } = {}
+  options: SyntheticMediaOptions = {}
 ): Promise<void> {
   const width = options.width ?? 640
   const height = options.height ?? 360
@@ -136,11 +174,27 @@ export async function installSyntheticMediaBuilders(
   // for a paired before/after; every other caller leaves this unset and gets
   // the unchanged `'interval'` behaviour.
   const painter = options.painter ?? 'interval'
+  // A/V drift rig (ESCSUITE-296): opt-in sync markers. Off unless a caller
+  // asks, and every marker branch below is behind it, so the benchmarks and
+  // every other spec paint and sound exactly as before.
+  const markers = options.markers === true
 
   await page.addInitScript(
-    ({ width, height, painter }) => {
-      const w = window as unknown as { __syntheticMedia?: SyntheticMediaBuilders }
+    ({ width, height, painter, markers, period, pulse }) => {
+      const w = window as unknown as {
+        __syntheticMedia?: SyntheticMediaBuilders
+        __markers?: MarkerState
+      }
       if (w.__syntheticMedia) return
+
+      // One wall-clock schedule for every track this document opens: a flash
+      // and a beep at `t0 + k * period` for `pulse` ms, keyed off
+      // `performance.now()` — the clock the WebCodecs recorder stamps video
+      // with, so the schedule is "the truth" both tracks are measured against.
+      if (markers && !w.__markers) {
+        w.__markers = { t0: performance.now(), period, pulse, scheduled: [], missed: [] }
+      }
+      const markerState = markers ? w.__markers! : undefined
 
       const makeVideoTrack = (): MediaStreamTrack => {
         const canvas = document.createElement('canvas')
@@ -150,13 +204,41 @@ export async function installSyntheticMediaBuilders(
 
         // Animate so every captured frame differs (encoders need real motion)
         let frame = 0
-        const paint = () => {
-          frame += 1
+        const paintPattern = () => {
           ctx.fillStyle = `hsl(${frame % 360}, 70%, 45%)`
           ctx.fillRect(0, 0, width, height)
           ctx.fillStyle = '#ffffff'
           ctx.font = `${Math.round(height / 8)}px sans-serif`
           ctx.fillText(`E2E ${frame}`, 40, height / 2)
+        }
+        // Markers: a flash at the head of every period, and on every frame a
+        // timecode — the paint's `performance.now() − t0` in whole ms, 31 bits
+        // MSB first plus an even-parity bit, as 32 black/white square cells of
+        // width/40 px along the top-left edge — so the analysis can read, for
+        // any frame that survived, the wall time it was painted at, however
+        // many frames around it the recorder dropped.
+        const cell = Math.floor(width / 40)
+        const paintMarkers = (state: MarkerState) => {
+          const elapsed = performance.now() - state.t0
+          if (elapsed % state.period < state.pulse) {
+            ctx.fillStyle = '#ffffff'
+            ctx.fillRect(0, 0, width, height)
+          } else {
+            paintPattern()
+          }
+          const value = Math.max(0, Math.round(elapsed)) % 0x80000000
+          let parity = 0
+          for (let bit = 0; bit < 32; bit++) {
+            const on = bit < 31 ? Math.floor(value / 2 ** (30 - bit)) % 2 : parity
+            if (bit < 31) parity ^= on
+            ctx.fillStyle = on ? '#ffffff' : '#000000'
+            ctx.fillRect(bit * cell, 0, cell, cell)
+          }
+        }
+        const paint = () => {
+          frame += 1
+          if (markerState) paintMarkers(markerState)
+          else paintPattern()
         }
 
         // ESCSUITE-86: stop painting when the track stops. Before this, every
@@ -210,15 +292,80 @@ export async function installSyntheticMediaBuilders(
         const audioContext = new AudioContext()
         const destination = audioContext.createMediaStreamDestination()
         const oscillator = audioContext.createOscillator()
-        oscillator.frequency.value = 440
-        oscillator.connect(destination)
+        if (!markerState) {
+          oscillator.frequency.value = 440
+          oscillator.connect(destination)
+          oscillator.start()
+          return destination.stream.getAudioTracks()[0]
+        }
+        return makeMarkerAudioTrack(audioContext, destination, oscillator, markerState)
+      }
+
+      /**
+       * A 1 kHz tone gated to silence except for a `pulse`-ms beep at the head
+       * of every marker period. Each beep is placed on the wall-clock schedule
+       * by mapping its `performance.now()` time into this context's time with
+       * `getOutputTimestamp()` — re-read every 250 ms and only ever used for
+       * beeps at most 2.5 s ahead, so a context whose clock runs off
+       * `performance.now()` still beeps on the wall-clock schedule rather than
+       * on its own. A beep whose context time has already passed by the time
+       * it is scheduled (a main thread stalled for longer than the lookahead)
+       * is skipped and logged in `missed`, never sounded late.
+       */
+      const makeMarkerAudioTrack = (
+        audioContext: AudioContext,
+        destination: MediaStreamAudioDestinationNode,
+        oscillator: OscillatorNode,
+        state: MarkerState
+      ): MediaStreamTrack => {
+        oscillator.frequency.value = 1000
+        const gate = audioContext.createGain()
+        gate.gain.value = 0
+        oscillator.connect(gate)
+        gate.connect(destination)
         oscillator.start()
-        return destination.stream.getAudioTracks()[0]
+
+        const done = new Set<number>()
+        const contextTimeAt = (wallMs: number): number => {
+          const stamp = audioContext.getOutputTimestamp()
+          if (stamp.performanceTime && stamp.contextTime !== undefined) {
+            return stamp.contextTime + (wallMs - stamp.performanceTime) / 1000
+          }
+          return audioContext.currentTime + (wallMs - performance.now()) / 1000
+        }
+        const schedule = () => {
+          const now = performance.now()
+          const first = Math.ceil((now - state.t0) / state.period)
+          const last = Math.floor((now + 2500 - state.t0) / state.period)
+          for (let k = first; k <= last; k++) {
+            if (done.has(k)) continue
+            done.add(k)
+            const at = contextTimeAt(state.t0 + k * state.period)
+            if (at <= audioContext.currentTime + 0.005) {
+              state.missed.push(k)
+              continue
+            }
+            gate.gain.setValueAtTime(1, at)
+            gate.gain.setValueAtTime(0, at + state.pulse / 1000)
+            state.scheduled.push({ k, contextTime: at, wallMs: state.t0 + k * state.period })
+          }
+        }
+        schedule()
+        const timer = setInterval(schedule, 250)
+
+        const track = destination.stream.getAudioTracks()[0]
+        const nativeStop = track.stop.bind(track)
+        track.stop = () => {
+          clearInterval(timer)
+          nativeStop()
+        }
+        track.addEventListener('ended', () => clearInterval(timer))
+        return track
       }
 
       w.__syntheticMedia = { makeVideoTrack, makeAudioTrack }
     },
-    { width, height, painter }
+    { width, height, painter, markers, period: MARKER_PERIOD_MS, pulse: MARKER_PULSE_MS }
   )
 }
 
@@ -346,10 +493,7 @@ export async function mockMediaRecorder(page: Page) {
  *
  * Must be called BEFORE navigating.
  */
-export async function mockSyntheticMedia(
-  page: Page,
-  options: { width?: number; height?: number; painter?: 'interval' | 'raf' } = {}
-) {
+export async function mockSyntheticMedia(page: Page, options: SyntheticMediaOptions = {}) {
   // Same reason as mockGetUserMedia: capture that works implies devices that
   // enumerate, and hardware-less runners enumerate none.
   await mockMediaDevices(page)
