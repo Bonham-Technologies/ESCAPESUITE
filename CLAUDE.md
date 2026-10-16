@@ -4698,6 +4698,19 @@ and the recycles at exactly one per chunk. `recorder.perf.test.ts`, `compositor.
 `converter.perf.test.ts` and every `App.*rerender*` are byte-identical; the fallback path is untouched.
 **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was measured directly on `main` at `98a96381` on 2026-10-16, after ESCSUITE-292,
+293 and 298 / 300 had landed one after another: **99.85 / 99.44 / 96.75 / 99.77** — lines 9,457 / 9,471,
+statements 10,718 / 10,778, branches 6,056 / 6,259, functions 2,243 / 2,248, the same 14 / 60 / 203 / 5
+uncovered that each of the three branches reported on its own tree. Each of those branches was measured
+against the same base (`368c976d`'s artist source, identical through `5f9008ed` and `a326f811`) and wrote
+its own figure into the table row as it landed — 96.68, then 96.70, then 96.66 — so the row read the last
+branch's own tree rather than `main`'s, the drift ESCSUITE-91 and 113 recorded and each of those paragraphs
+said would be corrected by the next direct measurement. This is that measurement: the three branches'
+sixty-six, one hundred and five and thirty-eight new branches add to 6,259 − 6,050 = 209 on the denominator
+and the same 209 on the numerator (5,847 + 209 = 6,056), so nothing is less covered than any paragraph
+claimed, and the row is corrected to what `main` measures. 5,823 green with `--testTimeout 20000`. **No
+floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4705,7 +4718,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.41 | 96.66 | 99.76 |
+| `@escapesuite/artist` | 99.85 | 99.44 | 96.75 | 99.77 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.64 | 98.87 |
 
