@@ -857,6 +857,7 @@ export class WebCodecsRecorder {
           bufferLength: SCRIPT_PROCESSOR_BUFFER,
           numberOfChannels: 2,
           label: COMPANION_PARTS[role].trackLabel,
+          readCurrentTime: () => context.currentTime,
           encode: (data) => companion.encoder!.encode(data),
         }),
         failed: false,
@@ -1242,11 +1243,13 @@ export class WebCodecsRecorder {
     // Use ScriptProcessorNode for audio capture
     // Buffer size of 4096 samples at 48kHz = ~85ms chunks
     this.audioWorklet = this.audioContext.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 2, 2);
+    const context = this.audioContext;
     const gapFiller = createAudioGapFiller({
       sampleRate: this.sampleRate,
       bufferLength: SCRIPT_PROCESSOR_BUFFER,
       numberOfChannels: 2,
       label: 'The recording',
+      readCurrentTime: () => context.currentTime,
       // Only ever called past the gate below, which has checked the encoder.
       encode: (data) => this.audioEncoder!.encode(data),
     });

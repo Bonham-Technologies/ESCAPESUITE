@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { createAudioGapFiller, GAP_WINDOW, MAX_GAP_FILL_SECONDS } from './audioGapFiller'
+import {
+  createAudioGapFiller,
+  gapWindowEvents,
+  GAP_WINDOW_MIN_EVENTS,
+  MAX_GAP_FILL_SECONDS,
+  RENDER_QUANTUM,
+} from './audioGapFiller'
 import {
   installWebCodecsDoubles,
   uninstallWebCodecsDoubles,
@@ -10,37 +16,60 @@ import {
 const RATE = 48000
 const BUFFER = 4096
 const BUFFER_SECONDS = BUFFER / RATE
-const BUFFER_US = BUFFER_SECONDS * 1e6
+const QUANTUM = RENDER_QUANTUM / RATE
+/** 47: four seconds of 4096-sample buffers at 48 kHz. */
+const WINDOW = gapWindowEvents(RATE, BUFFER)
 
 let encoded: AudioData[]
 let encode: ReturnType<typeof vi.fn<(data: AudioData) => void>>
+let currentTime: number | undefined
+let readCurrentTime: ReturnType<typeof vi.fn<() => number | undefined>>
 
 function filler(sampleRate = RATE) {
-  return createAudioGapFiller({ sampleRate, bufferLength: BUFFER, numberOfChannels: 2, label: 'Test', encode })
+  return createAudioGapFiller({
+    sampleRate,
+    bufferLength: BUFFER,
+    numberOfChannels: 2,
+    label: 'Test',
+    readCurrentTime,
+    encode,
+  })
 }
 
 function init(data: AudioData): { numberOfFrames: number; timestamp: number; sampleRate: number } {
   return (data as unknown as { init: { numberOfFrames: number; timestamp: number; sampleRate: number } }).init
 }
 
+const filledFrames = () => encoded.reduce((sum, d) => sum + init(d).numberOfFrames, 0)
+
+interface Feed {
+  /** Buffers never delivered. */
+  lost?: (k: number) => boolean
+  /** Seconds added to buffer k's reference time: lateness, or content lost before it. */
+  extra?: (k: number) => number
+  start?: number
+  /** Hand the reference as the context's currentTime, with no playbackTime. */
+  viaCurrentTime?: boolean
+  sampleRate?: number
+}
+
 /**
  * Feed buffers k = 0..count-1 the way the recorder does, skipping the lost
- * ones; `playbackTime` is buffer k's position plus `delay(k)` seconds.
- * Returns the index of each delivered buffer during whose call a fill landed.
+ * ones, buffer k's reference its position plus `extra(k)`. Returns the
+ * indices whose call encoded silence.
  */
-function feed(
-  f: ReturnType<typeof filler>,
-  count: number,
-  options: { lost?: (k: number) => boolean; delay?: (k: number) => number; start?: number } = {}
-): number[] {
+function feed(f: ReturnType<typeof filler>, count: number, options: Feed = {}): number[] {
   const landed: number[] = []
+  const bufferSeconds = BUFFER / (options.sampleRate ?? RATE)
   let ts = 0
   for (let k = 0; k < count; k++) {
     if (options.lost?.(k)) continue
+    const reference = (options.start ?? 10) + k * bufferSeconds + (options.extra?.(k) ?? 0)
     const before = encoded.length
-    ts = f.fill((options.start ?? 10) + k * BUFFER_SECONDS + (options.delay?.(k) ?? 0), BUFFER, ts)
+    if (options.viaCurrentTime) currentTime = reference
+    ts = f.fill(options.viaCurrentTime ? undefined : reference, BUFFER, ts)
     if (encoded.length > before) landed.push(k)
-    ts += BUFFER_US
+    ts += bufferSeconds * 1e6
   }
   return landed
 }
@@ -52,6 +81,8 @@ beforeEach(() => {
   encode = vi.fn((data: AudioData) => {
     encoded.push(data)
   })
+  currentTime = undefined
+  readCurrentTime = vi.fn(() => currentTime)
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
 
@@ -61,116 +92,130 @@ afterEach(() => {
 })
 
 describe('createAudioGapFiller', () => {
-  it('is a no-op for an event without playbackTime', () => {
+  it('is a no-op for an event with no playbackTime and no readable currentTime', () => {
     const f = filler()
     expect(f.fill(undefined, BUFFER, 0)).toBe(0)
     expect(f.fill(undefined, BUFFER, 1234)).toBe(1234)
+    expect(readCurrentTime).toHaveBeenCalledTimes(2)
     expect(encode).not.toHaveBeenCalled()
   })
 
-  it('fills nothing while every buffer arrives at its own position', () => {
-    expect(feed(filler(), 200)).toEqual([])
+  it('prefers the event\'s playbackTime, and reads currentTime only without one', () => {
+    const f = filler()
+    f.fill(10, BUFFER, 0)
+    expect(readCurrentTime).not.toHaveBeenCalled()
   })
 
-  it(`fills a lost buffer once, ${GAP_WINDOW} events after the loss, with one zero AudioData`, () => {
-    const f = filler()
+  it('fills nothing while every buffer arrives at its own position', () => {
+    expect(feed(filler(), 400)).toEqual([])
+  })
+
+  it('fills nothing for a constant latency from the first event: the anchor absorbs it', () => {
+    expect(feed(filler(), 400, { extra: () => 0.03 })).toEqual([])
+  })
+
+  it('fills nothing for callbacks that are late and the on-time ones after them', () => {
+    expect(feed(filler(), 400, { extra: k => (k % 2 ? 0.06 : 0) })).toEqual([])
+    expect(feed(filler(), 400, { extra: k => (k === 100 ? 0.08 : 0) })).toEqual([])
+  })
+
+  it('leaves a rise of one quantum, and fills all but one of a rise of two', () => {
+    const one = filler()
+    expect(feed(one, 200, { extra: k => (k >= 60 ? QUANTUM : 0) })).toEqual([])
+
+    const two = filler()
     let ts = 0
-    let filledAt = -1
-    for (let k = 0; k < 40; k++) {
-      if (k === 20) continue
+    let landedTs = -1
+    for (let k = 0; k < 200; k++) {
       const before = encoded.length
-      const next = f.fill(10 + k * BUFFER_SECONDS, BUFFER, ts)
+      const next = two.fill(10 + k * BUFFER_SECONDS + (k >= 60 ? 2 * QUANTUM : 0), BUFFER, ts)
       if (encoded.length > before) {
-        filledAt = k
-        // Stamped where the delivered buffer would have gone, which moves on by one buffer.
-        expect(init(encoded[0]).timestamp).toBe(ts)
-        expect(next).toBeCloseTo(ts + BUFFER_US, 6)
+        landedTs = ts
+        // Contiguous: the delivered buffer goes after the silence.
+        expect(next).toBeCloseTo(ts + QUANTUM * 1e6, 6)
       }
-      ts = next + BUFFER_US
+      ts = next + BUFFER_SECONDS * 1e6
     }
-    // The window has to hold eight events from after the loss before it is sure.
-    expect(filledAt).toBe(20 + GAP_WINDOW)
     expect(encoded).toHaveLength(1)
+    expect(init(encoded[0])).toMatchObject({ numberOfFrames: RENDER_QUANTUM, timestamp: landedTs })
     const [data] = getCreatedFrames('AudioData')
     expect(data.closed).toBe(true)
     expect((data.source as Float32Array).every(v => v === 0)).toBe(true)
-    expect(data.init).toMatchObject({ format: 'f32-planar', sampleRate: RATE, numberOfChannels: 2, numberOfFrames: BUFFER })
+    expect(data.init).toMatchObject({ format: 'f32-planar', sampleRate: RATE, numberOfChannels: 2 })
   })
 
-  it('fills two lost buffers as two whole buffers of silence, from one reused zero buffer', () => {
+  it(`fills a rise a window (${WINDOW} events) after it, once the window is all past it`, () => {
+    expect(feed(filler(), 200, { extra: k => (k >= 60 ? 4 * QUANTUM : 0) })).toEqual([60 + WINDOW - 1])
+    expect(filledFrames()).toBe(3 * RENDER_QUANTUM)
+  })
+
+  it('fills creep one quantum at a time as it comes, never more than it', () => {
+    // A quantum lost every 1.3 s for two minutes.
+    const creep = (k: number) => Math.floor((k * BUFFER_SECONDS) / 1.3) * QUANTUM
+    const count = Math.round(120 / BUFFER_SECONDS)
+    feed(filler(), count, { extra: creep })
+    const lost = creep(count - 1) * RATE
+    expect(filledFrames()).toBeLessThanOrEqual(lost)
+    // Everything up to a window before the end, less the quantum it leaves.
+    expect(filledFrames()).toBeGreaterThanOrEqual(creep(count - 1 - WINDOW) * RATE - 2 * RENDER_QUANTUM)
+  })
+
+  it('fills a lost buffer — all but the last quantum, then that quantum with the next loss', () => {
     const f = filler()
-    feed(f, 60, { lost: k => k === 20 || k === 21 || k === 45 })
-    expect(encoded.map(d => init(d).numberOfFrames)).toEqual([BUFFER, BUFFER, BUFFER])
-    const sources = getCreatedFrames('AudioData').map(d => (d.source as Float32Array).buffer)
-    expect(new Set(sources).size).toBe(1)
+    feed(f, 400, { lost: k => k === 100 || k === 200 })
+    expect(encoded.map(d => init(d).numberOfFrames)).toEqual([BUFFER - RENDER_QUANTUM, BUFFER])
   })
 
-  it('fills nothing for a callback that is late and the on-time ones after it', () => {
-    expect(feed(filler(), 200, { delay: k => (k % 2 ? 0.06 : 0) })).toEqual([])
-    expect(feed(filler(), 200, { delay: k => (k === 50 ? 0.08 : 0) })).toEqual([])
+  it('encodes a long fill in buffer-sized chunks from one reused zero buffer', () => {
+    feed(filler(), 300, { lost: k => k >= 100 && k < 103 })
+    expect(encoded.map(d => init(d).numberOfFrames)).toEqual([BUFFER, BUFFER, BUFFER - RENDER_QUANTUM])
+    const buffers = getCreatedFrames('AudioData').map(d => (d.source as Float32Array).buffer)
+    expect(new Set(buffers).size).toBe(1)
   })
 
-  it('fills nothing for a burst queued behind a hang (every event the same playbackTime)', () => {
-    // Buffers 20..59 came due during a 3.4 s hang and are all dispatched,
-    // back to back, when it ends: each reads the end of the hang.
-    const hangEnd = 10 + 60 * BUFFER_SECONDS
+  it('reads the context\'s currentTime when the event has no playbackTime', () => {
+    feed(filler(), 300, { lost: k => k === 100, viaCurrentTime: true })
+    expect(filledFrames()).toBe(BUFFER - RENDER_QUANTUM)
+  })
+
+  it('does not judge a window that is one burst queued behind a hang, however long', () => {
+    // Buffers 100..199 came due during an 8.5 s hang — longer than the
+    // window — and were all dispatched when it ended, each reading that time.
+    const hangEnd = 10 + 200 * BUFFER_SECONDS
     expect(
-      feed(filler(), 120, { delay: k => (k >= 20 && k < 60 ? hangEnd - (10 + k * BUFFER_SECONDS) : 0) })
+      feed(filler(), 400, { extra: k => (k >= 100 && k < 200 ? hangEnd - (10 + k * BUFFER_SECONDS) : 0) })
     ).toEqual([])
   })
 
-  it('follows a late first event down, so a later loss still reads as a whole buffer', () => {
+  it('fills nothing across a reanchor (a pause), and anchors again after it', () => {
     const f = filler()
-    // The anchor comes from a callback 60 ms late; without the correction a
-    // loss would read as 85 - 60 = 25 ms and never be filled.
-    expect(feed(f, 60, { delay: k => (k === 0 ? 0.06 : 0), lost: k => k === 30 })).toHaveLength(1)
-    expect(encoded).toHaveLength(1)
-  })
-
-  it('judges the next fill only by events from after the last one', () => {
-    // Late events on both sides of a loss: the window that fills the loss
-    // still holds pre-loss events, which — kept — would read as a late anchor,
-    // pull it down a buffer and fill the same loss again.
-    const delay = (k: number) => (k >= 15 && k < 30 ? 0.045 : 0)
-    expect(feed(filler(), 80, { delay, lost: k => k === 20 })).toHaveLength(1)
-  })
-
-  it('fills nothing across a reanchor (a pause)', () => {
-    const f = filler()
-    feed(f, 20)
+    feed(f, 100)
     f.reanchor()
     // 50 s later, as after a pause.
-    expect(feed(f, 40, { start: 60 })).toEqual([])
-    // ...and measures from the new anchor.
-    expect(feed(f, 40, { start: 60 + 40 * BUFFER_SECONDS, lost: k => k === 5 })).toHaveLength(1)
+    expect(feed(f, 100, { start: 60 })).toEqual([])
+    expect(feed(f, 200, { start: 60 + 100 * BUFFER_SECONDS, lost: k => k === 100 })).toHaveLength(1)
   })
 
   it('uses the sample rate it was given', () => {
-    const f = createAudioGapFiller({ sampleRate: 44100, bufferLength: BUFFER, numberOfChannels: 2, label: 'Test', encode })
-    let ts = 0
-    for (let k = 0; k < 30; k++) {
-      if (k === 10) continue
-      ts = f.fill(k * (BUFFER / 44100), BUFFER, ts) + (BUFFER / 44100) * 1e6
-    }
-    expect(encoded).toHaveLength(1)
+    feed(filler(44100), 300, { lost: k => k === 100, sampleRate: 44100 })
+    expect(filledFrames()).toBe(BUFFER - RENDER_QUANTUM)
     expect(init(encoded[0]).sampleRate).toBe(44100)
   })
 
   it(`caps one fill at ${MAX_GAP_FILL_SECONDS} s of silence, keeps the rest as a step, and warns once`, () => {
     const f = filler()
-    const maxBuffers = Math.floor(MAX_GAP_FILL_SECONDS / BUFFER_SECONDS)
+    const cap = Math.floor((MAX_GAP_FILL_SECONDS * RATE) / RENDER_QUANTUM) * RENDER_QUANTUM
     // 60 s of buffers never delivered.
     const stall = Math.round(60 / BUFFER_SECONDS)
-    feed(f, 100 + stall, { lost: k => k >= 50 && k < 50 + stall })
-    expect(encoded).toHaveLength(maxBuffers)
+    feed(f, 200 + stall, { lost: k => k >= 100 && k < 100 + stall })
+    expect(filledFrames()).toBe(cap)
     expect(console.warn).toHaveBeenCalledTimes(1)
     expect(String(vi.mocked(console.warn).mock.calls[0][0])).toContain('Test')
     // A second stall is capped too, and not said again.
-    const g = f
-    g.reanchor()
+    f.reanchor()
     encoded.length = 0
-    feed(g, 100 + stall, { lost: k => k >= 50 && k < 50 + stall })
-    expect(encoded).toHaveLength(maxBuffers)
+    feed(f, 200 + stall, { lost: k => k >= 100 && k < 100 + stall })
+    expect(filledFrames()).toBe(cap)
     expect(console.warn).toHaveBeenCalledTimes(1)
   })
 
@@ -178,7 +223,16 @@ describe('createAudioGapFiller', () => {
     encode.mockImplementation(() => {
       throw new Error('closed codec')
     })
-    expect(() => feed(filler(), 40, { lost: k => k === 10 })).toThrow('closed codec')
+    expect(() => feed(filler(), 200, { lost: k => k === 60 })).toThrow('closed codec')
     expect(getCreatedFrames('AudioData').every(d => d.closed)).toBe(true)
+  })
+})
+
+describe('gapWindowEvents', () => {
+  it('is four seconds of buffers, and never fewer than eight', () => {
+    expect(gapWindowEvents(48000, 4096)).toBe(47)
+    expect(gapWindowEvents(44100, 4096)).toBe(44)
+    // A buffer over half a second long: four seconds would be under eight.
+    expect(gapWindowEvents(8000, 4096)).toBe(GAP_WINDOW_MIN_EVENTS)
   })
 })
