@@ -7,8 +7,8 @@
  * of that count for good: every later sound stamped that much before its
  * picture, a drift that grew with the take.
  *
- * **What was measured** (the ESCSUITE-296 rig, headless Chromium 156,
- * 2026-10; `scratchpad/report-drift-measure.md` in that work):
+ * **What was measured** (measured 2026-10-16, headless Chromium 156, 60 ms
+ * busy loop every 100 ms):
  * - `playbackTime` is computed when the main thread *dispatches* the event,
  *   not from the buffer's position: under jank it sits one buffer ahead of
  *   `currentTime` from p5 to p95, and its offset from the sample count tracks
@@ -42,8 +42,8 @@
  * `AudioData` stamped contiguously before the delivered buffer, and the anchor
  * rises by what was filled.
  *
- * Why those numbers, measured on the rig's real log and on simulations
- * (`scratchpad/dbg296/q2.py`): a 2 s window over-filled the real take by
+ * Why those numbers, measured on the same rig's log of a 60 s take and on
+ * simulations: a 2 s window over-filled the real take by
  * 16 ms (a transient rise of its rolling minimum that later fell back), 4 s
  * matched it; and filling every quantum the moment it shows filled a few ms
  * of pure jitter over ten minutes, where leaving the last quantum filled none
@@ -54,7 +54,14 @@
  * it fills.
  *
  * One fill is capped at `MAX_GAP_FILL_SECONDS` (5 s) with one warning per
- * pipeline; the rest of such a rise stays a step. One helper for the mix and
+ * pipeline; the rest of such a rise stays a step.
+ *
+ * Two bounded limits, both the price of a minimum over a window:
+ * - a loss inside the take's last window (about 4 s) is never filled — the
+ *   take ends before the window can prove it;
+ * - the anchor never falls, so a take whose whole first window is uniformly
+ *   late keeps that lateness unfilled for good — the price of never filling a
+ *   constant latency. One helper for the mix and
  * every audio companion, each with its own instance.
  */
 
@@ -137,6 +144,13 @@ export function createAudioGapFiller(options: AudioGapFillerOptions): AudioGapFi
     fill(playbackTime, numberOfFrames, timestampUs) {
       const reference = typeof playbackTime === 'number' ? playbackTime : readCurrentTime();
       if (typeof reference !== 'number') return timestampUs;
+      // A reading that is not finite is skipped — one NaN would otherwise
+      // become the anchor or the baseline and stop every fill for the rest of
+      // the take — but its buffer's samples are still delivered.
+      if (!Number.isFinite(reference)) {
+        delivered += numberOfFrames;
+        return timestampUs;
+      }
       deficits[next] = reference - delivered / sampleRate;
       times[next] = reference;
       next = (next + 1) % windowEvents;

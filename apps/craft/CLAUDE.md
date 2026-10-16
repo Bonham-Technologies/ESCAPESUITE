@@ -1293,7 +1293,12 @@ ignored the 48 kHz request was stamped and labelled as 48 kHz anyway. Three fixe
    minutes — the residual is under two quanta (5.3 ms) and never accumulates. A window whose
    reference times span under half its nominal length is a burst queued behind a hang and is not
    judged. A fill lands about a window after its loss. One fill is capped at
-   `MAX_GAP_FILL_SECONDS` (5 s) with one warning per pipeline; the rest stays a step. Known limit:
+   `MAX_GAP_FILL_SECONDS` (5 s) with one warning per pipeline; the rest stays a step. A reference
+   that is not finite is skipped (its buffer's samples still counted), so one NaN cannot poison the
+   anchor or the baseline. Two bounded limits, both the price of a windowed minimum: a loss inside
+   the take's last window (~4 s) is never filled, and because the anchor never falls, a take whose
+   whole first window is uniformly late keeps that lateness unfilled — the price of never filling a
+   constant latency. Known limit:
    lateness that never comes back to its floor for a whole window — independent uniform 0–60 ms on
    every callback, where only 4 % land within a quantum of the floor (the rig: 20 %) — can read a
    quantum or two high; bounded, and the suite pins it at ≤ 2 quanta in ten minutes.
