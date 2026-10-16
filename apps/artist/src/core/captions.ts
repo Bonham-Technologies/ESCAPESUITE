@@ -175,8 +175,9 @@ function isTimingLine(line: string): boolean {
  * (`inverted-cues`).
  *
  * Refused, with the line: an empty file, a `.vtt` that does not open with
- * `WEBVTT`, a timestamp that does not parse, a block with no timing line, and a
- * file with no cue left once the drops are made.
+ * `WEBVTT`, a timestamp that does not parse, a block with no timing line (bar a
+ * lone index ending an SRT file, which is ignored), and a file with no cue
+ * left once the drops are made.
  */
 export function parseCaptions(text: string, format: CaptionFormat): ParsedCaptions {
   const blocks = blocksOf(text.replace(/^\uFEFF/, ''));
@@ -208,6 +209,9 @@ export function parseCaptions(text: string, format: CaptionFormat): ParsedCaptio
     // (an SRT index, a WebVTT cue id).
     const timingAt = block.lines[0].includes('-->') ? 0 : block.lines[1]?.includes('-->') ? 1 : -1;
     if (timingAt < 0) {
+      // A hand-edited SRT often ends on the next cue's index alone: ignored,
+      // there and only there (review M5).
+      if (!vtt && b === work.length - 1 && /^\d+$/.test(block.lines.join('\n').trim())) continue;
       throw new CaptionParseError(`Line ${block.line}: this caption has no timing line (start --> end).`);
     }
     const timing = block.lines[timingAt];

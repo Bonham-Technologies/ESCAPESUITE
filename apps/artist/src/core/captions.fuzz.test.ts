@@ -40,13 +40,18 @@ import {
 const ITERATIONS = 1000
 const SEEDS: Record<CaptionFormat, number> = { srt: 0x5eed2930, vtt: 0x5eed2931 }
 // Each loop's outcomes on its committed seed, measured 2026-10-16: SRT parsed
-// 409 mutated files and refused 591; WebVTT parsed 449 and refused 551. The floors
+// 409 mutated files and refused 591; WebVTT parsed 449 and refused 551.
+// Re-measured the same day after review round 1: SRT 416 / 584, WebVTT
+// unchanged at 449 / 551. The seven SRT files that moved are truncations that
+// end on the next cue's lone index, which the M5 ruling ignores rather than
+// refuses; the timing-line split (I2) and the bounded tag grammar (M1) moved
+// no outcome on either seed. The floors
 // ARE those counts: the seed is fixed, so a parser that turns lenient anywhere
 // (a timestamp check skipped) drops `refused` below its floor, and one that
 // turns strict drops `accepted`. A change that moves an input across the line
 // on purpose updates the numbers here and says why, as a per-frame ceiling does.
 const FLOORS: Record<CaptionFormat, { accepted: number; refused: number }> = {
-  srt: { accepted: 409, refused: 591 },
+  srt: { accepted: 416, refused: 584 },
   vtt: { accepted: 449, refused: 551 },
 }
 
