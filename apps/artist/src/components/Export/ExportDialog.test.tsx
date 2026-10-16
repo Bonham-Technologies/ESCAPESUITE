@@ -2392,6 +2392,8 @@ describe('ExportDialog', () => {
         '\u221223 LUFS (broadcast)',
       ])
 
+      expect(select).toHaveAccessibleDescription('Every export is measured. A target also holds peaks under \u22121 dBTP.')
+
       fireEvent.click(gifRadio())
       expect(screen.queryByLabelText(/audio loudness/i)).not.toBeInTheDocument()
     })

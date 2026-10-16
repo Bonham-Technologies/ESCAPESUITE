@@ -200,6 +200,12 @@
   margin-top: 2px;
 }
 
+/* A one-line note under a select, flush with it (ESCSUITE-292). */
+.fieldHint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 .radioDisabled {
   opacity: 0.5;
   cursor: not-allowed;
