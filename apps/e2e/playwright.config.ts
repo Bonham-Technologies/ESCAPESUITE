@@ -58,7 +58,9 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
-  reporter: 'html',
+  // CI adds the list reporter so the job log carries one line per test — a run that hits the
+  // job's timeout otherwise leaves no record of which test was running (ESCSUITE-292's #850).
+  reporter: isCI ? [['html'], ['list']] : 'html',
 
   use: {
     trace: 'on-first-retry',
