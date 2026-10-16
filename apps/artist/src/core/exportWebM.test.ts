@@ -1259,3 +1259,77 @@ describe('exportToWebM colour label (ESCSUITE-284)', () => {
     expect(firstVideoMeta().decoderConfig?.colorSpace).toEqual(REPORTED)
   })
 })
+
+describe('exportToWebM loudness (ESCSUITE-292)', () => {
+  /** Stereo interleaved 1 kHz sine at `peakDbfs`, `seconds` long — a stereo sine reads at its peak level in LUFS. */
+  const toneMix = (seconds: number, peakDbfs: number) => {
+    const mix = audioFor(seconds)
+    const a = 10 ** (peakDbfs / 20)
+    for (let i = 0; i < mix.length / 2; i++) {
+      const v = a * Math.sin((2 * Math.PI * 1000 * i) / SAMPLE_RATE)
+      mix[2 * i] = v
+      mix[2 * i + 1] = v
+    }
+    return mix
+  }
+  const clips = [makeClip({ duration: 1, endTime: 1 })]
+  /** Left channel of the first encoded chunk, as the encoder was handed it. */
+  const encodedLeft = (i: number) => webcodecs.audioData[0].data[i]
+
+  it('measures the mix it encodes, and leaves the sound alone with normalising off', async () => {
+    mixAudio.mockResolvedValue(toneMix(1, -30))
+
+    const { loudness } = await run({ clips })
+
+    expect(loudness).toEqual({
+      measuredLufs: expect.closeTo(-30, 1),
+      truePeakDbtp: expect.closeTo(-30, 1),
+      gainDb: 0,
+      targetLufs: null,
+      limited: false,
+    })
+    expect(encodedLeft(12)).toBeCloseTo(10 ** (-30 / 20) * Math.sin((2 * Math.PI * 12) / 48), 6)
+  })
+
+  it('normalises the mix onto the target before the encoder is fed', async () => {
+    mixAudio.mockResolvedValue(toneMix(1, -30))
+
+    const { loudness } = await run({ clips, options: { loudnessTarget: -16 } })
+
+    expect(loudness?.targetLufs).toBe(-16)
+    expect(loudness?.gainDb).toBeCloseTo(14, 1)
+    expect(loudness?.limited).toBe(false)
+    const g = 10 ** (loudness!.gainDb / 20)
+    expect(encodedLeft(12)).toBeCloseTo(g * 10 ** (-30 / 20) * Math.sin((2 * Math.PI * 12) / 48), 5)
+  })
+
+  it('measures only the range it exports', async () => {
+    // The first half second 4 dB quieter than the second: both halves pass the
+    // gates, so the whole mix reads ≈ −21.8 LUFS, the exported second half the
+    // tone's own −20.
+    const mix = toneMix(1, -20)
+    for (let i = 0; i < SAMPLE_RATE; i++) mix[i] *= 10 ** (-4 / 20)
+    mixAudio.mockResolvedValue(mix)
+
+    const { loudness } = await run({ clips, options: { timeRange: { start: 0.5, end: 1 } } })
+
+    expect(loudness?.measuredLufs).toBeCloseTo(-20, 1)
+  })
+
+  it('says nothing about a mix with no measurable sound', async () => {
+    mixAudio.mockResolvedValue(audioFor(1))
+
+    const { loudness } = await run({ clips, options: { loudnessTarget: -14 } })
+
+    expect(loudness).toBeUndefined()
+  })
+
+  it('measures nothing when this browser cannot encode the sound', async () => {
+    mixAudio.mockResolvedValue(toneMix(1, -30))
+    webcodecs.audio.answer = () => false
+
+    const { loudness } = await run({ clips, options: { loudnessTarget: -14 } })
+
+    expect(loudness).toBeUndefined()
+  })
+})
