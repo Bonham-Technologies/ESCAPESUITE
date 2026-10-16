@@ -4764,21 +4764,33 @@ and measures nothing.
   copied apart; the only allocations are one number per 100 ms of programme and the limiter's
   fourteen-slot gain delay line. Filter state is kept out of subnormal numbers by a −400 dB offset,
   which an x86 CPU otherwise processes an order of magnitude slower through every silent gap.
-- **Normalising.** `gainForTarget` is `target − measured`, and says whether the gained true peak
-  would pass the ceiling. When it would not, the gain is a plain multiply (the limiter's detector
+- **Normalising.** `gainForTarget` is `target − measured`, **capped at `MAX_GAIN_DB` = +20 dB of
+  boost** — a mix that only just clears the −70 LUFS gate (room tone, hum) would otherwise be
+  raised 50 dB or more with its noise floor; capped, it lands below the target and the completion
+  line shows the gain actually applied — and says whether the gained true peak would pass the
+  ceiling, judged on that capped gain. When it would not, the gain is a plain multiply (the limiter's detector
   reads exactly the peaks the meter measured, so it could never engage). When it would,
   `applyInterleavedGainWithLimiter` runs: **stereo-linked, instant attack, 5 ms hold, 50 ms
   release, no look-ahead** beyond the interpolator's own twelve samples, its detector the meter's
   4× peak around each sample. Sample peaks are held exactly; the true peak to within about
-  0.1 dB on the fixtures. A limited mix lands a little quieter than the target. 5 ms / 50 ms are
-  sample counts at 48 kHz, the export's only rate (the signature takes no rate).
+  0.1 dB on the fixtures. **A limited mix lands below the target** — well below it when short peaks
+  carry the loudness (a click-dominated programme asked for +8.7 dB measured 8.6 LU short), because
+  `gainDb` is the gain applied *before* the limiter, not the change in loudness; the completion
+  line says so in words. Hold and release are derived from the sample rate once per call
+  (`exportLoudness` passes the rate it measured with; the public functions take an optional
+  trailing `sampleRate`, default 48 000, so the ruled three-argument call still holds), pinned at
+  48 and 44.1 kHz. Known limit: 5 ms is shorter than half a cycle below 100 Hz, so heavily
+  limited bass is gain-modulated within each cycle (≈ 0.7 dB of ripple on a 100 Hz tone) —
+  audible as distortion; a longer hold or a look-ahead is the follow-up. The tests pin the
+  relative gate to the absolute-gated mean, the stereo link (a loud right channel holds a quiet
+  left one), the hold and the release, each against the mutant that would break it.
 - **Nothing to say.** No mix, digital silence, nothing above −70 LUFS for 400 ms, or less than
   one 400 ms block: `exportLoudness` returns `undefined`, the mix is untouched and the result
   carries no `loudness`. A gain target on such a mix is a no-op.
 - **Where it shows.** `ExportResult.loudness` (`{ measuredLufs, truePeakDbtp, gainDb, targetLufs,
   limited }`) → the dialog's completion sentence, "Export complete! Measured −18.3 LUFS · gain
-  +4.3 dB · limited" (the gain only when a target was set, "limited" only when the limiter
-  engaged), through the progress message, so the dialog's **one** live region announces it with
+  +4.3 dB · the limiter held the peaks, so the mix lands below the target" (the gain only when a
+  target was set, the last clause only when the limiter engaged), through the progress message, so the dialog's **one** live region announces it with
   the completion — no second region and no new dialog state. The choice is in the Advanced panel
   beside Quality (hidden for GIF, kept in `advancedOptions` like Quality), off by default,
   persisted in `lastExportSettings.loudnessTarget` and read back through `loudnessTargetOrOff`,
