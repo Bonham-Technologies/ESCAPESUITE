@@ -430,6 +430,35 @@ describe('parseProject (ESCSUITE-102)', () => {
     expect(result).toEqual({ ok: false, reason: 'A clip is missing an id' })
   })
 
+  describe('tracks and legacy overlay entries are shapes, not throws (ESCSUITE-294)', () => {
+    const withTimeline = (timeline: Record<string, unknown>) => {
+      const legacy = projectWithLegacyOverlays()
+      return { ...legacy, timeline: { ...legacy.timeline, ...timeline } }
+    }
+    const textOverlay = () => projectWithLegacyOverlays().timeline.textOverlays![0]
+    const shapeOverlay = () => projectWithLegacyOverlays().timeline.shapeOverlays![0]
+
+    it.each([
+      ['a null track', { tracks: [null] }, 'timeline.tracks[0] must be an object'],
+      ['a track that is a number', { tracks: [{ id: 't1', index: 0 }, 7] }, 'timeline.tracks[1] must be an object'],
+      ['textOverlays that is not a list', { textOverlays: 5 }, 'timeline.textOverlays must be a list'],
+      ['shapeOverlays that is not a list', { shapeOverlays: 'x' }, 'timeline.shapeOverlays must be a list'],
+      ['a null text overlay', { textOverlays: [null] }, 'timeline.textOverlays[0] must be an object'],
+      ['a shape overlay that is a list', { shapeOverlays: [shapeOverlay(), []] }, 'timeline.shapeOverlays[1] must be an object'],
+      ['a text overlay with no text', { textOverlays: [{ ...textOverlay(), text: undefined }] }, 'timeline.textOverlays[0].text must be a string'],
+      ['a shape overlay whose type is a number', { shapeOverlays: [{ ...shapeOverlay(), type: 5 }] }, 'timeline.shapeOverlays[0].type must be a string'],
+    ])('refuses %s by name', (_label, timeline, reason) => {
+      expect(parseProject(withTimeline(timeline))).toEqual({ ok: false, reason })
+    })
+
+    it('still converts well-formed legacy overlays, and treats null arrays as absent', () => {
+      const converted = parseProject(projectWithLegacyOverlays())
+      expect(converted.ok && converted.project.timeline.clips.map((clip) => clip.overlayType)).toEqual(['shape', 'text'])
+      const nulls = parseProject(withTimeline({ textOverlays: null, shapeOverlays: null }))
+      expect(nulls.ok).toBe(true)
+    })
+  })
+
   it('migrates a project with no tracks at all, rather than rejecting it', () => {
     // ensureTimelineHasTracks's own migration branch handles an absent/empty
     // `tracks` array — parseProject must let that through, not reject it.
