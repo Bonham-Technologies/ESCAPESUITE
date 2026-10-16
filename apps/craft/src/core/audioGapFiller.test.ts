@@ -219,6 +219,31 @@ describe('createAudioGapFiller', () => {
     expect(console.warn).toHaveBeenCalledTimes(1)
   })
 
+  it('skips a non-finite reference instead of letting it poison the anchor and the baseline', () => {
+    // One NaN playbackTime before the first window fills (it would have become
+    // the anchor) and one after (it would have become the baseline): a later
+    // whole-buffer loss is still filled.
+    const f = filler()
+    feed(f, 400, {
+      lost: k => k === 200,
+      extra: k => (k === 20 || k === 100 ? NaN : 0),
+    })
+    expect(filledFrames()).toBe(BUFFER - RENDER_QUANTUM)
+  })
+
+  it('skips a non-finite currentTime as well, and still counts that buffer\'s samples', () => {
+    const f = filler()
+    let ts = 0
+    for (let k = 0; k < 400; k++) {
+      if (k === 200) continue
+      currentTime = k === 100 ? Infinity : 10 + k * BUFFER_SECONDS
+      ts = f.fill(undefined, BUFFER, ts) + BUFFER_SECONDS * 1e6
+    }
+    // Had the Infinity buffer's samples not been counted, every later deficit
+    // would read a buffer high and a second buffer would be filled.
+    expect(filledFrames()).toBe(BUFFER - RENDER_QUANTUM)
+  })
+
   it('closes a zero AudioData whose encode throws, and lets the error through', () => {
     encode.mockImplementation(() => {
       throw new Error('closed codec')
