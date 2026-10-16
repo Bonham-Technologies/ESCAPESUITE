@@ -9,6 +9,7 @@ export default defineConfig([
     'playwright-report*',
     'test-results',
     'perf-results',
+    'av-drift-results',
     'coverage',
   ]),
   {
