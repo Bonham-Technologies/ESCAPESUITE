@@ -10,7 +10,7 @@
 //
 // The processor that runs here is the real source text: the AudioWorklet
 // double evaluates the Blob the module hands `URL.createObjectURL()`.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import {
   createAudioCapture,
   AUDIO_CAPTURE_PROCESSOR_NAME,
@@ -39,7 +39,7 @@ import {
 
 let audio: AudioContextDoubleControl
 let encoded: FrameDouble[]
-let onChunk: ReturnType<typeof vi.fn>
+let onChunk: Mock<(data: AudioData) => void>
 let consoleInfo: ReturnType<typeof vi.spyOn>
 let consoleWarn: ReturnType<typeof vi.spyOn>
 let consoleError: ReturnType<typeof vi.spyOn>
@@ -75,8 +75,8 @@ beforeEach(() => {
   encoded = []
   // What the recorder's encoder does with a chunk: keep it (to inspect) and
   // let the capture close it.
-  onChunk = vi.fn((data: FrameDouble) => {
-    encoded.push(data)
+  onChunk = vi.fn((data: AudioData) => {
+    encoded.push(data as unknown as FrameDouble)
   })
   consoleInfo = vi.spyOn(console, 'info').mockImplementation(() => {})
   consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -120,7 +120,10 @@ describe('the capture processor (the worklet module)', () => {
     context.render(2 * CHUNK_FRAMES + 256, (channel, frame) => channel * 1000 + (frame % 7))
 
     expect(node.posted).toHaveLength(2)
-    const [first, second] = node.posted.map(p => p.data as { frame: number; channels: Float32Array[] })
+    const delivered: Array<{ frame: number; channels: Float32Array[] }> = []
+    node.port.onmessage = event => delivered.push(event.data as { frame: number; channels: Float32Array[] })
+    node.deliver()
+    const [first, second] = delivered
     expect(first.frame).toBe(1280)
     expect(second.frame).toBe(1280 + CHUNK_FRAMES)
     expect(first.channels).toHaveLength(2)

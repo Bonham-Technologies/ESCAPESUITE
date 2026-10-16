@@ -6,7 +6,7 @@
 // the tests that need to steer decodeAudioData(), the mixed-destination track
 // list, or the analyser's frequency data, and uninstall it afterwards to hand
 // the global back to the setup stub.
-import { vi } from 'vitest'
+import { vi, type Mock } from 'vitest'
 
 /** AudioBuffer-shaped object: enough of the interface for real code to read it. */
 export interface AudioBufferDouble {
@@ -315,8 +315,8 @@ export class AudioWorkletNodeDouble {
   /** The page's end of the port. */
   readonly port: {
     onmessage: ((event: { data: unknown }) => void) | null
-    postMessage: ReturnType<typeof vi.fn>
-    close: ReturnType<typeof vi.fn>
+    postMessage: Mock<(data: unknown) => void>
+    close: Mock<() => void>
   }
   /** Posted by the processor, not yet handed to the page — oldest first. */
   readonly inbox: unknown[] = []

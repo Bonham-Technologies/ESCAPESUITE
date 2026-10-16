@@ -14,9 +14,9 @@
 // page receives what it posted when the test says (late, in bursts, never
 // lost). Video frames go through the track-processor double on a scripted
 // `performance.now()` that advances with the render clock.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { WebCodecsRecorder } from './webcodecs-recorder'
-import type { RecordingConfig } from '../store/types'
+import type { RecorderStopCallback, RecordingConfig } from '../store/types'
 import {
   installWebCodecsDoubles,
   uninstallWebCodecsDoubles,
@@ -109,7 +109,7 @@ let audio: AudioContextDoubleControl
 let worklet: AudioWorkletDoubleControl
 let processor: TrackProcessorControl
 let recorder: WebCodecsRecorder
-let callbacks: { onStop: ReturnType<typeof vi.fn>; onError: ReturnType<typeof vi.fn> }
+let callbacks: { onStop: Mock<RecorderStopCallback>; onError: Mock<(error: Error) => void> }
 let consoleInfo: ReturnType<typeof vi.spyOn>
 let micTrack: TrackDouble
 
@@ -248,7 +248,6 @@ describe('a long take', () => {
     recorder.start()
 
     const mix = newTally()
-    let videoEndUs = -1
     let nextVideoMs = 0
     let heldUntil = -1
     const seconds = 600
@@ -261,7 +260,6 @@ describe('a long take', () => {
       if (now - startMs >= nextVideoMs) {
         processor.pushFrame(new VideoFrameDouble(`f${nextVideoMs}`, { timestamp: 0 }))
         await flush()
-        videoEndUs = lastVideoEncoder().encodes.at(-1)!.data.timestamp!
         lastVideoEncoder().encodes.length = 0
         nextVideoMs += 1000
       }
@@ -273,7 +271,7 @@ describe('a long take', () => {
     // One last frame, at the end of the take.
     processor.pushFrame(new VideoFrameDouble('last', { timestamp: 0 }))
     await flush()
-    videoEndUs = lastVideoEncoder().encodes.at(-1)!.data.timestamp!
+    const videoEndUs = lastVideoEncoder().encodes.at(-1)!.data.timestamp!
 
     const renderClockUs = ((context.renderedFrames - startFrame) / 48000) * 1e6
     const chunkUs = (CHUNK / 48000) * 1e6

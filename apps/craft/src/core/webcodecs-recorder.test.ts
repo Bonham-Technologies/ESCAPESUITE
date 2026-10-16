@@ -2619,7 +2619,9 @@ describe('WebCodecsRecorder', () => {
         const restore = parkAudioEncoderConfigure(2, parked.promise)
         try {
           const init = recorder.initialize(screenStream, webcamStream, micStream, separateConfig)
-          await flush()
+          // More turns than the webcam's case: the mix's audio capture is built
+          // (and awaited, ESCSUITE-299) before the microphone's encoder is.
+          await flush(20)
 
           recorder.dispose()
           const schedulesAtDispose = rafSchedules()
