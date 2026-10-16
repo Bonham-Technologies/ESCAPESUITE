@@ -1066,23 +1066,37 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   format, hours optional (at most five digits, so a mangled file cannot read as `Infinity`), a
   one-to-three digit fraction (`.5` is half a second), CRLF / CR, a UTF-8 BOM, any blank-line
   layout (a whitespace-only line is blank), overlapping cues (kept, in file order). WebVTT's six
-  escapes (`&amp; &lt; &gt; &nbsp; &lrm; &rlm;`) are decoded in one pass; SRT has none.
+  escapes (`&amp; &lt; &gt; &nbsp; &lrm; &rlm;`) are decoded in one pass; SRT has none. A timing
+  line — a `-->` with a timestamp on each side — met inside a cue's text starts the next cue (the
+  WebVTT rule, applied to both formats; in SRT a line of digits right before it is that cue's
+  index), so a file missing the blank line between two cues does not import as one caption with
+  the next timing burned in as words (review I2). A lone index ending an SRT file — a hand-edited
+  file often stops there — is ignored rather than refused (review M5).
 - **Dropped, and named once each** (`DroppedFeature`, listed in a fixed order): cue settings or
-  SRT coordinates after the timing → `positioning`; markup tags inside text (`<b>`, `<i>`, `<u>`,
-  `<c.x>`, `<ruby>`, `<lang>`, `<font>`, timestamp tags), words kept → `styling`; a `<v Name>`
-  voice tag, the name with it → `voice-tags`; WebVTT `STYLE` / `REGION` / `NOTE` blocks →
+  SRT coordinates after the timing → `positioning`; the formats' own tags inside text, words kept
+  → `styling` — WebVTT's `b`, `i`, `u`, `c`, `v`, `ruby`, `rt`, `lang` (a class after `.`, an
+  annotation after a space), their closing forms and its timestamp tags (`<00:03.000>`,
+  `<00:00:03.000>`), plus SRT's `<font …>`, in either case; a `<v Name>` voice tag, the name with
+  it → `voice-tags`. **Any other `<…>` is caption text** (`Press <Enter> now` keeps `<Enter>`), and
+  nothing inside a tag may be a `<`, `>` or line break, so a line of nothing but `<` is read in one
+  linear pass (review M1). Stripping is one pass, so a tag that only appears once another is
+  stripped (`<<b>i>`) stays as text; WebVTT `STYLE` / `REGION` / `NOTE` blocks →
   `styling` / `regions` / `notes`; a cue with no words left → `empty-cues`; a cue with `end <=
   start` → `inverted-cues`. Tags are stripped line by line. `{\an8}`-style SSA codes in SRT are
   **not** recognised (they stay as text) — out of the brief's scope.
 - **Refused** with one `CaptionParseError` whose message the importer shows as it is: an empty
   file, a `.vtt` whose first block is not `WEBVTT` (optionally followed by a space and text), a
   timestamp that does not parse (`Line N: "…" is not a caption timestamp.`), a block with no timing
-  line in its first two lines, and a file with no cue left once the drops are made.
+  line in its first two lines (bar the lone trailing SRT index above), and a file with no cue left
+  once the drops are made.
 - **Writing.** `serializeCaptions(cues, format)`: SRT with 1-based indices and `,`, WebVTT with the
   header and `.`, milliseconds rounded, never negative. It is the parser's inverse and round-trip
   stable on its own output, so it leaves out what a reader would drop (a cue with no words, or no
   length once rounded) and writes each line the way the parser reads it back: trimmed, blank lines
-  left out, tags stripped for SRT (which cannot write a literal one), `& < >` escaped for WebVTT.
+  left out, `& < >` escaped for WebVTT. SRT has no escapes, so a line holding a literal tag gets an
+  empty `<i></i>` after each `<`, and a line that would read as timing gets one inside its arrow
+  (`--<i></i>>`): the parser strips them and reads back the same text. Cues `parseCaptions`
+  produced read back exactly (the fuzz holds this).
 - **The track marker.** `Track.kind?: 'captions'` (absent on every other track and in every older
   file). `parseProject` refuses a present `kind` that is not exactly `'captions'` with
   `timeline.tracks[i].kind must be 'captions'`; the migration passes tracks through by spread, so
@@ -1092,7 +1106,9 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   which pushes an entry and selects per call. The caption track is found by its marker, never by
   `findEmptyTrack`; the first import creates it at the top through `createTrackAtTop` ("Captions"),
   later imports append to it, and there is never a second one. A locked caption track refuses the
-  whole import with `null` (ESCSUITE-84 / 87); a hidden one still takes it.
+  whole import with `null` (ESCSUITE-84 / 87); a hidden one still takes it. `findEmptyTrack` never
+  hands out the caption track, even emptied, so a title or a video looking for an empty track
+  cannot land there and be read as a caption (review M2).
 - **The style.** `captionStyleFor(resolution)`: `x 0.5`, `y 0.88`, centred,
   `fontSize Math.round(height × 0.045)` (49 at 1080p, 32 at 720p), `FONT_OPTIONS[0]` (Arial), white
   on `#000000b3`, normal weight and style. The renderer never wraps, so the importer runs every cue
@@ -1105,9 +1121,14 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   `describeDroppedFeatures` when something was dropped ("Positioning and speaker names were not
   imported."); a refusal is the parser's own sentence (`error`); an unreadable file is
   `Could not read <name>.`; a locked caption track is `The Captions track is locked, so no captions
-  were imported.`
+  were imported.` When the captions land on a hidden track, the success notice gains one sentence,
+  `The Captions track is hidden.` (review M3). The file is read with `File.text()`, which decodes
+  UTF-8 and never fails on a bad byte, so a file in another encoding (a Windows-1252 SRT, say)
+  imports with replacement characters where its accented letters were rather than being refused
+  (review M4, documented, not changed).
 - **The sidecar.** The export dialog shows a "Captions" row (a labelled group, after the Advanced
-  options) only when a caption track holds a text clip: "Download .srt" and "Download .vtt" write
+  options) only when a caption track holds a clip whose `textData.text` is a string (a damaged clip
+  with no text is left out rather than read — the dialog is always mounted, review I1): "Download .srt" and "Download .vtt" write
   that track's text clips as they stand now, in timeline order (`end = timelinePosition +
   duration`), named `${projectName || 'export'}.srt` / `.vtt`, through `utils/downloadBlob.ts` —
   which the video download now calls too. A **hidden** caption track is still offered: hiding it is
@@ -1116,7 +1137,8 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   "Export Section" range does not shift or trim it.
 - **Fuzz.** `core/captions.fuzz.test.ts` (house harness): 1000 byte mutations per format, decoded
   non-fatally; every input parses or is a `CaptionParseError`, every parse is a valid cue list whose
-  serialization reads back as the same cues, with exact tally floors on the committed seeds.
+  serialization reads back as the same cues, with exact tally floors on the committed seeds (SRT
+  416 / 584, WebVTT 449 / 551 since review round 1).
 - **Out of scope, and why:** automatic captioning (no speech model runs in the browser here);
   SCC, CEA-608/708 and TTML (broadcast formats no browser tool of this kind is asked for, each a
   parser of its own); captions muxed into the MP4/WebM as a text track (Mediabunny's output path
