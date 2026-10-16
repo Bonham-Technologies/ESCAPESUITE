@@ -544,11 +544,15 @@ function signedTenth(value: number, plus: string): string {
 
 /**
  * The completion line: "Measured −18.3 LUFS", plus " · gain +4.3 dB" when a
- * target was applied and " · limited" when the limiter engaged.
+ * target was applied and " · the limiter held the peaks, so the mix lands
+ * below the target" when the limiter engaged.
  */
 export function formatLoudnessSummary(loudness: ExportLoudness): string {
   const parts = [`Measured ${signedTenth(loudness.measuredLufs, '')} LUFS`];
   if (loudness.targetLufs !== null) parts.push(`gain ${signedTenth(loudness.gainDb, '+')} dB`);
-  if (loudness.limited) parts.push('limited');
+  // Said rather than flagged: a limited mix lands below the target — well
+  // below it when its peaks carry the loudness — and `gainDb` is the gain
+  // applied before the limiter, not the change in loudness.
+  if (loudness.limited) parts.push('the limiter held the peaks, so the mix lands below the target');
   return parts.join(' · ');
 }
