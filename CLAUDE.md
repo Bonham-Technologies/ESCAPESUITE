@@ -4433,11 +4433,11 @@ committed seed hold at their measured counts, so a parser going lenient turns th
 stamped from one clock: video frames in audio-context time through `getOutputTimestamp()`, refreshed every two
 seconds, with the wall clock kept as the fallback; the context's real sample rate for every `AudioData`, every
 increment and the encoder; and a shared gap filler that makes up the audio the page never received — the fix
-for the field report of audio drifting from the picture as a take grows): 100.00 / **99.55** / **97.91** /
+for the field report of audio drifting from the picture as a take grows): 100.00 / **99.56** / **97.91** /
 100.00 against the 100.00 / 99.53 / 97.85 / 100.00 that `main` at `066669d9` measures in the same sitting —
-statements up two hundredths, branches up six, lines and functions still exactly 100. The base gives
-1,415 / 1,446 branches and this branch 1,456 / 1,487: forty-one new branches, forty-one covered, the same 31
-uncovered as before (lines 2,430 → 2,546, statements 2,592 / 2,604 → 2,715 / 2,727, functions 464 → 475,
+statements up three hundredths, branches up six, lines and functions still exactly 100. The base gives
+1,415 / 1,446 branches and this branch 1,458 / 1,489: forty-three new branches, forty-three covered, the same 31
+uncovered as before (lines 2,430 → 2,549, statements 2,592 / 2,604 → 2,718 / 2,730, functions 464 → 475,
 every denominator growing by exactly what the numerator did; the same 12 statements uncovered, in the same
 four files). The filler's design was changed twice on measured evidence before it was measured here, and the
 paragraph records why, so nobody re-derives it. The rig (a Playwright take with marker media and an
@@ -4453,8 +4453,8 @@ window (47 callbacks at 48 kHz), the anchor is the baseline when the window firs
 dispatch latency is never filled, and once the baseline has risen two quanta above the anchor the filler
 encodes all but one quantum of the rise as zero-filled `AudioData`s and moves the anchor — 45.3 ms on the
 rig's own creeping log against its 43 ms, 2.7 ms over ten simulated minutes of jitter with nothing lost, a
-whole-buffer drop filled as 3,968 samples. The forty-one new branches are `core/audioGapFiller.ts`'s sixteen
-on arrival (16 / 16: the no-reference pass-through, the window not yet full, a falling or flat baseline, the
+whole-buffer drop filled as 3,968 samples. The forty-three new branches are `core/audioGapFiller.ts`'s eighteen
+on arrival (18 / 18: the no-reference pass-through, a non-finite reference skipped, the window not yet full, a falling or flat baseline, the
 two-quantum trigger, the hold-back, the 5 s cap and its one warning, the re-anchor) and
 `core/webcodecs-recorder.ts`'s twenty-five (250 / 264 → 275 / 289: the `getOutputTimestamp` usable-or-fallback
 choice at `start()` and on resume, the two-second refresh, the context-time pause accounting, the
@@ -4474,7 +4474,7 @@ gained opt-in `playbackTime`, `currentTime`, `contextSampleRate` and `outputCloc
 limits, written in the helper: a fill lands about four seconds after its loss; under uniform jitter where few
 callbacks sit at the floor the rule can fill one false quantum (2.67 ms) every few minutes; the last window of
 a take is never filled. ESCSUITE-299 (an `AudioWorklet` capture with a render-thread clock) retires the
-heuristic. The suite measured 1,465 green with a 20 s per-test timeout because the drift matrix was loading
+heuristic. The suite measured 1,467 green with a 20 s per-test timeout because the drift matrix was loading
 the machine. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
@@ -4483,7 +4483,7 @@ never above what the suite actually achieves:
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.55 | 97.91 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.56 | 97.91 | 100.00 |
 | `@escapesuite/artist` | 99.84 | 99.41 | 96.64 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.61 | 98.87 |
