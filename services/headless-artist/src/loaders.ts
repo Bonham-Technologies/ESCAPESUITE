@@ -197,13 +197,17 @@ function assertTimelineShape(project: Project): void {
 /** Fails fast (before Chromium) when a media clip references a source id that isn't loaded. */
 function validateClipReferences(project: Project, sourceIds: Set<string>): void {
   assertTimelineShape(project)
-  for (const clip of project.timeline.clips) {
+  project.timeline.clips.forEach((clip, index) => {
+    // ESCSUITE-294: a null clip leaked a bare TypeError from the property read below.
+    if (!isRecord(clip)) {
+      throw new Error(`project.timeline.clips[${index}] must be an object`)
+    }
     // Overlay clips (and any clip with no source, defensively) carry no source reference.
-    if (clip.overlayType || !clip.sourceVideoId) continue
+    if (clip.overlayType || !clip.sourceVideoId) return
     if (!sourceIds.has(clip.sourceVideoId)) {
       throw new Error(`clip "${clip.id}" references unknown source "${clip.sourceVideoId}"`)
     }
-  }
+  })
 }
 
 /**
@@ -637,6 +641,14 @@ export async function loadManifest(manifestPath: string): Promise<LoadedJob> {
     const source = entry as unknown as ManifestSource
 
     assertUniqueSourceId(source.id, sourceIds)
+    // Both optional (the file's basename and extension stand in), but one that is present must
+    // be a usable string, as a bundle entry's are (ESCSUITE-294).
+    for (const field of ['name', 'mimeType'] as const) {
+      const value = entry[field]
+      if (value !== undefined && (typeof value !== 'string' || value.length === 0)) {
+        throw new Error(`manifest source "${source.id}" field "${field}" must be a non-empty string`)
+      }
+    }
     if (source.meta !== undefined) {
       assertSourceMeta(source.meta, `manifest source "${source.id}"`)
     }

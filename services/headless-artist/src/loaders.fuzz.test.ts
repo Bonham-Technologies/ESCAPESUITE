@@ -295,8 +295,8 @@ describe('loadBundle, version 2, under seeded mutation (ESCSUITE-294)', () => {
 })
 
 // The defects this fuzzer found, each one input pinned on its own so it reads
-// without the loop. Red until the loader is fixed: the coordinator rules on
-// the fix (ESCSUITE-294). Each asserts exactly the fuzz contract above.
+// without the loop. Fixed in the same ticket (ESCSUITE-294) and kept as
+// regression tests. Each asserts exactly the fuzz contract above.
 describe('defects the loader fuzz found (ESCSUITE-294)', () => {
   it('a manifest source whose "name" is not a string is refused, not loaded with that name (seed 0x5eed0158, iteration 117)', async () => {
     const context = { seed: MANIFEST_SEED, iteration: 117, mutation: 'swapType sources[0].name -> []' }

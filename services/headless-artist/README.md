@@ -165,8 +165,10 @@ disk. Nothing is copied and nothing is base64-encoded, so a 40 GB job costs the 
   (absolute paths work too). The file must exist; a missing one fails the job immediately.
 - **`sources[].mimeType`** — optional. Inferred from the extension when omitted:
   `mp4`, `webm`, `mov`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `mp3`, `wav`, `ogg`, `m4a`, `aac`.
-  Any other extension needs an explicit `mimeType`.
-- **`sources[].name`** — optional display name; defaults to the file's basename.
+  Any other extension needs an explicit `mimeType`. One that is given must be a non-empty
+  string.
+- **`sources[].name`** — optional display name; defaults to the file's basename. One that is
+  given must be a non-empty string.
 - **`sources[].width`, `height`, `duration`** — optional. Probed from the bytes when omitted;
   supplying them saves a probe.
 - **`sources[].meta`** — optional, mirrors a `.veditor` bundle video's own `meta` below
@@ -185,7 +187,8 @@ later otherwise:
   by name, so `a/clip.mp4` and `b/clip.mp4` in one job is rejected.
 - **Every media clip's `sourceVideoId` must exist in `sources`.** A mismatch fails with
   `clip "<id>" references unknown source "<id>"` — it means the project and the manifest have
-  drifted apart, not that a file is missing.
+  drifted apart, not that a file is missing. A clip that is not an object at all fails with
+  `project.timeline.clips[<i>] must be an object`.
 - **The project itself is validated in the page before any frame is drawn** (ESCSUITE-173): the
   same shape check the editor runs on a dropped `.veditor` or a host's `LOAD_PROJECT` — every
   clip id unique, every clip's track existing, a `crop` or `transform` that is present shaped
@@ -379,7 +382,9 @@ that accepts the body and never answers would hold the worker forever; the job t
 `webhook sink timed out after <n> ms`. Raise it, short of the bound, if you push large files
 over a slow link.
 
-`headers` are sent as given with one exception: a `Content-Type` you set is **ignored**. The
+`headers` are sent as given, and each value must be a string (a number or `null` is refused
+while the spec is parsed, as a `command` sink's `env` values are), with one exception: a
+`Content-Type` you set is **ignored**. The
 boundary is generated per request and lives in that header — overriding it would leave the
 server unable to parse the body.
 
@@ -563,6 +568,9 @@ for the JSON. The contract they assert is the one this README promises: every in
 refused with a plain `Error` naming the field or the bundle/manifest path (exit 2 for a spec);
 never a bare `TypeError`, `RangeError` or `SyntaxError`, and a refused bundle leaves no temp
 directory. They run in `test:run` like any other unit test and print nothing when they pass.
+The first run found a null clip escaping as a `TypeError` and a manifest source's `name` /
+`mimeType` going unchecked; both are fixed, and each input that found them is kept as a
+regression test beside its fuzz case.
 
 Each file fixes its seed, so a run is deterministic. A failure prints the seed, the iteration and
 the mutation in words, for example `seed 0x5eed0150, iteration 366 … mutation: swapType
