@@ -553,6 +553,23 @@ asserts its mean colour still matches the source, and re-hashes the delivered fi
 manifest's `sha256` and `byteLength` describe the bytes that were actually written. Those tests
 need `ffmpeg` and `ffprobe` on `PATH` and skip themselves (loudly) when the binaries are absent.
 
+## Fuzz tests
+
+`src/jobSpec.fuzz.test.ts` and `src/loaders.fuzz.test.ts` feed the job spec parser, `loadManifest`
+and `loadBundle` (both `.veditor` versions) a few hundred seeded mutations each of a real input:
+truncations, bit flips and resized declared lengths for the v2 container, duplicated and swapped
+ranges, and deleted keys, swapped types, non-finite and huge numbers, deep nesting and long arrays
+for the JSON. The contract they assert is the one this README promises: every input loads, or is
+refused with a plain `Error` naming the field or the bundle/manifest path (exit 2 for a spec);
+never a bare `TypeError`, `RangeError` or `SyntaxError`, and a refused bundle leaves no temp
+directory. They run in `test:run` like any other unit test and print nothing when they pass.
+
+Each file fixes its seed, so a run is deterministic. A failure prints the seed, the iteration and
+the mutation in words, for example `seed 0x5eed0150, iteration 366 … mutation: swapType
+project.timeline.clips[0] -> null`: rerun the file to replay it, or rebuild that one input from
+the description with the operators in `test/fuzz.ts` (the same harness ESCAPEARTIST uses,
+`apps/artist/src/test/fuzz.ts`, written out again so neither package imports the other).
+
 ## Exit codes and the stdout/stderr contract
 
 | Exit | Meaning | stdout |

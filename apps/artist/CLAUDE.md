@@ -4993,6 +4993,23 @@ outcome, not on the double.
 - **`src/test/appDoubles.ts`** holds the collaborator modules the `App.*.test.tsx` files
   hand to `vi.mock` (storage, project manager, integration, video processor);
   `src/test/domQueries.ts` holds the label-based control queries the editor panels share.
+- **Fuzz tests** (ESCSUITE-294) — `src/test/fuzz.ts` is a seeded mutation harness (a written-out
+  mulberry32 `createRng(seed)`; byte mutations `truncateAt`, `flipBit`, `resizeDeclared`,
+  `swapRanges`; JSON mutations `deleteKey`, `swapType`, `injectNumber`, `nestDeep`, `growArray`,
+  drawn together by `mutateJson`; and `expectNamedRefusal(run, isExpected, context)`, which passes
+  when `run` returns or refuses with an error `isExpected` accepts and a non-empty message, and
+  fails on anything else, a promise still pending after 2 s included). Each input parser has a
+  `*.fuzz.test.ts` beside its suite asserting its refusal contract over a few hundred mutations
+  of a real input: `core/projectFileFormat.fuzz.test.ts` (the v2 reader, then `loadProject`:
+  a `ProjectFileError` or a load, nothing written on a refusal), `store/projectMigration.fuzz.test.ts`
+  (`parseProject` returns `{ ok: false, reason }` and never throws) and
+  `app/useHostIntegration.fuzz.test.ts` (one `INVALID_MESSAGE` or `INVALID_PROJECT` reply, nothing
+  applied). The seed is a constant per file and the iteration count is fixed, so a run is
+  deterministic and prints nothing when it passes. **Reproducing a failure:** the message names the
+  seed, the iteration and the mutation in words (`seed 0x5eed0294, iteration 23 … mutation: nestDeep
+  project.timeline.shapeOverlays[0] -> depth 116`); rerunning the file replays it exactly, and
+  `setAt` / `nestDeep` / the other operators rebuild that one input for a standalone test. The
+  headless kit has the same harness, written out again (`services/headless-artist/test/fuzz.ts`).
 
 ## Key Constraints
 
