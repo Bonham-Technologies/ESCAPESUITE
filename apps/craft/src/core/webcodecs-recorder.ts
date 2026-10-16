@@ -897,6 +897,8 @@ export class WebCodecsRecorder {
         companion.encodedCount++;
       },
     });
+    // Its encoder gave up before there was a capture to stop (`endCompanion`).
+    if (companion.failed) void companion.capture.stop();
 
     this.companions.push(companion);
     this.watchCompanionTrack(companion, track);
@@ -963,16 +965,16 @@ export class WebCodecsRecorder {
    * just disconnects. The encoder is deliberately left alone: `stop()` still
    * has to flush it to get the tail of the part into the file.
    *
-   * The capture is non-null here: it is set before the companion is on
-   * `companions` and before its track is watched, and an encoder error during
-   * setup cannot land in between — the encoder is configured with nothing but
-   * microtasks after it, and an error callback is a task.
+   * An audio companion whose encoder fails while it is still being set up has
+   * no capture yet: nothing to stop, and nothing may throw here, inside the
+   * encoder's error callback. Its `failed` flag is the mark —
+   * `initializeAudioCompanion` stops the capture the moment it is built.
    */
   private endCompanion(companion: CompanionPipeline): void {
     if (companion.kind === 'video') {
       companion.readerActive = false;
-    } else {
-      void companion.capture!.stop();
+    } else if (companion.capture) {
+      void companion.capture.stop();
     }
   }
 
