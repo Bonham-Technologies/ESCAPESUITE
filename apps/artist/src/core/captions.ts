@@ -267,33 +267,26 @@ function formatTimestamp(ms: number, separator: ',' | '.'): string {
 }
 
 /**
- * How each format writes one line of a cue's text so `parseCaptions` reads
- * back exactly that line — line by line, because that is how it reads tags.
+ * How a line of a cue's text is written, in either format (fix round 2): as it
+ * is, with one substitution — a `-->` becomes `→`. Neither format can carry a
+ * `-->` in cue text (the parser takes a timing line inside a cue as the start
+ * of the next one), and the arrow keeps the meaning. Nothing is escaped or
+ * padded: a sidecar is a file people open and hand on.
  */
-const WRITE_LINE: Record<CaptionFormat, (line: string) => string> = {
-  // SRT has no escapes, so a literal tag — which a parse can leave behind,
-  // since it strips in one pass — has an empty `<i></i>` put after each `<`,
-  // which the parser strips back out (review M1); and a line that would read
-  // as timing gets one inside its arrow, so it reads back as the same text and
-  // not as the start of another cue (review I2). Other lines are written as
-  // they are. WebVTT's escapes cover both.
-  srt: (line) => {
-    const literal = line.search(TAG) >= 0 ? line.replace(/</g, '<<i></i>') : line;
-    return isTimingLine(literal) ? literal.replace(/-->/g, '--<i></i>>') : literal;
-  },
-  vtt: (line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
-};
+const writeLine = (line: string): string => line.replace(/-->/g, '\u2192');
 
 /**
  * Write cues as an `.srt` (1-based indices, `,` before the milliseconds) or a
  * `.vtt` (the `WEBVTT` header, `.`), in the order given.
  *
- * Round-trip stable: `parseCaptions` reads it back to the cues it was given
- * (to the millisecond) — exactly, for cues it parsed itself. So a cue a reader
- * would drop — no words, or no length once rounded — is not written, a blank
- * line inside a cue's text (which would end the block) is left out, each line
- * is trimmed the way the parser trims it, and text the parser would take for
- * markup or a timing line is written so that it is not (`WRITE_LINE`).
+ * Round-trip: `parseCaptions` reads it back to the cues it was given, to the
+ * millisecond — a cue a reader would drop (no words, or no length once
+ * rounded) is not written, a blank line inside a cue's text (which would end
+ * the block) is left out, each line is trimmed the way the parser trims it,
+ * and a `-->` in the text comes back as `→`. The one loss: caption text shaped
+ * like a tag the formats recognise (`<i>`, `<v Name>` …) is written as it is
+ * and stripped as markup on re-import, and in WebVTT text shaped like one of
+ * its escapes (`&lt;`) is decoded.
  */
 export function serializeCaptions(cues: CaptionCue[], format: CaptionFormat): string {
   const separator = format === 'srt' ? ',' : '.';
@@ -302,7 +295,7 @@ export function serializeCaptions(cues: CaptionCue[], format: CaptionFormat): st
     const start = toMs(cue.start);
     const end = toMs(cue.end);
     const text = lines(cue.text)
-      .map((line) => WRITE_LINE[format](line).trim())
+      .map((line) => writeLine(line).trim())
       .filter((line) => line !== '');
     if (text.length === 0 || end <= start) continue;
     const timing = `${formatTimestamp(start, separator)} --> ${formatTimestamp(end, separator)}`;

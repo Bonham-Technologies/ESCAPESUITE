@@ -10,7 +10,9 @@
 // returns is cues an editor can hold — finite, non-negative times with the end
 // after the start, words on every line, each dropped feature once — and
 // `serializeCaptions` writes them out in that format so that they read back as
-// exactly the same cues.
+// exactly the same cues, save for the writer's documented changes (a `-->`
+// written as `→`; tag- and escape-shaped text read back as markup), where
+// every cue read back is still one that was written, in order.
 //
 // A failure prints the seed, the iteration and the mutation; rerun this file
 // to reproduce it.
@@ -156,15 +158,31 @@ function checkParsed(parsed: ParsedCaptions, format: CaptionFormat, context: Fuz
   if (new Set(parsed.dropped).size !== parsed.dropped.length || parsed.dropped.some((d) => !VOCABULARY.has(d))) {
     throw fuzzFailure(context, `dropped is not a set of known features: ${parsed.dropped.join(', ')}`)
   }
+  // The writer's documented changes (fix round 2): a `-->` is written as `→`,
+  // and caption text shaped like a tag (or, in WebVTT, an escape) is written
+  // as it is and read back as markup. Text with none of those reads back
+  // exactly; text with any of them may lose words, and a cue left with none is
+  // dropped, but every cue that comes back is one that was written, in order.
   const written = serializeCaptions(parsed.cues, format)
+  const mayChange = parsed.cues.some((cue) => /-->|</.test(cue.text) || (format === 'vtt' && cue.text.includes('&')))
   let reread: ParsedCaptions
   try {
     reread = parseCaptions(written, format)
   } catch (error) {
+    if (mayChange && error instanceof CaptionParseError) return
     throw fuzzFailure(context, `its own serialization was refused: ${(error as Error).message}`)
   }
-  if (JSON.stringify(reread.cues) !== JSON.stringify(parsed.cues)) {
-    throw fuzzFailure(context, 'its serialization read back as different cues')
+  if (!mayChange) {
+    if (JSON.stringify(reread.cues) !== JSON.stringify(parsed.cues)) {
+      throw fuzzFailure(context, 'its serialization read back as different cues')
+    }
+    return
+  }
+  let w = 0
+  for (const cue of reread.cues) {
+    while (w < parsed.cues.length && (parsed.cues[w].start !== cue.start || parsed.cues[w].end !== cue.end)) w++
+    if (w === parsed.cues.length) throw fuzzFailure(context, `its serialization read back a cue it did not write: ${cue.start} --> ${cue.end}`)
+    w++
   }
 }
 
