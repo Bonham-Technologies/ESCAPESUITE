@@ -1,5 +1,13 @@
 # @escapesuite/headless-artist
 
+## 0.6.1
+
+### Patch Changes
+
+- 9a53df6: A project whose track carries a `kind` other than `'captions'` is now refused by name
+  
+  The kit validates projects with the editor's own `parseProject`, which now knows the caption-track marker: a project with a Captions track renders its captions like any text clips, and a track whose `kind` is anything but `'captions'` fails the job with `timeline.tracks[i].kind must be 'captions'` before a render starts.
+
 ## 0.6.0
 
 ### Minor Changes
