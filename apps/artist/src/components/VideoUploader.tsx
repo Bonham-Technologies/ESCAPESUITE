@@ -371,8 +371,14 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
       showNotification('The Captions track is locked, so no captions were imported.', 'error');
       return;
     }
+    // On a hidden track nothing appears in the picture: the same notice says
+    // why (review M3).
+    const hidden = useEditorStore
+      .getState()
+      .project.timeline.tracks.some((track) => track.id === result.trackId && !track.visible);
     showNotification(
-      `Imported ${result.added} caption${result.added !== 1 ? 's' : ''} onto the Captions track.`,
+      `Imported ${result.added} caption${result.added !== 1 ? 's' : ''} onto the Captions track.` +
+        (hidden ? ' The Captions track is hidden.' : ''),
       'success'
     );
     if (parsed.dropped.length > 0) showNotification(describeDroppedFeatures(parsed.dropped), 'info');
