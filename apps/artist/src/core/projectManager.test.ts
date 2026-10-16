@@ -32,6 +32,7 @@ import {
   storeVideo,
 } from './storage'
 import type { EditorBlock, Project, SourceVideo } from '../store/types'
+import { DEFAULT_TEXT_OVERLAY_DATA } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { OBJECT_URL_PATTERN, lastObjectUrl } from '../test/objectUrls'
 
@@ -1506,6 +1507,45 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
     expect(sourceVideos).toHaveLength(1)
     expect(sourceVideos[0]).toEqual(take)
     expect(media.videos).toHaveLength(0) // never probed the blob
+  })
+
+  // ESCSUITE-293 review M6: the caption-track marker, and the caption on it,
+  // come back from a saved .veditor.
+  it('carries the Captions track marker and its captions through a save and a load', async () => {
+    const videoId = uniqueId('captions')
+    const source: SourceVideo = {
+      id: videoId, name: 'a.mp4', duration: 5, width: 1280, height: 720, frameRate: 30, mimeType: 'video/mp4', size: 2,
+    }
+    await storeVideo(videoId, new Blob([new Uint8Array([1, 2])], { type: 'video/mp4' }), source)
+    const base = createTestProject(videoId)
+    const captionsTrack = { id: 'captions', name: 'Captions', index: 1, visible: false, locked: false, muted: false, volume: 1, height: 60, kind: 'captions' as const }
+    const caption = {
+      ...base.timeline.clips[0],
+      id: 'caption1',
+      sourceVideoId: '',
+      trackId: 'captions',
+      timelinePosition: 1,
+      duration: 1,
+      endTime: 1,
+      overlayType: 'text' as const,
+      textData: { ...DEFAULT_TEXT_OVERLAY_DATA, text: 'Hello' },
+    }
+    const project: Project = {
+      ...base,
+      timeline: { ...base.timeline, tracks: [...base.timeline.tracks, captionsTrack], clips: [...base.timeline.clips, caption] },
+    }
+
+    await saveProject(project, [source])
+    const { project: reopened } = await loadProject((await captured()).file)
+
+    expect(reopened.timeline.tracks.find((track) => track.id === 'captions')).toEqual(captionsTrack)
+    expect(reopened.timeline.clips.find((clip) => clip.id === 'caption1')?.textData?.text).toBe('Hello')
+    // loadProject hands the project back as found; useProjectActions migrates
+    // it with parseProject, which must keep the marker too.
+    const parsed = parseProject(reopened)
+    expect(parsed.ok && parsed.project.timeline.tracks.find((track) => track.id === 'captions')?.kind).toBe('captions')
+
+    await deleteVideo(videoId)
   })
 
   it('clears CRAFT take identity but still restores everything else from meta when the source is no longer in the shared DB (ESCSUITE-151)', async () => {
