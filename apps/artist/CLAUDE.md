@@ -4348,8 +4348,13 @@ file and no fallback. WebM's shape now matches MP4's:
   identical report would be mislabelled the other way, its colours shifted by the same ~25/255 in the
   opposite direction, with nothing in CI to notice (CI's e2e runs Chromium only); that residual risk,
   and retiring the gate, are **ESCSUITE-288**, the upstream report against Firefox's WebCodecs
-  encoder — filed 2026-10-12 as https://bugzilla.mozilla.org/show_bug.cgi?id=2081037; when a Firefox
-  release resolves it, re-run the probe below and retire the gate or narrow it to the new report.
+  encoder. Upstream the canonical bug is https://bugzilla.mozilla.org/show_bug.cgi?id=2057760 (our
+  own report, 2081037, filed 2026-10-12, was closed as its duplicate within hours). It weighs the two
+  fixes we identified: change the report to `smpte170m`, in which case the gate falls out on its own;
+  or convert with BT.709 and keep the report, in which case the pixels change under an identical
+  report and the gate must be removed or version-capped **before** that Firefox reaches release,
+  because CI runs Chromium only and would not notice. When 2057760 lands, read which shipped, re-run
+  the probe below, and retire or cap the gate accordingly.
   Every measurement here was on **macOS**, with Playwright's Firefox 155 build: Firefox on
   Linux, Windows and Android passes the `Gecko/` + `Firefox/` gate **unmeasured** (Android may hand
   VP8/VP9 to a platform encoder that converts or reports differently).
