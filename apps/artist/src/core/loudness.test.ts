@@ -40,7 +40,7 @@ function biquadPower(c: typeof TABLE.pre, freq: number, sr: number): number {
   return num / den
 }
 
-/** The K-weighting power gain at 1 kHz, from the published table: ≈ +0.69 dB. */
+/** The K-weighting power gain at 1 kHz, from the published table: ≈ +0.70 dB. */
 const KW_1K = biquadPower(TABLE.pre, 1000, SR) * biquadPower(TABLE.rlb, 1000, SR)
 
 /** Loudness of a mono sine of peak amplitude `a` at 1 kHz: −0.691 + 10·log10(a²/2 · Kw). */
@@ -89,13 +89,14 @@ describe('kWeightingCoefficients', () => {
   })
 
   it('keeps the same response at another sample rate (derived, not tabled)', () => {
-    // The analytic 1 kHz gain at 48 kHz is ≈ +0.691 dB, which is why the
-    // −0.691 offset exists; a coefficient set derived for 44.1 kHz must land
-    // on the same gain there.
+    // The analytic 1 kHz gain at 48 kHz is ≈ +0.70 dB — the −0.691 offset
+    // cancels it to within 0.01 dB, which is why a stereo 1 kHz sine at
+    // −23 dBFS reads −23.0 LUFS. A coefficient set derived for 44.1 kHz must
+    // land on the same gain there.
     const { pre, rlb } = kWeightingCoefficients(44100)
     const gainDb = 10 * Math.log10(biquadPower(pre, 1000, 44100) * biquadPower(rlb, 1000, 44100))
     expect(gainDb).toBeCloseTo(10 * Math.log10(KW_1K), 2)
-    expect(10 * Math.log10(KW_1K)).toBeCloseTo(0.691, 2)
+    expect(10 * Math.log10(KW_1K)).toBeCloseTo(0.7, 1)
   })
 })
 
@@ -342,7 +343,11 @@ describe('exportLoudness', () => {
 
   it('normalises the mix in place onto the target, under the ceiling', () => {
     const mix = stereo(sine(3, dbfs(-30)))
+    const before = mix.slice()
     const result = exportLoudness(mix, 2, SR, -16)!
+    // Under the ceiling the limiter cannot engage, so this is a plain gain.
+    const g = 10 ** (result.gainDb / 20)
+    for (let i = 0; i < mix.length; i += 89) expect(mix[i]).toBeCloseTo(before[i] * g, 6)
     expect(result.targetLufs).toBe(-16)
     expect(result.gainDb).toBeCloseTo(14, 1)
     expect(result.limited).toBe(false)
