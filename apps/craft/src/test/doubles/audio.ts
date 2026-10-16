@@ -173,6 +173,13 @@ export interface AudioContextDoubleControl {
    * constructed (present or absent) and on every call (its values).
    */
   outputClock: OutputClockDouble | null
+  /**
+   * Opt-in `currentTime`, as a function of `performance.now()`. Null (the
+   * default): a context reads `currentTime` as `undefined`, so every suite
+   * written before ESCSUITE-296's quantum rule gives the recorder's gap filler
+   * no clock at all and keeps the old path.
+   */
+  currentTimeAt: ((performanceTime: number) => number) | null
 }
 
 const control: AudioContextDoubleControl = {
@@ -185,6 +192,7 @@ const control: AudioContextDoubleControl = {
   resumeGate: null,
   contextSampleRate: null,
   outputClock: null,
+  currentTimeAt: null,
 }
 
 function makeAudioTrack(index: number): MediaStreamTrack {
@@ -230,6 +238,10 @@ export class AudioContextDoubleInstance {
     return control.decodeResult as unknown as AudioBuffer
   })
   readonly decodedByteLengths: number[] = []
+  /** `control.currentTimeAt` at the current `performance.now()`, or undefined. */
+  get currentTime(): number | undefined {
+    return control.currentTimeAt?.(performance.now())
+  }
   /** Present only when `control.outputClock` was set at construction. */
   getOutputTimestamp?: ReturnType<typeof vi.fn<() => { contextTime: number; performanceTime: number }>>
 
@@ -331,6 +343,7 @@ export function resetAudioContextDouble(): void {
   control.resumeGate = null
   control.contextSampleRate = null
   control.outputClock = null
+  control.currentTimeAt = null
 }
 
 /** The single AudioContext the code under test created (fails loudly if none). */

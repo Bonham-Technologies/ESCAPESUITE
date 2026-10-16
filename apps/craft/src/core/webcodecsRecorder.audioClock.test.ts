@@ -85,6 +85,8 @@ interface AudioTally {
   count: number
   /** Of those, the ones that are silence the recorder made up (every sample 0). */
   zeros: number
+  /** Frames of made-up silence, all told. */
+  zeroFrames: number
   /** End of the last AudioData: its stamp plus its length at its own rate, µs. */
   endUs: number
   /** Every `sampleRate` an AudioData carried. */
@@ -92,14 +94,17 @@ interface AudioTally {
 }
 
 function newTally(): AudioTally {
-  return { count: 0, zeros: 0, endUs: 0, rates: new Set() }
+  return { count: 0, zeros: 0, zeroFrames: 0, endUs: 0, rates: new Set() }
 }
 
 function tallyAudio(encoder: EncoderDouble, tally: AudioTally): void {
   for (const { data } of encoder.encodes) {
     const init = data.init as { timestamp: number; numberOfFrames: number; sampleRate: number }
     tally.count++
-    if ((data.source as Float32Array).every(v => v === 0)) tally.zeros++
+    if ((data.source as Float32Array).every(v => v === 0)) {
+      tally.zeros++
+      tally.zeroFrames += init.numberOfFrames
+    }
     tally.endUs = init.timestamp + (init.numberOfFrames / init.sampleRate) * 1e6
     tally.rates.add(init.sampleRate)
   }
@@ -155,6 +160,19 @@ interface TakeShape {
    * the buffer's exact position.
    */
   dispatchDelay?: (k: number) => number
+  /**
+   * Lose one 128-sample render quantum of content every this many seconds:
+   * the delivered count falls behind the engine's render position a quantum
+   * at a time, which is how the rig saw a real loss arrive on its jank take.
+   */
+  creepEvery?: number
+  /**
+   * Where the event's reference time comes from. `'playbackTime'` (default):
+   * the event carries it. `'currentTime'`: it does not, and the context's
+   * `currentTime` — read at dispatch, rounded down to a render quantum — is
+   * the only clock there is.
+   */
+  reference?: 'playbackTime' | 'currentTime'
   /** A video frame every this many wall seconds. Default 1. */
   videoEvery?: number
 }
@@ -203,7 +221,17 @@ async function recordTake(shape: TakeShape): Promise<TakeResult> {
   let nextVideo = 0
   let delivered = 0
   let dropped = 0
-  const audioAt = (n: number) => ((n * bufferSeconds) / (1 + clock.skew)) * 1000
+  const quantum = 128 / rate
+  /** Content lost by the time buffer n is delivered, in seconds. */
+  const creepAt = (n: number) =>
+    shape.creepEvery ? Math.floor((n * bufferSeconds) / shape.creepEvery) * quantum : 0
+  const audioAt = (n: number) => (((n * bufferSeconds + creepAt(n)) / (1 + clock.skew)) * 1000)
+  if (shape.reference === 'currentTime') {
+    audio.currentTimeAt = performanceTime =>
+      Math.floor(
+        ((contextAtStart + ((performanceTime - startMs) / 1000) * (1 + clock.skew)) * rate) / 128 + 1e-9
+      ) * quantum
+  }
   const isDropped = (n: number) =>
     Boolean((shape.dropEvery && n % shape.dropEvery === 0) || shape.drop?.(n))
   let lastDispatchMs = -Infinity
@@ -230,12 +258,14 @@ async function recordTake(shape: TakeShape): Promise<TakeResult> {
         dropped++
       } else {
         const playbackTime = scriptProcessorPlaybackTime(
-          contextAtStart + (k - 1) * bufferSeconds,
+          contextAtStart + (k - 1) * bufferSeconds + creepAt(k),
           rate,
           ((audioMs - audioAt(k)) / 1000) * (1 + clock.skew)
         )
         node.onaudioprocess!(
-          shape.playbackTime === false ? { inputBuffer: buffer } : { inputBuffer: buffer, playbackTime }
+          shape.playbackTime === false || shape.reference === 'currentTime'
+            ? { inputBuffer: buffer }
+            : { inputBuffer: buffer, playbackTime }
         )
         delivered++
         lastDispatchMs = audioMs
@@ -297,7 +327,8 @@ describe('audio and video timelines advance together over a long take', () => {
   }, 60_000)
 
   it('fills each onaudioprocess the page never saw with silence (one in 200 lost, 10 min)', async () => {
-    const r = await recordTake({ seconds: 600, dropEvery: 200 })
+    // Losses stop a window before the end, so every one has been judged by then.
+    const r = await recordTake({ seconds: 600, drop: k => k % 200 === 0 && k * (BUFFER / 48000) < 590 })
     // Each lost callback used to take 4096 samples out of the audio timeline:
     // 85.3 ms per loss, every later sound stamped that much before its picture.
     expect(r.dropped).toBeGreaterThan(30)
@@ -349,7 +380,7 @@ describe('audio and video timelines advance together over a long take', () => {
       now = startMs + k * bufferSeconds * 1000
       const event = { inputBuffer: buffer, playbackTime: 1000 + (k - 1) * bufferSeconds }
       mixNode.onaudioprocess!(event)
-      if (k % 200 === 0) micDropped++
+      if (k % 200 === 0 && k * bufferSeconds < 590) micDropped++
       else micNode.onaudioprocess!(event)
       const [mix, mic] = AudioEncoderDouble.instances
       tallyAudio(mix, mixTally)
@@ -544,7 +575,7 @@ describe('playbackTime read at dispatch', () => {
     expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
   }, 60_000)
 
-  it('(e) sustained 0-60 ms lateness on every callback, nothing lost, fills nothing (10 min, the rig\'s jank take)', async () => {
+  it('(f) sustained 0-60 ms lateness on every callback, nothing lost, fills nothing (10 min, the rig\'s jank take)', async () => {
     // Modelled on the measurement rig's 60 ms busy loop every 100 ms in
     // headless Chromium: lateness that swings slowly between 0 and 60 ms, so
     // it stays above half a buffer (42.7 ms) for many callbacks in a row —
@@ -559,6 +590,55 @@ describe('playbackTime read at dispatch', () => {
     expect(r.mix.zeros).toBe(0)
     expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
   }, 60_000)
+
+  it('(e) a loss that arrives as render-quantum creep under 0-60 ms jitter is filled as it comes (10 min)', async () => {
+    // The rig's jank take lost its audio 128 samples at a time, never a whole
+    // buffer: a whole-buffer filler never fires on it.
+    const random = seededRandom(13)
+    const r = await recordTake({ seconds: 600, dispatchDelay: () => random() * 0.06, creepEvery: 1.3 })
+    const quantum = 128 / 48000
+    // Everything lost up to a window (4 s) before the end, within two quanta:
+    // the fill judges a window of callbacks, and leaves the last quantum.
+    const creepBeforeLastWindow = Math.floor((600 - 4) / 1.3) * quantum
+    const filled = r.mix.zeroFrames / 48000
+    expect(filled).toBeGreaterThanOrEqual(creepBeforeLastWindow - 2 * quantum)
+    expect(filled).toBeLessThanOrEqual(Math.floor(600 / 1.3) * quantum)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  }, 60_000)
+
+  it('(e) the rig\'s own creep — about 43 ms in a minute under jank — is filled, where a whole-buffer rule fills nothing', async () => {
+    // One quantum every 3.7 s: 16 quanta, 42.7 ms, over 60 s.
+    const random = seededRandom(19)
+    const r = await recordTake({ seconds: 60, dispatchDelay: () => random() * 0.06, creepEvery: 3.7 })
+    const quantum = 128 / 48000
+    const filled = r.mix.zeroFrames / 48000
+    expect(filled).toBeGreaterThanOrEqual(Math.floor((60 - 4) / 3.7) * quantum - 2 * quantum)
+    expect(filled).toBeLessThanOrEqual(16 * quantum)
+  })
+
+  it('(h) a constant 30 ms dispatch latency from the first callback fills nothing (10 min)', async () => {
+    const r = await recordTake({ seconds: 600, dispatchDelay: () => 0.03 })
+    expect(r.mix.zeros).toBe(0)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  }, 60_000)
+
+  it('without playbackTime, reads the context\'s currentTime instead: a loss under jitter is filled once', async () => {
+    const random = seededRandom(17)
+    const r = await recordTake({
+      seconds: 60,
+      reference: 'currentTime',
+      dispatchDelay: () => random() * 0.06,
+      drop: k => k === 300,
+    })
+    expect(r.dropped).toBe(1)
+    expect(r.mix.zeros).toBe(1)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('a burst queued behind a 6 s main-thread hang — longer than the window — fills nothing', async () => {
+    const r = await recordTake({ seconds: 60, dispatchDelay: hang(20, 26) })
+    expect(r.mix.zeros).toBe(0)
+  })
 
   /** Callbacks that came due during [from, to) seconds are all dispatched at `to`. */
   const hang = (from: number, to: number) => (k: number) => {
@@ -626,7 +706,7 @@ describe('playbackTime read at dispatch', () => {
       now = startMs + dispatch * 1000
       const playbackTime = scriptProcessorPlaybackTime(1000 + (k - 1) * bufferSeconds, 48000, dispatch - ready)
       nodes.forEach((node, i) => {
-        if (k % dropEvery[i] === 0) dropped[i]++
+        if (k % dropEvery[i] === 0 && ready < 590) dropped[i]++
         else node.onaudioprocess!({ inputBuffer: buffer, playbackTime })
       })
       AudioEncoderDouble.instances.forEach((encoder, i) => tallyAudio(encoder, tallies[i]))
