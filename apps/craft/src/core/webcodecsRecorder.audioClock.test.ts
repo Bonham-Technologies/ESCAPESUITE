@@ -429,13 +429,47 @@ describe('pause and resume', () => {
     deliverUntil(7000)
     now = startMs + 7000
     recorder.resume()
-    deliverUntil(8000)
-    await frameAt(8000)
+    deliverUntil(9000)
+    // Two seconds after the resume's own reading, so this frame re-reads the
+    // context clock rather than extrapolating on performance.now().
+    await frameAt(9000)
 
-    // Context time runs 1.5x: 12 s elapsed, 7.5 s of it paused.
-    expect(lastVideoEncoder().encodes.map(e => e.data.timestamp)).toEqual([0, 4_500_000])
+    // Context time runs 1.5x: 13.5 s elapsed, 7.5 s of it paused.
+    expect(lastVideoEncoder().encodes.map(e => e.data.timestamp)).toEqual([0, 6_000_000])
     // The 7.5 s jump in playbackTime at the resume is the pause, not a loss.
     expect(mix.zeros).toBe(0)
-    expect(Math.abs(mix.endUs - 4_500_000)).toBeLessThanOrEqual(toleranceUs())
+    expect(Math.abs(mix.endUs - 6_000_000)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('separate tracks: every audio pipeline re-anchors at a resume, so none fills the pause', async () => {
+    await initialize(SEPARATE_TRACKS)
+    const [mixNode, micNode] = lastAudioContext().scriptProcessors
+    const buffer = realBuffer()
+    recorder.start()
+    const bufferSeconds = BUFFER / 48000
+    const mixTally = newTally()
+    const micTally = newTally()
+    const deliver = (from: number, to: number) => {
+      for (let k = from; k < to; k++) {
+        const event = { inputBuffer: buffer, playbackTime: 1000 + k * bufferSeconds }
+        mixNode.onaudioprocess!(event)
+        micNode.onaudioprocess!(event)
+      }
+      const [mix, mic] = AudioEncoderDouble.instances
+      tallyAudio(mix, mixTally)
+      tallyAudio(mic, micTally)
+    }
+
+    deliver(0, 20)
+    recorder.pause()
+    deliver(20, 80)
+    recorder.resume()
+    deliver(80, 100)
+
+    expect(mixTally.zeros).toBe(0)
+    expect(micTally.zeros).toBe(0)
+    expect(mixTally.count).toBe(40)
+    expect(micTally.count).toBe(40)
+    expect(micTally.endUs).toBeCloseTo(mixTally.endUs, 6)
   })
 })
