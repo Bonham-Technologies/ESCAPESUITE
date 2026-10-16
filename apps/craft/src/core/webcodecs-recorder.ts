@@ -1582,7 +1582,8 @@ export class WebCodecsRecorder {
     }
     // Asked now, with the rest of the capture, so nothing recorded after the
     // stop is taken: the fallback stops counting at once, and the AudioWorklet
-    // is asked for its tail at the render position the take ended on.
+    // closes its open span at the render position the take ended on — its
+    // flushed tail is cut there.
     const audioStopped = Promise.all(this.captures.map((capture) => capture.stop()));
 
     // Stop frame capture (setTimeout-based)

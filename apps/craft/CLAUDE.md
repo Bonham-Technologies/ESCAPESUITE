@@ -1358,7 +1358,8 @@ path is live — captures through an AudioWorklet wherever it can:
   chunks of `CHUNK_FRAMES` (4096, the ~85 ms a ScriptProcessor buffer was) per channel and posts
   `{ frame, channels }`, `frame` the render position of the chunk's first sample, the two
   `Float32Array`s transferred. The node is two channels, explicit, connected to the destination
-  (silent) so the engine pulls it; an input with nothing connected is recorded as silence.
+  (silent) so the engine pulls it; an input with nothing connected is recorded as silence, the
+  quantum's length read from the node's output rather than assumed to be 128.
 - **Stamping is by render position, never by arrival.** The take is a list of recorded spans of the
   render clock — `start()` opens one, `pause()` closes it, `resume()` opens the next, each read as
   `round(currentTime × sampleRate)`, the same frame count `currentFrame` reports. What a chunk
@@ -1372,8 +1373,9 @@ path is live — captures through an AudioWorklet wherever it can:
   (`currentTime`) at the same two moments on the same render clock, so the two subtract the same
   pause, to within a render quantum (2.7 ms), never cumulative.
 - **`stop()`** (asked at the top of the recorder's `stop()`, awaited before any encoder is flushed)
-  posts `'flush'`; the processor posts its partial tail and `{ flushed: true }` behind every chunk
-  still queued, and the capture closes the node and its port when that acknowledgement arrives —
+  closes the open span at the render position it is called at — so the tail is cut where the take
+  ended, not where the render thread got to the message — and posts `'flush'`; the processor posts
+  its partial tail and `{ flushed: true }` behind every chunk still queued, and the capture closes the node and its port when that acknowledgement arrives —
   after `FLUSH_TIMEOUT_MS` (1 s) without one it warns once and closes anyway, so a render thread that
   has stopped cannot hold a take hostage. A chunk that arrives after that is ignored. `close()` (the
   recorder's `cleanup()`) lets the node go at once and settles a pending `stop()`.

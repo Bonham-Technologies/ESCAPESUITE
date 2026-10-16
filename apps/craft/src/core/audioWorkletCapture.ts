@@ -47,7 +47,8 @@ const SCRIPT_PROCESSOR_BUFFER = 4096;
  * is a global. Each chunk is two fresh `Float32Array`s that are transferred,
  * not copied, so nothing on the render thread is reused after it is posted.
  * The node is built with two channels, explicit, so an input has either two
- * channels or — with nothing actively connected — none, which is silence.
+ * channels or — with nothing actively connected — none, which is silence; the
+ * quantum's length is read from the node's output, which always exists.
  * `'flush'` is the only message it is sent: it posts what it has gathered (if
  * anything), acknowledges with `{ flushed: true }` behind it on the same port,
  * and stops processing.
@@ -76,10 +77,12 @@ class EscapeCraftCapture extends AudioWorkletProcessor {
     this.filled = 0;
   }
 
-  process(inputs) {
+  process(inputs, outputs) {
     if (this.flushed) return false;
     const input = inputs[0];
-    const length = input.length > 0 ? input[0].length : 128;
+    // The quantum's length, from the output the node always has (two
+    // channels), so a silent quantum of any render size is counted right.
+    const length = outputs[0][0].length;
     let offset = 0;
     while (offset < length) {
       if (this.filled === 0) {
@@ -209,7 +212,9 @@ interface RecordedSpan {
  * inside a pause is dropped, and a chunk that arrives after a pause (or a
  * resume) is still judged by where it was rendered. A chunk that straddles a
  * span edge is cut there, to the frame: the audio starts at `start()` with a
- * stamp of 0 and runs on across a pause with neither a gap nor an overlap.
+ * stamp of 0, runs on across a pause with neither a gap nor an overlap, and
+ * ends at `stop()`, which closes the open span at the render position it is
+ * called at — so the flushed tail stops there too.
  *
  * The page reads the render position as `currentTime × sampleRate` — the same
  * frame count the processor's `currentFrame` reports — at `start()`, `pause()`
@@ -311,6 +316,11 @@ function createWorkletCapture(
       spans.push({ from: renderFrame(), to: Infinity, offset: last.offset + (last.to - last.from) });
     },
     stop() {
+      // The take ends here: whatever the render thread goes on rendering until
+      // it handles the flush is cut off. Already closed by a pause, the span
+      // keeps its pause; before start() there is no span at all.
+      const last = spans[spans.length - 1];
+      if (last) last.to = Math.min(last.to, renderFrame());
       stopped ??= closed
         ? Promise.resolve()
         : new Promise<void>((resolve) => {
