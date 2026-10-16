@@ -376,9 +376,13 @@ pnpm lint                # Run ESLint
   that is not an object or whose `id`, `name`, `mimeType` or `data` is not a string, a `thumbnail`
   that is present and not a string, a `meta` that is present and not an object (`videos[<i>].data
   must be a string` and so on), and an id listed twice (`the file lists source "<id>" twice`, the
-  v2 rule). A `null` thumbnail or meta is absent, as it always was. `data` or a `thumbnail` that
-  `atob` cannot decode is refused as `videos[<i>].data is not base64` as that source is restored,
-  inside the shared rollback, so a source stored before it is deleted again. `parseProject`'s own
+  v2 rule). A `null` thumbnail or meta still counts as absent, as it always did, and so does an
+  empty-string thumbnail. A few hand-edited shapes that used to load are now refused: a `meta` that
+  is not an object (a list, `false`, `0`, `""`), a thumbnail that is neither a string nor `null`, a
+  non-string `id` or `name`, a missing `mimeType`, and a source id listed twice. No ESCAPEARTIST ever
+  wrote any of them. `data` or a `thumbnail` that `atob` cannot decode is refused as
+  `videos[<i>].data is not base64` (or `.thumbnail`) as that source is restored, inside the shared
+  rollback, so a source stored before it is deleted again. `parseProject`'s own
   reasons pass through unchanged, as on v2. **Before any write**, both versions run `parseProject(project, editor)` (`assertProjectParses`) and throw
   `ProjectFileError(reason)` for a project it refuses, so a hand-edited file, or one from a newer
   editor, is refused by name with nothing stored and nothing to roll back (it used to be judged by
@@ -1042,11 +1046,14 @@ exporters only iterate `timeline.clips`.
   `null`, a string, `NaN`, `Infinity`) used to convert into a NaN-length clip that `parseProject`
   accepted and the exporter refused (`assertExportableLength`), far from the cause. `projectMigration.ts`'s
   `repairLegacyOverlayWindows` runs inside `ensureTimelineHasTracks`, before either return path's
-  conversion: such an overlay starts at its `startTime` when that alone is a finite number, else at
-  0, and lasts `REPAIRED_OVERLAY_DURATION`, 5 s, the length an overlay added in the editor gets
+  conversion. Two finite times whose difference overflows (`-1.7e308` / `1.7e308`) count as unusable
+  too. Such an overlay starts at its `startTime` (clamped at 0, as the conversion clamps a position)
+  when that alone is a finite number, else at 0, and lasts `REPAIRED_OVERLAY_DURATION`, 5 s, the length an overlay added in the editor gets
   (`overlaySlice.ts`'s `duration ?? 5`). It is repaired rather than refused, the ESCSUITE-173 / 255
   split for a shape the app once wrote, so every old file keeps loading. One `console.warn` per
   parse counts them ("Repaired the start and end times of 2 legacy overlays; each now lasts 5 s").
+  Open Project parses twice (`assertProjectParses` in `loadProject`, then the hook's own
+  `parseProject` on the unmigrated project), so it warns twice; the host and headless paths warn once.
   A finite pair is left to the conversion, inverted or zero-length included: it has always clamped
   that to its 0.1 s minimum, so a file that loaded before converts byte for byte as it did. A legacy
   overlay has no source, so there is no media length to take instead.
