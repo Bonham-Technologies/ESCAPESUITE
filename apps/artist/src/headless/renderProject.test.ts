@@ -101,6 +101,35 @@ describe('renderProject', () => {
     expect(res.meta.format).toBe('gif')
   })
 
+  // ESCSUITE-292: a job's loudness target reaches the exporter as the dialog's
+  // does, and the exporter's measurement reaches the meta the kit's
+  // verification manifest is built from — in the manifest's four fields.
+  it('carries options.loudnessTarget through to the exporter', async () => {
+    const input = baseInput()
+    input.options = { format: 'webm', loudnessTarget: -16 } as RenderInput['options']
+
+    await renderProject(input)
+
+    expect((exportToWebM.mock.calls[0] as unknown[])[2]).toMatchObject({ format: 'webm', loudnessTarget: -16 })
+  })
+
+  it('records the measured loudness and the gain applied in the meta', async () => {
+    exportToMP4.mockResolvedValueOnce({
+      blob: new Blob([new Uint8Array([9])], { type: 'video/mp4' }), audio: true, framesEncoded: 30,
+      loudness: { measuredLufs: -20.5, truePeakDbtp: -3.2, gainDb: 6.5, targetLufs: -14, limited: true },
+    } as Awaited<ReturnType<typeof exportToMP4>>)
+
+    const res = await renderProject(baseInput())
+
+    expect(res.meta.loudness).toEqual({ measuredLufs: -20.5, truePeakDbtp: -3.2, gainDb: 6.5, targetLufs: -14 })
+  })
+
+  it('leaves loudness out of the meta when the export measured nothing', async () => {
+    const res = await renderProject(baseInput())
+
+    expect('loudness' in res.meta).toBe(false)
+  })
+
   it('reports a GIF durationSec in the frame delays the file stores, not the requested range', async () => {
     // A GIF's on-screen time per frame is stored in **centiseconds**, so there are
     // two roundings between a frame rate and a duration: the exporter asks for
