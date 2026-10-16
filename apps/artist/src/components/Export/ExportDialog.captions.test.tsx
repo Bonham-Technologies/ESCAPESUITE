@@ -133,6 +133,23 @@ describe('ExportDialog — caption sidecar (ESCSUITE-293)', () => {
     expect(captionsRow()).not.toBeNull()
   })
 
+  // Review I1: the dialog is always mounted, so a damaged clip that
+  // parseProject lets through must not take the editor down while it is shut.
+  it('survives a caption-track text clip with no text, closed or open, and leaves it out of the sidecar', async () => {
+    const { trackId } = store().addCaptionCues([{ start: 6, end: 7, text: 'Kept' }], style)!
+    const project = store().project
+    const [kept] = project.timeline.clips.filter((clip) => clip.trackId === trackId)
+    const noTextData = { ...kept, id: 'no-text-data', timelinePosition: 1, textData: undefined }
+    const numericText = { ...kept, id: 'numeric-text', timelinePosition: 2, textData: { ...kept.textData!, text: 42 as unknown as string } }
+    store().setProject({ ...project, timeline: { ...project.timeline, clips: [...project.timeline.clips, noTextData, numericText] } })
+
+    const { rerender } = render(<ExportDialog isOpen={false} onClose={vi.fn()} />)
+    rerender(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Download .srt' }))
+
+    expect((await lastDownload(clicked)).text).toBe('1\n00:00:06,000 --> 00:00:07,000\nKept\n')
+  })
+
   it('names the files "export" for a project with no name, as the video is', async () => {
     store().setProject({ ...store().project, name: '' })
     store().addCaptionCues([{ start: 6, end: 7, text: 'Hi' }], style)
