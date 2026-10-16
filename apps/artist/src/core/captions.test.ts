@@ -326,6 +326,11 @@ describe('serializeCaptions', () => {
     )
   })
 
+  it('reads tags line by line when writing SRT, as the parser does, so a < and a > on two lines survive', () => {
+    expect(serializeCaptions([{ start: 1, end: 2, text: 'a <b\nc> d' }], 'srt')).toBe('1\n00:00:01,000 --> 00:00:02,000\na <b\nc> d\n')
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\na <b\nc> d', 'srt').cues[0].text).toBe('a <b\nc> d')
+  })
+
   it('writes hours past 99 in full', () => {
     expect(serializeCaptions([{ start: 360000, end: 360001, text: 'a' }], 'vtt')).toContain('100:00:00.000 --> 100:00:01.000')
   })
