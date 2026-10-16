@@ -645,6 +645,18 @@ describe('loadManifest source validation', () => {
       `manifest source "src-0" field "${field}" must be a non-empty string`,
     )
   })
+
+  // Review round 1: a broker that writes null for an empty optional field (Python's None, a Go
+  // nil pointer) means "absent", as it did before the guard -- the basename and the extension
+  // stand in, the same way the editor treats a null legacy overlay array.
+  it('treats a null "name" and a null "mimeType" as absent, falling back to the basename and the extension', async () => {
+    const dir = await makeManifestDir()
+    const manifestPath = await writeManifest(dir, [{ id: 'src-0', file: 'src-0.mp4', name: null, mimeType: null }])
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0]).toMatchObject({ name: 'src-0.mp4', mimeType: 'video/mp4' })
+    await job.cleanup()
+  })
 })
 
 describe('loadBundle video validation', () => {
