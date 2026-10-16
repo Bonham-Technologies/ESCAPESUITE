@@ -418,11 +418,20 @@ describe('serializeCaptions', () => {
     )
   })
 
-  it('writes WebVTT with the header and a full stop, the text as it is', () => {
+  // Fix round 3: WebVTT has escapes of its own, and its writer uses them.
+  it('writes WebVTT with the header, a full stop and the format\'s own escapes', () => {
     expect(serializeCaptions([...cues, { start: 5, end: 6, text: 'Tom & Jerry <3 >' }], 'vtt')).toBe(
       'WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nHello there.\n\n01:01:01.007 --> 01:01:02.000\nTwo lines\nof text.\n\n' +
-        '00:00:05.000 --> 00:00:06.000\nTom & Jerry <3 >\n'
+        '00:00:05.000 --> 00:00:06.000\nTom &amp; Jerry &lt;3 &gt;\n'
     )
+  })
+
+  it('round-trips WebVTT text exactly, tag- and escape-shaped text and a literal <Enter> & included', () => {
+    const cues: CaptionCue[] = [
+      { start: 1, end: 2, text: 'Press <Enter> & go' },
+      { start: 3, end: 4, text: 'a <b>bold</b> claim <v Ann>hi\nwrite &lt; for <' },
+    ]
+    expect(parseCaptions(serializeCaptions(cues, 'vtt'), 'vtt').cues).toEqual(cues)
   })
 
   it('rounds to the millisecond and never writes a negative time', () => {
@@ -453,21 +462,14 @@ describe('serializeCaptions', () => {
     expect(parseCaptions(serializeCaptions(cues, 'srt'), 'srt').cues).toEqual([{ start: 1, end: 2, text: 'padded\nlines' }])
   })
 
-  // The one documented loss: caption text that has the shape of a tag the
-  // formats recognise is written as it is — no padding, no escape — and so is
-  // read back as markup and stripped. WebVTT text shaped like one of its
-  // escapes is likewise decoded on the way back in.
-  it.each(['srt', 'vtt'] as const)('writes tag-shaped caption text as it is, and loses the tag on re-import (%s)', (format) => {
-    const written = serializeCaptions([{ start: 1, end: 2, text: 'a <b>bold</b> claim <v Ann>hi' }], format)
+  // SRT's one documented loss: it has no escapes, so caption text shaped like a
+  // tag it recognises is written as it is — no padding — and read back as
+  // markup and stripped. WebVTT escapes it instead (above).
+  it('writes tag-shaped caption text in SRT as it is, and loses the tag on re-import', () => {
+    const written = serializeCaptions([{ start: 1, end: 2, text: 'a <b>bold</b> claim <v Ann>hi' }], 'srt')
     expect(written).toContain('\na <b>bold</b> claim <v Ann>hi\n')
     expect(written).not.toContain('<i></i>')
-    expect(parseCaptions(written, format).cues).toEqual([{ start: 1, end: 2, text: 'a bold claim hi' }])
-  })
-
-  it('decodes escape-shaped WebVTT caption text on re-import — the same loss', () => {
-    const written = serializeCaptions([{ start: 1, end: 2, text: 'write &lt; for <' }], 'vtt')
-    expect(written).toContain('\nwrite &lt; for <\n')
-    expect(parseCaptions(written, 'vtt').cues[0].text).toBe('write < for <')
+    expect(parseCaptions(written, 'srt').cues).toEqual([{ start: 1, end: 2, text: 'a bold claim hi' }])
   })
 
   it('reads tags line by line when writing SRT, as the parser does, so a < and a > on two lines survive', () => {

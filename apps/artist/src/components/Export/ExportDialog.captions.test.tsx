@@ -102,7 +102,7 @@ describe('ExportDialog — caption sidecar (ESCSUITE-293)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download .vtt' }))
 
     expect(await lastDownload(clicked)).toEqual({
-      text: 'WEBVTT\n\n00:00:06.000 --> 00:00:07.000\nTom & Jerry\n',
+      text: 'WEBVTT\n\n00:00:06.000 --> 00:00:07.000\nTom &amp; Jerry\n',
       type: 'text/vtt',
       name: 'Talk.vtt',
     })
