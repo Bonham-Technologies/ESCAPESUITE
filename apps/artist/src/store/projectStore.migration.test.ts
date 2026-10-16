@@ -457,6 +457,13 @@ describe('parseProject (ESCSUITE-102)', () => {
       const nulls = parseProject(withTimeline({ textOverlays: null, shapeOverlays: null }))
       expect(nulls.ok).toBe(true)
     })
+
+    // Review round 1: the migration reads `textOverlays || []`, so any falsy value has always
+    // meant "no overlays", not only null.
+    it('treats a falsy legacy array (false, 0, an empty string) as absent too, as the migration does', () => {
+      expect(parseProject(withTimeline({ textOverlays: false, shapeOverlays: 0 })).ok).toBe(true)
+      expect(parseProject(withTimeline({ textOverlays: '' })).ok).toBe(true)
+    })
   })
 
   it('migrates a project with no tracks at all, rather than rejecting it', () => {
