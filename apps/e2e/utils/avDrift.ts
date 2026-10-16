@@ -62,6 +62,8 @@ export interface SpStats {
   offsetSpreadMs: number
   r: number
   slope: number
+  /** Floor of the unfilled `playbackTime − expected` over the last window, ms: content lost, in any unit. */
+  deficitAtEndMs: number
   /** `playbackTime − currentTime` at dispatch, ms — constant when `playbackTime` is read at dispatch. */
   playbackMinusCurrentTimeMs: { min: number; p50: number; p95: number; max: number } | null
   verdict: string
@@ -201,13 +203,28 @@ export async function installAvDriftInstrumentation(page: Page): Promise<void> {
       w.__spLog.reduce((sum, _calls, i) => sum + lostInNode(i, fromPerf, toPerf), 0)
 
     /**
+     * The fix's gap-fill rule (ESCSUITE-296, after the rig's 2026-10-15 jank
+     * measurement): Chromium's `playbackTime` is read at *dispatch* — one buffer
+     * ahead of `currentTime` at dispatch at p5–p95 under the `jank` load, its
+     * offset tracking dispatch lateness with r = 1.00 — so a merely late callback
+     * looks like a gap. That take showed lateness above half a buffer sustained
+     * across 8 callbacks with nothing lost, so a loss is counted only when the
+     * minimum offset over the last max(8 callbacks, ~2 s) reaches 0.95 of a
+     * buffer, and then whole buffers are filled.
+     */
+    const FILL_THRESHOLD_BUFFERS = 0.95
+    const FILL_WINDOW_MIN_CALLBACKS = 8
+    const FILL_WINDOW_SECONDS = 2
+
+    /**
      * `playbackTime` semantics and lost-callback counts for one ScriptProcessor
      * node (ESCSUITE-296 review). `calls` are `[playbackTime, perfNow, ctxNow,
      * bufferLength, sampleRate]`. Returns
      * - `naive`: Σ (round(Δplayback / buffer) − 1), every term rounded on its own;
      * - `robust`: the fix's rule — expected = anchor + samples delivered ÷ rate,
      *   offset = playbackTime − expected; a loss is counted only when the minimum
-     *   offset over the last 8 callbacks is at least half a buffer, and then the
+     *   offset over the last max(8 callbacks, ~2 s) reaches 0.95 of a buffer
+     *   (`FILL_THRESHOLD_BUFFERS`), and then whole buffers are filled and the
      *   anchor advances by the buffers filled;
      * - the offset and dispatch-interval distributions (ms: min, p50, p95, max);
      * - `r` / `slope`: offset against dispatch lateness (how far each callback ran
@@ -219,6 +236,7 @@ export async function installAvDriftInstrumentation(page: Page): Promise<void> {
       const n = calls.length
       if (n < 2) return null
       const period = bufferSize / sampleRate
+      const windowSize = Math.max(FILL_WINDOW_MIN_CALLBACKS, Math.ceil(FILL_WINDOW_SECONDS / period))
       let naive = 0
       let aligned = 0
       for (let i = 1; i < n; i++) {
@@ -237,11 +255,11 @@ export async function installAvDriftInstrumentation(page: Page): Promise<void> {
         let expectedRel = delivered / sampleRate
         let offset = calls[i][0] - anchor - expectedRel
         recent.push(offset)
-        if (recent.length > 8) recent.shift()
-        if (recent.length === 8) {
+        if (recent.length > windowSize) recent.shift()
+        if (recent.length === windowSize) {
           const least = Math.min(...recent)
-          if (least >= period / 2) {
-            const filled = Math.round(least / period)
+          if (least >= FILL_THRESHOLD_BUFFERS * period) {
+            const filled = Math.max(1, Math.round(least / period))
             robust += filled
             delivered += filled * bufferSize
             expectedRel = delivered / sampleRate
@@ -298,7 +316,18 @@ export async function installAvDriftInstrumentation(page: Page): Promise<void> {
         const sa = sorted(ahead)
         verdict += `; playbackTime − currentTime at dispatch: p50 ${fmt(aheadDist.p50)} ms, p5–p95 spread ${fmt(q(sa, 0.95) - q(sa, 0.05))} ms`
       }
+      // The content deficit, not rounded to buffers: the floor of the raw
+      // (never-filled) offset over the last window. In the 60 s jank take it crept
+      // up in render-quantum steps (128 samples, 2.67 ms) to ~43 ms with every
+      // callback accounted for — loss smaller than a buffer, which a rule that
+      // fills whole buffers cannot see.
+      const rawTail = calls.slice(-windowSize).map((c, i, tail) => {
+        const index = n - tail.length + i
+        return (c[0] - anchor - (index * bufferSize) / sampleRate) * 1000
+      })
+      const deficitAtEndMs = Math.min(...rawTail)
       return {
+        deficitAtEndMs,
         playbackMinusCurrentTimeMs: aheadDist,
         callbacks: n,
         naive,

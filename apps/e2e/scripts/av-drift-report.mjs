@@ -428,13 +428,28 @@ const significant = (r, minutes) =>
   !!r && Number.isFinite(r.seB) && Math.abs(r.b) > 3 * r.seB && Math.abs(r.b) * minutes > FRAME_MS
 
 /**
+ * The fix's gap-fill rule (ESCSUITE-296, after the rig's 2026-10-15 jank
+ * measurement): Chromium's `playbackTime` is read at *dispatch* — one buffer
+ * ahead of `currentTime` at dispatch at p5–p95 under the `jank` load, its
+ * offset tracking dispatch lateness with r = 1.00 — so a merely late callback
+ * looks like a gap. That take showed lateness above half a buffer sustained
+ * across 8 callbacks with nothing lost, so a loss is counted only when the
+ * minimum offset over the last max(8 callbacks, ~2 s) reaches 0.95 of a
+ * buffer, and then whole buffers are filled.
+ */
+const FILL_THRESHOLD_BUFFERS = 0.95
+const FILL_WINDOW_MIN_CALLBACKS = 8
+const FILL_WINDOW_SECONDS = 2
+
+/**
  * `playbackTime` semantics and lost-callback counts for one ScriptProcessor
  * node (ESCSUITE-296 review). `calls` are `[playbackTime, perfNow, ctxNow,
  * bufferLength, sampleRate]`. Returns
  * - `naive`: Σ (round(Δplayback / buffer) − 1), every term rounded on its own;
  * - `robust`: the fix's rule — expected = anchor + samples delivered ÷ rate,
  *   offset = playbackTime − expected; a loss is counted only when the minimum
- *   offset over the last 8 callbacks is at least half a buffer, and then the
+ *   offset over the last max(8 callbacks, ~2 s) reaches 0.95 of a buffer
+ *   (`FILL_THRESHOLD_BUFFERS`), and then whole buffers are filled and the
  *   anchor advances by the buffers filled;
  * - the offset and dispatch-interval distributions (ms: min, p50, p95, max);
  * - `r` / `slope`: offset against dispatch lateness (how far each callback ran
@@ -446,6 +461,7 @@ const spStats = (calls, bufferSize, sampleRate) => {
   const n = calls.length
   if (n < 2) return null
   const period = bufferSize / sampleRate
+  const windowSize = Math.max(FILL_WINDOW_MIN_CALLBACKS, Math.ceil(FILL_WINDOW_SECONDS / period))
   let naive = 0
   let aligned = 0
   for (let i = 1; i < n; i++) {
@@ -464,11 +480,11 @@ const spStats = (calls, bufferSize, sampleRate) => {
     let expectedRel = delivered / sampleRate
     let offset = calls[i][0] - anchor - expectedRel
     recent.push(offset)
-    if (recent.length > 8) recent.shift()
-    if (recent.length === 8) {
+    if (recent.length > windowSize) recent.shift()
+    if (recent.length === windowSize) {
       const least = Math.min(...recent)
-      if (least >= period / 2) {
-        const filled = Math.round(least / period)
+      if (least >= FILL_THRESHOLD_BUFFERS * period) {
+        const filled = Math.max(1, Math.round(least / period))
         robust += filled
         delivered += filled * bufferSize
         expectedRel = delivered / sampleRate
@@ -525,7 +541,18 @@ const spStats = (calls, bufferSize, sampleRate) => {
     const sa = sorted(ahead)
     verdict += `; playbackTime − currentTime at dispatch: p50 ${fmt(aheadDist.p50)} ms, p5–p95 spread ${fmt(q(sa, 0.95) - q(sa, 0.05))} ms`
   }
+  // The content deficit, not rounded to buffers: the floor of the raw
+  // (never-filled) offset over the last window. In the 60 s jank take it crept
+  // up in render-quantum steps (128 samples, 2.67 ms) to ~43 ms with every
+  // callback accounted for — loss smaller than a buffer, which a rule that
+  // fills whole buffers cannot see.
+  const rawTail = calls.slice(-windowSize).map((c, i, tail) => {
+    const index = n - tail.length + i
+    return (c[0] - anchor - (index * bufferSize) / sampleRate) * 1000
+  })
+  const deficitAtEndMs = Math.min(...rawTail)
   return {
+    deficitAtEndMs,
     playbackMinusCurrentTimeMs: aheadDist,
     callbacks: n,
     naive,
@@ -652,19 +679,19 @@ function analyseArm(dir) {
   lines.push('')
   if (m.nodes.some((n) => n.stats)) {
     const d = (x) => `${f(x.min)} / ${f(x.p50)} / ${f(x.p95)} / ${f(x.max)}`
-    lines.push('| ScriptProcessor node | callbacks | lost: naive Σ(round(Δ/buf)−1) | lost: fix rule (min of 8 ≥ ½ buf) | lost: telescoped (playbackTime / perf span) | buffer-aligned steps | playbackTime − expected ms (min / p50 / p95 / max) | dispatch interval ms (min / p50 / p95 / max) | r, slope (offset vs dispatch lateness) | playbackTime semantics |')
-    lines.push('|---|---|---|---|---|---|---|---|---|---|')
+    lines.push('| ScriptProcessor node | callbacks | lost: naive Σ(round(Δ/buf)−1) | lost: fix rule (min over max(8, ~2 s) ≥ 0.95 buf) | lost: telescoped (playbackTime / perf span) | deficit at end ms (unrounded) | buffer-aligned steps | playbackTime − expected ms (min / p50 / p95 / max) | dispatch interval ms (min / p50 / p95 / max) | r, slope (offset vs dispatch lateness) | playbackTime semantics |')
+    lines.push('|---|---|---|---|---|---|---|---|---|---|---|')
     m.nodes.forEach((n, i) => {
       const st = n.stats
       if (!st) return
       lines.push(
-        `| ${i}${i === 0 ? ' (mix)' : ' (companion)'} | ${st.callbacks} | ${st.naive} | ${st.robust} | ${n.lostInWindow} / ${n.lostByPerfSpan} | ${f(st.alignedShare * 100, 0)} % | ${d(st.offsetMs)} | ${d(st.dispatchIntervalMs)} | ${st.r.toFixed(2)}, ${st.slope.toFixed(2)} | ${st.verdict} |`
+        `| ${i}${i === 0 ? ' (mix)' : ' (companion)'} | ${st.callbacks} | ${st.naive} | ${st.robust} | ${n.lostInWindow} / ${n.lostByPerfSpan} | ${f(st.deficitAtEndMs)} | ${f(st.alignedShare * 100, 0)} % | ${d(st.offsetMs)} | ${d(st.dispatchIntervalMs)} | ${st.r.toFixed(2)}, ${st.slope.toFixed(2)} | ${st.verdict} |`
       )
     })
     lines.push('')
   }
   lines.push('| File | Kind | Role | videoEnd s | audioEnd s | audioEnd−videoEnd ms | audio PTS gaps (n / Σ ms) | timecoded frames (bad) | beeps (+bursts) | **a ms (timecode)** | **b ms/min ± SE (timecode)** | flashes (+uncertain) [scene] | flash pairs: a ms / b ms/min | grid b audio | grid b video | video vs wall b (timecode) |')
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|')
+  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---')
   for (const x of files) {
     const ve = x.video?.end
     const ae = x.audio?.end
