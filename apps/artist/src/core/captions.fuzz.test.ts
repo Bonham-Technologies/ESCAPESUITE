@@ -11,8 +11,8 @@
 // after the start, words on every line, each dropped feature once — and
 // `serializeCaptions` writes them out in that format so that they read back as
 // exactly the same cues, save for the writer's documented changes (a `-->`
-// written as `→`; tag- and escape-shaped text read back as markup), where
-// every cue read back is still one that was written, in order.
+// written as `→`; in SRT, tag-shaped text read back as markup), where every
+// cue read back is still one that was written, in order.
 //
 // A failure prints the seed, the iteration and the mutation; rerun this file
 // to reproduce it.
@@ -158,13 +158,14 @@ function checkParsed(parsed: ParsedCaptions, format: CaptionFormat, context: Fuz
   if (new Set(parsed.dropped).size !== parsed.dropped.length || parsed.dropped.some((d) => !VOCABULARY.has(d))) {
     throw fuzzFailure(context, `dropped is not a set of known features: ${parsed.dropped.join(', ')}`)
   }
-  // The writer's documented changes (fix round 2): a `-->` is written as `→`,
-  // and caption text shaped like a tag (or, in WebVTT, an escape) is written
-  // as it is and read back as markup. Text with none of those reads back
-  // exactly; text with any of them may lose words, and a cue left with none is
-  // dropped, but every cue that comes back is one that was written, in order.
+  // The writer's documented changes: a `-->` is written as `→` (both formats),
+  // and SRT, which has no escapes, writes tag-shaped text as it is, to be read
+  // back as markup. WebVTT escapes it (fix round 3). So WebVTT reads back
+  // exactly unless a cue holds a `-->`, and SRT unless one holds a `-->` or a
+  // `<`; otherwise words may be lost, and a cue left with none is dropped, but
+  // every cue that comes back is one that was written, in order.
   const written = serializeCaptions(parsed.cues, format)
-  const mayChange = parsed.cues.some((cue) => /-->|</.test(cue.text) || (format === 'vtt' && cue.text.includes('&')))
+  const mayChange = parsed.cues.some((cue) => (format === 'vtt' ? /-->/ : /-->|</).test(cue.text))
   let reread: ParsedCaptions
   try {
     reread = parseCaptions(written, format)

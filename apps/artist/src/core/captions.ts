@@ -267,13 +267,18 @@ function formatTimestamp(ms: number, separator: ',' | '.'): string {
 }
 
 /**
- * How a line of a cue's text is written, in either format (fix round 2): as it
- * is, with one substitution — a `-->` becomes `→`. Neither format can carry a
- * `-->` in cue text (the parser takes a timing line inside a cue as the start
- * of the next one), and the arrow keeps the meaning. Nothing is escaped or
- * padded: a sidecar is a file people open and hand on.
+ * How a line of a cue's text is written. First, in both formats, a `-->`
+ * becomes `→` (fix round 2): neither format can carry that token in cue text
+ * (the parser takes a timing line inside a cue as the start of the next one),
+ * and the arrow keeps the meaning. Then WebVTT escapes `&`, `<` and `>` with
+ * its own escapes (fix round 3), which the parser decodes, so a WebVTT
+ * sidecar reads back exactly; SRT has no escapes, so its text goes as it is —
+ * no padding, since a sidecar is a file people open and hand on.
  */
-const writeLine = (line: string): string => line.replace(/-->/g, '\u2192');
+const WRITE_LINE: Record<CaptionFormat, (line: string) => string> = {
+  srt: (line) => line.replace(/-->/g, '\u2192'),
+  vtt: (line) => line.replace(/-->/g, '\u2192').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+};
 
 /**
  * Write cues as an `.srt` (1-based indices, `,` before the milliseconds) or a
@@ -283,10 +288,10 @@ const writeLine = (line: string): string => line.replace(/-->/g, '\u2192');
  * millisecond — a cue a reader would drop (no words, or no length once
  * rounded) is not written, a blank line inside a cue's text (which would end
  * the block) is left out, each line is trimmed the way the parser trims it,
- * and a `-->` in the text comes back as `→`. The one loss: caption text shaped
- * like a tag the formats recognise (`<i>`, `<v Name>` …) is written as it is
- * and stripped as markup on re-import, and in WebVTT text shaped like one of
- * its escapes (`&lt;`) is decoded.
+ * and a `-->` in the text comes back as `→`. WebVTT reads back exactly
+ * otherwise. SRT's one loss: caption text shaped like a tag it recognises
+ * (`<i>`, `<v Name>` …) is written as it is and stripped as markup on
+ * re-import.
  */
 export function serializeCaptions(cues: CaptionCue[], format: CaptionFormat): string {
   const separator = format === 'srt' ? ',' : '.';
@@ -295,7 +300,7 @@ export function serializeCaptions(cues: CaptionCue[], format: CaptionFormat): st
     const start = toMs(cue.start);
     const end = toMs(cue.end);
     const text = lines(cue.text)
-      .map((line) => writeLine(line).trim())
+      .map((line) => WRITE_LINE[format](line).trim())
       .filter((line) => line !== '');
     if (text.length === 0 || end <= start) continue;
     const timing = `${formatTimestamp(start, separator)} --> ${formatTimestamp(end, separator)}`;

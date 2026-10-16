@@ -1092,17 +1092,17 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   once the drops are made.
 - **Writing.** `serializeCaptions(cues, format)`: SRT with 1-based indices and `,`, WebVTT with the
   header and `.`, milliseconds rounded, never negative. It leaves out what a reader would drop (a
-  cue with no words, or no length once rounded), trims each line and leaves out blank lines, and
-  otherwise writes the text **as it is**, in both formats — no padding, no escapes, because a
-  sidecar is a file people open and hand to platforms (fix round 2). The one substitution: a `-->`
-  in cue text is written as `→` (U+2192). Neither format can carry that token in cue text — the
-  parser takes a timing line inside a cue as the start of the next one (above) — and the arrow
-  keeps the meaning. So `parseCaptions(serializeCaptions(cues))` gives back the same cues, line
-  breaks, spacing and non-tag brackets like `<Enter>` included, with `→` for `-->`, and with **one
-  documented loss**: caption text shaped like a tag the formats recognise (`<i>`, `<b>`, `<c.x>`,
-  `<v Name>` …) is written as it is and so is stripped as markup on re-import; in WebVTT, text
-  shaped like one of its escapes (`&lt;`, `&amp;` …) is likewise decoded on re-import. The fuzz holds
-  exact read-back wherever none of those shapes occurs.
+  cue with no words, or no length once rounded), trims each line and leaves out blank lines. In both
+  formats a `-->` in cue text is written as `→` (U+2192): neither format can carry that token in cue
+  text — the parser takes a timing line inside a cue as the start of the next one (above) — and the
+  arrow keeps the meaning. WebVTT then escapes `&`, `<` and `>` with its own escapes (fix round 3),
+  which the parser decodes, so a WebVTT sidecar reads back **exactly** bar the `→` — tag-shaped
+  text, a literal `<Enter>` and `&` included. SRT has no escapes, so its text is written **as it
+  is** — no padding, since a sidecar is a file people open and hand to platforms (fix round 2) —
+  with **one documented loss**: caption text shaped like a tag the formats recognise (`<i>`, `<b>`,
+  `<c.x>`, `<v Name>` …) is stripped as markup when the `.srt` is re-imported. Non-tag brackets like
+  `<Enter>` read back unchanged. The fuzz holds exact read-back for WebVTT unless a cue holds a
+  `-->`, and for SRT unless one holds a `-->` or a `<`.
 - **The track marker.** `Track.kind?: 'captions'` (absent on every other track and in every older
   file). `parseProject` refuses a present `kind` that is not exactly `'captions'` with
   `timeline.tracks[i].kind must be 'captions'`; the migration passes tracks through by spread, so
