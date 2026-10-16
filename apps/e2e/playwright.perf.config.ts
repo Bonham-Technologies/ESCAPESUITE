@@ -25,6 +25,9 @@ import { PERF_LAUNCH_ARGS } from './utils/perf'
  */
 export default defineConfig({
   testDir: './tests/perf',
+  // The A/V drift rig lives beside the benchmarks but is not one: it has its
+  // own config (`playwright.av-drift.config.ts`) and multi-minute takes.
+  testIgnore: ['**/craft-av-drift.spec.ts'],
   // Empties perf-results/ first, so a benchmark that fails cannot leave last
   // run's JSON behind for the report to present as this run's.
   globalSetup: './scripts/perf-global-setup.ts',

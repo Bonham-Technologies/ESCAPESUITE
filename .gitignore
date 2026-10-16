@@ -38,6 +38,7 @@ playwright/.cache/
 # Performance benchmarks (pnpm perf) — measurements, not sources
 perf-report.json
 apps/e2e/perf-results/
+apps/e2e/av-drift-results/
 services/headless-artist/perf-report.json
 *.cpuprofile
 
