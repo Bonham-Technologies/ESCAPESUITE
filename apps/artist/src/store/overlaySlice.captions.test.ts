@@ -94,6 +94,24 @@ describe('addCaptionCues (ESCSUITE-293)', () => {
     expect(state().addCaptionCues(cues, style)).toEqual({ trackId, added: 2 })
   })
 
+  // Review M2: emptied of captions, the track is still the caption track. A
+  // title or a video looking for an empty track must not land there — the
+  // sidecar would write a title as a caption, and the next import would sit
+  // beside a video.
+  it('is never handed out as an empty track once its captions are gone', () => {
+    const title = state().addTextOverlayClip({ text: 'Title' })!
+    const { trackId } = state().addCaptionCues(cues, style)!
+    for (const clip of state().project.timeline.clips.filter((c) => c.trackId === trackId)) {
+      state().removeClipFromTimeline(clip.id)
+    }
+
+    const next = state().addTextOverlayClip({ text: 'Another' })!
+
+    expect(next.trackId).not.toBe(trackId)
+    expect(next.trackId).not.toBe(title.trackId)
+    expect(state().project.timeline.tracks.find((track) => track.id === next.trackId)?.name).toBe('Text')
+  })
+
   it('refuses when the caption track is locked, writing nothing', () => {
     const { trackId } = state().addCaptionCues(cues, style)!
     state().updateTrack(trackId, { locked: true })
