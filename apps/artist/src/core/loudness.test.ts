@@ -9,6 +9,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   LOUDNESS_TARGETS,
+  MAX_GAIN_DB,
   TRUE_PEAK_CEILING_DBTP,
   applyGainWithLimiter,
   applyInterleavedGainWithLimiter,
@@ -166,6 +167,27 @@ describe('measureLoudness', () => {
     expect(m.gatedBlocks).toBe(603)
   })
 
+  it('sets the relative gate from the mean of the blocks that passed the absolute gate, not of every block', () => {
+    // Stereo 1 kHz: 10 s at −23 dBFS, 10 s at −36, then 80 s of digital
+    // silence. Relative to the loud section, quiet blocks carry q = 10^(−1.3)
+    // = 0.0501 of its energy. The 997 blocks are 97 loud, 3 loud→quiet
+    // transitions ((3+q)/4, (2+2q)/4, (1+3q)/4), 97 quiet, 3 quiet→silence
+    // (3q/4, 2q/4, q/4) and 797 of silence. The absolute gate keeps the 200
+    // that hold any signal; their mean ≈ (100.5 + 100.5q)/200 puts the relative
+    // gate ≈ −35.8 LUFS, so the −36 blocks and the quiet→silence transitions
+    // fail it. 100 blocks count: (97 + (6 + 6q)/4)/100 = (98.5 + 1.5q)/100 of
+    // the loud section's energy. A gate taken from the mean of *all* 997
+    // blocks would sit near −42.8, let the −36 section in, and read −25.85
+    // over 200 blocks.
+    const q = 10 ** (-13 / 10)
+    const l = concat(sine(10, dbfs(-23)), sine(10, dbfs(-36)), new Float32Array(80 * SR))
+    const m = measureLoudness([l, l], SR)
+    const loudSection = -0.691 + 10 * Math.log10(2 * (dbfs(-23) ** 2 / 2) * KW_1K)
+    const expected = loudSection + 10 * Math.log10((98.5 + 1.5 * q) / 100)
+    expect(Math.abs(m.integratedLufs - expected)).toBeLessThan(0.01)
+    expect(m.gatedBlocks).toBe(100)
+  })
+
   it('reports −Infinity and no gated blocks for silence, for a signal under −70 LUFS, and for less than one block', () => {
     expect(measureLoudness([new Float32Array(SR), new Float32Array(SR)], SR)).toEqual({
       integratedLufs: -Infinity,
@@ -270,6 +292,20 @@ describe('gainForTarget', () => {
     })
   })
 
+  it('caps a boost at +20 dB, and judges the ceiling on the capped gain', () => {
+    expect(MAX_GAIN_DB).toBe(20)
+    // −50 → −14 would be +36 dB: room tone and hum brought up with it.
+    expect(gainForTarget({ integratedLufs: -50, truePeakDbtp: -40, gatedBlocks: 1 }, -14, -1)).toEqual({
+      gainDb: 20,
+      limited: false,
+    })
+    // −15 + 20 = +5 dBTP: over the ceiling on the gain actually applied.
+    expect(gainForTarget({ integratedLufs: -50, truePeakDbtp: -15, gatedBlocks: 1 }, -14, -1)).toEqual({
+      gainDb: 20,
+      limited: true,
+    })
+  })
+
   it('asks for no gain on a programme with no measurable loudness', () => {
     expect(gainForTarget({ integratedLufs: -Infinity, truePeakDbtp: -Infinity, gatedBlocks: 0 }, -14, -1)).toEqual({
       gainDb: 0,
@@ -332,6 +368,70 @@ describe('applyGainWithLimiter', () => {
     for (let i = tail; i < out.length; i += 101) {
       expect(out[i]).toBeCloseTo(x[i], 4)
     }
+  })
+
+  it('links the channels: a loud right channel holds a quiet left one down with it, and neither passes the ceiling', () => {
+    // L a 1 kHz tone at 0.05, R a 3 kHz tone at 0.5, asked for +12 dB under
+    // −1 dBTP. R would peak at +6 dBFS; a detector that read only L would let
+    // it through. Linked, both channels take one gain at every sample.
+    const l = sine(1, 0.05)
+    const r = sine(1, 0.5, 3000)
+    const lOut = l.slice()
+    const rOut = r.slice()
+    applyGainWithLimiter([lOut, rOut], 12, -1)
+    const ceiling = dbfs(-1)
+    expect(peakOf(lOut)).toBeLessThanOrEqual(ceiling + 1e-6)
+    expect(peakOf(rOut)).toBeLessThanOrEqual(ceiling + 1e-6)
+    for (let i = 0; i < l.length; i++) {
+      if (Math.abs(l[i]) > 1e-3 && Math.abs(r[i]) > 1e-3) {
+        expect(Math.abs(lOut[i] / l[i] - rOut[i] / r[i])).toBeLessThan(1e-5)
+      }
+    }
+  })
+
+  describe('hold and release', () => {
+    // A steady 0.1 (−20 dBFS) with one sample at 1.0 at frame 1000, through a
+    // −6 dBTP ceiling at 0 dB gain. The spike needs 10^(−6/20) = 0.501187; the
+    // bed alone needs nothing. Measured 2026-10-16 on the real limiter.
+    const spike = () => {
+      const x = new Float32Array(SR).fill(0.1)
+      x[1000] = 1
+      return x
+    }
+    const ratio = (out: Float32Array, n: number) => out[n] / 0.1
+
+    it('holds the reduction for 5 ms after the last frame that needed it', () => {
+      const out = spike()
+      applyGainWithLimiter([out], 0, -6)
+      expect(out[1000]).toBeCloseTo(dbfs(-6), 6)
+      // 240 frames = 5 ms at 48 kHz: held exactly through 1240…
+      for (const n of [1100, 1200, 1240]) expect(ratio(out, n)).toBeCloseTo(dbfs(-6), 6)
+      // …and letting go from 1241.
+      expect(ratio(out, 1241)).toBeGreaterThan(dbfs(-6) + 1e-5)
+      expect(ratio(out, 1241)).toBeLessThan(0.502)
+    })
+
+    it('then releases with a 50 ms time constant', () => {
+      const out = spike()
+      applyGainWithLimiter([out], 0, -6)
+      // One and three time constants (2400 and 7200 frames) after the hold:
+      // 1 − (1 − 0.501187)·e^(−1) = 0.8165 and 1 − 0.498813·e^(−3) = 0.9752.
+      expect(ratio(out, 1240 + 2400)).toBeCloseTo(1 - (1 - dbfs(-6)) * Math.exp(-1), 3)
+      expect(ratio(out, 1240 + 7200)).toBeCloseTo(1 - (1 - dbfs(-6)) * Math.exp(-3), 3)
+    })
+
+    it('scales the hold and the release with the sample rate', () => {
+      // At 44.1 kHz, 5 ms is round(220.5) = 221 frames and 50 ms is 2205.
+      const out = spike()
+      applyGainWithLimiter([out], 0, -6, 44100)
+      expect(ratio(out, 1221)).toBeCloseTo(dbfs(-6), 6)
+      expect(ratio(out, 1222)).toBeGreaterThan(dbfs(-6) + 1e-5)
+      expect(ratio(out, 1221 + 2205)).toBeCloseTo(1 - (1 - dbfs(-6)) * Math.exp(-1), 3)
+      // The interleaved twin takes the rate the same way.
+      const inter = spike()
+      applyInterleavedGainWithLimiter(inter, 1, 0, -6, 44100)
+      expect(Array.from(inter)).toEqual(Array.from(out))
+    })
   })
 
   it('treats an interleaved buffer the way it treats its planar channels', () => {
@@ -407,6 +507,15 @@ describe('exportLoudness', () => {
     // The tone itself is untouched by the limiter away from the click, so the
     // programme still lands on the target.
     expect(after.integratedLufs).toBeCloseTo(-14, 0)
+  })
+
+  it('applies, and reports, no more than the capped boost to a very quiet mix', () => {
+    const mix = stereo(sine(3, dbfs(-60)))
+    const before = mix.slice()
+    const result = exportLoudness(mix, 2, SR, -14)!
+    expect(result.gainDb).toBe(MAX_GAIN_DB)
+    for (let i = 0; i < mix.length; i += 89) expect(mix[i]).toBeCloseTo(before[i] * 10, 6)
+    expect(measureInterleavedLoudness(mix, 2, SR).integratedLufs).toBeCloseTo(-40, 1)
   })
 
   it('treats a stale or unknown target as off', () => {
