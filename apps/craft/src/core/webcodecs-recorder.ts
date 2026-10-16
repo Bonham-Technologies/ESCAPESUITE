@@ -22,6 +22,7 @@ import type {
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
+import { createAudioGapFiller, type AudioGapFiller } from './audioGapFiller';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
 // muxer; re-exported here because this is where every caller imports it from.
@@ -72,6 +73,16 @@ interface LevelMeter {
  * `recorder.perf.test.ts` and `webcodecsRecorder.perf.test.ts`.
  */
 const AUDIO_LEVEL_INTERVAL_MS = 80;
+
+/** Samples per `onaudioprocess` buffer, for the mix and every audio companion. */
+const SCRIPT_PROCESSOR_BUFFER = 4096;
+
+/**
+ * How often the frame path re-reads `getOutputTimestamp()` (ESCSUITE-296).
+ * Between reads the context clock is extrapolated on `performance.now()`, so
+ * an audio device whose crystal is 100 ppm off costs at most 0.2 ms here.
+ */
+const CONTEXT_CLOCK_REFRESH_MS = 2000;
 
 /**
  * One encoder's presentation bookkeeping.
@@ -179,6 +190,8 @@ interface AudioCompanionPipeline extends CompanionPipelineBase {
    * `AudioContext`, one gate — which is what puts the parts on one timeline.
    */
   timestampUs: number;
+  /** This pipeline's own silence for its own lost callbacks (ESCSUITE-296). */
+  gapFiller: AudioGapFiller;
 }
 
 type CompanionPipeline = VideoCompanionPipeline | AudioCompanionPipeline;
@@ -227,11 +240,13 @@ export class WebCodecsRecorder {
   // countdown. Never reset — a WebCodecsRecorder records one take.
   private hasStarted = false;
   private isPausedState = false;
-  // All three are `performance.now()` milliseconds — the one monotonic clock
-  // getDuration() and the frame timestamps (nextFrameTiming) both read, so the
-  // duration shown and the length muxed come from the same source. They are
-  // not identical: the controller reads getDuration() after stop() has flushed
-  // and finalised, a little past the last frame — see apps/craft/CLAUDE.md.
+  // All three are `performance.now()` milliseconds — the clock getDuration()
+  // reads, and the one the frame timestamps (nextFrameTiming) read too unless
+  // the take is stamped in audio-context time (`clockContext`, ESCSUITE-296),
+  // when the two differ by the render clock's skew: a third of a second an hour
+  // at 100 ppm. They were never identical anyway: the controller reads
+  // getDuration() after stop() has flushed and finalised, a little past the
+  // last frame — see apps/craft/CLAUDE.md.
   private startTime = 0;
   private pausedDuration = 0;
   private pauseStartTime = 0;
@@ -242,6 +257,37 @@ export class WebCodecsRecorder {
   /** The primary (screen or webcam) pipeline's own frame bookkeeping. */
   private screenTiming: FrameTiming = newFrameTiming();
   private audioTimestamp = 0;
+  /** The mix's silence for its lost callbacks; null for a take with no audio. */
+  private mixGapFiller: AudioGapFiller | null = null;
+
+  /**
+   * The audio context whose clock this take's video is stamped in, or null for
+   * a take stamped on `performance.now()` (ESCSUITE-296).
+   *
+   * The audio of a take is counted in context time — sample by sample, at the
+   * rate the context renders — so the video is put on the same clock: each
+   * frame is stamped with the context time elapsed since `start()`, read
+   * through `getOutputTimestamp()`'s pairing of context time with
+   * `performance.now()`. A render clock that runs fast or slow against the
+   * system clock then bends the video's (variable) frame timing by the same
+   * amount instead of drifting the sound away from it. Decided once, at
+   * `start()`: a context with no `getOutputTimestamp()`, or one that has not
+   * rendered yet (it reports zeros), or one whose reading is not finite, gives
+   * the take today's `performance.now()` stamps for its whole length.
+   */
+  private clockContext: AudioContext | null = null;
+  /** The last usable `getOutputTimestamp()` reading: context seconds... */
+  private anchorContextTime = 0;
+  /** ...and the `performance.now()` milliseconds it was paired with. */
+  private anchorPerformanceTime = 0;
+  /** `performance.now()` when `getOutputTimestamp()` was last asked. */
+  private anchorReadAt = 0;
+  /** Context seconds at `start()`. */
+  private contextStart = 0;
+  /** Context seconds spent paused — the context's own `pausedDuration`. */
+  private pausedContextSeconds = 0;
+  /** Context seconds at the current pause's start. */
+  private pauseStartContext = 0;
 
   // Frame capture (for fallback method)
   private canvas: HTMLCanvasElement | null = null;
@@ -308,7 +354,16 @@ export class WebCodecsRecorder {
 
   // Configuration
   private readonly frameRate = CAPTURE_FRAME_RATE;
-  private readonly sampleRate = 48000;
+  /** The rate the AudioContext is asked for. */
+  private readonly requestedSampleRate = 48000;
+  /**
+   * The rate the AudioContext actually runs at — read once, right after it is
+   * built, and used for every `AudioData`, every audio timestamp, every gap
+   * filled and every audio encoder (ESCSUITE-296). An engine that ignored the
+   * request and ran at 44.1 kHz used to have its samples stamped and labelled
+   * as 48 kHz: 8.1 % of drift and the wrong pitch.
+   */
+  private sampleRate = this.requestedSampleRate;
   private width = 0;
   private height = 0;
 
@@ -422,7 +477,13 @@ export class WebCodecsRecorder {
     }
 
     // Set up audio context for mixing and level monitoring
-    this.audioContext = new AudioContext({ sampleRate: this.sampleRate });
+    this.audioContext = new AudioContext({ sampleRate: this.requestedSampleRate });
+    this.sampleRate = this.audioContext.sampleRate;
+    if (this.sampleRate !== this.requestedSampleRate) {
+      console.warn(
+        `The audio context runs at ${this.sampleRate} Hz, not the ${this.requestedSampleRate} Hz asked for — recording audio at ${this.sampleRate} Hz`
+      );
+    }
     if (this.audioContext.state === 'suspended') {
       await this.audioContext.resume();
       // `cleanup()` closes and nulls the context, so without this the very next
@@ -520,6 +581,24 @@ export class WebCodecsRecorder {
 
     // Set up audio encoder if we have audio
     if (this.audioSource) {
+      // A context that ignored the 48 kHz request has its audio encoded at the
+      // rate it really runs at — which an engine's Opus encoder might refuse,
+      // and say so only through `error:`, after `configure()` has resolved:
+      // a take with no sound in it and nothing to tell the user. Asked first,
+      // so such a take fails to start instead. Every audio encoder of the take
+      // (the mix and each companion) runs at this one rate.
+      if (this.sampleRate !== this.requestedSampleRate) {
+        const { supported } = await AudioEncoder.isConfigSupported({
+          codec: 'opus',
+          sampleRate: this.sampleRate,
+          numberOfChannels: 2,
+        });
+        this.abortIfDisposed();
+        if (!supported) {
+          throw new Error(`Opus audio cannot be encoded at this device's ${this.sampleRate} Hz`);
+        }
+      }
+
       this.audioEncoder = this.registerCodec(
         new AudioEncoder({
           output: async (chunk, meta) => {
@@ -771,6 +850,16 @@ export class WebCodecsRecorder {
         processor: null,
         encodedCount: 0,
         timestampUs: 0,
+        // The encoder is read when a gap is filled, not now: the gate in
+        // `onaudioprocess` below has already proved it is there by then.
+        gapFiller: createAudioGapFiller({
+          sampleRate: this.sampleRate,
+          bufferLength: SCRIPT_PROCESSOR_BUFFER,
+          numberOfChannels: 2,
+          label: COMPANION_PARTS[role].trackLabel,
+          readCurrentTime: () => context.currentTime,
+          encode: (data) => companion.encoder!.encode(data),
+        }),
         failed: false,
       };
 
@@ -815,7 +904,7 @@ export class WebCodecsRecorder {
     // has exactly one audio-capture mechanism and a second one in the same
     // take would be two things to keep in step for no gain.
     const source = this.createSourceNode(context, new MediaStream([track]));
-    const processor = context.createScriptProcessor(4096, 2, 2);
+    const processor = context.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 2, 2);
     // Owned by the pipeline from the moment it exists, because the callback
     // below reads it as its gate: a disconnected node is one this pipeline has
     // finished with, and `endCompanion` / `failCompanion` are what disconnect
@@ -846,6 +935,11 @@ export class WebCodecsRecorder {
       }
 
       try {
+        companion.timestampUs = companion.gapFiller.fill(
+          event.playbackTime,
+          numberOfFrames,
+          companion.timestampUs
+        );
         const audioData = new AudioData({
           format: 'f32-planar',
           sampleRate: this.sampleRate,
@@ -1148,7 +1242,18 @@ export class WebCodecsRecorder {
 
     // Use ScriptProcessorNode for audio capture
     // Buffer size of 4096 samples at 48kHz = ~85ms chunks
-    this.audioWorklet = this.audioContext.createScriptProcessor(4096, 2, 2);
+    this.audioWorklet = this.audioContext.createScriptProcessor(SCRIPT_PROCESSOR_BUFFER, 2, 2);
+    const context = this.audioContext;
+    const gapFiller = createAudioGapFiller({
+      sampleRate: this.sampleRate,
+      bufferLength: SCRIPT_PROCESSOR_BUFFER,
+      numberOfChannels: 2,
+      label: 'The recording',
+      readCurrentTime: () => context.currentTime,
+      // Only ever called past the gate below, which has checked the encoder.
+      encode: (data) => this.audioEncoder!.encode(data),
+    });
+    this.mixGapFiller = gapFiller;
 
     this.audioWorklet.onaudioprocess = (event) => {
       if (!this.isRecordingActive || this.isPausedState || !this.audioEncoder) return;
@@ -1165,6 +1270,7 @@ export class WebCodecsRecorder {
       }
 
       try {
+        this.audioTimestamp = gapFiller.fill(event.playbackTime, numberOfFrames, this.audioTimestamp);
         const audioData = new AudioData({
           format: 'f32-planar',
           sampleRate: this.sampleRate,
@@ -1213,6 +1319,18 @@ export class WebCodecsRecorder {
     this.frameCount = 0;
     this.screenTiming = newFrameTiming();
     this.audioTimestamp = 0;
+    this.mixGapFiller?.reanchor();
+
+    // Non-null here: `setUpTake()` builds the context before the video encoder
+    // this method has just checked for.
+    const context = this.audioContext!;
+    this.clockContext = this.readOutputTimestamp(context, this.startTime) ? context : null;
+    // One line per take, so a field report can say which clock its file used.
+    console.log(
+      `Video stamped in ${this.clockContext ? 'audio-context time' : 'performance.now() time (no usable audio-context clock)'}`
+    );
+    this.contextStart = this.contextTimeAt(this.startTime);
+    this.pausedContextSeconds = 0;
 
     const frameDurationUs = Math.round((1 / this.frameRate) * 1_000_000);
 
@@ -1232,6 +1350,7 @@ export class WebCodecsRecorder {
         companion.readerActive = true;
       } else {
         companion.timestampUs = 0;
+        companion.gapFiller.reanchor();
       }
     }
     this.startCompanionCaptures();
@@ -1244,7 +1363,10 @@ export class WebCodecsRecorder {
    * now. All three capture paths go through here, so they cannot drift apart.
    *
    * The timestamp is the **recording clock at capture** — elapsed since
-   * `start()`, paused time excluded — and not the frame index times a nominal
+   * `start()`, paused time excluded, in audio-context seconds where the
+   * context's clock can be read (`clockContext`, ESCSUITE-296: the clock the
+   * audio is counted in) and in `performance.now()` where it cannot — and
+   * not the frame index times a nominal
    * frame duration. `getDisplayMedia` does not promise 30fps: a window or
    * screen capture routinely delivers 5-15 frames a second, and counting
    * frames made N of them span N x 33.3ms however long they really took. A
@@ -1281,7 +1403,10 @@ export class WebCodecsRecorder {
     timing: FrameTiming,
     now = performance.now()
   ): { timestamp: number; keyFrame: boolean } {
-    const elapsedUs = Math.round((now - this.startTime - this.pausedDuration) * 1000);
+    const elapsedMs = this.clockContext
+      ? (this.contextNow(now) - this.contextStart - this.pausedContextSeconds) * 1000
+      : now - this.startTime - this.pausedDuration;
+    const elapsedUs = Math.round(elapsedMs * 1000);
     const timestamp =
       elapsedUs > timing.lastFrameTimestampUs ? elapsedUs : timing.lastFrameTimestampUs + 1;
     timing.lastFrameTimestampUs = timestamp;
@@ -1292,6 +1417,42 @@ export class WebCodecsRecorder {
     }
 
     return { timestamp, keyFrame };
+  }
+
+  /**
+   * Read `getOutputTimestamp()` into the anchor, and say whether it was
+   * usable. An unusable reading — no such method, zeros from a context that
+   * has not rendered yet, a non-finite value — leaves the previous anchor
+   * where it was.
+   */
+  private readOutputTimestamp(context: AudioContext, now: number): boolean {
+    this.anchorReadAt = now;
+    const stamp = context.getOutputTimestamp?.();
+    const contextTime = stamp?.contextTime as number;
+    const performanceTime = stamp?.performanceTime as number;
+    if (!Number.isFinite(contextTime) || !(contextTime > 0) || !Number.isFinite(performanceTime)) {
+      return false;
+    }
+    this.anchorContextTime = contextTime;
+    this.anchorPerformanceTime = performanceTime;
+    return true;
+  }
+
+  /** The anchor extrapolated to `now` on `performance.now()`, in context seconds. */
+  private contextTimeAt(now: number): number {
+    return this.anchorContextTime + (now - this.anchorPerformanceTime) / 1000;
+  }
+
+  /**
+   * Context time now, re-reading the anchor once `CONTEXT_CLOCK_REFRESH_MS`
+   * have passed since it was last asked. Only called while `clockContext` is
+   * set.
+   */
+  private contextNow(now: number): number {
+    if (now - this.anchorReadAt >= CONTEXT_CLOCK_REFRESH_MS) {
+      this.readOutputTimestamp(this.clockContext!, now);
+    }
+    return this.contextTimeAt(now);
   }
 
   /**
@@ -1471,6 +1632,7 @@ export class WebCodecsRecorder {
   pause(): void {
     if (this.isRecordingActive && !this.isPausedState) {
       this.pauseStartTime = performance.now();
+      if (this.clockContext) this.pauseStartContext = this.contextNow(this.pauseStartTime);
       this.isPausedState = true;
       this.callbacks.onPause?.();
     }
@@ -1481,7 +1643,18 @@ export class WebCodecsRecorder {
    */
   resume(): void {
     if (this.isRecordingActive && this.isPausedState) {
-      this.pausedDuration += performance.now() - this.pauseStartTime;
+      const now = performance.now();
+      this.pausedDuration += now - this.pauseStartTime;
+      if (this.clockContext) {
+        this.readOutputTimestamp(this.clockContext, now);
+        this.pausedContextSeconds += this.contextTimeAt(now) - this.pauseStartContext;
+      }
+      // The callbacks dropped while paused are the pause, not lost audio: the
+      // first buffer after it is taken as given, by every audio pipeline.
+      this.mixGapFiller?.reanchor();
+      for (const companion of this.companions) {
+        if (companion.kind === 'audio') companion.gapFiller.reanchor();
+      }
       this.isPausedState = false;
       this.callbacks.onResume?.();
     }

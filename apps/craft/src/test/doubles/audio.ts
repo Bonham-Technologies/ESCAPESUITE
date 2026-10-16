@@ -52,9 +52,21 @@ export function createAudioBufferDouble(options: AudioBufferOptions = {}): Audio
   }
 }
 
+/**
+ * What a test hands `onaudioprocess`. `playbackTime` is opt-in: a real
+ * `AudioProcessingEvent` always carries it (the context time, in seconds, of
+ * the buffer), but every suite written before ESCSUITE-296 dispatches
+ * `{ inputBuffer }` alone — and the recorder's gap filler is a no-op for such
+ * an event, which is what keeps those suites' counts exactly as they were.
+ */
+export interface AudioProcessEventDouble {
+  inputBuffer: AudioBufferDouble
+  playbackTime?: number
+}
+
 export interface ScriptProcessorDouble {
   bufferSize: number
-  onaudioprocess: ((event: { inputBuffer: AudioBufferDouble }) => void) | null
+  onaudioprocess: ((event: AudioProcessEventDouble) => void) | null
   connect: ReturnType<typeof vi.fn>
   disconnect: ReturnType<typeof vi.fn>
 }
@@ -78,6 +90,55 @@ export interface AnalyserDouble {
   getByteFrequencyData: ReturnType<typeof vi.fn>
 }
 
+/**
+ * The context's render clock, for `getOutputTimestamp()` (ESCSUITE-296).
+ *
+ * `contextTime = offsetSeconds + performanceTime / 1000 × (1 + skew)` — a
+ * render clock that runs `skew` fast (ε, positive) or slow against
+ * `performance.now()`, the way an output device's crystal does.
+ */
+export interface OutputClockDouble {
+  /** ε: context seconds per `performance.now()` second, minus one. */
+  skew: number
+  /** `contextTime` at `performance.now() === 0`, in seconds. */
+  offsetSeconds: number
+  /**
+   * When set, `getOutputTimestamp()` reports exactly this instead — zeros, as
+   * a context that has not rendered yet does, or a non-finite value. Read on
+   * every call, so a test can change it mid-take.
+   */
+  report?: { contextTime: number; performanceTime: number }
+}
+
+/** The context time `clock` reads at this `performance.now()`, in seconds. */
+export function outputClockContextTime(clock: OutputClockDouble, performanceTime: number): number {
+  return clock.offsetSeconds + (performanceTime / 1000) * (1 + clock.skew)
+}
+
+/**
+ * The `playbackTime` an `onaudioprocess` event carries for the buffer that
+ * starts at context time `bufferStart`, in seconds.
+ *
+ * With no `dispatchDelay` it is that position exactly — the reading the
+ * recorder's gap filler was first written against. With one, it is what Blink
+ * and WebKit are recalled to compute (ESCSUITE-296's review; not measured):
+ * the context time at the moment the main thread *dispatches* the event — the
+ * buffer's position plus how late the dispatch is — rounded down to a
+ * 128-frame render quantum. A late callback then reads as a gap that is not
+ * one, and a burst of callbacks queued behind a hang all read about the same
+ * time.
+ */
+export function scriptProcessorPlaybackTime(
+  bufferStart: number,
+  sampleRate: number,
+  dispatchDelay = 0
+): number {
+  if (dispatchDelay === 0) return bufferStart
+  // The epsilon keeps a position that is a whole quantum from flooring one
+  // quantum short on a float that lands a hair under it.
+  return (Math.floor(((bufferStart + dispatchDelay) * sampleRate) / 128 + 1e-9) * 128) / sampleRate
+}
+
 export interface AudioContextDoubleControl {
   /** Every AudioContext the code under test constructed. */
   readonly contexts: AudioContextDoubleInstance[]
@@ -99,6 +160,26 @@ export interface AudioContextDoubleControl {
    * from — and the state Chrome hands out without a user gesture.
    */
   resumeGate: Promise<void> | null
+  /**
+   * The rate every new context runs at whatever it was asked for — an engine
+   * that ignores `new AudioContext({ sampleRate })`. Null (the default)
+   * honours the option, falling back to 48000.
+   */
+  contextSampleRate: number | null
+  /**
+   * Opt-in render clock. Null (the default): new contexts have **no**
+   * `getOutputTimestamp` at all, so every suite written before ESCSUITE-296
+   * keeps the recorder on its `performance.now()` path. Read when a context is
+   * constructed (present or absent) and on every call (its values).
+   */
+  outputClock: OutputClockDouble | null
+  /**
+   * Opt-in `currentTime`, as a function of `performance.now()`. Null (the
+   * default): a context reads `currentTime` as `undefined`, so every suite
+   * written before ESCSUITE-296's quantum rule gives the recorder's gap filler
+   * no clock at all and keeps the old path.
+   */
+  currentTimeAt: ((performanceTime: number) => number) | null
 }
 
 const control: AudioContextDoubleControl = {
@@ -109,6 +190,9 @@ const control: AudioContextDoubleControl = {
   destinationTrackCount: 1,
   analyserLevel: 0,
   resumeGate: null,
+  contextSampleRate: null,
+  outputClock: null,
+  currentTimeAt: null,
 }
 
 function makeAudioTrack(index: number): MediaStreamTrack {
@@ -154,11 +238,25 @@ export class AudioContextDoubleInstance {
     return control.decodeResult as unknown as AudioBuffer
   })
   readonly decodedByteLengths: number[] = []
+  /** `control.currentTimeAt` at the current `performance.now()`, or undefined. */
+  get currentTime(): number | undefined {
+    return control.currentTimeAt?.(performance.now())
+  }
+  /** Present only when `control.outputClock` was set at construction. */
+  getOutputTimestamp?: ReturnType<typeof vi.fn<() => { contextTime: number; performanceTime: number }>>
 
   constructor(options?: { sampleRate?: number }) {
     if (control.constructorThrows) throw new Error('AudioContext is unavailable')
     this.state = control.initialState
-    this.sampleRate = options?.sampleRate ?? 48000
+    this.sampleRate = control.contextSampleRate ?? options?.sampleRate ?? 48000
+    if (control.outputClock) {
+      this.getOutputTimestamp = vi.fn(() => {
+        const clock = control.outputClock!
+        if (clock.report) return { ...clock.report }
+        const performanceTime = performance.now()
+        return { contextTime: outputClockContextTime(clock, performanceTime), performanceTime }
+      })
+    }
     control.contexts.push(this)
   }
 
@@ -243,6 +341,9 @@ export function resetAudioContextDouble(): void {
   control.destinationTrackCount = 1
   control.analyserLevel = 0
   control.resumeGate = null
+  control.contextSampleRate = null
+  control.outputClock = null
+  control.currentTimeAt = null
 }
 
 /** The single AudioContext the code under test created (fails loudly if none). */
