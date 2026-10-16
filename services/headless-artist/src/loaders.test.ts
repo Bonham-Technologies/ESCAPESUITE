@@ -237,6 +237,26 @@ describe('loadManifest', () => {
       /project\.timeline must be an object with an array "clips"/,
     )
   })
+  // ESCSUITE-294: a clip that is not an object leaked a bare TypeError from
+  // validateClipReferences ("Cannot read properties of null (reading 'overlayType')").
+  it.each([
+    ['null', null],
+    ['a number', 7],
+    ['a list', []],
+  ])('names the index, rather than leaking a TypeError, when a clip is %s', async (_label, badClip) => {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    const { project } = JSON.parse(await fs.readFile(path.join(manifestFixtureDir, 'project.json'), 'utf8'))
+    project.timeline.clips.push(badClip)
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({ project, sources: [{ id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' }] }),
+    )
+
+    await expect(loadManifest(path.join(dir, 'manifest.json'))).rejects.toThrow(
+      'project.timeline.clips[1] must be an object',
+    )
+  })
 })
 
 describe('loadManifest "meta"', () => {
@@ -605,6 +625,25 @@ describe('loadManifest source validation', () => {
     ])
 
     await expect(loadManifest(manifestPath)).rejects.toThrow('duplicate source id "src-0"')
+  })
+  // ESCSUITE-294: "name" and "mimeType" are optional (the file's basename and its extension
+  // stand in), but one that is present must be a non-empty string -- a bundle entry's are
+  // checked, and [] used to load here as a source's name.
+  it.each([
+    ['name', []],
+    ['name', 5],
+    ['name', ''],
+    ['mimeType', true],
+    ['mimeType', ''],
+  ])('rejects a "%s" of %j, naming the field', async (field, value) => {
+    const dir = await makeManifestDir()
+    const manifestPath = await writeManifest(dir, [
+      { id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4', [field]: value },
+    ])
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      `manifest source "src-0" field "${field}" must be a non-empty string`,
+    )
   })
 })
 
