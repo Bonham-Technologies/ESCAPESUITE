@@ -17,6 +17,7 @@ import {
   AUDIO_CAPTURE_WORKLET_SOURCE,
   CHUNK_FRAMES,
   FLUSH_TIMEOUT_MS,
+  POOL_PAIRS,
   type AudioCapture,
 } from './audioWorkletCapture'
 import {
@@ -66,6 +67,37 @@ function stamps(): Array<{ timestamp: number; frames: number; rate: number }> {
 
 async function settle(turns = 8): Promise<void> {
   for (let i = 0; i < turns; i++) await Promise.resolve()
+}
+
+/** The `{ recycle }` messages the page has sent this node, in order. */
+function recycles(node: AudioWorkletNodeDouble): Float32Array[][] {
+  return node.port.postMessage.mock.calls
+    .map(([message]) => message)
+    .filter((message): message is { recycle: Float32Array[] } => typeof message === 'object' && message !== null && 'recycle' in message)
+    .map(message => message.recycle)
+}
+
+/**
+ * The provenance law (ESCSUITE-303): walk every transfer across the port in
+ * order and fail if the processor ever posts a buffer the page still holds —
+ * one it posted before and has not had back. Returns how many distinct buffers
+ * the processor ever posted.
+ */
+function assertNoBufferPostedWhileInFlight(node: AudioWorkletNodeDouble): number {
+  const heldByPage = new Set<number>()
+  const posted = new Set<number>()
+  for (const { to, ids } of node.transfers) {
+    for (const id of ids) {
+      if (to === 'page') {
+        expect(heldByPage.has(id), `buffer ${id} posted while the page still held it`).toBe(false)
+        heldByPage.add(id)
+        posted.add(id)
+      } else {
+        heldByPage.delete(id)
+      }
+    }
+  }
+  return posted.size
 }
 
 beforeEach(() => {
@@ -239,6 +271,93 @@ describe('the capture processor (the worklet module)', () => {
       ['frame', 'channels'],
       ['flushed'],
     ])
+  })
+
+  describe('its buffer pool (ESCSUITE-303)', () => {
+    /** Be the page: take every chunk delivered and hand its buffers straight back. */
+    function returnChunks(): void {
+      node.port.onmessage = event => {
+        const { channels } = event.data as { channels?: Float32Array[] }
+        if (channels) node.port.postMessage({ recycle: channels }, channels.map(c => c.buffer))
+      }
+      node.deliver()
+    }
+
+    /** A pair of buffers, as a page would hand back. */
+    const pair = (frames = CHUNK_FRAMES) => [new Float32Array(frames), new Float32Array(frames)]
+
+    /** Hand the processor `pairs` directly, as recycles. */
+    async function recycle(...pairs: Float32Array[][]): Promise<void> {
+      for (const channels of pairs) node.port.postMessage({ recycle: channels }, channels.map(c => c.buffer))
+      await settle()
+    }
+
+    /** The lineage ids of the buffers in the `n`th transfer the page sent. */
+    const idsSent = (n: number) => node.transfers.filter(t => t.to === 'processor')[n].ids
+    /** The lineage ids of the buffers in the processor's `n`th chunk. */
+    const idsPosted = (n: number) => node.transfers.filter(t => t.to === 'page')[n].ids
+
+    it(`holds at most POOL_PAIRS = 4 pairs`, () => {
+      expect(POOL_PAIRS).toBe(4)
+    })
+
+    it('fills the next chunk from a recycled pair instead of allocating one', async () => {
+      context.render(CHUNK_FRAMES)
+      expect(context.processorArrayAllocations).toBe(2)
+      returnChunks()
+      await settle()
+
+      context.render(CHUNK_FRAMES, (channel, frame) => channel * 1000 + (frame % 5))
+      expect(context.processorArrayAllocations).toBe(2)
+      // The second chunk went out in the first chunk's buffers...
+      expect(idsPosted(1)).toEqual(idsPosted(0))
+      // ...overwritten with its own samples.
+      const delivered: Array<{ channels: Float32Array[] }> = []
+      node.port.onmessage = event => delivered.push(event.data as { channels: Float32Array[] })
+      node.deliver()
+      expect(delivered[0].channels[0][3]).toBe((CHUNK_FRAMES + 3) % 5)
+      expect(delivered[0].channels[1][3]).toBe(1000 + ((CHUNK_FRAMES + 3) % 5))
+    })
+
+    it('writes silence over a recycled pair: a quantum with nothing connected leaves no old samples behind', async () => {
+      context.render(CHUNK_FRAMES, () => 0.5)
+      returnChunks()
+      await settle()
+
+      context.render(CHUNK_FRAMES, undefined, 0)
+      // Recycled, not fresh — so the zeros were written, not inherited.
+      expect(context.processorArrayAllocations).toBe(2)
+      const delivered: Array<{ channels: Float32Array[] }> = []
+      node.port.onmessage = event => delivered.push(event.data as { channels: Float32Array[] })
+      node.deliver()
+      expect(delivered[0].channels[0].every(v => v === 0)).toBe(true)
+      expect(delivered[0].channels[1].every(v => v === 0)).toBe(true)
+    })
+
+    it(`keeps POOL_PAIRS pairs and drops a fifth`, async () => {
+      await recycle(pair(), pair(), pair(), pair(), pair())
+      const kept = [0, 1, 2, 3].flatMap(idsSent)
+      const fifth = idsSent(4)
+
+      context.render(POOL_PAIRS * CHUNK_FRAMES)
+      // The four kept pairs carry the next four chunks, with no allocation...
+      expect(context.processorArrayAllocations).toBe(0)
+      expect([0, 1, 2, 3].flatMap(idsPosted).sort()).toEqual(kept.sort())
+      // ...and the chunk after them needs a fresh pair: the fifth was dropped.
+      context.render(CHUNK_FRAMES)
+      expect(context.processorArrayAllocations).toBe(2)
+      expect(idsPosted(4)).not.toEqual(fifth)
+      expect(node.transfers.filter(t => t.to === 'page').flatMap(t => t.ids)).not.toContain(fifth[0])
+    })
+
+    it('drops a recycled pair that is not CHUNK_FRAMES long, and allocates instead', async () => {
+      // A tail, say — sliced to what was rendered.
+      await recycle(pair(640))
+      context.render(CHUNK_FRAMES)
+      expect(context.processorArrayAllocations).toBe(2)
+      expect(idsPosted(0)).not.toEqual(idsSent(0))
+      expect(node.posted).toHaveLength(1)
+    })
   })
 })
 
@@ -620,6 +739,112 @@ describe('the AudioWorklet capture', () => {
     expect(getCreatedFrames('AudioData')).toHaveLength(2)
     expect(getCreatedFrames('AudioData').every(d => d.closed)).toBe(true)
     expect(encoded).toHaveLength(1)
+  })
+})
+
+describe('the AudioWorklet capture hands each chunk\'s buffers back (ESCSUITE-303)', () => {
+  let worklet: AudioWorkletDoubleControl
+  let context: AudioContextDoubleInstance
+  let node: AudioWorkletNodeDouble
+  let take: AudioCapture
+
+  beforeEach(async () => {
+    worklet = enableAudioWorkletDouble()
+    context = newContext()
+    take = await capture(context)
+    node = context.workletNodes[0]
+  })
+
+  /** Render `chunks` while the page is busy, then let it catch up. */
+  async function behind(chunks: number): Promise<void> {
+    worklet.holdMessages = true
+    context.render(chunks * CHUNK_FRAMES)
+    worklet.holdMessages = false
+    node.deliver()
+    await settle()
+  }
+
+  it('recycles every chunk it handles, after encoding it, transferred', async () => {
+    take.start()
+    context.render(CHUNK_FRAMES * 2)
+    await settle()
+
+    expect(stamps().map(s => s.frames)).toEqual([CHUNK_FRAMES, CHUNK_FRAMES])
+    const sent = recycles(node)
+    expect(sent).toHaveLength(2)
+    const [[channels, transfer]] = node.port.postMessage.mock.calls as unknown as Array<[{ recycle: Float32Array[] }, ArrayBuffer[]]>
+    expect(transfer).toHaveLength(2)
+    expect(transfer).toEqual(channels.recycle.map(c => c.buffer))
+    // Detached on the page's side: it keeps nothing it handed back.
+    expect(sent[0][0].length).toBe(0)
+  })
+
+  it('recycles a chunk that kept nothing — rendered while paused, or after stop() — since the node lives until close()', async () => {
+    take.start()
+    context.render(CHUNK_FRAMES)
+    take.pause()
+    context.render(CHUNK_FRAMES)
+    await settle()
+    expect(encoded).toHaveLength(1)
+    expect(recycles(node)).toHaveLength(2)
+
+    take.resume()
+    context.render(CHUNK_FRAMES)
+    const stopped = take.stop()
+    // Rendered after the take ended, before the render thread got the flush.
+    context.render(CHUNK_FRAMES)
+    await stopped
+    expect(encoded).toHaveLength(2)
+    expect(recycles(node)).toHaveLength(4)
+  })
+
+  it('never recycles after close(): a chunk whose encode closes the capture is not handed back, and nothing throws', async () => {
+    onChunk.mockImplementationOnce(() => take.close())
+    take.start()
+    context.render(CHUNK_FRAMES)
+    await settle()
+
+    expect(node.port.close).toHaveBeenCalledTimes(1)
+    expect(recycles(node)).toHaveLength(0)
+    expect(consoleError).not.toHaveBeenCalled()
+  })
+
+  it(`a 20-chunk take allocates buffers for the first POOL_PAIRS + 1 chunks and then none, and never posts a buffer the page still holds`, async () => {
+    take.start()
+    // The page falls one chunk further behind than the pool holds: five pairs
+    // are made, five come back, and the pool keeps four.
+    await behind(POOL_PAIRS + 1)
+    for (let k = POOL_PAIRS + 1; k < 20; k++) await behind(1)
+
+    expect(encoded).toHaveLength(20)
+    expect(stamps().map(s => s.timestamp)).toEqual(
+      Array.from({ length: 20 }, (_, k) => Math.round(((k * CHUNK_FRAMES) / 48000) * 1e6))
+    )
+    // Exact: two buffers for each of the first five chunks, none after.
+    expect(context.processorArrayAllocations).toBe(2 * (POOL_PAIRS + 1))
+    expect(assertNoBufferPostedWhileInFlight(node)).toBe(2 * (POOL_PAIRS + 1))
+  })
+
+  // ESCSUITE-303, measured 2026-10-16: the render thread's allocations per
+  // chunk once the pool is warm, with the page up to POOL_PAIRS chunks behind.
+  // Before the pool it was 2 per chunk (two fresh Float32Array(4096), ~32 KB,
+  // every ~85 ms); it is 0, and a conservation law, so asserted exactly.
+  it('allocates nothing per chunk after warm-up while the page is no more than POOL_PAIRS chunks behind', async () => {
+    take.start()
+    await behind(POOL_PAIRS + 1)
+    const warm = context.processorArrayAllocations
+
+    const lags = [1, 2, 3, 4, 4, 3, 2, 1]
+    let chunks = 0
+    for (let round = 0; chunks < 100; round++) {
+      const lag = Math.min(lags[round % lags.length], 100 - chunks)
+      await behind(lag)
+      chunks += lag
+    }
+
+    expect(encoded).toHaveLength(POOL_PAIRS + 1 + 100)
+    expect((context.processorArrayAllocations - warm) / chunks).toBe(0)
+    assertNoBufferPostedWhileInFlight(node)
   })
 })
 
