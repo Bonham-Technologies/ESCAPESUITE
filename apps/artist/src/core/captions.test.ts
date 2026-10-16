@@ -381,6 +381,26 @@ describe('parseCaptions — refusals name the line', () => {
     expect(refusal('just words', 'srt')).toBe('Line 1: this caption has no timing line (start --> end).')
   })
 
+  // Review M5 (ruling): a hand-edited SRT often ends on the next cue's index
+  // and nothing more. That is ignored; the same index anywhere else, or a lone
+  // id at the end of a WebVTT file, is still a block with no timing.
+  it('ignores a lone index at the end of an SRT file, and only there', () => {
+    expect(parseCaptions('1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\n', 'srt')).toEqual({
+      cues: [{ start: 1, end: 2, text: 'A' }],
+      dropped: [],
+    })
+    expect(parseCaptions('1\n00:00:01,000 --> 00:00:02,000\nA\n\n 2 \n\n\n', 'srt').cues).toHaveLength(1)
+    expect(refusal('1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\n\n3\n00:00:03,000 --> 00:00:04,000\nB', 'srt')).toBe(
+      'Line 5: this caption has no timing line (start --> end).'
+    )
+    expect(refusal('WEBVTT\n\n00:01.000 --> 00:02.000\nA\n\n2\n', 'vtt')).toBe(
+      'Line 6: this caption has no timing line (start --> end).'
+    )
+    expect(refusal('1\n00:00:01,000 --> 00:00:02,000\nA\n\nB\n', 'srt')).toBe(
+      'Line 5: this caption has no timing line (start --> end).'
+    )
+  })
+
   it('refuses a file that yields no cues once the drops are made', () => {
     expect(refusal('WEBVTT\n\nNOTE only a note', 'vtt')).toBe('The file has no captions to import.')
     expect(refusal('WEBVTT', 'vtt')).toBe('The file has no captions to import.')
