@@ -159,6 +159,46 @@ describe('parseCaptions — SRT', () => {
   })
 })
 
+// Review M1: only the formats' own tags are markup — WebVTT's b, i, u, c, v,
+// ruby, rt, lang and timestamps, and SRT's font — and everything else between
+// angle brackets is caption text. The tag pattern cannot cross a < or a line,
+// so a line of nothing but < is read in one pass.
+describe('parseCaptions — what counts as a tag', () => {
+  const textOf = (line: string, format: 'srt' | 'vtt' = 'srt') =>
+    parseCaptions(`${format === 'vtt' ? 'WEBVTT\n\n' : ''}00:00:01.000 --> 00:00:02.000\n${line}`, format)
+
+  it('keeps angle brackets that are not a tag as words, and records no styling', () => {
+    expect(textOf('Press <Enter> now')).toEqual({ cues: [{ start: 1, end: 2, text: 'Press <Enter> now' }], dropped: [] })
+    expect(textOf('1 < 2 and 3 > 2').cues[0].text).toBe('1 < 2 and 3 > 2')
+    expect(textOf('<br> <bold> <colour>', 'vtt').cues[0].text).toBe('<br> <bold> <colour>')
+  })
+
+  it('strips the known tags in either case, closing forms included', () => {
+    expect(textOf('<I>a</I> <FONT color="red">b</FONT> <u>c</u>')).toEqual({
+      cues: [{ start: 1, end: 2, text: 'a b c' }],
+      dropped: ['styling'],
+    })
+  })
+
+  it('strips both forms of timestamp tag, and nothing that only looks like one', () => {
+    expect(textOf('a <00:01.500>b <00:00:01.750>c <1:2.3>d', 'vtt').cues[0].text).toBe('a b c <1:2.3>d')
+  })
+
+  it('does not cross a < inside a tag', () => {
+    expect(textOf('<font color="<">x').cues[0].text).toBe('<font color="<">x')
+  })
+
+  it('reads a line of eighty thousand < as text', () => {
+    expect(textOf('<'.repeat(80_000)).cues[0].text).toHaveLength(80_000)
+  })
+
+  it('strips in one pass, so a tag made by stripping another stays as text — and is written back so', () => {
+    const parsed = textOf('<<b>i>x')
+    expect(parsed.cues[0].text).toBe('<i>x')
+    expect(parseCaptions(serializeCaptions(parsed.cues, 'srt'), 'srt').cues).toEqual(parsed.cues)
+  })
+})
+
 describe('parseCaptions — WebVTT', () => {
   const VTT = 'WEBVTT\n\n00:01.000 --> 00:02.500\nHello there.\n\nid-2\n00:00:03.000 --> 00:00:04.000\nTwo lines\nof text.\n'
 
@@ -379,10 +419,15 @@ describe('serializeCaptions', () => {
     )
   })
 
-  it('leaves tags out of SRT, which has no way to write a literal one', () => {
-    expect(serializeCaptions([{ start: 1, end: 2, text: 'a <b>bold</b> claim\n<i></i>' }], 'srt')).toBe(
-      '1\n00:00:01,000 --> 00:00:02,000\na bold claim\n'
-    )
+  it('writes a literal tag in SRT, which has no escapes, so that it reads back as text', () => {
+    const cues = [{ start: 1, end: 2, text: 'a <b>bold</b> claim\n<i></i>' }]
+    const written = serializeCaptions(cues, 'srt')
+    expect(written).toBe('1\n00:00:01,000 --> 00:00:02,000\na <<i></i>b>bold<<i></i>/b> claim\n<<i></i>i><<i></i>/i>\n')
+    expect(parseCaptions(written, 'srt').cues).toEqual(cues)
+  })
+
+  it('writes angle brackets that are not tags as they are', () => {
+    expect(serializeCaptions([{ start: 1, end: 2, text: 'Press <Enter>, 1 < 2' }], 'srt')).toContain('\nPress <Enter>, 1 < 2\n')
   })
 
   it('reads tags line by line when writing SRT, as the parser does, so a < and a > on two lines survive', () => {
