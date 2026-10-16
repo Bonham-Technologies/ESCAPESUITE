@@ -201,18 +201,21 @@ interface RecordedSpan {
  *
  * Every decision is by render position, never by when a chunk arrives: the
  * take is a list of recorded spans of the render clock — `start()` opens one,
- * `pause()` closes it, `resume()` opens the next — and a chunk is kept when
- * its first frame falls inside one. It is stamped
- * `(frame − span start + frames recorded before the span) / sampleRate`, so
+ * `pause()` closes it, `resume()` opens the next — and what a chunk rendered
+ * inside a span is kept, stamped
+ * `(frame − span start + frames recorded before the span) / sampleRate`. So
  * the paused render frames are taken out of the audio exactly as the recorder
- * takes the paused context time out of the video, and a chunk that arrives
- * after a pause (or a resume) is still judged by where it was rendered.
+ * takes the paused context time out of the video, a chunk rendered wholly
+ * inside a pause is dropped, and a chunk that arrives after a pause (or a
+ * resume) is still judged by where it was rendered. A chunk that straddles a
+ * span edge is cut there, to the frame: the audio starts at `start()` with a
+ * stamp of 0 and runs on across a pause with neither a gap nor an overlap.
  *
  * The page reads the render position as `currentTime × sampleRate` — the same
  * frame count the processor's `currentFrame` reports — at `start()`, `pause()`
- * and `resume()`. Decisions are per chunk, so a chunk that straddles a span
- * edge goes with the span its first frame is in: up to one chunk (~85 ms)
- * either side of a pause or of `start()`, never cumulative.
+ * and `resume()`; the recorder reads the video's paused time on the same
+ * clock at the same moments, so the two subtract the same pause (to within a
+ * render quantum, 2.7 ms, never cumulative).
  */
 function createWorkletCapture(
   context: AudioContext,
@@ -245,32 +248,19 @@ function createWorkletCapture(
     settle?.();
   };
 
-  node.port.onmessage = (event: MessageEvent<ProcessorMessage>) => {
-    const message = event.data;
-    if ('flushed' in message) {
-      close();
-      return;
+  /** One `AudioData` of `count` frames from `start` in the chunk, stamped at recorded frame `at`. */
+  const encodePiece = (channels: Float32Array[], start: number, count: number, at: number) => {
+    const planar = new Float32Array(count * channels.length);
+    for (let c = 0; c < channels.length; c++) {
+      planar.set(channels[c].subarray(start, start + count), c * count);
     }
-    const { frame, channels } = message;
-    let span: RecordedSpan | null = null;
-    for (let i = 0; i < spans.length; i++) {
-      if (frame >= spans[i].from && frame < spans[i].to) {
-        span = spans[i];
-        break;
-      }
-    }
-    if (!span) return;
-
-    const numberOfFrames = channels[0].length;
-    const planar = new Float32Array(numberOfFrames * channels.length);
-    for (let c = 0; c < channels.length; c++) planar.set(channels[c], c * numberOfFrames);
     try {
       const audioData = new AudioData({
         format: 'f32-planar',
         sampleRate,
-        numberOfFrames,
+        numberOfFrames: count,
         numberOfChannels: channels.length,
-        timestamp: Math.round(((frame - span.from + span.offset) / sampleRate) * 1_000_000),
+        timestamp: Math.round((at / sampleRate) * 1_000_000),
         data: planar,
       });
       try {
@@ -280,6 +270,27 @@ function createWorkletCapture(
       }
     } catch (e) {
       console.error('Audio encoding error:', e);
+    }
+  };
+
+  node.port.onmessage = (event: MessageEvent<ProcessorMessage>) => {
+    const message = event.data;
+    if ('flushed' in message) {
+      close();
+      return;
+    }
+    const { frame, channels } = message;
+    const length = channels[0].length;
+    // Almost always one piece: the whole chunk, inside the open span. A chunk
+    // that straddles `start()`, a pause or a resume is cut where the span
+    // edge falls, so the stamps run on across a pause with neither a gap nor
+    // an overlap.
+    for (let i = 0; i < spans.length; i++) {
+      const span = spans[i];
+      const from = Math.max(frame, span.from);
+      const to = Math.min(frame + length, span.to);
+      if (from >= to) continue;
+      encodePiece(channels, from - frame, to - from, from - span.from + span.offset);
     }
   };
 
