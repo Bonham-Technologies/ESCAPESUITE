@@ -217,12 +217,15 @@ function formatTimestamp(ms: number, separator: ',' | '.'): string {
   return `${pad(hours, 2)}:${pad(minutes, 2)}:${pad(seconds, 2)}${separator}${pad(ms % 1000, 3)}`;
 }
 
-/** How each format writes a cue's text so `parseCaptions` reads back exactly that text. */
-const WRITE_TEXT: Record<CaptionFormat, (text: string) => string> = {
+/**
+ * How each format writes one line of a cue's text so `parseCaptions` reads
+ * back exactly that line — line by line, because that is how it reads tags.
+ */
+const WRITE_LINE: Record<CaptionFormat, (line: string) => string> = {
   // SRT has no escapes: a tag in the text would be read as markup, so it is
   // left out, as any SRT reader would treat it.
-  srt: (text) => text.replace(TAG, ''),
-  vtt: (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+  srt: (line) => line.replace(TAG, ''),
+  vtt: (line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
 };
 
 /**
@@ -241,8 +244,8 @@ export function serializeCaptions(cues: CaptionCue[], format: CaptionFormat): st
   for (const cue of cues) {
     const start = toMs(cue.start);
     const end = toMs(cue.end);
-    const text = lines(WRITE_TEXT[format](cue.text))
-      .map((line) => line.trim())
+    const text = lines(cue.text)
+      .map((line) => WRITE_LINE[format](line).trim())
       .filter((line) => line !== '');
     if (text.length === 0 || end <= start) continue;
     const timing = `${formatTimestamp(start, separator)} --> ${formatTimestamp(end, separator)}`;
