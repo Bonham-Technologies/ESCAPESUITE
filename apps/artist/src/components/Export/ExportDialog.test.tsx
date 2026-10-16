@@ -20,6 +20,8 @@ import styles from './ExportDialog.module.css'
 import { lastObjectUrl } from '../../test/objectUrls'
 import { disposeLiveExport } from './liveExport'
 import { ErrorBoundary } from '@escapesuite/shared/components'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 // The exporter itself is driven by its own suite; here it is a scripted
 // collaborator. The real error classes come through importOriginal so the
@@ -2363,6 +2365,27 @@ describe('ExportDialog', () => {
 
       expect(signal!.aborted).toBe(true)
       expect(onClose).toHaveBeenCalled()
+    })
+  })
+
+  // ESCSUITE-292 fix round 3: jsdom has no layout, so the guarantee is pinned
+  // on the stylesheet itself. The overlay centres the dialog; without a
+  // max-height a dialog taller than the window overflowed both edges with no
+  // way to scroll to its ends. With Advanced options open, the Audio loudness
+  // choice and a no-AAC browser's silent-MP4 note, it measured 1,020 px in
+  // Firefox at 1280x720 and put "Download MP4" below the window — every MP4
+  // export in the e2e suite (Firefox, Linux Chromium) waited on that click
+  // until its test timed out.
+  describe('fits the window', () => {
+    // The module's own stylesheet, read as text: vitest does not process CSS.
+    const css = readFileSync(join(__dirname, 'ExportDialog.module.css'), 'utf8')
+    const rule = (selector: string) => css.match(new RegExp(`\\${selector} \\{([^}]*)\\}`))?.[1] ?? ''
+
+    it('caps the dialog at the window height and lets the body scroll', () => {
+      expect(rule('.dialog')).toMatch(/max-height:\s*calc\(100vh/)
+      expect(rule('.dialog')).toMatch(/flex-direction:\s*column/)
+      expect(rule('.body')).toMatch(/overflow-y:\s*auto/)
+      expect(rule('.body')).toMatch(/min-height:\s*0/)
     })
   })
 

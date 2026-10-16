@@ -1324,6 +1324,24 @@ describe('exportToWebM loudness (ESCSUITE-292)', () => {
     expect(loudness).toBeUndefined()
   })
 
+  // Fix round 3: on the no-Opus arm the export must still settle — with the
+  // loudness choice off and with a target — rather than wait on a mix it
+  // never made. Bounded, so a hang fails here instead of hanging the run.
+  it.each([undefined, -14] as const)('completes without Opus, loudnessTarget %s', async (loudnessTarget) => {
+    mixAudio.mockResolvedValue(toneMix(1, -30))
+    webcodecs.audio.answer = () => false
+    const progress: ExportProgress[] = []
+
+    const result = await Promise.race([
+      run({ clips, options: { loudnessTarget }, onProgress: (p) => progress.push(p) }),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error('export did not settle in 4 s')), 4000)),
+    ])
+
+    expect(result.audio).toBe(false)
+    expect(result.loudness).toBeUndefined()
+    expect(progress[progress.length - 1].phase).toBe('complete')
+  })
+
   it('measures nothing when this browser cannot encode the sound', async () => {
     mixAudio.mockResolvedValue(toneMix(1, -30))
     webcodecs.audio.answer = () => false
