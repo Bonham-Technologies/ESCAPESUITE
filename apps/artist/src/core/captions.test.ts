@@ -250,6 +250,65 @@ describe('parseCaptions — WebVTT', () => {
   })
 })
 
+// Review I2: a file missing the blank line between two cues used to import as
+// one caption whose text carried the second timing line, burned into the
+// picture. A timing line — both sides read as timestamps — starts a new cue
+// wherever it appears, the WebVTT rule, in both formats.
+describe('parseCaptions — a timing line inside a cue starts the next cue', () => {
+  it('splits SRT cues with no blank line between them, the index going with the new cue', () => {
+    const text = '1\n00:00:01,000 --> 00:00:02,000\nHello\n2\n00:00:03,000 --> 00:00:04,000\nWorld'
+    expect(parseCaptions(text, 'srt')).toEqual({
+      cues: [
+        { start: 1, end: 2, text: 'Hello' },
+        { start: 3, end: 4, text: 'World' },
+      ],
+      dropped: [],
+    })
+  })
+
+  it('splits them without indices too, as often as it happens', () => {
+    const text = '00:00:01,000 --> 00:00:02,000\nA\n00:00:03,000 --> 00:00:04,000\nB\nB2\n00:00:05,000 --> 00:00:06,000\nC'
+    expect(parseCaptions(text, 'srt').cues.map((c) => [c.start, c.text])).toEqual([[1, 'A'], [3, 'B\nB2'], [5, 'C']])
+  })
+
+  it('splits WebVTT cues the same way, where a line of digits before the timing stays text', () => {
+    const text = 'WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n42\n00:03.000 --> 00:04.000 line:0\nWorld'
+    expect(parseCaptions(text, 'vtt')).toEqual({
+      cues: [
+        { start: 1, end: 2, text: 'Hello\n42' },
+        { start: 3, end: 4, text: 'World' },
+      ],
+      dropped: ['positioning'],
+    })
+  })
+
+  it('drops a cue whose timing is followed straight away by the next timing', () => {
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\n00:00:03,000 --> 00:00:04,000\nB', 'srt')).toEqual({
+      cues: [{ start: 3, end: 4, text: 'B' }],
+      dropped: ['empty-cues'],
+    })
+  })
+
+  it('keeps a line with --> as text when either side is not a timestamp', () => {
+    const text = '00:00:01,000 --> 00:00:02,000\nnope --> 00:00:04,000\n00:00:03,000 --> later'
+    expect(parseCaptions(text, 'srt').cues).toEqual([
+      { start: 1, end: 2, text: 'nope --> 00:00:04,000\n00:00:03,000 --> later' },
+    ])
+  })
+
+  it('writes a caption line that reads as timing so that it reads back as text, in SRT', () => {
+    const cues = [{ start: 1, end: 2, text: 'Said:\n00:00:03,000 --> 00:00:04,000' }]
+    const written = serializeCaptions(cues, 'srt')
+    expect(written).toBe('1\n00:00:01,000 --> 00:00:02,000\nSaid:\n00:00:03,000 --<i></i>> 00:00:04,000\n')
+    expect(parseCaptions(written, 'srt').cues).toEqual(cues)
+  })
+
+  it('needs nothing extra for that in WebVTT, which escapes the >', () => {
+    const cues = [{ start: 1, end: 2, text: '00:03.000 --> 00:04.000' }]
+    expect(parseCaptions(serializeCaptions(cues, 'vtt'), 'vtt').cues).toEqual(cues)
+  })
+})
+
 describe('parseCaptions — refusals name the line', () => {
   it('refuses an empty file', () => {
     expect(refusal('', 'srt')).toBe('The caption file is empty.')
