@@ -10,6 +10,8 @@ import type {
   OverlayPlacement,
 } from '@escapesuite/shared/types'
 
+import type { CaptionCue, CaptionStyle } from '../core/captions'
+
 // Re-export shared types
 export type { MediaType, MediaSource, WaveformPeak, SourceVideo, RecordingRole, OverlayPlacement }
 
@@ -306,6 +308,13 @@ export interface Track {
   volume: number;   // Audio volume level (0-1, where 1 = 100%)
   lastVolume?: number; // Remembered volume level when muted (for restoring on unmute)
   height: number;   // UI height in pixels
+  /**
+   * ESCSUITE-293: `'captions'` marks the one track caption imports land on
+   * (named "Captions", created at the top on the first import and reused by
+   * every later one) and the track the export dialog's sidecar reads. Absent
+   * on every other track. The clips on it are ordinary text clips.
+   */
+  kind?: 'captions';
 }
 
 export interface Clip {
@@ -805,6 +814,13 @@ export interface EditorState {
   // trackId can never land on one — findEmptyTrack already skips locked tracks.
   addTextOverlayClip: (textData?: Partial<TextOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
   addShapeOverlayClip: (shapeData?: Partial<ShapeOverlayData>, trackId?: string, position?: number, duration?: number) => Clip | null;
+  /**
+   * ESCSUITE-293: a caption file's cues as text clips on the one `kind:
+   * 'captions'` track — created at the top ("Captions") on the first import,
+   * appended to after. One write and one history entry for the whole file; the
+   * selection is left alone. `null`, writing nothing, when that track is locked.
+   */
+  addCaptionCues: (cues: CaptionCue[], style: CaptionStyle) => { trackId: string; added: number } | null;
   /** `boolean` for the same reason as the clip actions above (ESCSUITE-87). */
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => boolean;
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => boolean;

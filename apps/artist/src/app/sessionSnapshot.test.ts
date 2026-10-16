@@ -4,6 +4,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useEditorStore } from '../store/projectStore';
 import { resetStoreForTest, store, addClip, video } from '../test/fixtures/projectStore';
 import { buildSessionSnapshot, isEmptySession } from './sessionSnapshot';
+import { clearSessionState, listSessionStates, saveSessionState } from '../core/storage';
+import { captionStyleFor } from '../core/captions';
 
 beforeEach(() => {
   resetStoreForTest();
@@ -82,6 +84,19 @@ describe('buildSessionSnapshot', () => {
     const restored = snapshot.project.timeline.clips[0];
     expect(restored.mask).toEqual({ kind: 'circle' });
     expect(restored.stroke).toEqual({ color: 'rgba(255, 255, 255, 0.8)', width: 3 / 1280 });
+  });
+
+  // ESCSUITE-293 review M6: the caption-track marker survives the autosave's
+  // own write and read, through the real IndexedDB slot.
+  it('carries the Captions track marker through a saved and re-read session', async () => {
+    const { trackId } = store().addCaptionCues([{ start: 1, end: 2, text: 'Hi' }], captionStyleFor({ width: 1920, height: 1080 }))!
+
+    await saveSessionState(buildSessionSnapshot(useEditorStore.getState(), 1, 'tab-captions'));
+    const slot = (await listSessionStates()).find((saved) => saved.tabId === 'tab-captions')!;
+    await clearSessionState('tab-captions');
+
+    expect(slot.session.project.timeline.tracks.find((track) => track.id === trackId)?.kind).toBe('captions');
+    expect(slot.session.project.timeline.clips.find((clip) => clip.trackId === trackId)?.textData?.text).toBe('Hi');
   });
 
   it('carries a clip crop through a snapshot round trip (ESCSUITE-6)', () => {

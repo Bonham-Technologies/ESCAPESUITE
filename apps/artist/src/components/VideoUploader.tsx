@@ -9,6 +9,14 @@ import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
 import type { SourceVideo } from '../store/types';
+import {
+  CaptionParseError,
+  captionStyleFor,
+  describeDroppedFeatures,
+  parseCaptions,
+  wrapCaptionText,
+  type ParsedCaptions,
+} from '../core/captions';
 import styles from './VideoUploader.module.css';
 
 /**
@@ -18,6 +26,9 @@ import styles from './VideoUploader.module.css';
  * declared in terms of, so the two stay in step without a shared constant.
  */
 const UPLOAD_ROW_FADE_MS = 200;
+
+/** A caption file, told apart by extension: a browser reports `.srt` with no MIME type at all (ESCSUITE-293). */
+const CAPTION_FILE = /\.(srt|vtt)$/i;
 
 /** The one notice a storage clear raises for the ids it could not delete (ESCSUITE-142's shape). */
 function notRemovedMessage(failed: number): string {
@@ -122,6 +133,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
   const addSourceVideo = useEditorStore((state) => state.addSourceVideo);
+  const addCaptionCues = useEditorStore((state) => state.addCaptionCues);
   // Clear Unused and Clear All both delete bytes from IndexedDB themselves —
   // a storage clear, not an edit — so neither makes an undoable write; both
   // batch the ids whose `deleteVideo` actually succeeded into one
@@ -335,6 +347,43 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
     }
   }, [orphans, refreshStorageInfo, refreshOrphans, showNotification]);
 
+  // ESCSUITE-293: one caption file onto the Captions track. Every outcome is
+  // one notice — how many were imported, or why none were — plus, when the
+  // file used something an import does not keep, one more saying what.
+  const importCaptions = useCallback(async (file: File) => {
+    let parsed: ParsedCaptions;
+    try {
+      // `File.text()` decodes UTF-8 and already drops a byte-order mark;
+      // `parseCaptions` drops one too, for a caller that hands it a string.
+      parsed = parseCaptions(await file.text(), file.name.toLowerCase().endsWith('.vtt') ? 'vtt' : 'srt');
+    } catch (error) {
+      if (error instanceof CaptionParseError) {
+        showNotification(error.message, 'error');
+      } else {
+        console.error('Failed to read caption file:', error);
+        showNotification(`Could not read ${file.name}.`, 'error');
+      }
+      return;
+    }
+    const wrapped = parsed.cues.map((cue) => ({ ...cue, text: wrapCaptionText(cue.text) }));
+    const result = addCaptionCues(wrapped, captionStyleFor(useEditorStore.getState().project.resolution));
+    if (!result) {
+      showNotification('The Captions track is locked, so no captions were imported.', 'error');
+      return;
+    }
+    // On a hidden track nothing appears in the picture: the same notice says
+    // why (review M3).
+    const hidden = useEditorStore
+      .getState()
+      .project.timeline.tracks.some((track) => track.id === result.trackId && !track.visible);
+    showNotification(
+      `Imported ${result.added} caption${result.added !== 1 ? 's' : ''} onto the Captions track.` +
+        (hidden ? ' The Captions track is hidden.' : ''),
+      'success'
+    );
+    if (parsed.dropped.length > 0) showNotification(describeDroppedFeatures(parsed.dropped), 'info');
+  }, [addCaptionCues, showNotification]);
+
   const handleFiles = useCallback(async (files: FileList | File[]) => {
     const allFiles = Array.from(files);
 
@@ -345,14 +394,17 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
       return;
     }
 
+    const captionFiles = allFiles.filter((file) => CAPTION_FILE.test(file.name));
     const mediaFiles = allFiles.filter((file) =>
       file.type.startsWith('video/') || file.type.startsWith('image/') || file.type.startsWith('audio/')
     );
 
-    if (mediaFiles.length === 0) {
-      showNotification('Only video, image, audio and .veditor files can be imported.', 'error');
+    if (mediaFiles.length === 0 && captionFiles.length === 0) {
+      showNotification('Only video, image, audio, caption (.srt / .vtt) and .veditor files can be imported.', 'error');
       return;
     }
+
+    for (const file of captionFiles) await importCaptions(file);
 
     for (const file of mediaFiles) {
       const uploadId = uuidv4();
@@ -435,7 +487,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         refreshStorageInfo();
       }
     }
-  }, [addSourceVideo, refreshStorageInfo, onProjectFile, showNotification]);
+  }, [addSourceVideo, refreshStorageInfo, onProjectFile, showNotification, importCaptions]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -503,7 +555,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         <input
           ref={fileInputRef}
           type="file"
-          accept="video/*,image/*,audio/*,.veditor"
+          accept="video/*,image/*,audio/*,.srt,.vtt,.veditor"
           multiple
           onChange={handleFileChange}
           className={styles.fileInput}

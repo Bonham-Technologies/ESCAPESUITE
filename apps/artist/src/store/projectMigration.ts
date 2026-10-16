@@ -408,6 +408,10 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     if (!isRecord(track)) {
       return { ok: false, reason: `timeline.tracks[${i}] must be an object` };
     }
+    // ESCSUITE-293: the caption-track marker. Absent is every ordinary track.
+    if (track.kind !== undefined && track.kind !== 'captions') {
+      return { ok: false, reason: `timeline.tracks[${i}].kind must be 'captions'` };
+    }
   }
   const legacyProblem = legacyOverlaysProblem(timeline.textOverlays, 'textOverlays', 'text')
     ?? legacyOverlaysProblem(timeline.shapeOverlays, 'shapeOverlays', 'type');

@@ -1,0 +1,589 @@
+// Caption files (ESCSUITE-293): SRT and WebVTT in, the same two formats out.
+//
+// `parseCaptions` is written from the two formats themselves. What it keeps is
+// timing and words; what it cannot represent on an ordinary text clip
+// (positioning, styling, regions, notes, speaker names) it drops and names, so
+// the importer can say so once. A file it cannot read at all is refused with a
+// `CaptionParseError` whose message names the line.
+import { describe, it, expect } from 'vitest'
+import {
+  CaptionParseError,
+  captionStyleFor,
+  describeDroppedFeatures,
+  parseCaptions,
+  serializeCaptions,
+  wrapCaptionText,
+  type CaptionCue,
+} from './captions'
+import { FONT_OPTIONS } from './fontStacks'
+
+/** The refusal's message, or a failure if it parsed. */
+function refusal(text: string, format: 'srt' | 'vtt'): string {
+  try {
+    parseCaptions(text, format)
+  } catch (error) {
+    expect(error).toBeInstanceOf(CaptionParseError)
+    expect((error as Error).name).toBe('CaptionParseError')
+    return (error as Error).message
+  }
+  throw new Error('expected a CaptionParseError')
+}
+
+const SRT = [
+  '1',
+  '00:00:01,000 --> 00:00:02,500',
+  'Hello there.',
+  '',
+  '2',
+  '00:00:03,000 --> 00:00:04,000',
+  'Two lines',
+  'of text.',
+  '',
+].join('\n')
+
+describe('parseCaptions — SRT', () => {
+  it('reads cues in seconds, with a newline between source lines', () => {
+    expect(parseCaptions(SRT, 'srt')).toEqual({
+      cues: [
+        { start: 1, end: 2.5, text: 'Hello there.' },
+        { start: 3, end: 4, text: 'Two lines\nof text.' },
+      ],
+      dropped: [],
+    })
+  })
+
+  it('accepts CRLF, a lone CR, a UTF-8 BOM and extra blank lines', () => {
+    const messy = '\uFEFF\r\n\r\n1\r\n00:00:01,000 --> 00:00:02,000\r\nA\r\n\r\n\r\n\r\n2\r00:00:03,000 --> 00:00:04,000\rB\r\n'
+    expect(parseCaptions(messy, 'srt').cues).toEqual([
+      { start: 1, end: 2, text: 'A' },
+      { start: 3, end: 4, text: 'B' },
+    ])
+  })
+
+  it('treats a blank line of spaces as a block break', () => {
+    const text = '1\n00:00:01,000 --> 00:00:02,000\nA\n   \n2\n00:00:03,000 --> 00:00:04,000\nB'
+    expect(parseCaptions(text, 'srt').cues.map((c) => c.text)).toEqual(['A', 'B'])
+  })
+
+  it('takes indices as optional and in any order, keeping the file order', () => {
+    const text = '7\n00:00:05,000 --> 00:00:06,000\nlate\n\n00:00:01,000 --> 00:00:02,000\nno index\n\n2\n00:00:03,000 --> 00:00:04,000\nmiddle'
+    expect(parseCaptions(text, 'srt').cues).toEqual([
+      { start: 5, end: 6, text: 'late' },
+      { start: 1, end: 2, text: 'no index' },
+      { start: 3, end: 4, text: 'middle' },
+    ])
+  })
+
+  it('accepts a full stop as the millisecond separator, short fractions and no hours', () => {
+    const text = '00:00:01.5 --> 00:00:02.25\nA\n\n01:02,003 --> 01:03,000\nB'
+    expect(parseCaptions(text, 'srt').cues).toEqual([
+      { start: 1.5, end: 2.25, text: 'A' },
+      { start: 62.003, end: 63, text: 'B' },
+    ])
+  })
+
+  it('reads hours', () => {
+    expect(parseCaptions('01:00:00,000 --> 01:00:01,000\nA', 'srt').cues).toEqual([
+      { start: 3600, end: 3601, text: 'A' },
+    ])
+  })
+
+  it('keeps overlapping cues as they are', () => {
+    const text = '00:00:01,000 --> 00:00:03,000\nA\n\n00:00:02,000 --> 00:00:04,000\nB'
+    expect(parseCaptions(text, 'srt').cues).toEqual([
+      { start: 1, end: 3, text: 'A' },
+      { start: 2, end: 4, text: 'B' },
+    ])
+  })
+
+  it('strips <i>/<b>/<font> tags, keeps the words, and records styling once', () => {
+    const text = '00:00:01,000 --> 00:00:02,000\n<i>Hello</i> <b>there</b>\n\n00:00:03,000 --> 00:00:04,000\n<font color="#ff0000">red</font>'
+    expect(parseCaptions(text, 'srt')).toEqual({
+      cues: [
+        { start: 1, end: 2, text: 'Hello there' },
+        { start: 3, end: 4, text: 'red' },
+      ],
+      dropped: ['styling'],
+    })
+  })
+
+  it('drops coordinates after the timing as positioning', () => {
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000 X1:100 X2:200\nA', 'srt')).toEqual({
+      cues: [{ start: 1, end: 2, text: 'A' }],
+      dropped: ['positioning'],
+    })
+  })
+
+  it('leaves entities alone in SRT, which has none', () => {
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\nTom &amp; Jerry', 'srt').cues[0].text).toBe('Tom &amp; Jerry')
+  })
+
+  it('keeps a lone < that opens no tag', () => {
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\nI <3 this', 'srt').cues[0].text).toBe('I <3 this')
+  })
+
+  it('drops a cue that is empty once its tags are gone, and records it', () => {
+    const text = '00:00:01,000 --> 00:00:02,000\n<i></i>\n\n00:00:03,000 --> 00:00:04,000\nkept'
+    expect(parseCaptions(text, 'srt')).toEqual({
+      cues: [{ start: 3, end: 4, text: 'kept' }],
+      dropped: ['styling', 'empty-cues'],
+    })
+  })
+
+  it('drops a cue with timing and no text at all', () => {
+    const text = '1\n00:00:01,000 --> 00:00:02,000\n\n2\n00:00:03,000 --> 00:00:04,000\nkept'
+    expect(parseCaptions(text, 'srt')).toEqual({
+      cues: [{ start: 3, end: 4, text: 'kept' }],
+      dropped: ['empty-cues'],
+    })
+  })
+
+  it('drops one empty line of a two-line cue and keeps the other', () => {
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\n<i></i>\nkept', 'srt').cues[0].text).toBe('kept')
+  })
+
+  it('drops cues that end at or before they start, and records them once', () => {
+    const text = [
+      '00:00:02,000 --> 00:00:01,000', 'backwards', '',
+      '00:00:03,000 --> 00:00:03,000', 'zero', '',
+      '00:00:04,000 --> 00:00:05,000', 'kept',
+    ].join('\n')
+    expect(parseCaptions(text, 'srt')).toEqual({
+      cues: [{ start: 4, end: 5, text: 'kept' }],
+      dropped: ['inverted-cues'],
+    })
+  })
+
+  it('treats a text line containing --> after the timing as text', () => {
+    expect(parseCaptions('1\n00:00:01,000 --> 00:00:02,000\na --> b', 'srt').cues[0].text).toBe('a --> b')
+  })
+})
+
+// Review M1: only the formats' own tags are markup — WebVTT's b, i, u, c, v,
+// ruby, rt, lang and timestamps, and SRT's font — and everything else between
+// angle brackets is caption text. The tag pattern cannot cross a < or a line,
+// so a line of nothing but < is read in one pass.
+describe('parseCaptions — what counts as a tag', () => {
+  const textOf = (line: string, format: 'srt' | 'vtt' = 'srt') =>
+    parseCaptions(`${format === 'vtt' ? 'WEBVTT\n\n' : ''}00:00:01.000 --> 00:00:02.000\n${line}`, format)
+
+  it('keeps angle brackets that are not a tag as words, and records no styling', () => {
+    expect(textOf('Press <Enter> now')).toEqual({ cues: [{ start: 1, end: 2, text: 'Press <Enter> now' }], dropped: [] })
+    expect(textOf('1 < 2 and 3 > 2').cues[0].text).toBe('1 < 2 and 3 > 2')
+    expect(textOf('<br> <bold> <colour>', 'vtt').cues[0].text).toBe('<br> <bold> <colour>')
+  })
+
+  it('strips the known tags in either case, closing forms included', () => {
+    expect(textOf('<I>a</I> <FONT color="red">b</FONT> <u>c</u>')).toEqual({
+      cues: [{ start: 1, end: 2, text: 'a b c' }],
+      dropped: ['styling'],
+    })
+  })
+
+  it('strips both forms of timestamp tag, and nothing that only looks like one', () => {
+    expect(textOf('a <00:01.500>b <00:00:01.750>c <1:2.3>d', 'vtt').cues[0].text).toBe('a b c <1:2.3>d')
+  })
+
+  it('does not cross a < inside a tag', () => {
+    expect(textOf('<font color="<">x').cues[0].text).toBe('<font color="<">x')
+  })
+
+  it('reads a line of eighty thousand < as text', () => {
+    expect(textOf('<'.repeat(80_000)).cues[0].text).toHaveLength(80_000)
+  })
+
+  it('strips in one pass, so a tag made by stripping another stays as text', () => {
+    expect(textOf('<<b>i>x').cues[0].text).toBe('<i>x')
+  })
+})
+
+describe('parseCaptions — WebVTT', () => {
+  const VTT = 'WEBVTT\n\n00:01.000 --> 00:02.500\nHello there.\n\nid-2\n00:00:03.000 --> 00:00:04.000\nTwo lines\nof text.\n'
+
+  it('reads the header, optional hours and optional cue identifiers', () => {
+    expect(parseCaptions(VTT, 'vtt')).toEqual({
+      cues: [
+        { start: 1, end: 2.5, text: 'Hello there.' },
+        { start: 3, end: 4, text: 'Two lines\nof text.' },
+      ],
+      dropped: [],
+    })
+  })
+
+  it('accepts header text and header metadata lines', () => {
+    const text = 'WEBVTT - Some title\nKind: captions\nLanguage: en\n\n00:01.000 --> 00:02.000\nA'
+    expect(parseCaptions(text, 'vtt').cues).toEqual([{ start: 1, end: 2, text: 'A' }])
+  })
+
+  it('accepts a comma as the millisecond separator', () => {
+    expect(parseCaptions('WEBVTT\n\n00:01,000 --> 00:02,000\nA', 'vtt').cues).toEqual([{ start: 1, end: 2, text: 'A' }])
+  })
+
+  it('drops cue settings after the timing as positioning', () => {
+    const text = 'WEBVTT\n\n00:01.000 --> 00:02.000 line:10% position:50% align:start size:80% vertical:rl\nA'
+    expect(parseCaptions(text, 'vtt')).toEqual({ cues: [{ start: 1, end: 2, text: 'A' }], dropped: ['positioning'] })
+  })
+
+  it('drops STYLE, REGION and NOTE blocks and records each', () => {
+    const text = [
+      'WEBVTT', '',
+      'STYLE', '::cue { color: red }', '',
+      'REGION', 'id:fred width:40%', '',
+      'NOTE this is a comment', 'that runs on', '',
+      'NOTE', '',
+      '00:01.000 --> 00:02.000', 'A',
+    ].join('\n')
+    expect(parseCaptions(text, 'vtt')).toEqual({
+      cues: [{ start: 1, end: 2, text: 'A' }],
+      dropped: ['styling', 'regions', 'notes'],
+    })
+  })
+
+  it('strips <c>, <b>, <i>, <u>, <ruby>, <rt>, <lang> and timestamp tags, keeping the words', () => {
+    const text = 'WEBVTT\n\n00:01.000 --> 00:05.000\n<c.yellow>one</c> <b>two</b> <i>three</i> <u>four</u>\n<ruby>five<rt>5</rt></ruby> <00:00:03.000>six <lang en>seven</lang>'
+    expect(parseCaptions(text, 'vtt')).toEqual({
+      cues: [{ start: 1, end: 5, text: 'one two three four\nfive5 six seven' }],
+      dropped: ['styling'],
+    })
+  })
+
+  it('drops a voice tag and its speaker name, keeping the words', () => {
+    const text = 'WEBVTT\n\n00:01.000 --> 00:02.000\n<v Roger Bingham>We are in New York City</v>\n\n00:03.000 --> 00:04.000\n<v.loud Neil>Hi'
+    expect(parseCaptions(text, 'vtt')).toEqual({
+      cues: [
+        { start: 1, end: 2, text: 'We are in New York City' },
+        { start: 3, end: 4, text: 'Hi' },
+      ],
+      dropped: ['voice-tags'],
+    })
+  })
+
+  it('decodes the escapes the format defines', () => {
+    const text = 'WEBVTT\n\n00:01.000 --> 00:02.000\nTom &amp; Jerry &lt;3 &gt; a&nbsp;b &lrm;&rlm;&quot;'
+    expect(parseCaptions(text, 'vtt').cues[0].text).toBe('Tom & Jerry <3 > a\u00a0b \u200e\u200f&quot;')
+  })
+
+  it('lists every dropped feature once, in a fixed order, however often each occurred', () => {
+    const text = [
+      'WEBVTT', '',
+      'NOTE a', '', 'NOTE b', '',
+      '00:02.000 --> 00:01.000', 'inverted', '',
+      '00:01.000 --> 00:02.000 align:start', '<v A><b></b></v>', '',
+      'REGION', 'id:r', '',
+      '00:03.000 --> 00:04.000 line:0', '<i>kept</i>',
+    ].join('\n')
+    expect(parseCaptions(text, 'vtt').dropped).toEqual([
+      'positioning', 'styling', 'regions', 'notes', 'voice-tags', 'empty-cues', 'inverted-cues',
+    ])
+  })
+
+  it('does not treat NOTE, STYLE or REGION as anything special in SRT', () => {
+    expect(refusal('NOTE x\n\n00:00:01,000 --> 00:00:02,000\nA', 'srt')).toBe(
+      'Line 1: this caption has no timing line (start --> end).'
+    )
+  })
+
+  it('does not take NOTES (a longer word) for a NOTE block', () => {
+    expect(refusal('WEBVTT\n\nNOTES\nx', 'vtt')).toBe('Line 3: this caption has no timing line (start --> end).')
+  })
+})
+
+// Review I2: a file missing the blank line between two cues used to import as
+// one caption whose text carried the second timing line, burned into the
+// picture. A timing line — both sides read as timestamps — starts a new cue
+// wherever it appears, the WebVTT rule, in both formats.
+describe('parseCaptions — a timing line inside a cue starts the next cue', () => {
+  it('splits SRT cues with no blank line between them, the index going with the new cue', () => {
+    const text = '1\n00:00:01,000 --> 00:00:02,000\nHello\n2\n00:00:03,000 --> 00:00:04,000\nWorld'
+    expect(parseCaptions(text, 'srt')).toEqual({
+      cues: [
+        { start: 1, end: 2, text: 'Hello' },
+        { start: 3, end: 4, text: 'World' },
+      ],
+      dropped: [],
+    })
+  })
+
+  it('splits them without indices too, as often as it happens', () => {
+    const text = '00:00:01,000 --> 00:00:02,000\nA\n00:00:03,000 --> 00:00:04,000\nB\nB2\n00:00:05,000 --> 00:00:06,000\nC'
+    expect(parseCaptions(text, 'srt').cues.map((c) => [c.start, c.text])).toEqual([[1, 'A'], [3, 'B\nB2'], [5, 'C']])
+  })
+
+  it('splits WebVTT cues the same way, where a line of digits before the timing stays text', () => {
+    const text = 'WEBVTT\n\n00:01.000 --> 00:02.000\nHello\n42\n00:03.000 --> 00:04.000 line:0\nWorld'
+    expect(parseCaptions(text, 'vtt')).toEqual({
+      cues: [
+        { start: 1, end: 2, text: 'Hello\n42' },
+        { start: 3, end: 4, text: 'World' },
+      ],
+      dropped: ['positioning'],
+    })
+  })
+
+  it('drops a cue whose timing is followed straight away by the next timing', () => {
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\n00:00:03,000 --> 00:00:04,000\nB', 'srt')).toEqual({
+      cues: [{ start: 3, end: 4, text: 'B' }],
+      dropped: ['empty-cues'],
+    })
+  })
+
+  it.each(['srt', 'vtt'] as const)('keeps "12:34 --> hello" in cue text as text, not a new cue (%s)', (format) => {
+    const text = `${format === 'vtt' ? 'WEBVTT\n\n' : ''}00:00:01.000 --> 00:00:02.000\nSaid\n12:34 --> hello`
+    expect(parseCaptions(text, format)).toEqual({ cues: [{ start: 1, end: 2, text: 'Said\n12:34 --> hello' }], dropped: [] })
+  })
+
+  it('keeps a line with --> as text when either side is not a timestamp', () => {
+    const text = '00:00:01,000 --> 00:00:02,000\nnope --> 00:00:04,000\n00:00:03,000 --> later'
+    expect(parseCaptions(text, 'srt').cues).toEqual([
+      { start: 1, end: 2, text: 'nope --> 00:00:04,000\n00:00:03,000 --> later' },
+    ])
+  })
+
+  // Fix round 2: neither format can carry a `-->` in cue text, so the writer
+  // puts → in its place — the one substitution it makes — and the line can
+  // never be read as the next cue's timing.
+  it.each(['srt', 'vtt'] as const)('writes a --> in caption text as → (%s), and reads that back', (format) => {
+    const cues = [{ start: 1, end: 2, text: 'Said:\n00:00:03,000 --> 00:00:04,000\nthis --> that' }]
+    const written = serializeCaptions(cues, format)
+    expect(written).toContain('\nSaid:\n00:00:03,000 \u2192 00:00:04,000\nthis \u2192 that\n')
+    expect(parseCaptions(written, format).cues).toEqual([
+      { start: 1, end: 2, text: 'Said:\n00:00:03,000 \u2192 00:00:04,000\nthis \u2192 that' },
+    ])
+  })
+})
+
+describe('parseCaptions — refusals name the line', () => {
+  it('refuses an empty file', () => {
+    expect(refusal('', 'srt')).toBe('The caption file is empty.')
+    expect(refusal('\uFEFF \r\n\n\t\n', 'vtt')).toBe('The caption file is empty.')
+  })
+
+  it('refuses a .vtt without the WEBVTT header', () => {
+    expect(refusal('00:01.000 --> 00:02.000\nA', 'vtt')).toBe('Line 1: a WebVTT file must start with "WEBVTT".')
+    expect(refusal('\n\nWEBVTTX\n\n00:01.000 --> 00:02.000\nA', 'vtt')).toBe(
+      'Line 3: a WebVTT file must start with "WEBVTT".'
+    )
+  })
+
+  it('refuses a timestamp that does not parse, naming it', () => {
+    expect(refusal('1\n00:00:01,000 --> 00:00:02\nA', 'srt')).toBe('Line 2: "00:00:02" is not a caption timestamp.')
+    expect(refusal('1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\n0:61:00,000 --> 0:62:00,000\nB', 'srt')).toBe(
+      'Line 6: "0:61:00,000" is not a caption timestamp.'
+    )
+    expect(refusal('WEBVTT\n\n00:01.000 -->\nA', 'vtt')).toBe('Line 3: "" is not a caption timestamp.')
+  })
+
+  it('refuses an absurd number of hours rather than reading Infinity', () => {
+    expect(refusal(`${'9'.repeat(400)}:00:00,000 --> 00:00:01,000\nA`, 'srt')).toMatch(/^Line 1: ".*" is not a caption timestamp\.$/)
+  })
+
+  it('refuses a cue block with no timing line', () => {
+    expect(refusal('1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\nB\nC', 'srt')).toBe(
+      'Line 5: this caption has no timing line (start --> end).'
+    )
+    expect(refusal('just words', 'srt')).toBe('Line 1: this caption has no timing line (start --> end).')
+  })
+
+  // Review M5 (ruling): a hand-edited SRT often ends on the next cue's index
+  // and nothing more. That is ignored; the same index anywhere else, or a lone
+  // id at the end of a WebVTT file, is still a block with no timing.
+  it('ignores a lone index at the end of an SRT file, and only there', () => {
+    expect(parseCaptions('1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\n', 'srt')).toEqual({
+      cues: [{ start: 1, end: 2, text: 'A' }],
+      dropped: [],
+    })
+    expect(parseCaptions('1\n00:00:01,000 --> 00:00:02,000\nA\n\n 2 \n\n\n', 'srt').cues).toHaveLength(1)
+    expect(refusal('1\n00:00:01,000 --> 00:00:02,000\nA\n\n2\n\n3\n00:00:03,000 --> 00:00:04,000\nB', 'srt')).toBe(
+      'Line 5: this caption has no timing line (start --> end).'
+    )
+    expect(refusal('WEBVTT\n\n00:01.000 --> 00:02.000\nA\n\n2\n', 'vtt')).toBe(
+      'Line 6: this caption has no timing line (start --> end).'
+    )
+    expect(refusal('1\n00:00:01,000 --> 00:00:02,000\nA\n\nB\n', 'srt')).toBe(
+      'Line 5: this caption has no timing line (start --> end).'
+    )
+  })
+
+  it('refuses a file that yields no cues once the drops are made', () => {
+    expect(refusal('WEBVTT\n\nNOTE only a note', 'vtt')).toBe('The file has no captions to import.')
+    expect(refusal('WEBVTT', 'vtt')).toBe('The file has no captions to import.')
+    expect(refusal('00:00:02,000 --> 00:00:01,000\nbackwards', 'srt')).toBe('The file has no captions to import.')
+  })
+})
+
+describe('serializeCaptions', () => {
+  const cues: CaptionCue[] = [
+    { start: 1, end: 2.5, text: 'Hello there.' },
+    { start: 3661.007, end: 3662, text: 'Two lines\nof text.' },
+  ]
+
+  it('writes SRT with 1-based indices and a comma', () => {
+    expect(serializeCaptions(cues, 'srt')).toBe(
+      '1\n00:00:01,000 --> 00:00:02,500\nHello there.\n\n2\n01:01:01,007 --> 01:01:02,000\nTwo lines\nof text.\n'
+    )
+  })
+
+  // Fix round 3: WebVTT has escapes of its own, and its writer uses them.
+  it('writes WebVTT with the header, a full stop and the format\'s own escapes', () => {
+    expect(serializeCaptions([...cues, { start: 5, end: 6, text: 'Tom & Jerry <3 >' }], 'vtt')).toBe(
+      'WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nHello there.\n\n01:01:01.007 --> 01:01:02.000\nTwo lines\nof text.\n\n' +
+        '00:00:05.000 --> 00:00:06.000\nTom &amp; Jerry &lt;3 &gt;\n'
+    )
+  })
+
+  it('round-trips WebVTT text exactly, tag- and escape-shaped text and a literal <Enter> & included', () => {
+    const cues: CaptionCue[] = [
+      { start: 1, end: 2, text: 'Press <Enter> & go' },
+      { start: 3, end: 4, text: 'a <b>bold</b> claim <v Ann>hi\nwrite &lt; for <' },
+    ]
+    expect(parseCaptions(serializeCaptions(cues, 'vtt'), 'vtt').cues).toEqual(cues)
+  })
+
+  it('rounds to the millisecond and never writes a negative time', () => {
+    expect(serializeCaptions([{ start: -0.2, end: 0.5, text: 'a' }, { start: 1.0006, end: 2, text: 'b' }], 'srt')).toBe(
+      '1\n00:00:00,000 --> 00:00:00,500\na\n\n2\n00:00:01,001 --> 00:00:02,000\nb\n'
+    )
+  })
+
+  it('writes nothing for a cue that rounds to no length, which a reader would drop', () => {
+    expect(serializeCaptions([{ start: 3, end: 3.0004, text: 'gone' }, { start: 4, end: 5, text: 'kept' }], 'vtt')).toBe(
+      'WEBVTT\n\n00:00:04.000 --> 00:00:05.000\nkept\n'
+    )
+  })
+
+  // Fix round 2: the text is written as it is, so text that reads back exactly
+  // — line breaks, spacing inside a line, angle brackets that are not one of
+  // the formats' tags, a bare & — round-trips exactly in both formats.
+  it.each(['srt', 'vtt'] as const)('round-trips text that is not markup exactly (%s)', (format) => {
+    const cues: CaptionCue[] = [
+      { start: 1, end: 2, text: 'Two  spaced\nlines, 1 < 2 and 3 > 2' },
+      { start: 3, end: 4, text: 'Press <Enter> now & then <colour>' },
+    ]
+    expect(parseCaptions(serializeCaptions(cues, format), format).cues).toEqual(cues)
+  })
+
+  it('trims each line on the way out, as the parser trims it on the way in', () => {
+    const cues = [{ start: 1, end: 2, text: '  padded  \n  lines ' }]
+    expect(parseCaptions(serializeCaptions(cues, 'srt'), 'srt').cues).toEqual([{ start: 1, end: 2, text: 'padded\nlines' }])
+  })
+
+  // SRT's one documented loss: it has no escapes, so caption text shaped like a
+  // tag it recognises is written as it is — no padding — and read back as
+  // markup and stripped. WebVTT escapes it instead (above).
+  it('writes tag-shaped caption text in SRT as it is, and loses the tag on re-import', () => {
+    const written = serializeCaptions([{ start: 1, end: 2, text: 'a <b>bold</b> claim <v Ann>hi' }], 'srt')
+    expect(written).toContain('\na <b>bold</b> claim <v Ann>hi\n')
+    expect(written).not.toContain('<i></i>')
+    expect(parseCaptions(written, 'srt').cues).toEqual([{ start: 1, end: 2, text: 'a bold claim hi' }])
+  })
+
+  it('reads tags line by line when writing SRT, as the parser does, so a < and a > on two lines survive', () => {
+    expect(serializeCaptions([{ start: 1, end: 2, text: 'a <b\nc> d' }], 'srt')).toBe('1\n00:00:01,000 --> 00:00:02,000\na <b\nc> d\n')
+    expect(parseCaptions('00:00:01,000 --> 00:00:02,000\na <b\nc> d', 'srt').cues[0].text).toBe('a <b\nc> d')
+  })
+
+  it('writes hours past 99 in full', () => {
+    expect(serializeCaptions([{ start: 360000, end: 360001, text: 'a' }], 'vtt')).toContain('100:00:00.000 --> 100:00:01.000')
+  })
+
+  it('writes nothing for a cue with no words, and no blank line inside a cue', () => {
+    expect(serializeCaptions([{ start: 1, end: 2, text: ' \n ' }, { start: 3, end: 4, text: 'a\n\n b ' }], 'srt')).toBe(
+      '1\n00:00:03,000 --> 00:00:04,000\na\nb\n'
+    )
+  })
+
+  it('writes no cues as an empty file, or a bare header', () => {
+    expect(serializeCaptions([], 'srt')).toBe('')
+    expect(serializeCaptions([], 'vtt')).toBe('WEBVTT\n')
+  })
+
+  it.each(['srt', 'vtt'] as const)('is round-trip stable on its own output (%s)', (format) => {
+    const messy: CaptionCue[] = [
+      { start: 0.0004, end: 1.9996, text: 'Tom & Jerry <Enter>' },
+      { start: 1.5, end: 3, text: 'overlap\n  two lines ' },
+      { start: 10, end: 12.3456, text: 'a --> b\r\nCR line' },
+      { start: 13, end: 14, text: 'literal \u00a0' },
+      { start: 4, end: 4.0001, text: 'rounds to nothing' },
+    ]
+    const once = serializeCaptions(messy, format)
+    const twice = serializeCaptions(parseCaptions(once, format).cues, format)
+    expect(twice).toBe(once)
+  })
+
+  it('round-trips what it parsed, through either format', () => {
+    const parsed = parseCaptions(SRT, 'srt').cues
+    expect(parseCaptions(serializeCaptions(parsed, 'vtt'), 'vtt').cues).toEqual(parsed)
+    expect(parseCaptions(serializeCaptions(parsed, 'srt'), 'srt').cues).toEqual(parsed)
+  })
+})
+
+describe('wrapCaptionText', () => {
+  it('leaves a line within the limit alone', () => {
+    expect(wrapCaptionText('Short enough.')).toBe('Short enough.')
+  })
+
+  it('wraps a long line at word boundaries at 42 characters by default', () => {
+    const line = 'The quick brown fox jumps over the lazy dog and keeps on running'
+    const wrapped = wrapCaptionText(line)
+    expect(wrapped).toBe('The quick brown fox jumps over the lazy\ndog and keeps on running')
+    for (const part of wrapped.split('\n')) expect(part.length).toBeLessThanOrEqual(42)
+  })
+
+  it('fills a line to exactly the limit', () => {
+    expect(wrapCaptionText('aaaa bbbb cccc', 9)).toBe('aaaa bbbb\ncccc')
+  })
+
+  it('keeps source line breaks and wraps each line on its own', () => {
+    expect(wrapCaptionText('one two three\nfour five', 9)).toBe('one two\nthree\nfour five')
+  })
+
+  it('keeps a single word longer than the limit whole', () => {
+    expect(wrapCaptionText('Supercalifragilistic is long', 10)).toBe('Supercalifragilistic\nis long')
+    expect(wrapCaptionText('a Supercalifragilistic', 10)).toBe('a\nSupercalifragilistic')
+  })
+
+  it('collapses runs of spaces and keeps an empty line empty', () => {
+    expect(wrapCaptionText('a    b\n\nc')).toBe('a b\n\nc')
+  })
+})
+
+describe('captionStyleFor', () => {
+  it('is centred near the bottom, white on translucent black, sized to the height', () => {
+    expect(captionStyleFor({ width: 1920, height: 1080 })).toEqual({
+      x: 0.5,
+      y: 0.88,
+      textAlign: 'center',
+      fontSize: 49,
+      fontFamily: 'Arial',
+      color: '#ffffff',
+      backgroundColor: '#000000b3',
+      fontWeight: 'normal',
+      fontStyle: 'normal',
+    })
+  })
+
+  it('scales the font with the project height', () => {
+    expect(captionStyleFor({ width: 1280, height: 720 }).fontSize).toBe(32)
+    expect(captionStyleFor({ width: 3840, height: 2160 }).fontSize).toBe(97)
+  })
+
+  it('uses the first font the inspector offers', () => {
+    expect(captionStyleFor({ width: 1, height: 1 }).fontFamily).toBe(FONT_OPTIONS[0].value)
+  })
+})
+
+describe('describeDroppedFeatures', () => {
+  it('names one feature with its own verb', () => {
+    expect(describeDroppedFeatures(['positioning'])).toBe('Positioning was not imported.')
+    expect(describeDroppedFeatures(['notes'])).toBe('Notes were not imported.')
+  })
+
+  it('names two with "and", and more with commas', () => {
+    expect(describeDroppedFeatures(['positioning', 'styling'])).toBe('Positioning and styling were not imported.')
+    expect(
+      describeDroppedFeatures(['positioning', 'styling', 'regions', 'notes', 'voice-tags', 'empty-cues', 'inverted-cues'])
+    ).toBe(
+      'Positioning, styling, regions, notes, speaker names, empty captions and captions that end before they start were not imported.'
+    )
+  })
+})

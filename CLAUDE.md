@@ -4593,13 +4593,57 @@ the measurement is one pass per export, none per frame; the ~2–3 s it costs on
 Cancel unresponsive is ESCSUITE-301. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and
 the kit's 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-16 for ESCSUITE-293 (captions: an `.srt` or `.vtt` dropped
+or picked in the media library is parsed by `core/captions.ts` — written from the two formats, refusing by
+name through one `CaptionParseError` and dropping WebVTT positioning, styling, regions, notes and voice
+tags with a notice naming them — onto one "Captions" track marked `Track.kind: 'captions'`, in one write
+and one undo step through `addCaptionCues`; the cues are ordinary text clips in a caption style, so the
+preview, both video exporters, the GIF exporter and the headless bundle burn them in through the existing
+text renderer with no renderer change; the export dialog offers the track back as an `.srt` or `.vtt`
+sidecar through a new `utils/downloadBlob.ts`; `parseProject` refuses any other `kind` by name):
+99.84 / **99.42** / **96.70** / **99.77** against the 99.84 / 99.41 / 96.64 / 99.76 that `main` at
+`5f9008ed` measures (the ESCSUITE-296 version-packages commit; its artist source is identical to
+`368c976d`'s, whose base summary is reused) — statements up a hundredth, branches up six, functions up
+one, lines unmoved. The base gives 5,847 / 6,050 branches and this branch 5,952 / 6,155: one hundred and
+five new branches, one hundred and five covered, the same 203 uncovered as before (lines 9,049 / 9,063 →
+9,220 / 9,234, statements 10,230 / 10,290 → 10,429 / 10,489, functions 2,156 / 2,161 → 2,204 / 2,209,
+every denominator growing by exactly what the numerator did; the same 14 / 60 / 5 uncovered). The
+hundred and five are `core/captions.ts`'s seventy-four on arrival (74 / 74, 138 / 138 statements,
+30 / 30 functions: the SRT and WebVTT block walkers, the optional index and the lone trailing one,
+optional hours and both millisecond separators, CRLF and a BOM, a timing line met inside cue text starting
+the next cue, the bounded tag grammar stripped in one linear pass, the `NOTE` / `STYLE` / `REGION` blocks,
+the empty and inverted cues, the WebVTT escapes decoded and written back, the `-->` → `→` substitution,
+`captionStyleFor`'s size and `wrapCaptionText`'s word boundaries — each reached from both sides by the
+module's 74 cases and the seeded fuzz over both formats, whose tally floors are exact on the committed
+seeds: SRT 416 accepted / 584 refused, WebVTT 449 / 551, with a read-back check per accepted input),
+`components/VideoUploader.tsx`'s sixteen (135 / 140 → 151 / 156: the extension branch, the `.veditor`
+precedence, the mixed drop, the hidden-track sentence, the dropped-features notice, the refusal and the
+locked-track refusal; the same five pre-existing arms uncovered), `components/Export/ExportDialog.tsx`'s
+six (234 / 235 → 240 / 241: the Captions row's visibility, the two formats and the string-text filter
+that keeps a text clip with no caption data out of the sidecar instead of throwing with the dialog closed —
+the review's first Important; the file's one pre-existing uncovered arm untouched),
+`store/overlaySlice.ts`'s four (60 → 64: `addCaptionCues`' reuse-or-create of the track and its
+locked refusal), `store/projectMigration.ts`'s four (212 → 216: the `kind` present-and-wrong refusal
+against absent and `'captions'`) and `store/projectFactory.ts`'s one (10 / 13 → 11 / 14:
+`findEmptyTrack` skipping the Captions track, reached from both sides; the same three pre-existing arms
+uncovered). `utils/downloadBlob.ts` is eight statements and no decision, the dialog's inline hand-off
+moved whole. The burn-in pins — one per exporter and one on the preview's `drawFrame` — were proven red
+under a temporary renderer mutation that skipped caption text, and the `Track.kind` round-trip pins by
+dropping the field; the suite is measured with `--testTimeout 20000` as the load-flake guard, 5,718
+green. This branch and ESCSUITE-292's were measured against the same base in the same sitting and land
+one after the other, so whichever table row lands second is that branch's own figure, a hundredth or two
+off the other's — the drift ESCSUITE-91 and 113 recorded — and the next direct measurement of `main`
+corrects it. Every `*.perf.test.ts` and `*rerender*` file is byte-identical: the import is one store write
+and the sidecar one serialization on click, nothing per frame. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.57 | 97.93 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
 | `@escapesuite/artist` | 99.84 | 99.43 | 96.68 | 99.77 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.64 | 98.87 |

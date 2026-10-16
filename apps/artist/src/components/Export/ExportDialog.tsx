@@ -41,6 +41,9 @@ import type { ProgressAnnouncement } from './progressAnnouncement';
 import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
+import { downloadBlob } from '../../utils/downloadBlob';
+import { serializeCaptions } from '../../core/captions';
+import type { CaptionCue, CaptionFormat } from '../../core/captions';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime, formatFileSize } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
@@ -74,6 +77,12 @@ const LOUDNESS_TARGET_USES: Record<LoudnessTarget, string> = {
   [-14]: 'streaming',
   [-16]: 'podcast/mobile',
   [-23]: 'broadcast',
+};
+
+/** The sidecar files' MIME types (ESCSUITE-293). */
+const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
+  srt: 'application/x-subrip',
+  vtt: 'text/vtt',
 };
 
 interface ExportDialogProps {
@@ -298,6 +307,31 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // exported, so every download says so instead of reaching the exporter's
   // refusal. `clips.length === 0` keeps its own, older handling.
   const wholeLengthReason = exportLengthReason(calculateTimelineDuration(clips));
+
+  // ESCSUITE-293: the Captions track as cues, for the sidecar row — its text
+  // clips as they stand now (edits, moves and all), in timeline order. Read
+  // from the `clips` / `tracks` this dialog already subscribes to; a hidden
+  // caption track is included, since hiding it is how a caption is kept off
+  // the picture and wanted only as a sidecar. This runs while the dialog is
+  // shut too (it is always mounted), so a damaged clip `parseProject` let
+  // through — a text clip with no `textData`, or text that is not a string —
+  // is left out rather than read (review I1).
+  const captionCues = useMemo((): CaptionCue[] => {
+    const captionTrackIds = new Set(tracks.filter((track) => track.kind === 'captions').map((track) => track.id));
+    return clips
+      .filter((clip) => captionTrackIds.has(clip.trackId) && typeof clip.textData?.text === 'string')
+      .sort((a, b) => a.timelinePosition - b.timelinePosition)
+      .map((clip) => ({
+        start: clip.timelinePosition,
+        end: clip.timelinePosition + clip.duration,
+        text: clip.textData!.text,
+      }));
+  }, [clips, tracks]);
+
+  const downloadCaptions = (format: CaptionFormat) => {
+    const blob = new Blob([serializeCaptions(captionCues, format)], { type: CAPTION_MIME_TYPES[format] });
+    downloadBlob(blob, `${projectName || 'export'}.${format}`);
+  };
   const lengthReason =
     wholeLengthReason ?? (timeRange ? exportLengthReason(timeRange.end - timeRange.start) : null);
 
@@ -465,15 +499,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       if (isCurrentRun()) {
         const fileName = `${projectName || 'export'}.${extension}`;
 
-        // Create download link
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, fileName);
 
         // Hand the finished file to an embedding host (no-op when not embedded).
         // The download above has already happened, so a host channel that throws
@@ -1088,6 +1114,22 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                   </div>
                 )}
               </div>
+
+              {/* ESCSUITE-293: the Captions track beside the video, as a file
+                  of its own. Only when there is a caption to write. */}
+              {captionCues.length > 0 && (
+                <div className={styles.section} role="group" aria-labelledby="export-captions-label">
+                  <span className={styles.label} id="export-captions-label">Captions</span>
+                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                    <button className={styles.cancelButton} onClick={() => downloadCaptions('srt')}>
+                      Download .srt
+                    </button>
+                    <button className={styles.cancelButton} onClick={() => downloadCaptions('vtt')}>
+                      Download .vtt
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>

@@ -147,7 +147,7 @@ describe('VideoUploader', () => {
 
       expect(screen.getByText('Drop media or click to browse')).toBeInTheDocument()
       const input = fileInput()
-      expect(input.accept).toBe('video/*,image/*,audio/*,.veditor')
+      expect(input.accept).toBe('video/*,image/*,audio/*,.srt,.vtt,.veditor')
       expect(input.multiple).toBe(true)
     })
 
@@ -468,7 +468,7 @@ describe('VideoUploader', () => {
 
       await waitFor(() =>
         expect(showNotification).toHaveBeenCalledWith(
-          'Only video, image, audio and .veditor files can be imported.',
+          'Only video, image, audio, caption (.srt / .vtt) and .veditor files can be imported.',
           'error'
         )
       )
@@ -695,6 +695,147 @@ describe('VideoUploader', () => {
 
       await waitFor(() => expect(mockProcessMediaFile).toHaveBeenCalledTimes(1))
       expect(onProjectFile).not.toHaveBeenCalled()
+    })
+  })
+
+  // ESCSUITE-293: a dropped or picked .srt / .vtt becomes text clips on the
+  // Captions track. Told apart by extension, in any case — a browser reports
+  // `.srt` with no MIME type at all.
+  describe('importing captions (ESCSUITE-293)', () => {
+    const SRT = '1\n00:00:01,000 --> 00:00:02,000\nHello there.\n\n2\n00:00:03,000 --> 00:00:04,000\nGoodbye.\n'
+    const VTT = 'WEBVTT\n\n00:01.000 --> 00:02.000 align:start\n<v Ann>Hi</v>\n'
+
+    const captionTrack = () => store().project.timeline.tracks.find((track) => track.kind === 'captions')
+    const captionTexts = () => store().project.timeline.clips.map((clip) => clip.textData?.text)
+
+    function renderUploader() {
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+    }
+
+    it('puts a dropped .srt on the Captions track and says how many', async () => {
+      renderUploader()
+
+      fireEvent.drop(dropZone(), { dataTransfer: { files: [file('talk.srt', '', SRT)] } })
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith('Imported 2 captions onto the Captions track.', 'success')
+      )
+      expect(captionTrack()?.name).toBe('Captions')
+      expect(captionTexts()).toEqual(['Hello there.', 'Goodbye.'])
+      expect(store().project.timeline.clips.map((clip) => [clip.timelinePosition, clip.duration])).toEqual([[1, 1], [3, 1]])
+      expect(showNotification).toHaveBeenCalledTimes(1)
+      expect(mockProcessMediaFile).not.toHaveBeenCalled()
+      expect(onProjectFile).not.toHaveBeenCalled()
+    })
+
+    it('reads a picked .VTT in upper case, and says once what it did not import', async () => {
+      renderUploader()
+
+      selectFiles([file('TALK.VTT', 'text/vtt', VTT)])
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith('Imported 1 caption onto the Captions track.', 'success')
+      )
+      expect(showNotification).toHaveBeenCalledWith('Positioning and speaker names were not imported.', 'info')
+      expect(showNotification).toHaveBeenCalledTimes(2)
+      expect(captionTexts()).toEqual(['Hi'])
+    })
+
+    it('styles captions for the project, and wraps a long line at word boundaries', async () => {
+      store().setProjectResolution(1280, 720)
+      renderUploader()
+      const long = 'This caption is far too long to sit on one line of a video frame'
+
+      selectFiles([file('long.srt', '', `00:00:01,000 --> 00:00:02,000\n${long}\n`)])
+
+      await waitFor(() => expect(captionTexts()).toEqual(['This caption is far too long to sit on one\nline of a video frame']))
+      expect(store().project.timeline.clips[0].textData).toMatchObject({ fontSize: 32, y: 0.88, backgroundColor: '#000000b3' })
+    })
+
+    it('refuses a file it cannot read, saying why, and adds nothing', async () => {
+      renderUploader()
+
+      selectFiles([file('broken.vtt', 'text/vtt', '00:01.000 --> 00:02.000\nNo header\n')])
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith('Line 1: a WebVTT file must start with "WEBVTT".', 'error')
+      )
+      expect(store().project.timeline.clips).toHaveLength(0)
+      expect(captionTrack()).toBeUndefined()
+    })
+
+    it('says so when the file itself cannot be read', async () => {
+      renderUploader()
+      const unreadable = file('gone.srt', '', SRT)
+      vi.spyOn(unreadable, 'text').mockRejectedValue(new DOMException('The file could not be read.', 'NotReadableError'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        selectFiles([unreadable])
+
+        await waitFor(() => expect(showNotification).toHaveBeenCalledWith('Could not read gone.srt.', 'error'))
+        expect(errorLog).toHaveBeenCalled()
+        expect(store().project.timeline.clips).toHaveLength(0)
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
+    // Review M3: imported onto a hidden track, nothing appears in the picture;
+    // the one notice says why rather than a second one.
+    it('says the Captions track is hidden, in the same notice, when it is', async () => {
+      renderUploader()
+      selectFiles([file('first.srt', '', SRT)])
+      await waitFor(() => expect(captionTrack()).toBeDefined())
+      store().updateTrack(captionTrack()!.id, { visible: false })
+      showNotification.mockClear()
+
+      selectFiles([file('second.srt', '', SRT)])
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith(
+          'Imported 2 captions onto the Captions track. The Captions track is hidden.',
+          'success'
+        )
+      )
+      expect(showNotification).toHaveBeenCalledTimes(1)
+    })
+
+    it('refuses while the Captions track is locked', async () => {
+      renderUploader()
+      selectFiles([file('first.srt', '', SRT)])
+      await waitFor(() => expect(captionTrack()).toBeDefined())
+      store().updateTrack(captionTrack()!.id, { locked: true })
+      showNotification.mockClear()
+
+      selectFiles([file('second.srt', '', SRT)])
+
+      await waitFor(() =>
+        expect(showNotification).toHaveBeenCalledWith('The Captions track is locked, so no captions were imported.', 'error')
+      )
+      expect(store().project.timeline.clips).toHaveLength(2)
+    })
+
+    it('imports captions and media dropped together', async () => {
+      renderUploader()
+
+      fireEvent.drop(dropZone(), {
+        dataTransfer: { files: [file('talk.srt', '', SRT), file('test.mp4', 'video/mp4')] },
+      })
+
+      await screen.findByText('Complete')
+      expect(captionTexts()).toEqual(['Hello there.', 'Goodbye.'])
+      expect(mockProcessMediaFile).toHaveBeenCalledTimes(1)
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+    })
+
+    it('leaves captions alone beside a project file, which still wins', async () => {
+      renderUploader()
+
+      selectFiles([file('talk.srt', '', SRT), file('my.veditor', '')])
+
+      await waitFor(() => expect(onProjectFile).toHaveBeenCalledTimes(1))
+      expect(store().project.timeline.clips).toHaveLength(0)
+      expect(showNotification).not.toHaveBeenCalled()
     })
   })
 

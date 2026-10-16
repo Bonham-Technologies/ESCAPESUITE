@@ -35,10 +35,12 @@ function createTrackAtTop(tracks: Track[], name?: string): Track {
 
 // Find an empty track (no clips assigned) - returns lowest index empty track.
 // A locked track is never chosen (ESCSUITE-84): its contents are frozen, and an
-// empty locked track is still locked.
+// empty locked track is still locked. Nor is the caption track (ESCSUITE-293,
+// review M2): emptied of captions it is still the one the next import and the
+// sidecar use, so a title or a video put there would be read as a caption.
 function findEmptyTrack(tracks: Track[], clips: Clip[]): Track | null {
   const usedTrackIds = new Set(clips.map(c => c.trackId));
-  const emptyTracks = tracks.filter(t => !usedTrackIds.has(t.id) && !t.locked);
+  const emptyTracks = tracks.filter(t => !usedTrackIds.has(t.id) && !t.locked && t.kind !== 'captions');
   if (emptyTracks.length === 0) return null;
   // Return the one with lowest index
   return emptyTracks.reduce((a, b) => a.index < b.index ? a : b);
