@@ -4546,6 +4546,53 @@ from the served header falling back, Chromium naming the refused `blob:` module 
 fallback line — it fires no `securitypolicyviolation` and prints no refusal) and `serve-dist.test.mjs`'s directive
 pin, 19 / 19. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-16 for ESCSUITE-292
+(every MP4 and WebM export measures the loudness of the mix it encodes — integrated loudness and true
+peak per ITU-R BS.1770-4 / EBU R128 in `core/loudness.ts`, one allocation-free pass after the mix and
+before the encoder — and can normalize it to −14, −16 or −23 LUFS through a stereo-linked −1 dBTP
+limiter, Off by default; the dialog's Audio loudness select, persisted with the other export
+preferences, and the completion line "Measured −XX.X LUFS · gain +X.X dB"; the kit's
+`options.loudnessTarget` and the manifest's `loudness`), each in one sitting against `main` at
+`5f9008ed` (the ESCSUITE-296 version-packages commit; its artist and kit sources are identical to
+`368c976d`'s, so the artist base summary is the one measured there). **Artist**:
+99.84 / **99.43** / **96.68** / **99.77** against 99.84 / 99.41 / 96.64 / 99.76 — statements up two
+hundredths, branches up four, functions up one, lines unmoved. The base gives 5,847 / 6,050 branches and
+this branch 5,913 / 6,116: sixty-six new branches, sixty-six covered, the same 203 uncovered as before
+(lines 9,049 / 9,063 → 9,245 / 9,259, statements 10,230 / 10,290 → 10,468 / 10,528, functions
+2,156 / 2,161 → 2,187 / 2,192, every denominator growing by exactly what the numerator did; the same
+14 / 60 / 5 uncovered). The sixty-six are `core/loudness.ts`'s fifty-four on arrival (54 / 54, 229 / 229
+statements, 29 / 29 functions: the K-weighting coefficient derivation, the block tail, the two gates,
+the 4× true-peak oversampling with its window bound, `gainForTarget`'s non-finite
+refusal and +20 dB cap, the limiter's engage-or-plain-gain choice, its hold and release derived from
+the sample rate, and the interleaved twins — each reached from both sides by `loudness.test.ts`'s 38
+cases, whose fixtures are analytic (a −23 LUFS sine by inverting the formula, Tech 3341 case 3 at
+−23.021 over 603 blocks, a silent half at −23.066 over 100 gated blocks, the relative gate pinned to
+the absolute-gated mean against an all-blocks mutant at −25.854, stereo +3.01 LU, the limiter's
+stereo link, hold at 0.5012 through frame 1240 and release at 0.8165 at frame 3640, 44.1 kHz
+scaling, the cap) at ±0.1 LU and cross-checked against `ffmpeg -af ebur128` within 0.08 LU),
+`components/Export/ExportDialog.tsx`'s six (234 / 235 → 240 / 241: the select's GIF gate, the
+Off-or-target choice and the limited-or-not completion copy; the file's one pre-existing uncovered arm
+untouched), `core/exportMP4.ts`'s two (132 / 149 → 134 / 151: the no-mix skip; the same seventeen
+pre-existing arms uncovered), `core/exportWebM.ts`'s two (72 / 74 → 74 / 76: the same skip; the same
+two pre-existing arms uncovered) and `headless/renderProject.ts`'s two (35 / 38 → 37 / 40: the
+`loudness` field carried or omitted; the same three pre-existing arms uncovered). The long loudness
+fixtures carry explicit per-test timeouts with their measured durations under coverage (Tech 3341's
+80 s stereo fixture took 6.6 s instrumented on a loaded machine), after the first measurement of the
+branch timed two of them out at vitest's 5 s default; the suite is measured with `--testTimeout 20000`
+as the load-flake guard. **Kit**: 99.59 / 99.52 / **98.64** / 98.87 against 99.59 / 99.52 / 98.61 / 98.87
+— branches up three hundredths, the other three unmoved: lines 984 / 988 → 991 / 995, statements
+1,043 / 1,048 → 1,050 / 1,055, branches 643 / 652 → 653 / 662 and functions 176 / 178 on both, every
+denominator growing by exactly what the numerator did, the same 4 / 5 / 9 / 2 uncovered. The ten are
+`src/jobSpec.ts`'s eight (90 → 98: `options.loudnessTarget` absent, one of the three targets, or
+refused by name — `-15`, a string, `null` — each from both sides) and `src/manifest.ts`'s two (1 → 3:
+the `loudness` block copied through or omitted). Outside vitest's measurement the kit's Chromium suite
+ran here with ffmpeg on PATH: 36 passed / 1 skipped, the new case rendering a pink-noise fixture and
+comparing the kit's integrated loudness with `ffmpeg -af ebur128` within ±0.3 LU on the measure and
+±0.5 LU on the delivered Opus file. Every `*.perf.test.ts` and `*rerender*` file is byte-identical —
+the measurement is one pass per export, none per frame; the ~2–3 s it costs on a 10-minute mix with
+Cancel unresponsive is ESCSUITE-301. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and
+the kit's 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4553,9 +4600,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.57 | 97.93 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.41 | 96.64 | 99.76 |
+| `@escapesuite/artist` | 99.84 | 99.43 | 96.68 | 99.77 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.61 | 98.87 |
+| `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.64 | 98.87 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
