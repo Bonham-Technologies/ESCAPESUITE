@@ -72,7 +72,7 @@ vi.mock('../../utils/analytics', () => ({ analytics: mockAnalytics }))
 type ExportArgs = [
   unknown, // clips
   unknown, // sourceVideos
-  { format: string; quality: string; resolution: string; fps?: number; timeRange?: { start: number; end: number } },
+  { format: string; quality: string; resolution: string; fps?: number; timeRange?: { start: number; end: number }; loudnessTarget?: number },
   (p: ExportProgress) => void,
   unknown, // tracks
   AbortSignal,
@@ -2372,6 +2372,103 @@ describe('ExportDialog', () => {
   // `disposeLiveExport()` as `onError`; these pin the dialog's half of that
   // contract: a run registers itself in the slot when it starts and clears
   // itself when it settles or is cancelled.
+  // ESCSUITE-292: every video export measures its mix (ITU-R BS.1770-4) and,
+  // when a target is chosen here, normalises it under a −1 dBTP limiter. The
+  // choice lives beside Quality and is remembered with it; the measurement is
+  // reported on the completion line, which the one live region announces.
+  describe('audio loudness (ESCSUITE-292)', () => {
+    const loudnessSelect = () => screen.getByLabelText(/audio loudness/i)
+
+    it('offers off and the three targets beside Quality, off by default, and hides them for GIF', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+
+      const select = loudnessSelect()
+      expect(select).toHaveValue('off')
+      expect(Array.from((select as HTMLSelectElement).options).map((o) => o.textContent)).toEqual([
+        'Off',
+        '\u221214 LUFS (streaming)',
+        '\u221216 LUFS (podcast/mobile)',
+        '\u221223 LUFS (broadcast)',
+      ])
+
+      fireEvent.click(gifRadio())
+      expect(screen.queryByLabelText(/audio loudness/i)).not.toBeInTheDocument()
+    })
+
+    it('exports with the chosen target from the advanced button and remembers it', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.change(loudnessSelect(), { target: { value: '-16' } })
+
+      fireEvent.click(advancedExport())
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2]).toMatchObject({ format: 'webm', loudnessTarget: -16 })
+      expect(mockSetSetting).toHaveBeenCalledWith('lastExportSettings', {
+        format: 'webm',
+        quality: 'medium',
+        resolution: 'project',
+        fps: 15,
+        loudnessTarget: -16,
+      })
+    })
+
+    it('goes back to off when Off is chosen again', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.change(loudnessSelect(), { target: { value: '-23' } })
+      fireEvent.change(loudnessSelect(), { target: { value: 'off' } })
+      expect(loudnessSelect()).toHaveValue('off')
+
+      fireEvent.click(advancedExport())
+
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalledTimes(1))
+      expect(webmArgs()[2].loudnessTarget).toBeUndefined()
+    })
+
+    it('restores a saved target, and treats a stale one as off', async () => {
+      mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project', loudnessTarget: -23 })
+      const { unmount } = render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await waitFor(() => expect(loudnessSelect()).toHaveValue('-23'))
+      unmount()
+
+      mockGetSetting.mockResolvedValue({ format: 'mp4', quality: 'medium', resolution: 'project', loudnessTarget: -20 })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      await waitFor(() => expect(screen.getByRole('radio', { name: /mp4/i })).toBeChecked())
+      expect(loudnessSelect()).toHaveValue('off')
+    })
+
+    it('reports the measurement, the gain and the limiter on the completion line, announced once', async () => {
+      mockExportToWebM.mockResolvedValue({
+        ...exported(new Blob()),
+        loudness: { measuredLufs: -18.34, truePeakDbtp: -2, gainDb: 4.34, targetLufs: -14, limited: true },
+      })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+
+      const line = 'Export complete! Measured \u221218.3 LUFS \u00b7 gain +4.3 dB \u00b7 limited'
+      await waitFor(() => expect(screen.getByText(line)).toBeInTheDocument())
+      expect(liveRegion()?.textContent).toBe(`${line} (100%)`)
+      expect(document.querySelectorAll('[role="status"]')).toHaveLength(1)
+    })
+
+    it('reports the measurement alone when normalising was off', async () => {
+      mockExportToWebM.mockResolvedValue({
+        ...exported(new Blob()),
+        loudness: { measuredLufs: -20.04, truePeakDbtp: -6, gainDb: 0, targetLufs: null, limited: false },
+      })
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+
+      await waitFor(() =>
+        expect(screen.getByText('Export complete! Measured \u221220.0 LUFS')).toBeInTheDocument()
+      )
+    })
+  })
+
   describe('disposeLiveExport (ESCSUITE-220)', () => {
     interface AbortableRun {
       signal: AbortSignal
