@@ -1262,26 +1262,41 @@ length: every callback the page never received took 85.3 ms out of the audio, an
 crystal running ε fast against the system clock put the audio ε·T behind, and a context that
 ignored the 48 kHz request was stamped and labelled as 48 kHz anyway. Three fixes, in
 `webcodecs-recorder.ts` and `core/audioGapFiller.ts`:
-1. **Lost buffers are filled — but only a persistent offset.** One `createAudioGapFiller()` per
-   pipeline (the mix and each audio companion) anchors on the first event's `playbackTime` after
-   `start()` or a resume and counts samples from there, so each event has an *offset*: its
-   `playbackTime` minus where the count says its buffer starts. It fills only when the **minimum**
-   offset over the last `GAP_WINDOW` (8, ~0.7 s) events is at least half a buffer, with that
-   offset in whole 4096-sample buffers of zero-valued `AudioData` (one reused zero buffer, stamped
-   contiguously before the delivered buffer). Why the minimum: Blink and WebKit are recalled — not
-   measured — to read `playbackTime` when the main thread *dispatches* the event, so a callback
-   that is merely late carries a later time and the callbacks queued behind a hang arrive back to
-   back with about the same one. Filling each event's own gap (round 1) turned that into seconds
-   of inserted silence per minute of jank. A dispatch delay is never negative, so the minimum
-   ignores it, while a lost buffer lifts every later offset by one buffer. A window whose
-   `playbackTime`s span under half its nominal length is a queued burst and is not judged; a
-   negative minimum moves the anchor down (the anchor came from a late event); the window starts
-   again after every fill. A fill lands up to 8 callbacks after its loss (85 ms early for ~0.7 s
-   meanwhile). One fill is capped at `MAX_GAP_FILL_SECONDS` (5 s) with one warning per pipeline;
-   the rest stays a step. An event with **no** `playbackTime` takes exactly the old path, which is
-   what keeps `webcodecsRecorder.perf.test.ts`'s one-`AudioData`-per-callback law exact. Known
-   limit: a dispatch delay that rises by half a buffer or more and *stays* there for 8 callbacks
-   looks like a loss and is filled with one buffer.
+1. **Lost audio is filled — the rise in the baseline deficit, in render quanta.** One
+   `createAudioGapFiller()` per pipeline (the mix and each audio companion). What the ESCSUITE-296
+   rig measured in headless Chromium 156, which every earlier version of this rule got wrong, and
+   which nobody should have to re-derive:
+   - **`playbackTime` is read at dispatch**, not from the buffer's position: under jank it sits one
+     buffer ahead of `currentTime` from p5 to p95, and its offset from the sample count tracks
+     dispatch lateness with r = 1.00, slope 0.99. (Counting each event's own gap — round 1 —
+     read +87, −25 and −33 lost callbacks on takes that lost 0, 0 and 1.)
+   - **A real loss arrives as 128-sample creep**, one render quantum (2.67 ms) at a time, not as a
+     dropped 4096-sample buffer: ~43 ms over a minute under a 60 ms-per-100 ms busy loop, matched by
+     a −41 ms A/V marker drift.
+   - **Whole-buffer rules miss it**: the rolling minimum peaked at 80 ms over 8 callbacks and
+     58.7 ms over 24, under a 0.95-buffer threshold, while a half-buffer threshold filled a buffer
+     that was never lost (lateness above half a buffer can be sustained).
+
+   So each event has a *deficit* — its reference time minus the samples delivered since the
+   anchor. The reference is the event's `playbackTime` (dispatch-time is harmless: only minimums
+   are used), else the context's `currentTime` read in the callback, else none, and then the event
+   takes exactly the old path (what keeps `webcodecsRecorder.perf.test.ts`'s
+   one-`AudioData`-per-callback law exact). Lateness only raises a deficit, so the **baseline** —
+   the minimum over the last 8 events or 4 s of them, whichever is more (47 at 48 kHz) — ignores
+   it, and lost content raises it for good. The first full window's baseline is the **anchor**, so
+   a constant dispatch latency is never filled; a baseline two quanta or more above the anchor is
+   filled with all but one of those quanta (zero-valued `AudioData`, chunks of at most 4096 from one
+   reused zero buffer, stamped contiguously before the delivered buffer) and the anchor rises by
+   what was filled. The window is 4 s, not 2, because on the rig's real log 2 s over-filled by 16 ms
+   (a transient rise of the minimum that later fell back) and 4 s matched; the last quantum is left
+   because filling every quantum the moment it shows filled a few ms of pure jitter over ten
+   minutes — the residual is under two quanta (5.3 ms) and never accumulates. A window whose
+   reference times span under half its nominal length is a burst queued behind a hang and is not
+   judged. A fill lands about a window after its loss. One fill is capped at
+   `MAX_GAP_FILL_SECONDS` (5 s) with one warning per pipeline; the rest stays a step. Known limit:
+   lateness that never comes back to its floor for a whole window — independent uniform 0–60 ms on
+   every callback, where only 4 % land within a quantum of the floor (the rig: 20 %) — can read a
+   quantum or two high; bounded, and the suite pins it at ≤ 2 quanta in ten minutes.
 2. **Video is stamped in context time.** `start()` reads `audioContext.getOutputTimestamp()`;
    usable (present, finite, non-zero), every frame is stamped with the context seconds elapsed
    since `start()`, extrapolated on `performance.now()` from that pairing and re-read every
@@ -1306,7 +1321,9 @@ What a user sees: a long recording no longer drifts further out of sync the long
 `webcodecsRecorder.audioClock.test.ts` (which replaced the hunt's probe) drives 10- and 60-minute
 simulated takes through it — with `playbackTime` both exact and read at dispatch
 (`scriptProcessorPlaybackTime()` in the audio double: jitter, queued bursts behind 300 ms and 3 s
-hangs, real losses under jitter, three pipelines losing independently) — and
+hangs, the rig's busy-loop jank, sustained 0–60 ms lateness, a constant latency, 128-sample creep
+including the rig's ~43 ms a minute, whole-buffer losses, three pipelines losing independently,
+`currentTime` in place of `playbackTime`) — and
 `audioGapFiller.test.ts` pins the helper, one case per guard.
 
 `webcodecs-recorder.test.ts` pins all of it against a scripted `performance.now()`: a 30 fps
