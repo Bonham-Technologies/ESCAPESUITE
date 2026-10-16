@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.18.1
+
+### Patch Changes
+
+- 4d33a7e: A damaged older project file is now refused with a reason instead of a bare "Failed to load project"
+  
+  Opening a `.veditor` saved by an older ESCAPEARTIST (the JSON kind, with its videos written into it as text) that had been cut short, hand-edited or otherwise damaged used to fail with the browser's own JSON or type error, and the notice said only "Failed to load project". It now says what is wrong, the way a damaged current-format file already did: "Failed to load project: the file is not valid JSON", "… videos must be a list", "… videos[1].data must be a string", "… videos[0].data is not base64" and so on. Nothing is stored from a refused file, and a video that was stored before the damaged one is removed again. A few hand-edited shapes that used to load are now refused, as a current-format file already refuses them: a video whose `meta` is not an object (a list, `false`, `0` or `""`), a thumbnail that is neither text nor `null`, an `id` or `name` that is not text, a missing `mimeType`, and the same video listed twice. ESCAPEARTIST never wrote any of them.
+- 4d33a7e: A very old project whose text or shape overlay has no usable start and end time now opens with that overlay repaired, instead of failing at export
+  
+  Projects from early ESCAPEARTIST versions kept text and shape overlays in a list of their own, each with a start and end time on the timeline. If one of those times was missing or not a number (or the two were so far apart that the length overflowed), the project still opened, but the overlay became a clip with no length and the export refused the whole project. The overlay is now repaired when the project opens: it starts at its start time if that one is usable, otherwise at the beginning, and lasts 5 seconds, the length a new overlay gets. A note in the browser console says how many were repaired. Overlays whose times were fine open exactly as before.
+
 ## 2.18.0
 
 ### Minor Changes
