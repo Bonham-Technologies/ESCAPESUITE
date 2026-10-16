@@ -443,6 +443,9 @@ describe('separate tracks', () => {
     expect(mic.encodes).toHaveLength(1)
     expect(system.encodes).toHaveLength(4)
     expect(callbacks.onError).not.toHaveBeenCalled()
+    // Dropped by the guard, not thrown at a closed or missing codec and logged
+    // once per chunk.
+    expect(console.error).not.toHaveBeenCalled()
 
     worklet.holdMessages = false
     for (const node of context.workletNodes) node.deliver()

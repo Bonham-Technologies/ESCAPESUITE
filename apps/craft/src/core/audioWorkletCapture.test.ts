@@ -166,10 +166,11 @@ describe('the capture processor (the worklet module)', () => {
     }
     const left = new Float32Array(3000).map((_, i) => i)
     const right = new Float32Array(3000).map((_, i) => -i)
+    const outputs = [[new Float32Array(3000), new Float32Array(3000)]]
     context.renderingFrame = 0
-    processor.process([[left, right]], [[]], {})
+    processor.process([[left, right]], outputs, {})
     context.renderingFrame = 3000
-    processor.process([[left, right]], [[]], {})
+    processor.process([[left, right]], outputs, {})
     node.port.postMessage('flush')
     await settle()
 
@@ -188,6 +189,21 @@ describe('the capture processor (the worklet module)', () => {
     expect(second.frame).toBe(4096)
     expect(second.channels[0]).toHaveLength(6000 - 4096)
     expect(second.channels[0][0]).toBe(1096)
+  })
+
+  it('takes a silent quantum\'s length from the arrays it is handed, not an assumed 128', async () => {
+    // A render quantum other than 128 frames (Chromium's renderSizeHint work)
+    // with nothing connected: the length comes from the node's output.
+    const { processor } = node as unknown as {
+      processor: { process(inputs: Float32Array[][], outputs: Float32Array[][], p: object): boolean }
+    }
+    const outputs = [[new Float32Array(1024), new Float32Array(1024)]]
+    for (let q = 0; q < 4; q++) {
+      context.renderingFrame = q * 1024
+      processor.process([[]], outputs, {})
+    }
+    expect(node.posted).toHaveLength(1)
+    expect((node.posted[0].data as { frame: number }).frame).toBe(0)
   })
 
   it("flushes a partial tail on 'flush', then acknowledges and stops processing", async () => {
@@ -465,6 +481,40 @@ describe('the AudioWorklet capture', () => {
     expect(node.disconnect).toHaveBeenCalledTimes(1)
     expect(node.port.close).toHaveBeenCalledTimes(1)
     expect(node.port.onmessage).toBeNull()
+  })
+
+  it('stop() cuts the tail at the render position it was called at, not where the flush was handled', async () => {
+    await build()
+    take.start()
+    context.render(CHUNK_FRAMES + 1024)
+    const stopped = take.stop()
+    // The render thread goes on rendering until it handles the flush: those
+    // frames are after the end of the take.
+    context.render(512)
+    await stopped
+
+    expect(stamps().map(s => s.frames)).toEqual([CHUNK_FRAMES, 1024])
+  })
+
+  it('stop() while paused takes nothing rendered after the pause', async () => {
+    await build()
+    take.start()
+    context.render(CHUNK_FRAMES + 1024)
+    take.pause()
+    context.render(768)
+    const stopped = take.stop()
+    context.render(512)
+    await stopped
+
+    expect(stamps().map(s => s.frames)).toEqual([CHUNK_FRAMES, 1024])
+  })
+
+  it('stop() before start() takes nothing and still lets the node go', async () => {
+    await build()
+    context.render(CHUNK_FRAMES + 1024)
+    await take.stop()
+    expect(onChunk).not.toHaveBeenCalled()
+    expect(node.disconnect).toHaveBeenCalledTimes(1)
   })
 
   it('stop() waits for chunks still queued behind a busy page, tail and all', async () => {
