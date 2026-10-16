@@ -158,10 +158,10 @@ async function render(
   // the fallback for an unrecognised value, which is what it has always been.
   const format: RenderMeta['format'] =
     options.format === 'webm' ? 'webm' : options.format === 'gif' ? 'gif' : 'mp4'
-  // The exporters hand back `{ blob, audio, framesEncoded }`; the kit's
-  // manifest describes the bytes, so the blob and the frame count are read
-  // here and `audio` is not.
-  const { blob, framesEncoded } = format === 'webm'
+  // The exporters hand back `{ blob, audio, framesEncoded, loudness? }`; the
+  // kit's manifest describes the bytes, so the blob, the frame count and the
+  // mix's measured loudness are read here and `audio` is not.
+  const { blob, framesEncoded, loudness } = format === 'webm'
     ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
     : format === 'gif'
       ? await exportToGIF(clips, sourceVideos, options, progress, tracks, undefined, resolution)
@@ -184,6 +184,18 @@ async function render(
       width: out.width,
       height: out.height,
       gpu: false, // set by the runner based on launch flags (Plan 2)
+      // ESCSUITE-292: the manifest's four fields — the exporter's own
+      // `limited` flag stays in the editor's completion line.
+      ...(loudness
+        ? {
+            loudness: {
+              measuredLufs: loudness.measuredLufs,
+              truePeakDbtp: loudness.truePeakDbtp,
+              gainDb: loudness.gainDb,
+              targetLufs: loudness.targetLufs,
+            },
+          }
+        : {}),
     },
   }
 }
