@@ -11,6 +11,10 @@
 // escapes. Ranges that tile slice to exactly their declared length. And a
 // refused load leaves the shared DB as it found it.
 //
+// Since ESCSUITE-298 the v1 (JSON) path keeps the same contract: a mutated
+// file that loses its magic goes down it and is loaded or refused with a
+// `ProjectFileError`, and a third loop mutates a real v1 file.
+//
 // A failure prints the seed, the iteration and the mutation; rerun this file
 // to reproduce it. See src/test/fuzz.ts.
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
@@ -56,8 +60,17 @@ const LOAD_ITERATIONS = 150
 // drops `refused` below its floor, and one that turns strict drops `accepted`.
 // A change that moves an input across the line on purpose updates the numbers
 // here and says why, as a per-frame ceiling does.
+//
+// Re-measured 2026-10-16 for ESCSUITE-298: the load loop no longer skips the
+// 11 of its 150 files whose magic a mutation destroyed. They go down the v1
+// path, which refuses each by name as not JSON, so `refused` goes 100 -> 111
+// and `accepted` stays 39. The v1 loop, new in that ticket, loaded 67 of its
+// 300 files and refused 233.
 const READER_FLOORS = { accepted: 115, refused: 332 }
-const LOAD_FLOORS = { accepted: 39, refused: 100 }
+const LOAD_FLOORS = { accepted: 39, refused: 111 }
+const V1_SEED = 0x5eed0298
+const V1_ITERATIONS = 300
+const V1_FLOORS = { accepted: 67, refused: 233 }
 
 /** Where the u32 index length sits in the header. */
 const INDEX_LENGTH_OFFSET = 12
@@ -315,23 +328,111 @@ describe('loadProject, version 2, under seeded mutation (ESCSUITE-294)', () => {
     expect(loaded.sourceVideos.map((video) => video.id)).toEqual(['fz-a', 'fz-b'])
   })
 
-  it(`loads or refuses ${LOAD_ITERATIONS} mutated v2 files with a ProjectFileError, writing nothing on a refusal`, async () => {
+  it(`loads or refuses ${LOAD_ITERATIONS} mutated files with a ProjectFileError, writing nothing on a refusal`, async () => {
     const rng = createRng(LOAD_SEED)
     const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < LOAD_ITERATIONS; iteration++) {
       const { value, description } = mutateFile(rng)
-      // A file whose magic is gone is a v1 file (the reader's half proves the
-      // hand-off); the v1 JSON path is outside this ticket.
-      if (!startsWithMagic(value)) continue
-      const context = { seed: LOAD_SEED, iteration, mutation: description }
-      const loaded = await expectNamedRefusal(() => loadProject(fileOf(value)), isProjectFileError, context)
-      tally[loaded.ok ? 'accepted' : 'refused']++
-      const stored = (await getAllVideoMetadata()).map(({ id }) => id)
-      if (!loaded.ok && stored.length > 0) {
-        throw fuzzFailure(context, `a refused load left ${stored.join(', ')} in the shared DB`)
-      }
-      for (const id of stored) await deleteVideo(id)
+      // A file whose magic is gone goes down the v1 path, which since
+      // ESCSUITE-298 refuses it by name too (as not JSON): no skip.
+      tally[await checkLoad(fileOf(value), { seed: LOAD_SEED, iteration, mutation: description })]++
     }
     expectTallyAtLeast(tally, LOAD_FLOORS, LOAD_SEED)
   })
+})
+
+/** One load's half of the contract: loaded, or refused by name with nothing left in the shared DB. */
+async function checkLoad(file: File, context: FuzzContext): Promise<'accepted' | 'refused'> {
+  const loaded = await expectNamedRefusal(() => loadProject(file), isProjectFileError, context)
+  const stored = (await getAllVideoMetadata()).map(({ id }) => id)
+  if (!loaded.ok && stored.length > 0) {
+    throw fuzzFailure(context, `a refused load left ${stored.join(', ')} in the shared DB`)
+  }
+  for (const id of stored) await deleteVideo(id)
+  return loaded.ok ? 'accepted' : 'refused'
+}
+
+/** A real v1 file's content, as an older ESCAPEARTIST wrote it: two base64 sources, the first with a thumbnail. */
+const baseV1 = () => {
+  const meta = { duration: 2, width: 64, height: 48, frameRate: 30 }
+  return {
+    version: 1,
+    project: project(),
+    editor,
+    videos: [
+      { id: 'fz-a', name: 'a.mp4', mimeType: 'video/mp4', data: btoa('\x01\x02\x03\x04\x05'), thumbnail: btoa('\xff\xd8\xff'), meta },
+      { id: 'fz-b', name: 'b.webm', mimeType: 'video/webm', data: btoa('\x14\x15\x16'), meta },
+    ],
+  }
+}
+
+const v1File = (text: string) => new NodeFile([text], 'old.veditor') as unknown as File
+
+/** One random mutation of the base v1 file: its text cut short or bit-flipped, or its JSON structure. */
+function mutateV1(rng: Rng): Mutated<string> {
+  const text = JSON.stringify(baseV1())
+  switch (rng.int(4)) {
+    case 0: {
+      const at = rng.int(text.length)
+      return { value: text.slice(0, at), description: `truncate the text at ${at} of ${text.length}` }
+    }
+    case 1: {
+      const bytes = new TextEncoder().encode(text)
+      const bit = rng.int(bytes.length * 8)
+      return { value: new TextDecoder().decode(flipBit(bytes, bit)), description: `flipBit ${bit} of the text` }
+    }
+    default: {
+      // `project` is held aside, as the v2 loop holds it: parseProject has a
+      // fuzz file of its own (store/projectMigration.fuzz.test.ts).
+      const { project: held, ...rest } = baseV1()
+      const { value, description } = mutateJson(rng, rest)
+      const content = value && typeof value === 'object' && !Array.isArray(value) ? { ...value, project: held } : value
+      // JSON.stringify(undefined) is undefined: the file is then empty.
+      return { value: JSON.stringify(content) ?? '', description }
+    }
+  }
+}
+
+describe('loadProject, version 1, under seeded mutation (ESCSUITE-298)', () => {
+  let media: MediaDoubles
+
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { duration: 2, videoWidth: 64, videoHeight: 48 } })
+  })
+
+  afterEach(async () => {
+    media.uninstall()
+    for (const { id } of await getAllVideoMetadata()) await deleteVideo(id)
+    vi.restoreAllMocks()
+  })
+
+  it('loads the unmutated v1 file', async () => {
+    const loaded = await loadProject(v1File(JSON.stringify(baseV1())))
+    expect(loaded.sourceVideos.map((video) => video.id)).toEqual(['fz-a', 'fz-b'])
+  })
+
+  it.each([
+    ['a file cut short', () => JSON.stringify(baseV1()).slice(0, 60), 'the file is not valid JSON'],
+    ['videos: null', () => JSON.stringify({ ...baseV1(), videos: null }), 'videos must be a list'],
+    [
+      'a source whose data is a number',
+      () => JSON.stringify({ ...baseV1(), videos: [{ ...baseV1().videos[1], data: 42 }] }),
+      'videos[0].data must be a string',
+    ],
+  ])('refuses %s with a ProjectFileError, writing nothing', async (_label, text, reason) => {
+    const error = await loadProject(v1File(text())).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe(reason)
+    expect(await getAllVideoMetadata()).toEqual([])
+  })
+
+  it(`loads or refuses ${V1_ITERATIONS} mutated v1 files with a ProjectFileError, writing nothing on a refusal`, async () => {
+    const rng = createRng(V1_SEED)
+    const tally = { accepted: 0, refused: 0 }
+    for (let iteration = 0; iteration < V1_ITERATIONS; iteration++) {
+      const { value, description } = mutateV1(rng)
+      tally[await checkLoad(v1File(value), { seed: V1_SEED, iteration, mutation: description })]++
+    }
+    expectTallyAtLeast(tally, V1_FLOORS, V1_SEED)
+  }, 15_000)
 })

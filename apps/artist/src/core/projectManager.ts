@@ -85,10 +85,17 @@ export interface ProjectFile {
 const JSON_FILE_VERSION = 1;
 
 /**
- * Convert base64 string to Blob
+ * Decode one of a v1 file's base64 fields to a Blob. `where` names the field
+ * (`videos[1].data`): text `atob` cannot decode is a damaged file, refused by
+ * name like every other v1 refusal (ESCSUITE-298), not its `DOMException`.
  */
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const binaryString = atob(base64);
+function base64ToBlob(base64: string, mimeType: string, where: string): Blob {
+  let binaryString: string;
+  try {
+    binaryString = atob(base64);
+  } catch {
+    throw new ProjectFileError(`${where} is not base64`);
+  }
   const bytes = new Uint8Array(binaryString.length);
   for (let i = 0; i < binaryString.length; i++) {
     bytes[i] = binaryString.charCodeAt(i);
@@ -397,32 +404,79 @@ async function restoreSources(
   return restored;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function refuse(reason: string): never {
+  throw new ProjectFileError(reason);
+}
+
+/**
+ * A v1 file's text, read into the shape `loadJsonFile` walks, or refused by
+ * name (ESCSUITE-298): every refusal is a `ProjectFileError`, shown as
+ * "Failed to load project: <reason>", as the v2 reader's are. It used to throw
+ * whatever `JSON.parse` or a property read on a malformed value threw. Only
+ * what the loader reads is checked, before anything is written: the top level,
+ * `project` being an object (`parseProject` then judges it), `videos` being a
+ * list of entries with a string `id`, `name`, `mimeType` and `data`, a
+ * `thumbnail` that is a string and a `meta` that is an object when present,
+ * and no id listed twice, which v2 refuses too. A `null` thumbnail or meta is
+ * absent, as it always was; whether `data` and `thumbnail` decode is checked
+ * as each source is restored (`base64ToBlob`), inside the rollback.
+ */
+function readJsonFile(text: string): ProjectFile {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    refuse('the file is not valid JSON');
+  }
+  if (!isRecord(parsed)) refuse('the file is not a project file');
+  if ((parsed.version as number) > JSON_FILE_VERSION) {
+    refuse(`the file names format version ${String(parsed.version)}, and a JSON project file is version ${JSON_FILE_VERSION}`);
+  }
+  if (!isRecord(parsed.project)) refuse('project must be an object');
+  if (!Array.isArray(parsed.videos)) refuse('videos must be a list');
+  const ids = new Set<string>();
+  parsed.videos.forEach((video: unknown, i) => {
+    const at = `videos[${i}]`;
+    if (!isRecord(video)) refuse(`${at} must be an object`);
+    for (const field of ['id', 'name', 'mimeType', 'data']) {
+      if (typeof video[field] !== 'string') refuse(`${at}.${field} must be a string`);
+    }
+    if (video.thumbnail != null && typeof video.thumbnail !== 'string') refuse(`${at}.thumbnail must be a string`);
+    if (video.meta != null && !isRecord(video.meta)) refuse(`${at}.meta must be an object`);
+    const id = video.id as string;
+    if (ids.has(id)) refuse(`the file lists source "${id}" twice`);
+    ids.add(id);
+  });
+  return parsed as unknown as ProjectFile;
+}
+
 /**
  * A v1 file: one JSON document with every source base64-encoded inside it.
  * Unchanged since before ESCSUITE-260 except that each source now goes
- * through the shared `restoreSource`, and the project is validated before
- * any of them is stored.
+ * through the shared `restoreSource`, the project is validated before any of
+ * them is stored, and a damaged file is refused by name (`readJsonFile`,
+ * ESCSUITE-298).
  */
 async function loadJsonFile(
   file: File,
   onProgress?: (progress: number, message: string) => void
 ): Promise<LoadedFile> {
-  const projectFile: ProjectFile = JSON.parse(await file.text());
-
-  if (projectFile.version > JSON_FILE_VERSION) {
-    throw new Error(
-      `Project file version ${projectFile.version} is newer than supported version ${JSON_FILE_VERSION}`
-    );
-  }
+  const projectFile = readJsonFile(await file.text());
   assertProjectParses(projectFile.project, projectFile.editor);
 
   const sourceVideos = await restoreSources(
     projectFile.videos.length,
     async (i, written) => {
       const videoData = projectFile.videos[i];
-      const blob = base64ToBlob(videoData.data, videoData.mimeType);
+      const blob = base64ToBlob(videoData.data, videoData.mimeType, `videos[${i}].data`);
       // v1 never recorded a thumbnail's type; every one ESCAPEARTIST wrote was a JPEG.
-      const thumbnail = videoData.thumbnail ? base64ToBlob(videoData.thumbnail, 'image/jpeg') : undefined;
+      const thumbnail = videoData.thumbnail
+        ? base64ToBlob(videoData.thumbnail, 'image/jpeg', `videos[${i}].thumbnail`)
+        : undefined;
       return restoreSource(videoData, blob, thumbnail, await getVideo(videoData.id), written);
     },
     onProgress
@@ -496,7 +550,8 @@ async function loadContainer(
 /**
  * Load a project from a `.veditor` file of either version. The first 16 bytes
  * decide: a v2 header goes through the index and slices, and anything else
- * takes the v1 path. A v2 file this refuses throws `ProjectFileError`.
+ * takes the v1 path. A file of either version this refuses throws
+ * `ProjectFileError` (ESCSUITE-260, ESCSUITE-298).
  */
 export async function loadProject(
   file: File,

@@ -365,8 +365,25 @@ pnpm lint                # Run ESLint
   never read the same) and trailing bytes are each refused. Each part is then
   `file.slice`d straight into `storeVideo` / `storeThumbnail` and the metadata probes, so a source
   never enters the JS heap. Anything else (every file an older build wrote, and anything that is not
-  a project) takes the unchanged v1 path: `file.text()`, `JSON.parse`, `base64ToBlob`. **Before any
-  write**, both versions run `parseProject(project, editor)` (`assertProjectParses`) and throw
+  a project) takes the v1 path: `file.text()`, `readJsonFile`, `base64ToBlob`. **A damaged v1 file
+  is refused by name (ESCSUITE-298)** through the same `ProjectFileError` the v2 reader throws,
+  where it used to throw whatever `JSON.parse` or a property read threw (a raw `SyntaxError` or
+  `TypeError`, shown only as the bare "Failed to load project"). `readJsonFile` checks what the
+  loader reads, before anything is written: text that is not JSON ("the file is not valid JSON",
+  which also covers a binary file whose magic a corruption broke), a top level that is not an
+  object ("the file is not a project file"), a `version` above 1 ("the file names format version 2,
+  and a JSON project file is version 1"), `project` not an object, `videos` not a list, an entry
+  that is not an object or whose `id`, `name`, `mimeType` or `data` is not a string, a `thumbnail`
+  that is present and not a string, a `meta` that is present and not an object (`videos[<i>].data
+  must be a string` and so on), and an id listed twice (`the file lists source "<id>" twice`, the
+  v2 rule). A `null` thumbnail or meta still counts as absent, as it always did, and so does an
+  empty-string thumbnail. A few hand-edited shapes that used to load are now refused: a `meta` that
+  is not an object (a list, `false`, `0`, `""`), a thumbnail that is neither a string nor `null`, a
+  non-string `id` or `name`, a missing `mimeType`, and a source id listed twice. No ESCAPEARTIST ever
+  wrote any of them. `data` or a `thumbnail` that `atob` cannot decode is refused as
+  `videos[<i>].data is not base64` (or `.thumbnail`) as that source is restored, inside the shared
+  rollback, so a source stored before it is deleted again. `parseProject`'s own
+  reasons pass through unchanged, as on v2. **Before any write**, both versions run `parseProject(project, editor)` (`assertProjectParses`) and throw
   `ProjectFileError(reason)` for a project it refuses, so a hand-edited file, or one from a newer
   editor, is refused by name with nothing stored and nothing to roll back (it used to be judged by
   the hook only after every new source had been stored). `loadProject` still hands the project back
@@ -384,9 +401,9 @@ pnpm lint                # Run ESLint
   `console.warn` per failure, and the thumbnail URLs the load minted are revoked. An id that was
   present before the load is never touched, and the original error is rethrown. The rollback lives
   in the loop both versions share (`restoreSources`), so it covers a v1 load too. A row it cannot
-  delete is unreferenced and shows in ESCSUITE-268's "files from earlier sessions" list. Every v2
-  refusal, a project refusal on either version, and the storage pre-check is a `ProjectFileError`
-  whose message is shown:
+  delete is unreferenced and shows in ESCSUITE-268's "files from earlier sessions" list. Every
+  refusal of either version (v1 since ESCSUITE-298), a project refusal, and the storage pre-check is
+  a `ProjectFileError` whose message is shown:
   `useProjectActions` says "Failed to load project: \<reason\>" for one, and shows the writer's one
   refusal (an index past the cap, unreachable in practice) on its own. **The format sets no project
   size limit**: a `.veditor` is limited by the browser's download size and its storage quota, not by
@@ -1023,6 +1040,23 @@ exporters only iterate `timeline.clips`.
   ids (`legacy-text-<id>` / `legacy-shape-<id>`), so the same file always converts to the same
   project and a headless render of it is reproducible. An entry whose derived id is already a
   clip is skipped, which makes the function idempotent and lets a half-converted file converge.
+- **A window with no usable start or end is repaired first (ESCSUITE-300).** A legacy overlay's
+  `startTime` / `endTime` are timeline times the conversion turns into a clip's position and
+  length, and `Math.max` passes `NaN` through, so a pair that was not two finite numbers (missing,
+  `null`, a string, `NaN`, `Infinity`) used to convert into a NaN-length clip that `parseProject`
+  accepted and the exporter refused (`assertExportableLength`), far from the cause. `projectMigration.ts`'s
+  `repairLegacyOverlayWindows` runs inside `ensureTimelineHasTracks`, before either return path's
+  conversion. Two finite times whose difference overflows (`-1.7e308` / `1.7e308`) count as unusable
+  too. Such an overlay starts at its `startTime` (clamped at 0, as the conversion clamps a position)
+  when that alone is a finite number, else at 0, and lasts `REPAIRED_OVERLAY_DURATION`, 5 s, the length an overlay added in the editor gets
+  (`overlaySlice.ts`'s `duration ?? 5`). It is repaired rather than refused, the ESCSUITE-173 / 255
+  split for a shape the app once wrote, so every old file keeps loading. One `console.warn` per
+  parse counts them ("Repaired the start and end times of 2 legacy overlays; each now lasts 5 s").
+  Open Project parses twice (`assertProjectParses` in `loadProject`, then the hook's own
+  `parseProject` on the unmigrated project), so it warns twice; the host and headless paths warn once.
+  A finite pair is left to the conversion, inverted or zero-length included: it has always clamped
+  that to its 0.1 s minimum, so a file that loaded before converts byte for byte as it did. A legacy
+  overlay has no source, so there is no media length to take instead.
 - **Identity on empty input** — with both arrays empty or absent it returns the *same*
   `Timeline` object, so a modern project (the headless kit's fixture included) is provably
   untouched.
@@ -5174,8 +5208,11 @@ outcome, not on the double.
   fails on anything else, a promise still pending after 2 s included). Each input parser has a
   `*.fuzz.test.ts` beside its suite asserting its refusal contract over a few hundred mutations
   of a real input: `core/projectFileFormat.fuzz.test.ts` (the v2 reader, then `loadProject`:
-  a `ProjectFileError` or a load, nothing written on a refusal), `store/projectMigration.fuzz.test.ts`
-  (`parseProject` returns `{ ok: false, reason }` and never throws) and
+  a `ProjectFileError` or a load, nothing written on a refusal; since ESCSUITE-298 a mutated file
+  that loses its magic is driven down the v1 path rather than skipped, and a third loop mutates a
+  real v1 file), `store/projectMigration.fuzz.test.ts`
+  (`parseProject` returns `{ ok: false, reason }` and never throws, and since ESCSUITE-300 every
+  clip it parses has a finite duration above 0) and
   `app/useHostIntegration.fuzz.test.ts` (one `INVALID_MESSAGE` or `INVALID_PROJECT` reply, nothing
   applied). The seed is a constant per file and the iteration count is fixed, so a run is
   deterministic and prints nothing when it passes. Each loop also tallies how many inputs parsed

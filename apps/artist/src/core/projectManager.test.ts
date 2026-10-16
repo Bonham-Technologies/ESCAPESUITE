@@ -551,9 +551,9 @@ describe('loadProject', () => {
 
   it('refuses a project file written by a newer version', async () => {
     const file = veditorFile({ version: 2 }, 'unused')
-    await expect(loadProject(file)).rejects.toThrow(
-      'Project file version 2 is newer than supported version 1'
-    )
+    const error = await loadProject(file).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe('the file names format version 2, and a JSON project file is version 1')
   })
 
   it('loads a project that embeds no videos at all', async () => {
@@ -745,6 +745,104 @@ describe('loadProject', () => {
     const { project: loaded } = await loadProject(veditorFile({ project }, videoId))
 
     expect(loaded.timeline.clips[0].crop).toEqual(crop)
+  })
+})
+
+describe('loadProject, version 1, refuses a damaged file by name (ESCSUITE-298)', () => {
+  let media: MediaDoubles
+
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { duration: 42, videoWidth: 1280, videoHeight: 720 } })
+    vi.mocked(storeVideo).mockClear()
+    vi.mocked(deleteVideo).mockClear()
+  })
+
+  afterEach(() => {
+    media.uninstall()
+  })
+
+  const v1Text = (text: string) => new File([text], 'old.veditor', { type: 'application/json' })
+  const v1 = (content: unknown) => v1Text(JSON.stringify(content))
+  const source = (id: string, overrides: Record<string, unknown> = {}) => ({
+    id,
+    name: 'v.mp4',
+    mimeType: 'video/mp4',
+    data: base64Of([1, 2, 3]),
+    ...overrides,
+  })
+  const withVideos = (videos: unknown, id = 'v1-damaged') => ({ version: 1, project: createTestProject(id), videos })
+
+  /** The refusal's message, after asserting it is a ProjectFileError and that nothing was written. */
+  async function refusal(file: File): Promise<string> {
+    const error = await loadProject(file).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect(storeVideo).not.toHaveBeenCalled()
+    return (error as Error).message
+  }
+
+  it.each([
+    ['a file cut short mid-JSON', () => v1Text(JSON.stringify(withVideos([source('cut')])).slice(0, 40)), 'the file is not valid JSON'],
+    ['an empty file', () => v1Text(''), 'the file is not valid JSON'],
+    ['a top level of null', () => v1(null), 'the file is not a project file'],
+    ['a top level that is a list', () => v1([]), 'the file is not a project file'],
+    ['a version newer than JSON files have', () => v1({ ...withVideos([]), version: 2 }), 'the file names format version 2, and a JSON project file is version 1'],
+    ['no project', () => v1({ version: 1, videos: [] }), 'project must be an object'],
+    ['a project that is a string', () => v1({ version: 1, project: 'p', videos: [] }), 'project must be an object'],
+    ['no videos list', () => v1({ version: 1, project: createTestProject('x') }), 'videos must be a list'],
+    ['videos: null', () => v1(withVideos(null)), 'videos must be a list'],
+    ['a video that is null', () => v1(withVideos([null])), 'videos[0] must be an object'],
+    ['a video with no id', () => v1(withVideos([source('x', { id: undefined })])), 'videos[0].id must be a string'],
+    ['a video whose name is a number', () => v1(withVideos([source('x', { name: 3 })])), 'videos[0].name must be a string'],
+    ['a video with no type', () => v1(withVideos([source('x', { mimeType: undefined })])), 'videos[0].mimeType must be a string'],
+    ['a second video whose data is a number', () => v1(withVideos([source('ok'), source('num', { data: 12 })])), 'videos[1].data must be a string'],
+    ['a video whose thumbnail is a number', () => v1(withVideos([source('x', { thumbnail: 7 })])), 'videos[0].thumbnail must be a string'],
+    ['a video whose meta is a string', () => v1(withVideos([source('x', { meta: 'm' })])), 'videos[0].meta must be an object'],
+    ['a video whose meta is a list', () => v1(withVideos([source('x', { meta: [] })])), 'videos[0].meta must be an object'],
+    ['the same source listed twice', () => v1(withVideos([source('twice'), source('twice')])), 'the file lists source "twice" twice'],
+  ])('refuses %s', async (_label, file, reason) => {
+    expect(await refusal(file())).toBe(reason)
+  })
+
+  it("passes parseProject's own reason through, as the v2 path does", async () => {
+    const project: Partial<Project> = createTestProject('no-timeline')
+    delete project.timeline
+    expect(await refusal(v1({ version: 1, project, videos: [] }))).toBe('Project has no timeline')
+  })
+
+  it('refuses data that is not base64 by name, and rolls back the source stored before it', async () => {
+    const first = uniqueId('v1-b64-ok')
+    const file = v1(withVideos([source(first), source(uniqueId('v1-b64-bad'), { data: '***not base64***' })], first))
+
+    const error = await loadProject(file).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe('videos[1].data is not base64')
+    expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+    expect(await getVideo(first)).toBeUndefined()
+  })
+
+  it('refuses a thumbnail that is not base64 by name', async () => {
+    const id = uniqueId('v1-thumb-bad')
+    const error = await loadProject(v1(withVideos([source(id, { thumbnail: '%%%' })], id))).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe('videos[0].thumbnail is not base64')
+    expect(await getVideo(id)).toBeUndefined()
+  })
+
+  // What loads today keeps loading: an absent or null thumbnail and meta were
+  // always "none", and an empty thumbnail string was always skipped.
+  it.each([
+    ['a null thumbnail', { thumbnail: null }],
+    ['an empty thumbnail', { thumbnail: '' }],
+    ['a null meta', { meta: null }],
+  ])('still loads a video with %s, as it always has', async (_label, overrides) => {
+    const id = uniqueId('v1-lenient')
+    const { sourceVideos } = await loadProject(v1(withVideos([source(id, overrides)], id)))
+
+    expect(sourceVideos.map((video) => video.id)).toEqual([id])
+    expect(sourceVideos[0].thumbnailUrl).toBeUndefined()
+    await deleteVideo(id)
   })
 })
 
@@ -991,7 +1089,7 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
     await deleteVideo(id)
   })
 
-  it('sends a file whose magic is one byte off down the v1 path, where it fails as JSON', async () => {
+  it('sends a file whose magic is one byte off down the v1 path, where it is refused by name as not JSON (ESCSUITE-298)', async () => {
     const bytes = new Uint8Array(
       await rawV2File({ version: 2, project: createTestProject('x'), videos: [] }).arrayBuffer()
     )
@@ -999,8 +1097,8 @@ describe('loadProject, version 2 (ESCSUITE-260)', () => {
 
     const error = await loadProject(fileOf([bytes])).catch((e: unknown) => e)
 
-    expect(error).toBeInstanceOf(SyntaxError)
-    expect(error).not.toBeInstanceOf(ProjectFileError)
+    expect(error).toBeInstanceOf(ProjectFileError)
+    expect((error as Error).message).toBe('the file is not valid JSON')
     expect(storeVideo).not.toHaveBeenCalled()
   })
 
