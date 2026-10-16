@@ -106,7 +106,7 @@ See [`services/headless-artist/README.md`](services/headless-artist/README.md) f
 
 ## Browser support
 
-Recording works in all modern browsers (Chrome, Edge, Firefox, Safari). Exporting video (WebM/MP4) requires the WebCodecs API, which is currently only available in **Chrome and Edge**.
+Recording works in all modern browsers (Chrome, Edge, Firefox, Safari). Exporting video (WebM/MP4) requires the WebCodecs API, which Chrome, Edge, Firefox 155+ and Safari 26.6+ all provide (measured 2026-10-02). Which codecs a browser can *encode* still varies: Firefox has no AAC encoder, so an MP4 exported there has no sound and the export dialog says so before and after; WebM (VP9/VP8 + Opus) exports with sound everywhere. GIF export needs no WebCodecs at all. MP4 exports keep running at full speed in a background tab in Chrome, Edge and Firefox; Safari decodes in the page.
 
 ## Testing
 
