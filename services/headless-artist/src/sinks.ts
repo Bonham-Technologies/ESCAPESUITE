@@ -379,6 +379,10 @@ export function validateWebhookConfig(config: Record<string, unknown>): WebhookC
   ) {
     throw new Error('webhook sink requires config.headers (object) when provided')
   }
+  // As the command sink's env values: a number or null reached fetch's Headers as "3"/"null".
+  if (rawHeaders !== undefined && !Object.values(rawHeaders).every((value) => typeof value === 'string')) {
+    throw new Error('webhook sink config.headers values must be strings')
+  }
 
   const rawTimeout = config.timeoutMs
   if (

@@ -4377,6 +4377,57 @@ counts (listeners, rects, snap points, renders per move) can move. Every other p
 pins are byte-identical. No changeset: a pure rename. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-16 for ESCSUITE-294 (a seeded mutation-fuzz harness,
+`src/test/fuzz.ts`, and fuzz files beside the `.veditor` v2 reader and `loadProject`, `parseProject` and the
+host's `LOAD_PROJECT` / `LOAD_VIDEO` / `SET_THEME` payloads, asserting one contract per parser — every
+refusal is a named `ProjectFileError` or a parse reason, the host replies exactly one `ERROR`, and nothing
+else ever escapes — plus the two guards the fuzz found wanting on its first run: a malformed legacy
+`textOverlays` / `shapeOverlays` entry and a non-object `tracks` entry are refused by name
+(`timeline.textOverlays[i].text must be a string`, `timeline.tracks[i] must be an object`) where they used to
+throw a `TypeError`, with a falsy legacy overlay array still read as absent the way the migration reads it):
+99.84 / 99.41 / **96.64** / 99.76 against the 99.84 / 99.41 / 96.63 / 99.76 that `main` at `066669d9`
+measures in the same sitting — branches up a hundredth, the other three unmoved. The base gives
+5,828 / 6,031 branches and this branch 5,847 / 6,050: nineteen new branches, nineteen covered, the same 203
+uncovered as before (lines 9,036 / 9,050 → 9,049 / 9,063, statements 10,213 / 10,273 → 10,230 / 10,290,
+functions 2,154 / 2,159 → 2,156 / 2,161, every denominator growing by exactly what the numerator did; the
+same 14 / 60 / 5 uncovered). All nineteen are `store/projectMigration.ts`'s (193 → 212): the object test on
+each track, the per-field checks on each legacy overlay — `text` a string, `type` a string, the position and
+size numbers — and the falsy-array-is-absent arm, each reached from both sides by the deterministic fuzz
+reproductions (seed `0x5eed0294` iteration 23 and seed `0xabc123` iteration 1624, kept as regression tests,
+red before the guards: `textOverlays.map is not a function`, `type.charAt is not a function`, `Cannot read
+properties of null (reading 'id')`) and by the legacy-file cases that were already there. The fuzz files
+themselves add cases, not branches: each runs a few hundred mutations on a fixed seed in under a few seconds,
+prints nothing on success, prints the seed, iteration and mutation on failure, and asserts that the accepted
+and refused tallies hold at the counts measured on that seed, so a parser going lenient turns the file red —
+the rule, and the fact that a changed operator or base input means re-measuring those counts, is written in
+each file. The host-payload fuzz reached no new arm (`useHostIntegration.ts` needed no change: with
+`parseProject` no longer throwing, `LOAD_PROJECT` already answers one `ERROR` with `INVALID_PROJECT`). The
+suite measured 5,597 green with a 20 s per-test timeout, because the machine was carrying the ESCSUITE-296
+drift matrix at the time and the known ClipEditor / App.project timeouts had aborted two ordinary runs; the
+figures are the same the first clean run of this branch produced. The three rerender pins and every
+`*.perf.test.ts` are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+`@escapesuite/headless-artist` was re-measured 2026-10-16 for ESCSUITE-294 (the seeded mutation-fuzz
+harness — `test/fuzz.ts`, the same API as the artist's — and the fuzz files beside the job-spec parser and
+the manifest and bundle loaders, plus the three guards the fuzz found wanting: a `null`, numeric or list clip
+in a v1 bundle or a manifest is refused with `project.timeline.clips[i] must be an object` instead of
+throwing from `validateClipReferences`; a manifest source's present `name` or `mimeType` must be a non-empty
+string — `null` still means absent and falls back to the basename or the extension, an empty string is now
+refused where it used to be inferred; and a webhook sink's `headers` values must be strings, the command
+sink's `env` rule mirrored): **99.59 / 99.52 / 98.61 / 98.87** against the 99.59 / 99.51 / 98.59 / 98.86
+that `main` at `066669d9` measures in the same sitting with the package's `test:coverage` script — statements,
+branches and functions each up a hundredth or two, lines unmoved. The base gives 632 / 641 branches and this
+branch 643 / 652: eleven new branches, eleven covered, the same 9 uncovered as before (lines 976 / 980 →
+984 / 988, statements 1,034 / 1,039 → 1,043 / 1,048, functions 174 / 176 → 176 / 178, every denominator
+growing by exactly what the numerator did; the same 4 / 5 / 2 uncovered, in the same ledgered places). The
+eleven are `src/loaders.ts`'s seven (153 → 160: the object test on each clip for the manifest and both bundle
+versions, and the `!= null` / non-empty-string pair on `name` and on `mimeType`) and `src/sinks.ts`'s four
+(86 → 90: the header-value string check and its message), each reached from both sides by the fuzz
+reproductions (`null`, `5`, `[]`, `true`, `""` refused by name; `null` and absent accepted with the fallbacks)
+and the suites that were already there. The fuzz files themselves assert, per parser, that every refusal is
+the kit's own error naming the field or the bundle path and that the accepted and refused tallies on the
+committed seed hold at their measured counts, so a parser going lenient turns the file red. Kit `test:run`
+461 passed / 2 skipped. **No floor crossed**; the kit's floors stay 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4384,9 +4435,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.84 | 99.41 | 96.63 | 99.76 |
+| `@escapesuite/artist` | 99.84 | 99.41 | 96.64 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.59 | 99.51 | 98.59 | 98.86 |
+| `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.61 | 98.87 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

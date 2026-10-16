@@ -237,6 +237,26 @@ describe('loadManifest', () => {
       /project\.timeline must be an object with an array "clips"/,
     )
   })
+  // ESCSUITE-294: a clip that is not an object leaked a bare TypeError from
+  // validateClipReferences ("Cannot read properties of null (reading 'overlayType')").
+  it.each([
+    ['null', null],
+    ['a number', 7],
+    ['a list', []],
+  ])('names the index, rather than leaking a TypeError, when a clip is %s', async (_label, badClip) => {
+    const dir = await makeTempDir()
+    await fs.copyFile(path.join(manifestFixtureDir, 'src-0.mp4'), path.join(dir, 'src-0.mp4'))
+    const { project } = JSON.parse(await fs.readFile(path.join(manifestFixtureDir, 'project.json'), 'utf8'))
+    project.timeline.clips.push(badClip)
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({ project, sources: [{ id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4' }] }),
+    )
+
+    await expect(loadManifest(path.join(dir, 'manifest.json'))).rejects.toThrow(
+      'project.timeline.clips[1] must be an object',
+    )
+  })
 })
 
 describe('loadManifest "meta"', () => {
@@ -605,6 +625,37 @@ describe('loadManifest source validation', () => {
     ])
 
     await expect(loadManifest(manifestPath)).rejects.toThrow('duplicate source id "src-0"')
+  })
+  // ESCSUITE-294: "name" and "mimeType" are optional (the file's basename and its extension
+  // stand in), but one that is present must be a non-empty string -- a bundle entry's are
+  // checked, and [] used to load here as a source's name.
+  it.each([
+    ['name', []],
+    ['name', 5],
+    ['name', ''],
+    ['mimeType', true],
+    ['mimeType', ''],
+  ])('rejects a "%s" of %j, naming the field', async (field, value) => {
+    const dir = await makeManifestDir()
+    const manifestPath = await writeManifest(dir, [
+      { id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4', [field]: value },
+    ])
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      `manifest source "src-0" field "${field}" must be a non-empty string`,
+    )
+  })
+
+  // Review round 1: a broker that writes null for an empty optional field (Python's None, a Go
+  // nil pointer) means "absent", as it did before the guard -- the basename and the extension
+  // stand in, the same way the editor treats a null legacy overlay array.
+  it('treats a null "name" and a null "mimeType" as absent, falling back to the basename and the extension', async () => {
+    const dir = await makeManifestDir()
+    const manifestPath = await writeManifest(dir, [{ id: 'src-0', file: 'src-0.mp4', name: null, mimeType: null }])
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0]).toMatchObject({ name: 'src-0.mp4', mimeType: 'video/mp4' })
+    await job.cleanup()
   })
 })
 
@@ -1238,6 +1289,17 @@ describe('loadBundle version 2 (ESCSUITE-260)', () => {
 
     it('a clip that references a source the bundle does not hold', () =>
       refusedEntry((video) => (video.id = 'renamed'), 'clip "clip-0" references unknown source "src-0"'))
+
+    // ESCSUITE-294 review round 1: the null-clip refusal pinned by message on the bundle path too.
+    it('a project clip that is null, naming its index', async () => {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2()
+      ;((index.project as { timeline: { clips: unknown[] } }).timeline.clips).push(null)
+      await expect(loadBundle(await writeBundle(dir, assembleV2(index, payload)), dir)).rejects.toThrow(
+        'project.timeline.clips[1] must be an object',
+      )
+      await expectNoTempDir(dir)
+    })
 
     it('two entries under one id', async () => {
       const dir = await makeTempDir()

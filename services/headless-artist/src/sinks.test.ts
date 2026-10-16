@@ -832,6 +832,21 @@ describe('webhook sink', () => {
     )
   })
 
+  // ESCSUITE-294: the same check the command sink's env values have. A number or null here
+  // reached fetch's Headers as "8080" / "null" at best.
+  it('rejects config.headers values that are not strings', async () => {
+    await expect(getSink('webhook', { url: 'http://x/', headers: { 'x-retry': 3 } })).rejects.toThrow(
+      'webhook sink config.headers values must be strings',
+    )
+    await expect(getSink('webhook', { url: 'http://x/', headers: { authorization: null } })).rejects.toThrow(
+      'webhook sink config.headers values must be strings',
+    )
+  })
+
+  it('accepts string-valued config.headers', async () => {
+    await expect(getSink('webhook', { url: 'http://x/', headers: { authorization: 'Bearer x' } })).resolves.toBeTruthy()
+  })
+
   it('posts a multipart body containing the manifest JSON and file bytes', async () => {
     const srcDir = await makeTempDir()
     const fileBytes = Buffer.from('webhook file contents')
