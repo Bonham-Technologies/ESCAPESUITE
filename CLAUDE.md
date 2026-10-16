@@ -360,7 +360,7 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - The benchmark is `*.bench.test.ts`, NOT `*.chromium.test.ts`, precisely so `test:e2e`'s
   `chromium.test` substring filter does not sweep it into CI's gating `e2e` job;
   `test:run` and `test:coverage` exclude the suffix explicitly. Only `test:perf` names it.
-- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.63.0 as
+- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.64.0 as
   `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
   `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the
   tarball to GitHub Releases alongside the standalone HTML builds.
@@ -4498,7 +4498,7 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
 - Playwright browsers are cached across runs (~1min savings); `e2e` also runs on
   pushes to `main`, so the cache is written from the base branch and fresh PR
   branches can restore it. `services/headless-artist` pins the same Playwright
-  version (1.63.0) as `apps/e2e`, so its Chromium tests share that cache
+  version (1.64.0) as `apps/e2e`, so its Chromium tests share that cache
 - Playwright browser download and apt system-deps are separate steps, each with
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
