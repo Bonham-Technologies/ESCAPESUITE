@@ -1006,6 +1006,25 @@ describe('a legacy overlay with no usable start and end time is repaired (ESCSUI
     expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 1 legacy overlay; each now lasts 5 s')
   })
 
+  // Fix round 1 (review minor 1): two finite times whose difference overflows
+  // converted into an Infinity-length clip, the same failure as a NaN pair.
+  it('repairs a finite pair whose length overflows, starting it at 0 rather than at its negative start', () => {
+    const project = parsed(withOverlays([text({ startTime: -1.7e308, endTime: 1.7e308 })]))
+
+    expect(clip(project, 'legacy-text-text1')).toMatchObject({ timelinePosition: 0, duration: 5, startTime: 0, endTime: 5 })
+    expect(project.timeline.duration).toBe(5)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('repairs the reversed overflowing pair into a clip of finite length', () => {
+    const project = parsed(withOverlays([text({ startTime: 1.7e308, endTime: -1.7e308 })]))
+
+    const repaired = clip(project, 'legacy-text-text1')
+    expect(Number.isFinite(repaired.duration) && repaired.duration > 0).toBe(true)
+    expect(Number.isFinite(project.timeline.duration)).toBe(true)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
   it('warns once for the whole parse, counting every overlay it repaired', () => {
     const project = parsed(withOverlays([text({ startTime: NaN })], [shape({ endTime: undefined }), shape({ id: 'ok' })]))
 
