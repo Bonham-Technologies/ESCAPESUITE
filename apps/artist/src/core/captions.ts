@@ -115,15 +115,41 @@ function blocksOf(text: string): Block[] {
   return blocks;
 }
 
-function parseTimestamp(token: string, line: number): number {
+/** A timestamp in seconds, or `null` when the token is not one. */
+function readTimestamp(token: string): number | null {
   const match = TIMESTAMP.exec(token);
-  if (!match) {
-    throw new CaptionParseError(`Line ${line}: "${token.slice(0, 40)}" is not a caption timestamp.`);
-  }
+  if (!match) return null;
   const [, hours = '0', minutes, seconds, fraction] = match;
   const ms =
     Number(hours) * 3_600_000 + Number(minutes) * 60_000 + Number(seconds) * 1000 + Number(fraction.padEnd(3, '0'));
   return ms / 1000;
+}
+
+function parseTimestamp(token: string, line: number): number {
+  const seconds = readTimestamp(token);
+  if (seconds === null) {
+    throw new CaptionParseError(`Line ${line}: "${token.slice(0, 40)}" is not a caption timestamp.`);
+  }
+  return seconds;
+}
+
+/** The text either side of a timing line's first `-->`: the start, then the end and any settings. */
+function timingParts(line: string, arrow: number): [start: string, end: string, settings: string[]] {
+  const [end, ...settings] = line.slice(arrow + 3).trim().split(/[ \t]+/);
+  return [line.slice(0, arrow).trim(), end, settings];
+}
+
+/**
+ * Whether a line is a timing line: a `-->` with a timestamp on each side.
+ * Met inside a cue's text it starts the next cue — the WebVTT rule, applied to
+ * both formats, so a file missing the blank line between two cues does not
+ * import as one caption carrying the second's timing as words (review I2).
+ */
+function isTimingLine(line: string): boolean {
+  const arrow = line.indexOf('-->');
+  if (arrow < 0) return false;
+  const [start, end] = timingParts(line, arrow);
+  return readTimestamp(start) !== null && readTimestamp(end) !== null;
 }
 
 /**
@@ -159,8 +185,11 @@ export function parseCaptions(text: string, format: CaptionFormat): ParsedCaptio
     }
   }
 
-  // The WebVTT header block (and any metadata lines in it) is not a cue.
-  for (const block of vtt ? blocks.slice(1) : blocks) {
+  // The WebVTT header block (and any metadata lines in it) is not a cue. A
+  // block that holds a second cue is split, the rest going next in line.
+  const work = vtt ? blocks.slice(1) : blocks;
+  for (let b = 0; b < work.length; b++) {
+    const block = work[b];
     const special = vtt ? VTT_SPECIAL_BLOCK.exec(block.lines[0]) : null;
     if (special) {
       dropped.add(VTT_SPECIAL_DROPS[special[1]]);
@@ -175,14 +204,22 @@ export function parseCaptions(text: string, format: CaptionFormat): ParsedCaptio
     }
     const timing = block.lines[timingAt];
     const timingLine = block.line + timingAt;
-    const arrow = timing.indexOf('-->');
-    const [endToken, ...settings] = timing.slice(arrow + 3).trim().split(/[ \t]+/);
-    const start = parseTimestamp(timing.slice(0, arrow).trim(), timingLine);
+    const [startToken, endToken, settings] = timingParts(timing, timing.indexOf('-->'));
+    const start = parseTimestamp(startToken, timingLine);
     const end = parseTimestamp(endToken, timingLine);
     if (settings.length > 0) dropped.add('positioning');
 
+    // The cue's text runs to the next timing line, if the block has one. In
+    // SRT a line of digits just before it is that next cue's index.
+    let textEnd = block.lines.length;
+    const next = block.lines.findIndex((line, i) => i > timingAt && isTimingLine(line));
+    if (next >= 0) {
+      textEnd = !vtt && /^\d+$/.test(block.lines[next - 1].trim()) ? next - 1 : next;
+      work.splice(b + 1, 0, { line: block.line + textEnd, lines: block.lines.slice(textEnd) });
+    }
+
     const words = block.lines
-      .slice(timingAt + 1)
+      .slice(timingAt + 1, textEnd)
       .map((line) => {
         const stripped = line.replace(TAG, (tag) => {
           dropped.add(VOICE_TAG.test(tag) ? 'voice-tags' : 'styling');
@@ -224,7 +261,13 @@ function formatTimestamp(ms: number, separator: ',' | '.'): string {
 const WRITE_LINE: Record<CaptionFormat, (line: string) => string> = {
   // SRT has no escapes: a tag in the text would be read as markup, so it is
   // left out, as any SRT reader would treat it.
-  srt: (line) => line.replace(TAG, ''),
+  // A line that would read as timing is written with an empty tag inside its
+  // arrow, which the parser strips: it reads back as the same text, not as
+  // the start of another cue (review I2). WebVTT's escaped `>` already does it.
+  srt: (line) => {
+    const stripped = line.replace(TAG, '');
+    return isTimingLine(stripped) ? stripped.replace(/-->/g, '--<i></i>>') : stripped;
+  },
   vtt: (line) => line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
 };
 
