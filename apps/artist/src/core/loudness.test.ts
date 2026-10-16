@@ -58,6 +58,19 @@ function sine(seconds: number, a: number, freq = 1000, sr = SR, phase = 0): Floa
   return out
 }
 
+/**
+ * `seconds` of a 1 kHz sine at peak `a`, at 48 kHz: one 48-sample period
+ * computed and then tiled (1 kHz divides 48 kHz exactly), so the long gating
+ * fixtures below spend their time in the meter, not in Math.sin.
+ */
+function tone1k(seconds: number, a: number): Float32Array {
+  const out = new Float32Array(Math.round(seconds * SR))
+  const period = SR / 1000
+  for (let i = 0; i < period; i++) out[i] = a * Math.sin((2 * Math.PI * i) / period)
+  for (let filled = period; filled < out.length; filled *= 2) out.copyWithin(filled, 0, filled)
+  return out
+}
+
 function concat(...parts: Float32Array[]): Float32Array {
   const out = new Float32Array(parts.reduce((s, p) => s + p.length, 0))
   let at = 0
@@ -123,7 +136,9 @@ describe('measureLoudness', () => {
   })
 
   it('weights the surrounds of a 5.0 layout 1.41 and drops the LFE of a 5.1 one', () => {
-    const x = sine(5, dbfs(-30))
+    // 2 s (17 blocks) proves the weights as well as 5 s did, at two fifths of
+    // the cost: this case meters 22 channels in all (3.98 s under coverage at 5 s).
+    const x = tone1k(2, dbfs(-30))
     const z = new Float32Array(x.length)
     const front = measureLoudness([x, z, z, z, z], SR).integratedLufs
     const surround = measureLoudness([z, z, z, x, z], SR).integratedLufs
@@ -134,7 +149,8 @@ describe('measureLoudness', () => {
     expect(surround51 - front).toBeCloseTo(10 * Math.log10(1.41), 3)
   })
 
-  it('gates out a silent half: only the blocks that hold signal count', () => {
+  // 20 s of audio. Under coverage, 2026-10-16: 1.08 s idle, 1.85 s at a load average of 33.
+  it('gates out a silent half: only the blocks that hold signal count', { timeout: 30_000 }, () => {
     // 10 s at −23 then 10 s of digital silence. Sub-blocks 0–99 are the sine,
     // 100–199 silence. Blocks j = 0…196; j ≤ 96 are all sine, j = 97/98/99
     // hold 3/4, 2/4 and 1/4 of it (−24.25, −26.0, −29.0 LUFS — all above the
@@ -143,13 +159,16 @@ describe('measureLoudness', () => {
     // the mean energy is (97 + 3/4 + 2/4 + 1/4) / 100 = 0.985 of the sine's:
     // integrated = −23 + 10·log10(0.985) = −23.066 LUFS.
     const a = amplitudeForMonoLufs(-23)
-    const m = measureLoudness([concat(sine(10, a), new Float32Array(10 * SR))], SR)
+    const m = measureLoudness([concat(tone1k(10, a), new Float32Array(10 * SR))], SR)
     expect(m.integratedLufs).toBeCloseTo(-23 + 10 * Math.log10(0.985), 1)
     expect(Math.abs(m.integratedLufs - (-23 + 10 * Math.log10(0.985)))).toBeLessThan(0.01)
     expect(m.gatedBlocks).toBe(100)
   })
 
-  it('drops quiet sections below the relative gate (EBU Tech 3341 case 3)', () => {
+  // 80 s of stereo, fixed by Tech 3341 case 3 itself (10 / 60 / 10 s). Under
+  // coverage on the dev machine (2026-10-16): 5.35 s, and 20.0 s at a load
+  // average of 33 — over vitest's 5 s default either way.
+  it('drops quiet sections below the relative gate (EBU Tech 3341 case 3)', { timeout: 60_000 }, () => {
     // Stereo −36 / −23 / −36 dBFS for 10 / 60 / 10 s. Per-block energy
     // relative to the −23 section: quiet q = 10^(−13/10) = 0.0501, loud 1.
     // 797 blocks: 194 all-quiet, 597 all-loud, and three transition blocks at
@@ -158,7 +177,9 @@ describe('measureLoudness', () => {
     // (−36) fail it and the six transitions pass. Gated mean
     // (600 + 3q)/603 = 0.99527 → −23 + 10·log10(0.99527) = −23.021 LUFS
     // (Tech 3341 publishes −23.0 ± 0.1).
-    const l = concat(sine(10, dbfs(-36)), sine(60, dbfs(-23)), sine(10, dbfs(-36)))
+    // The two −36 sections are one block, reused.
+    const quiet = tone1k(10, dbfs(-36))
+    const l = concat(quiet, tone1k(60, dbfs(-23)), quiet)
     const m = measureLoudness([l, l], SR)
     const q = 10 ** (-13 / 10)
     const expected = -23 + 10 * Math.log10((600 + 3 * q) / 603)
@@ -167,7 +188,11 @@ describe('measureLoudness', () => {
     expect(m.gatedBlocks).toBe(603)
   })
 
-  it('sets the relative gate from the mean of the blocks that passed the absolute gate, not of every block', () => {
+  // 100 s of stereo: the 80 s of silence is what dilutes an all-blocks mean
+  // enough to let the −36 section through, which is the mutant this pins.
+  // Under coverage, 2026-10-16: 2.1 s idle, 6.65 s with another vitest running,
+  // 8.0 s at a load average of 33.
+  it('sets the relative gate from the mean of the blocks that passed the absolute gate, not of every block', { timeout: 60_000 }, () => {
     // Stereo 1 kHz: 10 s at −23 dBFS, 10 s at −36, then 80 s of digital
     // silence. Relative to the loud section, quiet blocks carry q = 10^(−1.3)
     // = 0.0501 of its energy. The 997 blocks are 97 loud, 3 loud→quiet
@@ -180,7 +205,7 @@ describe('measureLoudness', () => {
     // blocks would sit near −42.8, let the −36 section in, and read −25.85
     // over 200 blocks.
     const q = 10 ** (-13 / 10)
-    const l = concat(sine(10, dbfs(-23)), sine(10, dbfs(-36)), new Float32Array(80 * SR))
+    const l = concat(tone1k(10, dbfs(-23)), tone1k(10, dbfs(-36)), new Float32Array(80 * SR))
     const m = measureLoudness([l, l], SR)
     const loudSection = -0.691 + 10 * Math.log10(2 * (dbfs(-23) ** 2 / 2) * KW_1K)
     const expected = loudSection + 10 * Math.log10((98.5 + 1.5 * q) / 100)
@@ -221,7 +246,9 @@ describe('measureLoudness', () => {
     expect(measureLoudness([sine(1, dbfs(-6), 997)], SR).truePeakDbtp).toBeCloseTo(-6, 1)
   })
 
-  it('reads full-band noise close to a long band-limited reference, as ffmpeg does', () => {
+  // Only 1 s of noise, but the 128-tap reference is computed here, in the test:
+  // under coverage, 2026-10-16, 1.50 s idle and 5.62 s at a load average of 33.
+  it('reads full-band noise close to a long band-limited reference, as ffmpeg does', { timeout: 30_000 }, () => {
     // White noise carries energy right up to Nyquist, where a short
     // interpolator under-reads the peaks between samples. The reference here
     // is the same 4× read through a 128-tap-per-phase windowed sinc. Measured
