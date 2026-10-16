@@ -4428,35 +4428,54 @@ the kit's own error naming the field or the bundle path and that the accepted an
 committed seed hold at their measured counts, so a parser going lenient turns the file red. Kit `test:run`
 461 passed / 2 skipped. **No floor crossed**; the kit's floors stay 99 / 99 / 98 / 98.
 
+
 `@escapesuite/craft` was re-measured 2026-10-16 for ESCSUITE-296 (a WebCodecs take's audio and video are
-stamped from one clock: a shared gap filler encodes zero-filled `AudioData`s for every `ScriptProcessorNode`
-callback the page never received, keyed on `event.playbackTime`; video frames are stamped in audio-context
-time through `getOutputTimestamp()`, refreshed every two seconds, with the wall clock kept as the fallback;
-and the context's real sample rate is used for every `AudioData`, every increment and the encoder — the fix
-for the field report of audio drifting from the picture as a take grows): 100.00 / **99.55** / **97.89** /
+stamped from one clock: video frames in audio-context time through `getOutputTimestamp()`, refreshed every two
+seconds, with the wall clock kept as the fallback; the context's real sample rate for every `AudioData`, every
+increment and the encoder; and a shared gap filler that makes up the audio the page never received — the fix
+for the field report of audio drifting from the picture as a take grows): 100.00 / **99.55** / **97.91** /
 100.00 against the 100.00 / 99.53 / 97.85 / 100.00 that `main` at `066669d9` measures in the same sitting —
-statements up two hundredths, branches up four, lines and functions still exactly 100. The base gives
-1,415 / 1,446 branches and this branch 1,444 / 1,475: twenty-nine new branches, twenty-nine covered, the
-same 31 uncovered as before (lines 2,430 → 2,508, statements 2,592 / 2,604 → 2,674 / 2,686, functions
-464 → 472, every denominator growing by exactly what the numerator did; the same 12 statements uncovered, in
-the same four files). The twenty-nine are `core/audioGapFiller.ts`'s ten on arrival (10 / 10: the
-no-`playbackTime` pass-through, the half-buffer threshold, the chunking of a long gap, the 5 s cap and its one
-warning, the re-anchor after a real buffer) and `core/webcodecs-recorder.ts`'s nineteen (250 / 264 →
-269 / 283: the `getOutputTimestamp` usable-or-fallback choice at `start()` and on resume, the two-second
-refresh, the context-time pause accounting, the not-48-kHz warning, and the filler's wiring into the mix and
-both companions; the file's same fourteen pre-existing uncovered arms untouched), each reached from both
-sides by the fifteen cases of `webcodecsRecorder.audioClock.test.ts` — converted from the hunt's probe, seven
-of them red before the fix (`expected 3008000 to be ≤ 118666` for one lost callback in 200 over ten minutes;
-`expected 359999 to be ≤ 1000` for a +100 ppm clock over an hour; `expected [48000] to equal [44100]` for a
-44.1 kHz context; `expected 2986666 to be ≤ 85333` for a microphone companion losing callbacks the mix did
-not; the context-time, refresh and pause/resume stamps) — and the nine of `audioGapFiller.test.ts`. The
-doubles gained opt-in `playbackTime`, `contextSampleRate` and `outputClock`; with `outputClock` unset a
-context has no `getOutputTimestamp` at all, so every older suite stays on the wall-clock path, which is why
+statements up two hundredths, branches up six, lines and functions still exactly 100. The base gives
+1,415 / 1,446 branches and this branch 1,456 / 1,487: forty-one new branches, forty-one covered, the same 31
+uncovered as before (lines 2,430 → 2,546, statements 2,592 / 2,604 → 2,715 / 2,727, functions 464 → 475,
+every denominator growing by exactly what the numerator did; the same 12 statements uncovered, in the same
+four files). The filler's design was changed twice on measured evidence before it was measured here, and the
+paragraph records why, so nobody re-derives it. The rig (a Playwright take with marker media and an
+instrumented `ScriptProcessorNode`, headless Chromium 156) showed that `event.playbackTime` is computed at
+**dispatch** time — its offset against the delivered-sample count tracks dispatch lateness with r = 1.00 and
+sits one buffer ahead of `currentTime` under jank — so a filler keyed on single `playbackTime` gaps fills late
+callbacks as if lost (the round-1 review's Critical: 13 s of lag per ten minutes under mild jank in its
+simulation); and that the one take that really lost audio lost it as **render-quantum creep**, the deficit
+floor rising in 128-sample steps to about 43 ms over a minute, so a whole-buffer rule reads nothing lost on a
+drifting take. The rule that ships: `deficit = reference − delivered / sampleRate` per callback (the
+reference is `playbackTime` when present, else `currentTime`), the baseline is the minimum over a four-second
+window (47 callbacks at 48 kHz), the anchor is the baseline when the window first fills so a constant
+dispatch latency is never filled, and once the baseline has risen two quanta above the anchor the filler
+encodes all but one quantum of the rise as zero-filled `AudioData`s and moves the anchor — 45.3 ms on the
+rig's own creeping log against its 43 ms, 2.7 ms over ten simulated minutes of jitter with nothing lost, a
+whole-buffer drop filled as 3,968 samples. The forty-one new branches are `core/audioGapFiller.ts`'s sixteen
+on arrival (16 / 16: the no-reference pass-through, the window not yet full, a falling or flat baseline, the
+two-quantum trigger, the hold-back, the 5 s cap and its one warning, the re-anchor) and
+`core/webcodecs-recorder.ts`'s twenty-five (250 / 264 → 275 / 289: the `getOutputTimestamp` usable-or-fallback
+choice at `start()` and on resume, the two-second refresh, the context-time pause accounting, the
+not-48-kHz warning, the `currentTime` reference when `playbackTime` is absent, and the filler's wiring into the
+mix and both companions; the file's same fourteen pre-existing uncovered arms untouched) — each reached from
+both sides by `webcodecsRecorder.audioClock.test.ts` (red before the fix: `expected 3008000 to be ≤ 118666`
+for one lost callback in 200; `expected 359999 to be ≤ 1000` for a +100 ppm clock over an hour;
+`expected [48000] to equal [44100]`; `expected 2986666 to be ≤ 85333` for a microphone companion losing
+callbacks the mix did not) and the cases the two amendments added (creep of one quantum per 1.3 s under
+jitter for ten minutes: `expected 1.1947 to be ≥ 1.216` on the whole-buffer filler; sustained 0–60 ms
+lateness with nothing lost: `expected 175 to be +0` on the half-buffer filler; a constant 30 ms latency: zero
+fills; `currentTime` as the only clock: `expected +0 to be 1`), plus `audioGapFiller.test.ts`. The doubles
+gained opt-in `playbackTime`, `currentTime`, `contextSampleRate` and `outputClock`; unset, a context has no
+`getOutputTimestamp` and no `currentTime`, so every older suite stays on the old path, which is why
 `webcodecsRecorder.perf.test.ts`'s one-`AudioData`-per-callback law, `recorder.perf.test.ts`,
-`compositor.perf.test.ts`, `converter.perf.test.ts` and every `App.*rerender*` pin are byte-identical. What
-this measurement cannot show — that Chromium reports a dropped buffer as a jump in the next callback's
-`playbackTime`, and how often a loaded machine drops one — is the Playwright + ffprobe rig's job, run against
-this branch and against `main`. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+`compositor.perf.test.ts`, `converter.perf.test.ts` and every `App.*rerender*` pin are byte-identical. Known
+limits, written in the helper: a fill lands about four seconds after its loss; under uniform jitter where few
+callbacks sit at the floor the rule can fill one false quantum (2.67 ms) every few minutes; the last window of
+a take is never filled. ESCSUITE-299 (an `AudioWorklet` capture with a render-thread clock) retires the
+heuristic. The suite measured 1,465 green with a 20 s per-test timeout because the drift matrix was loading
+the machine. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
@@ -4464,7 +4483,7 @@ never above what the suite actually achieves:
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.55 | 97.89 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.55 | 97.91 | 100.00 |
 | `@escapesuite/artist` | 99.84 | 99.41 | 96.64 | 99.76 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.61 | 98.87 |
