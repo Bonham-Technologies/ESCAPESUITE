@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useEditorStore } from './projectStore'
 import { parseProject, repairEditorBlock } from './projectMigration'
+import { convertLegacyOverlays } from './legacyOverlays'
 import { DEFAULT_ANIMATION } from './types'
 import type { Project } from './types'
 import { buildMaskedSceneProject } from '../test/fixtures/perfScene'
@@ -951,5 +952,94 @@ describe('a session carrying a non-finite transform is repaired (ESCSUITE-255)',
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.reason).toMatch(/transform/)
+  })
+})
+
+// ESCSUITE-300. A legacy overlay's startTime / endTime are timeline times the
+// conversion turns into a clip's position and length. A pair that is not two
+// finite numbers used to convert into a NaN-length clip that parsed and was
+// refused only at export. It is repaired in the migration instead (the
+// ESCSUITE-173 / 255 split for a shape the app once wrote): it starts where its
+// startTime says when that is usable, else at 0, and lasts the 5 s an overlay
+// added in the editor lasts. One warning per parse names how many were repaired.
+describe('a legacy overlay with no usable start and end time is repaired (ESCSUITE-300)', () => {
+  const withOverlays = (text: Record<string, unknown>[] | undefined, shape?: Record<string, unknown>[]) => {
+    const legacy = projectWithLegacyOverlays()
+    return { ...legacy, timeline: { ...legacy.timeline, textOverlays: text, shapeOverlays: shape ?? [] } }
+  }
+  const text = (window: Record<string, unknown>) => ({ ...projectWithLegacyOverlays().timeline.textOverlays![0], ...window })
+  const shape = (window: Record<string, unknown>) => ({ ...projectWithLegacyOverlays().timeline.shapeOverlays![0], ...window })
+
+  const parsed = (input: unknown) => {
+    const result = parseProject(input)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    return result.project
+  }
+  const clip = (project: Project, id: string) => project.timeline.clips.find((c) => c.id === id)!
+
+  let warn: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    warn.mockRestore()
+  })
+
+  it.each([
+    ['no start or end at all', { startTime: undefined, endTime: undefined }, 0],
+    ['a NaN start', { startTime: NaN, endTime: 3 }, 0],
+    ['a start that is a string', { startTime: '1', endTime: 3 }, 0],
+    ['an end that JSON wrote as null', { startTime: 4, endTime: null }, 4],
+    ['an infinite end', { startTime: 2, endTime: Infinity }, 2],
+    ['a negative start and no end', { startTime: -2, endTime: undefined }, 0],
+  ])('gives an overlay with %s a 5 s window and warns once', (_label, window, position) => {
+    const project = parsed(withOverlays([text(window)]))
+
+    expect(clip(project, 'legacy-text-text1')).toMatchObject({
+      timelinePosition: position,
+      duration: 5,
+      startTime: 0,
+      endTime: 5,
+    })
+    expect(project.timeline.duration).toBe(position + 5)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 1 legacy overlay; each now lasts 5 s')
+  })
+
+  it('warns once for the whole parse, counting every overlay it repaired', () => {
+    const project = parsed(withOverlays([text({ startTime: NaN })], [shape({ endTime: undefined }), shape({ id: 'ok' })]))
+
+    expect(clip(project, 'legacy-text-text1').duration).toBe(5)
+    expect(clip(project, 'legacy-shape-shape1').duration).toBe(5)
+    expect(clip(project, 'legacy-shape-ok').duration).toBe(2)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 2 legacy overlays; each now lasts 5 s')
+  })
+
+  it('repairs a shape overlay when the project has no text overlays list at all', () => {
+    const project = parsed(withOverlays(undefined, [shape({ startTime: 'x' })]))
+
+    expect(clip(project, 'legacy-shape-shape1')).toMatchObject({ timelinePosition: 0, duration: 5 })
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('converts a project whose pairs are usable exactly as before, and says nothing', () => {
+    const legacy = projectWithLegacyOverlays()
+    const project = parsed(legacy)
+
+    // convertLegacyOverlays is the conversion this ticket leaves alone: the
+    // repair must not change one byte of a file that loads today.
+    expect(project.timeline).toEqual(convertLegacyOverlays(projectWithLegacyOverlays().timeline))
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['an inverted pair', { startTime: 4, endTime: 2 }],
+    ['a zero-length pair', { startTime: 4, endTime: 4 }],
+  ])('leaves %s to the conversion, which has always clamped it to 0.1 s', (_label, window) => {
+    const project = parsed(withOverlays([text(window)]))
+
+    expect(clip(project, 'legacy-text-text1')).toMatchObject({ timelinePosition: 4, duration: 0.1 })
+    expect(warn).not.toHaveBeenCalled()
   })
 })

@@ -7,7 +7,7 @@
 // A failure prints the seed, the iteration and the mutation; rerun this file
 // to reproduce it (every choice comes from the seed), or build the input by
 // hand from the mutation's words. See src/test/fuzz.ts.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { parseProject, type ParseProjectResult } from './projectMigration'
 import {
   createRng,
@@ -144,6 +144,11 @@ function assertShape(result: ParseProjectResult, context: FuzzContext): void {
     if (!isRecord(clip) || !trackIds.has(clip.trackId as string)) {
       throw fuzzFailure(context, `parsed a clip on no track: ${JSON.stringify(clip)}`)
     }
+    // ESCSUITE-300: the ESCSUITE-257 rule holds after migration too, for the
+    // clips a legacy overlay converts into as well as the file's own.
+    if (typeof clip.duration !== 'number' || !Number.isFinite(clip.duration) || clip.duration <= 0) {
+      throw fuzzFailure(context, `parsed clip ${String(clip.id)} with a duration of ${String(clip.duration)}`)
+    }
   }
   if (result.editor !== undefined && !Array.isArray(result.editor.markers)) {
     throw fuzzFailure(context, 'parsed an editor block with no markers list')
@@ -207,5 +212,28 @@ describe('defects the parseProject fuzz found (ESCSUITE-294)', () => {
       // rerunning the file does not replay it; this case is the reproduction.
       mutation: 'swapType project.timeline.tracks[0] -> null (exploratory seed, not this file\'s)',
     })
+  })
+})
+
+// ESCSUITE-300, found by the duration check `assertShape` gained in that
+// ticket: a legacy overlay with no usable start and end time parsed into a
+// NaN-length clip. It is repaired, not refused, so this asserts the repair.
+describe('defects the parseProject fuzz found (ESCSUITE-300)', () => {
+  it('a legacy shape overlay whose endTime is a list converts into a clip of finite length (seed 0x5eed0294, iteration 159)', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const context = {
+      seed: SEED,
+      iteration: 159,
+      mutation: 'growArray project.timeline.shapeOverlays[0].endTime -> 211 entries',
+    }
+    const input = setAt(baseInput(), ['project', 'timeline', 'shapeOverlays', 0, 'endTime'], Array(211).fill(3)) as {
+      project: unknown
+      editor: unknown
+    }
+    const outcome = await expectNamedRefusal(() => parseProject(input.project, input.editor), () => false, context)
+    if (outcome.ok) assertShape(outcome.value, context)
+    expect(outcome.ok && outcome.value.ok).toBe(true)
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
   })
 })
