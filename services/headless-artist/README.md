@@ -570,6 +570,9 @@ for the JSON. The contract they assert is the one this README promises: every in
 refused with a plain `Error` naming the field or the bundle/manifest path (exit 2 for a spec);
 never a bare `TypeError`, `RangeError` or `SyntaxError`, and a refused bundle leaves no temp
 directory. They run in `test:run` like any other unit test and print nothing when they pass.
+Each loop also holds its count of loaded and refused inputs to the numbers measured on its seed,
+so a validator that quietly stops refusing something fails the loop even though every input
+still meets the contract.
 The first run found a null clip escaping as a `TypeError` and a manifest source's `name` /
 `mimeType` going unchecked; both are fixed, and each input that found them is kept as a
 regression test beside its fuzz case.

@@ -23,6 +23,7 @@ import { assembleV2, v2IndexAndPayload } from '../test/veditorV2'
 import {
   createRng,
   expectNamedRefusal,
+  expectTallyAtLeast,
   flipBit,
   fuzzFailure,
   mutateJson,
@@ -38,6 +39,17 @@ const MANIFEST_SEED = 0x5eed0158
 const V1_SEED = 0x5eed0150
 const V2_SEED = 0x5eed0260
 const ITERATIONS = 400
+// Each loop's outcomes on its committed seed, measured 2026-10-15. Manifest: 304
+// loaded, 96 refused. v1 bundle: 285 loaded, 115 refused. v2 bundle: 36 loaded,
+// 364 refused. The floors ARE those counts: the seed is fixed, so a check
+// dropped anywhere lowers `refused` and a new over-strict one lowers `accepted`.
+// A change that moves an input across the line on purpose updates the numbers
+// here and says why.
+const MANIFEST_FLOORS = { accepted: 304, refused: 96 }
+const V1_FLOORS = { accepted: 285, refused: 115 }
+const V2_FLOORS = { accepted: 36, refused: 364 }
+/** Generous for a loop that takes about a second, so a slow, loaded runner cannot time it out. */
+const LOOP_TIMEOUT_MS = 15_000
 
 const HEADER_BYTES = 16
 const INDEX_LENGTH_OFFSET = 12
@@ -65,19 +77,23 @@ afterAll(async () => {
 const isValidationError = (error: unknown) =>
   error instanceof Error && Object.getPrototypeOf(error) === Error.prototype
 
-/** Every refusal names the file, a source, a clip or the field. */
-const NAMES_WHAT = /bundle|manifest|source|clip|project|file|meta|MIME/
+/**
+ * Every refusal opens by naming what it refused: the bundle or manifest (by
+ * path), a source, a clip, the project's timeline or a project file.
+ */
+const NAMES_WHAT =
+  /^(bundle |manifest |source file "|project file "|project\.timeline|clip "|duplicate source id "|could not infer a MIME type)/
 
-/** What loaded is a job the render driver can take; what was refused said what. */
+/** What loaded is a job the render driver can take; what was refused said what. Answers which. */
 async function checkLoaded(
   outcome: { ok: true; value: LoadedJob } | { ok: false; error: Error },
   context: FuzzContext,
-): Promise<void> {
+): Promise<'accepted' | 'refused'> {
   if (!outcome.ok) {
     if (!NAMES_WHAT.test(outcome.error.message)) {
       throw fuzzFailure(context, `refused without naming what: ${outcome.error.message}`)
     }
-    return
+    return 'refused'
   }
   const job = outcome.value
   try {
@@ -97,6 +113,7 @@ async function checkLoaded(
   } finally {
     await job.cleanup()
   }
+  return 'accepted'
 }
 
 /** A refused bundle must have removed its temp directory; a loaded one was cleaned by its job. */
@@ -135,13 +152,15 @@ describe('loadManifest under seeded mutation (ESCSUITE-294)', () => {
   it(`loads or refuses ${ITERATIONS} mutated manifests with a named validation error`, async () => {
     const rng = createRng(MANIFEST_SEED)
     const manifestPath = path.join(workDir, 'manifest.json')
+    const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
       const { value, description } = mutateJson(rng, baseManifest())
       const context = { seed: MANIFEST_SEED, iteration, mutation: description }
       await fs.writeFile(manifestPath, asJson(value))
-      await checkLoaded(await expectNamedRefusal(() => loadManifest(manifestPath), isValidationError, context), context)
+      tally[await checkLoaded(await expectNamedRefusal(() => loadManifest(manifestPath), isValidationError, context), context)]++
     }
-  })
+    expectTallyAtLeast(tally, MANIFEST_FLOORS, MANIFEST_SEED)
+  }, LOOP_TIMEOUT_MS)
 })
 
 describe('loadBundle, version 1, under seeded mutation (ESCSUITE-294)', () => {
@@ -167,14 +186,16 @@ describe('loadBundle, version 1, under seeded mutation (ESCSUITE-294)', () => {
     await (await loadBundle(bundlePath, tmpRoot)).cleanup()
 
     const rng = createRng(V1_SEED)
+    const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
       const { value, description } = mutateJson(rng, base)
       const context = { seed: V1_SEED, iteration, mutation: description }
       await fs.writeFile(bundlePath, asJson(value))
-      await checkLoaded(await expectNamedRefusal(() => loadBundle(bundlePath, tmpRoot), isValidationError, context), context)
+      tally[await checkLoaded(await expectNamedRefusal(() => loadBundle(bundlePath, tmpRoot), isValidationError, context), context)]++
       await expectTmpRootEmpty(tmpRoot, context)
     }
-  })
+    expectTallyAtLeast(tally, V1_FLOORS, V1_SEED)
+  }, LOOP_TIMEOUT_MS)
 })
 
 describe('loadBundle, version 2, under seeded mutation (ESCSUITE-294)', () => {
@@ -284,20 +305,29 @@ describe('loadBundle, version 2, under seeded mutation (ESCSUITE-294)', () => {
     await (await loadBundle(bundlePath, tmpRoot)).cleanup()
 
     const rng = createRng(V2_SEED)
+    const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
       const { value, description } = mutateFile(rng)
       const context = { seed: V2_SEED, iteration, mutation: description }
       await fs.writeFile(bundlePath, value)
-      await checkLoaded(await expectNamedRefusal(() => loadBundle(bundlePath, tmpRoot), isValidationError, context), context)
+      tally[await checkLoaded(await expectNamedRefusal(() => loadBundle(bundlePath, tmpRoot), isValidationError, context), context)]++
       await expectTmpRootEmpty(tmpRoot, context)
     }
-  })
+    expectTallyAtLeast(tally, V2_FLOORS, V2_SEED)
+  }, LOOP_TIMEOUT_MS)
 })
 
 // The defects this fuzzer found, each one input pinned on its own so it reads
 // without the loop. Fixed in the same ticket (ESCSUITE-294) and kept as
-// regression tests. Each asserts exactly the fuzz contract above.
+// regression tests. Each asserts the fuzz contract above, and that the input is
+// refused with its exact sentence, not quietly loaded.
 describe('defects the loader fuzz found (ESCSUITE-294)', () => {
+  const expectRefusal = async (load: () => Promise<LoadedJob>, context: FuzzContext, message: string) => {
+    const outcome = await expectNamedRefusal(load, isValidationError, context)
+    expect(await checkLoaded(outcome, context)).toBe('refused')
+    expect(outcome.ok ? undefined : outcome.error.message).toBe(message)
+  }
+
   it('a manifest source whose "name" is not a string is refused, not loaded with that name (seed 0x5eed0158, iteration 117)', async () => {
     const context = { seed: MANIFEST_SEED, iteration: 117, mutation: 'swapType sources[0].name -> []' }
     const manifestPath = path.join(workDir, 'manifest-name.json')
@@ -305,7 +335,7 @@ describe('defects the loader fuzz found (ESCSUITE-294)', () => {
       manifestPath,
       JSON.stringify({ project, sources: [{ id: 'src-0', file: 'src-0.mp4', mimeType: 'video/mp4', name: [] }] }),
     )
-    await checkLoaded(await expectNamedRefusal(() => loadManifest(manifestPath), isValidationError, context), context)
+    await expectRefusal(() => loadManifest(manifestPath), context, 'manifest source "src-0" field "name" must be a non-empty string')
   })
 
   it('a version 1 bundle whose clip is null is refused by name, not with a TypeError (seed 0x5eed0150, iteration 366)', async () => {
@@ -314,7 +344,7 @@ describe('defects the loader fuzz found (ESCSUITE-294)', () => {
     const tmpRoot = await fs.mkdtemp(path.join(workDir, 'tmp-'))
     const nullClip = { ...project, timeline: { ...(project.timeline as object), clips: [null] } }
     await fs.writeFile(bundlePath, JSON.stringify({ version: 1, project: nullClip, videos: [] }))
-    await checkLoaded(await expectNamedRefusal(() => loadBundle(bundlePath, tmpRoot), isValidationError, context), context)
+    await expectRefusal(() => loadBundle(bundlePath, tmpRoot), context, 'project.timeline.clips[0] must be an object')
   })
 
   it('a manifest whose clip is null is refused by name, not with a TypeError (seed 0x5eed0158, iteration 188)', async () => {
@@ -322,6 +352,6 @@ describe('defects the loader fuzz found (ESCSUITE-294)', () => {
     const manifestPath = path.join(workDir, 'manifest-null-clip.json')
     const nullClip = { ...project, timeline: { ...(project.timeline as object), clips: [null] } }
     await fs.writeFile(manifestPath, JSON.stringify({ project: nullClip, sources: [] }))
-    await checkLoaded(await expectNamedRefusal(() => loadManifest(manifestPath), isValidationError, context), context)
+    await expectRefusal(() => loadManifest(manifestPath), context, 'project.timeline.clips[0] must be an object')
   })
 })

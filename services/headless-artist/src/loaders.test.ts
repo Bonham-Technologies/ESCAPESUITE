@@ -1290,6 +1290,17 @@ describe('loadBundle version 2 (ESCSUITE-260)', () => {
     it('a clip that references a source the bundle does not hold', () =>
       refusedEntry((video) => (video.id = 'renamed'), 'clip "clip-0" references unknown source "src-0"'))
 
+    // ESCSUITE-294 review round 1: the null-clip refusal pinned by message on the bundle path too.
+    it('a project clip that is null, naming its index', async () => {
+      const dir = await makeTempDir()
+      const { index, payload } = await fixtureV2()
+      ;((index.project as { timeline: { clips: unknown[] } }).timeline.clips).push(null)
+      await expect(loadBundle(await writeBundle(dir, assembleV2(index, payload)), dir)).rejects.toThrow(
+        'project.timeline.clips[1] must be an object',
+      )
+      await expectNoTempDir(dir)
+    })
+
     it('two entries under one id', async () => {
       const dir = await makeTempDir()
       const { index, payload } = await fixtureV2([
