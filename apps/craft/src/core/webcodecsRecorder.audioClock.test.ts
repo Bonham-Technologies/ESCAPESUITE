@@ -37,6 +37,7 @@ import {
   lastAudioContext,
   createAudioBufferDouble,
   outputClockContextTime,
+  scriptProcessorPlaybackTime,
   type AudioContextDoubleControl,
   type OutputClockDouble,
   type ScriptProcessorDouble,
@@ -117,7 +118,10 @@ function realBuffer(rate = 48000): AudioBufferDouble {
 
 async function initialize(config: RecordingConfig = CONFIG): Promise<void> {
   await recorder.initialize(
-    createStreamDouble([createTrackDouble('video', { id: 'screen' })]),
+    createStreamDouble([
+      createTrackDouble('video', { id: 'screen' }),
+      ...(config.systemAudioEnabled ? [createTrackDouble('audio', { id: 'system' })] : []),
+    ]),
     config.separateTracks
       ? createStreamDouble([
           createTrackDouble('video', { id: 'webcam', settings: { width: 640, height: 480 } }),
@@ -141,8 +145,24 @@ interface TakeShape {
   playbackTime?: boolean
   /** Drop every Nth audio callback (never delivered to the page). */
   dropEvery?: number
+  /** Drop exactly these callbacks (1-based). */
+  drop?: (k: number) => boolean
+  /**
+   * How late, in seconds, the main thread dispatches callback k — and its
+   * `playbackTime` read at dispatch (`scriptProcessorPlaybackTime`). Events
+   * queue first in, first out, so one delivered after a hang drags those
+   * behind it to the same moment. Unset: every event on time, `playbackTime`
+   * the buffer's exact position.
+   */
+  dispatchDelay?: (k: number) => number
   /** A video frame every this many wall seconds. Default 1. */
   videoEvery?: number
+}
+
+/** A seeded uniform [0, 1) — the same jitter on every run. */
+function seededRandom(seed = 1): () => number {
+  let state = seed
+  return () => (state = (state * 16807) % 2147483647) / 2147483647
 }
 
 interface TakeResult {
@@ -184,9 +204,19 @@ async function recordTake(shape: TakeShape): Promise<TakeResult> {
   let delivered = 0
   let dropped = 0
   const audioAt = (n: number) => ((n * bufferSeconds) / (1 + clock.skew)) * 1000
+  const isDropped = (n: number) =>
+    Boolean((shape.dropEvery && n % shape.dropEvery === 0) || shape.drop?.(n))
+  let lastDispatchMs = -Infinity
+  /** Wall ms (after start) at which callback n reaches the page, or would have. */
+  const dispatchAt = (n: number) => {
+    const ready = audioAt(n)
+    if (isDropped(n) || !shape.dispatchDelay) return ready
+    return Math.max(ready + (shape.dispatchDelay(n) * 1000) / (1 + clock.skew), lastDispatchMs)
+  }
+  let audioMs = dispatchAt(1)
 
-  while (audioAt(k) <= endMs || nextVideo <= endMs) {
-    if (nextVideo <= audioAt(k)) {
+  while (audioMs <= endMs || nextVideo <= endMs) {
+    if (nextVideo <= audioMs) {
       now = startMs + nextVideo
       processor.pushFrame(new VideoFrameDouble(`f${nextVideo}`, { timestamp: 0 }))
       await flush()
@@ -195,18 +225,24 @@ async function recordTake(shape: TakeShape): Promise<TakeResult> {
       encodes.length = 0
       nextVideo += videoPeriodMs
     } else {
-      now = startMs + audioAt(k)
-      if (shape.dropEvery && k % shape.dropEvery === 0) {
+      now = startMs + audioMs
+      if (isDropped(k)) {
         dropped++
       } else {
-        const playbackTime = contextAtStart + (k - 1) * bufferSeconds
+        const playbackTime = scriptProcessorPlaybackTime(
+          contextAtStart + (k - 1) * bufferSeconds,
+          rate,
+          ((audioMs - audioAt(k)) / 1000) * (1 + clock.skew)
+        )
         node.onaudioprocess!(
           shape.playbackTime === false ? { inputBuffer: buffer } : { inputBuffer: buffer, playbackTime }
         )
         delivered++
+        lastDispatchMs = audioMs
         tallyAudio(AudioEncoderDouble.instances[0], mix)
       }
       k++
+      audioMs = dispatchAt(k)
     }
     forgetCreatedFrames()
   }
@@ -472,4 +508,106 @@ describe('pause and resume', () => {
     expect(micTally.count).toBe(40)
     expect(micTally.endUs).toBeCloseTo(mixTally.endUs, 6)
   })
+})
+
+// Review round 1: Blink and WebKit are recalled to compute `playbackTime` when
+// the main thread dispatches the event, not from the buffer's own position. A
+// callback that is merely late then reads as a gap, and a burst queued behind a
+// hang all read about the same time. Neither is lost audio, and neither may be
+// filled; a real loss still must be, exactly once.
+describe('playbackTime read at dispatch', () => {
+  it('(a) a late callback followed by on-time ones fills nothing (60 ms late every other callback, 60 s)', async () => {
+    const r = await recordTake({ seconds: 60, dispatchDelay: k => (k % 2 ? 0.06 : 0) })
+    expect(r.dropped).toBe(0)
+    expect(r.mix.zeros).toBe(0)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('(a) uniform 0-60 ms dispatch jank fills nothing (10 min)', async () => {
+    const random = seededRandom()
+    const r = await recordTake({ seconds: 600, dispatchDelay: () => random() * 0.06 })
+    expect(r.mix.zeros).toBe(0)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  }, 60_000)
+
+  /** Callbacks that came due during [from, to) seconds are all dispatched at `to`. */
+  const hang = (from: number, to: number) => (k: number) => {
+    const ready = (k * BUFFER) / 48000
+    return ready >= from && ready < to ? to - ready : 0
+  }
+
+  it('(b) a burst queued behind a 300 ms main-thread hang fills nothing', async () => {
+    const r = await recordTake({ seconds: 60, dispatchDelay: hang(20, 20.3) })
+    expect(r.mix.zeros).toBe(0)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('(b) a burst queued behind a 3 s main-thread hang fills nothing', async () => {
+    const r = await recordTake({ seconds: 60, dispatchDelay: hang(20, 23) })
+    expect(r.mix.zeros).toBe(0)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('(c) a real loss under 0-60 ms jitter is filled with exactly one buffer', async () => {
+    const random = seededRandom(7)
+    const r = await recordTake({
+      seconds: 60,
+      dispatchDelay: () => random() * 0.06,
+      drop: k => k === 300,
+    })
+    expect(r.dropped).toBe(1)
+    expect(r.mix.zeros).toBe(1)
+    expect(r.mix.count).toBe(r.delivered + 1)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('(c) a real loss after a first callback that was itself late is still filled exactly once', async () => {
+    // The first event anchors the count; 60 ms late, it would leave a later
+    // loss reading as 85 - 60 = 25 ms — under half a buffer — unless the
+    // anchor follows the window's minimum down.
+    const r = await recordTake({
+      seconds: 60,
+      dispatchDelay: k => (k === 1 ? 0.06 : 0),
+      drop: k => k === 300,
+    })
+    expect(r.mix.zeros).toBe(1)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  })
+
+  it('(d) separate tracks: the mix, the microphone and the system audio lose callbacks independently under jitter (10 min)', async () => {
+    await initialize({ ...SEPARATE_TRACKS, systemAudioEnabled: true })
+    const nodes = lastAudioContext().scriptProcessors
+    expect(nodes).toHaveLength(3)
+    const buffer = realBuffer()
+    const startMs = now
+    recorder.start()
+
+    const bufferSeconds = BUFFER / 48000
+    const dropEvery = [150, 200, 170]
+    const tallies = [newTally(), newTally(), newTally()]
+    const dropped = [0, 0, 0]
+    const random = seededRandom(3)
+    let lastDispatch = -Infinity
+    for (let k = 1; k * bufferSeconds <= 600; k++) {
+      // One main thread: every node's event for buffer k is dispatched together.
+      const ready = k * bufferSeconds
+      const dispatch = Math.max(ready + random() * 0.06, lastDispatch)
+      lastDispatch = dispatch
+      now = startMs + dispatch * 1000
+      const playbackTime = scriptProcessorPlaybackTime(1000 + (k - 1) * bufferSeconds, 48000, dispatch - ready)
+      nodes.forEach((node, i) => {
+        if (k % dropEvery[i] === 0) dropped[i]++
+        else node.onaudioprocess!({ inputBuffer: buffer, playbackTime })
+      })
+      AudioEncoderDouble.instances.forEach((encoder, i) => tallyAudio(encoder, tallies[i]))
+      forgetCreatedFrames()
+    }
+
+    const [mix, mic, system] = tallies
+    expect(mix.zeros).toBe(dropped[0])
+    expect(mic.zeros).toBe(dropped[1])
+    expect(system.zeros).toBe(dropped[2])
+    expect(Math.abs(mic.endUs - mix.endUs)).toBeLessThanOrEqual((BUFFER / 48000) * 1e6)
+    expect(Math.abs(system.endUs - mix.endUs)).toBeLessThanOrEqual((BUFFER / 48000) * 1e6)
+  }, 60_000)
 })

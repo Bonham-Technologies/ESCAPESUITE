@@ -115,6 +115,30 @@ export function outputClockContextTime(clock: OutputClockDouble, performanceTime
   return clock.offsetSeconds + (performanceTime / 1000) * (1 + clock.skew)
 }
 
+/**
+ * The `playbackTime` an `onaudioprocess` event carries for the buffer that
+ * starts at context time `bufferStart`, in seconds.
+ *
+ * With no `dispatchDelay` it is that position exactly — the reading the
+ * recorder's gap filler was first written against. With one, it is what Blink
+ * and WebKit are recalled to compute (ESCSUITE-296's review; not measured):
+ * the context time at the moment the main thread *dispatches* the event — the
+ * buffer's position plus how late the dispatch is — rounded down to a
+ * 128-frame render quantum. A late callback then reads as a gap that is not
+ * one, and a burst of callbacks queued behind a hang all read about the same
+ * time.
+ */
+export function scriptProcessorPlaybackTime(
+  bufferStart: number,
+  sampleRate: number,
+  dispatchDelay = 0
+): number {
+  if (dispatchDelay === 0) return bufferStart
+  // The epsilon keeps a position that is a whole quantum from flooring one
+  // quantum short on a float that lands a hair under it.
+  return (Math.floor(((bufferStart + dispatchDelay) * sampleRate) / 128 + 1e-9) * 128) / sampleRate
+}
+
 export interface AudioContextDoubleControl {
   /** Every AudioContext the code under test constructed. */
   readonly contexts: AudioContextDoubleInstance[]
