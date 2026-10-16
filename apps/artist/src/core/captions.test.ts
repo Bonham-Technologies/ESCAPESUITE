@@ -192,10 +192,8 @@ describe('parseCaptions — what counts as a tag', () => {
     expect(textOf('<'.repeat(80_000)).cues[0].text).toHaveLength(80_000)
   })
 
-  it('strips in one pass, so a tag made by stripping another stays as text — and is written back so', () => {
-    const parsed = textOf('<<b>i>x')
-    expect(parsed.cues[0].text).toBe('<i>x')
-    expect(parseCaptions(serializeCaptions(parsed.cues, 'srt'), 'srt').cues).toEqual(parsed.cues)
+  it('strips in one pass, so a tag made by stripping another stays as text', () => {
+    expect(textOf('<<b>i>x').cues[0].text).toBe('<i>x')
   })
 })
 
@@ -336,16 +334,16 @@ describe('parseCaptions — a timing line inside a cue starts the next cue', () 
     ])
   })
 
-  it('writes a caption line that reads as timing so that it reads back as text, in SRT', () => {
-    const cues = [{ start: 1, end: 2, text: 'Said:\n00:00:03,000 --> 00:00:04,000' }]
-    const written = serializeCaptions(cues, 'srt')
-    expect(written).toBe('1\n00:00:01,000 --> 00:00:02,000\nSaid:\n00:00:03,000 --<i></i>> 00:00:04,000\n')
-    expect(parseCaptions(written, 'srt').cues).toEqual(cues)
-  })
-
-  it('needs nothing extra for that in WebVTT, which escapes the >', () => {
-    const cues = [{ start: 1, end: 2, text: '00:03.000 --> 00:04.000' }]
-    expect(parseCaptions(serializeCaptions(cues, 'vtt'), 'vtt').cues).toEqual(cues)
+  // Fix round 2: neither format can carry a `-->` in cue text, so the writer
+  // puts → in its place — the one substitution it makes — and the line can
+  // never be read as the next cue's timing.
+  it.each(['srt', 'vtt'] as const)('writes a --> in caption text as → (%s), and reads that back', (format) => {
+    const cues = [{ start: 1, end: 2, text: 'Said:\n00:00:03,000 --> 00:00:04,000\nthis --> that' }]
+    const written = serializeCaptions(cues, format)
+    expect(written).toContain('\nSaid:\n00:00:03,000 \u2192 00:00:04,000\nthis \u2192 that\n')
+    expect(parseCaptions(written, format).cues).toEqual([
+      { start: 1, end: 2, text: 'Said:\n00:00:03,000 \u2192 00:00:04,000\nthis \u2192 that' },
+    ])
   })
 })
 
@@ -420,10 +418,10 @@ describe('serializeCaptions', () => {
     )
   })
 
-  it('writes WebVTT with the header, a full stop and escaped text', () => {
+  it('writes WebVTT with the header and a full stop, the text as it is', () => {
     expect(serializeCaptions([...cues, { start: 5, end: 6, text: 'Tom & Jerry <3 >' }], 'vtt')).toBe(
       'WEBVTT\n\n00:00:01.000 --> 00:00:02.500\nHello there.\n\n01:01:01.007 --> 01:01:02.000\nTwo lines\nof text.\n\n' +
-        '00:00:05.000 --> 00:00:06.000\nTom &amp; Jerry &lt;3 &gt;\n'
+        '00:00:05.000 --> 00:00:06.000\nTom & Jerry <3 >\n'
     )
   })
 
@@ -439,15 +437,37 @@ describe('serializeCaptions', () => {
     )
   })
 
-  it('writes a literal tag in SRT, which has no escapes, so that it reads back as text', () => {
-    const cues = [{ start: 1, end: 2, text: 'a <b>bold</b> claim\n<i></i>' }]
-    const written = serializeCaptions(cues, 'srt')
-    expect(written).toBe('1\n00:00:01,000 --> 00:00:02,000\na <<i></i>b>bold<<i></i>/b> claim\n<<i></i>i><<i></i>/i>\n')
-    expect(parseCaptions(written, 'srt').cues).toEqual(cues)
+  // Fix round 2: the text is written as it is, so text that reads back exactly
+  // — line breaks, spacing inside a line, angle brackets that are not one of
+  // the formats' tags, a bare & — round-trips exactly in both formats.
+  it.each(['srt', 'vtt'] as const)('round-trips text that is not markup exactly (%s)', (format) => {
+    const cues: CaptionCue[] = [
+      { start: 1, end: 2, text: 'Two  spaced\nlines, 1 < 2 and 3 > 2' },
+      { start: 3, end: 4, text: 'Press <Enter> now & then <colour>' },
+    ]
+    expect(parseCaptions(serializeCaptions(cues, format), format).cues).toEqual(cues)
   })
 
-  it('writes angle brackets that are not tags as they are', () => {
-    expect(serializeCaptions([{ start: 1, end: 2, text: 'Press <Enter>, 1 < 2' }], 'srt')).toContain('\nPress <Enter>, 1 < 2\n')
+  it('trims each line on the way out, as the parser trims it on the way in', () => {
+    const cues = [{ start: 1, end: 2, text: '  padded  \n  lines ' }]
+    expect(parseCaptions(serializeCaptions(cues, 'srt'), 'srt').cues).toEqual([{ start: 1, end: 2, text: 'padded\nlines' }])
+  })
+
+  // The one documented loss: caption text that has the shape of a tag the
+  // formats recognise is written as it is — no padding, no escape — and so is
+  // read back as markup and stripped. WebVTT text shaped like one of its
+  // escapes is likewise decoded on the way back in.
+  it.each(['srt', 'vtt'] as const)('writes tag-shaped caption text as it is, and loses the tag on re-import (%s)', (format) => {
+    const written = serializeCaptions([{ start: 1, end: 2, text: 'a <b>bold</b> claim <v Ann>hi' }], format)
+    expect(written).toContain('\na <b>bold</b> claim <v Ann>hi\n')
+    expect(written).not.toContain('<i></i>')
+    expect(parseCaptions(written, format).cues).toEqual([{ start: 1, end: 2, text: 'a bold claim hi' }])
+  })
+
+  it('decodes escape-shaped WebVTT caption text on re-import — the same loss', () => {
+    const written = serializeCaptions([{ start: 1, end: 2, text: 'write &lt; for <' }], 'vtt')
+    expect(written).toContain('\nwrite &lt; for <\n')
+    expect(parseCaptions(written, 'vtt').cues[0].text).toBe('write < for <')
   })
 
   it('reads tags line by line when writing SRT, as the parser does, so a < and a > on two lines survive', () => {
@@ -472,10 +492,10 @@ describe('serializeCaptions', () => {
 
   it.each(['srt', 'vtt'] as const)('is round-trip stable on its own output (%s)', (format) => {
     const messy: CaptionCue[] = [
-      { start: 0.0004, end: 1.9996, text: 'Tom & Jerry <b>not a tag</b>' },
+      { start: 0.0004, end: 1.9996, text: 'Tom & Jerry <Enter>' },
       { start: 1.5, end: 3, text: 'overlap\n  two lines ' },
       { start: 10, end: 12.3456, text: 'a --> b\r\nCR line' },
-      { start: 13, end: 14, text: '&nbsp; literal \u00a0' },
+      { start: 13, end: 14, text: 'literal \u00a0' },
       { start: 4, end: 4.0001, text: 'rounds to nothing' },
     ]
     const once = serializeCaptions(messy, format)
