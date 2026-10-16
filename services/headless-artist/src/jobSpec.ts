@@ -9,10 +9,15 @@ const RESOLUTIONS = ['project', '1080p', '720p', '480p', '360p']
 const SINKS = ['volume', 's3', 'webhook', 'command']
 /** GIF only. The three rates ESCAPEARTIST's own export offers (ESCSUITE-34). */
 const GIF_FPS = [10, 15, 20]
+/**
+ * MP4 and WebM only. The three integrated loudnesses (LUFS) ESCAPEARTIST's own export can
+ * normalise to (ESCSUITE-292): streaming, podcast/mobile, broadcast.
+ */
+const LOUDNESS_TARGETS = [-14, -16, -23]
 
 /** Every key `parseJobSpec` reads; anything else is a typo worth warning about. */
 const TOP_LEVEL_KEYS = ['jobId', 'input', 'options', 'output']
-const OPTIONS_KEYS = ['format', 'quality', 'resolution', 'timeRange', 'fps']
+const OPTIONS_KEYS = ['format', 'quality', 'resolution', 'timeRange', 'fps', 'loudnessTarget']
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -91,6 +96,19 @@ function parseOptions(value: unknown): JobSpec['options'] {
       throw new Error('options.fps must be one of 10, 15, or 20')
     }
     options.fps = value.fps as NonNullable<JobSpec['options']['fps']>
+  }
+
+  // Video formats only, and refused on a GIF for the same reason `fps` is refused on a video
+  // job: a GIF has no sound, so a target there is a caller who misunderstood something
+  // (ESCSUITE-292). Absent means off: the mix is still measured, and the manifest says so.
+  if (value.loudnessTarget !== undefined) {
+    if (format === 'gif') {
+      throw new Error('options.loudnessTarget applies to "mp4" and "webm" only')
+    }
+    if (typeof value.loudnessTarget !== 'number' || !LOUDNESS_TARGETS.includes(value.loudnessTarget)) {
+      throw new Error('options.loudnessTarget must be one of -14, -16, or -23')
+    }
+    options.loudnessTarget = value.loudnessTarget as NonNullable<JobSpec['options']['loudnessTarget']>
   }
 
   if (value.timeRange !== undefined) {

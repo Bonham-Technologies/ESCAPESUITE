@@ -33,6 +33,8 @@ import {
   calculateTimelineDuration,
   exportLengthReason,
 } from '../../core/exportTypes';
+import { LOUDNESS_TARGETS, formatLoudnessSummary, loudnessTargetOrOff } from '../../core/loudness';
+import type { LoudnessTarget } from '../../core/loudness';
 import { shouldAnnounceProgress } from './progressAnnouncement';
 import { registerLiveExport, clearLiveExport } from './liveExport';
 import type { ProgressAnnouncement } from './progressAnnouncement';
@@ -67,6 +69,13 @@ function resolutionPresetLabel(preset: ExportOptions['resolution']): string {
   return preset === 'project' ? 'Project' : preset;
 }
 
+/** What each normalise-to-target option is for, after its LUFS figure (ESCSUITE-292). */
+const LOUDNESS_TARGET_USES: Record<LoudnessTarget, string> = {
+  [-14]: 'streaming',
+  [-16]: 'podcast/mobile',
+  [-23]: 'broadcast',
+};
+
 interface ExportDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -79,6 +88,8 @@ interface LastExportSettings {
   resolution: ExportOptions['resolution'];
   /** GIF only, and absent from every setting saved before ESCSUITE-34. */
   fps?: ExportOptions['fps'];
+  /** Absent for off, and from every setting saved before ESCSUITE-292. */
+  loudnessTarget?: ExportOptions['loudnessTarget'];
 }
 
 export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: ExportDialogProps) {
@@ -344,6 +355,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             // (no `fps` at all) or one carrying a rate this build no longer
             // offers lands on the default rather than on `undefined`.
             fps: gifFrameRate(saved.fps),
+            // Through `loudnessTargetOrOff`, so a setting saved before
+            // ESCSUITE-292, or one carrying a target this build no longer
+            // offers, is off rather than an arbitrary gain.
+            loudnessTarget: loudnessTargetOrOff(saved.loudnessTarget),
           });
           setShowAdvanced(true);
         }
@@ -405,6 +420,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         quality: advancedOptions.quality,
         resolution: advancedOptions.resolution,
         fps: gifFrameRate(advancedOptions.fps),
+        loudnessTarget: advancedOptions.loudnessTarget,
       });
     }
 
@@ -496,7 +512,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             ? exportedWithoutSoundReason(soundFormat)
             : null
         );
-        report({ phase: 'complete', progress: 100, message: 'Export complete!' });
+        // The mix's measured loudness, and the gain a target applied, ride on
+        // the completion sentence itself (ESCSUITE-292), so the one live
+        // region announces them with it rather than a second region competing.
+        report({
+          phase: 'complete',
+          progress: 100,
+          message: result.loudness
+            ? `Export complete! ${formatLoudnessSummary(result.loudness)}`
+            : 'Export complete!',
+        });
 
         // Close dialog after a delay
         setTimeout(() => {
@@ -953,6 +978,40 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                           <option value="medium">Medium</option>
                           <option value="high">High (slower export)</option>
                         </select>
+                      </div>
+                    )}
+
+                    {/* Every video export measures its mix (ITU-R BS.1770-4); a
+                        target also normalises it, under a −1 dBTP true-peak
+                        limiter (ESCSUITE-292). Hidden for GIF, which has no
+                        sound — the value stays in `advancedOptions` and in
+                        `lastExportSettings`, as Quality's does. */}
+                    {advancedOptions.format !== 'gif' && (
+                      <div className={styles.section}>
+                        <label className={styles.label} htmlFor="export-loudness">
+                          Audio loudness
+                        </label>
+                        <select
+                          id="export-loudness"
+                          className={styles.select}
+                          aria-describedby="export-loudness-hint"
+                          value={advancedOptions.loudnessTarget ?? 'off'}
+                          onChange={(e) => setAdvancedOptions({
+                            ...advancedOptions,
+                            // 'off' is not a number, so it lands on off.
+                            loudnessTarget: loudnessTargetOrOff(Number(e.target.value)),
+                          })}
+                        >
+                          <option value="off">Off</option>
+                          {LOUDNESS_TARGETS.map((target) => (
+                            <option key={target} value={target}>
+                              {`\u2212${-target} LUFS (${LOUDNESS_TARGET_USES[target]})`}
+                            </option>
+                          ))}
+                        </select>
+                        <span className={styles.fieldHint} id="export-loudness-hint">
+                          Every export is measured. A target also holds peaks under −1 dBTP.
+                        </span>
                       </div>
                     )}
 

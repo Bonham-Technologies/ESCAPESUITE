@@ -304,6 +304,34 @@ describe('parseJobSpec', () => {
     )
   })
 
+  // ESCSUITE-292: normalise the mix to a target loudness under a −1 dBTP limiter.
+  it.each([
+    ['mp4', -14],
+    ['mp4', -16],
+    ['webm', -23],
+  ])('keeps a %s job\'s loudnessTarget of %s', (format, loudnessTarget) => {
+    const spec = parseJobSpec(validSpec({ options: { format, loudnessTarget } }))
+    expect(spec.options.loudnessTarget).toBe(loudnessTarget)
+  })
+
+  it('leaves loudnessTarget unset when a job does not ask for one', () => {
+    // Off: the mix is still measured and reported in the manifest, never changed.
+    const spec = parseJobSpec(validSpec({ options: { format: 'webm' } }))
+    expect(spec.options.loudnessTarget).toBeUndefined()
+  })
+
+  it.each([-20, 14, '-14', -14.5, null, Number.NaN])('rejects a loudnessTarget of %s', (loudnessTarget) => {
+    expect(() => parseJobSpec(validSpec({ options: { format: 'mp4', loudnessTarget } }))).toThrow(
+      /options\.loudnessTarget must be one of -14, -16, or -23/,
+    )
+  })
+
+  it('rejects loudnessTarget for a gif job, which has no sound to normalise', () => {
+    expect(() => parseJobSpec(validSpec({ options: { format: 'gif', loudnessTarget: -14 } }))).toThrow(
+      /options\.loudnessTarget applies to "mp4" and "webm" only/,
+    )
+  })
+
   it('names gif in the format error', () => {
     expect(() => parseJobSpec(validSpec({ options: { format: 'avi' } }))).toThrow(
       /options\.format must be one of "mp4", "webm", or "gif"/,
@@ -329,6 +357,7 @@ describe('parseJobSpec', () => {
 describe('collectUnknownKeys', () => {
   it('returns nothing for a spec using only known fields', () => {
     expect(collectUnknownKeys(validSpec())).toEqual([])
+    expect(collectUnknownKeys(validSpec({ options: { format: 'mp4', loudnessTarget: -14 } }))).toEqual([])
     expect(
       collectUnknownKeys(
         validSpec({ options: { format: 'mp4', quality: 'low', resolution: '720p', timeRange: { start: 0, end: 1 } } }),

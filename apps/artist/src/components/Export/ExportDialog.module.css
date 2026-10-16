@@ -16,6 +16,15 @@
   box-shadow: var(--shadow-lg);
   width: 400px;
   max-width: 90vw;
+  /* Never taller than the window: the overlay centres the dialog, so a dialog
+     taller than the viewport overflowed both edges with no way to scroll to
+     its ends. With Advanced options open, the Audio loudness choice
+     (ESCSUITE-292) and a no-AAC browser's silent-MP4 note, it reached 1,020 px
+     and put the Advanced Download button below a 720 px window. The header and
+     footer stay put; the body scrolls. */
+  max-height: calc(100vh - 2 * var(--spacing-lg));
+  display: flex;
+  flex-direction: column;
 }
 
 .header {
@@ -51,6 +60,9 @@
   display: flex;
   flex-direction: column;
   gap: var(--spacing-lg);
+  /* The one part of the dialog that scrolls (see .dialog). */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* Primary export section */
@@ -198,6 +210,12 @@
   color: var(--text-muted);
   margin-left: 20px;
   margin-top: 2px;
+}
+
+/* A one-line note under a select, flush with it (ESCSUITE-292). */
+.fieldHint {
+  font-size: 11px;
+  color: var(--text-muted);
 }
 
 .radioDisabled {

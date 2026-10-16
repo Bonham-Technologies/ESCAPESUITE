@@ -48,6 +48,25 @@ export interface RenderMeta {
   width: number
   height: number
   gpu: boolean
+  /**
+   * The mix's ITU-R BS.1770-4 loudness as measured before any gain, and the gain
+   * applied to reach `options.loudnessTarget` (ESCSUITE-292). Absent when the
+   * render had no sound to measure: a GIF, a project with no audio, a mix too
+   * quiet or too short to gate, or a browser that cannot encode the sound.
+   */
+  loudness?: RenderLoudness
+}
+
+/** The verification manifest's loudness record. */
+export interface RenderLoudness {
+  /** Integrated loudness of the mix as mixed, LUFS. */
+  measuredLufs: number
+  /** True peak of the mix as mixed, dBTP. */
+  truePeakDbtp: number
+  /** Gain applied, dB: 0 when no target was set. */
+  gainDb: number
+  /** The target normalised to, or null when none was set. */
+  targetLufs: -14 | -16 | -23 | null
 }
 
 export interface RenderResult {

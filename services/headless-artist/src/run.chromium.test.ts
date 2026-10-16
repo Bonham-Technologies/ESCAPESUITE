@@ -7,7 +7,7 @@ import { chromium } from 'playwright'
 import { loadBundle } from './loaders'
 import { runJob } from './run'
 import type { JobSpec } from './types'
-import { hasFfmpeg, probe } from '../test/ffprobe'
+import { hasFfmpeg, integratedLoudness, probe, writePinkNoiseWav } from '../test/ffprobe'
 import { assembleV2, v2IndexAndPayload } from '../test/veditorV2'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
@@ -282,6 +282,58 @@ describe('runJob (real Chromium)', () => {
       await fromV2.cleanup()
     }
   })
+
+  // ESCSUITE-292: the mix's loudness, measured inside the bundle by `core/loudness.ts`, against
+  // ffmpeg's own `ebur128` on the same audio. The source is seeded stereo pink noise as 48 kHz
+  // PCM, which Chromium decodes sample for sample as ffmpeg reads it, so the mix ESCAPEARTIST
+  // meters is the file ffmpeg meters (one clip, track volume 1, no resampling); the two
+  // integrated loudnesses must agree within ±0.3 LU. The same render asks for −23 LUFS, so the
+  // delivered WebM's own loudness, read by ffmpeg through the Opus decode, must land on the target
+  // within ±0.5 LU — the codec's share of the tolerance. Needs ffmpeg; the CI `e2e` runner has it.
+  it.skipIf(!FFPROBE)('measures the mix as ffmpeg\'s ebur128 does, and normalises the file onto the target', async () => {
+    const dir = path.join(tmpRoot, 'loudness')
+    await fs.mkdir(dir, { recursive: true })
+    const seconds = 3
+    await writePinkNoiseWav(path.join(dir, 'noise.wav'), seconds, 0.1)
+    const project = JSON.parse(
+      await fs.readFile(path.join(SERVICE_ROOT, 'test/fixtures/manifest/project.json'), 'utf8'),
+    ).project
+    project.timeline.clips[0] = {
+      ...project.timeline.clips[0],
+      sourceVideoId: 'noise',
+      name: 'noise.wav',
+      endTime: seconds,
+      duration: seconds,
+    }
+    project.timeline.duration = seconds
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({ project }))
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { $ref: './project.json' },
+        sources: [{
+          id: 'noise', file: 'noise.wav', mimeType: 'audio/wav', name: 'noise.wav',
+          meta: { mediaType: 'audio', duration: seconds },
+        }],
+      }),
+    )
+    const spec: JobSpec = {
+      ...makeSpec('e2e-loudness', path.join(dir, 'manifest.json')),
+      options: { format: 'webm', quality: 'high', loudnessTarget: -23 },
+    }
+
+    const outcome = await runJob(spec, { bundlePath: BUNDLE, workDir, versions: VERSIONS, log: quiet })
+
+    expect(outcome.error).toBeUndefined()
+    expect(outcome.ok).toBe(true)
+    const manifest = JSON.parse(await fs.readFile(path.join(outDir, 'e2e-loudness.manifest.json'), 'utf8'))
+    const reference = await integratedLoudness(path.join(dir, 'noise.wav'))
+    expect(Math.abs(manifest.loudness.measuredLufs - reference)).toBeLessThanOrEqual(0.3)
+    expect(manifest.loudness.targetLufs).toBe(-23)
+    expect(manifest.loudness.gainDb).toBeCloseTo(-23 - manifest.loudness.measuredLufs, 6)
+    const delivered = await integratedLoudness(path.join(outDir, 'e2e-loudness.webm'))
+    expect(Math.abs(delivered - -23)).toBeLessThanOrEqual(0.5)
+  }, RENDER_TIMEOUT_MS)
 
   it('renders the same job as a GIF', async () => {
     const spec: JobSpec = {
