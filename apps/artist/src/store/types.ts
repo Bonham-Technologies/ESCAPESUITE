@@ -306,6 +306,13 @@ export interface Track {
   volume: number;   // Audio volume level (0-1, where 1 = 100%)
   lastVolume?: number; // Remembered volume level when muted (for restoring on unmute)
   height: number;   // UI height in pixels
+  /**
+   * ESCSUITE-293: `'captions'` marks the one track caption imports land on
+   * (named "Captions", created at the top on the first import and reused by
+   * every later one) and the track the export dialog's sidecar reads. Absent
+   * on every other track. The clips on it are ordinary text clips.
+   */
+  kind?: 'captions';
 }
 
 export interface Clip {
