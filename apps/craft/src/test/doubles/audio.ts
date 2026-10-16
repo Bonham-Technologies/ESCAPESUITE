@@ -52,9 +52,21 @@ export function createAudioBufferDouble(options: AudioBufferOptions = {}): Audio
   }
 }
 
+/**
+ * What a test hands `onaudioprocess`. `playbackTime` is opt-in: a real
+ * `AudioProcessingEvent` always carries it (the context time, in seconds, of
+ * the buffer), but every suite written before ESCSUITE-296 dispatches
+ * `{ inputBuffer }` alone — and the recorder's gap filler is a no-op for such
+ * an event, which is what keeps those suites' counts exactly as they were.
+ */
+export interface AudioProcessEventDouble {
+  inputBuffer: AudioBufferDouble
+  playbackTime?: number
+}
+
 export interface ScriptProcessorDouble {
   bufferSize: number
-  onaudioprocess: ((event: { inputBuffer: AudioBufferDouble }) => void) | null
+  onaudioprocess: ((event: AudioProcessEventDouble) => void) | null
   connect: ReturnType<typeof vi.fn>
   disconnect: ReturnType<typeof vi.fn>
 }
@@ -78,6 +90,31 @@ export interface AnalyserDouble {
   getByteFrequencyData: ReturnType<typeof vi.fn>
 }
 
+/**
+ * The context's render clock, for `getOutputTimestamp()` (ESCSUITE-296).
+ *
+ * `contextTime = offsetSeconds + performanceTime / 1000 × (1 + skew)` — a
+ * render clock that runs `skew` fast (ε, positive) or slow against
+ * `performance.now()`, the way an output device's crystal does.
+ */
+export interface OutputClockDouble {
+  /** ε: context seconds per `performance.now()` second, minus one. */
+  skew: number
+  /** `contextTime` at `performance.now() === 0`, in seconds. */
+  offsetSeconds: number
+  /**
+   * When set, `getOutputTimestamp()` reports exactly this instead — zeros, as
+   * a context that has not rendered yet does, or a non-finite value. Read on
+   * every call, so a test can change it mid-take.
+   */
+  report?: { contextTime: number; performanceTime: number }
+}
+
+/** The context time `clock` reads at this `performance.now()`, in seconds. */
+export function outputClockContextTime(clock: OutputClockDouble, performanceTime: number): number {
+  return clock.offsetSeconds + (performanceTime / 1000) * (1 + clock.skew)
+}
+
 export interface AudioContextDoubleControl {
   /** Every AudioContext the code under test constructed. */
   readonly contexts: AudioContextDoubleInstance[]
@@ -99,6 +136,19 @@ export interface AudioContextDoubleControl {
    * from — and the state Chrome hands out without a user gesture.
    */
   resumeGate: Promise<void> | null
+  /**
+   * The rate every new context runs at whatever it was asked for — an engine
+   * that ignores `new AudioContext({ sampleRate })`. Null (the default)
+   * honours the option, falling back to 48000.
+   */
+  contextSampleRate: number | null
+  /**
+   * Opt-in render clock. Null (the default): new contexts have **no**
+   * `getOutputTimestamp` at all, so every suite written before ESCSUITE-296
+   * keeps the recorder on its `performance.now()` path. Read when a context is
+   * constructed (present or absent) and on every call (its values).
+   */
+  outputClock: OutputClockDouble | null
 }
 
 const control: AudioContextDoubleControl = {
@@ -109,6 +159,8 @@ const control: AudioContextDoubleControl = {
   destinationTrackCount: 1,
   analyserLevel: 0,
   resumeGate: null,
+  contextSampleRate: null,
+  outputClock: null,
 }
 
 function makeAudioTrack(index: number): MediaStreamTrack {
@@ -154,11 +206,21 @@ export class AudioContextDoubleInstance {
     return control.decodeResult as unknown as AudioBuffer
   })
   readonly decodedByteLengths: number[] = []
+  /** Present only when `control.outputClock` was set at construction. */
+  getOutputTimestamp?: ReturnType<typeof vi.fn<() => { contextTime: number; performanceTime: number }>>
 
   constructor(options?: { sampleRate?: number }) {
     if (control.constructorThrows) throw new Error('AudioContext is unavailable')
     this.state = control.initialState
-    this.sampleRate = options?.sampleRate ?? 48000
+    this.sampleRate = control.contextSampleRate ?? options?.sampleRate ?? 48000
+    if (control.outputClock) {
+      this.getOutputTimestamp = vi.fn(() => {
+        const clock = control.outputClock!
+        if (clock.report) return { ...clock.report }
+        const performanceTime = performance.now()
+        return { contextTime: outputClockContextTime(clock, performanceTime), performanceTime }
+      })
+    }
     control.contexts.push(this)
   }
 
@@ -243,6 +305,8 @@ export function resetAudioContextDouble(): void {
   control.destinationTrackCount = 1
   control.analyserLevel = 0
   control.resumeGate = null
+  control.contextSampleRate = null
+  control.outputClock = null
 }
 
 /** The single AudioContext the code under test created (fails loudly if none). */

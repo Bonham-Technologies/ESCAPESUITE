@@ -331,6 +331,15 @@ export function getCreatedFrames(kind?: 'VideoFrame' | 'AudioData'): FrameDouble
 }
 
 /**
+ * Drop every frame recorded so far. For a long simulated take (ESCSUITE-296's
+ * audio-clock suite runs tens of thousands of buffers), whose test tallies
+ * what it needs as it goes rather than holding every buffer to the end.
+ */
+export function forgetCreatedFrames(): void {
+  frameRegistry.length = 0
+}
+
+/**
  * True when every frame constructed so far has been close()d. Throws when no
  * frame was constructed at all, so the assertion can never pass vacuously.
  */
