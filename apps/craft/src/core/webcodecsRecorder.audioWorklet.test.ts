@@ -500,3 +500,43 @@ describe('a take disposed while the AudioWorklet module is still loading', () =>
     expect(context.workletNodes[0].port.close).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('an audio companion whose encoder fails before its capture exists', () => {
+  it('is refused quietly — no throw inside the error callback — and its capture is stopped the moment it is built', async () => {
+    // The real API reports a configure failure through `error:` as a task, so
+    // it lands after setup has set the capture; this double reports it
+    // synchronously, inside the setup window, which is the one way to reach
+    // the not-yet-built arm.
+    const configure = AudioEncoderDouble.prototype.configure
+    const spy = vi.spyOn(AudioEncoderDouble.prototype, 'configure').mockImplementation(function (
+      this: AudioEncoderDouble,
+      config: unknown
+    ) {
+      configure.call(this, config)
+      if (AudioEncoderDouble.instances.indexOf(this) === 1) this.emitError('mic encoder refused')
+    })
+    await expect(initialize(SEPARATE_TRACKS)).resolves.toBeUndefined()
+    spy.mockRestore()
+    await flush()
+
+    const context = lastAudioContext()
+    expect(console.warn).toHaveBeenCalledWith('Microphone track encoder failed: mic encoder refused')
+    // Built, then stopped at once: the flush was asked for and the node let go.
+    const micNode = context.workletNodes[1]
+    expect(micNode.port.postMessage).toHaveBeenCalledWith('flush')
+    expect(micNode.disconnect).toHaveBeenCalledTimes(1)
+    // ...while the rest of the take records as normal.
+    recorder.start()
+    now += 40
+    processor.pushFrameTo('screen-video', new VideoFrameDouble('s', { timestamp: 0 }))
+    processor.pushFrameTo('webcam-video', new VideoFrameDouble('w', { timestamp: 0 }))
+    render(CHUNK)
+    await flush()
+    expect(AudioEncoderDouble.instances[1].encodes).toHaveLength(0)
+    expect(AudioEncoderDouble.instances[2].encodes).toHaveLength(1)
+    await recorder.stop()
+    expect(callbacks.onError).not.toHaveBeenCalled()
+    const parts = callbacks.onStop.mock.calls[0][1] as Array<{ role: string }>
+    expect(parts.map(p => p.role)).toEqual(['webcam', 'system'])
+  })
+})
