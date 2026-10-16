@@ -53,7 +53,7 @@ describe('parseCaptions — SRT', () => {
   })
 
   it('accepts CRLF, a lone CR, a UTF-8 BOM and extra blank lines', () => {
-    const messy = '﻿\r\n\r\n1\r\n00:00:01,000 --> 00:00:02,000\r\nA\r\n\r\n\r\n\r\n2\r00:00:03,000 --> 00:00:04,000\rB\r\n'
+    const messy = '\uFEFF\r\n\r\n1\r\n00:00:01,000 --> 00:00:02,000\r\nA\r\n\r\n\r\n\r\n2\r00:00:03,000 --> 00:00:04,000\rB\r\n'
     expect(parseCaptions(messy, 'srt').cues).toEqual([
       { start: 1, end: 2, text: 'A' },
       { start: 3, end: 4, text: 'B' },
@@ -222,7 +222,7 @@ describe('parseCaptions — WebVTT', () => {
 
   it('decodes the escapes the format defines', () => {
     const text = 'WEBVTT\n\n00:01.000 --> 00:02.000\nTom &amp; Jerry &lt;3 &gt; a&nbsp;b &lrm;&rlm;&quot;'
-    expect(parseCaptions(text, 'vtt').cues[0].text).toBe('Tom & Jerry <3 > a b ‎‏&quot;')
+    expect(parseCaptions(text, 'vtt').cues[0].text).toBe('Tom & Jerry <3 > a\u00a0b \u200e\u200f&quot;')
   })
 
   it('lists every dropped feature once, in a fixed order, however often each occurred', () => {
@@ -253,7 +253,7 @@ describe('parseCaptions — WebVTT', () => {
 describe('parseCaptions — refusals name the line', () => {
   it('refuses an empty file', () => {
     expect(refusal('', 'srt')).toBe('The caption file is empty.')
-    expect(refusal('﻿ \r\n\n\t\n', 'vtt')).toBe('The caption file is empty.')
+    expect(refusal('\uFEFF \r\n\n\t\n', 'vtt')).toBe('The caption file is empty.')
   })
 
   it('refuses a .vtt without the WEBVTT header', () => {
