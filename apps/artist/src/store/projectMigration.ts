@@ -188,8 +188,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Why a legacy overlay array cannot be folded into clips, or `null` when it
- * can (ESCSUITE-294). Absent or `null` is no overlays at all, as the migration
- * already treats it; anything else must be a list of objects whose `label`
+ * can (ESCSUITE-294). Any falsy value (absent, `null`, `false`, `0`, `''`) is no
+ * overlays at all, as the migration's `|| []` already treats it; anything else
+ * must be a list of objects whose `label`
  * field (`text` for a text overlay, `type` for a shape) is a string.
  */
 function legacyOverlaysProblem(
@@ -197,7 +198,7 @@ function legacyOverlaysProblem(
   field: 'textOverlays' | 'shapeOverlays',
   label: 'text' | 'type'
 ): string | null {
-  if (value == null) return null;
+  if (!value) return null;
   if (!Array.isArray(value)) return `timeline.${field} must be a list`;
   for (const [i, overlay] of value.entries()) {
     if (!isRecord(overlay)) return `timeline.${field}[${i}] must be an object`;
@@ -356,7 +357,7 @@ export function repairEditorBlock(
  * left untouched, to whatever default the caller (the migration below, or a
  * headless render) supplies.
  * Every `tracks` entry must be an object, and a legacy `textOverlays` /
- * `shapeOverlays` that is present and not `null` must be a list of objects
+ * `shapeOverlays` that is present and not falsy must be a list of objects
  * whose `text` / `type` is a string (ESCSUITE-294): those are what the
  * migration reads, and each used to throw a TypeError out of it.
  *
