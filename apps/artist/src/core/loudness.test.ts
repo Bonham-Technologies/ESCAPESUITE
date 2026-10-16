@@ -199,6 +199,41 @@ describe('measureLoudness', () => {
     expect(measureLoudness([sine(1, dbfs(-6), 997)], SR).truePeakDbtp).toBeCloseTo(-6, 1)
   })
 
+  it('reads full-band noise close to a long band-limited reference, as ffmpeg does', () => {
+    // White noise carries energy right up to Nyquist, where a short
+    // interpolator under-reads the peaks between samples. The reference here
+    // is the same 4× read through a 128-tap-per-phase windowed sinc. Measured
+    // 2026-10-16 on this seeded noise: 16 taps per phase read 1.11 dB under
+    // it, 24 taps 0.68 dB under. (On ffmpeg's own noise source the 24-tap
+    // read and ebur128's agree to 0.03 dB.)
+    let seed = 7
+    const x = new Float32Array(SR)
+    for (let i = 0; i < x.length; i++) {
+      seed = (seed * 16807) % 2147483647
+      x[i] = seed / 2147483647 - 0.5
+    }
+    const half = 64
+    let reference = 0
+    for (let n = half; n < x.length - half; n++) {
+      reference = Math.max(reference, Math.abs(x[n]))
+      for (const f of [0.25, 0.5, 0.75]) {
+        let sum = 0
+        let norm = 0
+        for (let i = -half + 1; i <= half; i++) {
+          const u = f - i
+          const tap = (Math.sin(Math.PI * u) / (Math.PI * u)) * (0.5 + 0.5 * Math.cos((Math.PI * u) / half))
+          sum += tap * x[n + i]
+          norm += tap
+        }
+        reference = Math.max(reference, Math.abs(sum / norm))
+      }
+    }
+    const tp = measureLoudness([x], SR).truePeakDbtp
+    const referenceDb = 20 * Math.log10(reference)
+    expect(tp).toBeGreaterThan(referenceDb - 0.8)
+    expect(tp).toBeLessThan(referenceDb + 0.2)
+  })
+
   it('puts a full-scale clipped square wave above 0 dBTP', () => {
     // Every sample is ±1.0 (0 dBFS), but the band-limited waveform those
     // samples describe overshoots each edge (Gibbs): the true peak is above

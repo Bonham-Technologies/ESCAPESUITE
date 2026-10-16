@@ -26,8 +26,9 @@
 //   tone at 45° (every sample at −3 dB, the waveform at 0 dB) well inside EBU
 //   Tech 3341's +0.2 / −0.4 dB, and full-band white noise at the same figure
 //   ffmpeg's `ebur128` prints (−3.6 dBTP, measured 2026-10-16); 16 taps read
-//   that noise 0.6 dB low. Content right up at Nyquist still reads about
-//   0.5 dB under a band-limited ideal, as ffmpeg's does.
+//   that noise 0.6 dB low. Content right up at Nyquist still reads up to
+//   ~0.7 dB under a long band-limited reference, as ffmpeg's does — which is
+//   also how far over −1 dBTP the limiter can let such content go.
 //
 // The open-source storytold/filmcraft meter (`crates/audio-dsp/src/
 // loudness.rs`) was read as a cross-check of the constants and of the Tech
