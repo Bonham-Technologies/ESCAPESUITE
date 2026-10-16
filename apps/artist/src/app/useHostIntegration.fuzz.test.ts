@@ -225,8 +225,8 @@ describe('host payloads under seeded mutation (ESCSUITE-294)', () => {
 // The defect this fuzzer found, its one input pinned on its own so it reads
 // without the loop: parseProject's (store/projectMigration.fuzz.test.ts),
 // reached through the host channel, where the throw becomes an unhandled
-// rejection and the host gets no reply at all. Red until parseProject is
-// fixed: the coordinator rules on the fix (ESCSUITE-294).
+// rejection and the host gets no reply at all. Fixed in parseProject in the
+// same ticket (ESCSUITE-294) and kept as a regression test.
 describe('the defect the host payload fuzz found (ESCSUITE-294)', () => {
   it('LOAD_PROJECT whose legacy textOverlays is not a list gets one INVALID_PROJECT, not a throw (seed 0x5eed0232, iteration 115)', async () => {
     const context = {

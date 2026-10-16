@@ -182,6 +182,30 @@ function isValidTransform(transform: unknown): transform is ClipTransform {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Why a legacy overlay array cannot be folded into clips, or `null` when it
+ * can (ESCSUITE-294). Absent or `null` is no overlays at all, as the migration
+ * already treats it; anything else must be a list of objects whose `label`
+ * field (`text` for a text overlay, `type` for a shape) is a string.
+ */
+function legacyOverlaysProblem(
+  value: unknown,
+  field: 'textOverlays' | 'shapeOverlays',
+  label: 'text' | 'type'
+): string | null {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return `timeline.${field} must be a list`;
+  for (const [i, overlay] of value.entries()) {
+    if (!isRecord(overlay)) return `timeline.${field}[${i}] must be an object`;
+    if (typeof overlay[label] !== 'string') return `timeline.${field}[${i}].${label} must be a string`;
+  }
+  return null;
+}
+
 /** `null`, or a finite number >= 0: what an in or out point may be. */
 function isValidPoint(value: unknown): value is number | null {
   return value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
@@ -331,6 +355,10 @@ export function repairEditorBlock(
  * `core/cropDrag.ts`'s `sourceDelta` divides by it. An *absent* transform is
  * left untouched, to whatever default the caller (the migration below, or a
  * headless render) supplies.
+ * Every `tracks` entry must be an object, and a legacy `textOverlays` /
+ * `shapeOverlays` that is present and not `null` must be a list of objects
+ * whose `text` / `type` is a string (ESCSUITE-294): those are what the
+ * migration reads, and each used to throw a TypeError out of it.
  *
  * `editorInput` is the file's `editor` block, which sits BESIDE the project
  * and not inside it (ESCSUITE-245): validated by name with `validateEditorBlock`
@@ -367,6 +395,23 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
 
   if (!Array.isArray(timeline.clips)) {
     return { ok: false, reason: 'Timeline has no clips list' };
+  }
+
+  // ESCSUITE-294. The migration reads every track's id and index, and folds
+  // each legacy overlay into a clip by reading its `text` / `type` as a
+  // string, so a null track or a malformed legacy entry threw a TypeError out
+  // of `ensureTimelineHasTracks` instead of being refused. Only what that walk
+  // needs is checked: a legacy entry's other fields were never validated and
+  // a real old file is not refused for them now.
+  for (const [i, track] of (timeline.tracks ?? []).entries()) {
+    if (!isRecord(track)) {
+      return { ok: false, reason: `timeline.tracks[${i}] must be an object` };
+    }
+  }
+  const legacyProblem = legacyOverlaysProblem(timeline.textOverlays, 'textOverlays', 'text')
+    ?? legacyOverlaysProblem(timeline.shapeOverlays, 'shapeOverlays', 'type');
+  if (legacyProblem) {
+    return { ok: false, reason: legacyProblem };
   }
 
   const seenClipIds = new Set<string>();

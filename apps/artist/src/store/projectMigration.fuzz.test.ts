@@ -168,8 +168,8 @@ describe('parseProject under seeded mutation (ESCSUITE-294)', () => {
 })
 
 // The defects this fuzzer found, each one input pinned on its own so it reads
-// without the loop. Red until parseProject is fixed: the coordinator rules on
-// the fix (ESCSUITE-294). Each asserts exactly the fuzz contract above.
+// without the loop. Fixed in the same ticket (ESCSUITE-294) and kept as
+// regression tests. Each asserts exactly the fuzz contract above.
 describe('defects the parseProject fuzz found (ESCSUITE-294)', () => {
   const check = async (input: unknown, context: FuzzContext) => {
     const { project, editor } = input as { project: unknown; editor: unknown }
