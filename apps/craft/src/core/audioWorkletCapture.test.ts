@@ -332,7 +332,7 @@ describe('the AudioWorklet capture', () => {
     worklet = enableAudioWorkletDouble()
   })
 
-  it('drops what was rendered before start() and stamps the rest from start()\'s render position', async () => {
+  it('keeps only what was rendered from start() on: the chunk in progress is cut there and stamped 0', async () => {
     await build()
     context.render(CHUNK_FRAMES * 2 + 512)
     await settle()
@@ -344,18 +344,15 @@ describe('the AudioWorklet capture', () => {
     context.render(CHUNK_FRAMES * 3)
     await settle()
 
+    const us = (frames: number) => Math.round((frames / 48000) * 1e6)
     expect(stamps()).toEqual([
-      {
-        timestamp: Math.round(((3 * CHUNK_FRAMES - startFrame) / 48000) * 1e6),
-        frames: CHUNK_FRAMES,
-        rate: 48000,
-      },
-      {
-        timestamp: Math.round(((4 * CHUNK_FRAMES - startFrame) / 48000) * 1e6),
-        frames: CHUNK_FRAMES,
-        rate: 48000,
-      },
+      { timestamp: 0, frames: 3 * CHUNK_FRAMES - startFrame, rate: 48000 },
+      { timestamp: us(3 * CHUNK_FRAMES - startFrame), frames: CHUNK_FRAMES, rate: 48000 },
+      { timestamp: us(4 * CHUNK_FRAMES - startFrame), frames: CHUNK_FRAMES, rate: 48000 },
     ])
+    // The piece is the chunk's own samples from start() on, not its head.
+    const first = encoded[0].init as { data: Float32Array }
+    expect(first.data).toHaveLength(2 * (3 * CHUNK_FRAMES - startFrame))
     expect(getCreatedFrames('AudioData').every(d => d.closed)).toBe(true)
   })
 
@@ -401,7 +398,7 @@ describe('the AudioWorklet capture', () => {
     )
   })
 
-  it('drops the chunks rendered while paused and closes the pause up: stamps continuous across it', async () => {
+  it('drops what was rendered while paused, to the frame: stamps run on across the pause with no gap and no overlap', async () => {
     await build()
     take.start()
     context.render(CHUNK_FRAMES * 2 + 1024)
@@ -411,19 +408,31 @@ describe('the AudioWorklet capture', () => {
     context.render(CHUNK_FRAMES * 3)
     await settle()
 
-    const s = stamps()
-    // Two whole chunks before the pause, one straddling it (kept: it began
-    // while recording), the paused ones dropped, then after the resume.
-    expect(s.slice(0, 3).map(c => c.timestamp)).toEqual(
-      [0, 1, 2].map(k => Math.round(((k * CHUNK_FRAMES) / 48000) * 1e6))
+    const C = CHUNK_FRAMES
+    // Two whole chunks; the one the pause landed in, cut at the pause; the
+    // paused ones gone; the one the resume landed in, from the resume on.
+    expect(stamps().map(s => s.frames)).toEqual([C, C, 1024, C - 1024, C, C])
+    expect(stamps().map(s => s.timestamp)).toEqual(
+      [0, C, 2 * C, 2 * C + 1024, 3 * C, 4 * C].map(f => Math.round((f / 48000) * 1e6))
     )
-    // The first chunk after the resume follows the pre-pause audio by less
-    // than a chunk — the 5-chunk pause is gone from the timeline.
-    const gapUs = s[3].timestamp - (s[2].timestamp + (CHUNK_FRAMES / 48000) * 1e6)
-    expect(gapUs).toBeGreaterThan(-((CHUNK_FRAMES / 48000) * 1e6))
-    expect(gapUs).toBeLessThan((CHUNK_FRAMES / 48000) * 1e6)
-    // Stamps only ever go forward.
-    for (let i = 1; i < s.length; i++) expect(s[i].timestamp).toBeGreaterThan(s[i - 1].timestamp)
+    // The piece after the resume is the chunk's own samples from the resume
+    // on — the frames rendered before it were the pause.
+    const resumed = encoded[3].init as { data: Float32Array }
+    expect(resumed.data).toHaveLength(2 * (C - 1024))
+  })
+
+  it('a pause and a resume inside one chunk cut it into two pieces, back to back', async () => {
+    await build()
+    take.start()
+    context.render(1024)
+    take.pause()
+    context.render(512)
+    take.resume()
+    context.render(CHUNK_FRAMES - 1536)
+    await settle()
+
+    expect(stamps().map(s => s.frames)).toEqual([1024, CHUNK_FRAMES - 1536])
+    expect(stamps().map(s => s.timestamp)).toEqual([0, Math.round((1024 / 48000) * 1e6)])
   })
 
   it('subtracts every pause: two pauses, the second span offset by both recorded spans before it', async () => {

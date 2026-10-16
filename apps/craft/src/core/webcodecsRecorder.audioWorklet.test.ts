@@ -85,11 +85,13 @@ interface AudioTally {
   stamps: number[]
   /** End of the last chunk: its stamp plus its length at its own rate, µs. */
   endUs: number
+  /** The largest distance, µs, between a chunk's stamp and the end of the one before: gap or overlap. */
+  maxSeamUs: number
   rates: Set<number>
 }
 
 function newTally(): AudioTally {
-  return { count: 0, zeros: 0, stamps: [], endUs: 0, rates: new Set() }
+  return { count: 0, zeros: 0, stamps: [], endUs: 0, maxSeamUs: 0, rates: new Set() }
 }
 
 function tallyAudio(encoder: EncoderDouble, tally: AudioTally): void {
@@ -98,6 +100,7 @@ function tallyAudio(encoder: EncoderDouble, tally: AudioTally): void {
     tally.count++
     if ((data.source as Float32Array).every(v => v === 0)) tally.zeros++
     tally.stamps.push(init.timestamp)
+    if (tally.count > 1) tally.maxSeamUs = Math.max(tally.maxSeamUs, Math.abs(init.timestamp - tally.endUs))
     tally.endUs = init.timestamp + (init.numberOfFrames / init.sampleRate) * 1e6
     tally.rates.add(init.sampleRate)
   }
@@ -283,12 +286,12 @@ describe('a long take', () => {
     expect(mix.zeros).toBe(0)
     // Every chunk rendered since start() encoded exactly once, in order, each
     // one chunk after the last.
-    const rendered = node.posted.filter(p => (p.data as { frame?: number }).frame! >= startFrame)
+    // (the one in progress at start() included, from start() on).
+    const rendered = node.posted.filter(p => (p.data as { frame?: number }).frame! + CHUNK > startFrame)
     expect(rendered.length).toBeGreaterThan(7000)
     expect(mix.count).toBe(rendered.length)
-    for (let i = 1; i < mix.stamps.length; i++) {
-      expect(Math.abs(mix.stamps[i] - mix.stamps[i - 1] - chunkUs)).toBeLessThanOrEqual(1)
-    }
+    expect(mix.stamps[0]).toBe(0)
+    expect(mix.maxSeamUs).toBeLessThanOrEqual(1)
     expect([...mix.rates]).toEqual([48000])
   }, 120_000)
 
@@ -339,10 +342,8 @@ describe('pause and resume', () => {
     await frameAt()
 
     const chunkUs = (CHUNK / 48000) * 1e6
-    // No step the length of the pause anywhere in the audio...
-    for (let i = 1; i < mix.stamps.length; i++) {
-      expect(mix.stamps[i] - mix.stamps[i - 1]).toBeLessThanOrEqual(2 * chunkUs)
-    }
+    // No step the length of the pause anywhere in the audio — no step at all...
+    expect(mix.maxSeamUs).toBeLessThanOrEqual(1)
     // ...and the audio ends where the video does: 60 chunks of recording.
     const videoUs = lastVideoEncoder().encodes.at(-1)!.data.timestamp!
     expect(Math.abs(videoUs - 60 * chunkUs)).toBeLessThanOrEqual(1000)
