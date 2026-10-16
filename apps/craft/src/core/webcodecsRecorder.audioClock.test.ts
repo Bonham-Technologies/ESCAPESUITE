@@ -544,6 +544,22 @@ describe('playbackTime read at dispatch', () => {
     expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
   }, 60_000)
 
+  it('(e) sustained 0-60 ms lateness on every callback, nothing lost, fills nothing (10 min, the rig\'s jank take)', async () => {
+    // Modelled on the measurement rig's 60 ms busy loop every 100 ms in
+    // headless Chromium: lateness that swings slowly between 0 and 60 ms, so
+    // it stays above half a buffer (42.7 ms) for many callbacks in a row —
+    // which a half-buffer threshold reads as a loss — while staying below the
+    // one full buffer a double-buffered ScriptProcessor needs to lose one.
+    const random = seededRandom(11)
+    const r = await recordTake({
+      seconds: 600,
+      dispatchDelay: k => Math.min(0.06, Math.max(0, 0.03 + 0.027 * Math.sin((2 * Math.PI * k) / 40) + (random() - 0.5) * 0.006)),
+    })
+    expect(r.dropped).toBe(0)
+    expect(r.mix.zeros).toBe(0)
+    expect(Math.abs(r.mix.endUs - r.videoEndUs)).toBeLessThanOrEqual(toleranceUs())
+  }, 60_000)
+
   /** Callbacks that came due during [from, to) seconds are all dispatched at `to`. */
   const hang = (from: number, to: number) => (k: number) => {
     const ready = (k * BUFFER) / 48000
