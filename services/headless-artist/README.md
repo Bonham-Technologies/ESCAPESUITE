@@ -56,7 +56,7 @@ The kit does not bundle a browser. Give it one of these two:
    launch that instead. Anything recent enough for WebCodecs works; an older build will fail at
    encode time rather than at launch.
 
-The pinned version is **Playwright 1.63.0**. `headless-artist --version` prints it, along with
+The pinned version is **Playwright 1.64.0**. `headless-artist --version` prints it, along with
 the kit and engine versions and the commit the kit was built from:
 
 ```console
@@ -82,7 +82,7 @@ the matching browser. Building that image still needs a registry (for the base i
 one `npm install`), so build it where you have egress and ship the image, not the Dockerfile.
 
 **Installing the kit still needs a registry.** The tarball vendors no dependencies: `npm install`
-on it resolves `playwright@1.63.0` (plus `@aws-sdk/client-s3`, unless you pass `--omit=optional`)
+on it resolves `playwright@1.64.0` (plus `@aws-sdk/client-s3`, unless you pass `--omit=optional`)
 the usual way. On a host with no egress, point npm at an internal mirror or copy in a
 `node_modules` populated on a machine that had one — same Node major, same OS/arch.
 

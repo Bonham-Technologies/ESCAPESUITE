@@ -34,7 +34,7 @@
     "test:e2e": "cross-env HEADLESS_BUILD=1 vitest run chromium.test",
     "test:perf": "cross-env HEADLESS_BUILD=1 vitest run src/perf.bench.test.ts"
   },
-  "dependencies": { "playwright": "1.63.0" },
+  "dependencies": { "playwright": "1.64.0" },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "cross-env": "^10.1.0",
