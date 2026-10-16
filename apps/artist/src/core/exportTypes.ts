@@ -4,6 +4,7 @@ import type { Clip, Track, ExportOptions, ExportProgress, BlendMode, SourceVideo
 import { isTrackVisible, isVisibleTrack } from '../store/trackVisibility';
 import { PRESET_SUPPRESSION } from '../utils/animation';
 import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
+import type { ExportLoudness } from './loudness';
 
 /**
  * A drawable media source that can be used with canvas drawImage.
@@ -759,6 +760,13 @@ export interface ExportResult {
    * the type system would not catch.
    */
   framesEncoded: number;
+  /**
+   * The mix's measured loudness and what was done about it (ESCSUITE-292) —
+   * absent for a GIF, for an export with no sound in it (no audio at all, a
+   * silent mix, or a browser that cannot encode the sound) and so whenever
+   * there is nothing to measure.
+   */
+  loudness?: ExportLoudness;
 }
 
 /**

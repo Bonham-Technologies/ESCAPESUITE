@@ -55,6 +55,7 @@ import {
   disposeFrameManager,
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
+import { exportLoudness, formatLoudnessSummary } from './loudness';
 
 // `ExportLogEntry` and `ExportError` live in exportTypes.ts (moved there by
 // ESCSUITE-152, independently of ESCSUITE-29 Mechanism 1 doing the same
@@ -229,6 +230,13 @@ export async function exportToMP4(
     const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
     return fullAudioData.slice(startSample, endSample);
   })() : fullAudioData;
+
+  // Measure the sound this file will carry — the exported range, as mixed —
+  // and normalise it onto the chosen target in place, before any encoder sees
+  // it (ESCSUITE-292). One pass over the mix; nothing per frame. `null` when
+  // there is no mix, or no AAC encoder to carry one (the mix was skipped).
+  const loudness = exportLoudness(audioData, audioChannels, sampleRate, options.loudnessTarget);
+  if (loudness) log('audio', `Loudness: ${formatLoudnessSummary(loudness)}`);
 
   // Create canvas for frame rendering
   const canvas = document.createElement('canvas');
@@ -717,7 +725,7 @@ export async function exportToMP4(
     // question the exporter deliberately cannot answer — knowing would mean
     // decoding, which is the cost the probe-first ordering removed — so the
     // dialog pairs this with its own `projectHasAudio` before claiming a loss.
-    return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported, framesEncoded: frameCount };
+    return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported, framesEncoded: frameCount, loudness };
   } catch (error) {
     // Clean up resources on error
     await cleanup();

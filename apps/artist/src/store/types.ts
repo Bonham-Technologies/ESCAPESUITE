@@ -913,6 +913,14 @@ export interface ExportOptions {
    * whatever number it carried.
    */
   fps?: 10 | 15 | 20;
+  /**
+   * WebM and MP4 only: normalise the mix to this integrated loudness, in LUFS,
+   * under a −1 dBTP true-peak limiter (ESCSUITE-292). Absent is off — the mix
+   * is still measured, and left as mixed. One of `LOUDNESS_TARGETS`
+   * (`core/loudness.ts`); read through `loudnessTargetOrOff`, so a stale saved
+   * setting or a hand-built job spec carrying any other number is off.
+   */
+  loudnessTarget?: -14 | -16 | -23;
 }
 
 export interface ExportProgress {
