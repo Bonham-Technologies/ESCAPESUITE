@@ -542,9 +542,9 @@ describe('formatLoudnessSummary', () => {
     )
   })
 
-  it('says when the limiter engaged', () => {
+  it('says what the limiter did when it engaged', () => {
     expect(formatLoudnessSummary({ ...base, gainDb: 4.34, targetLufs: -14, limited: true })).toBe(
-      'Measured −18.3 LUFS · gain +4.3 dB · limited'
+      'Measured −18.3 LUFS · gain +4.3 dB · the limiter held the peaks, so the mix lands below the target'
     )
   })
 

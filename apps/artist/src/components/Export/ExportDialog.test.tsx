@@ -2365,13 +2365,7 @@ describe('ExportDialog', () => {
       expect(onClose).toHaveBeenCalled()
     })
   })
-  // ESCSUITE-220: a render-time throw elsewhere in the editor unmounts this
-  // dialog through the app's ErrorBoundary, and nothing else would stop the
-  // export it started — its decodeWorker, encoders and muxer would run on
-  // behind the error panel until Reload. `main.tsx` hands the boundary
-  // `disposeLiveExport()` as `onError`; these pin the dialog's half of that
-  // contract: a run registers itself in the slot when it starts and clears
-  // itself when it settles or is cancelled.
+
   // ESCSUITE-292: every video export measures its mix (ITU-R BS.1770-4) and,
   // when a target is chosen here, normalises it under a −1 dBTP limiter. The
   // choice lives beside Quality and is remembered with it; the measurement is
@@ -2450,7 +2444,8 @@ describe('ExportDialog', () => {
 
       fireEvent.click(primaryExport())
 
-      const line = 'Export complete! Measured \u221218.3 LUFS \u00b7 gain +4.3 dB \u00b7 limited'
+      const line =
+        'Export complete! Measured \u221218.3 LUFS \u00b7 gain +4.3 dB \u00b7 the limiter held the peaks, so the mix lands below the target'
       await waitFor(() => expect(screen.getByText(line)).toBeInTheDocument())
       expect(liveRegion()?.textContent).toBe(`${line} (100%)`)
       expect(document.querySelectorAll('[role="status"]')).toHaveLength(1)
@@ -2471,6 +2466,13 @@ describe('ExportDialog', () => {
     })
   })
 
+  // ESCSUITE-220: a render-time throw elsewhere in the editor unmounts this
+  // dialog through the app's ErrorBoundary, and nothing else would stop the
+  // export it started — its decodeWorker, encoders and muxer would run on
+  // behind the error panel until Reload. `main.tsx` hands the boundary
+  // `disposeLiveExport()` as `onError`; these pin the dialog's half of that
+  // contract: a run registers itself in the slot when it starts and clears
+  // itself when it settles or is cancelled.
   describe('disposeLiveExport (ESCSUITE-220)', () => {
     interface AbortableRun {
       signal: AbortSignal

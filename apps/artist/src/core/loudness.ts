@@ -53,6 +53,14 @@ export const LOUDNESS_TARGETS: readonly LoudnessTarget[] = [-14, -16, -23];
 export const TRUE_PEAK_CEILING_DBTP = -1;
 
 /**
+ * The most a target may turn a mix up, in dB. A mix that only just clears the
+ * −70 LUFS gate — room tone, hum — would otherwise be raised by 50 dB or more,
+ * and its noise floor with it; capped, it lands below the target instead, and
+ * the gain reported is the gain applied.
+ */
+export const MAX_GAIN_DB = 20;
+
+/**
  * One of the three targets, or `undefined` for off — for a value read back
  * from storage or handed over by a caller the type system did not see (a
  * stale saved setting, a headless job spec), which must land on "off" rather
@@ -222,7 +230,7 @@ const INTERPOLATION_GAIN = Math.max(
 
 /**
  * A cheap upper bound on |x| over every sample `forwardPeak(…, n)` reads, so
- * the 48 multiply-adds can be skipped wherever they cannot change the answer:
+ * the 72 multiply-adds can be skipped wherever they cannot change the answer:
  * the meter skips a frame whose bound cannot beat the peak already found, the
  * limiter one whose bound cannot reach the ceiling. Without it the true-peak
  * read is ~90 % of the meter's cost; with it, a minute of speech-like stereo
@@ -365,9 +373,10 @@ export function measureInterleavedLoudness(
 // --- Normalising ------------------------------------------------------------
 
 /**
- * The gain that moves `measured` onto `targetLufs`, and whether applying it
- * would put the true peak above `ceilingDbtp` (so the limiter will engage).
- * A programme with no measurable loudness asks for no gain.
+ * The gain that moves `measured` onto `targetLufs` — never more than
+ * `MAX_GAIN_DB` of boost — and whether applying it would put the true peak
+ * above `ceilingDbtp` (so the limiter will engage). A programme with no
+ * measurable loudness asks for no gain.
  */
 export function gainForTarget(
   measured: LoudnessMeasurement,
@@ -375,14 +384,14 @@ export function gainForTarget(
   ceilingDbtp: number
 ): { gainDb: number; limited: boolean } {
   if (!Number.isFinite(measured.integratedLufs)) return { gainDb: 0, limited: false };
-  const gainDb = targetLufs - measured.integratedLufs;
+  const gainDb = Math.min(targetLufs - measured.integratedLufs, MAX_GAIN_DB);
   return { gainDb, limited: measured.truePeakDbtp + gainDb > ceilingDbtp };
 }
 
-/** How long the limiter holds a reduction before letting go: 5 ms at 48 kHz, the export's rate. */
-const HOLD_FRAMES = 240;
-/** Per-frame release step toward unity: a 50 ms time constant at 48 kHz. */
-const RELEASE = 1 - Math.exp(-1 / 2400);
+/** How long the limiter holds a reduction before letting go. */
+const HOLD_SECONDS = 0.005;
+/** The release's time constant: the gain recovers 63 % of the way to unity in this long. */
+const RELEASE_SECONDS = 0.05;
 /**
  * How far behind the detector the gain is written. The detector at frame n
  * reads samples up to TAPS_HALF either side of n, so every sample it reads
@@ -390,9 +399,12 @@ const RELEASE = 1 - Math.exp(-1 / 2400);
  */
 const WRITE_LAG = TAPS_HALF + 1;
 
-function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number): void {
+function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number, sampleRate: number): void {
   const { data, offset, stride, frames } = lanes;
   const channelCount = data.length;
+  // Two scalars per call, in frames at this rate.
+  const holdFrames = Math.round(HOLD_SECONDS * sampleRate);
+  const release = 1 - Math.exp(-1 / (RELEASE_SECONDS * sampleRate));
   const gain = 10 ** (gainDb / 20);
   const ceiling = 10 ** (ceilingDbtp / 20);
   const envelope = new Float64Array(WRITE_LAG + 1);
@@ -424,11 +436,11 @@ function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number): voi
     const required = truePeak > ceiling ? ceiling / truePeak : 1;
     if (required < env) {
       env = required;
-      hold = HOLD_FRAMES;
+      hold = holdFrames;
     } else if (hold > 0) {
       hold--;
     } else {
-      env = Math.min(required, env + (1 - env) * RELEASE);
+      env = Math.min(required, env + (1 - env) * release);
     }
     envelope[n % (WRITE_LAG + 1)] = env;
     if (n >= WRITE_LAG) write(n - WRITE_LAG);
@@ -448,9 +460,21 @@ function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number): voi
  * within about 0.1 dB (the reduction lands on the loud sample itself, so the
  * samples just before it are a little less reduced). When nothing would pass
  * the ceiling it never engages and this is a plain gain.
+ *
+ * A known limit: 5 ms is shorter than half a cycle below 100 Hz, so limited
+ * bass is gain-modulated within each cycle (≈ 0.7 dB of ripple on a 100 Hz
+ * tone held 6 dB down) — audible as distortion on heavily limited low end.
+ *
+ * `sampleRate` sets the hold and release in frames; it defaults to the
+ * export's 48 kHz so the three-argument call keeps its meaning.
  */
-export function applyGainWithLimiter(channels: readonly Float32Array[], gainDb: number, ceilingDbtp: number): void {
-  gainWithLimiter(planarLanes(channels), gainDb, ceilingDbtp);
+export function applyGainWithLimiter(
+  channels: readonly Float32Array[],
+  gainDb: number,
+  ceilingDbtp: number,
+  sampleRate = 48000
+): void {
+  gainWithLimiter(planarLanes(channels), gainDb, ceilingDbtp, sampleRate);
 }
 
 /** `applyGainWithLimiter` over an interleaved buffer, in place. */
@@ -458,9 +482,10 @@ export function applyInterleavedGainWithLimiter(
   data: Float32Array,
   channelCount: number,
   gainDb: number,
-  ceilingDbtp: number
+  ceilingDbtp: number,
+  sampleRate = 48000
 ): void {
-  gainWithLimiter(interleavedLanes(data, channelCount), gainDb, ceilingDbtp);
+  gainWithLimiter(interleavedLanes(data, channelCount), gainDb, ceilingDbtp, sampleRate);
 }
 
 // --- The export's one call --------------------------------------------------
@@ -500,7 +525,7 @@ export function exportLoudness(
   if (targetLufs === undefined) return { ...base, gainDb: 0, targetLufs: null, limited: false };
   const { gainDb, limited } = gainForTarget(measured, targetLufs, TRUE_PEAK_CEILING_DBTP);
   if (limited) {
-    applyInterleavedGainWithLimiter(data, channelCount, gainDb, TRUE_PEAK_CEILING_DBTP);
+    applyInterleavedGainWithLimiter(data, channelCount, gainDb, TRUE_PEAK_CEILING_DBTP, sampleRate);
   } else {
     // The limiter's detector reads exactly the peaks the meter just measured,
     // so when the gained true peak is under the ceiling it could never engage:
