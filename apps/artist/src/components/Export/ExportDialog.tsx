@@ -312,11 +312,14 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // clips as they stand now (edits, moves and all), in timeline order. Read
   // from the `clips` / `tracks` this dialog already subscribes to; a hidden
   // caption track is included, since hiding it is how a caption is kept off
-  // the picture and wanted only as a sidecar.
+  // the picture and wanted only as a sidecar. This runs while the dialog is
+  // shut too (it is always mounted), so a damaged clip `parseProject` let
+  // through — a text clip with no `textData`, or text that is not a string —
+  // is left out rather than read (review I1).
   const captionCues = useMemo((): CaptionCue[] => {
     const captionTrackIds = new Set(tracks.filter((track) => track.kind === 'captions').map((track) => track.id));
     return clips
-      .filter((clip) => clip.overlayType === 'text' && captionTrackIds.has(clip.trackId))
+      .filter((clip) => captionTrackIds.has(clip.trackId) && typeof clip.textData?.text === 'string')
       .sort((a, b) => a.timelinePosition - b.timelinePosition)
       .map((clip) => ({
         start: clip.timelinePosition,
