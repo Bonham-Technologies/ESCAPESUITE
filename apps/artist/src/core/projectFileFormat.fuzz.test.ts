@@ -39,6 +39,7 @@ import {
   resizeDeclared,
   swapRanges,
   truncateAt,
+  expectTallyAtLeast,
   type FuzzContext,
   type Mutated,
   type Rng,
@@ -48,6 +49,15 @@ const READER_SEED = 0x5eed0260
 const READER_ITERATIONS = 500
 const LOAD_SEED = 0x5eed0261
 const LOAD_ITERATIONS = 150
+// Each loop's outcomes on its committed seed, measured 2026-10-15: the reader
+// read and tiled 115 files and refused 332 (the other 53 were v1 hand-offs);
+// loadProject loaded 39 and refused 100. The floors ARE those counts: the seed
+// is fixed, so a reader that turns lenient anywhere (a range check skipped)
+// drops `refused` below its floor, and one that turns strict drops `accepted`.
+// A change that moves an input across the line on purpose updates the numbers
+// here and says why, as a per-frame ceiling does.
+const READER_FLOORS = { accepted: 115, refused: 332 }
+const LOAD_FLOORS = { accepted: 39, refused: 100 }
 
 /** Where the u32 index length sits in the header. */
 const INDEX_LENGTH_OFFSET = 12
@@ -229,21 +239,24 @@ const isProjectFileError = (error: unknown) => error instanceof ProjectFileError
 
 const startsWithMagic = (bytes: Uint8Array) => bytes.length >= MAGIC.length && MAGIC.every((b, i) => bytes[i] === b)
 
-/** The reader's half of the contract for one file. */
-async function checkReader(bytes: Uint8Array<ArrayBuffer>, context: FuzzContext): Promise<void> {
+/** The reader's half of the contract for one file, and which way it went. */
+async function checkReader(
+  bytes: Uint8Array<ArrayBuffer>,
+  context: FuzzContext
+): Promise<'v1' | 'refused' | 'read'> {
   const blob = new Blob([bytes])
   const read = await expectNamedRefusal(() => readProjectFileIndex(blob), isProjectFileError, context)
   if (!startsWithMagic(bytes)) {
     if (!read.ok || read.value !== null) {
       throw fuzzFailure(context, 'a file without the magic was not handed to the v1 path (null)')
     }
-    return
+    return 'v1'
   }
-  if (!read.ok) return
+  if (!read.ok) return 'refused'
   if (read.value === null) throw fuzzFailure(context, 'a file with the magic was handed to the v1 path')
   const { index, payloadStart } = read.value
   const tiled = await expectNamedRefusal(() => assertRangesTile(index, payloadStart, blob.size), isProjectFileError, context)
-  if (!tiled.ok) return
+  if (!tiled.ok) return 'refused'
   for (const video of index.videos) {
     for (const range of video.thumbnail ? [video.data, video.thumbnail] : [video.data]) {
       const slice = sliceRange(blob, payloadStart, range, 'application/octet-stream')
@@ -252,6 +265,7 @@ async function checkReader(bytes: Uint8Array<ArrayBuffer>, context: FuzzContext)
       }
     }
   }
+  return 'read'
 }
 
 describe('the v2 reader under seeded mutation (ESCSUITE-294)', () => {
@@ -269,10 +283,14 @@ describe('the v2 reader under seeded mutation (ESCSUITE-294)', () => {
 
   it(`reads or refuses ${READER_ITERATIONS} mutated files with a ProjectFileError, and nothing else`, async () => {
     const rng = createRng(READER_SEED)
+    const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < READER_ITERATIONS; iteration++) {
       const { value, description } = mutateFile(rng)
-      await checkReader(value, { seed: READER_SEED, iteration, mutation: description })
+      const outcome = await checkReader(value, { seed: READER_SEED, iteration, mutation: description })
+      if (outcome === 'read') tally.accepted++
+      if (outcome === 'refused') tally.refused++
     }
+    expectTallyAtLeast(tally, READER_FLOORS, READER_SEED)
   })
 })
 
@@ -299,6 +317,7 @@ describe('loadProject, version 2, under seeded mutation (ESCSUITE-294)', () => {
 
   it(`loads or refuses ${LOAD_ITERATIONS} mutated v2 files with a ProjectFileError, writing nothing on a refusal`, async () => {
     const rng = createRng(LOAD_SEED)
+    const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < LOAD_ITERATIONS; iteration++) {
       const { value, description } = mutateFile(rng)
       // A file whose magic is gone is a v1 file (the reader's half proves the
@@ -306,11 +325,13 @@ describe('loadProject, version 2, under seeded mutation (ESCSUITE-294)', () => {
       if (!startsWithMagic(value)) continue
       const context = { seed: LOAD_SEED, iteration, mutation: description }
       const loaded = await expectNamedRefusal(() => loadProject(fileOf(value)), isProjectFileError, context)
+      tally[loaded.ok ? 'accepted' : 'refused']++
       const stored = (await getAllVideoMetadata()).map(({ id }) => id)
       if (!loaded.ok && stored.length > 0) {
         throw fuzzFailure(context, `a refused load left ${stored.join(', ')} in the shared DB`)
       }
       for (const id of stored) await deleteVideo(id)
     }
+    expectTallyAtLeast(tally, LOAD_FLOORS, LOAD_SEED)
   })
 })

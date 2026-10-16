@@ -25,6 +25,7 @@ import { defaultUrlParams, sampleVideo } from '../test/appDoubles'
 import {
   createRng,
   expectNamedRefusal,
+  expectTallyAtLeast,
   fuzzFailure,
   mutateJson,
   nestDeep,
@@ -40,6 +41,17 @@ vi.mock('../core/videoProcessor', async () =>
 
 const SEED = 0x5eed0232
 const ITERATIONS = 200
+// Outcomes on the committed seed, measured 2026-10-15; the floors ARE those
+// counts, so a check dropped anywhere lowers `refused` (a change that moves an
+// input across the line on purpose updates them and says why). LOAD_VIDEO and
+// SET_THEME refused all 200: their payloads have one field, so every mutation
+// breaks it, and the accepting side is the sanity case's. LOAD_PROJECT applied
+// 108 and refused 92.
+const FLOORS = {
+  LOAD_VIDEO: { accepted: 0, refused: 200 },
+  SET_THEME: { accepted: 0, refused: 200 },
+  LOAD_PROJECT: { accepted: 108, refused: 92 },
+}
 const THEME_MODULE_DEFAULT = 'dark' as const
 
 type Handler = (message: { type: string; payload?: unknown }) => Promise<void> | void
@@ -102,14 +114,18 @@ function expectNoError(context: FuzzContext): void {
   }
 }
 
-/** One mutated `{ payload }` per iteration, so the mutation's path reads `payload.<field>`. */
+/**
+ * One mutated `{ payload }` per iteration, so the mutation's path reads
+ * `payload.<field>`; an iteration that sent an ERROR counts as refused.
+ */
 async function fuzzPayloads(
-  type: string,
+  type: keyof typeof FLOORS,
   basePayload: () => unknown,
   check: (payload: unknown, context: FuzzContext) => void
 ): Promise<void> {
   const handler = await mountHandler()
   const rng = createRng(SEED)
+  const tally = { accepted: 0, refused: 0 }
   for (let iteration = 0; iteration < ITERATIONS; iteration++) {
     const { value, description } = mutateJson(rng, { payload: basePayload() })
     const payload = (value as { payload?: unknown } | null | undefined)?.payload
@@ -118,7 +134,9 @@ async function fuzzPayloads(
     // The handler refuses by reply, so no thrown error is expected at all.
     await expectNamedRefusal(() => deliver(handler, { type, payload }), () => false, context)
     check(payload, context)
+    tally[errorsSent().length > 0 ? 'refused' : 'accepted']++
   }
+  expectTallyAtLeast(tally, FLOORS[type], SEED)
 }
 
 beforeEach(() => {

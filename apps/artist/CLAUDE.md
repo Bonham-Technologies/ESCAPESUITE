@@ -5005,7 +5005,11 @@ outcome, not on the double.
   (`parseProject` returns `{ ok: false, reason }` and never throws) and
   `app/useHostIntegration.fuzz.test.ts` (one `INVALID_MESSAGE` or `INVALID_PROJECT` reply, nothing
   applied). The seed is a constant per file and the iteration count is fixed, so a run is
-  deterministic and prints nothing when it passes. **Reproducing a failure:** the message names the
+  deterministic and prints nothing when it passes. Each loop also tallies how many inputs parsed
+  and how many were refused and holds both to the counts measured on its seed
+  (`expectTallyAtLeast`), because the per-input contract cannot see a parser that quietly turns
+  lenient; a change that moves an input across the line on purpose updates those numbers and
+  says why. **Reproducing a failure:** the message names the
   seed, the iteration and the mutation in words (`seed 0x5eed0294, iteration 23 … mutation: nestDeep
   project.timeline.shapeOverlays[0] -> depth 116`); rerunning the file replays it exactly, and
   `setAt` / `nestDeep` / the other operators rebuild that one input for a standalone test. The

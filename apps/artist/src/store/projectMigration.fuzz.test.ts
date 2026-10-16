@@ -12,6 +12,7 @@ import { parseProject, type ParseProjectResult } from './projectMigration'
 import {
   createRng,
   expectNamedRefusal,
+  expectTallyAtLeast,
   fuzzFailure,
   mutateJson,
   nestDeep,
@@ -21,6 +22,12 @@ import {
 
 const SEED = 0x5eed0294
 const ITERATIONS = 600
+// Outcomes on the committed seed, measured 2026-10-15 (after the ESCSUITE-294
+// guards): 354 parsed, 246 refused. The floors ARE those counts: the seed is
+// fixed, so a check dropped anywhere lowers `refused` and a new over-strict one
+// lowers `accepted`. A change that moves an input across the line on purpose
+// updates the numbers here and says why.
+const FLOORS = { accepted: 354, refused: 246 }
 
 const transform = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }
 
@@ -152,6 +159,7 @@ describe('parseProject under seeded mutation (ESCSUITE-294)', () => {
 
   it(`answers ${ITERATIONS} mutated projects with a project or a reason, and never throws`, async () => {
     const rng = createRng(SEED)
+    const tally = { accepted: 0, refused: 0 }
     for (let iteration = 0; iteration < ITERATIONS; iteration++) {
       const { value, description } = mutateJson(rng, baseInput())
       const context = { seed: SEED, iteration, mutation: description }
@@ -162,8 +170,12 @@ describe('parseProject under seeded mutation (ESCSUITE-294)', () => {
         () => false,
         context
       )
-      if (outcome.ok) assertShape(outcome.value, context)
+      if (outcome.ok) {
+        assertShape(outcome.value, context)
+        tally[outcome.value.ok ? 'accepted' : 'refused']++
+      }
     }
+    expectTallyAtLeast(tally, FLOORS, SEED)
   })
 })
 
@@ -175,6 +187,8 @@ describe('defects the parseProject fuzz found (ESCSUITE-294)', () => {
     const { project, editor } = input as { project: unknown; editor: unknown }
     const outcome = await expectNamedRefusal(() => parseProject(project, editor), () => false, context)
     if (outcome.ok) assertShape(outcome.value, context)
+    // And refused, not quietly accepted.
+    expect(outcome.ok && !outcome.value.ok).toBe(true)
   }
 
   it('a legacy shapeOverlays entry that is not an overlay is answered, not thrown (seed 0x5eed0294, iteration 23)', async () => {
@@ -185,11 +199,13 @@ describe('defects the parseProject fuzz found (ESCSUITE-294)', () => {
     })
   })
 
-  it('a timeline.tracks entry that is null is answered, not thrown (seed 0xabc123, iteration 1624)', async () => {
+  it('a timeline.tracks entry that is null is answered, not thrown (exploratory seed 0xabc123, iteration 1624)', async () => {
     await check(setAt(baseInput(), ['project', 'timeline', 'tracks', 0], null), {
       seed: 0xabc123,
       iteration: 1624,
-      mutation: 'swapType project.timeline.tracks[0] -> null',
+      // Found by an exploratory 20,000-iteration run, not this file's SEED, so
+      // rerunning the file does not replay it; this case is the reproduction.
+      mutation: 'swapType project.timeline.tracks[0] -> null (exploratory seed, not this file\'s)',
     })
   })
 })

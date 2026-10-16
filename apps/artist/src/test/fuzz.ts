@@ -306,3 +306,23 @@ export async function expectNamedRefusal<T>(
     clearTimeout(timer);
   }
 }
+
+/** How many inputs one fuzz loop saw parse and saw refused. */
+export interface Tally {
+  accepted: number;
+  refused: number;
+}
+
+/**
+ * Fail a loop whose outcomes fell below the floors measured on its committed
+ * seed. The per-input contract cannot see a parser that quietly starts
+ * accepting (or refusing) everything; the tally can.
+ */
+export function expectTallyAtLeast(tally: Tally, floors: Tally, seed: number): void {
+  if (tally.accepted < floors.accepted || tally.refused < floors.refused) {
+    throw new FuzzContractError(
+      `fuzz outcomes below their floors (seed ${formatSeed(seed)}): ` +
+        `accepted ${tally.accepted} (floor ${floors.accepted}), refused ${tally.refused} (floor ${floors.refused})`
+    );
+  }
+}
