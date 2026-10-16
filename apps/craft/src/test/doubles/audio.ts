@@ -180,6 +180,52 @@ export interface AudioContextDoubleControl {
    * no clock at all and keeps the old path.
    */
   currentTimeAt: ((performanceTime: number) => number) | null
+  /**
+   * Opt-in AudioWorklet (ESCSUITE-299). Null (the default): new contexts have
+   * **no** `audioWorklet`, which is what a browser without one looks like — so
+   * every suite written before ESCSUITE-299 keeps the recorder on its
+   * ScriptProcessorNode capture. Read when a context is constructed (present or
+   * absent) and on every call (its values). See `enableAudioWorkletDouble()`.
+   */
+  audioWorklet: AudioWorkletDoubleControl | null
+}
+
+/**
+ * How the AudioWorklet double behaves (ESCSUITE-299).
+ *
+ * jsdom has no Web Audio at all, so this is the render thread in miniature:
+ * `addModule()` evaluates the module the page handed it — the `Blob` behind the
+ * last `URL.createObjectURL()` call — in a stand-in `AudioWorkletGlobalScope`
+ * (`registerProcessor`, `AudioWorkletProcessor`, `currentFrame`, `sampleRate`),
+ * so the processor that runs here is the real source text, not a copy of it.
+ * `context.render(frames)` then calls every live processor's `process()` once
+ * per 128-frame render quantum, advancing `currentFrame` — and the context's
+ * own `currentTime` — exactly as the engine does.
+ *
+ * What a processor posts reaches the page the way a real `MessagePort`
+ * delivers it: as a `{ data }` event on `port.onmessage`, structured-cloned
+ * with its transfer list (so a transferred buffer is detached on the processor
+ * side), first in first out, and never dropped while the port is open — but
+ * possibly late: with `holdMessages` set it waits in the node's `inbox` until
+ * the test calls `deliver()`. A closed port delivers nothing more, as a real
+ * one does.
+ */
+export interface AudioWorkletDoubleControl {
+  /** What `addModule()` rejects with; null (the default) resolves. */
+  addModuleError: unknown
+  /** Held open to park `addModule()` mid-flight. Null resolves at once. */
+  addModuleGate: Promise<void> | null
+  /**
+   * Keep every message a processor posts in its node's `inbox` until the test
+   * calls `deliver()`. False (the default) delivers each on a microtask.
+   */
+  holdMessages: boolean
+  /**
+   * The render thread never handles what the page posts to a processor — a
+   * stalled or suspended engine. False (the default) hands each message to the
+   * processor on a microtask.
+   */
+  processorDeaf: boolean
 }
 
 const control: AudioContextDoubleControl = {
@@ -193,6 +239,177 @@ const control: AudioContextDoubleControl = {
   contextSampleRate: null,
   outputClock: null,
   currentTimeAt: null,
+  audioWorklet: null,
+}
+
+/** Turn the AudioWorklet double on for every context constructed from now on. */
+export function enableAudioWorkletDouble(
+  overrides: Partial<AudioWorkletDoubleControl> = {}
+): AudioWorkletDoubleControl {
+  control.audioWorklet = {
+    addModuleError: null,
+    addModuleGate: null,
+    holdMessages: false,
+    processorDeaf: false,
+    ...overrides,
+  }
+  return control.audioWorklet
+}
+
+/** One render quantum, in frames — what `process()` is handed each call. */
+export const RENDER_QUANTUM_FRAMES = 128
+
+/** A processor class as `registerProcessor()` receives it. */
+type ProcessorConstructor = new (options?: unknown) => {
+  process(inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, never>): boolean
+}
+
+/** The processor-side end of a node's port, as `AudioWorkletProcessor.port`. */
+interface ProcessorPortDouble {
+  onmessage: ((event: { data: unknown }) => void) | null
+  postMessage(data: unknown, transfer?: Transferable[]): void
+}
+
+/** Handed to the processor base class while its node is constructing it. */
+let constructingPort: ProcessorPortDouble | null = null
+
+/** `AudioWorkletProcessor`: all it gives a subclass is its port. */
+class AudioWorkletProcessorDouble {
+  readonly port: ProcessorPortDouble
+  constructor() {
+    if (!constructingPort) throw new TypeError('Illegal constructor')
+    this.port = constructingPort
+  }
+}
+
+/**
+ * Evaluate a worklet module's source text in a stand-in global scope. `with`
+ * is what lets the module read `currentFrame` as a bare global, the way it
+ * does in a real `AudioWorkletGlobalScope`; the class bodies inside are strict
+ * mode either way.
+ */
+function evaluateWorkletModule(source: string, scope: object): void {
+  new Function('scope', `with (scope) {\n${source}\n}`)(scope)
+}
+
+/** The Blob the page handed `URL.createObjectURL()` last — what `url` names. */
+function lastObjectUrlBlob(): Blob {
+  const calls = (URL.createObjectURL as unknown as { mock?: { calls: unknown[][] } }).mock?.calls
+  const blob = calls?.at(-1)?.[0]
+  if (!(blob instanceof Blob)) {
+    throw new Error('AudioWorklet double: addModule() was not handed a URL.createObjectURL(Blob)')
+  }
+  return blob
+}
+
+/**
+ * `AudioWorkletNode`, running the processor its context registered under
+ * `name`. Installed as the global by `installAudioContextDouble()`.
+ */
+export class AudioWorkletNodeDouble {
+  readonly context: AudioContextDoubleInstance
+  readonly name: string
+  readonly options: Record<string, unknown> | undefined
+  readonly connect = vi.fn()
+  readonly disconnect = vi.fn()
+  /** The page's end of the port. */
+  readonly port: {
+    onmessage: ((event: { data: unknown }) => void) | null
+    postMessage: ReturnType<typeof vi.fn>
+    close: ReturnType<typeof vi.fn>
+  }
+  /** Posted by the processor, not yet handed to the page — oldest first. */
+  readonly inbox: unknown[] = []
+  /** Every message the processor posted, as it posted it (before cloning). */
+  readonly posted: Array<{ data: unknown; transfer: Transferable[] }> = []
+  /** Set when `process()` returned false: the engine stops calling it. */
+  finished = false
+  private portClosed = false
+  private readonly processor: InstanceType<ProcessorConstructor>
+  private readonly processorPort: ProcessorPortDouble
+  private readonly inputs: Float32Array[] = [
+    new Float32Array(RENDER_QUANTUM_FRAMES),
+    new Float32Array(RENDER_QUANTUM_FRAMES),
+  ]
+  private readonly outputs: Float32Array[][] = [
+    [new Float32Array(RENDER_QUANTUM_FRAMES), new Float32Array(RENDER_QUANTUM_FRAMES)],
+  ]
+  private inputSample = Number.NaN
+
+  constructor(context: AudioContextDoubleInstance, name: string, options?: Record<string, unknown>) {
+    const Processor = context.registeredProcessors.get(name)
+    if (!Processor) {
+      throw new DOMException(`The node name '${name}' is not defined in AudioWorkletGlobalScope.`, 'InvalidStateError')
+    }
+    this.context = context
+    this.name = name
+    this.options = options
+    this.port = {
+      onmessage: null,
+      postMessage: vi.fn((data: unknown) => {
+        if (this.portClosed || control.audioWorklet?.processorDeaf) return
+        queueMicrotask(() => this.processorPort.onmessage?.({ data }))
+      }),
+      close: vi.fn(() => {
+        this.portClosed = true
+      }),
+    }
+    this.processorPort = {
+      onmessage: null,
+      postMessage: (data: unknown, transfer: Transferable[] = []) => {
+        this.posted.push({ data, transfer })
+        this.inbox.push(structuredClone(data, { transfer }))
+        if (!control.audioWorklet?.holdMessages) queueMicrotask(() => this.deliver())
+      },
+    }
+    constructingPort = this.processorPort
+    try {
+      this.processor = new Processor(options)
+    } finally {
+      constructingPort = null
+    }
+    context.workletNodes.push(this)
+  }
+
+  /**
+   * Hand the page up to `count` of the oldest messages the processor posted,
+   * in order. A closed port hands over nothing — and stops mid-way if the page
+   * closes it from inside a handler. Returns how many were handed over.
+   */
+  deliver(count = Infinity): number {
+    let delivered = 0
+    while (delivered < count && this.inbox.length > 0 && !this.portClosed) {
+      const data = this.inbox.shift()
+      delivered++
+      this.port.onmessage?.({ data })
+    }
+    return delivered
+  }
+
+  /**
+   * One render quantum: `input(channel, frame)` for each of `channelCount`
+   * input channels (none at all models an input with nothing connected), or a
+   * constant 0.25 when no function is given.
+   */
+  renderQuantum(
+    frame: number,
+    input: ((channel: number, frame: number) => number) | undefined,
+    channelCount: number
+  ): void {
+    if (this.finished) return
+    if (input) {
+      for (let c = 0; c < this.inputs.length; c++) {
+        for (let i = 0; i < RENDER_QUANTUM_FRAMES; i++) this.inputs[c][i] = input(c, frame + i)
+      }
+      this.inputSample = Number.NaN
+    } else if (this.inputSample !== 0.25) {
+      for (const channel of this.inputs) channel.fill(0.25)
+      this.inputSample = 0.25
+    }
+    this.context.renderingFrame = frame
+    const inputs = [this.inputs.slice(0, channelCount)]
+    if (!this.processor.process(inputs, this.outputs, {})) this.finished = true
+  }
 }
 
 function makeAudioTrack(index: number): MediaStreamTrack {
@@ -238,10 +455,26 @@ export class AudioContextDoubleInstance {
     return control.decodeResult as unknown as AudioBuffer
   })
   readonly decodedByteLengths: number[] = []
-  /** `control.currentTimeAt` at the current `performance.now()`, or undefined. */
+  /**
+   * `control.currentTimeAt` at the current `performance.now()` when set; else,
+   * on a context with the AudioWorklet double, the render position — frames
+   * rendered so far over the rate, which is what a real context reports;
+   * else undefined.
+   */
   get currentTime(): number | undefined {
-    return control.currentTimeAt?.(performance.now())
+    if (control.currentTimeAt) return control.currentTimeAt(performance.now())
+    return this.audioWorklet ? this.renderedFrames / this.sampleRate : undefined
   }
+  /** Present only when `control.audioWorklet` was set at construction. */
+  audioWorklet?: { addModule: ReturnType<typeof vi.fn<(url: string) => Promise<void>>> }
+  /** What the evaluated worklet modules registered, by name. */
+  readonly registeredProcessors = new Map<string, ProcessorConstructor>()
+  /** Every AudioWorkletNode built on this context, in creation order. */
+  readonly workletNodes: AudioWorkletNodeDouble[] = []
+  /** Frames rendered so far — the worklet scope's `currentFrame` between quanta. */
+  renderedFrames = 0
+  /** `currentFrame` as the processor being called sees it. */
+  renderingFrame = 0
   /** Present only when `control.outputClock` was set at construction. */
   getOutputTimestamp?: ReturnType<typeof vi.fn<() => { contextTime: number; performanceTime: number }>>
 
@@ -257,7 +490,48 @@ export class AudioContextDoubleInstance {
         return { contextTime: outputClockContextTime(clock, performanceTime), performanceTime }
       })
     }
+    if (control.audioWorklet) {
+      const scope = {
+        registerProcessor: (name: string, processor: ProcessorConstructor) => {
+          this.registeredProcessors.set(name, processor)
+        },
+        AudioWorkletProcessor: AudioWorkletProcessorDouble,
+      }
+      Object.defineProperties(scope, {
+        currentFrame: { get: () => this.renderingFrame },
+        sampleRate: { get: () => this.sampleRate },
+      })
+      this.audioWorklet = {
+        addModule: vi.fn(async () => {
+          const blob = lastObjectUrlBlob()
+          const worklet = control.audioWorklet!
+          if (worklet.addModuleGate) await worklet.addModuleGate
+          if (worklet.addModuleError !== null) throw worklet.addModuleError
+          evaluateWorkletModule(await blob.text(), scope)
+        }),
+      }
+    }
     control.contexts.push(this)
+  }
+
+  /**
+   * Render `frames` (a whole number of quanta) through every AudioWorkletNode
+   * on this context, in creation order, advancing the render position.
+   * `input(channel, frame)` supplies the samples; `channelCount` 0 is an input
+   * with nothing connected.
+   */
+  render(
+    frames: number,
+    input?: (channel: number, frame: number) => number,
+    channelCount = 2
+  ): void {
+    if (frames % RENDER_QUANTUM_FRAMES !== 0) {
+      throw new Error(`render(): ${frames} is not a whole number of ${RENDER_QUANTUM_FRAMES}-frame quanta`)
+    }
+    for (let done = 0; done < frames; done += RENDER_QUANTUM_FRAMES) {
+      for (const node of this.workletNodes) node.renderQuantum(this.renderedFrames, input, channelCount)
+      this.renderedFrames += RENDER_QUANTUM_FRAMES
+    }
   }
 
   createAnalyser(): AnalyserDouble {
@@ -306,6 +580,7 @@ export class AudioContextDoubleInstance {
 }
 
 let originalAudioContext: unknown
+let originalAudioWorkletNode: unknown
 let installed = false
 
 /**
@@ -317,7 +592,9 @@ export function installAudioContextDouble(): AudioContextDoubleControl {
   if (!installed) {
     const g = globalThis as unknown as Record<string, unknown>
     originalAudioContext = g.AudioContext
+    originalAudioWorkletNode = g.AudioWorkletNode
     g.AudioContext = AudioContextDoubleInstance
+    g.AudioWorkletNode = AudioWorkletNodeDouble
     installed = true
   }
   resetAudioContextDouble()
@@ -329,6 +606,8 @@ export function uninstallAudioContextDouble(): void {
   const g = globalThis as unknown as Record<string, unknown>
   if (originalAudioContext === undefined) delete g.AudioContext
   else g.AudioContext = originalAudioContext
+  if (originalAudioWorkletNode === undefined) delete g.AudioWorkletNode
+  else g.AudioWorkletNode = originalAudioWorkletNode
   installed = false
   resetAudioContextDouble()
 }
@@ -344,6 +623,7 @@ export function resetAudioContextDouble(): void {
   control.contextSampleRate = null
   control.outputClock = null
   control.currentTimeAt = null
+  control.audioWorklet = null
 }
 
 /** The single AudioContext the code under test created (fails loudly if none). */

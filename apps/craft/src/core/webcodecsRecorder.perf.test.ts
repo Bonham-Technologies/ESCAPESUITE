@@ -2,7 +2,8 @@
 //
 // WebCodecsRecorder runs for the whole length of a take, on whatever machine
 // the user has, and three of its loops repeat: the frame capture (30/s), the
-// ScriptProcessor's audio callback (~12/s at 4096 samples), and the
+// audio capture (~12/s at 4096 samples — an AudioWorklet chunk since
+// ESCSUITE-299, a ScriptProcessor callback on the fallback path), and the
 // audio-level monitor. The monitor is the one that used to be free-running —
 // one emission per animation frame, each one a store write that re-rendered
 // ESCAPECRAFT's tree, plus a fresh Uint8Array per analyser for the FFT to be
@@ -36,6 +37,7 @@ import { getMediabunnyState, resetMediabunnyDouble } from '../test/doubles/media
 import {
   installAudioContextDouble,
   uninstallAudioContextDouble,
+  enableAudioWorkletDouble,
   lastAudioContext,
   createAudioBufferDouble,
   type AnalyserDouble,
@@ -251,6 +253,8 @@ describe('WebCodecsRecorder work ceilings', () => {
       expect(allFramesClosed()).toBe(true)
     })
 
+    // The ScriptProcessorNode path — the fallback since ESCSUITE-299, and what
+    // every case in this file without `enableAudioWorkletDouble()` measures.
     it('allocates one planar buffer per audio buffer and closes every AudioData', async () => {
       await initializeWithAudio()
       recorder.start()
@@ -301,6 +305,83 @@ describe('WebCodecsRecorder work ceilings', () => {
       expect(lastAudioContext().close).toHaveBeenCalledTimes(1)
       // ...and the monitor is not left scheduled behind it.
       expect(raf.pending()).toBe(0)
+    })
+  })
+
+  // ESCSUITE-299, 2026-10-16: a deliberate pin change. The conservation law
+  // for audio used to be "one AudioData per ScriptProcessor callback"; on the
+  // AudioWorklet path — the one a take now runs on wherever the browser has an
+  // AudioWorklet — it is "one AudioData created, encoded once and closed per
+  // chunk the processor posts", and the fallback path above keeps the old law
+  // exactly. A chunk is 4096 frames, the same ~85 ms a callback was, so the
+  // rate of AudioData, encodes and planar buffers per second is unchanged.
+  describe('one take of captured audio on the AudioWorklet path', () => {
+    const CHUNKS = 12
+
+    it('creates one AudioData per posted chunk, encodes it once, and closes it', async () => {
+      enableAudioWorkletDouble()
+      await initializeWithAudio()
+      recorder.start()
+
+      const context = lastAudioContext()
+      context.render(CHUNKS * AUDIO_BUFFER_FRAMES)
+      await flush()
+
+      const posted = context.workletNodes[0].posted
+      const audioData = getCreatedFrames('AudioData')
+      // Exact: one AudioData per chunk, each encoded once and closed.
+      expect(posted).toHaveLength(CHUNKS)
+      expect(audioData).toHaveLength(CHUNKS)
+      expect(lastAudioEncoder().encodes).toHaveLength(CHUNKS)
+      expect(lastAudioEncoder().encodes.map(e => e.data)).toEqual(audioData)
+      expect(audioData.every(d => d.closed)).toBe(true)
+      // Measured 2026-10-16: one Float32Array per chunk on the page — the two
+      // transferred channels laid out planar for the AudioData — the same one
+      // per buffer the ScriptProcessor path measures above.
+      expect(new Set(audioData.map(d => d.source)).size).toBe(audioData.length)
+
+      await recorder.stop()
+      // Exact: the stop flushes the tail once and the node is let go once.
+      expect(context.workletNodes[0].port.postMessage).toHaveBeenCalledTimes(1)
+      expect(context.workletNodes[0].disconnect).toHaveBeenCalledTimes(1)
+      expect(lastAudioEncoder().flushCalls).toBe(1)
+      expect(allFramesClosed()).toBe(true)
+    })
+
+    it('per pipeline: one AudioData per chunk for the mix and each audio companion', async () => {
+      enableAudioWorkletDouble()
+      installTrackProcessorDouble()
+      const webcamStream = createStreamDouble([
+        createTrackDouble('video', { id: 'webcam-video', settings: { width: 640, height: 480 } }),
+      ])
+      try {
+        await recorder.initialize(screenStream, webcamStream, micStream, {
+          ...baseConfig,
+          webcamEnabled: true,
+          separateTracks: true,
+          microphoneEnabled: true,
+          systemAudioEnabled: true,
+        })
+        recorder.start()
+
+        const context = lastAudioContext()
+        context.render(CHUNKS * AUDIO_BUFFER_FRAMES)
+        await flush()
+
+        expect(context.workletNodes).toHaveLength(3)
+        expect(context.scriptProcessors).toHaveLength(0)
+        for (const encoder of AudioEncoderDouble.instances) {
+          expect(encoder.encodes).toHaveLength(CHUNKS)
+        }
+        const audioData = getCreatedFrames('AudioData')
+        expect(audioData).toHaveLength(3 * CHUNKS)
+        expect(audioData.every(d => d.closed)).toBe(true)
+        // Exact: one AudioContext and one module load for the whole take.
+        expect(audio.contexts).toHaveLength(1)
+        expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(1)
+      } finally {
+        uninstallTrackProcessorDouble()
+      }
     })
   })
 
