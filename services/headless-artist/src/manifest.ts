@@ -51,6 +51,9 @@ export async function buildManifest(
     width: meta.width,
     height: meta.height,
     gpu: meta.gpu,
+    // ESCSUITE-292: present exactly when the render measured its mix — additive, so a consumer
+    // that reads only the fields it always has is unaffected.
+    ...(meta.loudness ? { loudness: meta.loudness } : {}),
     sha256,
     chromiumVersion: versions.chromiumVersion,
     engineVersion: versions.engineVersion,
