@@ -78,6 +78,10 @@ test('headersFor, called with no config, reads the real vercel.json — the serv
   // out of vercel.json itself rather than retyped here, so an edit to the
   // policy can never silently stop being covered by this assertion.
   assert.match(csp.value, /media-src 'self' blob:/)
+  // ESCSUITE-299: ESCAPECRAFT loads its AudioWorklet module from a blob: URL,
+  // and a worklet module is fetched under script-src — without this the hosted
+  // recorder silently falls back to the ScriptProcessorNode.
+  assert.match(csp.value, /script-src [^;]*blob:/)
 
   const frameOptions = headers.find((header) => header.key === 'X-Frame-Options')
   assert.ok(frameOptions, 'vercel.json should also declare X-Frame-Options')
