@@ -4542,7 +4542,8 @@ posted chunk, one flush message and one disconnect per take; three nodes, thirty
 `compositor.perf.test.ts`, `converter.perf.test.ts` and every `App.*rerender*` are byte-identical. Outside
 vitest's measurement: `apps/e2e/tests/production/csp-audio-worklet.spec.ts` under the served
 Content-Security-Policy (a take on the worklet path with no violation; the inverse with `blob:` stripped
-from the served header falling back with a `script-src` violation) and `serve-dist.test.mjs`'s directive
+from the served header falling back, Chromium naming the refused `blob:` module only in the recorder's own
+fallback line — it fires no `securitypolicyviolation` and prints no refusal) and `serve-dist.test.mjs`'s directive
 pin, 19 / 19. **No floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is

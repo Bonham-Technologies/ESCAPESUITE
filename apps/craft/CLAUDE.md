@@ -1390,8 +1390,9 @@ path is live — captures through an AudioWorklet wherever it can:
 `vercel.json`'s `script-src` carries `blob:` (ESCSUITE-299; before it, every hosted take was refused
 the module and quietly fell back). `apps/e2e/tests/production/csp-audio-worklet.spec.ts` records a
 take under the policy `serve-dist.mjs` serves and expects the AudioWorklet line and no violation,
-and — with `blob:` stripped from the served `script-src` — the ScriptProcessorNode line and a
-`script-src` violation; `serve-dist.test.mjs` pins `blob:` in the policy without a browser. The dev
+and — with `blob:` stripped from the served `script-src` — the ScriptProcessorNode line naming the
+refused `blob:` module (Chromium 156 fires no `securitypolicyviolation` and prints no refusal for a
+blocked worklet module; the recorder's own line is the one trace); `serve-dist.test.mjs` pins `blob:` in the policy without a browser. The dev
 server, the standalone file and the headless kit send no policy. A self-hosted build that sends its
 own needs `blob:` in `script-src` too, or it gets the fallback.
 
