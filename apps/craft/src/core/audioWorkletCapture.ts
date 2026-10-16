@@ -11,7 +11,10 @@
  * first sample, its buffers transferred. A `MessagePort` queues what it is
  * given and never drops it, so however late the page gets to a chunk, the
  * chunk says where it was rendered: the audio is stamped on the render clock
- * itself, with nothing to fill and no threshold to tune.
+ * itself, with nothing to fill and no threshold to tune. Once a chunk is
+ * encoded the page hands its buffers back over the same port (ESCSUITE-303),
+ * so the render thread fills the next chunk from a pool of at most
+ * `POOL_PAIRS` pairs and allocates only when the pool is empty.
  *
  * **The ScriptProcessorNode path** — the fallback, for a browser with no
  * `audioWorklet` or whose `addModule()` refuses the module — is ESCSUITE-296's
@@ -26,6 +29,13 @@ import { createAudioGapFiller } from './audioGapFiller';
 
 /** Frames per channel in each chunk the processor posts: ~85 ms at 48 kHz. */
 export const CHUNK_FRAMES = 4096;
+
+/**
+ * The most chunk buffer pairs the processor keeps for reuse (ESCSUITE-303): a
+ * page up to this many chunks behind costs the render thread no allocation.
+ * A pair handed back beyond it is dropped.
+ */
+export const POOL_PAIRS = 4;
 
 /** The name the processor is registered under. */
 export const AUDIO_CAPTURE_PROCESSOR_NAME = 'escapecraft-capture';
@@ -44,17 +54,25 @@ const SCRIPT_PROCESSOR_BUFFER = 4096;
  * The processor, as the source text of a worklet module.
  *
  * Plain JavaScript run in an `AudioWorkletGlobalScope`, where `currentFrame`
- * is a global. Each chunk is two fresh `Float32Array`s that are transferred,
- * not copied, so nothing on the render thread is reused after it is posted.
+ * is a global. Each chunk is a pair of `Float32Array`s that are transferred,
+ * not copied, so nothing on the render thread touches a buffer after it is
+ * posted. The pair comes from the pool when one is waiting — the page hands
+ * every chunk's buffers back as `{ recycle: channels }`, transferred, once it
+ * has encoded them — and is two fresh arrays only when the pool is empty
+ * (ESCSUITE-303: two fresh arrays per chunk were ~32 KB of garbage on the
+ * render thread every ~85 ms). The pool keeps at most `POOL_PAIRS` pairs and
+ * drops a pair that is not `CHUNK_FRAMES` long (a tail, sliced). A recycled
+ * pair is never cleared up front: every sample of a chunk is written as it
+ * fills — silence included, written as zeros rather than assumed.
  * The node is built with two channels, explicit, so an input has either two
  * channels or — with nothing actively connected — none, which is silence; the
  * quantum's length is read from the node's output, which always exists.
- * `'flush'` is the only message it is sent: it posts what it has gathered (if
- * anything), acknowledges with `{ flushed: true }` behind it on the same port,
- * and stops processing.
+ * `'flush'` posts what it has gathered (if anything), acknowledges with
+ * `{ flushed: true }` behind it on the same port, and stops processing.
  */
 export const AUDIO_CAPTURE_WORKLET_SOURCE = `
 const CHUNK_FRAMES = ${CHUNK_FRAMES};
+const POOL_PAIRS = ${POOL_PAIRS};
 
 class EscapeCraftCapture extends AudioWorkletProcessor {
   constructor() {
@@ -63,10 +81,18 @@ class EscapeCraftCapture extends AudioWorkletProcessor {
     this.frame = 0;
     this.filled = 0;
     this.flushed = false;
-    this.port.onmessage = () => {
-      if (this.filled > 0) this.post();
-      this.port.postMessage({ flushed: true });
-      this.flushed = true;
+    this.pool = [];
+    this.port.onmessage = (event) => {
+      if (event.data === 'flush') {
+        if (this.filled > 0) this.post();
+        this.port.postMessage({ flushed: true });
+        this.flushed = true;
+        return;
+      }
+      const channels = event.data.recycle;
+      if (this.pool.length < POOL_PAIRS && channels.every((c) => c.length === CHUNK_FRAMES)) {
+        this.pool.push(channels);
+      }
     };
   }
 
@@ -87,12 +113,17 @@ class EscapeCraftCapture extends AudioWorkletProcessor {
     while (offset < length) {
       if (this.filled === 0) {
         this.frame = currentFrame + offset;
-        this.channels = [new Float32Array(CHUNK_FRAMES), new Float32Array(CHUNK_FRAMES)];
+        this.channels = this.pool.pop() || [new Float32Array(CHUNK_FRAMES), new Float32Array(CHUNK_FRAMES)];
       }
       const count = Math.min(length - offset, CHUNK_FRAMES - this.filled);
       if (input.length > 0) {
         this.channels[0].set(input[0].subarray(offset, offset + count), this.filled);
         this.channels[1].set(input[1].subarray(offset, offset + count), this.filled);
+      } else {
+        // A recycled pair still holds the chunk it last carried: silence is
+        // written, not assumed.
+        this.channels[0].fill(0, this.filled, this.filled + count);
+        this.channels[1].fill(0, this.filled, this.filled + count);
       }
       this.filled += count;
       offset += count;
@@ -188,6 +219,9 @@ export async function createAudioCapture(
 
 /** What the processor posts. */
 type ProcessorMessage = { frame: number; channels: Float32Array[] } | { flushed: true };
+
+/** What the page posts the processor: `'flush'`, or a chunk's buffers for its pool. */
+type PageMessage = 'flush' | { recycle: Float32Array[] };
 
 /**
  * A stretch of the render clock that is being recorded: `[from, to)` in render
@@ -297,6 +331,13 @@ function createWorkletCapture(
       if (from >= to) continue;
       encodePiece(channels, from - frame, to - from, from - span.from + span.offset);
     }
+    // Every piece above was copied out — `encodePiece` lays it planar into a
+    // buffer of its own before the AudioData is built, and the AudioData keeps
+    // nothing of `channels` — so the chunk's buffers go back to the processor's
+    // pool now (ESCSUITE-303). Even a chunk that kept nothing (rendered while
+    // paused, or after `stop()`): the node lives until `close()`. Not after
+    // it: an encode that closed the capture has let the port go.
+    if (!closed) node.port.postMessage({ recycle: channels } satisfies PageMessage, channels.map((c) => c.buffer));
   };
 
   source.connect(node);
@@ -334,7 +375,7 @@ function createWorkletCapture(
               clearTimeout(timer);
               resolve();
             };
-            node.port.postMessage('flush');
+            node.port.postMessage('flush' satisfies PageMessage);
           });
       return stopped;
     },
