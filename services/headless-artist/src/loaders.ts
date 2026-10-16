@@ -641,11 +641,11 @@ export async function loadManifest(manifestPath: string): Promise<LoadedJob> {
     const source = entry as unknown as ManifestSource
 
     assertUniqueSourceId(source.id, sourceIds)
-    // Both optional (the file's basename and extension stand in), but one that is present must
-    // be a usable string, as a bundle entry's are (ESCSUITE-294).
+    // Both optional (the file's basename and extension stand in, for null as for absent), but
+    // one that is present must be a usable string, as a bundle entry's are (ESCSUITE-294).
     for (const field of ['name', 'mimeType'] as const) {
       const value = entry[field]
-      if (value !== undefined && (typeof value !== 'string' || value.length === 0)) {
+      if (value != null && (typeof value !== 'string' || value.length === 0)) {
         throw new Error(`manifest source "${source.id}" field "${field}" must be a non-empty string`)
       }
     }

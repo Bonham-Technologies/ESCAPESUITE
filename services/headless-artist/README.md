@@ -165,10 +165,12 @@ disk. Nothing is copied and nothing is base64-encoded, so a 40 GB job costs the 
   (absolute paths work too). The file must exist; a missing one fails the job immediately.
 - **`sources[].mimeType`** — optional. Inferred from the extension when omitted:
   `mp4`, `webm`, `mov`, `png`, `jpg`, `jpeg`, `gif`, `webp`, `mp3`, `wav`, `ogg`, `m4a`, `aac`.
-  Any other extension needs an explicit `mimeType`. One that is given must be a non-empty
-  string.
+  Any other extension needs an explicit `mimeType`. `null` counts as omitted; any other value
+  must be a non-empty string. An empty `""`, which was inferred like an omitted one before
+  ESCSUITE-294, is now refused.
 - **`sources[].name`** — optional display name; defaults to the file's basename. One that is
-  given must be a non-empty string.
+  given must be a non-empty string (`null` counts as omitted). An empty `""`, which was kept as
+  the name before ESCSUITE-294, is now refused.
 - **`sources[].width`, `height`, `duration`** — optional. Probed from the bytes when omitted;
   supplying them saves a probe.
 - **`sources[].meta`** — optional, mirrors a `.veditor` bundle video's own `meta` below
