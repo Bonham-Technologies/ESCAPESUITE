@@ -581,6 +581,24 @@ export class WebCodecsRecorder {
 
     // Set up audio encoder if we have audio
     if (this.audioSource) {
+      // A context that ignored the 48 kHz request has its audio encoded at the
+      // rate it really runs at — which an engine's Opus encoder might refuse,
+      // and say so only through `error:`, after `configure()` has resolved:
+      // a take with no sound in it and nothing to tell the user. Asked first,
+      // so such a take fails to start instead. Every audio encoder of the take
+      // (the mix and each companion) runs at this one rate.
+      if (this.sampleRate !== this.requestedSampleRate) {
+        const { supported } = await AudioEncoder.isConfigSupported({
+          codec: 'opus',
+          sampleRate: this.sampleRate,
+          numberOfChannels: 2,
+        });
+        this.abortIfDisposed();
+        if (!supported) {
+          throw new Error(`Opus audio cannot be encoded at this device's ${this.sampleRate} Hz`);
+        }
+      }
+
       this.audioEncoder = this.registerCodec(
         new AudioEncoder({
           output: async (chunk, meta) => {
@@ -1304,6 +1322,10 @@ export class WebCodecsRecorder {
     // this method has just checked for.
     const context = this.audioContext!;
     this.clockContext = this.readOutputTimestamp(context, this.startTime) ? context : null;
+    // One line per take, so a field report can say which clock its file used.
+    console.log(
+      `Video stamped in ${this.clockContext ? 'audio-context time' : 'performance.now() time (no usable audio-context clock)'}`
+    );
     this.contextStart = this.contextTimeAt(this.startTime);
     this.pausedContextSeconds = 0;
 

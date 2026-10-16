@@ -364,6 +364,16 @@ describe('audio and video timelines advance together over a long take', () => {
   }, 60_000)
 })
 
+describe('a context at a rate the Opus encoder refuses', () => {
+  it('fails the take at initialize() instead of recording it silent', async () => {
+    audio.contextSampleRate = 44100
+    AudioEncoderDouble.supportPlan = config => (config as { sampleRate: number }).sampleRate === 48000
+    await expect(initialize()).rejects.toThrow('44100 Hz')
+    // No audio encoder was ever built.
+    expect(AudioEncoderDouble.instances).toHaveLength(0)
+  })
+})
+
 describe('the video clock', () => {
   /** Frames at these wall offsets (ms) after start(); returns their stamps. */
   async function stampsAt(offsetsMs: number[], midTake?: () => void): Promise<number[]> {
@@ -386,11 +396,15 @@ describe('the video clock', () => {
     audio.outputClock = { ...FAST }
     expect(await stampsAt([0, 2000, 4000])).toEqual([0, 3_000_000, 6_000_000])
     expect(lastAudioContext().getOutputTimestamp).toHaveBeenCalled()
+    expect(console.log).toHaveBeenCalledWith('Video stamped in audio-context time')
   })
 
   it('falls back to performance.now() when the context has no getOutputTimestamp()', async () => {
     expect(await stampsAt([0, 2000, 4000])).toEqual([0, 2_000_000, 4_000_000])
     expect(lastAudioContext().getOutputTimestamp).toBeUndefined()
+    expect(console.log).toHaveBeenCalledWith(
+      'Video stamped in performance.now() time (no usable audio-context clock)'
+    )
   })
 
   it('falls back to performance.now() when getOutputTimestamp() reports zeros (the context has not rendered)', async () => {
