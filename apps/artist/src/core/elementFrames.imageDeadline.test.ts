@@ -31,6 +31,7 @@ const load = () =>
 describe('an image that never settles in the element exporters (ESCSUITE-328)', () => {
   it('is warned about and skipped at 15 s, the image torn down', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const removeSrc = vi.spyOn(HTMLImageElement.prototype, 'removeAttribute')
     let sources: Awaited<ReturnType<typeof load>> | undefined
     void load().then((s) => (sources = s))
     await vi.advanceTimersByTimeAsync(14_999)
@@ -40,7 +41,7 @@ describe('an image that never settles in the element exporters (ESCSUITE-328)', 
     expect(sources!.imageElements.size).toBe(0)
     expect(warn).toHaveBeenCalledWith('Failed to load media img1')
     expect(media.images[0].onload).toBeNull()
-    expect(media.images[0].getAttribute('src')).toBeNull()
+    expect(removeSrc).toHaveBeenCalledWith('src')
   })
 
   it('is kept when it loads at 14.9 s, the timer cleared', async () => {
