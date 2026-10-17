@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { extractVideoMetadata } from './videoProcessor'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { mediaFile } from '../test/doubles/files'
+import { restoreEngine, setEngine } from '../test/engine'
 
 // ESCSUITE-327: an engine the probe was not measured on stores 30 'assumed'
 // through the arm videoProcessor already has; Chromium still measures.
@@ -17,13 +18,11 @@ describe('extractVideoMetadata frame-rate engine gate (ESCSUITE-327)', () => {
 
   afterEach(() => {
     media.uninstall()
-    vi.unstubAllGlobals()
+    restoreEngine()
   })
 
   it('stores 30 assumed on Firefox, without playing the element', async () => {
-    vi.stubGlobal('navigator', {
-      userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:157.0) Gecko/20100101 Firefox/157.0',
-    })
+    setEngine('firefox')
 
     const metadata = await extractVideoMetadata(mediaFile(['v'], 'sixty.mp4', 'video/mp4'))
 
@@ -33,11 +32,17 @@ describe('extractVideoMetadata frame-rate engine gate (ESCSUITE-327)', () => {
   })
 
   it('measures on Chromium', async () => {
-    vi.stubGlobal('navigator', { userAgent: 'x', userAgentData: { brands: [{ brand: 'Chromium' }] } })
+    setEngine('chromium')
 
     const metadata = await extractVideoMetadata(mediaFile(['v'], 'sixty.mp4', 'video/mp4'))
 
     expect(metadata.frameRate).toBe(60)
     expect(metadata.frameRateSource).toBe('measured')
+  })
+
+  // ESCSUITE-119: restoring the engine must not take the setup file's stubs with it.
+  it('leaves the URL stubs from src/test/setup.ts as mock functions', () => {
+    expect(vi.isMockFunction(URL.createObjectURL)).toBe(true)
+    expect(vi.isMockFunction(URL.revokeObjectURL)).toBe(true)
   })
 })
