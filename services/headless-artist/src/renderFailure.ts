@@ -14,8 +14,20 @@ export const OUTPUT_SIZE_UNSUPPORTED = 'OUTPUT_SIZE_UNSUPPORTED'
  */
 export const AUDIO_CODEC_UNAVAILABLE = 'AUDIO_CODEC_UNAVAILABLE'
 
+/**
+ * The bundle's `ExportError.code` for a source whose seeks never complete in this browser
+ * (ESCSUITE-305) — a WebM with no Cues index, in an engine that cannot seek one. Every frame
+ * would be black; retrying on the same engine fails identically. Chromium, the reference
+ * image's engine, seeks such a file, so the kit should not meet it there.
+ */
+export const SOURCE_NOT_SEEKABLE = 'SOURCE_NOT_SEEKABLE'
+
 /** Every code that names a failure of the job's input rather than of this run. */
-const PERMANENT_CODES: ReadonlySet<string> = new Set([OUTPUT_SIZE_UNSUPPORTED, AUDIO_CODEC_UNAVAILABLE])
+const PERMANENT_CODES: ReadonlySet<string> = new Set([
+  OUTPUT_SIZE_UNSUPPORTED,
+  AUDIO_CODEC_UNAVAILABLE,
+  SOURCE_NOT_SEEKABLE,
+])
 
 /**
  * What the in-page render hands back across the Playwright evaluate boundary. Playwright

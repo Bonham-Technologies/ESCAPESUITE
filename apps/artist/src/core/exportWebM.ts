@@ -36,6 +36,7 @@ import {
   // (ESCSUITE-152 moved it here; ESCSUITE-29 Mechanism 1 is why this file
   // needs it at all).
   ExportError,
+  exportErrorCodeOf,
   type ExportLogEntry,
 } from './exportTypes';
 import {
@@ -543,6 +544,6 @@ export async function exportToWebM(
     // ESCSUITE-29) in ExportError to carry the diagnostic log.
     const message = error instanceof Error ? error.message : String(error);
     log('error', `Export failed: ${message}`);
-    throw new ExportError(message, exportLog, frameCount, totalFrames);
+    throw new ExportError(message, exportLog, frameCount, totalFrames, exportErrorCodeOf(error));
   }
 }

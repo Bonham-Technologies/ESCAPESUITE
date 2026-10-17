@@ -7,6 +7,7 @@ import {
   type FallbackCallback,
   type IFrameSource,
 } from './frameSource';
+import { SourceNotSeekableError } from './seekWedge';
 
 /**
  * Frame manager for WebCodecs-based export
@@ -57,7 +58,8 @@ export async function loadFrameSource(
   blob: Blob,
   mimeType: string,
   onFallback?: FallbackCallback,
-  frameRate?: number
+  frameRate?: number,
+  sourceName?: string
 ): Promise<IFrameSource> {
   const source = await manager.factory.createSource(
     sourceId,
@@ -65,7 +67,8 @@ export async function loadFrameSource(
     mimeType,
     undefined,
     onFallback,
-    frameRate
+    frameRate,
+    sourceName
   );
   manager.sources.set(sourceId, source);
   return source;
@@ -103,6 +106,9 @@ export async function getFrameAtTime(
 
     return frame;
   } catch (error) {
+    // A source whose seeks never complete is not a frame to skip: skipping it
+    // every frame is how a WebM exported black on Firefox (ESCSUITE-305).
+    if (error instanceof SourceNotSeekableError) throw error;
     console.warn(`Failed to get frame for ${sourceId} at ${timestamp}:`, error);
     return null;
   }

@@ -33,6 +33,7 @@ import {
   isAudioCodecSupported,
   waitForEncoderBackpressure,
   ExportError,
+  exportErrorCodeOf,
   EXPORT_AUDIO_CHANNELS,
   EXPORT_AUDIO_SAMPLE_RATE,
   noAudioNote,
@@ -309,7 +310,8 @@ export async function exportToMP4(
             blob,
             blob.type || 'video/mp4',
             reportInPageDecoding,
-            source?.frameRate
+            source?.frameRate,
+            source?.name
           );
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
@@ -776,6 +778,6 @@ export async function exportToMP4(
     // Wrap other errors in ExportError to carry the diagnostic log
     const message = error instanceof Error ? error.message : String(error);
     log('error', `Export failed: ${message}`);
-    throw new ExportError(message, exportLog, frameCount, totalFrames);
+    throw new ExportError(message, exportLog, frameCount, totalFrames, exportErrorCodeOf(error));
   }
 }
