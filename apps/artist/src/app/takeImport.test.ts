@@ -5,7 +5,8 @@
 // so the two suites see the same boundaries.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { importTake } from './takeImport'
-import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage'
+import { getAllVideoMetadata, getThumbnail, getVideo, storeVideo } from '../core/storage'
+import { buildWebm, hasNonEmptyCues } from '../test/fixtures/webmFixture'
 import { resolveStoredDuration } from '../core/videoProcessor'
 import { extractWaveformData } from '../utils/waveform'
 import { sampleVideo } from '../test/appDoubles'
@@ -583,5 +584,54 @@ describe('importTake', () => {
       expect(take.clipParts).toHaveLength(3)
       expect(take.missingParts).toBe(0)
     })
+  })
+})
+
+// ESCSUITE-305 rule 3. Every composited-PiP take ESCAPECRAFT has stored carries
+// an empty Cues index, which Firefox cannot seek: an export of it came out
+// black. The handoff remuxes such a primary with a real index, once, and
+// rewrites ESCAPECRAFT's own row in place — the same packets, so the same
+// recording, and the only way a wedged seek can be cured.
+describe('importTake and the seek index', () => {
+  const take = (bytes: Uint8Array, type = 'video/webm;codecs=vp9,opus') => ({
+    blob: new Blob([bytes as BlobPart], { type }),
+    metadata: { ...sampleVideo, id: 'take-pip', name: 'PiP take', mimeType: type },
+  })
+
+  it('remuxes a primary whose Cues index is empty and re-stores it under its own id, once', async () => {
+    const handed = take(buildWebm({ cues: 'empty' }))
+
+    await importTake(handed, addSourceVideo)
+
+    expect(storeVideo).toHaveBeenCalledTimes(1)
+    const [id, blob, metadata] = vi.mocked(storeVideo).mock.calls[0]
+    expect(id).toBe('take-pip')
+    expect(hasNonEmptyCues(new Uint8Array(await blob.arrayBuffer()))).toBe(true)
+    expect(blob.type).toBe('video/webm;codecs=vp9,opus')
+    expect(metadata).toEqual({ ...handed.metadata, size: blob.size })
+    // The rest of the import reads the repaired bytes.
+    expect(vi.mocked(resolveStoredDuration).mock.calls[0][0]).toBe(blob)
+  })
+
+  it('leaves a primary that already has an index untouched', async () => {
+    const handed = take(buildWebm({ cues: 'indexed' }))
+
+    await importTake(handed, addSourceVideo)
+
+    expect(storeVideo).not.toHaveBeenCalled()
+    expect(vi.mocked(resolveStoredDuration).mock.calls[0][0]).toBe(handed.blob)
+  })
+
+  it('carries on with the repaired bytes when the rewrite cannot be stored', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(storeVideo).mockRejectedValueOnce(new Error('QuotaExceededError'))
+    const handed = take(buildWebm({ cues: 'empty' }))
+
+    const imported = await importTake(handed, addSourceVideo)
+
+    expect(imported.clipParts).toHaveLength(1)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith('Could not store the re-indexed copy of "PiP take":', expect.any(Error))
+    warn.mockRestore()
   })
 })

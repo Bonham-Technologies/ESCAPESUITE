@@ -14,7 +14,9 @@ import {
   processMediaFile,
   processVideoFile,
   resolveStoredDuration,
+  THUMBNAIL_SEEK_TIMEOUT_MS,
 } from './videoProcessor'
+import { buildWebm, hasNonEmptyCues } from '../test/fixtures/webmFixture'
 import { getThumbnail, getVideo, storeVideo } from './storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
@@ -532,6 +534,62 @@ describe('videoProcessor', () => {
       await expect(generateThumbnail(new File(['v'], 'broken.mp4', { type: 'video/mp4' })))
         .rejects.toThrow('Failed to load video for thumbnail: broken.mp4')
     })
+
+    // ESCSUITE-305: on Firefox a seek into a Cues-less WebM never completes, and
+    // the thumbnail's seek had no deadline — the import sat on "Processing..."
+    // for ever. It now gives up after THUMBNAIL_SEEK_TIMEOUT_MS, by name.
+    describe('the seek deadline (ESCSUITE-305)', () => {
+      afterEach(() => {
+        vi.useRealTimers()
+      })
+
+      it('rejects by name at 5 s and revokes its object URL once', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        media.script({ video: { stallSeek: true } })
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+        const pending = generateThumbnail(new File(['v'], 'take.webm', { type: 'video/webm' }), 1.5)
+        const outcome = pending.then(() => null, (error: unknown) => error)
+        await vi.advanceTimersByTimeAsync(4_999)
+        expect(revoke).not.toHaveBeenCalled()
+        await vi.advanceTimersByTimeAsync(1)
+
+        expect(await outcome).toMatchObject({
+          message: 'Could not capture a thumbnail of "take.webm" — the browser did not finish seeking within 5 s',
+        })
+        expect(revoke.mock.calls).toEqual([[lastObjectUrl()]])
+        expect(THUMBNAIL_SEEK_TIMEOUT_MS).toBe(5_000)
+        revoke.mockRestore()
+      })
+
+      it('resolves a seek that lands at 4.9 s and clears its deadline', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        media.script({ video: { stallSeek: true } })
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+        const pending = generateThumbnail(new File(['v'], 'slow.webm', { type: 'video/webm' }), 1.5)
+        await vi.advanceTimersByTimeAsync(4_900)
+        media.videos[0].dispatchEvent(new Event('seeked'))
+
+        expect((await pending).type).toBe('image/jpeg')
+        expect(vi.getTimerCount()).toBe(0)
+        expect(revoke).toHaveBeenCalledTimes(1)
+        revoke.mockRestore()
+      })
+
+      it('revokes once and clears the deadline when the load fails', async () => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+        media.script({ video: { fail: true } })
+        const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+        await expect(generateThumbnail(new File(['v'], 'broken.mp4', { type: 'video/mp4' }))).rejects.toThrow(
+          'Failed to load video for thumbnail: broken.mp4'
+        )
+        expect(vi.getTimerCount()).toBe(0)
+        expect(revoke).toHaveBeenCalledTimes(1)
+        revoke.mockRestore()
+      })
+    })
   })
 
   describe('processVideoFile', () => {
@@ -585,6 +643,29 @@ describe('videoProcessor', () => {
       expect(await getVideo(metadata.id)).toBeDefined()
       expect(await getThumbnail(metadata.id)).toBeUndefined()
       warn.mockRestore()
+    })
+
+    // ESCSUITE-305 rule 2. A thumbnail was already cosmetic — a rejection was
+    // warned about and the video stored without one — but a thumbnail seek that
+    // never settled never rejected, so the import never finished.
+    it('still stores the video, with no thumbnail, when the thumbnail seek never completes', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      try {
+        media.script({ video: { videoWidth: 1280, videoHeight: 720, duration: 15.5, stallSeek: true } })
+
+        const pending = processVideoFile(mediaFile(['v'], 'take.webm', 'video/webm'))
+        await vi.advanceTimersByTimeAsync(5_000)
+        const metadata = await pending
+
+        expect(metadata.thumbnailUrl).toBeUndefined()
+        expect(warn).toHaveBeenCalledWith('Failed to generate thumbnail:', expect.any(Error))
+        expect(await getVideo(metadata.id)).toBeDefined()
+        expect(await getThumbnail(metadata.id)).toBeUndefined()
+      } finally {
+        vi.useRealTimers()
+        warn.mockRestore()
+      }
     })
 
     it('records hasAudio false when the file carries no decodable audio', async () => {
@@ -1052,6 +1133,45 @@ describe('videoProcessor', () => {
       expect(metadata.width).toBe(0)
       expect((await getVideo(metadata.id))?.metadata.mediaType).toBe('audio')
       expect(media.videos).toHaveLength(0)
+    })
+
+    // ESCSUITE-305 rule 3: a WebM with an empty Cues index is stored remuxed
+    // with one, so Firefox can seek it; one that already has an index, and any
+    // file that is not a WebM, is stored byte for byte as it came.
+    describe('the seek index (ESCSUITE-305)', () => {
+      it('stores a WebM whose Cues index is empty remuxed with a real one', async () => {
+        media.script({ video: { videoWidth: 16, videoHeight: 16, duration: 0.33 } })
+        const original = buildWebm({ cues: 'empty' })
+
+        const metadata = await processMediaFile(mediaFile([original as BlobPart], 'take.webm', 'video/webm;codecs=vp9'))
+
+        const stored = await getVideo(metadata.id)
+        const bytes = new Uint8Array(await stored!.blob.arrayBuffer())
+        expect(hasNonEmptyCues(bytes)).toBe(true)
+        expect(stored!.blob.type).toBe('video/webm;codecs=vp9')
+        expect(metadata.size).toBe(stored!.blob.size)
+      })
+
+      it('stores a WebM that already has an index byte for byte', async () => {
+        media.script({ video: { videoWidth: 16, videoHeight: 16, duration: 0.33 } })
+        const original = buildWebm({ cues: 'indexed' })
+
+        const metadata = await processMediaFile(mediaFile([original as BlobPart], 'take.webm', 'video/webm'))
+
+        const stored = await getVideo(metadata.id)
+        expect(new Uint8Array(await stored!.blob.arrayBuffer())).toEqual(original)
+      })
+
+      it('never probes a file that is not a WebM', async () => {
+        media.script({ video: { videoWidth: 16, videoHeight: 16, duration: 0.33 } })
+        // A Cues-less WebM's bytes under an MP4 type: the type decides, not the bytes.
+        const original = buildWebm({ cues: 'empty' })
+
+        const metadata = await processMediaFile(mediaFile([original as BlobPart], 'clip.mp4', 'video/mp4'))
+
+        const stored = await getVideo(metadata.id)
+        expect(new Uint8Array(await stored!.blob.arrayBuffer())).toEqual(original)
+      })
     })
 
     it('rejects, as the video path always did, when the file will not decode', async () => {

@@ -49,6 +49,15 @@ export interface SeekScript {
    * that reveals the end only as the position the seek landed on.
    */
   durationStaysUnknown: boolean
+  /**
+   * Firefox's seek wedge (ESCSUITE-305): a seek to a time this answers true for
+   * never completes — no 'seeked', `seeking` stays true and `readyState` drops
+   * to HAVE_METADATA (1) — while a seek it answers false lands normally,
+   * clearing `seeking` and restoring the scripted `readyState`. Firefox wedges
+   * this way on a Cues-less WebM whose target needs a Cluster that does not
+   * start with a key frame. Leave it unset and seeks behave as they always have.
+   */
+  wedgeSeekAt?: (time: number) => boolean
 }
 
 export interface VideoScript extends SeekScript {
@@ -173,7 +182,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
    * <audio>, since the duration discovery both model is the same browser
    * behaviour reached through two importers.
    */
-  function defineCurrentTime(el: HTMLMediaElement, s: SeekScript): void {
+  function defineCurrentTime(el: HTMLMediaElement, s: SeekScript, readyState?: number): void {
     let currentTime = 0
     Object.defineProperty(el, 'currentTime', {
       configurable: true,
@@ -199,6 +208,12 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
             own(el, 'duration', s.durationAfterSeek)
             queueMicrotask(() => el.dispatchEvent(new Event('durationchange')))
           }
+        }
+        if (s.wedgeSeekAt) {
+          const wedged = s.wedgeSeekAt(next)
+          own(el, 'seeking', wedged)
+          own(el, 'readyState', wedged ? 1 : readyState)
+          if (wedged) return
         }
         if (!s.stallSeek) queueMicrotask(() => el.dispatchEvent(new Event('seeked')))
       },
@@ -266,7 +281,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'load', vi.fn())
     if (s.frameTimes) defineFrameCallbacks(el, s.frameTimes, s.presentedFrames)
 
-    defineCurrentTime(el, s)
+    defineCurrentTime(el, s, s.readyState)
 
     defineSrc(el, () => {
       if (s.silent) return

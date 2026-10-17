@@ -111,6 +111,26 @@ function run({
 
 const ctx = () => getLastCanvasContext() as RecordingCanvasRenderingContext2D
 
+/**
+ * Run an export whose source seeks never complete (ESCSUITE-305), sitting out
+ * every seek and readiness fallback on fake timers.
+ */
+async function runWedged<T>(start: () => Promise<T>): Promise<unknown> {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    let outcome: unknown
+    let settled = false
+    start().then(
+      (value) => { outcome = value; settled = true },
+      (error: unknown) => { outcome = error; settled = true }
+    )
+    for (let i = 0; i < 200 && !settled; i++) await vi.advanceTimersByTimeAsync(100)
+    return outcome
+  } finally {
+    vi.useRealTimers()
+  }
+}
+
 beforeEach(async () => {
   resetMediabunnyDouble()
   mixAudio.mockReset()
@@ -1303,5 +1323,27 @@ describe('burning in captions (ESCSUITE-293)', () => {
     await run({ clips, tracks })
 
     expect(framesDrawing('Burned in')).toEqual([5, 6, 7])
+  })
+})
+
+// ESCSUITE-305: the in-page MP4 path seeks a <video> exactly as the element
+// exporters do, and on Firefox a Cues-less WebM source wedged it the same way:
+// every frame handed back an element with no picture. It fails by name.
+describe('exportToMP4 on a source that cannot seek', () => {
+  it('fails by name instead of finishing a black file', async () => {
+    media.script({ video: { videoWidth: 640, videoHeight: 360, wedgeSeekAt: (t) => t > 0.02 } })
+
+    const error = await runWedged(() =>
+      run({ sources: [makeSourceVideo({ width: 640, height: 360, name: 'take.webm' })] })
+    )
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error).toMatchObject({
+      code: 'SOURCE_NOT_SEEKABLE',
+      message:
+        'This browser cannot read "take.webm" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
+      frameIndex: 3,
+    })
+    expect(webcodecs.videoEncoders[0].encodes).toHaveLength(3)
   })
 })
