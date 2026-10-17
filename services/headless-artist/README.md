@@ -194,8 +194,10 @@ later otherwise:
   `project.timeline.clips[<i>] must be an object`.
 - **The project itself is validated in the page before any frame is drawn** (ESCSUITE-173): the
   same shape check the editor runs on a dropped `.veditor` or a host's `LOAD_PROJECT` — every
-  clip id unique, every clip's track existing, a `crop` or `transform` that is present shaped
-  correctly, `resolution` (if the project carries one) within range. A failure is reported as
+  clip id unique, every clip's track existing, every clip's `startTime` / `endTime` present
+  with `endTime` after `startTime` (ESCSUITE-302, overlay clips included), a `crop` or
+  `transform` that is present shaped correctly, `resolution` (if the project carries one) within
+  range. A failure is reported as
   `Invalid project: <reason>`, naming the problem rather than rendering a frame silently missing
   the offending clip.
 

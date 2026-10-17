@@ -17,6 +17,7 @@ import {
   wrapCaptionText,
   type ParsedCaptions,
 } from '../core/captions';
+import { STORAGE_QUOTA_MESSAGE } from '../core/storageErrors';
 import styles from './VideoUploader.module.css';
 
 /**
@@ -468,7 +469,7 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         // Provide more helpful error message for quota errors
         let errorMessage = error instanceof Error ? error.message : 'Unknown error';
         if (errorMessage.includes('QuotaExceeded') || errorMessage.includes('quota')) {
-          errorMessage = 'Storage quota exceeded. Remove some media to free up space.';
+          errorMessage = STORAGE_QUOTA_MESSAGE;
         }
 
         setUploads((prev) =>

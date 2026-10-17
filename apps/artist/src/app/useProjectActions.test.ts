@@ -15,6 +15,7 @@ import { revokeSourceThumbnails } from '../core/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
+import { installMediaElementDoubles } from '../test/doubles/media'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
 vi.mock('../core/projectManager', async () =>
@@ -303,6 +304,48 @@ describe('opening a project', () => {
     expect(deps.resetProject).not.toHaveBeenCalled()
     expect(revokeSourceThumbnails).not.toHaveBeenCalled()
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it('names a source the real loader could not decode, through the same sentence (ESCSUITE-302)', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const media = installMediaElementDoubles({ video: { fail: true } })
+    const actual = await vi.importActual<typeof import('../core/projectManager')>('../core/projectManager')
+    vi.mocked(loadProject).mockImplementation(actual.loadProject)
+    // A v1 file whose one source has no saved metadata, so the loader probes it.
+    const file = new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: {
+            id: 'p', name: 'P', created: 1, modified: 1, resolution: { width: 1280, height: 720 },
+            timeline: {
+              tracks: [{ id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }],
+              clips: [{ id: 'c1', sourceVideoId: 'v1', name: 'c1', startTime: 0, endTime: 2, duration: 2, trackId: 't1', timelinePosition: 0 }],
+              textOverlays: [], shapeOverlays: [], duration: 2,
+            },
+          },
+          videos: [{ id: 'v1', name: 'clip.mp4', mimeType: 'video/mp4', data: btoa('abc') }],
+        }),
+      ],
+      'old.veditor',
+      { type: 'application/json' }
+    )
+    vi.mocked(showOpenProjectDialog).mockResolvedValue(file)
+    const { result } = mountActions({ clipCount: 0 })
+
+    try {
+      await act(async () => {
+        await result.current.handleLoadProject()
+      })
+    } finally {
+      media.uninstall()
+    }
+
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      'Failed to load project: videos[0] ("clip.mp4") could not be decoded',
+      'error'
+    )
+    expect(deps.resetProject).not.toHaveBeenCalled()
   })
 
   it('rejects a malformed project without emptying the editor first (ESCSUITE-102), and revokes the incoming thumbnails loadProject already minted', async () => {

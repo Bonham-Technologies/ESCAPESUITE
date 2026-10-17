@@ -509,6 +509,19 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     ) {
       return { ok: false, reason: `Clip "${id}" has an invalid timelinePosition` };
     }
+    // ESCSUITE-302. The source trim points, read on every frame as
+    // `startTime + clipTime`. Every clip the app writes carries both (0 and the
+    // duration for an overlay or an image), and the migration supplies neither,
+    // so an absent one is refused too: it would read the source at NaN. Their
+    // difference is not checked against `duration`, which an extended image or
+    // overlay clip legitimately outgrows.
+    const { startTime, endTime } = candidate;
+    if (typeof startTime !== 'number' || !Number.isFinite(startTime) || startTime < 0) {
+      return { ok: false, reason: `Clip "${id}" has an invalid startTime` };
+    }
+    if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime <= startTime) {
+      return { ok: false, reason: `Clip "${id}" has an invalid endTime` };
+    }
 
     // ESCSUITE-173. Checked here, against the RAW input, for the same reason
     // as `crop`: the migration branch that runs when `tracks` already exists

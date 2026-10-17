@@ -4711,6 +4711,53 @@ and the same 209 on the numerator (5,847 + 209 = 6,056), so nothing is less cove
 claimed, and the row is corrected to what `main` measures. 5,823 green with `--testTimeout 20000`. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-16 for ESCSUITE-302 (a project load that fails after the
+file has been read names the source and the cause instead of the bare "Failed to load project": a
+metadata probe that rejects — a video the browser cannot decode, or the ESCSUITE-249 metadata deadline —
+reads `videos[<i>] ("<name>") could not be decoded`; a `storeVideo` / `storeThumbnail` that rejects
+reads `could not be stored`, with the media library's own quota sentence when the error's name — read
+through `error.cause ?? error`, the ESCSUITE-210 / 217 shape, now one `isQuotaExceeded` in
+`core/storageErrors.ts` beside the one `STORAGE_QUOTA_MESSAGE` the uploader, the autosave and the loader
+all read — is `QuotaExceededError`; and a read of the file itself that rejects reads `the file is too
+large to read` for a `RangeError` and `the file could not be read` otherwise, through
+`projectFileFormat.ts`'s `readOrRefuse` on the v1 `text()` and the v2 header and index reads; every one a
+`ProjectFileError` carrying the original as `cause`, raised inside `restoreSource` so the ESCSUITE-260
+rollback still deletes what the load had stored; and `parseProject` refuses a clip whose `startTime` is
+absent or not a finite number >= 0, or whose `endTime` is absent, not finite, or not after its
+`startTime`, by name — ruling (a) of the ticket, the ESCSUITE-173 / 255 split, applied to absent as well
+as invalid because every clip the app writes carries both, the migration supplies neither and the renderer
+reads a source at `startTime + clipTime`): 99.85 / 99.44 / **96.76** / 99.77 against the
+99.85 / 99.44 / 96.75 / 99.77 that `main` at `02a3feca` measures in the same sitting — branches up a
+hundredth, the other three unmoved. The base gives 6,056 / 6,259 branches and this branch 6,072 / 6,275:
+sixteen new branches, sixteen covered, the same 203 uncovered as before (lines 9,457 / 9,471 →
+9,474 / 9,488, statements 10,718 / 10,778 → 10,739 / 10,799, functions 2,243 / 2,248 → 2,249 / 2,254,
+every denominator growing by exactly what the numerator did; the same 14 / 60 / 5 uncovered). The sixteen
+net four files: `store/projectMigration.ts` 231 → 241 (the `startTime` present-finite-non-negative
+operands and the `endTime` present-finite-after-start operands, each reached from both sides by the
+`NaN`, `-1`, `"0"`, `Infinity`, absent, equal-to-start and less-than-start refusals against the valid
+pair, with the boundary `startTime: 0` accepted and `endTime === startTime` refused),
+`core/projectFileFormat.ts` 69 → 73 (`readOrRefuse`'s `RangeError`-or-other choice and
+`ProjectFileError`'s optional `cause`, reached by the v1 `text()` both ways, the v2 header with another
+error and the v2 index with a `RangeError`), `core/projectManager.ts` 71 → 73 (the quota-or-other choice
+on a rejected write, reached by a bare `QuotaExceededError` `DOMException`, one wrapped as another error's
+`cause`, and a plain rejection, on both file versions, with the earlier source's row deleted again in
+each), `core/storageErrors.ts` 2 / 2 on arrival (the `cause ?? error` read, from both sides), and
+`app/useSessionAutosave.ts` 22 → 20, whose private `failureName` became a call to the shared predicate.
+The ESCSUITE-294 fuzz floors moved: `parseProject` 354 / 246 → 335 / 265 (nineteen inputs crossed from
+parsed to refused, every one a mutation of a clip's `startTime` or `endTime` — three deleted keys, five
+refused numbers, eleven lists or nested objects, counted per iteration in the review) and the host
+`LOAD_PROJECT` fuzz 108 / 92 → 96 / 104 (twelve, the same fields: two absent, ten non-numbers); the
+`projectFileFormat` fuzz floors did not move. The review (opus) approved the code and asked for a kit
+changeset — a hand-built headless job spec whose overlay clip left off its trim points used to render and
+is refused now, the ESCSUITE-293 precedent — a README line, the corrected fuzz counts and a `finally`
+around a test's uninstall; all four are the fix round. A split-then-trim defect the implementer found
+beside the work (an image or overlay clip's second half recomputes `duration` from its inherited
+`startTime`) is ESCSUITE-304, not this ticket's. The first measurement of the branch lost one case to the
+machine's load (the 80 s Tech 3341 fixture timing out at its 60 s limit with the load average above 400
+while the ESCSUITE-297 rig ran); the figures above are the clean run, 5,855 green with the
+`--testTimeout 20000` guard. Every `*.perf.test.ts` and `App.*rerender*` pin is byte-identical. **No floor
+crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4718,7 +4765,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.44 | 96.75 | 99.77 |
+| `@escapesuite/artist` | 99.85 | 99.44 | 96.76 | 99.77 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.64 | 98.87 |
 

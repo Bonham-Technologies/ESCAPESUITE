@@ -682,6 +682,57 @@ describe('parseProject (ESCSUITE-102)', () => {
     })
   })
 
+  // ESCSUITE-302. A clip's source trim points, refused by name like duration:
+  // every clip the app writes carries both, and the migration supplies neither,
+  // so an absent one is refused too (it would read the source at NaN).
+  describe('trim point validation (ESCSUITE-302)', () => {
+    it.each([
+      ['NaN', NaN],
+      ['negative', -1],
+      ['a string', '0'],
+      ['Infinity', Infinity],
+      ['null', null],
+      ['absent', undefined],
+    ])('rejects a clip whose startTime is %s, naming the clip', (_label, badStart) => {
+      const bad = validProject()
+      bad.timeline.clips[0].startTime = badStart as never
+
+      expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid startTime' })
+    })
+
+    it.each([
+      ['NaN', NaN],
+      ['equal to startTime', 1],
+      ['less than startTime', 0.5],
+      ['Infinity', Infinity],
+      ['a string', '2'],
+      ['absent', undefined],
+    ])('rejects a clip whose endTime is %s, naming the clip', (_label, badEnd) => {
+      const bad = validProject()
+      bad.timeline.clips[0].startTime = 1
+      bad.timeline.clips[0].endTime = badEnd as never
+
+      expect(parseProject(bad)).toEqual({ ok: false, reason: 'Clip "c1" has an invalid endTime' })
+    })
+
+    it('accepts a pair whose length differs from duration: an extended image or overlay keeps its own', () => {
+      const good = validProject()
+      good.timeline.clips[0].startTime = 0
+      good.timeline.clips[0].endTime = 0.5
+      good.timeline.clips[0].duration = 7
+
+      expect(parseProject(good).ok).toBe(true)
+    })
+
+    it('accepts a trimmed pair that starts after 0', () => {
+      const good = validProject()
+      good.timeline.clips[0].startTime = 3
+      good.timeline.clips[0].endTime = 3.25
+
+      expect(parseProject(good).ok).toBe(true)
+    })
+  })
+
   describe('resolution validation (ESCSUITE-152)', () => {
     it.each([
       ['null', null],

@@ -47,10 +47,18 @@ const ITERATIONS = 200
 // SET_THEME refused all 200: their payloads have one field, so every mutation
 // breaks it, and the accepting side is the sanity case's. LOAD_PROJECT applied
 // 108 and refused 92.
+//
+// Re-measured 2026-10-16 for ESCSUITE-302: LOAD_PROJECT applied 96 and refused
+// 104. Exactly 12 payloads crossed, every one a mutation of the clip's
+// `startTime` or `endTime`, which `parseProject` now refuses by name
+// (INVALID_PROJECT): 2 leave it absent (the key deleted, or set to undefined)
+// and 10 replace it with something that is not a number (a string, null, a
+// boolean, a list, a nested object). Each used to be applied as a clip whose
+// source time read as NaN.
 const FLOORS = {
   LOAD_VIDEO: { accepted: 0, refused: 200 },
   SET_THEME: { accepted: 0, refused: 200 },
-  LOAD_PROJECT: { accepted: 108, refused: 92 },
+  LOAD_PROJECT: { accepted: 96, refused: 104 },
 }
 const THEME_MODULE_DEFAULT = 'dark' as const
 
