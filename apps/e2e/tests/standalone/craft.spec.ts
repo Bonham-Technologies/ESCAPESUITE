@@ -422,12 +422,10 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     // The path is logged when the take starts; give the line a moment to land.
     await expect.poll(() => lines.length, { timeout: 10_000 }).toBeGreaterThan(0)
 
-    if (browserName === 'webkit') {
-      // ESCSUITE-321 reads this answer; nothing is asserted for WebKit yet.
-      console.log(`ESCSUITE-317 WebKit capture path: ${lines.join(' | ')}`)
-      return
-    }
-    expect(lines.filter((line) => /through an AudioWorklet/.test(line))).toHaveLength(1)
+    // Measured over file:// (ESCSUITE-317, ESCSUITE-321): Chromium and WebKit refuse the
+    // `blob:null/…` module and load the `data:` retry; Firefox accepts the `blob:` one.
+    const moduleKind = browserName === 'firefox' ? 'blob module' : 'data module'
+    expect(lines.filter((line) => new RegExp(`through an AudioWorklet \\(${moduleKind}\\)`).test(line))).toHaveLength(1)
     expect(lines.filter((line) => /ScriptProcessorNode/.test(line))).toHaveLength(0)
   })
 })
