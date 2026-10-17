@@ -1459,9 +1459,11 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     expect(second.play).toHaveBeenCalled()
   })
 
-  // ESCSUITE-323: the remembered slots are forgotten when the element set
-  // changes, so the next assignment starts afresh in track order.
-  it('assigns afresh after the element set changes', async () => {
+  // ESCSUITE-323 review: the remembered slots outlive a change of the element
+  // set. A slot names an element by index, resolved afresh on every lookup,
+  // so it cannot bind a released element — and re-packing here would move a
+  // picture-in-picture's two clips onto each other's elements and seek both.
+  it('seeks neither element of a paused picture-in-picture when the element set changes', async () => {
     addClip('l', 0.05, 4)
     store().addClipToTimeline(
       { id: 'u', sourceVideoId: video.id, name: 'u', startTime: 10, endTime: 14, duration: 4 },
@@ -1479,13 +1481,53 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     seek(1)
     await settle(1000)
     expect(primary.currentTime).toBe(11)
+    const seeksBefore = doubles.media.seeks.length
 
     rerender({ ...deps, videoUrlsKey: 'video1,video2' })
     await settle(1000)
 
-    // Afresh, `l` is first in track order and takes the source's own element.
-    expect(primary.currentTime).toBeCloseTo(0.95)
-    expect(secondElement(deps)!.currentTime).toBe(11)
+    expect(doubles.media.seeks.length - seeksBefore).toBe(0)
+    expect(primary.currentTime).toBe(11)
+    expect(secondElement(deps)!.currentTime).toBeCloseTo(0.95)
+  })
+
+  // ESCSUITE-323 review: during playback nothing re-seeks the live clips after
+  // an element-set change, so a re-pack at the next assignment — the
+  // crossfade hold, with the live set unchanged — would swap the two
+  // picture-in-picture clips in the map the draw reads, each then drawn from
+  // the other's playing element for the rest of the fade.
+  it('keeps a playing picture-in-picture\'s slots across an element-set change into a crossfade', async () => {
+    // `l` (0.05-1.05, below) fades over its last half second into `c`, a later
+    // part of the same source on the same track; `u`, above, spans it all.
+    const l = addClip('l', 0.05, 1)
+    store().updateClip('l', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'c', sourceVideoId: video.id, name: 'c', startTime: 20, endTime: 22, duration: 2 },
+      l.trackId,
+      1.05
+    )
+    store().addClipToTimeline(
+      { id: 'u', sourceVideoId: video.id, name: 'u', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const { deps, seek, play } = harness()
+    seek(0)
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+
+    play()
+    // Past 0.05 s, before the fade (0.55 s): `u` kept 0, `l` took 1.
+    await settle(200)
+    expect(Object.fromEntries(deps.elementSlotsRef.current)).toEqual({ u: 0, l: 1 })
+
+    rerender({ ...deps, videoUrlsKey: 'video1,video2' })
+    // Into the fade: `c` is held on the next free slot.
+    await settle(500)
+
+    expect(Object.fromEntries(deps.elementSlotsRef.current)).toEqual({ l: 1, u: 0, c: 2 })
   })
 
   // ESCSUITE-323: and when another project is put in place, even one that
