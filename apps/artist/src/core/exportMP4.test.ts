@@ -1288,6 +1288,102 @@ describe('exportToMP4 loudness (ESCSUITE-292)', () => {
   })
 })
 
+// ESCSUITE-316 (U-2) / ESCSUITE-325: `HTMLVideoFrameSource.create` used to await
+// the element's `loadeddata` / `error` with no deadline, so a WebM source
+// (never offered to the decode worker) whose file the browser neither decodes
+// nor rejects hung the export forever, with Cancel the only way out. It now has
+// the import probe's 15 s deadline (ESCSUITE-249), and the export fails by name
+// rather than skipping a clip the file would silently lose.
+describe('a <video> fallback source that never loads (ESCSUITE-316, 325)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('fails the export by name within 15 s, the element torn down', async () => {
+    await storeSource('video1', 'video/webm')
+    media.script({ video: { silent: true } })
+    vi.useFakeTimers()
+    let failure: unknown
+    void run().catch((e) => (failure = e))
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(failure).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(2)
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toBe(
+      'Could not read video1 \u2014 the browser did not report its metadata within 15 s'
+    )
+    const video = media.videos[0]
+    expect(video.onloadeddata).toBeNull()
+    expect(video.onerror).toBeNull()
+    expect(video.load).toHaveBeenCalledTimes(1)
+  })
+
+  it('releases an already-loaded image source when a later video times out', async () => {
+    await storeSource('image1', 'image/png')
+    await storeSource('video1', 'video/webm')
+    media.script({ video: { silent: true } })
+    vi.useFakeTimers()
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
+    let failure: unknown
+    void run({
+      clips: [
+        makeClip({ id: 'c1', sourceVideoId: 'image1', duration: CLIP_DURATION, endTime: CLIP_DURATION }),
+        makeClip({ id: 'c2', sourceVideoId: 'video1', duration: CLIP_DURATION, endTime: CLIP_DURATION }),
+      ],
+      sources: [
+        makeSourceVideo({ id: 'image1', mediaType: 'image' }),
+        makeSourceVideo({ id: 'video1', mediaType: 'video' }),
+      ],
+    }).catch((e) => (failure = e))
+    await vi.advanceTimersByTimeAsync(15_100)
+    expect(failure).toBeInstanceOf(ExportError)
+    expect((failure as ExportError).message).toContain('Could not read video1')
+    expect(media.images).toHaveLength(1)
+    expect(revoke.mock.calls.filter((c) => c[0] === media.images[0].src)).toHaveLength(1)
+    revoke.mockRestore()
+  })
+
+  it('succeeds when the source loads at 14.9 s, the timer cleared', async () => {
+    await storeSource('video1', 'video/webm')
+    media.script({ video: { silent: true } })
+    vi.useFakeTimers()
+    const set = vi.spyOn(globalThis, 'setTimeout')
+    const clear = vi.spyOn(globalThis, 'clearTimeout')
+    let outcome: string | undefined
+    void run().then(
+      () => (outcome = 'resolved'),
+      (e) => (outcome = `rejected: ${e}`)
+    )
+    await vi.advanceTimersByTimeAsync(14_900)
+    const deadlineIndex = set.mock.calls.findIndex((c) => c[1] === 15_000)
+    expect(deadlineIndex).toBeGreaterThanOrEqual(0)
+    const deadline = set.mock.results[deadlineIndex].value
+    media.videos[0].dispatchEvent(new Event('loadeddata'))
+    for (let i = 0; i < 20 && outcome === undefined; i++) await vi.advanceTimersByTimeAsync(5_000)
+    // The deadline's own handle is cleared exactly once, and the export finishes.
+    expect(clear.mock.calls.filter((c) => c[0] === deadline)).toHaveLength(1)
+    expect(outcome).toBe('resolved')
+    set.mockRestore()
+    clear.mockRestore()
+  })
+
+  it('still skips a source that errors at once, without arming a late rejection', async () => {
+    await storeSource('video1', 'video/webm')
+    media.script({ video: { fail: true } })
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let outcome: string | undefined
+    void run().then(
+      () => (outcome = 'resolved'),
+      () => (outcome = 'rejected')
+    )
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(warn.mock.calls.some((c) => String(c[0]).startsWith('Failed to load video video1'))).toBe(true)
+    expect(outcome).not.toBe('rejected')
+    warn.mockRestore()
+  })
+})
+
 // ESCSUITE-293: a caption is an ordinary text clip on the `kind: 'captions'`
 // track, so it is burned in by the same text renderer as any title — while its
 // cue is up, and not a frame before or after. No renderer change was needed;
