@@ -356,10 +356,12 @@ export function generateShareUrl(
  *   cause instead of a generic failure — see loadVideoFromUrl.
  * - LOAD_PROJECT: Project - Load a project. The payload IS the project object
  *   (not wrapped in a `data` field). Since ESCSUITE-102 a present payload is
- *   validated the same way a dropped .veditor file is (`parseProject` in
- *   store/projectMigration.ts: timeline is an object, clips is an array,
- *   clip ids are unique, every clip's trackId names a track that exists once
- *   migration has run) before it replaces anything; a payload that fails gets
+ *   validated the same way a dropped .veditor file is before it replaces anything.
+ *   `parseProject` in store/projectMigration.ts is the authority on what it
+ *   refuses, and services/headless-artist/README.md the maintained list; the ones
+ *   a host most often trips are a clip without a finite `startTime`/`endTime`, a
+ *   `trackId` naming no track and a `duration` that is not a finite number above 0.
+ *   A payload that fails gets
  *   an ERROR reply (code: 'INVALID_PROJECT', see below) instead of being
  *   applied, and the current project is left exactly as it was. A payload that is
  *   not an object at all (absent, null, a string, a number) gets an ERROR reply with
