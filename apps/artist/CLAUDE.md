@@ -2018,8 +2018,8 @@ its own element, positioned once when the transition begins (`holdIncoming`); a 
 no transition on it skips that lookup on every frame, decided once per playback run. The crop
 chrome's dim pass (`PreviewPlayer`'s `cropElementFor`) resolves the cropped clip's slot at the
 drawn time the same way, so the second of two live clips of one source dims over its own
-moment. Unlike an export's, the preview's further elements are kept for as long as the source
-is on the timeline, not only while its clips overlap.
+moment. The lifetimes differ: the preview's further elements are kept for as long as the source
+is on the timeline, an export's until the export ends — neither frees one when its clips stop overlapping.
 
 **A paused frame repaints once when its video decodes its first frame** (ESCSUITE-264).
 `isDrawableVideo` (in `drawFrame.ts`) accepts a `<video>` at `readyState >= 1` — metadata, not
