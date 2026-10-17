@@ -7,6 +7,12 @@
  *
  *     node apps/e2e/scripts/av-drift-report.mjs [result-dir ...] [--flash=luma|scene]
  *
+ * The ESCAPEARTIST arm (`tests/perf/artist-av-drift.spec.ts`, ESCSUITE-297)
+ * leaves `av-drift-results/artist-<browser>/`: the ESCAPECRAFT raw WebM it
+ * imported (`raw`) and the editor's exports of it (`artist-webm`,
+ * `artist-mp4`), each read the same way below, with an H4 verdict comparing
+ * each export's drift slope with the source's.
+ *
  * With no directories it reads every arm under `apps/e2e/av-drift-results/`.
  * The report is printed and also written to `av-drift-results/report.md`.
  *
@@ -607,6 +613,94 @@ function nodesFromLog(dir, m) {
   })
 }
 
+/** The per-file table, shared by the ESCAPECRAFT and ESCAPEARTIST arms. */
+function fileTableLines(files, comparisons) {
+  const out = []
+  out.push('| File | Kind | Role | videoEnd s | audioEnd s | audioEnd−videoEnd ms | audio PTS gaps (n / Σ ms) | timecoded frames (bad) | beeps (+bursts) | **a ms (timecode)** | **b ms/min ± SE (timecode)** | flashes (+uncertain) [scene] | flash pairs: a ms / b ms/min | grid b audio | grid b video | video vs wall b (timecode) |')
+  out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---')
+  for (const x of files) {
+    const ve = x.video?.end
+    const ae = x.audio?.end
+    out.push(
+      `| ${x.file}${x.note ? ` (${x.note})` : ''} | ${x.kind} | ${x.role} | ${f(ve, 3)} | ${f(ae, 3)} | ${ve !== undefined && ae !== undefined ? signed((ae - ve) * 1000) : '—'} | ${x.audio ? `${x.audio.gaps} / ${f(x.audio.gapMs)}` : '—'} | ${x.timecode ? `${x.timecode.frames.length} (${x.timecode.bad})` : '—'} | ${x.beeps ? `${x.beeps.length} (+${x.bursts})` : '—'} | ${x.tc ? signed(x.tc.a) : '—'} | ${x.tc ? `${fitText(x.tc)} (n ${x.tc.n})` : '—'} | ${x.flashes ? `${x.flashes.length} (+${x.uncertainFlashes}) [${x.sceneChanges}]` : '—'} | ${x.self ? `${signed(x.self.a)} / ${fitText(x.self)} (n ${x.self.n})` : '—'} | ${fitText(x.audioGrid)} | ${fitText(x.videoGrid)} | ${fitText(x.videoTc)} |`
+    )
+  }
+  for (const c of comparisons) {
+    out.push(`| ${c.label} | pair | | | | | | | | ${c.fit ? signed(c.fit.a) : '—'} | ${c.fit ? `${fitText(c.fit)} (n ${c.fit.n})` : '—'} | | | | | |`)
+  }
+  return out
+}
+
+/**
+ * Hypothesis H4 for ESCAPEARTIST (ESCSUITE-297), from what
+ * `tests/perf/artist-av-drift.spec.ts` left: the ESCAPECRAFT raw WebM it
+ * imported (copied in as `raw`) and the editor's exports of it
+ * (`artist-webm` / `artist-mp4`). Each file is read exactly as an ESCAPECRAFT
+ * file is — its own picture's timecode against its own beeps — so an export's
+ * drift slope sits beside the source's. A decoder that spliced the source's
+ * audio PTS gaps shut would make an export's audio lead its picture by the gaps
+ * accumulated so far: b ≈ −Σgaps ÷ minutes, relative to the source.
+ */
+const SPLICE_MIN_MS_PER_MIN = 20
+const FLAT_MS_PER_MIN = 3
+
+function analyseArtistArm(dir, m, files, rawPrimary, minutes) {
+  const best = (x) => (x?.tc && x.tc.n >= 2 ? x.tc : x?.self)
+  const raw = best(rawPrimary)
+  const lines = []
+  lines.push(`### ${path.basename(dir)} — ESCAPEARTIST export, ${m.browser}, ${f(m.window.seconds, 1)} s timeline`)
+  lines.push('')
+  lines.push('| Instrument | Value |')
+  lines.push('|---|---|')
+  lines.push(`| source | ${m.source?.path ?? '—'}${m.source?.arm ? ` (ESCAPECRAFT ${m.source.arm.mode}-${m.source.arm.load}, ${m.source.arm.recorder})` : ''} |`)
+  lines.push(`| project / clip | ${m.projectResolution ? `${m.projectResolution.width}x${m.projectResolution.height}` : '—'}, clip ${f(m.clip?.duration, 3)} s |`)
+  lines.push(`| exports | ${m.files.filter((x) => x.kind !== 'raw').map((x) => `${x.kind} in ${f(x.exportSeconds, 0)} s`).join('; ') || '—'} |`)
+  lines.push(`| lost callbacks | n/a — no capture in this arm |`)
+  lines.push('')
+  lines.push(...fileTableLines(files, []))
+  lines.push('')
+
+  const verdicts = []
+  const gaps = rawPrimary?.audio?.gaps ?? 0
+  const gapMs = rawPrimary?.audio?.gapMs ?? 0
+  const predicted = -gapMs / minutes
+  if (!raw) {
+    verdicts.push('**H4 (ESCAPEARTIST)**: inconclusive — no drift fit for the source.')
+  } else {
+    const outcomes = []
+    for (const x of files.filter((y) => y.kind.startsWith('artist-'))) {
+      const r = best(x)
+      if (!r) {
+        outcomes.push({ x, state: 'inconclusive', text: `${x.kind}: no drift fit` })
+        continue
+      }
+      const delta = r.b - raw.b
+      const se = Math.sqrt(r.seB ** 2 + raw.seB ** 2)
+      const state =
+        Math.abs(delta) > SPLICE_MIN_MS_PER_MIN && Math.abs(delta) > 3 * se
+          ? 'spliced'
+          : Math.abs(delta) <= Math.max(FLAT_MS_PER_MIN, 3 * se)
+            ? 'flat'
+            : 'inconclusive'
+      const endDiff = x.video && x.audio ? (x.audio.end - x.video.end) * 1000 : NaN
+      outcomes.push({
+        x,
+        state,
+        text: `${x.kind}: b = ${fitText(r)} ms/min (Δ vs source ${signed(delta, 2)} ± ${f(se, 2)}), ${x.audio ? `${x.audio.gaps} PTS gaps (Σ ${f(x.audio.gapMs)} ms)` : 'no audio'}, audioEnd−videoEnd ${signed(endDiff, 0)} ms → ${state}`,
+      })
+    }
+    const any = (state) => outcomes.some((o) => o.state === state)
+    const verdict = any('spliced') ? 'CONFIRMED' : outcomes.length && outcomes.every((o) => o.state === 'flat') ? 'REFUTED' : 'inconclusive'
+    verdicts.push(
+      `**H4 (ESCAPEARTIST, ${m.browser})**: ${verdict} — the source has ${gaps} audio PTS gaps (Σ ${f(gapMs)} ms; a splice would read b ≈ ${signed(predicted, 0)} ms/min relative to it) and b = ${fitText(raw)} ms/min of its own.`
+    )
+    for (const o of outcomes) verdicts.push(`  - ${o.text}.`)
+  }
+  lines.push(...verdicts.map((v) => (v.startsWith('  -') ? v : `- ${v}`)))
+  lines.push('')
+  return lines.join('\n')
+}
+
 function analyseArm(dir) {
   const m = JSON.parse(readFileSync(path.join(dir, 'measurement.json'), 'utf8'))
   m.nodes = nodesFromLog(dir, m)
@@ -616,6 +710,8 @@ function analyseArm(dir) {
   const files = m.files.map((entry) => analyseFile(dir, entry, periodMs))
   const rawPrimary = files.find((x) => x.kind === 'raw' && x.role === 'primary')
   const comparisons = []
+
+  if (m.arm === 'artist') return analyseArtistArm(dir, m, files, rawPrimary, minutes)
 
   const m4a = files.find((x) => x.kind === 'm4a')
   if (m4a && rawPrimary?.flashes && m4a.beeps) {
@@ -690,18 +786,7 @@ function analyseArm(dir) {
     })
     lines.push('')
   }
-  lines.push('| File | Kind | Role | videoEnd s | audioEnd s | audioEnd−videoEnd ms | audio PTS gaps (n / Σ ms) | timecoded frames (bad) | beeps (+bursts) | **a ms (timecode)** | **b ms/min ± SE (timecode)** | flashes (+uncertain) [scene] | flash pairs: a ms / b ms/min | grid b audio | grid b video | video vs wall b (timecode) |')
-  lines.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---')
-  for (const x of files) {
-    const ve = x.video?.end
-    const ae = x.audio?.end
-    lines.push(
-      `| ${x.file}${x.note ? ` (${x.note})` : ''} | ${x.kind} | ${x.role} | ${f(ve, 3)} | ${f(ae, 3)} | ${ve !== undefined && ae !== undefined ? signed((ae - ve) * 1000) : '—'} | ${x.audio ? `${x.audio.gaps} / ${f(x.audio.gapMs)}` : '—'} | ${x.timecode ? `${x.timecode.frames.length} (${x.timecode.bad})` : '—'} | ${x.beeps ? `${x.beeps.length} (+${x.bursts})` : '—'} | ${x.tc ? signed(x.tc.a) : '—'} | ${x.tc ? `${fitText(x.tc)} (n ${x.tc.n})` : '—'} | ${x.flashes ? `${x.flashes.length} (+${x.uncertainFlashes}) [${x.sceneChanges}]` : '—'} | ${x.self ? `${signed(x.self.a)} / ${fitText(x.self)} (n ${x.self.n})` : '—'} | ${fitText(x.audioGrid)} | ${fitText(x.videoGrid)} | ${fitText(x.videoTc)} |`
-    )
-  }
-  for (const c of comparisons) {
-    lines.push(`| ${c.label} | pair | | | | | | | | ${c.fit ? signed(c.fit.a) : '—'} | ${c.fit ? `${fitText(c.fit)} (n ${c.fit.n})` : '—'} | | | | | |`)
-  }
+  lines.push(...fileTableLines(files, comparisons))
   lines.push('')
 
   // Verdicts — the hunt report's "What confirms what".
@@ -817,7 +902,7 @@ if (targets.length === 0) {
 }
 
 const report = [
-  `## ESCAPECRAFT A/V drift — ${new Date().toISOString()}`,
+  `## ESCAPECRAFT / ESCAPEARTIST A/V drift — ${new Date().toISOString()}`,
   '',
   `A/V offset is positive when audio lags its picture. **a / b (timecode)**: per beep, the wall time of the picture on screen at the beep's file time (decoded from the frame timecode) minus the beep's own wall time — the primary measure and the one the verdicts read. Flash pairs: beep onset − flash onset, the brief's method, kept as a cross-check (flash onsets by ${flashMethod}, luma threshold ${LUMA_THRESHOLD}; an onset more than ${f(MAX_ONSET_GAP_S * 1000, 0)} ms after the previous decoded frame is "uncertain" and left out). b is ms per minute of take. "Grid b" is one track's onsets against the ${PERIOD_S} s wall-clock schedule; "video vs wall b" is every timecoded frame's paint time − file time. Significant: |b| > 3 SE and more than one frame (${f(FRAME_MS)} ms) over the take.`,
   '',
