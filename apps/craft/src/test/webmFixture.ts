@@ -113,7 +113,7 @@ export interface FixtureSpec {
 }
 
 export interface Fixture {
-  bytes: Uint8Array
+  bytes: Uint8Array<ArrayBuffer>
   blob: Blob
   segmentDataStart: number
   cuesStart: number

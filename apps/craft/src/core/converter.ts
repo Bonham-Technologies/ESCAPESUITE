@@ -35,6 +35,7 @@ import {
 import fixWebmDurationImport from 'webm-duration-fix';
 import type { OverlayPlacement } from '@escapesuite/shared/types';
 import { drawOverlay, overlayGeometryFor, type OverlayGeometry } from './overlayGeometry';
+import { writeKeyframeCues } from './webmCues';
 
 /**
  * The one function `webm-duration-fix` provides: repair a WebM container. Taken
@@ -895,16 +896,21 @@ async function askMP4Support(): Promise<MP4SupportProbe> {
 }
 
 /**
- * Fix WebM metadata for proper seeking and playback.
- * This is near-instant since it only rewrites container metadata
- * (Duration, SeekHead, Cues) without re-encoding video/audio.
+ * Fix WebM metadata for proper seeking and playback — the one place a stored
+ * MediaRecorder WebM is repaired. Near-instant: it rewrites container metadata
+ * only, never re-encoding video or audio.
  *
- * Uses webm-duration-fix which properly adds seek cues that
- * Windows Media Player and other players need for scrubbing.
+ * Two steps. `webm-duration-fix` writes the Duration and the SeekHead, and a
+ * Cues element; then `writeKeyframeCues` replaces that Cues element with one
+ * CuePoint per video keyframe, because the library indexes only SimpleBlocks
+ * and Chrome writes a composited-PiP take's alpha-VP9 frames as BlockGroups, so
+ * it left those takes' Cues empty — which Firefox cannot seek (ESCSUITE-305,
+ * ESCSUITE-322). A failure in either step rejects, and the save reports it as
+ * `NOT_SEEKABLE`.
  */
 export async function fixWebMMetadata(webmBlob: Blob): Promise<Blob> {
-  const fixedBlob = await fixWebmDuration(webmBlob);
-  return fixedBlob;
+  const durationFixed = await fixWebmDuration(webmBlob);
+  return writeKeyframeCues(durationFixed);
 }
 
 /**

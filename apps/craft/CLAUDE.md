@@ -484,7 +484,8 @@ the Help button.
   rejected it. Deleted with its suite and the `appDoubles.ts` double's entry rather than fixed,
   on the operator's decision, the same as ESCSUITE-85's `remuxToWebM`.
 - `converter.ts`: `fixWebMMetadata()` — the WebM container repair a **MediaRecorder** take
-  goes through at save time (a WebCodecs take needs none; see "WebM Handling") — plus
+  goes through at save time (a WebCodecs take needs none; see "WebM Handling"): `webm-duration-fix`
+  and then `webmCues.ts`'s `writeKeyframeCues()`, the keyframe Cues index (ESCSUITE-322) — plus
   `convertToMP4()`, `convertToM4A()` (the audio alone, AAC in an MP4 container; the two share
   the private `encodeAudioChunks()` AAC pass) — `convertToMP4()`'s fourth optional argument is
   the take's camera half, which makes it the composite (see "Download Formats") — the `probeMP4Support()` codec probe both
@@ -1624,7 +1625,8 @@ message and navigate to its own editor itself.
 
 - **Download WebM** hands back the stored blob as `<name>.webm` with no conversion step.
   What is in storage is already seekable, either because the recorder wrote it that way or
-  because it was repaired at save time (see "WebM Handling"), so the download is instant
+  because it was repaired at save time — a Duration and a keyframe Cues index (see "WebM
+  Handling") — so the download is instant
   and is never gated on anything.
 - **MP4** re-encodes that blob to H.264 + AAC in the page — `convertToMP4()` in
   `core/converter.ts`: WebCodecs decode and encode, Mediabunny mux,
@@ -2108,7 +2110,33 @@ upstream-requests page has its own row.
 
 ### WebM Handling
 - MediaRecorder produces WebM without proper seek metadata
-- `webm-duration-fix` library adds Duration, SeekHead, and Cues elements
+- `webm-duration-fix` library adds Duration, SeekHead, and Cues elements — but its Cues index
+  only video **SimpleBlocks** (one CuePoint at the first video SimpleBlock of each cluster,
+  keyframe or not), so `fixWebMMetadata()` follows it with **`core/webmCues.ts`'s
+  `writeKeyframeCues()`**, which replaces that Cues element with **one CuePoint per video
+  keyframe** (ESCSUITE-322). Why it matters: Chrome's MediaRecorder writes every frame of the
+  compositor's alpha-VP9 canvas stream as a **BlockGroup** (the alpha plane rides in
+  BlockAdditions), so the library alone stored every composited-PiP take with an **empty** Cues
+  element (`1c53bb6b 80`). Chromium's `<video>` scans such a file and seeks it anyway; Firefox's
+  seek into a cluster that does not open on a keyframe never fires `seeked` — Chrome starts a
+  cluster about every second whatever the keyframes — so an ESCAPEARTIST export of the take on
+  Firefox drew black frames and its import thumbnail hung (ESCSUITE-305, whose own half is
+  ARTIST's). ESCSUITE-305 measured the cure: the same bytes with a keyframe index written into
+  the same place seeked 48/48 on Firefox, and that index is what this step writes. It is pure
+  bytes, once per save: one forward pass over the Segment, read in 1 MiB windows
+  (`CUES_READ_WINDOW_BYTES`) with every frame payload skipped, noting each keyframe — a
+  SimpleBlock with the keyframe flag, or a BlockGroup with no ReferenceBlock — then the Cues
+  element rewritten in place (CueTime, CueTrack, CueClusterPosition, CueRelativePosition, each at
+  a fixed 8-byte width) and every other byte, alpha included, handed on as a `slice()` of the
+  input. It leans on `makeMetadataSeekable`'s fixed output shape (an unknown-size Segment, the
+  Cues ahead of the first Cluster, the SeekHead pointing only at elements ahead of it), so
+  growing the Cues moves every Cluster by exactly its growth and nothing else. A take with no
+  video track (microphone only) is handed back as the library left it. A video file with no
+  Cues element at all throws — the library always writes one — and the save reports it as
+  `NOT_SEEKABLE` like any other failed repair. Mediabunny's packet-copy remux was the other
+  option and was not taken: it would rebuild every block, and whether it keeps the alpha
+  BlockAdditions byte for byte is exactly what a rewrite of the Cues alone never has to prove.
+  Takes stored before this carry the empty Cues; nothing repairs them in place
 - Thumbnails captured from live preview (more reliable than from blob)
 - Metadata extraction has fallbacks for problematic WebM files
 - **The repair runs on MediaRecorder output only**, once, at save time.
@@ -2144,8 +2172,13 @@ upstream-requests page has its own row.
   combined `dist/` — which records a real **composited PiP** take (the only mode that reaches
   MediaRecorder in Chromium, and still what a PiP take is unless the separate-tracks toggle is
   on) and requires the stored blob to report a finite `duration` in a `<video>`.
-  `src/core/converterInterop.test.ts` is the one suite that imports the real module, and pins
-  both arms of the resolver
+  `src/core/converterInterop.test.ts` imports the real module and pins both arms of the
+  resolver; `src/core/webmRepair.test.ts` runs the real library over hand-built containers
+  (`src/test/webmFixture.ts`) and then the keyframe Cues step, on Node's Blob with Node's
+  `Buffer` pool switched off — jsdom's Blob cannot stream, and under Node the library's output
+  head is the `.buffer` of a pooled `Buffer`, which a browser's `buffer` polyfill never pools. The
+  same specs also read the stored take's Cues in the page: present, non-empty, and one CuePoint per
+  video keyframe found walking its clusters
 
 ### Analytics
 - Vercel Analytics via `@vercel/analytics`, **in the hosted build only**. The standalone
