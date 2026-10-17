@@ -58,6 +58,13 @@ export interface SeekScript {
    * start with a key frame. Leave it unset and seeks behave as they always have.
    */
   wedgeSeekAt?: (time: number) => boolean
+  /**
+   * A slow but healthy seek (ESCSUITE-305 re-review): the seek reports
+   * `seeking` true at HAVE_METADATA (1) until this many milliseconds later,
+   * when it lands — `seeking` false, the scripted `readyState` back, 'seeked'
+   * dispatched — on a `setTimeout`, so fake timers drive it.
+   */
+  seekLandsAfterMs?: number
 }
 
 export interface VideoScript extends SeekScript {
@@ -208,6 +215,16 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
             own(el, 'duration', s.durationAfterSeek)
             queueMicrotask(() => el.dispatchEvent(new Event('durationchange')))
           }
+        }
+        if (s.seekLandsAfterMs !== undefined) {
+          own(el, 'seeking', true)
+          own(el, 'readyState', 1)
+          setTimeout(() => {
+            own(el, 'seeking', false)
+            own(el, 'readyState', readyState)
+            el.dispatchEvent(new Event('seeked'))
+          }, s.seekLandsAfterMs)
+          return
         }
         if (s.wedgeSeekAt) {
           const wedged = s.wedgeSeekAt(next)
