@@ -90,17 +90,23 @@ test.describe('ESCAPECRAFT separate-tracks companion length', () => {
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     // After the mock's own init scripts, so this wraps the synthetic
-    // getUserMedia rather than the browser's.
+    // getUserMedia rather than the browser's — layered through
+    // `__layerMediaDevices`, as every override in utils/media-mocks.ts is
+    // (ESCSUITE-177), rather than assigned onto `navigator.mediaDevices`.
     await page.addInitScript(() => {
-      const w = window as unknown as { __microphones: MediaStreamTrack[] }
-      w.__microphones = []
-      const mediaDevices = navigator.mediaDevices
-      const getUserMedia = mediaDevices.getUserMedia.bind(mediaDevices)
-      mediaDevices.getUserMedia = async (constraints?: MediaStreamConstraints) => {
-        const stream = await getUserMedia(constraints)
-        w.__microphones.push(...stream.getAudioTracks())
-        return stream
+      const w = window as unknown as {
+        __microphones: MediaStreamTrack[]
+        __layerMediaDevices: (overrides: Record<string, unknown>) => void
       }
+      w.__microphones = []
+      const synthetic = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+      w.__layerMediaDevices({
+        getUserMedia: async (constraints?: MediaStreamConstraints) => {
+          const stream = await synthetic(constraints)
+          w.__microphones.push(...stream.getAudioTracks())
+          return stream
+        },
+      })
     })
 
     await page.goto(CRAFT_URL)
