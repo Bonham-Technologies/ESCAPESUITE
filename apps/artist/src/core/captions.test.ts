@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest'
 import {
   CaptionParseError,
   captionStyleFor,
+  captionWrapColumns,
   describeDroppedFeatures,
   parseCaptions,
   serializeCaptions,
@@ -562,13 +563,42 @@ describe('captionStyleFor', () => {
     })
   })
 
-  it('scales the font with the project height', () => {
+  it('scales the font with the project\'s shorter side', () => {
     expect(captionStyleFor({ width: 1280, height: 720 }).fontSize).toBe(32)
     expect(captionStyleFor({ width: 3840, height: 2160 }).fontSize).toBe(97)
   })
 
+  it('sizes from the shorter side, so a portrait frame gets the font its width allows (ESCSUITE-309)', () => {
+    expect(captionStyleFor({ width: 1080, height: 1920 }).fontSize).toBe(49)
+    expect(captionStyleFor({ width: 720, height: 1280 }).fontSize).toBe(32)
+    expect(captionStyleFor({ width: 1080, height: 1350 }).fontSize).toBe(49)
+    expect(captionStyleFor({ width: 1920, height: 1080 }).fontSize).toBe(49)
+    expect(captionStyleFor({ width: 1080, height: 1080 }).fontSize).toBe(49)
+  })
+
   it('uses the first font the inspector offers', () => {
     expect(captionStyleFor({ width: 1, height: 1 }).fontFamily).toBe(FONT_OPTIONS[0].value)
+  })
+})
+
+describe('captionWrapColumns (ESCSUITE-309)', () => {
+  const columns = (width: number, height: number) =>
+    captionWrapColumns({ width, height }, captionStyleFor({ width, height }).fontSize)
+
+  it('keeps 42 on every landscape frame', () => {
+    expect(columns(1920, 1080)).toBe(42)
+    expect(columns(1280, 720)).toBe(42)
+  })
+
+  it('derives fewer columns from the width on a square or portrait frame', () => {
+    expect(columns(1080, 1080)).toBe(36)
+    expect(columns(1080, 1920)).toBe(36)
+    expect(columns(720, 1280)).toBe(37)
+  })
+
+  it('clamps up to 20 when the font leaves less room, and down to 42 on a very wide frame', () => {
+    expect(captionWrapColumns({ width: 200, height: 200 }, 49)).toBe(20)
+    expect(captionWrapColumns({ width: 8000, height: 200 }, 9)).toBe(42)
   })
 })
 

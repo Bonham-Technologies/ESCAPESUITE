@@ -13,6 +13,7 @@ import type { SourceVideo } from '../store/types';
 import {
   CaptionParseError,
   captionStyleFor,
+  captionWrapColumns,
   describeDroppedFeatures,
   parseCaptions,
   wrapCaptionText,
@@ -398,8 +399,11 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
       }
       return;
     }
-    const wrapped = parsed.cues.map((cue) => ({ ...cue, text: wrapCaptionText(cue.text) }));
-    const result = addCaptionCues(wrapped, captionStyleFor(useEditorStore.getState().project.resolution));
+    const resolution = useEditorStore.getState().project.resolution;
+    const style = captionStyleFor(resolution);
+    const columns = captionWrapColumns(resolution, style.fontSize);
+    const wrapped = parsed.cues.map((cue) => ({ ...cue, text: wrapCaptionText(cue.text, columns) }));
+    const result = addCaptionCues(wrapped, style);
     if (!result) {
       showNotification('The Captions track is locked, so no captions were imported.', 'error');
       return;
