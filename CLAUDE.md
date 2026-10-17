@@ -5106,6 +5106,32 @@ storage row, which a real session always has) and `session-ownership.spec.ts` ra
 Every `*.perf.test.ts` and rerender pin is byte-identical, and `App` gains no store subscription. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-17 for ESCSUITE-319 (the playback dialog for a
+microphone-only take draws one centred glyph carrying the play/pause state — the play triangle while
+paused, ESCSUITE-233's speaker while playing — where the paused 72×72 play overlay used to sit exactly on
+the speaker glyph, two icons reading as one; the `<video>` stays the engine, the keyboard target and the
+click-to-toggle surface, the glyph container stays `aria-hidden` with the controls' button carrying the
+state for assistive tech, and a video take's overlay is byte-identical): 100.00 / 99.57 / **97.94** / 100.00
+against the 100.00 / 99.57 / 97.93 / 100.00 that `main` at `f5d65ac5` (the ESCSUITE-306 version-packages
+commit) measures in the same sitting — branches up a hundredth, the other three unmoved at exactly 100,
+99.57 and 100. The base predates ESCSUITE-317 (`bee8617f`, which this branch was cut from), so the delta
+carries both: the base gives 1,473 / 1,504 branches and this branch 1,481 / 1,512 — eight new branches,
+eight covered, the same 31 uncovered — of which `core/audioWorkletCapture.ts`'s two (22 → 24) are
+ESCSUITE-317's data-module retry, already measured in its own paragraph, and
+`components/VideoPlayer/VideoPlayer.tsx`'s six (107 / 115 → 113 / 121) are this ticket's: the
+`showPlayGlyph ? PlayIcon : SpeakerIcon` ternary and the `mediaType !== 'audio'` gate on the overlay, each
+reached from both sides by the audio-paused, audio-playing and video-paused cases (the file's same eight
+pre-existing arms uncovered). Lines 2,626 → 2,634, statements 2,810 / 2,822 → 2,818 / 2,830 and functions
+497 → 498, every new unit covered; the same 12 statements uncovered, in the same four files. Red first:
+`expected null to be 'play'` and `expected null to be 'speaker'`; the mutation (the overlay rendered for an
+audio take again) reds the "exactly one glyph" case. One review round (sonnet): approved, with its one
+MINOR — the Playwright case asserting the controls' play/pause button beside the glyph — taken by the
+coordinator. Outside vitest's measurement,
+`apps/e2e/tests/escapecraft/audio-take-glyph.spec.ts` (a mic-only take through the recorder's own UI,
+one glyph with zero overlap paused and playing, the controls' button present) ran on Chromium: 1 / 1,
+twice. `App.*rerender*` and every `*.perf.test.ts` are byte-identical. **No floor crossed**; craft's floors
+stay 100 / 99 / 97 / 100 (98 on branches once ESCSUITE-322 lands).
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
