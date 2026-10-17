@@ -239,6 +239,31 @@ pnpm lint                # Run ESLint
   2 s `testsrc` fixtures in `apps/e2e/fixtures/frame-rate/` (H.264 at 24, 30, 60, 120 and 29.97 fps; VP9 WebM at
   24, 30, 60 and 120) imported through the uploader on Chromium, each required to be stored `'measured'` at its own
   rate (exact for the MP4s, the NTSC neighbour also accepted for a WebM). Run 5 times each in one sitting, 45 of 45 passed.
+  **The probe runs only on an engine it was measured on — Chromium (ESCSUITE-327).** The same nine
+  fixtures on Playwright's Firefox 157 (ESCSUITE-316 U-3, 2026-10-17, the Chromium-only skip lifted) stored
+  five as 30 `'assumed'` (the safe side: 24 / 30 / 60 / 29.97 MP4 and 24 WebM), two right (60 and 120
+  WebM) and two **wrong `'measured'` claims** — the 120 fps MP4 as **124.62** (outside the 1.5 % snap) and
+  the 30 fps WebM as **34.33** (14 % over). Firefox's rVFC metadata — its `presentedFrames` counter and
+  `mediaTime` stamps per rate and container — was never characterised the way ESCSUITE-276 / 278
+  characterised Chromium's (140 instrumented runs; Firefox was measured for VP9 120 fps alone), so
+  `measureFrameRate` takes `engineMeasured` on its options, defaulting to
+  `isMeasuredFrameRateEngine(navigator)` in `core/workerDecodeEngine.ts` — **Chromium only**, by the same
+  `userAgentData.brands` test the decode worker's allow-list reads — and answers `undefined` at once when it
+  is false, before any play, seek or rVFC request, so the import stores 30 `'assumed'`. The probe's
+  allow-list is deliberately narrower than the worker's, which admits Firefox: the worker's Firefox parity
+  was measured against its own `<video>` (ESCSUITE-262), the probe's was not. An over-read only narrows
+  ESCSUITE-263's seek window (more seeks, never a skipped frame), so the picture was never wrong — the
+  stored `frameRate` and `frameRateSource: 'measured'` were. Admitting Firefox is a measurement task, not a
+  code change: instrument its rVFC per rate and container as 276 / 278 did, re-derive the refusal arms, and
+  widen the predicate. The committed spec keeps its Chromium-only skip and gains one Firefox-only case —
+  the 120 fps MP4 stored as 30 `'assumed'` — which is the gate's own pin. In jsdom, `src/test/setup.ts`
+  defines `navigator.userAgentData` as Chromium brands (an `Object.defineProperty`, so
+  `vi.unstubAllGlobals()` leaves it) because jsdom is not a measured engine and every suite that expects the
+  probe to run — `videoProcessor.test.ts`, the probe's own — would otherwise read 30 `'assumed'`; the
+  gate's tests stub `navigator` per case to say otherwise, and `videoProcessor.frameRateGate.test.ts` pins
+  both sides through `processVideoFile`. That definition also makes `isMeasuredWorkerDecodeEngine` true in
+  every artist unit test; nothing changes for the worker path in jsdom, which has no `Worker` and no
+  `VideoDecoder`, so `VideoDecodeManager.isSupported()` keeps the factory on `<video>` regardless.
 - `exporter.ts`: the barrel over **three** export paths — two through WebCodecs +
   `mediabunny` for muxing, and one through neither:
   - **WebM** (`exportWebM.ts`): VP9 video + Opus audio, frame-by-frame encoding with audio mixing
@@ -558,6 +583,12 @@ row). Measured
 | Firefox 155 | `Gecko/` and `Firefox/` in the user agent | export MAD 0.000 over every compared frame of the untagged, BT.709-tagged, matrix-only, two `colr`-only and trimmed sources, and 0.000 / 0.314–0.337 / 0.353–0.379 / 0.207–0.211 at the full-range source's frames 0/25/41/59 (ESCSUITE-262: the parity spec now runs on Firefox, four runs 2026-10-11; 0.195–0.356 when ESCSUITE-265 ran it by hand); probe decode 0.00 on eight colour and size variants. The trimmed clip's "previous colour segment at export frames 25–26" (68.3/255) that ESCSUITE-254 found was the `<video>` path, not the worker: frame 25 the boundary seek below, frame 26 the seek skip ESCSUITE-263 removed. Its `VideoDecoder` drops `rotation`, so a rotated source is refused and keeps `<video>` (with the notice) — the parity spec's rotated case asserts exactly that refusal on Firefox (one fallback naming "VideoDecoder cannot rotate its output", no `FRAME_READY`, the notice shown) rather than a worker decode. CI's gating job runs Chromium only; Firefox runs under `pnpm test:e2e:browsers` | yes |
 | WebKit 26.6 | — | probe decode beside `<video>` (ESCSUITE-262, six colour fixtures): 6.5–8.0/255 mean, up to 17.6 on one frame — colour, not timing. Its `<video>` picks the matrix per stream (BT.601 for untagged SD and a `colr` 6/6/6 box, BT.709 for a fully tagged, a matrix-only or a `colr` 1/1/1 stream) and colour-manages (Apple's 1.961 video gamma to sRGB, SMPTE-C to BT.709 primaries for a BT.601 source; model residual 0.39–0.50); its `VideoDecoder` ignores `VideoDecoderConfig.colorSpace` (echoed by `isConfigSupported`, no effect on a pixel), hands back full-range NV12 tagged `bt709/bt709/iec61966-2-1/full`, and `drawImage` draws it as plain BT.709 with no conversion (residual 0.31–0.49). `copyTo({ format: 'RGBA', colorSpace: 'srgb' })` resolves but writes zeros. No decoder configuration closes the gap; re-wrapping the planes in a new `VideoFrame` tagged with `<video>`'s matrix and primaries (transfer `bt709`, full range) brings every fixture to 0.44–1.22 — a per-frame copy in the worker (one `VideoFrame` allocated and closed per decoded frame), not a `decoderConfig.ts` rule. **Not admitted (ESCSUITE-285)**: WebKit is not a primary export target, that copy is a per-frame cost the editor does not take on for it, and the parity spec cannot run there end to end (it cannot import media under Playwright: IndexedDB refuses the Blob, ESCSUITE-258), so the spec skips WebKit; the in-page `<video>` path is correct on WebKit and stays | no |
 | anything else, or no `navigator` | — | not measured | no |
+
+The table is the **decode worker's** allow-list. The import-time frame-rate probe has its own, narrower
+one — `isMeasuredFrameRateEngine`, Chromium alone, in the same module — because the probe's Firefox output
+was never characterised where the worker's was (ESCSUITE-327; see the frame-rate paragraph under
+`videoProcessor.ts`). `isMeasuredWorkerDecodeEngine` is written as that predicate plus `isFirefoxEngine`, so
+the Chromium test exists once.
 
 - **`mp4Demux.ts`** — `mp4box.js` demuxing of the first video track: every sample in decode order,
   timestamps in whole microseconds with the **edit list applied** (x264's B-frame files start
