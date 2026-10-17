@@ -21,6 +21,13 @@ import { waitForAppReady } from '../../utils/ready'
  * own, `escapeartist-offer:<tabId>`, held while the slot is on offer (the tab
  * lock itself is only probed), so two fresh tabs opened together after A
  * closes are not both offered A's session — the second case below.
+ *
+ * ESCSUITE-306: a free tab lock is not proof the tab is gone for good. Chrome's
+ * Memory Saver (on by default) discards a background tab — its page, and so its
+ * lock, is gone — but the tab stays in the strip with its `sessionStorage`, id
+ * and all, and reloads looking for its own slot when it is clicked. Start Fresh
+ * in another tab therefore leaves another tab's slot in storage, and that tab
+ * does not offer it again — the third case below.
  */
 
 /** ESCAPEARTIST's autosave debounce (`AUTO_SAVE_DELAY`) is 2 s; give it room. */
@@ -218,5 +225,80 @@ test.describe('One session slot per ESCAPEARTIST tab (ESCSUITE-274)', () => {
     await expect
       .poll(() => readSlots(offeredTo), { timeout: 15_000 })
       .toEqual({ [idOffered]: { name: 'Tab A', sources: 1, clips: 1 } })
+  })
+
+  test('Start Fresh in another tab leaves a discarded tab\'s session for it to come back to (ESCSUITE-306)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000)
+    const context = page.context()
+
+    // Tab A: a real source and a clip, autosaved into A's own slot.
+    await page.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab A')}`)
+    await waitForAppReady(page, 'artist')
+    const idA = (await tabIdOf(page))!
+    await importMediaAndAddToTimeline(page)
+    await expect
+      .poll(() => slotOf(page, idA), { timeout: 15_000 })
+      .toEqual({ name: 'Tab A', sources: 1, clips: 1 })
+
+    // A discard, simulated: A's page goes (its lock with it) and what survives
+    // is its sessionStorage, which the reactivated tab will start with. The
+    // real thing, headed Chromium only — not run in CI:
+    //   const discards = await context.newPage()
+    //   await discards.goto('chrome://discards')
+    //   // find tab A's row and click its "Urgent discard" link, then later
+    //   // `await page.bringToFront()` to reactivate it
+    const survivingSessionStorage = await page.evaluate(() => {
+      const items: Record<string, string> = {}
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i)!
+        items[key] = sessionStorage.getItem(key)!
+      }
+      return items
+    })
+    expect(survivingSessionStorage['escapeartist-tab-id']).toBe(idA)
+    await page.close()
+
+    const tabB = await test.step('(a) a fresh tab is offered the discarded tab\'s session, and Start Fresh keeps it', async () => {
+      const tab = await context.newPage()
+      await tab.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab B')}`)
+      await waitForAppReady(tab, 'artist')
+      const prompt = tab.getByRole('dialog', { name: 'Resume Previous Session?' })
+      await expect(prompt).toBeVisible({ timeout: 15_000 })
+      await expect(prompt.getByText('Tab A', { exact: true })).toBeVisible()
+      await tab.getByRole('button', { name: 'Start Fresh' }).click()
+      await expect(prompt).toHaveCount(0)
+      await tab.waitForTimeout(PAST_THE_DEBOUNCE_MS)
+      expect(await slotOf(tab, idA)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
+      return tab
+    })
+
+    await test.step('(b) the tab that declined it is not offered it again on a reload', async () => {
+      await tabB.reload()
+      await waitForAppReady(tabB, 'artist')
+      await tabB.waitForTimeout(1_500)
+      await expect(tabB.getByRole('dialog', { name: 'Resume Previous Session?' })).toHaveCount(0)
+      expect(await slotOf(tabB, idA)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
+    })
+
+    await test.step('(c) the discarded tab comes back to its own session', async () => {
+      const tabA = await context.newPage()
+      await tabA.addInitScript((items: Record<string, string>) => {
+        for (const [key, value] of Object.entries(items)) sessionStorage.setItem(key, value)
+      }, survivingSessionStorage)
+      await tabA.goto(`${ARTIST_URL}/?title=${encodeURIComponent('Tab A')}`)
+      await waitForAppReady(tabA, 'artist')
+      expect(await tabIdOf(tabA)).toBe(idA)
+
+      const prompt = tabA.getByRole('dialog', { name: 'Resume Previous Session?' })
+      await expect(prompt).toBeVisible({ timeout: 15_000 })
+      await expect(prompt.getByText('Tab A', { exact: true })).toBeVisible()
+      await tabA.getByRole('button', { name: 'Restore Session' }).click()
+      await expect(prompt).toHaveCount(0)
+      await expect(tabA.getByText('Session restored')).toBeVisible()
+      await tabA.waitForTimeout(PAST_THE_DEBOUNCE_MS)
+      expect(await slotOf(tabA, idA)).toEqual({ name: 'Tab A', sources: 1, clips: 1 })
+    })
   })
 })

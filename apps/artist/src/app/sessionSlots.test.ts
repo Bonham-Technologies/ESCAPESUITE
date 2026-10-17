@@ -274,6 +274,58 @@ describe('findOfferableSlot claims the departed tab\'s offer (ESCSUITE-283)', ()
   })
 })
 
+// ESCSUITE-306: a slot this tab declined is another tab's work left in storage
+// for that tab to come back to (a tab Chrome's Memory Saver discarded keeps its
+// id). It is not offered to this tab again; another tab may still be offered it.
+describe('findOfferableSlot skips the slots this tab declined (ESCSUITE-306)', () => {
+  it('skips a declined slot and offers the next newest', async () => {
+    const older = slot('crashed-early', NOW - 60_000)
+    const declined = slot('discarded', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([older, declined])
+
+    const offer = await findOfferableSlot('me', NOW, new Set(['discarded']))
+
+    expect(offer?.slot).toBe(older)
+    // Skipped before any lock is asked about: neither probed nor claimed.
+    expect(fake.isHeld(offerLockName('discarded'))).toBe(false)
+  })
+
+  it('offers nothing when the only free slot was declined', async () => {
+    vi.mocked(listSessionStates).mockResolvedValue([slot('discarded', NOW - 1_000)])
+
+    await expect(findOfferableSlot('me', NOW, new Set(['discarded']))).resolves.toBeNull()
+  })
+
+  it('still offers a declined slot to another tab, whose list does not name it', async () => {
+    const declined = slot('discarded', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([declined])
+
+    const offer = await findOfferableSlot('other-fresh-tab', NOW, new Set())
+
+    expect(offer?.slot).toBe(declined)
+  })
+
+  it('offers this tab\'s own slot even when the list names it: the own-slot rule comes first', async () => {
+    const mine = slot('me', NOW - 60_000)
+    vi.mocked(listSessionStates).mockResolvedValue([mine])
+
+    const offer = await findOfferableSlot('me', NOW, new Set(['me']))
+
+    expect(offer?.slot).toBe(mine)
+  })
+
+  it('reads this tab\'s own list from sessionStorage when none is passed', async () => {
+    const older = slot('crashed-early', NOW - 60_000)
+    vi.mocked(listSessionStates).mockResolvedValue([older, slot('discarded', NOW - 1_000)])
+    sessionStorage.setItem('escapeartist-declined-slots', JSON.stringify(['discarded']))
+    try {
+      await expect(offered('me', NOW)).resolves.toBe(older)
+    } finally {
+      sessionStorage.clear()
+    }
+  })
+})
+
 // Fix round 1: an offer can go stale while the prompt is up — the departed tab
 // comes back (a reload after a renderer crash, a tab the browser restores
 // lazily) and is offered its own slot. Before either answer touches the slot,
