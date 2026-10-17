@@ -297,8 +297,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   session that already holds clips appends at the end of the timeline —
   `?suppressRestore=1` to skip the
   "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
-  the autosave is off too), and `?title=<name>` to name the project (trimmed, max 120 chars;
-  applied only while the name is still the default `Untitled Project`). `?video=url` (and the
+  the autosave is off too), `?title=<name>` to name the project (trimmed, max 120 chars;
+  applied only while the name is still the default `Untitled Project`), and `?tabKey=<name>` to
+  name the frame when a host frames more than one editor (ESCSUITE-332, below). `?video=url` (and the
   inbound `LOAD_VIDEO` message, below) fetch the URL from the page itself, so both are bound by
   its own `connect-src` — on the hosted deployment (`connect-src 'self' ...` in `vercel.json`)
   that means a **same-origin URL only**; a cross-origin one is refused before it leaves the page,
@@ -335,6 +336,25 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   ignored, with one console warning. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus
   `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a
   self-hosted or standalone build must set its own.
+- **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
+  one host page keep a saved session each (ESCSUITE-332). **Pass a different one to each frame**
+  when a page frames more than one editor: every same-origin frame of a page shares the top-level
+  tab's `sessionStorage`, where a top-level tab keeps its id, so before this ticket the second frame
+  renewed the first's id and wrote over it, and after a host reload the two frames swapped sessions
+  (ESCSUITE-311's two-iframes probe). Trimmed, max 120 chars, blank ignored, otherwise taken as it
+  comes — it is only ever part of a storage key and a lock name. Read only when embedded
+  (`isEmbedded()`): the frame's id is `host:<name>`, its slot `session:host:<name>` and its locks
+  `escapeartist-tab:host:<name>` / `escapeartist-offer:host:<name>`, so each named frame is offered
+  its own session after a host reload. **An embedded editor never reads or writes the shared
+  `sessionStorage` id**, with a key or without: without one its id lasts that page load, so nothing
+  is overwritten or lost, but after a host reload each frame's last session is offered like any
+  closed tab's — newest free first, to whichever frame asks. Two frames given the **same** key is the
+  host's mistake: the second warns once in the console naming the key and takes an id for that page
+  load, overwriting nothing. The frames of one page share the declined-session list
+  (`declinedSlots.ts`, also `sessionStorage`): a save declined in one is not offered to another. A
+  top-level tab ignores the parameter. Pinned in a real two-iframe host page by
+  `apps/e2e/tests/integration/two-iframes-session.spec.ts`; see `apps/artist/CLAUDE.md`'s "One
+  session slot per tab".
 - **Documented but not currently implemented**: inbound `EXPORT`, outbound `EXPORT_PROGRESS` and
   `PROJECT_SAVED`, and the `?project=` / `?autoplay=` URL params. See `apps/artist/CLAUDE.md`.
 - **`VITE_EDITOR_URL`** (build-time, CRAFT): where standalone CRAFT opens the editor.

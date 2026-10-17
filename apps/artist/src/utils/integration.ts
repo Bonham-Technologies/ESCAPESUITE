@@ -526,4 +526,19 @@ export function generateShareUrl(
  *   `Content-Security-Policy: frame-ancestors` on the deployment. The hosted deployment
  *   (escapesuite.io) sends `frame-ancestors 'self'` from vercel.json; self-hosted builds
  *   must set their own.
+ * - tabKey=<name> - The host's name for this frame (ESCSUITE-332). A host that
+ *   frames MORE THAN ONE editor in a page should pass a different one to each:
+ *   every same-origin frame of a page shares the top-level tab's
+ *   sessionStorage, so the editor cannot tell its frames apart on its own.
+ *   Trimmed, max 120 chars, blank ignored, otherwise taken as it comes - it is
+ *   only ever part of a storage key and a lock name. Read only when embedded:
+ *   the frame's tab id is then `host:<name>`, so its autosaved session slot
+ *   (`session:host:<name>`) and its tab lock follow the name across a host
+ *   reload, and each frame is offered its own session back. Without a tabKey an
+ *   embedded editor's id lasts that page load only: nothing is lost, but after
+ *   a host reload each frame's last session is offered like any closed tab's,
+ *   newest first, to whichever frame asks. Two frames given the SAME tabKey is
+ *   the host's mistake: the second warns once in the console and keeps its
+ *   session for that page load only, overwriting nothing. A top-level
+ *   (unframed) editor ignores the parameter.
  */
