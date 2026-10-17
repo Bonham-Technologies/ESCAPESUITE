@@ -223,7 +223,7 @@ test.describe('ESCAPEARTIST A/V drift rig', () => {
       recorder: 'artist-export',
       seconds: clip.duration,
       window: { startPerf: 0, stopPerf: clip.duration * 1000, seconds: clip.duration },
-      source: { path: SOURCE, durationSeconds: sourceProbe.duration, arm: sourceMeasurement ? { mode: sourceMeasurement.mode, load: sourceMeasurement.load, recorder: sourceMeasurement.recorder } : null },
+      source: { path: SOURCE, durationSeconds: sourceProbe.duration, arm: sourceMeasurement ? { mode: sourceMeasurement.mode, load: sourceMeasurement.load, recorder: sourceMeasurement.recorder, capturePath: sourceMeasurement.capturePath ?? null } : null },
       clip,
       projectResolution: project.resolution,
       playbackTimeAvailable: false,

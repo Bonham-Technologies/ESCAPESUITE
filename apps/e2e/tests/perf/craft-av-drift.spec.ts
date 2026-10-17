@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test, type CDPSession, type Page } from '@playwright/test'
 import { CAPTURE_SIZE, CRAFT_URL } from '../../utils/craftPerf'
 import { grantMediaPermissions, mockSyntheticMedia, type MarkerState } from '../../utils/media-mocks'
+import { expectedCapturePath, resolveCapturePath } from '../../utils/capturePath'
 import { installAvDriftInstrumentation, readAvDriftSnapshot, readSpStats, type SpNodeLog } from '../../utils/avDrift'
 
 /**
@@ -26,6 +27,7 @@ import { installAvDriftInstrumentation, readAvDriftSnapshot, readSpStats, type S
  *
  * | Variable | Values | Default |
  * |---|---|---|
+ * | `AV_DRIFT_EXPECT_PATH` | the capture path the arm must have used: `worklet`, `script-processor` or `media-recorder` (tripwire; default follows the arm's recorder) | — |
  * | `AV_DRIFT_MODE` | `screen` (screen + mic → WebCodecs), `pip` (screen + webcam composited → MediaRecorder), `tracks` (screen + webcam + mic as separate tracks → WebCodecs), `mic` (microphone alone → MediaRecorder) | `screen` |
  * | `AV_DRIFT_LOAD` | `idle`, `cpu4` (CDP `Emulation.setCPUThrottlingRate { rate: 4 }`), `jank` (a 60 ms busy loop every 100 ms in the CRAFT page) | `idle` |
  * | `AV_DRIFT_SECONDS` | take length, start click to stop click | `180` |
@@ -254,8 +256,15 @@ test.describe('ESCAPECRAFT A/V drift rig', () => {
     test.slow()
 
     const arm = ARMS[MODE]
+    // A bad AV_DRIFT_EXPECT_PATH is a configuration error: fail before the take.
+    const expectedPath = expectedCapturePath(arm.recorder, process.env.AV_DRIFT_EXPECT_PATH)
     rmSync(RESULTS_DIR, { recursive: true, force: true })
     mkdirSync(RESULTS_DIR, { recursive: true })
+
+    // ESCSUITE-320: the recorder names its audio capture path in one console
+    // line; the ScriptProcessor instruments cannot see a worklet take.
+    const consoleLines: string[] = []
+    page.on('console', (message) => consoleLines.push(message.text()))
 
     await installAvDriftInstrumentation(page)
     await mockSyntheticMedia(page, { ...CAPTURE_SIZE, markers: true })
@@ -313,8 +322,10 @@ test.describe('ESCAPECRAFT A/V drift rig', () => {
     })
 
     const files: SavedFile[] = []
+    const capturePath = resolveCapturePath(consoleLines, arm.recorder)
     const measurement = () => ({
       mode: MODE,
+      capturePath,
       load: LOAD,
       seconds: SECONDS,
       recorder: arm.recorder,
@@ -333,6 +344,11 @@ test.describe('ESCAPECRAFT A/V drift rig', () => {
 
     writeFileSync(path.join(RESULTS_DIR, 'sp-log.json'), JSON.stringify(snapshot.nodes))
     writeMeasurement()
+
+    // Tripwire (ESCSUITE-320): the take measured the capture path this arm meant
+    // to — `AV_DRIFT_EXPECT_PATH` states another expectation (Firefox, a
+    // forced ScriptProcessor fallback).
+    expect(capturePath, 'the audio capture path the take used').toBe(expectedPath)
 
     // Every stored part, exactly as the app's own WebM download hands it out.
     const rawButtons = page.getByRole('button', { name: /^Download (?!.+ as ).+$/ })

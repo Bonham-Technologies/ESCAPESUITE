@@ -574,7 +574,12 @@ one the two-track take that lost a callback drifted −2 ms; the before and afte
 the ticket. The CPU-throttled arms are not deterministic — how many callbacks Chromium drops
 varies run to run — so a comparison reads the arm that lost callbacks on both trees, and the
 rig reads the callbacks rather than the gap filler, so a fill count is inferred from the
-end-to-end drift rather than read out.
+end-to-end drift rather than read out. The rig records which audio capture path the take used
+(`capturePath`: `worklet`, `script-processor` or `media-recorder`, read from the recorder's own
+`console.info` line, ESCSUITE-320) and trips if it is not the one the arm meant (`AV_DRIFT_EXPECT_PATH`
+overrides). Its ScriptProcessor callback instruments see nothing on a worklet take — every WebCodecs
+take since ESCSUITE-299 — so the report prints "n/a (AudioWorklet)" and an n/a H1a verdict there
+instead of reading it as a MediaRecorder take; a per-chunk gap read on the worklet port is not built.
 
 CI runs them in their own workflow, `.github/workflows/perf.yml` (ESCSUITE-26): on every
 push to `main` or `dev`, on a pull request that carries the **`perf` label** (add the label,
