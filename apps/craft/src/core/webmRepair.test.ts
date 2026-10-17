@@ -90,6 +90,7 @@ describe('fixWebMMetadata over real containers', () => {
     const read = readCues(out)
     expect(read.hasDuration).toBe(true)
     // Track 1 is the Opus track here; whatever the library indexes is audio.
+    expect(read.points.length).toBeGreaterThan(0)
     expect(read.points.every((p) => p.track === 1)).toBe(true)
   })
 })

@@ -61,6 +61,87 @@ describe('writeKeyframeCues', () => {
     await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/no Cues element/)
   })
 
+  it('indexes a video track whose number takes a two-byte vint', async () => {
+    // Track 200: the TrackEntry says 200 and every block header carries it as
+    // a two-byte vint, the longer form of the track number a block can hold.
+    const wide = (track: number) => (track === 1 ? 200 : track)
+    const fixture = buildWebM({
+      ...PIP_SPEC,
+      tracks: PIP_SPEC.tracks.map((t) => ({ ...t, number: wide(t.number) })),
+      clusters: PIP_SPEC.clusters.map((c) => ({
+        ...c,
+        children: c.children.map((child) => ('track' in child ? { ...child, track: wide(child.track) } : child)),
+      })),
+    })
+    const out = await bytesOf(await writeKeyframeCues(fixture.blob))
+    expectIndexesKeyframes(fixture, out, PIP_KEYFRAMES, 200)
+  })
+
+  describe('refuses a layout it would index wrongly (the save then says NOT_SEEKABLE)', () => {
+    // The step moves every Cluster by the Cues element's growth and leaves the
+    // Segment size and the SeekHead alone. That is right for the library's
+    // output and silently wrong for anything else, so anything else is refused.
+    it('a Segment written with a known size', async () => {
+      const fixture = buildWebM({ ...PIP_SPEC, segmentKnownSize: true })
+      await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/Segment has a known size/)
+    })
+
+    it('a Cluster ahead of the Cues element', async () => {
+      const fixture = buildWebM({ ...PIP_SPEC, cuesAfterFirstCluster: true })
+      await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/Cluster ahead of its Cues/)
+    })
+
+    it('a SeekHead entry pointing past the Cues element', async () => {
+      const fixture = buildWebM({ ...PIP_SPEC, seekEntryPastCues: true })
+      await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/SeekHead entry past its Cues/)
+    })
+  })
+
+  it('refuses a video take in which no keyframe is found, rather than store an empty index', async () => {
+    const fixture = buildWebM({
+      tracks: PIP_SPEC.tracks,
+      cues: 'empty',
+      clusters: [
+        {
+          timecode: 0,
+          unknownSize: true,
+          children: [
+            { kind: 'group', track: 1, rel: 0, alpha: true, reference: -33 },
+            { kind: 'simple', track: 2, rel: 0, key: true },
+            { kind: 'group', track: 1, rel: 33, alpha: true, reference: -33 },
+          ],
+        },
+      ],
+    })
+    await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/no video keyframe/)
+  })
+
+  describe('refuses an invalid EBML vint', () => {
+    const withRaw = (bytes: number[]) =>
+      buildWebM({
+        ...PIP_SPEC,
+        clusters: [
+          {
+            timecode: 0,
+            unknownSize: false,
+            children: [{ kind: 'group', track: 1, rel: 0 }, { kind: 'raw', bytes }],
+          },
+        ],
+      })
+
+    it('an element ID longer than four bytes', async () => {
+      // 0x08 opens a five-byte vint, which no EBML ID may be.
+      const fixture = withRaw([0x08, 0x00, 0x00, 0x00, 0x00, 0x81, 0x00])
+      await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/invalid EBML/)
+    })
+
+    it('an element size longer than eight bytes', async () => {
+      // 0x00 opens no vint of eight bytes or fewer.
+      const fixture = withRaw([0xec, 0x00, 0x00, 0x00])
+      await expect(writeKeyframeCues(fixture.blob)).rejects.toThrow(/invalid EBML/)
+    })
+  })
+
   it('writes one CuePoint per keyframe and nothing else', async () => {
     // The mutation this file exists for: skip the step and the BlockGroup take
     // keeps its empty Cues element.

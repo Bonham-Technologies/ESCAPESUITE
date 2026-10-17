@@ -183,6 +183,11 @@ export interface StoredCues {
   payloadBytes: number
   /** Every CuePoint's CueTime, in file order. */
   cueTimes: number[]
+  /**
+   * The four bytes at each CuePoint's `segmentDataStart + CueClusterPosition`,
+   * as hex — `1f43b675`, a Cluster ID, when the position is right.
+   */
+  cueTargets: string[]
   /** The time of every video keyframe found walking the Clusters. */
   keyframeTimes: number[]
 }
@@ -223,10 +228,15 @@ export async function storedRecordingCues(page: Page): Promise<StoredCues> {
       for (let k = 0; k < idLength; k++) id = id * 256 + bytes[at + k]
       const sizeAt = at + idLength
       const sizeLength = vintLength(bytes[sizeAt])
-      let size = bytes[sizeAt] & (0xff >> sizeLength)
-      for (let k = 1; k < sizeLength; k++) size = size * 256 + bytes[sizeAt + k]
+      const mask = 0xff >> sizeLength
+      let size = bytes[sizeAt] & mask
+      // Every value bit set is the reserved "unknown size" Chrome writes.
+      let unknown = size === mask
+      for (let k = 1; k < sizeLength; k++) {
+        size = size * 256 + bytes[sizeAt + k]
+        unknown = unknown && bytes[sizeAt + k] === 0xff
+      }
       const dataStart = sizeAt + sizeLength
-      const unknown = size === 2 ** (7 * sizeLength) - 1
       return { id, dataStart, end: unknown ? Infinity : dataStart + size }
     }
     const uint = (e: { dataStart: number; end: number }) => {
@@ -251,7 +261,15 @@ export async function storedRecordingCues(page: Page): Promise<StoredCues> {
       return { track, rel, flags: bytes[at + length + 2] }
     }
 
-    const result = { present: false, payloadBytes: 0, cueTimes: [] as number[], keyframeTimes: [] as number[] }
+    const result = {
+      present: false,
+      payloadBytes: 0,
+      cueTimes: [] as number[],
+      cueTargets: [] as string[],
+      keyframeTimes: [] as number[],
+    }
+    const hex = (from: number) =>
+      Array.from(bytes.subarray(from, from + 4), (b) => b.toString(16).padStart(2, '0')).join('')
     const videoTracks = new Set<number>()
     const segment = element(element(0).end)
     let at = segment.dataStart
@@ -268,8 +286,13 @@ export async function storedRecordingCues(page: Page): Promise<StoredCues> {
         result.present = true
         result.payloadBytes = e.end - e.dataStart
         for (const point of children(e)) {
-          const time = children(point).find((f) => f.id === 0xb3)
+          const fields = children(point)
+          const time = fields.find((f) => f.id === 0xb3)
           if (time) result.cueTimes.push(uint(time))
+          for (const positions of fields.filter((f) => f.id === 0xb7)) {
+            const cluster = children(positions).find((f) => f.id === 0xf1)
+            if (cluster) result.cueTargets.push(hex(segment.dataStart + uint(cluster)))
+          }
         }
       } else if (e.id === CLUSTER) {
         // An unknown-size Cluster (Chrome's) runs until the next one starts.
@@ -329,6 +352,11 @@ export async function expectSeekableTake(page: Page, log: ConsoleCapture): Promi
   expect(cues.payloadBytes, 'stored recording has an empty Cues element').toBeGreaterThan(0)
   expect(cues.keyframeTimes.length).toBeGreaterThanOrEqual(1)
   expect(cues.cueTimes, 'every video keyframe is indexed, and nothing else').toEqual(cues.keyframeTimes)
+  // And each one points at a Cluster: CueClusterPosition is relative to the
+  // Segment's data start, in the stored file.
+  expect(cues.cueTargets, 'every CueClusterPosition lands on a Cluster ID').toEqual(
+    cues.cueTimes.map(() => '1f43b675')
+  )
 
   await expect(page.getByText(NOT_SEEKABLE_FRAGMENT)).toHaveCount(0)
   expect(log.matching(/fixWebmDuration is not a function/)).toEqual([])

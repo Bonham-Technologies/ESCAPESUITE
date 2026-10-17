@@ -78,10 +78,15 @@ function uintEl(id: readonly number[], value: number, width = 1): Bytes {
   return el(id, bigEndian(value, width))
 }
 
+function trackVint(track: number): Bytes {
+  // One byte up to 126, two above (a track number of 127 or more).
+  return track < 0x7f ? [0x80 | track] : [0x40 | (track >> 8), track & 0xff]
+}
+
 function blockBody(track: number, rel: number, flags: number): Bytes {
-  // Track number as a one-byte vint, a signed 16-bit relative timecode, the
-  // flags byte, then four bytes of "frame" that can never spell an element ID.
-  return [0x80 | track, (rel >> 8) & 0xff, rel & 0xff, flags, 0x00, 0x00, 0x00, 0x00]
+  // Track number as a vint, a signed 16-bit relative timecode, the flags byte,
+  // then four bytes of "frame" that can never spell an element ID.
+  return [...trackVint(track), (rel >> 8) & 0xff, rel & 0xff, flags, 0x00, 0x00, 0x00, 0x00]
 }
 
 export type ClusterChild =
@@ -98,6 +103,8 @@ export type ClusterChild =
       discardPadding?: boolean
     }
   | { kind: 'void'; length: number }
+  /** Bytes written as they are — for a malformed element header. */
+  | { kind: 'raw'; bytes: Bytes }
 
 export interface FixtureCluster {
   timecode: number
@@ -110,6 +117,12 @@ export interface FixtureSpec {
   /** What sits where `webm-duration-fix` writes its Cues element. */
   cues: 'empty' | 'stale' | 'none'
   clusters: FixtureCluster[]
+  /** Write the Segment with a known size, as the library never does. */
+  segmentKnownSize?: boolean
+  /** Put the Cues element after the first Cluster, as the library never does. */
+  cuesAfterFirstCluster?: boolean
+  /** Add a SeekHead entry (for Tags) pointing past the Cues element. */
+  seekEntryPastCues?: boolean
 }
 
 export interface Fixture {
@@ -129,6 +142,7 @@ function childBytes(child: ClusterChild): Bytes {
     return el(ID.SIMPLE_BLOCK, blockBody(child.track, child.rel, child.key ? 0x80 : 0x00))
   }
   if (child.kind === 'void') return el(ID.VOID, new Array<number>(child.length).fill(0))
+  if (child.kind === 'raw') return child.bytes
   const parts: Bytes = [...el(ID.BLOCK, blockBody(child.track, child.rel, 0x00))]
   if (child.alpha) {
     parts.push(
@@ -164,7 +178,6 @@ function cuesBytes(kind: FixtureSpec['cues']): Bytes {
 
 export function buildWebM(spec: FixtureSpec): Fixture {
   const ebml = el(ID.EBML, [...el([0x42, 0x82], [...'webm'].map((c) => c.charCodeAt(0)))])
-  const segmentHeader = [...ID.SEGMENT, ...UNKNOWN_SIZE]
   const info = el(ID.INFO, [
     ...uintEl(ID.TIMECODE_SCALE, 1_000_000, 3),
     ...el(ID.DURATION, [0x40, 0xa7, 0x70, 0x00, 0x00, 0x00, 0x00, 0x00]), // 3000.0
@@ -179,47 +192,66 @@ export function buildWebM(spec: FixtureSpec): Fixture {
       ])
     )
   )
-  // The SeekHead's Cues entry: a fixed-width position so its length does not
-  // depend on its value, the way the library writes room for growth.
+  // SeekHead entries: fixed-width positions so its length does not depend on
+  // their values, the way the library writes room for growth.
+  const seek = (target: readonly number[], position: number) =>
+    el(ID.SEEK, [...el(ID.SEEK_ID, [...target]), ...uintEl(ID.SEEK_POSITION, position, 4)])
   const seekHead = (cuesPosition: number) =>
-    el(ID.SEEK_HEAD, el(ID.SEEK, [...el(ID.SEEK_ID, [...ID.CUES]), ...uintEl(ID.SEEK_POSITION, cuesPosition, 4)]))
+    el(ID.SEEK_HEAD, [
+      ...seek(ID.CUES, cuesPosition),
+      ...(spec.seekEntryPastCues ? seek([0x12, 0x54, 0xc3, 0x67], cuesPosition + 1000) : []),
+    ])
   const cues = cuesBytes(spec.cues)
-  const segmentDataStart = ebml.length + segmentHeader.length
-  const cuesRelative = seekHead(0).length + info.length + tracks.length
-
-  const out: Bytes = [...ebml, ...segmentHeader, ...seekHead(cuesRelative), ...info, ...tracks]
-  const cuesStart = out.length
-  out.push(...cues)
-  const cuesEnd = out.length
-
-  const clusterStarts: number[] = []
-  const childStarts: number[][] = []
-  for (const cluster of spec.clusters) {
+  const clusters = spec.clusters.map((cluster) => {
     const timecode = uintEl(ID.TIMECODE, cluster.timecode, 2)
     const children = cluster.children.map(childBytes)
     const payload = [...timecode, ...children.flat()]
     const element = el(ID.CLUSTER, payload, cluster.unknownSize)
-    const start = out.length
-    const dataStart = start + element.length - payload.length
-    clusterStarts.push(start)
-    let at = dataStart + timecode.length
-    childStarts.push(
-      children.map((c) => {
-        const here = at
-        at += c.length
-        return here
-      })
-    )
-    out.push(...element)
-  }
+    return { element, firstChild: element.length - payload.length + timecode.length, children }
+  })
+
+  // Lay the Segment's children out: head, then the Cues either ahead of every
+  // Cluster (the library's shape) or after the first one.
+  const head = seekHead(0).length + info.length + tracks.length
+  const cuesAt = spec.cuesAfterFirstCluster ? 1 : 0
+  const pieces: Bytes[] = clusters.map((c) => c.element)
+  pieces.splice(cuesAt, 0, cues)
+  const cuesRelative = head + pieces.slice(0, cuesAt).reduce((n, p) => n + p.length, 0)
+  const segmentPayload = [...seekHead(cuesRelative), ...info, ...tracks, ...pieces.flat()]
+  const segmentHeader = [
+    ...ID.SEGMENT,
+    ...(spec.segmentKnownSize ? [0x01, ...bigEndian(segmentPayload.length, 7)] : UNKNOWN_SIZE),
+  ]
+  const segmentDataStart = ebml.length + segmentHeader.length
+  const out: Bytes = [...ebml, ...segmentHeader, ...segmentPayload]
+
+  const clusterStarts: number[] = []
+  const childStarts: number[][] = []
+  let at = segmentDataStart + head
+  pieces.forEach((piece, i) => {
+    if (i !== cuesAt) {
+      const cluster = clusters[clusterStarts.length]
+      clusterStarts.push(at)
+      let childAt = at + cluster.firstChild
+      childStarts.push(
+        cluster.children.map((c) => {
+          const here = childAt
+          childAt += c.length
+          return here
+        })
+      )
+    }
+    at += piece.length
+  })
 
   const bytes = new Uint8Array(out)
+  const cuesStart = segmentDataStart + cuesRelative
   return {
     bytes,
     blob: new Blob([bytes], { type: 'video/webm' }),
     segmentDataStart,
     cuesStart,
-    cuesEnd,
+    cuesEnd: cuesStart + cues.length,
     clusterStarts,
     childStarts,
   }
@@ -474,7 +506,8 @@ export async function bytesOf(blob: Blob): Promise<Uint8Array> {
 export function expectIndexesKeyframes(
   fixture: Fixture,
   out: Uint8Array,
-  keyframes: Array<[number, number, number]>
+  keyframes: Array<[number, number, number]>,
+  videoTrack = 1
 ): void {
   const read = readCues(out)
   expect(read.points.map((p) => p.time)).toEqual(keyframes.map(([, , time]) => time))
@@ -485,7 +518,7 @@ export function expectIndexesKeyframes(
   read.points.forEach((point, i) => {
     const [cluster, child] = keyframes[i]
     const clusterAt = read.segmentDataStart + point.clusterPosition
-    expect(point.track).toBe(1)
+    expect(point.track).toBe(videoTrack)
     expect(elementIdAt(out, clusterAt)).toBe(CLUSTER_ID)
     expect(clusterAt).toBe(fixture.clusterStarts[cluster] + grown)
     const clusterData = elementDataStartAt(fixture.bytes, fixture.clusterStarts[cluster])
