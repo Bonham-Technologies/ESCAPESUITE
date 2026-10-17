@@ -35,7 +35,16 @@ const ITERATIONS = 600
 // not across the parsed / refused line. Unchanged again after fix round 1,
 // which also repairs a finite pair whose length overflows: no committed-seed
 // input has one.
-const FLOORS = { accepted: 354, refused: 246 }
+//
+// Re-measured 2026-10-16 for ESCSUITE-302: 335 parsed, 265 refused. Exactly 19
+// inputs crossed from parsed to refused, every one a mutation of a clip's
+// `startTime` or `endTime`, which `parseProject` now refuses by name: 3 delete
+// the key (an absent trim point, which the migration does not supply), 4 inject
+// a number the rule refuses (Infinity, -Infinity, and a startTime of 1e+308 or
+// 2^53 that leaves endTime behind it), and 12 replace it with a list or a
+// nested object. Each of them used to parse into a clip whose source time read
+// as NaN or ran backwards.
+const FLOORS = { accepted: 335, refused: 265 }
 
 const transform = { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 }
 

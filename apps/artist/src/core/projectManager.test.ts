@@ -1346,7 +1346,7 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
   })
 
   describe('the rollback', () => {
-    it('deletes what it wrote when a later write fails, and rethrows the original error', async () => {
+    it('deletes what it wrote when a later write fails, and rethrows the failure named, with the original error as its cause (ESCSUITE-302)', async () => {
       const first = uniqueId('rb-first')
       const second = uniqueId('rb-second')
       const failure = new Error('QuotaExceededError')
@@ -1359,7 +1359,8 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
         ])
       ).catch((e: unknown) => e)
 
-      expect(error).toBe(failure)
+      expect(error).toBeInstanceOf(ProjectFileError)
+      expect((error as ProjectFileError).cause).toBe(failure)
       expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
       expect(await getVideo(first)).toBeUndefined()
     })
@@ -1384,7 +1385,7 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
             { id: second, meta, bytes: [2] },
           ])
         )
-      ).rejects.toThrow('disk full')
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'disk full' }) })
 
       expect(minted).toMatch(OBJECT_URL_PATTERN)
       expect(vi.mocked(URL.revokeObjectURL).mock.calls).toEqual([[minted]])
@@ -1428,14 +1429,14 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
             { id: second, meta, bytes: [3] },
           ])
         )
-      ).rejects.toThrow('disk full')
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'disk full' }) })
 
       expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
       expect(await getVideo(present)).toBeDefined()
       await actualStorage.deleteVideo(present)
     })
 
-    it('warns once when a delete fails, and still rethrows the original error', async () => {
+    it('warns once when a delete fails, and still rethrows the failure', async () => {
       const first = uniqueId('rb-warn')
       const second = uniqueId('rb-warn-2')
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -1450,7 +1451,7 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
             { id: second, meta, bytes: [2] },
           ])
         )
-      ).rejects.toThrow('disk full')
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'disk full' }) })
 
       expect(warn).toHaveBeenCalledTimes(1)
       expect(warn).toHaveBeenCalledWith(`Could not remove source ${first} after a project load failed:`, deleteFailure)
@@ -1464,7 +1465,7 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
 
       await expect(
         loadProject(v2File(createTestProject(id), [{ id, meta, bytes: [1], thumbnail: { bytes: [2], type: 'image/jpeg' } }]))
-      ).rejects.toThrow('thumbnail write failed')
+      ).rejects.toMatchObject({ cause: expect.objectContaining({ message: 'thumbnail write failed' }) })
 
       expect(vi.mocked(deleteVideo).mock.calls).toEqual([[id]])
       expect(await getVideo(id)).toBeUndefined()
@@ -1483,7 +1484,10 @@ describe('loading a project into storage that may be full (ESCSUITE-260)', () =>
             { id: second, bytes: [2] }, // no meta: probed, and the probe fails
           ])
         )
-      ).rejects.toThrow(`Failed to load video: ${second}.mp4`)
+      ).rejects.toMatchObject({
+        message: `videos[1] ("${second}.mp4") could not be decoded`,
+        cause: expect.objectContaining({ message: `Failed to load video: ${second}.mp4` }),
+      })
 
       expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
       expect(await getVideo(first)).toBeUndefined()
@@ -2273,3 +2277,216 @@ describe('the editor block in the project file (ESCSUITE-245)', () => {
   })
 })
 
+
+describe('a load that fails after the file is read names the source and the cause (ESCSUITE-302)', () => {
+  let media: MediaDoubles
+  const meta: SourceVideoMeta = { duration: 9, width: 64, height: 48, frameRate: 30 }
+  const QUOTA = 'Storage quota exceeded. Remove some media to free up space.'
+  const resetSpies = () => {
+    vi.mocked(storeVideo).mockReset()
+    vi.mocked(storeThumbnail).mockReset()
+    vi.mocked(deleteVideo).mockReset()
+  }
+
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { duration: 9, videoWidth: 64, videoHeight: 48 } })
+    resetSpies()
+  })
+
+  afterEach(() => {
+    media.uninstall()
+    resetSpies()
+  })
+
+  interface Part {
+    id: string
+    name: string
+    meta?: SourceVideoMeta
+    thumbnail?: boolean
+  }
+
+  /** The same sources, written as either file version. */
+  const fileFor = {
+    v1: (parts: Part[]): File =>
+      new File(
+        [
+          JSON.stringify({
+            version: 1,
+            project: createTestProject(parts[0].id),
+            videos: parts.map((part, i) => ({
+              id: part.id,
+              name: part.name,
+              mimeType: 'video/mp4',
+              data: base64Of([i + 1]),
+              ...(part.thumbnail ? { thumbnail: base64Of([9]) } : {}),
+              ...(part.meta ? { meta: part.meta } : {}),
+            })),
+          }),
+        ],
+        'old.veditor',
+        { type: 'application/json' }
+      ),
+    v2: (parts: Part[]): File =>
+      v2File(
+        createTestProject(parts[0].id),
+        parts.map((part, i) => ({
+          id: part.id,
+          name: part.name,
+          meta: part.meta,
+          bytes: [i + 1],
+          ...(part.thumbnail ? { thumbnail: { bytes: [9], type: 'image/jpeg' } } : {}),
+        }))
+      ),
+  }
+
+  /** The refusal, after asserting it is a ProjectFileError. */
+  async function refusal(file: File): Promise<ProjectFileError> {
+    const error = await loadProject(file).catch((e: unknown) => e)
+    expect(error).toBeInstanceOf(ProjectFileError)
+    return error as ProjectFileError
+  }
+
+  describe.each(['v1', 'v2'] as const)('version %s', (version) => {
+    const twoSources = (secondMeta: boolean) => {
+      const first = uniqueId(`302-${version}-first`)
+      const second = uniqueId(`302-${version}-second`)
+      const file = fileFor[version]([
+        { id: first, name: 'first.mp4', meta },
+        { id: second, name: 'clip.mp4', ...(secondMeta ? { meta } : {}) },
+      ])
+      return { first, second, file }
+    }
+
+    it('a metadata probe that rejects is "could not be decoded", with the probe\'s sentence as its cause, and the first source rolled back', async () => {
+      const { first, file } = twoSources(false)
+      media.script({ video: { fail: true } })
+
+      const error = await refusal(file)
+
+      expect(error.message).toBe('videos[1] ("clip.mp4") could not be decoded')
+      expect((error.cause as Error).message).toBe('Failed to load video: clip.mp4')
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+      expect(await getVideo(first)).toBeUndefined()
+    })
+
+    it('a quota DOMException from storeVideo is the media library\'s quota sentence, and the first source rolled back', async () => {
+      const { first, file } = twoSources(true)
+      const quota = new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(quota)
+
+      const error = await refusal(file)
+
+      expect(error.message).toBe(`videos[1] ("clip.mp4") could not be stored: ${QUOTA}`)
+      expect(error.cause).toBe(quota)
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+      expect(await getVideo(first)).toBeUndefined()
+    })
+
+    it('a quota error carried as another error\'s cause is the quota sentence too', async () => {
+      const { file } = twoSources(true)
+      const wrapped = Object.assign(new Error('write failed'), {
+        cause: new DOMException('The quota has been exceeded.', 'QuotaExceededError'),
+      })
+      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(wrapped)
+
+      const error = await refusal(file)
+
+      expect(error.message).toBe(`videos[1] ("clip.mp4") could not be stored: ${QUOTA}`)
+      expect(error.cause).toBe(wrapped)
+    })
+
+    it('any other storeVideo rejection is "could not be stored", with the error as its cause', async () => {
+      const { first, file } = twoSources(true)
+      const failure = new Error('disk full')
+      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(failure)
+
+      const error = await refusal(file)
+
+      expect(error.message).toBe('videos[1] ("clip.mp4") could not be stored')
+      expect(error.cause).toBe(failure)
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
+    })
+
+    it('a quota error from storeThumbnail is the quota sentence, and its own video rolled back', async () => {
+      const id = uniqueId(`302-${version}-thumb`)
+      const quota = new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      vi.mocked(storeThumbnail).mockRejectedValueOnce(quota)
+
+      const error = await refusal(fileFor[version]([{ id, name: 'clip.mp4', meta, thumbnail: true }]))
+
+      expect(error.message).toBe(`videos[0] ("clip.mp4") could not be stored: ${QUOTA}`)
+      expect(vi.mocked(deleteVideo).mock.calls).toEqual([[id]])
+      expect(await getVideo(id)).toBeUndefined()
+    })
+
+    it('loads both sources when nothing fails', async () => {
+      const { first, second, file } = twoSources(false)
+
+      const { sourceVideos } = await loadProject(file)
+
+      expect(sourceVideos.map((v) => v.id)).toEqual([first, second])
+      expect(deleteVideo).not.toHaveBeenCalled()
+      await actualStorage.deleteVideo(first)
+      await actualStorage.deleteVideo(second)
+    })
+  })
+
+  describe('a read of the file that rejects', () => {
+    /** `file`, with one of its reads replaced by a rejection. */
+    function rejecting<T extends object>(target: T, method: 'text' | 'arrayBuffer', error: unknown): T {
+      Object.defineProperty(target, method, { value: () => Promise.reject(error) })
+      return target
+    }
+    /** `file`, whose slice at `start` hands back a part whose `method` rejects. */
+    function rejectingSlice(file: File, start: number, method: 'text' | 'arrayBuffer', error: unknown): File {
+      const slice = file.slice.bind(file)
+      Object.defineProperty(file, 'slice', {
+        value: (from?: number, to?: number, type?: string) => {
+          const part = slice(from, to, type)
+          return from === start ? rejecting(part, method, error) : part
+        },
+      })
+      return file
+    }
+
+    it('v1: file.text() rejecting with a RangeError is "the file is too large to read"', async () => {
+      const ceiling = new RangeError('Invalid string length')
+      const error = await refusal(rejecting(fileFor.v1([{ id: uniqueId('302-big'), name: 'a.mp4', meta }]), 'text', ceiling))
+
+      expect(error.message).toBe('the file is too large to read')
+      expect(error.cause).toBe(ceiling)
+      expect(storeVideo).not.toHaveBeenCalled()
+    })
+
+    it('v1: file.text() rejecting with anything else is "the file could not be read"', async () => {
+      const failure = new DOMException('The requested file could not be read.', 'NotReadableError')
+      const error = await refusal(rejecting(fileFor.v1([{ id: uniqueId('302-gone'), name: 'a.mp4', meta }]), 'text', failure))
+
+      expect(error.message).toBe('the file could not be read')
+      expect(error.cause).toBe(failure)
+      expect(storeVideo).not.toHaveBeenCalled()
+    })
+
+    it('v2: the header read rejecting is "the file could not be read"', async () => {
+      const failure = new Error('read failed')
+      const file = rejectingSlice(fileFor.v2([{ id: uniqueId('302-head'), name: 'a.mp4', meta }]), 0, 'arrayBuffer', failure)
+
+      const error = await refusal(file)
+
+      expect(error.message).toBe('the file could not be read')
+      expect(error.cause).toBe(failure)
+      expect(storeVideo).not.toHaveBeenCalled()
+    })
+
+    it('v2: the index read rejecting with a RangeError is "the file is too large to read"', async () => {
+      const ceiling = new RangeError('Array buffer allocation failed')
+      const file = rejectingSlice(fileFor.v2([{ id: uniqueId('302-index'), name: 'a.mp4', meta }]), HEADER_BYTES, 'text', ceiling)
+
+      const error = await refusal(file)
+
+      expect(error.message).toBe('the file is too large to read')
+      expect(error.cause).toBe(ceiling)
+      expect(storeVideo).not.toHaveBeenCalled()
+    })
+  })
+})
