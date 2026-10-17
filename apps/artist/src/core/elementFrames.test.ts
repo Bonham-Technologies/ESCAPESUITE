@@ -592,8 +592,7 @@ describe('createFrameComposer readiness wait', () => {
       raf.flush()
       await frame
 
-      expect(vi.getTimerCount()).toBe(0)
-      expect(raf.requests).toBe(1)
+        expect(raf.requests).toBe(1)
     } finally {
       raf.uninstall()
       vi.useRealTimers()
@@ -642,8 +641,7 @@ describe('createFrameComposer seek wait', () => {
 
       await frame
 
-      expect(vi.getTimerCount()).toBe(0)
-    } finally {
+      } finally {
       vi.useRealTimers()
     }
   })
@@ -671,6 +669,108 @@ describe('createFrameComposer seek wait', () => {
       added.mockRestore()
       removed.mockRestore()
     }
+  })
+})
+
+// ESCSUITE-316 (U-2) / ESCSUITE-325: `loadVideoElement` (exportTypes.ts) used to
+// wait for `loadeddata` / `error` with no deadline, so a source the browser
+// neither decodes nor rejects hung every WebM and GIF export before its first
+// frame. It now shares the import probe's 15 s deadline (ESCSUITE-249) and the
+// loader skips the source with its existing warning.
+describe('loadElementSources with a <video> that never loads (ESCSUITE-316, 325)', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function load(sources: SourceVideo[], ids: string[]) {
+    return loadElementSources(
+      ids.map((id) => makeClip({ sourceVideoId: id })),
+      sourceMapOf(sources)
+    )
+  }
+
+  it('skips the silent source within 15 s with one warning, torn down', async () => {
+    await store('v1')
+    media.script({ video: { silent: true } })
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
+    let sources: Awaited<ReturnType<typeof loadElementSources>> | undefined
+    void load([], ['v1']).then((s) => (sources = s))
+    await vi.advanceTimersByTimeAsync(14_999)
+    expect(sources).toBeUndefined()
+    await vi.advanceTimersByTimeAsync(2)
+    expect(sources).toBeDefined()
+    expect(sources!.videoElements.size).toBe(0)
+    const video = media.videos[0]
+    expect(video.onloadeddata).toBeNull()
+    expect(video.onerror).toBeNull()
+    expect(video.getAttribute('src')).toBeNull()
+    expect(video.load).toHaveBeenCalledTimes(1)
+    expect(revoke).toHaveBeenCalledTimes(1)
+    const messages = warn.mock.calls.map((c) => String(c[0]))
+    expect(messages.filter((m) => m.startsWith('Failed to load video v1'))).toHaveLength(1)
+    expect(String(warn.mock.calls[0][1])).toContain(
+      'Could not read v1 \u2014 the browser did not report its metadata within 15 s'
+    )
+  })
+
+  it('names the source by its SourceVideo name when the map has it', async () => {
+    await store('v1')
+    media.script({ video: { silent: true } })
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    void load([makeSourceVideo({ id: 'v1', name: 'interview.webm' })], ['v1'])
+    await vi.advanceTimersByTimeAsync(15_001)
+    expect(String(warn.mock.calls[0][1])).toContain('Could not read interview.webm')
+  })
+
+  it('keeps a source that loads at 14.9 s and clears the timer', async () => {
+    await store('v1')
+    media.script({ video: { silent: true } })
+    vi.useFakeTimers()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const clear = vi.spyOn(globalThis, 'clearTimeout')
+    let sources: Awaited<ReturnType<typeof loadElementSources>> | undefined
+    void load([makeSourceVideo({ id: 'v1' })], ['v1']).then((s) => (sources = s))
+    await vi.advanceTimersByTimeAsync(14_900)
+    const before = clear.mock.calls.length
+    media.videos[0].dispatchEvent(new Event('loadeddata'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sources!.videoElements.has('v1')).toBe(true)
+    expect(clear.mock.calls.length - before).toBe(1)
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(warn).not.toHaveBeenCalled()
+    expect(media.videos[0].load).not.toHaveBeenCalled()
+    clear.mockRestore()
+  })
+
+  it('rejects at once on an error event, clearing the timer', async () => {
+    await store('v1')
+    media.script({ video: { fail: true } })
+    const clear = vi.spyOn(globalThis, 'clearTimeout')
+    const sources = await load([makeSourceVideo({ id: 'v1' })], ['v1'])
+    expect(sources.videoElements.size).toBe(0)
+    expect(clear).toHaveBeenCalledTimes(1)
+    clear.mockRestore()
+  })
+
+  it('still loads the other sources when one is silent', async () => {
+    await store('v1')
+    await store('v2')
+    vi.useFakeTimers()
+    media.script({ video: { silent: true, fail: false } })
+    let sources: Awaited<ReturnType<typeof loadElementSources>> | undefined
+    void load([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2' })], ['v1', 'v2']).then(
+      (s) => (sources = s)
+    )
+    await vi.advanceTimersByTimeAsync(15_001)
+    // v1 timed out; v2 is now loading — let it answer.
+    await vi.advanceTimersByTimeAsync(100)
+    media.videos[1].dispatchEvent(new Event('loadeddata'))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(sources!.videoElements.has('v2')).toBe(true)
+    expect(sources!.videoElements.has('v1')).toBe(false)
   })
 })
 

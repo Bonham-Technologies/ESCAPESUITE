@@ -33,6 +33,7 @@ import {
   isAudioCodecSupported,
   waitForEncoderBackpressure,
   ExportError,
+  MediaLoadTimeoutError,
   EXPORT_AUDIO_CHANNELS,
   EXPORT_AUDIO_SAMPLE_RATE,
   noAudioNote,
@@ -312,6 +313,16 @@ export async function exportToMP4(
             source?.frameRate
           );
         } catch (e) {
+          // A source the browser neither decodes nor rejects fails the export
+          // by name (ESCSUITE-325): skipping it would drop the clip from the
+          // file without a word. Every other load failure is skipped below.
+          if (e instanceof MediaLoadTimeoutError) {
+            cleanupIterationFrames(frameManager);
+            await disposeFrameManager(frameManager);
+            imageElements.forEach((img) => URL.revokeObjectURL(img.src));
+            log('error', e.message);
+            throw new ExportError(e.message, exportLog);
+          }
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
           // Try loading as image as fallback
           try {

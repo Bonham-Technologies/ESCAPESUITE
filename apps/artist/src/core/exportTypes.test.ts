@@ -40,6 +40,7 @@ import {
   opusEncoderConfig,
   loadImageElement,
   loadVideoElement,
+  waitForVideoLoad,
   presetSuppressionFor,
   resolutionForFormat,
   waitForEncoderBackpressure,
@@ -1093,6 +1094,49 @@ describe('getResolution', () => {
   })
 })
 
+describe('waitForVideoLoad (ESCSUITE-325)', () => {
+  let media: MediaDoubles
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { silent: true } })
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    media.uninstall()
+  })
+
+  async function expire() {
+    const video = document.createElement('video')
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
+    const settled: string[] = []
+    waitForVideoLoad(video, 'blob:x', 'clip.webm').then(
+      () => settled.push('resolved'),
+      (e: Error) => settled.push(e.name)
+    )
+    await vi.advanceTimersByTimeAsync(15_000)
+    return { video, revoke, settled }
+  }
+
+  it('ignores a loadeddata that arrives after expiry', async () => {
+    const { video, revoke, settled } = await expire()
+    expect(settled).toEqual(['MediaLoadTimeoutError'])
+    expect(revoke).toHaveBeenCalledTimes(1)
+    video.dispatchEvent(new Event('loadeddata'))
+    video.dispatchEvent(new Event('error'))
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(settled).toEqual(['MediaLoadTimeoutError'])
+    expect(revoke).toHaveBeenCalledTimes(1)
+    revoke.mockRestore()
+  })
+
+  it('leaves no live handler after expiry', async () => {
+    const { video, revoke } = await expire()
+    expect(video.onloadeddata).toBeNull()
+    expect(video.onerror).toBeNull()
+    revoke.mockRestore()
+  })
+})
+
 describe('loadVideoElement / loadImageElement', () => {
   let media: MediaDoubles
 
@@ -1105,7 +1149,7 @@ describe('loadVideoElement / loadImageElement', () => {
   })
 
   it('resolves with a configured, muted video element once data loads', async () => {
-    const video = await loadVideoElement(new Blob(['v'], { type: 'video/mp4' }))
+    const video = await loadVideoElement(new Blob(['v'], { type: 'video/mp4' }), 'clip.mp4')
     expect(video.muted).toBe(true)
     expect(video.playsInline).toBe(true)
     expect(video.preload).toBe('auto')
@@ -1116,7 +1160,7 @@ describe('loadVideoElement / loadImageElement', () => {
   it('rejects and revokes the object URL when the video fails to load', async () => {
     media.script({ video: { fail: true } })
     const revoke = vi.spyOn(URL, 'revokeObjectURL')
-    await expect(loadVideoElement(new Blob(['v'], { type: 'video/mp4' }))).rejects.toThrow('Failed to load video')
+    await expect(loadVideoElement(new Blob(['v'], { type: 'video/mp4' }), 'clip.mp4')).rejects.toThrow('Failed to load video')
     expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
     revoke.mockRestore()
   })

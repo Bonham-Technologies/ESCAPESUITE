@@ -5,6 +5,7 @@ import { isTrackVisible, isVisibleTrack } from '../store/trackVisibility';
 import { PRESET_SUPPRESSION } from '../utils/animation';
 import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
 import type { ExportLoudness } from './loudness';
+import { METADATA_LOAD_TIMEOUT_MS } from './videoProcessor';
 
 /**
  * A drawable media source that can be used with canvas drawImage.
@@ -1114,41 +1115,99 @@ export const GIF_ALWAYS_AVAILABLE_NOTE =
 export const TAB_VISIBLE_NOTE = 'needs this tab visible';
 
 /**
- * Load a video blob and create an HTMLVideoElement
+ * Thrown when a `<video>` neither reports `loadeddata` nor `error` within
+ * `METADATA_LOAD_TIMEOUT_MS` (ESCSUITE-325). A distinct class so the MP4
+ * exporter can fail by name on it where every other load failure is skipped.
  */
-export async function loadVideoElement(blob: Blob): Promise<HTMLVideoElement> {
-  const url = URL.createObjectURL(blob);
-  try {
-    return await loadVideoElementFromUrl(url);
-  } catch (error) {
-    URL.revokeObjectURL(url);
-    throw error;
+export class MediaLoadTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MediaLoadTimeoutError';
   }
+}
+
+/**
+ * Point `video` at `url` and wait for its first frame (ESCSUITE-325). Shared by
+ * every export `<video>` load — `loadVideoElement`, `loadVideoElementFromUrl`
+ * and `HTMLVideoFrameSource`'s elements, slot 0 and every further slot
+ * (ESCSUITE-313): one deadline, the import probe's (ESCSUITE-249), armed when
+ * the listeners attach and cleared on `loadeddata`, on `error` and on expiry.
+ * On expiry the element is torn down (handlers detached, `src` removed,
+ * `load()`) and the wait rejects with a `MediaLoadTimeoutError`. `name` is what
+ * the message calls the source.
+ *
+ * `ownsUrl` says whether a failure — an `error` or the deadline — revokes
+ * `url`. It does by default; a source's further element reads the URL its first
+ * element still holds, and passes `false` so a slot that will not load cannot
+ * take the URL from under the element that did.
+ */
+export function waitForVideoLoad(
+  video: HTMLVideoElement,
+  url: string,
+  name: string,
+  ownsUrl = true
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const detach = () => {
+      clearTimeout(timer);
+      video.onloadeddata = null;
+      video.onerror = null;
+    };
+    const timer = setTimeout(() => {
+      detach();
+      video.removeAttribute('src');
+      video.load();
+      if (ownsUrl) URL.revokeObjectURL(url);
+      reject(
+        new MediaLoadTimeoutError(
+          `Could not read ${name} \u2014 the browser did not report its metadata within ${METADATA_LOAD_TIMEOUT_MS / 1000} s`
+        )
+      );
+    }, METADATA_LOAD_TIMEOUT_MS);
+    video.onloadeddata = () => {
+      detach();
+      resolve();
+    };
+    video.onerror = () => {
+      detach();
+      if (ownsUrl) URL.revokeObjectURL(url);
+      reject(new Error('Failed to load video'));
+    };
+    video.src = url;
+  });
+}
+
+/** A muted, inline `<video>` with nothing loaded into it yet. */
+function createExportVideo(): HTMLVideoElement {
+  const video = document.createElement('video');
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.crossOrigin = 'anonymous';
+  video.muted = true;
+  return video;
+}
+
+/**
+ * Load a video blob and create an HTMLVideoElement. `name` is only for the
+ * deadline's message (ESCSUITE-325).
+ */
+export async function loadVideoElement(blob: Blob, name: string): Promise<HTMLVideoElement> {
+  const video = createExportVideo();
+  await waitForVideoLoad(video, URL.createObjectURL(blob), name);
+  return video;
 }
 
 /**
  * Load a `<video>` over an object URL something else owns — a source's second
  * element, reading the URL its first one already holds (ESCSUITE-313). A
- * failure rejects without revoking the URL: the first element still reads it.
+ * failure, the ESCSUITE-325 deadline included, rejects without revoking the
+ * URL: the first element still reads it. `name` is only for the deadline's
+ * message.
  */
-export function loadVideoElementFromUrl(url: string): Promise<HTMLVideoElement> {
-  return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
-    video.muted = true;
-
-    video.src = url;
-
-    video.onloadeddata = () => {
-      resolve(video);
-    };
-
-    video.onerror = () => {
-      reject(new Error('Failed to load video'));
-    };
-  });
+export async function loadVideoElementFromUrl(url: string, name: string): Promise<HTMLVideoElement> {
+  const video = createExportVideo();
+  await waitForVideoLoad(video, url, name, false);
+  return video;
 }
 
 /**

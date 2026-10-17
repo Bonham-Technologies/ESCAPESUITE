@@ -118,7 +118,7 @@ export async function loadElementSources(
         } else if (source?.mediaType !== 'audio') {
           // Load as video (skip audio-only files for visual rendering)
           try {
-            const video = await loadVideoElement(blob);
+            const video = await loadVideoElement(blob, source?.name ?? sourceId);
             videoElements.set(sourceId, video);
             extraVideoElements.set(sourceId, []);
           } catch (e) {
@@ -315,14 +315,15 @@ export function createFrameComposer({
 
   /**
    * Make a source's further elements up to `slot` (ESCSUITE-313), each over the
-   * URL its own element reads. One that will not load is warned about once and
-   * kept as `null`, so its clip is left out instead of retried every frame.
+   * URL its own element reads. One that will not load — an `error`, or silence
+   * past the 15 s deadline (ESCSUITE-325) — is warned about once and kept as
+   * `null`, so its clip is left out instead of retried every frame.
    */
   const growSlots = async (sourceId: string, extras: (HTMLVideoElement | null)[], slot: number) => {
     const url = videoElements.get(sourceId)!.src;
     while (extras.length < slot) {
       try {
-        const video = await loadVideoElementFromUrl(url);
+        const video = await loadVideoElementFromUrl(url, sourceId);
         playbackState.set(video, { playing: false, targetTime: 0 });
         extras.push(video);
       } catch {
