@@ -13,9 +13,8 @@
 // had, so a source with one live clip costs exactly what it did. Slot k > 0 is
 // a k-th element over the same object URL, made the first time a frame needs it
 // and kept, so a transition does not create and tear one down every frame. The
-// export composer and the in-page MP4 source ask `assignElementSlots` (as does
-// the preview's draw when it is handed no assignment), so they cannot disagree
-// about which element a clip is.
+// export composer and the in-page MP4 source ask `assignElementSlots`, so they
+// cannot disagree about which element a clip is.
 //
 // The preview asks `createStickySlotAssigner` instead (ESCSUITE-323), because
 // its elements are playing playheads rather than frames seeked one at a time.
@@ -155,6 +154,9 @@ export function createStickySlotAssigner(): StickySlotAssigner {
   };
 
   const place = (clip: Clip, out: Map<string, number>) => {
+    // Assumes a clip's `sourceVideoId` never changes while it is remembered —
+    // no editor action re-points a clip at another source — so a held entry's
+    // `source` is not checked against it again.
     let entry = held.get(clip.id);
     if (!entry) {
       entry = { source: clip.sourceVideoId, slot: lowestFree(clip.sourceVideoId) };

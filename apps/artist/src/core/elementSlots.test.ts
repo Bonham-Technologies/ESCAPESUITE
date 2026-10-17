@@ -131,8 +131,10 @@ describe('createStickySlotAssigner', () => {
 
     // Before the cut: `b` is held on the next free slot.
     expect(frame(live(a), fade)).toEqual({ a: 0, b: 1 })
-    // Past the cut, still inside the transition: `b` is live and keeps 1,
-    // `a` is no longer live but keeps 0 as the outgoing side.
+    // Synthetic: a transition's window ends at its outgoing clip's end, so the
+    // editor never names `a` as the outgoing side once only `b` is live. The
+    // frame pins the rule for a side that is not live: it keeps its slot.
+    // Here `b` is live and keeps 1, `a` keeps 0 as the outgoing side.
     expect(frame(live(b), fade)).toEqual({ a: 0, b: 1 })
     // The transition is over: `a` is let go, `b` stays.
     expect(frame(live(b))).toEqual({ b: 1 })
