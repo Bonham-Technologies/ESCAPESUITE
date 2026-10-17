@@ -69,7 +69,8 @@ describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
     time: number,
     scene: PreviewFrameScene,
     videoElements: Map<string, HTMLVideoElement>,
-    extraVideoElements?: Map<string, HTMLVideoElement[]>
+    extraVideoElements?: Map<string, HTMLVideoElement[]>,
+    slots?: Map<string, number>
   ): unknown[] {
     const ctx: RecordingCanvasRenderingContext2D = createRecordingContext()
     ctx.canvas.width = 640
@@ -77,6 +78,7 @@ describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
     drawPreviewFrame(ctx as unknown as CanvasRenderingContext2D, ctx.canvas, time, scene, {
       videoElements,
       extraVideoElements,
+      slots,
       imageElements: new Map(),
       blurScratch: { current: null },
     })
@@ -101,6 +103,20 @@ describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
     expect(drawnFrom(1, zoomedScene, new Map([['v1', first]]), new Map([['v1', [second]]]))).toEqual([
       first,
       second,
+    ])
+  })
+
+  // ESCSUITE-323: the render loop's own assignment, when it hands one in, is
+  // the one the frame draws by — here the upper clip kept the source's own
+  // element while the lower one started on the second.
+  it('draws each clip from the element the slots it is handed name', () => {
+    const first = fakeVideo(0)
+    const second = fakeVideo(1)
+    const slots = new Map([['A', 1], ['B', 0]])
+
+    expect(drawnFrom(1, zoomedScene, new Map([['v1', first]]), new Map([['v1', [second]]]), slots)).toEqual([
+      second,
+      first,
     ])
   })
 

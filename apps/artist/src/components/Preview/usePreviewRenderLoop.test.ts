@@ -62,6 +62,7 @@ function harness(sources: string[] = [video.id]): LoopHarness {
     drawMultiSelectHandles: vi.fn(),
     videoElementsRef,
     extraVideoElementsRef,
+    elementSlotsRef: { current: new Map<string, number>() },
     audioElementsRef,
     isPlayingRef,
     currentTimeRef,
@@ -1450,11 +1451,11 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
 
     // `u`'s element was never sought away from where it plays.
     expect(primary.currentTime).toBe(10)
-    // `l` plays on a fresh further element, from its own source time.
+    // `l` plays on a fresh further element, from its own source time (within
+    // a frame of its start at 0 s, so the new element needed no seek).
     const second = secondElement(deps)!
     expect(second).toBeDefined()
-    expect(second.currentTime).toBeGreaterThan(0)
-    expect(second.currentTime).toBeLessThan(1)
+    expect(second.currentTime).toBeLessThan(0.1)
     expect(second.play).toHaveBeenCalled()
   })
 
@@ -1506,7 +1507,12 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     expect(primary.currentTime).toBe(11)
 
     act(() => {
-      store().setProject({ ...store().project, id: 'another-project' })
+      const { project } = store()
+      store().setProject({
+        ...project,
+        id: 'another-project',
+        timeline: { ...project.timeline, clips: project.timeline.clips.map((clip) => ({ ...clip })) },
+      })
     })
     await settle(1000)
 
