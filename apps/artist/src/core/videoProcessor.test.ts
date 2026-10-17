@@ -21,6 +21,7 @@ import { getThumbnail, getVideo, storeVideo } from './storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { mediaFile } from '../test/doubles/files'
+import { restoreEngine, setEngine } from '../test/engine'
 import { lastObjectUrl } from '../test/objectUrls'
 import {
   failNextGetContext,
@@ -95,6 +96,10 @@ describe('videoProcessor', () => {
     })
 
     describe('frame rate (ESCSUITE-276)', () => {
+      // jsdom is not a measured engine; these cases run as Chromium (ESCSUITE-327).
+      beforeEach(() => setEngine('chromium'))
+      afterEach(restoreEngine)
+
       const spaced = (interval: number, count: number) =>
         Array.from({ length: count }, (_, i) => i * interval)
 

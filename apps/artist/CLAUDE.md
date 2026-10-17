@@ -273,14 +273,14 @@ pnpm lint                # Run ESLint
   stored `frameRate` and `frameRateSource: 'measured'` were. Admitting Firefox is a measurement task, not a
   code change: instrument its rVFC per rate and container as 276 / 278 did, re-derive the refusal arms, and
   widen the predicate. The committed spec keeps its Chromium-only skip and gains one Firefox-only case —
-  the 120 fps MP4 stored as 30 `'assumed'` — which is the gate's own pin. In jsdom, `src/test/setup.ts`
-  defines `navigator.userAgentData` as Chromium brands (an `Object.defineProperty`, so
-  `vi.unstubAllGlobals()` leaves it) because jsdom is not a measured engine and every suite that expects the
-  probe to run — `videoProcessor.test.ts`, the probe's own — would otherwise read 30 `'assumed'`; the
-  gate's tests stub `navigator` per case to say otherwise, and `videoProcessor.frameRateGate.test.ts` pins
-  both sides through `processVideoFile`. That definition also makes `isMeasuredWorkerDecodeEngine` true in
-  every artist unit test; nothing changes for the worker path in jsdom, which has no `Worker` and no
-  `VideoDecoder`, so `VideoDecodeManager.isSupported()` keeps the factory on `<video>` regardless.
+  the 120 fps MP4 stored as 30 `'assumed'` — which is the gate's own pin. WebKit (Safari) has `requestVideoFrameCallback` too, so the probe used to run there and could store
+  `'measured'`; it now stores 30 `'assumed'` as well (the Playwright pin skips it only because its WebKit
+  cannot import media, ESCSUITE-258). jsdom stays an engine nobody measured, so the default is the
+  production one: the suites that expect the probe to run (`frameRateProbe.test.ts` file-wide, the
+  `frame rate (ESCSUITE-276)` describe in `videoProcessor.test.ts`) call `setEngine('chromium')` from
+  `src/test/engine.ts` and `restoreEngine()` after, which puts back only `navigator.userAgentData` and the
+  `userAgent` spy, never `vi.unstubAllGlobals()` (ESCSUITE-119); `videoProcessor.frameRateGate.test.ts` pins
+  both sides through `extractVideoMetadata`.
 - `exporter.ts`: the barrel over **three** export paths — two through WebCodecs +
   `mediabunny` for muxing, and one through neither:
   - **WebM** (`exportWebM.ts`): VP9 video + Opus audio, frame-by-frame encoding with audio mixing

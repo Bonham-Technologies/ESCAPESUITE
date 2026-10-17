@@ -1,4 +1,5 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import { restoreEngine, setEngine } from '../test/engine'
 import { FRAME_RATE_PROBE, measureFrameRate, rateFromMediaTimes } from './frameRateProbe'
 
 /**
@@ -10,6 +11,10 @@ import { FRAME_RATE_PROBE, measureFrameRate, rateFromMediaTimes } from './frameR
 function spaced(interval: number, count: number, start = 0): number[] {
   return Array.from({ length: count }, (_, i) => start + i * interval)
 }
+
+// jsdom is not a measured engine; the probe's cases run as Chromium (ESCSUITE-327).
+beforeEach(() => setEngine('chromium'))
+afterEach(restoreEngine)
 
 describe('rateFromMediaTimes', () => {
   it('reads 1/60-spaced frames as 60', () => {
@@ -863,13 +868,6 @@ describe('measureFrameRate on a 60 Hz display', () => {
 // measured (Chromium). Elsewhere it answers undefined at once, so the caller
 // stores 30 'assumed' instead of a reading it cannot vouch for.
 describe('measureFrameRate engine gate', () => {
-  const CHROMIUM = { userAgent: 'x', userAgentData: { brands: [{ brand: 'Chromium' }] } }
-  const FIREFOX = { userAgent: 'Mozilla/5.0 (X11; rv:157.0) Gecko/20100101 Firefox/157.0' }
-
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
   it('answers undefined at once, without playing, seeking or asking for a frame, when engineMeasured is false', async () => {
     const v = probeVideo(spaced(1 / 60, 8))
     const request = vi.spyOn(v.el, 'requestVideoFrameCallback')
@@ -883,7 +881,7 @@ describe('measureFrameRate engine gate', () => {
   })
 
   it('runs as before when engineMeasured is true, whatever the navigator says', async () => {
-    vi.stubGlobal('navigator', FIREFOX)
+    setEngine('firefox')
     const v = probeVideo(spaced(1 / 60, 8))
 
     await expect(measureFrameRate(v.el, { ...FRAME_RATE_PROBE, engineMeasured: true })).resolves.toBe(60)
@@ -891,17 +889,25 @@ describe('measureFrameRate engine gate', () => {
   })
 
   it('reads the engine predicate by default: Chromium measures', async () => {
-    vi.stubGlobal('navigator', CHROMIUM)
+    setEngine('chromium')
     const v = probeVideo(spaced(1 / 60, 8))
 
     await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBe(60)
   })
 
   it('reads the engine predicate by default: Firefox does not', async () => {
-    vi.stubGlobal('navigator', FIREFOX)
+    setEngine('firefox')
     const v = probeVideo(spaced(1 / 60, 8))
 
     await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBeUndefined()
     expect(v.play).not.toHaveBeenCalled()
+  })
+})
+
+// ESCSUITE-119: restoring the engine must not take the setup file's stubs with it.
+describe('setup stubs', () => {
+  it('leaves the URL stubs from src/test/setup.ts as mock functions', () => {
+    expect(vi.isMockFunction(URL.createObjectURL)).toBe(true)
+    expect(vi.isMockFunction(URL.revokeObjectURL)).toBe(true)
   })
 })

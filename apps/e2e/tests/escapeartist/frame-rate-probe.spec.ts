@@ -94,7 +94,7 @@ test.describe('import-time frame-rate probe', () => {
 // the 120 fps MP4 read 124.62 and the 30 fps WebM 34.33, both 'measured').
 test.describe('import-time frame-rate probe, engine gate', () => {
   test.beforeEach(({ browserName }) => {
-    test.skip(browserName !== 'firefox', 'the gate pin: only Firefox is refused by the probe')
+    test.skip(browserName !== 'firefox', 'the gate pin runs on Firefox; WebKit is refused by the probe too but Playwright\'s WebKit cannot import media (ESCSUITE-258)')
   })
 
   test('testsrc-120fps.mp4 is stored as 30 assumed, not a Firefox reading', async ({ page }) => {
