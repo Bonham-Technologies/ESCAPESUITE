@@ -13,8 +13,9 @@
 // had, so a source with one live clip costs exactly what it did. Slot k > 0 is
 // a k-th element over the same object URL, made the first time a frame needs it
 // and kept, so a transition does not create and tear one down every frame. The
-// export composer and the in-page MP4 source ask `assignElementSlots`, so they
-// cannot disagree about which element a clip is.
+// export composer and the in-page MP4 source ask `assignElementSlots` (as does
+// the preview's draw when it is handed no assignment), so they cannot disagree
+// about which element a clip is.
 //
 // The preview asks `createStickySlotAssigner` instead (ESCSUITE-323), because
 // its elements are playing playheads rather than frames seeked one at a time.
@@ -126,9 +127,10 @@ interface HeldSlot {
  * A fresh {@link StickySlotAssigner}. Its state is the closure's own, so two
  * previews (or two tests) never share one.
  *
- * `assign` is called every frame by the preview's draw, so it allocates only
- * when a clip appears: `out` is the caller's map, cleared and refilled, and the
- * set of clips the call names is scratch kept with the state.
+ * `assign` runs on every paused scrub and whenever playback's set of live
+ * clips changes, so it allocates only when a clip appears: `out` is the
+ * caller's map, cleared and refilled, and the set of clips the call names is
+ * scratch kept with the state.
  */
 export function createStickySlotAssigner(): StickySlotAssigner {
   const held = new Map<string, HeldSlot>();
