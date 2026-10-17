@@ -1199,7 +1199,10 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   wraps, so the importer runs every cue through `wrapCaptionText(text, captionWrapColumns(resolution,
   fontSize))` first: `floor(width × 0.92 / (fontSize × 0.55))` clamped to [20, 42] (0.92 leaves a 4 %
   gutter each side; 0.55 em is a conservative Arial advance — a 42-character line at 49 px measured
-  961 px, 0.467 em). Landscape stays at 42; 1080×1080 and 1080×1920 give 36, 720×1280 gives 37. Measured
+  961 px, 0.467 em, so 0.55 covers mixed-case text with margin; all-caps Arial averages about 0.68 em,
+  so an all-capitals caption on a portrait frame can still run wide — a known limit). Landscape stays at
+  42; 1080×1080 and 1080×1920 give 36 (a square project wrapped at 42 before ESCSUITE-309, the one
+  existing shape this changes), 720×1280 gives 37. Measured
   before the fix, a 42-character Arial line was 1687 px on 1080×1920 (font 86), 1137 on 720×1280
   (58) and 1196 on 1080×1350 (61) against frames 1080, 720 and 1080 wide. Source line breaks kept,
   longer lines wrapped at word boundaries, a single over-long word left whole.

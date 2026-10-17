@@ -344,7 +344,8 @@ const CAPTION_FONT_FRACTION = 0.045;
 const CAPTION_LINE_WIDTH_FRACTION = 0.92;
 /**
  * A conservative average Latin glyph advance for Arial, in ems. A 42-character
- * line at 49 px measured 961 px (0.467 em per character), so 0.55 leaves margin.
+ * line at 49 px measured 961 px (0.467 em per character), so 0.55 leaves margin for
+ * mixed-case text; all-caps Arial averages about 0.68 em and can still run wide.
  */
 const CAPTION_GLYPH_EM = 0.55;
 

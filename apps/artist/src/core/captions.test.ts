@@ -563,7 +563,7 @@ describe('captionStyleFor', () => {
     })
   })
 
-  it('scales the font with the project height', () => {
+  it('scales the font with the project\'s shorter side', () => {
     expect(captionStyleFor({ width: 1280, height: 720 }).fontSize).toBe(32)
     expect(captionStyleFor({ width: 3840, height: 2160 }).fontSize).toBe(97)
   })
