@@ -5580,6 +5580,31 @@ Firefox-only case, the 120 fps MP4 stored as 30 `'assumed'`: 1 passed / 9 skippe
 `*.perf.test.ts` and rerender pin is byte-identical — the probe runs once per import, nothing per frame.
 **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-329 (a session restore clamps the saved
+in/out points against the migration-repaired clips rather than the raw session clips: `handleRestoreSession`
+handed `repairEditorBlock` the saved clips right after `setProject` had migrated the same project, so a text
+overlay the ESCSUITE-304 repair lengthens from a saved `4 / 2 / -2` to `0 / 2 / 2` left the block clamped
+against a timeline of negative length and a range inside the restored one dropped; the restore now calls
+`store/projectMigration.ts`'s new `repairEditorBlockForProject(raw, project)` — `repairEditorBlock` over
+`ensureTimelineHasTracks(project).timeline.clips`, the same pure pass `setProject` runs on the same
+ESCSUITE-307-filtered project, so the clips are the ones the store holds without reading the store, which the
+existing restore suite mocks — in a two-line change to `useSessionRestore.ts`; `parseProject` already
+clamped a file's block against the migrated clips, so the load path is unchanged): 99.85 / 99.45 / 96.84 /
+99.78, byte-identical on every percentage to the 99.85 / 99.45 / 96.84 / 99.78 that `main` at `9e2e3f43`
+(the ESCSUITE-304 squash) measures in the same sitting. That base reads 96.84 where the table row recorded
+96.80 from ESCSUITE-304's own tree — 307, 313 and 322 having landed beneath it, the drift ESCSUITE-91 and 113
+recorded — and the row is corrected here to the direct measurement. The base gives 6,228 / 6,431 branches and
+this branch the same 6,228 / 6,431: the change adds no decision at all — lines 9,730 / 9,744 → 9,731 / 9,745,
+statements 11,044 / 11,104 → 11,045 / 11,105 and functions 2,317 / 2,322 → 2,318 / 2,323, the one new unit on
+each being the helper itself, covered through `useSessionRestore.repairedClamp.test.ts` (the same 14 / 60 /
+203 / 5 uncovered). Red first: `expected null to be 0.5` for the repaired-timeline case and again for a range
+running past the restored end; a session already inside its timeline is pinned unchanged. Mutation: the raw
+clips put back in the call → both cases red. One review round (sonnet): spec Yes, ready Yes — the migration's
+purity and the filtered input verified, the load path's own clamp confirmed; its one wording minor folded in.
+Markers are never clamped, so only the points carry the pin, and images are not covered because the migration
+repairs overlays alone. Every `*.perf.test.ts` and rerender pin is byte-identical — one extra migration pass
+per restore, nothing per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5587,7 +5612,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.01 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.83 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.84 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 
