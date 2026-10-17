@@ -164,6 +164,11 @@ async function copyPackets(
  * and SeekHead at the finish. A write that lands on collected bytes overwrites
  * them in the part (or parts) it covers, and whatever runs past the end is
  * appended. Mediabunny pads any gap itself, so no write starts past the end.
+ *
+ * The parts are kept in the order the writes arrive, which is file order only
+ * because the `StreamTarget` is left in its default mode: there Mediabunny
+ * emits each flush as merged chunks sorted by start. Do not pass it
+ * `chunked: true`, which can deliver a chunk ahead of the bytes before it.
  */
 export function createChunkCollector(): {
   writable: WritableStream<StreamTargetChunk>;
