@@ -283,4 +283,31 @@ describe('GIF export per-frame work', () => {
     expect(measured.animationLookupsPerFrame).toBe(ACTIVE_CLIPS)
     expect(measured.animationLookups).toBe(FRAMES * ACTIVE_CLIPS)
   })
+  // ESCSUITE-313. The second this file measures is itself a two-clip,
+  // one-source frame — the blurred V1 clip and the picture-in-picture V2 clip
+  // both draw from the scene's one source, a second of source time apart — so
+  // it now takes two `<video>` elements, the second made the first time a frame
+  // needs it and read off the first one's object URL.
+  it('draws the two live clips of the one source from two elements over one object URL', async () => {
+    const urlsBefore = vi.mocked(URL.createObjectURL).mock.calls.length
+
+    const measured = await measureExport()
+
+    // Exact, measured 2026-10-17: two elements, one object URL for the export.
+    expect(media.videos).toHaveLength(ACTIVE_MEDIA_CLIPS)
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length - urlsBefore).toBe(1)
+    // Exact: every frame draws twice, from two different elements.
+    const frames = splitFrames(getLastCanvasContext()!.calls)
+    expect(frames).toHaveLength(FRAMES)
+    for (const frame of frames) {
+      const drawn = frame.filter((c) => c.method === 'drawImage').map((c) => c.args[0])
+      expect(drawn).toHaveLength(ACTIVE_MEDIA_CLIPS)
+      expect(new Set(drawn).size).toBe(ACTIVE_MEDIA_CLIPS)
+    }
+    // Exact, measured 2026-10-17: the one rewind of the element loaded up
+    // front, then one seek per element per frame — except the second element's
+    // first frame, whose clip starts at source 0, where the new element already
+    // sits.
+    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS - 1)
+  })
 })

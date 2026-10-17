@@ -7,7 +7,7 @@
 // stops needing them or the editor goes away.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook } from '@testing-library/react'
-import { usePreviewMedia } from './usePreviewMedia'
+import { previewVideoForSlot, usePreviewMedia } from './usePreviewMedia'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import {
   audioSource,
@@ -177,5 +177,95 @@ describe('usePreviewMedia release', () => {
     for (const url of live) {
       expect(URL.revokeObjectURL).toHaveBeenCalledWith(url)
     }
+  })
+})
+
+// ESCSUITE-313: a source with two clips live at once has a second <video>,
+// made on demand over the first one's URL, kept while the source is used and
+// let go with it.
+describe('usePreviewMedia second elements for one source', () => {
+  it('starts with none, and makes one over the same URL when a slot asks for it', async () => {
+    addClip('clip1', 0, 2)
+    const { result } = await mountMedia()
+    const videos = result.current.videoElementsRef.current
+    const extras = result.current.extraVideoElementsRef.current
+    expect(extras.size).toBe(0)
+
+    const second = previewVideoForSlot(videos, extras, video.id, 1)
+
+    expect(second).toBe(doubles.media.videos[1])
+    expect(second!.src).toBe(videos.get(video.id)!.src)
+    expect(second!.muted).toBe(true)
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1)
+    // Slot 0 is the source's own element, and asking again makes nothing new.
+    expect(previewVideoForSlot(videos, extras, video.id, 0)).toBe(videos.get(video.id))
+    expect(previewVideoForSlot(videos, extras, video.id, 1)).toBe(second)
+    expect(doubles.media.videos).toHaveLength(2)
+  })
+
+  it('makes nothing for a source that has no element of its own', async () => {
+    const { result } = await mountMedia()
+
+    expect(
+      previewVideoForSlot(
+        result.current.videoElementsRef.current,
+        result.current.extraVideoElementsRef.current,
+        'nowhere',
+        1
+      )
+    ).toBeUndefined()
+    expect(doubles.media.videos).toHaveLength(0)
+  })
+
+  it('empties the second element when its source stops being used', async () => {
+    const clip = addClip('clip1', 0, 2)
+    const { result } = await mountMedia()
+    const second = previewVideoForSlot(
+      result.current.videoElementsRef.current,
+      result.current.extraVideoElementsRef.current,
+      video.id,
+      1
+    )!
+
+    store().removeClipFromTimeline(clip.id)
+    await settle()
+
+    expect(second.pause).toHaveBeenCalled()
+    expect(second.src).toBe('')
+    expect(result.current.extraVideoElementsRef.current.size).toBe(0)
+  })
+
+  it('keeps the second element while its source is still used', async () => {
+    addClip('clip1', 0, 2)
+    const { result } = await mountMedia()
+    const second = previewVideoForSlot(
+      result.current.videoElementsRef.current,
+      result.current.extraVideoElementsRef.current,
+      video.id,
+      1
+    )!
+
+    addClip('clip2', 4, 2)
+    await settle()
+
+    expect(result.current.extraVideoElementsRef.current.get(video.id)).toEqual([second])
+    expect(second.src).not.toBe('')
+  })
+
+  it('pauses and empties the second element on unmount, revoking the shared URL once', async () => {
+    addClip('clip1', 0, 2)
+    const { result, unmount } = await mountMedia()
+    const second = previewVideoForSlot(
+      result.current.videoElementsRef.current,
+      result.current.extraVideoElementsRef.current,
+      video.id,
+      1
+    )!
+
+    unmount()
+
+    expect(second.pause).toHaveBeenCalled()
+    expect(second.src).toBe('')
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 })

@@ -600,6 +600,45 @@ const PARITY_CASES: ParityCase[] = [
   },
 ]
 
+/**
+ * Split the one clip on the timeline into two pieces of the same source and
+ * crossfade the first into the second (ESCSUITE-313): `a` is source 0-0.5 s at
+ * timeline 0, fading out over its last 0.3 s; `b` is source 1.0-1.5 s at
+ * timeline 0.5 — a jump cut. Inside the fade (export frames 6-14) two clips of
+ * one source are live in one frame, the outgoing side at its own time and the
+ * incoming side held on its first frame, 1.0 s into the source.
+ */
+async function splitIntoSameSourceCrossfade(page: Page): Promise<void> {
+  const project = (await getProject(page)) as unknown as {
+    timeline: { duration: number; clips: Array<Record<string, unknown>> }
+  }
+  const [clip] = project.timeline.clips
+  const a = { ...clip, startTime: 0, endTime: 0.5, duration: 0.5, timelinePosition: 0, transition: { type: 'fade', duration: 0.3 } }
+  const b = {
+    ...clip, id: `${String(clip.id)}-b`, startTime: 1.0, endTime: 1.5, duration: 0.5, timelinePosition: 0.5,
+    transition: { type: 'none', duration: 0 },
+  }
+  project.timeline.clips = [a, b]
+  project.timeline.duration = 1.0
+  await page.evaluate((payload) => window.postMessage({ type: 'LOAD_PROJECT', payload }, '*'), project)
+  await expect.poll(async () => (await getProject(page)).timeline.clips.length, { timeout: 15_000 }).toBe(2)
+}
+
+/** Export the same-source crossfade in a fresh context, with or without the worker. */
+async function exportSameSourceCrossfade(browser: Browser, forceNoWorker: boolean): Promise<ExportRun> {
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    await installProbes(page, { forceNoWorker })
+    const logs = await openWithSource(page, SEGMENTS_MP4)
+    await splitIntoSameSourceCrossfade(page)
+    const bytes = await exportMp4FromDialog(page, 'project')
+    return { bytes, logs, ...(await readProbes(page)) }
+  } finally {
+    await context.close()
+  }
+}
+
 test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () => {
   test.skip(
     ({ browserName }) => browserName === 'webkit',
@@ -666,6 +705,46 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
       })
     })
   }
+
+  // ESCSUITE-313: the worker decodes two playheads of one source per request;
+  // the <video> path used to give a source one element, so inside the fade both
+  // sides were drawn from the incoming side's moment (MAD 5.149 against this
+  // tolerance before the fix). It now gives the second live clip a second
+  // element over the same URL.
+  test('the worker export matches the <video> export through a split clip crossfading into itself', async ({ browser, page }) => {
+    test.setTimeout(300_000)
+
+    const withWorker = await exportSameSourceCrossfade(browser, false)
+    const withoutWorker = await exportSameSourceCrossfade(browser, true)
+
+    expectWorkerDecoded(withWorker, 30)
+    expect(withoutWorker.logs.some((line) => line.includes('[MP4 Export] Using HTMLVideoElement'))).toBe(true)
+    expect(withoutWorker.framesReady).toBe(0)
+    expectMp4(withWorker.bytes)
+    expectMp4(withoutWorker.bytes)
+
+    await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+    await waitForAppReady(page, 'artist')
+    const centre = { width: 200, height: 160 }
+    const at = (frame: number) => (frame + 0.5) / 30
+
+    // Not vacuous: mid-fade (frame 10) still carries the outgoing side, so it
+    // differs from the incoming side alone (frame 15, just past the cut).
+    const [fadeVsCut] = await compareFrames(page, withoutWorker.bytes, withoutWorker.bytes, [[at(10), at(15)]], centre)
+    expect(fadeVsCut.mad).toBeGreaterThan(5)
+
+    const frames = [3, 8, 10, 13, 15]
+    const results = await compareFrames(page, withWorker.bytes, withoutWorker.bytes, frames.map((f) => [at(f), at(f)]), centre)
+    results.forEach(({ mad, regionWidth, regionHeight }, index) => {
+      console.log(
+        `[ESCSUITE-313 parity] same-source crossfade, frame ${frames[index]}: MAD ${mad.toFixed(3)} / 255 ` +
+          `over the source's ${regionWidth}x${regionHeight} region`
+      )
+      expect(regionWidth).toBeGreaterThan(150)
+      expect(regionHeight).toBeGreaterThan(110)
+      expect(mad).toBeLessThan(PARITY_TOLERANCE)
+    })
+  })
 
   test('a rotated source exports in the orientation its <video> preview shows', async ({ page, browserName }) => {
     test.setTimeout(180_000)

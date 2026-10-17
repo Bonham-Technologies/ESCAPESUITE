@@ -263,7 +263,7 @@ describe('rewindElementSources', () => {
 
     expect(media.seeks).toEqual([0])
     expect(sources.videoElements.get('v1')!.pause).toHaveBeenCalledTimes(1)
-    expect(state.get('v1')).toEqual({ playing: false, targetTime: 0 })
+    expect(state.get(sources.videoElements.get('v1')!)).toEqual({ playing: false, targetTime: 0 })
   })
 })
 
@@ -489,8 +489,8 @@ describe('createFrameComposer', () => {
     const playbackState = rewindElementSources(sources)
     // A video the composer believes is playing: the one state the pause loop
     // acts on, and the only way to reach it from outside the loop.
-    playbackState.set('v1', { playing: true, targetTime: 0 })
     const video = sources.videoElements.get('v1')!
+    playbackState.set(video, { playing: true, targetTime: 0 })
     vi.mocked(video.pause).mockClear()
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -511,7 +511,7 @@ describe('createFrameComposer', () => {
     await composeFrame(5)
 
     expect(video.pause).toHaveBeenCalledTimes(1)
-    expect(playbackState.get('v1')).toEqual({ playing: false, targetTime: 0 })
+    expect(playbackState.get(video)).toEqual({ playing: false, targetTime: 0 })
     expect(ctx.argsFor('drawImage')).toHaveLength(0)
   })
 })
@@ -671,5 +671,192 @@ describe('createFrameComposer seek wait', () => {
       added.mockRestore()
       removed.mockRestore()
     }
+  })
+})
+
+// ESCSUITE-313. Two clips of one source live in the same frame — a clip split
+// and crossfaded into a later part of itself, or the same recording duplicated
+// on a track above as a zoom or picture-in-picture — used to share the one
+// `<video>` the loader made for that source: the second seek landed on it and
+// both clips drew the last seek's moment. A source now has one element per
+// simultaneously live clip, grown on demand over the same object URL.
+describe('createFrameComposer with two live clips of one source', () => {
+  const TWO_TRACKS = [makeTrack({ id: 'tA', index: 0 }), makeTrack({ id: 'tB', index: 1 })]
+
+  /** Clip A shows the source from 0 s; clip B, on the track above, the same source from 10 s. */
+  function zoomedPair(): Clip[] {
+    return [
+      makeClip({ id: 'A', sourceVideoId: 'v1', trackId: 'tA', startTime: 0, endTime: 1, duration: 1 }),
+      makeClip({ id: 'B', sourceVideoId: 'v1', trackId: 'tB', startTime: 10, endTime: 11, duration: 1 }),
+    ]
+  }
+
+  async function composerFor(clips: Clip[], tracks = TWO_TRACKS) {
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', duration: 20 })]))
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks,
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    return { composeFrame, sources, playbackState, ctx }
+  }
+
+  /** Where each drawn `<video>` sat, in draw order, read once the frame is complete. */
+  function drawnAt(ctx: RecordingCanvasRenderingContext2D): number[] {
+    return ctx
+      .argsFor('drawImage')
+      .map((args) => args[0])
+      .filter((el): el is HTMLVideoElement => el instanceof HTMLVideoElement)
+      .map((video) => video.currentTime)
+  }
+
+  it('draws each clip from its own element at its own source time, over one object URL', async () => {
+    await store('v1')
+    const urlsBefore = vi.mocked(URL.createObjectURL).mock.calls.length
+    const { composeFrame, ctx } = await composerFor(zoomedPair())
+
+    await composeFrame(0)
+
+    expect(drawnAt(ctx)).toEqual([expect.closeTo(0, 2), expect.closeTo(10, 2)])
+    expect(media.videos).toHaveLength(2)
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length - urlsBefore).toBe(1)
+    // Both elements play the same bytes: the second is a second reader of the
+    // one URL, not a second copy of the file.
+    expect(media.videos[1].src).toBe(media.videos[0].src)
+  })
+
+  it('draws a split clip crossfading into its own later part from two moments', async () => {
+    await store('v1')
+    // Split at 1 s, with a jump cut: the second piece starts 5 s into the
+    // source, and the first fades into it over its last half second.
+    const split = [
+      makeClip({
+        id: 'A', sourceVideoId: 'v1', trackId: 'tA', startTime: 0, endTime: 1, duration: 1,
+        transition: { type: 'fade', duration: 0.5 },
+      }),
+      makeClip({ id: 'B', sourceVideoId: 'v1', trackId: 'tA', startTime: 5, endTime: 6, duration: 1, timelinePosition: 1 }),
+    ]
+    const { composeFrame, ctx } = await composerFor(split, [makeTrack({ id: 'tA', index: 0 })])
+
+    await composeFrame(0.75)
+
+    // Outgoing first, then incoming: the outgoing side at its own 0.75 s, the
+    // incoming side held on its first frame at 5 s until the cut.
+    expect(drawnAt(ctx)).toEqual([expect.closeTo(0.75, 2), expect.closeTo(5, 2)])
+  })
+
+  it('keeps a source with one live clip on one element', async () => {
+    await store('v1')
+    const clips = zoomedPair()
+    clips[1] = { ...clips[1], timelinePosition: 5 }
+    const { composeFrame, ctx } = await composerFor(clips)
+
+    await composeFrame(0)
+    await composeFrame(0.5)
+
+    expect(media.videos).toHaveLength(1)
+    expect(ctx.argsFor('drawImage')).toHaveLength(2)
+  })
+
+  it('creates the second element once and reuses it on every later frame', async () => {
+    await store('v1')
+    const urlsBefore = vi.mocked(URL.createObjectURL).mock.calls.length
+    const { composeFrame, ctx } = await composerFor(zoomedPair())
+
+    await composeFrame(0)
+    await composeFrame(1 / 30)
+    await composeFrame(2 / 30)
+
+    expect(media.videos).toHaveLength(2)
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length - urlsBefore).toBe(1)
+    expect(drawnAt(ctx).slice(-2)).toEqual([expect.closeTo(2 / 30, 2), expect.closeTo(10 + 2 / 30, 2)])
+  })
+
+  it('pauses the second element once its clip has gone out of range', async () => {
+    await store('v1')
+    const clips = zoomedPair()
+    clips[1] = { ...clips[1], duration: 0.5, endTime: 10.5 }
+    const { composeFrame, playbackState } = await composerFor(clips)
+    await composeFrame(0)
+    const second = media.videos[1]
+    playbackState.set(second, { playing: true, targetTime: 10 })
+    vi.mocked(second.pause).mockClear()
+
+    // B has ended; A is still live on the first element.
+    await composeFrame(0.75)
+
+    expect(second.pause).toHaveBeenCalledTimes(1)
+    expect(playbackState.get(second)).toEqual({ playing: false, targetTime: 10 })
+  })
+
+  it('rewinds and releases every element, revoking the shared URL once', async () => {
+    await store('v1')
+    const { composeFrame, sources } = await composerFor(zoomedPair())
+    await composeFrame(0)
+    const [first, second] = media.videos
+    const seeksBefore = media.seeks.length
+
+    const state = rewindElementSources(sources)
+
+    expect(media.seeks.slice(seeksBefore)).toEqual([0, 0])
+    expect(state.get(first)).toEqual({ playing: false, targetTime: 0 })
+    expect(state.get(second)).toEqual({ playing: false, targetTime: 0 })
+
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    vi.mocked(first.pause).mockClear()
+    vi.mocked(second.pause).mockClear()
+    releaseElementSources(sources)
+
+    expect(first.pause).toHaveBeenCalledTimes(1)
+    expect(second.pause).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+  })
+
+  it('skips the clip whose element will not load, once, and still draws the other', async () => {
+    await store('v1')
+    const { composeFrame, ctx } = await composerFor(zoomedPair())
+    media.script({ video: { fail: true } })
+
+    await composeFrame(0)
+    await composeFrame(1 / 30)
+
+    expect(drawnAt(ctx)).toEqual([expect.closeTo(0, 2), expect.closeTo(1 / 30, 2)])
+    // Not retried every frame: one failed element, one warning.
+    expect(media.videos).toHaveLength(2)
+    expect(warns.mock.calls.filter(([message]) => String(message).includes('second element'))).toHaveLength(1)
+  })
+
+  it('draws two clips of one image from the one image', async () => {
+    await store('i1', 'image/png', 'image')
+    const clips = zoomedPair().map((c) => ({ ...c, sourceVideoId: 'i1' }))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })]))
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: TWO_TRACKS,
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+
+    await composeFrame(0)
+
+    expect(ctx.argsFor('drawImage')).toHaveLength(2)
+    expect(media.videos).toHaveLength(0)
   })
 })
