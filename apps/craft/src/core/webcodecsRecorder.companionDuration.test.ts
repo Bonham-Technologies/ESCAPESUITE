@@ -246,6 +246,31 @@ describe('the ScriptProcessorNode fallback', () => {
     expect(parts.system.duration).toBeCloseTo(60 * CHUNK_SECONDS, 6)
   })
 
+  it('a 44.1 kHz context: the length follows the rate the context runs at, not an assumed 48 kHz', async () => {
+    audio.contextSampleRate = 44100
+    await initialize()
+    expect(lastAudioContext().sampleRate).toBe(44100)
+    recorder.start()
+    pushFrames()
+    const buffer = createAudioBufferDouble({ length: CHUNK, sampleRate: 44100, sample: () => 0.25 })
+    const fireAt44k = (times: number) => {
+      for (let k = 0; k < times; k++) {
+        for (const node of lastAudioContext().scriptProcessors) node.onaudioprocess?.({ inputBuffer: buffer })
+        now += (CHUNK / 44100) * 1000
+      }
+    }
+    fireAt44k(20)
+    micTrack.end()
+    await flush()
+    fireAt44k(40)
+    pushFrames()
+    await recorder.stop()
+
+    const parts = partsByRole()
+    expect(parts.mic.duration).toBeCloseTo((20 * CHUNK) / 44100, 6)
+    expect(parts.system.duration).toBeCloseTo((60 * CHUNK) / 44100, 6)
+  })
+
   it('a paused take: what was delivered while paused is not counted', async () => {
     await initialize()
     recorder.start()
