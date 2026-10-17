@@ -429,12 +429,13 @@ function* meterSteps(lanes: Lanes, sampleRate: number, sliceFrames: number): Gen
   return { integratedLufs: -0.691 + 10 * Math.log10(gatedSum / gatedBlocks), truePeakDbtp, gatedBlocks };
 }
 
-/** Run a resumable walk to its end without stopping: the synchronous pass. */
+/**
+ * The synchronous pass. Both callers hand the walk an infinite slice, so it
+ * never yields and the first `next()` is the whole walk — there is no loop
+ * here because its "not done yet" arm could never run (ESCSUITE-301 measurement).
+ */
 function runToEnd<T>(steps: Generator<number, T, void>): T {
-  for (;;) {
-    const step = steps.next();
-    if (step.done) return step.value;
-  }
+  return steps.next().value as T;
 }
 
 function measure(lanes: Lanes, sampleRate: number): LoudnessMeasurement {
