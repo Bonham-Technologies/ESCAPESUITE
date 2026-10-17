@@ -28,6 +28,7 @@ import {
   gifFrameDelayMs,
   gifFrameRate,
   exportedWithoutSoundReason,
+  audioCandidateSources,
   projectHasAudio,
   hasMP4EncodeGlobals,
   isAudioCodecSupported,
@@ -747,6 +748,30 @@ describe('projectHasAudio', () => {
 
   it('is false for an empty timeline', () => {
     expect(projectHasAudio([], [track('t', 0)], [])).toBe(false)
+  })
+})
+
+// ESCSUITE-312: the sources `projectHasAudio` is true because of — the headless refusal reads
+// each one's container headers, once per source however many clips use it.
+describe('audioCandidateSources', () => {
+  const media = (id: string, mediaType: SourceVideo['mediaType']): SourceVideo =>
+    ({ id, width: 64, height: 48, mediaType } as unknown as SourceVideo)
+
+  it('lists each sounded source once, in first-use order, and nothing else', () => {
+    const sources = [media('img', 'image'), media('v', 'video'), media('a', 'audio'), media('hid', 'video')]
+    const clips = [
+      clip('c1', 'v', 't'), clip('c2', 'img', 't'), clip('c3', 'v', 't'),
+      clip('c4', 'a', 't'), clip('c5', 'hid', 'hidden'), clip('c6', 'gone', 't'),
+    ]
+    const tracks = [track('t', 0), track('hidden', 1, false)]
+    expect(audioCandidateSources(clips, tracks, sources).map((s) => s.id)).toEqual(['v', 'a'])
+  })
+
+  it('is empty exactly when projectHasAudio is false', () => {
+    const tracks = [{ ...track('t', 0), muted: true }]
+    const sources = [media('v', 'video')]
+    expect(audioCandidateSources([clip('c', 'v', 't')], tracks, sources)).toEqual([])
+    expect(projectHasAudio([clip('c', 'v', 't')], tracks, sources)).toBe(false)
   })
 })
 

@@ -42,6 +42,10 @@ vi.mock('./seedSources', () => ({
   }))),
 }))
 
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { Input } from 'mediabunny'
 import { renderProject, renderProjectToFile } from './renderProject'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, SourceVideoInput } from './types'
@@ -437,12 +441,23 @@ const fileInputBase = (): RenderFileInput => ({
 // ESCSUITE-312: the reference image's Linux Chromium has no AAC encoder. `exportToMP4` already
 // skips the mix there and returns `audio: false`; the headless entry used to drop that flag, so
 // every kit mp4 job on Linux was `ok: true` with a silent file. Now the meta says whether the
-// file carries sound, and a sounded project is refused by name before any exporter runs.
+// file carries sound, and a project whose sources carry an audio track is refused by name before
+// any exporter runs. "Carry an audio track" is read from each candidate source's container
+// headers (mediabunny's demuxer), never decoded — so a video-only source renders as before. The
+// sources here are real MP4 bytes (src/test/fixtures/media/README.md).
 describe('renderProject — sound', () => {
   const AAC_REFUSAL =
     'This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.'
+  const media = (name: string): ArrayBuffer => {
+    const bytes = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../test/fixtures/media', name))
+    // Copied into this realm's ArrayBuffer: Node's file buffers come from another realm, and
+    // mediabunny's `BufferSource` checks `instanceof ArrayBuffer`.
+    return new Uint8Array(bytes).buffer
+  }
   let savedAudioEncoder: unknown
   let probedConfigs: AudioEncoderConfig[]
+  let headerProbe: ReturnType<typeof vi.spyOn>
+  let warn: ReturnType<typeof vi.spyOn>
 
   /** A minimal `AudioEncoder` whose only job is to answer the AAC probe. */
   const installAudioEncoder = (aac: boolean) => {
@@ -454,10 +469,14 @@ describe('renderProject — sound', () => {
     }
   }
 
-  /** A project jsdom's `projectHasAudio` reads as sounded: a video clip on a visible, unmuted track. */
-  const soundedInput = (format: 'mp4' | 'webm' | 'gif' = 'mp4'): RenderInput => {
+  /**
+   * A project `projectHasAudio` reads as a candidate — a video clip on a visible, unmuted track —
+   * whose source's container carries an AAC track.
+   */
+  const soundedInput = (format: 'mp4' | 'webm' | 'gif' = 'mp4', bytes: ArrayBuffer | Blob = media('video-with-aac.mp4')): RenderInput => {
     const input = baseInput()
     input.project.timeline.tracks = [{ id: 't0', visible: true, muted: false }] as unknown as RenderInput['project']['timeline']['tracks']
+    input.sourceBlobs = { s0: bytes }
     input.options = { format, quality: 'high' } as RenderInput['options']
     return input
   }
@@ -465,9 +484,13 @@ describe('renderProject — sound', () => {
   beforeEach(() => {
     savedAudioEncoder = (globalThis as Record<string, unknown>).AudioEncoder
     probedConfigs = []
+    headerProbe = vi.spyOn(Input.prototype, 'getPrimaryAudioTrack')
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
   afterEach(() => {
     ;(globalThis as Record<string, unknown>).AudioEncoder = savedAudioEncoder
+    headerProbe.mockRestore()
+    warn.mockRestore()
   })
 
   it.each([
@@ -493,7 +516,7 @@ describe('renderProject — sound', () => {
     expect(res.meta.audio).toBe(false)
   })
 
-  it('refuses a sounded mp4 by name when this Chromium has no AAC encoder, before any exporter runs', async () => {
+  it('refuses an mp4 whose source carries an audio track when this Chromium has no AAC encoder, before any exporter runs', async () => {
     installAudioEncoder(false)
 
     let thrown: unknown
@@ -513,6 +536,53 @@ describe('renderProject — sound', () => {
     expect(probedConfigs).toEqual([
       { codec: 'mp4a.40.2', sampleRate: EXPORT_AUDIO_SAMPLE_RATE, numberOfChannels: EXPORT_AUDIO_CHANNELS, bitrate: 256_000 },
     ])
+    expect(headerProbe).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads a Blob source\'s headers as well as an ArrayBuffer\'s', async () => {
+    installAudioEncoder(false)
+
+    await expect(
+      renderProject(soundedInput('mp4', new Blob([media('video-with-aac.mp4')], { type: 'video/mp4' }))),
+    ).rejects.toMatchObject({ code: 'AUDIO_CODEC_UNAVAILABLE' })
+  })
+
+  it.each(['h264-faststart.mp4', 'h264-bframes.mp4'])(
+    'renders a video-only source (%s) as mp4 with no AAC encoder, reporting audio: false',
+    async (name) => {
+      installAudioEncoder(false)
+      exportToMP4.mockResolvedValueOnce({
+        blob: new Blob([new Uint8Array([9])], { type: 'video/mp4' }), audio: false, framesEncoded: 30,
+      })
+
+      const res = await renderProject(soundedInput('mp4', media(name)))
+
+      expect(exportToMP4).toHaveBeenCalledTimes(1)
+      expect(res.meta.audio).toBe(false)
+      expect(headerProbe).toHaveBeenCalledTimes(1)
+      expect(warn).not.toHaveBeenCalled()
+    },
+  )
+
+  it('refuses when a source\'s container cannot be read, warning once with its name', async () => {
+    installAudioEncoder(false)
+
+    await expect(renderProject(soundedInput('mp4', new Uint8Array([1, 2, 3, 4]).buffer))).rejects.toMatchObject({
+      message: AAC_REFUSAL,
+      code: 'AUDIO_CODEC_UNAVAILABLE',
+    })
+    expect(exportToMP4).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(String(warn.mock.calls[0][0])).toContain('"s.mp4"')
+  })
+
+  it('refuses an audio source without reading its headers', async () => {
+    installAudioEncoder(false)
+    const input = soundedInput('mp4', media('h264-faststart.mp4'))
+    input.sourceVideos = [{ ...input.sourceVideos[0], mediaType: 'audio' }]
+
+    await expect(renderProject(input)).rejects.toMatchObject({ code: 'AUDIO_CODEC_UNAVAILABLE' })
+    expect(headerProbe).not.toHaveBeenCalled()
   })
 
   it('refuses with allowSilentMp4: false exactly as with it absent', async () => {
@@ -539,9 +609,10 @@ describe('renderProject — sound', () => {
     // A job-spec switch for the headless entry, not an export option: the exporter never sees it.
     expect('allowSilentMp4' in ((exportToMP4.mock.calls[0] as unknown[])[2] as object)).toBe(false)
     expect(probedConfigs).toEqual([])
+    expect(headerProbe).not.toHaveBeenCalled()
   })
 
-  it('renders a sounded mp4 when this Chromium has an AAC encoder', async () => {
+  it('renders a sounded mp4 when this Chromium has an AAC encoder, without reading any headers', async () => {
     installAudioEncoder(true)
 
     const res = await renderProject(soundedInput())
@@ -549,6 +620,7 @@ describe('renderProject — sound', () => {
     expect(exportToMP4).toHaveBeenCalledTimes(1)
     expect(res.meta.audio).toBe(true)
     expect(probedConfigs).toHaveLength(1)
+    expect(headerProbe).not.toHaveBeenCalled()
   })
 
   it.each([
@@ -573,16 +645,17 @@ describe('renderProject — sound', () => {
 
     expect(exportToMP4).toHaveBeenCalledTimes(1)
     expect(res.meta.audio).toBe(false)
+    expect(headerProbe).not.toHaveBeenCalled()
   })
 
-  it('never refuses a webm by this rule, whatever the AAC answer', async () => {
+  it.each(['webm', 'gif'] as const)('never refuses a %s by this rule, nor reads any headers', async (format) => {
     installAudioEncoder(false)
 
-    const res = await renderProject(soundedInput('webm'))
+    await renderProject(soundedInput(format))
 
-    expect(exportToWebM).toHaveBeenCalledTimes(1)
-    expect(res.meta.audio).toBe(true)
+    expect(format === 'webm' ? exportToWebM : exportToGIF).toHaveBeenCalledTimes(1)
     expect(probedConfigs).toEqual([])
+    expect(headerProbe).not.toHaveBeenCalled()
   })
 })
 
