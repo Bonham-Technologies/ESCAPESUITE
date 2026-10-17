@@ -22,7 +22,7 @@ import {
   revokeSourceThumbnails,
   type SessionState,
 } from '../core/storage';
-import { repairEditorBlock } from '../store/projectMigration';
+import { repairEditorBlockForProject } from '../store/projectMigration';
 import { timelineWithoutSources } from '../store/projectFactory';
 import { sessionSourcesLeftOutMessage } from './appFormat';
 import { applyEditorBlock } from './editorBlock';
@@ -299,7 +299,7 @@ export function useSessionRestore({
     // that fails the file's checks falls back to no range and no markers with
     // one warning, and an old snapshot with no block clears whatever the
     // editor held. Neither is an edit, so neither is undoable.
-    applyEditorBlock(repairEditorBlock(session.editor, project.timeline.clips));
+    applyEditorBlock(repairEditorBlockForProject(session.editor, project));
     clearHistory();
     // Another tab's slot — one that closed or crashed, or the legacy shared
     // row — becomes this tab's (ESCSUITE-274). Not awaited: the restore has

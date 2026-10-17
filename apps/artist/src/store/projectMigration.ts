@@ -443,6 +443,17 @@ export function repairEditorBlock(
 }
 
 /**
+ * `repairEditorBlock` against the clips `setProject` will hold for `project`
+ * (ESCSUITE-329): the same `ensureTimelineHasTracks` pass it runs, not the raw
+ * saved clips. The migration can lengthen an overlay saved with a non-positive
+ * duration to its dragged length (ESCSUITE-304), so a block clamped against the
+ * saved clips would be held to a timeline shorter than the one on screen.
+ */
+export function repairEditorBlockForProject(raw: unknown, project: Project): EditorBlock {
+  return repairEditorBlock(raw, ensureTimelineHasTracks(project).timeline.clips);
+}
+
+/**
  * Validate a project shape before anything downstream touches it, and only
  * then run the existing migration on it.
  *
