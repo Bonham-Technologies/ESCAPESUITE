@@ -6,6 +6,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from './types'
 import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
 import { isValidCrop } from '../core/clipCrop';
+import { isExtendableClip } from './extendableClip';
 
 /**
  * Repair a clip transform the app itself once wrote (ESCSUITE-255): a scale
@@ -113,6 +114,36 @@ function repairLegacyOverlayWindows(project: Project): Project {
   return { ...project, timeline: { ...timeline, textOverlays, shapeOverlays } };
 }
 
+/**
+ * Put an overlay clip's `startTime` / `endTime` back to `0` / `duration`
+ * (ESCSUITE-304). An overlay has no source timeline, and that is the only pair
+ * the app means to write for one, but `splitClip` used to give the second half
+ * the split offset as its `startTime`, and a trim then carried the offset into
+ * the stored pair. The app wrote those files itself, so they are repaired, not
+ * refused (the ESCSUITE-173 / 255 split); `duration` is what the file says the
+ * clip lasts and is kept. A media clip's pair is a window on its source and is
+ * never touched. An image is extendable too, but the project carries no source
+ * list to tell an image clip from a video one, so only overlays are repaired
+ * here; a stored image clip's pair is put right by its next trim or split. One
+ * `console.warn` counts the repairs. Returns the very same project when nothing
+ * needs repair.
+ */
+function repairExtendableClipPairs(project: Project): Project {
+  let repaired = 0;
+  const clips = project.timeline.clips.map((clip) => {
+    if (!isExtendableClip(clip, undefined)) return clip;
+    if (clip.startTime === 0 && clip.endTime === clip.duration) return clip;
+    repaired++;
+    return { ...clip, startTime: 0, endTime: clip.duration };
+  });
+  if (repaired === 0) return project;
+  console.warn(
+    `Repaired the start and end times of ${repaired} ` +
+      (repaired === 1 ? 'overlay clip to 0 and its duration' : 'overlay clips to 0 and their duration')
+  );
+  return { ...project, timeline: { ...project.timeline, clips } };
+}
+
 // Ensure timeline has tracks and overlays arrays (migration helper)
 function ensureTimelineHasTracks(project: Project): Project {
   // Ensure resolution exists (migration for older projects)
@@ -121,6 +152,7 @@ function ensureTimelineHasTracks(project: Project): Project {
   }
   project = repairClipTransforms(project);
   project = repairLegacyOverlayWindows(project);
+  project = repairExtendableClipPairs(project);
 
   const timeline = project.timeline;
   let needsMigration = false;
@@ -513,8 +545,11 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     // `startTime + clipTime`. Every clip the app writes carries both (0 and the
     // duration for an overlay or an image), and the migration supplies neither,
     // so an absent one is refused too: it would read the source at NaN. Their
-    // difference is not checked against `duration`, which an extended image or
-    // overlay clip legitimately outgrows.
+    // difference is not checked against `duration` here: an overlay's pair is
+    // repaired to 0 / duration by `repairExtendableClipPairs` in the migration
+    // below (ESCSUITE-304), which these two checks never pre-empt for a file
+    // the app wrote — its trims kept `duration === endTime - startTime`, so a
+    // positive duration means `endTime > startTime`.
     const { startTime, endTime } = candidate;
     if (typeof startTime !== 'number' || !Number.isFinite(startTime) || startTime < 0) {
       return { ok: false, reason: `Clip "${id}" has an invalid startTime` };

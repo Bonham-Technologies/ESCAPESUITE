@@ -15,6 +15,7 @@ import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './p
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
 import { pruneSelection } from './selectionPrune';
 import { isSaneTransformWrite } from './transformGuard';
+import { isExtendableClip } from './extendableClip';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -523,10 +524,22 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       secondAnimation = split.second;
     }
 
+    // ESCSUITE-304: a media clip's halves are two windows on its source, so
+    // the second starts where the first ends. An overlay or an image has no
+    // source timeline — its pair is always 0 / duration — and a second half
+    // that inherited the split offset as its `startTime` had that offset taken
+    // off its length by the next trim's `endTime - startTime` recompute.
+    const extendable = isExtendableClip(
+      clip,
+      state.sourceVideos.find((v) => v.id === clip.sourceVideoId)
+    );
+    const firstPair = extendable ? { startTime: 0, endTime: firstDuration } : { endTime: sourceTime };
+    const secondPair = extendable ? { startTime: 0, endTime: secondDuration } : { startTime: sourceTime };
+
     const firstClip: Clip = {
       ...cloneClip(clip),
       id: uuidv4(),
-      endTime: sourceTime,
+      ...firstPair,
       duration: firstDuration,
       name: `${clip.name} (1)`,
       animation: firstAnimation,
@@ -535,7 +548,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const secondClip: Clip = {
       ...cloneClip(clip),
       id: uuidv4(),
-      startTime: sourceTime,
+      ...secondPair,
       duration: secondDuration,
       timelinePosition: clip.timelinePosition + firstDuration,
       name: `${clip.name} (2)`,

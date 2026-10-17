@@ -517,7 +517,7 @@ describe('useTrimDrag and the undo stack', () => {
     release()
 
     expect(actions.trimClip).toHaveBeenCalledTimes(1)
-    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'end', { duration: 3, endTime: 3 }, ORIGIN, false)
+    expect(actions.trimClip).toHaveBeenCalledWith('clip1', 'end', { duration: 3, startTime: 0, endTime: 3 }, ORIGIN, false)
     expect(past() - before).toBe(1)
   })
 
