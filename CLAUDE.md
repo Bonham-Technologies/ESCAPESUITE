@@ -4808,6 +4808,59 @@ other, so whichever table row lands second is that branch's own figure, a hundre
 the drift ESCSUITE-91 and 113 recorded. The suite measured 5,862 green with the `--testTimeout 20000`
 guard. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-17 for ESCSUITE-312 (the
+headless kit's mp4 render says whether it carries sound, and refuses a sounded project when it cannot: the
+reference image's Linux Chromium has no AAC encoder, so every kit mp4 job there came back `ok: true`, exit 0,
+a picture-only file with any `loudnessTarget` silently ignored and nothing in the manifest to say so —
+`headless/renderProject.ts` read `{ blob, framesEncoded, loudness }` off the exporter's result and dropped
+the `audio` flag ESCSUITE-175 had put there; `RenderMeta.audio` is now required and carried into the kit's
+verification manifest for every format, `true` when the format's audio encoder was available (the file
+carries a track when the mix had sound) and `false` when the file has none; an mp4 job is refused before any
+exporter runs, `ExportError` with `code: 'AUDIO_CODEC_UNAVAILABLE'` mapped by the kit to exit 2 / 400 the
+way `OUTPUT_SIZE_UNSUPPORTED` is, when `allowSilentMp4` is off, the project has a candidate source
+(`audioCandidateSources` in `core/exportTypes.ts`, the sources `projectHasAudio` is true because of, which
+the dialog now reads the same list through), the AAC probe answers false **and** a candidate's container
+carries an audio track — read from its headers, never decoded, through `headless/audioTrackProbe.ts`
+(mediabunny's `Input` over a `BlobSource`, `getPrimaryAudioTrack()`, disposed in a `finally`; an
+`audio`-type source counts without a probe, a probe that throws counts as sounded with one warning), so
+the video-only kit fixtures and the 64×8 case render as before on Linux and the ruled "any video source is
+sounded" rule, which would have turned Linux CI red, was replaced on the implementer's finding; the new
+`options.allowSilentMp4` is accepted on any format and ignored on webm and gif, the `quality`-on-gif
+precedent), each in one sitting against `main` at `1924dfe6` (the ESCSUITE-297 merge; its artist and kit
+sources are `31fa9edc`'s). The figures are the measurement of `f92e93c4`, the last source commit; the
+review's one round after it, `dc8af514`, is tests and docs alone. **Artist**: 99.85 / 99.44 / **96.78** /
+99.77 against 99.85 / 99.44 / 96.77 / 99.77 — branches up a hundredth, the other three unmoved. The base
+gives 6,091 / 6,294 branches and this branch 6,106 / 6,309: fifteen new branches, fifteen covered, the same
+203 uncovered as before (lines 9,513 / 9,527 → 9,533 / 9,547, statements 10,785 / 10,845 → 10,809 / 10,869,
+functions 2,263 / 2,268 → 2,267 / 2,272, every denominator growing by exactly what the numerator did; the
+same 14 / 60 / 5 uncovered). The fifteen net four files: `headless/audioTrackProbe.ts` arrives at 6 / 6
+(the audio-type short-circuit, the first-track stop, the throwing probe's warn, each from both sides by the
+AAC fixture, the two video-only fixtures and a probe made to throw); `headless/renderProject.ts` 37 / 40 →
+44 / 47 (the mp4 → `allowSilentMp4` → candidates → AAC → headers chain, the same three pre-existing arms
+uncovered); `core/exportTypes.ts` 135 / 139 → 144 / 148 (`audioCandidateSources`' per-clip operands and the
+identity dedupe, the same four pre-existing arms uncovered); and `components/Export/ExportDialog.tsx`
+246 / 247 → 239 / 240, which lost `projectHasAudio`'s inline operands to the shared function with its one
+pre-existing arm still uncovered. **Kit**: **99.60** / 99.52 / **98.65** / 98.87 against
+99.59 / 99.52 / 98.64 / 98.87 — lines and branches up a hundredth, statements and functions unmoved: lines
+991 / 995 → 997 / 1,001, statements 1,050 / 1,055 → 1,056 / 1,061, branches 653 / 662 → 659 / 668 and
+functions 176 / 178 on both, every denominator growing by exactly what the numerator did, the same
+4 / 5 / 9 / 2 uncovered in the same ledgered places. The six are `src/jobSpec.ts`'s four (98 → 102:
+`allowSilentMp4` absent, boolean, or refused as not boolean) and `src/renderFailure.ts`'s two (2 → 4: the
+permanent-code set's membership from both sides). The headline red: `refuses a sounded mp4 by name` →
+`expected undefined to be an instance of ExportError`; round 2's: `expected "getPrimaryAudioTrack" to be
+called 1 times, but got 0 times`, and the video-only renders failing with the refusal sentence itself before
+the header probe existed. Mutations: the candidate operand forced true → 26 red (every silent-project case
+and, jsdom having no AAC encoder, every older mp4 case); `containerHasAudioTrack` forced true → 6 red (both
+video-only renders among them). The review (opus) read mediabunny's ISOBMFF and Matroska demuxers to
+confirm the probe reads headers only — an MP4 with `moov` last costs a header hop over `mdat`, a WebM stops
+at the first Cluster — and verified the new 2.7 KB H.264 + AAC fixture with ffprobe; its one round (the
+`audio: true` wording, which had claimed a track where a silent project's mp4 carries none, the exporters'
+`mockReset`, the order pinned by assertion, the webm/gif acceptance case) is `dc8af514`. The kit's new
+Chromium case (a sine WAV refused on an engine with no AAC, then rendered `audio: false` under
+`allowSilentMp4`) skips at runtime where AAC exists and so first runs in CI on Linux. Every `*.perf.test.ts`
+and rerender pin is byte-identical — one header read per candidate source on the no-AAC path, nothing per
+frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4815,9 +4868,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.44 | 96.76 | 99.77 |
+| `@escapesuite/artist` | 99.85 | 99.44 | 96.78 | 99.77 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.59 | 99.52 | 98.64 | 98.87 |
+| `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being
