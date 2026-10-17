@@ -32,6 +32,15 @@
 // trim calls it on every mousemove; `firstFreeGroupStart` builds and sorts one
 // span per (member, same-row clip) pair whether the two collide or not, and
 // runs once per Ctrl+V.
+//
+// One importer places clips whose times it did not choose: `addCaptionCues`
+// (ESCSUITE-293) keeps a caption file's cues in file order on the one Captions
+// track, overlaps included. A gesture on such a pair must not be broken by an
+// overlap it found (ESCSUITE-308): `preexistingOverlaps` names what a clip
+// already overlaps, the trim clamp and both drag vetoes leave those clips out of
+// their neighbours, and `wouldOverlap` itself — the placement predicate — is
+// unchanged. Paste and duplicate keep the strict rule: they make clips, and a
+// clip made now has no overlap to have found.
 import type { Clip, Track, TrimOrigin } from './types';
 
 // Get snap points from all clip edges
@@ -90,6 +99,28 @@ export function findNearestSnapPoint(
  */
 const OVERLAP_EPSILON = 1e-9;
 
+/**
+ * Whether `clip` reaches into the span `[start, end)` by more than
+ * `OVERLAP_EPSILON` — the one comparison every reader of "do these two
+ * overlap?" makes: `wouldOverlap` for a placement, `preexistingOverlaps` and
+ * `clampTrimToNeighbours` for what a gesture found when it began
+ * (ESCSUITE-308). A pair meeting within the epsilon is butted, not
+ * overlapping, which is the side the tie has to fall on: a clamped end trim
+ * lands up to 3.55e-15 s past its neighbour's start, and reading that as an
+ * overlap the gesture *found* would exempt the neighbour from the clip's next
+ * trim and let it run straight over it.
+ */
+export function overlapsSpan(
+  clip: Pick<Clip, 'timelinePosition' | 'duration'>,
+  start: number,
+  end: number
+): boolean {
+  return (
+    start < clip.timelinePosition + clip.duration - OVERLAP_EPSILON &&
+    end > clip.timelinePosition + OVERLAP_EPSILON
+  );
+}
+
 // Check if clip placement would overlap with another on same track
 export function wouldOverlap(
   clips: Clip[],
@@ -104,14 +135,42 @@ export function wouldOverlap(
     if (clip.trackId !== trackId) continue;
     if (clip.id === excludeClipId) continue;
 
-    const clipEnd = clip.timelinePosition + clip.duration;
     // Overlap if ranges intersect by more than a float bit's worth.
-    if (position < clipEnd - OVERLAP_EPSILON && end > clip.timelinePosition + OVERLAP_EPSILON) {
+    if (overlapsSpan(clip, position, end)) {
       return true;
     }
   }
 
   return false;
+}
+
+/**
+ * The clips on `clip`'s own row that already overlap it — the overlaps a
+ * gesture on `clip` *found*, rather than made (ESCSUITE-308).
+ *
+ * The rule the four writers keep is that one row never holds two overlapping
+ * clips, but one importer places clips it did not choose the times of:
+ * `addCaptionCues` (ESCSUITE-293) keeps a caption file's cues in file order on
+ * the one Captions track, and a file may overlap two cues. Read as neighbours,
+ * such a pair broke both gestures — the trim clamp took the inner cue's start
+ * as the long cue's end limit (a 9 s caption became 1 s on the first move),
+ * and the drag veto read the pair as already colliding and refused every drag
+ * of either. A gesture may keep, or change, an overlap it found; it may not
+ * make one with a clip it did not overlap. The clip drag takes this set once,
+ * on mousedown, beside its snap points; `canMoveSelectedClips` takes it per
+ * member from the clips it is handed, which a drag has not yet changed.
+ */
+export function preexistingOverlaps(
+  clip: Pick<Clip, 'id' | 'trackId' | 'timelinePosition' | 'duration'>,
+  clips: Clip[]
+): Set<string> {
+  const found = new Set<string>();
+  const end = clip.timelinePosition + clip.duration;
+  for (const other of clips) {
+    if (other.trackId !== clip.trackId || other.id === clip.id) continue;
+    if (overlapsSpan(other, clip.timelinePosition, end)) found.add(other.id);
+  }
+  return found;
 }
 
 /**
@@ -204,7 +263,12 @@ export function canMoveSelectedClips({
 
   /** The clips nothing is moving, and then each member as it is placed. */
   const settled: Clip[] = [];
-  const moved: Clip[] = [];
+  /**
+   * Each member where it would land, beside the clips it already overlapped
+   * where it stands (ESCSUITE-308): those are not in its way, wherever the
+   * move takes the pair.
+   */
+  const moved: { clip: Clip; found: ReadonlySet<string> }[] = [];
 
   for (const clip of clips) {
     if (!selectedClipIds.has(clip.id)) {
@@ -222,16 +286,23 @@ export function canMoveSelectedClips({
     if (locked.has(clip.trackId) || locked.has(order[to])) return false;
 
     moved.push({
-      ...clip,
-      trackId: order[to],
-      timelinePosition: Math.max(0, clip.timelinePosition + deltaTime),
+      clip: {
+        ...clip,
+        trackId: order[to],
+        timelinePosition: Math.max(0, clip.timelinePosition + deltaTime),
+      },
+      found: preexistingOverlaps(clip, clips),
     });
   }
 
-  for (const clip of moved) {
+  for (const { clip, found } of moved) {
     // No `excludeClipId`: a member's own old placement is not in `settled` — it
     // is in `moved` — so there is nothing of its own for it to collide with.
-    if (wouldOverlap(settled, clip.trackId, clip.timelinePosition, clip.duration)) {
+    // What it already overlapped is left out of the candidates: a group may
+    // carry an overlap it found, or slide one member across another it found,
+    // but may not land on anything new.
+    const candidates = settled.filter((other) => !found.has(other.id));
+    if (wouldOverlap(candidates, clip.trackId, clip.timelinePosition, clip.duration)) {
       return false;
     }
     settled.push(clip);
@@ -254,6 +325,13 @@ export function canMoveSelectedClips({
  * neighbour touching the clamped edge exactly is not an overlap, which is the
  * same open-interval rule `wouldOverlap` applies.
  *
+ * A clip that already overlapped the trimmed one at the gesture's start — its
+ * span reaching into `origin`'s by more than `OVERLAP_EPSILON` — is no
+ * neighbour at all (ESCSUITE-308, `preexistingOverlaps`' rule). Imported
+ * caption cues can overlap; read as neighbours, a cue with a shorter one inside
+ * it clamped its end to the inner cue's start on the first move. One it did not
+ * overlap still clamps as before.
+ *
  * Clamping the *pointer time* rather than the computed update is what keeps the
  * gesture idempotent: `computeTrimUpdate` re-derives the edge from the origin
  * and the pointer on every move, so a trim that wanders out past the neighbour
@@ -267,16 +345,20 @@ export function clampTrimToNeighbours(
   origin: TrimOrigin,
   mouseTime: number
 ): number {
-  const fixedEdge =
-    edge === 'end'
-      ? clip.timelinePosition
-      : origin.timelinePosition + (origin.endTime - origin.startTime);
+  // Where the clip stood when the gesture began. A clip that already reached
+  // into that span is not a neighbour (ESCSUITE-308): the trim found that
+  // overlap rather than made it. Two numbers, not a set, because the clamp
+  // runs on every mousemove and must allocate nothing — and the clips it is
+  // handed besides the trimmed one do not move while a trim runs.
+  const originEnd = origin.timelinePosition + (origin.endTime - origin.startTime);
+  const fixedEdge = edge === 'end' ? clip.timelinePosition : originEnd;
 
   let limit: number | null = null;
 
   for (const other of clips) {
     if (other.trackId !== clip.trackId) continue;
     if (other.id === clip.id) continue;
+    if (overlapsSpan(other, origin.timelinePosition, originEnd)) continue;
 
     if (edge === 'end') {
       if (other.timelinePosition >= fixedEdge && (limit === null || other.timelinePosition < limit)) {
