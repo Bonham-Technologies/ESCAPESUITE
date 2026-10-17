@@ -1361,7 +1361,7 @@ path is live — captures through an AudioWorklet wherever it can:
   unmeasured (ESCSUITE-321). `blob:` stays first because the hosted `script-src` admits `blob:` and
   must not have to admit `data:`; the retry is the general rule rather than an `isFileOrigin()` gate,
   so any opaque origin (a sandboxed frame) is covered. The one `console.info` line says which kind
-  loaded — "(blob module)" or "(data module)". It gathers quanta into
+  loaded — "(blob module)" or "(data module)". The processor gathers quanta into
   chunks of `CHUNK_FRAMES` (4096, the ~85 ms a ScriptProcessor buffer was) per channel and posts
   `{ frame, channels }`, `frame` the render position of the chunk's first sample, the two
   `Float32Array`s transferred. Once the page has encoded a chunk (copied planar first, so nothing
