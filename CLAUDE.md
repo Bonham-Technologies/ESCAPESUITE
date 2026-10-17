@@ -125,8 +125,9 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   CRAFT's two modals and all five of ARTIST's (export, shortcut sheet, project-load, session
   restore, the resolution-change confirm). Escape's *meaning* is per dialog, not inherited: the
   hook calls whatever it is handed, and ARTIST's session-restore prompt hands it a no-op because
-  declining discards the
-  saved session. See each app's CLAUDE.md "Dialogs" note
+  declining discards this tab's own (or the legacy) saved session — another tab's is left where it is
+  since ESCSUITE-306, because the tab may only be discarded, not gone. See each app's CLAUDE.md
+  "Dialogs" note
 - **Shared error boundary**: `ErrorBoundary` (`packages/shared/src/components`), available as
   `@escapesuite/shared/components` for a host app, is the one React error boundary for all three
   apps. `bootstrapApp()` mounts it around `<App />` for CRAFT and ARTIST; ESCAPEPLAN, which
