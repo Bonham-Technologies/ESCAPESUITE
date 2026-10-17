@@ -2127,7 +2127,8 @@ upstream-requests page has its own row.
   (`CUES_READ_WINDOW_BYTES`). Frame payloads are not parsed, only element and block headers, but
   they are still read, so the pass costs about one 1 MiB read per MiB of file (a 56 MB take is
   about 56 reads). It notes each keyframe — a SimpleBlock with the keyframe flag, or a BlockGroup
-  with no ReferenceBlock — then rewrites the Cues element in place (CueTime, CueTrack,
+  with no ReferenceBlock — walking an unknown-size Cluster until the next level-1 (four-byte) ID,
+  not only the next Cluster, which is the spec's rule — then rewrites the Cues element in place (CueTime, CueTrack,
   CueClusterPosition, CueRelativePosition, each at a fixed 8-byte width) and hands every other
   byte, alpha included, on as a `slice()` of the input. It leans on `makeMetadataSeekable`'s fixed
   output shape — an unknown-size Segment, the Cues ahead of the first Cluster, and every SeekHead

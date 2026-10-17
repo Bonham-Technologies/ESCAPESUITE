@@ -5016,13 +5016,57 @@ crossfaded into itself, worker export against `<video>` export, MAD < 1.5 at fra
 with a frame-10-versus-frame-15 check that would fail on main) and ran here on Chromium: 10 / 10. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-17 for ESCSUITE-322 (a stored MediaRecorder WebM carries a
+Cues element that indexes every video keyframe: `webm-duration-fix` records a CuePoint only for a video
+SimpleBlock, and Chrome's MediaRecorder writes every frame of the compositor's alpha-VP9 canvas stream as a
+BlockGroup, so every composited-PiP take ever stored carried a 0-byte Cues element — which Chromium's
+`<video>` tolerates and Firefox's seek wedges on, permanently, for any cluster that does not open on a
+keyframe (ESCSUITE-305's black exports and hung import thumbnail); `fixWebMMetadata` now runs the library
+and then `core/webmCues.ts`'s `writeKeyframeCues`, one forward pass over the Segment in 1 MiB windows that
+notes each SimpleBlock with the keyframe flag or BlockGroup with no ReferenceBlock and rewrites the Cues
+element in place with one fixed-width CuePoint per keyframe, every other byte — alpha included — handed on
+as a `slice()` of the input, and refusing by throw (so the save shows `NOT_SEEKABLE`) a known-size Segment,
+a Cluster ahead of the Cues, a SeekHead entry past the Cues, a video file with no Cues or no keyframe, and
+an invalid vint; an audio-only take is handed back as the library left it):
+100.00 / **99.59** / **98.00** / 100.00 against the 100.00 / 99.57 / 97.93 / 100.00 that `main` at
+`d315d882` (the ESCSUITE-312 version-packages commit) measures in the same sitting — statements up two
+hundredths, branches up seven, lines and functions still exactly 100. The base gives 1,473 / 1,504 branches
+and this branch 1,525 / 1,556: fifty-two new branches, fifty-two covered, the same 31 uncovered as before
+(lines 2,626 → 2,769, statements 2,810 / 2,822 → 2,975 / 2,987, functions 497 → 512, every denominator
+growing by exactly what the numerator did; the same 12 statements uncovered, in the same four files). All
+fifty-two are `core/webmCues.ts`'s, which arrives at 100 on all four (143 lines, 165 statements, 52
+branches, 15 functions): the vint reader's length and all-0xff unknown-size arms, the known- and
+unknown-size Cluster walk (an unknown-size Cluster ends at any level-1 four-byte ID, the spec's rule),
+SimpleBlock against BlockGroup, a BlockGroup with and without a ReferenceBlock, an audio BlockGroup and a
+cluster with no video, Void elements, the multi-byte track-number VINT, the window reader's re-read, and
+the six refusals — each reached from both sides by `src/test/webmFixture.ts`'s hand-built WebMs
+(`webmCues.test.ts`) and by `webmRepair.test.ts`, which runs the REAL `webm-duration-fix` under Node's
+`Blob` with `Buffer.poolSize = 0` (jsdom's Blob has no `stream()`, and a pooled Buffer's `.buffer` hands
+back unrelated bytes), restored by value. The first measurement of the branch came back one statement
+short — the loop body for a track number above 127 in `readBlock`, which no fixture reached — and the
+fix round's track-200 fixture is why the file reads 165 / 165; the same round added the three layout
+guards, the zero-keyframe and invalid-vint refusals the review found missing (a probe had written
+`['0@bb', '1033@1f43b675']` for a Cues placed after the first Cluster), and `apps/e2e/utils/seekable.ts`'s
+in-page assertion that every CuePoint's CueClusterPosition lands on `1f 43 b6 75`. Reds, with the real
+library: the BlockGroup case `expected [] to deeply equal [ +0, 1040, 3000 ]`, the SimpleBlock case
+`expected [ +0, 1000 ] to deeply equal [ +0, 1033 ]` (the library cues the first block of each cluster,
+keyframe or not); the reviewer's mutation (every BlockGroup a keyframe) reds four cases. Checked against
+the real 15.52 s take: the same seven keyframe times as the proven hand-written index, every cue on a
+Cluster, about 6 ms. `converter.perf.test.ts`, the other three craft perf files and every `App.*rerender*`
+are byte-identical — once per save, nothing per frame — and `converterInterop.test.ts` (the CJS pin) is
+untouched. Outside vitest's measurement, `tests/escapecraft/pip-seekable.spec.ts` with the new Cues
+assertions ran on Chromium against this branch twice: 1 / 1 each time. **Branches land on exactly 98.00,
+so craft's branches floor goes 97 → 98** in `apps/craft/vite.config.ts` and `scripts/coverage-report.mjs`
+— a floor is the achieved coverage rounded down, with nothing to spare, as shared's 92.00 was in
+ESCSUITE-221; craft's floors are now 100 / 99 / **98** / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.57 | 97.94 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
 | `@escapesuite/artist` | 99.85 | 99.45 | 96.80 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
