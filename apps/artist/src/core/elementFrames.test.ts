@@ -1031,6 +1031,25 @@ describe('createFrameComposer seek wedge', () => {
     await expect(frame(composeFrame, 17)).rejects.toThrow('This browser cannot read "incoming.webm" frame by frame')
   })
 
+  // Re-review round 1, F1: a healthy element on a slow machine whose every
+  // seek lands at ~900 ms — after both fallbacks, so each frame ends still
+  // seeking — but lands before the next frame begins. The earlier seek landed,
+  // so the next frame starts the count again: it is never refused.
+  it('never refuses a source whose every seek lands late, between frames', async () => {
+    await store('v1')
+    media.script({ video: { seekLandsAfterMs: 900 } })
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
+    const { composeFrame } = await composerOver(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+
+    for (let i = 1; i <= 10; i++) {
+      const pending = composeFrame(i / 30)
+      pending.catch(() => {})
+      // 800 ms for the frame's own waits, then the seek lands before the next.
+      await vi.advanceTimersByTimeAsync(1_000)
+      await pending
+    }
+  })
+
   it('does not count a seek that runs slow but settles (`seeking` false)', async () => {
     await store('v1')
     // No 'seeked' and no frame data in time, but the element is not stuck seeking.

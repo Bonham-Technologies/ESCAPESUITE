@@ -489,6 +489,81 @@ describe('frameSource', () => {
         expect(await request(source, 1)).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: expect.stringContaining('"incoming.webm"') });
       });
 
+      /**
+       * A healthy element on a slow machine: every seek reports `seeking` with
+       * no frame until it lands, 900 ms later — after the 500 ms seek fallback
+       * and the 100 ms readiness wait (re-review round 1, F1).
+       */
+      class LateSeekVideo {
+        readyState = 4;
+        seeking = false;
+        duration = 10;
+        videoWidth = 1920;
+        videoHeight = 1080;
+        private time = 0;
+        private readonly listeners = new Set<() => void>();
+        get currentTime() {
+          return this.time;
+        }
+        set currentTime(next: number) {
+          this.time = next;
+          this.seeking = true;
+          this.readyState = 1;
+          setTimeout(() => {
+            this.seeking = false;
+            this.readyState = 4;
+            for (const listener of [...this.listeners]) listener();
+          }, 900);
+        }
+        addEventListener(event: string, handler: () => void) {
+          if (event === 'seeked') this.listeners.add(handler);
+        }
+        removeEventListener(event: string, handler: () => void) {
+          this.listeners.delete(handler);
+        }
+        pause() {}
+        load() {}
+      }
+
+      /** Ask for `time`, then let `idleMs` pass in all before the next request. */
+      async function requestThenIdle(source: HTMLVideoFrameSource, time: number, idleMs: number): Promise<unknown> {
+        const pending = source.getFrame(time).then(
+          (frame) => frame,
+          (error: unknown) => error
+        );
+        await vi.advanceTimersByTimeAsync(idleMs);
+        return pending;
+      }
+
+      it('never refuses a source whose every seek lands late, between requests', async () => {
+        const element = new LateSeekVideo();
+        const source = HTMLVideoFrameSource.fromElement('slow', element as unknown as HTMLVideoElement);
+
+        for (let t = 1; t <= 10; t++) expect(await requestThenIdle(source, t, 1_000)).toBe(element);
+      });
+
+      it('gives a request held at one time the same wait for a seek still in flight', async () => {
+        const element = new LateSeekVideo();
+        const source = HTMLVideoFrameSource.fromElement('held-slow', element as unknown as HTMLVideoElement);
+
+        // One seek, whose waits run out with it still in flight; then the same
+        // time asked for twice more at once — the transition's outgoing clip is
+        // fetched twice a frame. Neither may be counted before the seek has had
+        // the wait a seeking request gets; it lands at 900 ms, inside it.
+        expect(await requestThenIdle(source, 1, 600)).toBe(element);
+        const again = [source.getFrame(1), source.getFrame(1)].map((p) =>
+          p.then(
+            (frame) => frame,
+            (error: unknown) => error
+          )
+        );
+        await vi.advanceTimersByTimeAsync(600);
+
+        const [first, second] = await Promise.all(again);
+        expect(first).toBe(element);
+        expect(second).toBe(element);
+      });
+
       it('does not count a seek that runs slow but settles (`seeking` false)', async () => {
         const element = new ScriptedVideoElement({ stallSeek: true, stallCanPlay: true, readyState: 1 });
         const source = HTMLVideoFrameSource.fromElement('slow', element as unknown as HTMLVideoElement);
