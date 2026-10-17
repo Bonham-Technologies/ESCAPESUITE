@@ -5503,6 +5503,44 @@ as pre-existing → the 8 guard cases red; the review's own (the group filter dr
 `timelineGestures.perf.test.ts` and every other `*.perf.test.ts` / rerender pin are byte-identical — nothing
 per move. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-332 (an embedded ESCAPEARTIST keys its
+session slot per frame: every same-origin frame of a host page shares the page's `sessionStorage`, where a
+top-level tab keeps its id, so two framed editors shared one id — the second renewed and overwrote the shared
+key, and after a host reload the two frames swapped sessions, whichever startup effect ran first keeping the
+id (ESCSUITE-311's two-iframes probe); `readTabId({ embedded, tabKey })` and `renewTabId({ embedded, tabKey })`
+now never read or write that key for an embedded document — the id is `host:<tabKey>` when the host named the
+frame with the new `?tabKey=` (trimmed, capped at 120, blank ignored), deterministic across loads so the frame's
+slot `session:host:<key>` and its tab and offer locks follow through the existing scheme, and an in-memory id
+for this page load otherwise; a `host:` id found held — two frames given one key — warns once and takes an
+in-memory id; the no-argument top-level form is unchanged; the trade without a key, a departed-tab offer in
+place of own-slot-first and a Start Fresh that leaves the previous load's slot, is stated for every host, a
+single-frame one included): 99.85 / 99.45 / 96.83 / 99.78, byte-identical on every percentage to the
+99.85 / 99.45 / 96.83 / 99.78 that `main` at `28f045f6` (the ESCSUITE-307 squash) measures in the same
+sitting. That base reads 96.83 where the table row recorded 96.79 from ESCSUITE-307's own tree, 313 and 322
+having landed beneath it — the drift ESCSUITE-91 and 113 recorded — and the row is corrected here to the
+direct measurement. The base gives 6,202 / 6,405 branches and this branch 6,216 / 6,419: fourteen new
+branches, fourteen covered, the same 203 uncovered as before (lines 9,700 / 9,714 → 9,709 / 9,723, statements
+11,011 / 11,071 → 11,022 / 11,082, functions 2,312 / 2,317 → 2,313 / 2,318, every denominator growing by
+exactly what the numerator did; the same 14 / 60 / 5 uncovered). The fourteen are `app/tabId.ts`'s ten
+(4 → 14, still 100 on all four: the `{ embedded, tabKey }` defaults, the embedded-or-top-level choice in each
+function, the key-or-no-key choice in `readTabId` and the warn-on-held-key choice in `renewTabId`, each reached
+from both sides by the module's cases — `host:left-pane` from a key, a page-load id without one, the top-level
+path reading and writing the stored id as before, two renewals that touch `sessionStorage` not at all) and
+`utils/integration.ts`'s four (53 / 55 → 57 / 59: the `tabKey` parse's `?.`, `??` and blank `||`, reached by
+the absent, blank, over-long and `left pane: 1/2` cases; the file's same two pre-existing arms, the streaming
+reader's, uncovered). `app/useSessionRestore.ts` gained one statement and one function — the `useState`
+initializer now calling `readTabId({ embedded: isEmbedded(), tabKey })` — and no decision; the new
+`useSessionRestore.embedded.test.ts` drives two frames as two hook mounts over one fake storage and one locks
+double, each autosaving and each offered its own slot after a reload, and the same-key second frame warning
+once. Mutations: the embedded path writing `sessionStorage` → 5 red; the hook calling `renewTabId()` bare →
+1 red; the keyless frame reading the shared key → 2 red. One review round (opus): spec Yes, ready Yes; its
+MEDIUM — the docs saying "more than one editor" where a single-frame keyless host also loses own-slot-first
+and leaves its previous slot behind on Start Fresh — is the last commit, docs alone. Outside vitest's
+measurement, `apps/e2e/tests/integration/two-iframes-session.spec.ts` (two frames `?tabKey=a` / `b`, different
+edits, a host reload, each offered its own project) ran on Chromium: 1 / 1. `App.*rerender*` and every
+`*.perf.test.ts` are byte-identical — the id is read once per mount, as before. **No floor crossed**; artist's
+floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5510,7 +5548,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.01 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.82 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.83 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 
