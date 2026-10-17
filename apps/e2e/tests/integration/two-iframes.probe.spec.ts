@@ -157,8 +157,12 @@ test('ESCSUITE-311 O-U3: two ARTIST iframes in one host page, then a host reload
     mimeType: 'audio/wav',
     buffer: makeToneWav(1),
   })
-  await frameB.getByRole('button', { name: 'Add Text' }).click()
-  await frameB.getByRole('button', { name: 'Add Text' }).click()
+  // The imported clip is selected, and "Add Text" lives in the inspector's empty state —
+  // deselect (Escape) before each add so the button is rendered.
+  for (let i = 0; i < 2; i++) {
+    await frameB.locator('body').press('Escape')
+    await frameB.getByRole('button', { name: 'Add Text' }).click()
+  }
   await expect(frameB.getByText(/^3 clips/).first()).toBeVisible({ timeout: 15_000 })
   await expect(frameA.getByText(/^1 clip/).first()).toBeVisible()
 
