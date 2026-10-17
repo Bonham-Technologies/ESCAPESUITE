@@ -4,7 +4,7 @@
 // thing, so it was lifted here rather than copied. The exporters' own suites
 // (`exportWebM.test.ts`, and `exportGIF.test.ts` once it lands) still cover it
 // end to end; these cases cover the four exported functions directly, where a
-// specific question — "does a source with no bytes get skipped", "is a seek
+// specific question — "does a source with no bytes refuse by name", "is a seek
 // inside half a frame of the target skipped" — is cheaper to ask than through a
 // whole export.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -16,6 +16,7 @@ import {
 } from './elementFrames'
 import { elementSeekTarget } from './elementSeek'
 import { SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
+import { ExportError, type ExportLogEntry } from './exportTypes'
 import { getVideoBlob, storeVideo } from './storage'
 import {
   getLastCanvasContext,
@@ -154,13 +155,29 @@ describe('loadElementSources', () => {
     expect(sources.imageElements.size).toBe(0)
   })
 
-  it('skips a source with no bytes in storage rather than failing the export', async () => {
-    const sources = await loadElementSources(
-      [makeClip({ sourceVideoId: 'ghost' })],
-      sourceMapOf([makeSourceVideo({ id: 'ghost' })])
-    )
+  // ESCSUITE-330: a source with no bytes in storage — another tab's Clear All
+  // deleted them — used to be skipped here without a word, and the export drew
+  // nothing for its clip and reported "Export complete!". It refuses by name now,
+  // and the loader frees what it had loaded before it, by the same ownership rule
+  // a failed read follows below. (A load *failure* — bytes the browser cannot
+  // read — still warns and skips; there is nothing to try here.)
+  it('refuses a source with no bytes in storage by name, releasing what it loaded before it', async () => {
+    await store('v1')
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    const exportLog: ExportLogEntry[] = []
 
-    expect(sources.videoElements.size).toBe(0)
+    const error = await loadElementSources(
+      [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'ghost' })],
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'ghost', name: 'Ghost take' })]),
+      exportLog
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).code).toBe('SOURCE_MISSING')
+    expect((error as ExportError).message).toContain('"Ghost take" is no longer in storage')
+    expect((error as ExportError).exportLog).toBe(exportLog)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(media.videos[0].src)
   })
 
   it('ignores an overlay clip, which has no source id at all', async () => {
