@@ -1362,8 +1362,9 @@ path is live — captures through an AudioWorklet wherever it can:
   in a single-file build — and the URL is revoked once `addModule()` settles. **If that rejects, the
   same source is retried once as a `data:text/javascript;charset=utf-8,…` URL** (ESCSUITE-317):
   opened from disk (`file://`, the offline build), Chromium 156 mints `blob:null/<uuid>` and refuses
-  it as a worklet module (`AbortError`) while accepting `data:`; Firefox 157 accepts both; WebKit is
-  unmeasured (ESCSUITE-321). `blob:` stays first because the hosted `script-src` admits `blob:` and
+  it as a worklet module (`AbortError`) while accepting `data:`; Firefox 157 accepts both; WebKit 26.6
+  behaves as Chromium does — refuses the `blob:` module, accepts `data:` (ESCSUITE-321, 2026-10-17; pinned by the
+  standalone spec's WebKit case). `blob:` stays first because the hosted `script-src` admits `blob:` and
   must not have to admit `data:`; the retry is the general rule rather than an `isFileOrigin()` gate,
   so any opaque origin (a sandboxed frame) is covered. When both are refused the one fallback line names both rejections, `blob:` first, the `data:` payload elided (the CSP pin reads the `blob:` refusal from it). The one `console.info` line says which kind
   loaded — "(blob module)" or "(data module)". The processor gathers quanta into
@@ -1404,6 +1405,18 @@ path is live — captures through an AudioWorklet wherever it can:
   filling what the page never saw, the context-time video clock unchanged.
 - **The choice is made once per `AudioContext`** — once per take, however many pipelines it has —
   and logged once with `console.info`, naming the path (and, for a refused module, the error).
+- **The first Opus packet's timestamp is the encoder's, not the capture's (ESCSUITE-321 U-1 /
+  ESCSUITE-331).** Firefox 157's Opus `AudioEncoder` subtracts its 312-frame (6.5 ms) lookahead from
+  every output timestamp — packets at 0, 13500, 33500 … µs (0, 14, 34 ms in the WebM's 1 ms
+  timescale), packet 0 clamped — while Chromium 156's are at 0, 20000, 40000 …; both write OpusHead
+  pre-skip 312, so a player honouring CodecDelay trims 6.5 ms from either file and a Firefox take's
+  audio may start 6.5 ms earlier than the same take's in Chromium. The capture is not the cause: the
+  `AudioData`s the worklet hands the encoder line up end to end in both engines (each stamp = previous
+  stamp + previous length; the partial first piece `start()` cuts is intended and pinned). Measured
+  with `apps/e2e/tests/perf/first-packet.probe.spec.ts` on branch `verify/escsuite-321`
+  (`ESCSUITE_321_PROBE=1`; `*.probe.spec.ts` is ignored by the perf config). Whether to re-base the
+  packet timestamps in `webcodecs-recorder.ts`'s encoder output callback is ESCSUITE-331 (Low; under
+  the 45 ms lip-sync threshold, left as a documented offset).
 
 **The hosted CSP admits the module.** A worklet module is fetched under `script-src`, so
 `vercel.json`'s `script-src` carries `blob:` (ESCSUITE-299; before it, every hosted take was refused
