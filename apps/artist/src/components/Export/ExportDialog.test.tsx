@@ -1508,6 +1508,49 @@ describe('ExportDialog', () => {
       await settle()
     })
 
+    // ESCSUITE-301: the loudness measurement used to run as one synchronous
+    // call, seconds long on a long mix, with nothing on screen moving and
+    // Cancel dead. It is now a phase of its own, reported per slice through
+    // the same channel and throttle as every other report.
+    it('shows the loudness measurement as its own phase and announces it', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'measuring-loudness', progress: 10.8, message: 'Measuring loudness…' })
+
+      expect(screen.getByText('measuring-loudness')).toBeInTheDocument()
+      expect(screen.getByText('Measuring loudness…')).toBeInTheDocument()
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '11')
+      // The first report of a run always speaks.
+      expect(liveRegion()?.textContent).toBe('Measuring loudness… (11%)')
+      expect(document.querySelectorAll('[role="status"]')).toHaveLength(1)
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    it('cancels during the loudness measurement the way it cancels during encoding', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'measuring-loudness', progress: 11.6, message: 'Measuring loudness…' })
+      const signal = webmArgs()[5]
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      expect(signal.aborted).toBe(true)
+      expect(onClose).toHaveBeenCalledTimes(1)
+
+      // The exporter rejects at its next slice boundary.
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(mockSendMessage).not.toHaveBeenCalled()
+    })
+
     // ESCSUITE-215. The per-frame message was visual only; this is the one
     // channel that speaks it, and the visual copy leaves the accessibility
     // tree so the same sentence is not met twice.

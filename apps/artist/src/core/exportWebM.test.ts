@@ -1352,6 +1352,49 @@ describe('exportToWebM loudness (ESCSUITE-292)', () => {
 
     expect(loudness).toBeUndefined()
   })
+
+  // ESCSUITE-301: the measurement is sliced, yields between slices and says
+  // what it is doing through the export's own progress channel — about 2 s of
+  // audio per report, so 5 s of mix is three slices and a final report.
+  it('reports measuring the loudness once the Opus probe has answered and before the first encoder is built, without going backwards', async () => {
+    mixAudio.mockResolvedValue(toneMix(5, -30))
+    const progress: ExportProgress[] = []
+
+    await run({ clips, onProgress: (p) => progress.push(p) })
+
+    const measuring = progress.filter((p) => p.phase === 'measuring-loudness')
+    expect(measuring.map((p) => p.message)).toEqual(Array(4).fill('Measuring loudness…'))
+    expect(measuring.map((p) => p.progress)).toEqual([15.8, 16.6, 17, 17].map((v) => expect.closeTo(v, 9)))
+    const first = progress.indexOf(measuring[0])
+    const last = progress.indexOf(measuring[measuring.length - 1])
+    expect(progress[first - 1].message).toBe('Initializing encoder...')
+    expect(progress[last + 1].message).toBe('Encoding frames...')
+    const upToNext = progress.slice(0, last + 2).map((p) => p.progress)
+    expect(upToNext).toEqual([...upToNext].sort((a, b) => a - b))
+  })
+
+  it('stops a cancelled export inside the measurement, before any encoder is built', async () => {
+    mixAudio.mockResolvedValue(toneMix(5, -30))
+    const revoke = vi.mocked(URL.revokeObjectURL)
+    revoke.mockClear()
+    const controller = new AbortController()
+    const progress: ExportProgress[] = []
+    const onProgress = (p: ExportProgress) => {
+      progress.push(p)
+      if (progress.filter((q) => q.phase === 'measuring-loudness').length === 2) controller.abort()
+    }
+
+    await expect(run({ clips, onProgress, signal: controller.signal })).rejects.toBeInstanceOf(ExportAbortedError)
+
+    // Rejected at the next boundary: no third slice was measured or reported.
+    expect(progress.filter((p) => p.phase === 'measuring-loudness').map((p) => p.progress))
+      .toEqual([15.8, 16.6].map((v) => expect.closeTo(v, 9)))
+    expect(progress.some((p) => p.message === 'Encoding frames...')).toBe(false)
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+    expect(webcodecs.audioEncoders).toHaveLength(0)
+    // The media it had loaded go back, as for any failure after the load.
+    expect(revoke).toHaveBeenCalledTimes(1)
+  })
 })
 
 // ESCSUITE-293: a caption is an ordinary text clip on the `kind: 'captions'`
