@@ -40,7 +40,7 @@
 // state per channel and the limiter's constant-size gain delay line.
 //
 // Cooperative (ESCSUITE-301): the export walks that one pass in slices of
-// about 2 s of audio (`loudnessSliceFrames`), yielding a macrotask between
+// about 2 s of audio (`loudnessSliceFrames`), yielding through a MessageChannel between
 // slices, reporting progress after each and checking the export's
 // AbortSignal at every boundary — on a 10-minute mix the single synchronous
 // call held the main thread for seconds, with the dialog's Cancel dead. The
@@ -49,7 +49,7 @@
 // limiter's envelope and hold), so a sliced pass is bit-identical to the
 // synchronous one — which is the same generator run with no yields.
 
-import { checkAborted } from './exportTypes';
+import { checkAborted, yieldToMain } from './exportTypes';
 
 /** The integrated loudnesses the export offers to normalise to, in LUFS. */
 export type LoudnessTarget = -14 | -16 | -23;
@@ -247,9 +247,18 @@ function forwardPeak(d: Float32Array, o: number, stride: number, frames: number,
  * from: the largest sum of |taps| of the three phases (≈ 2.3; at least 1,
  * since each phase sums to 1).
  */
-const INTERPOLATION_GAIN = Math.max(
-  ...[QUARTER, HALF, THREE_QUARTERS].map((taps) => taps.reduce((sum, t) => sum + Math.abs(t), 0))
-);
+const INTERPOLATION_GAIN =
+  Math.max(...[QUARTER, HALF, THREE_QUARTERS].map((taps) => taps.reduce((sum, t) => sum + Math.abs(t), 0))) *
+  // A hair of margin (ESCSUITE-301): the bound is the exact sum of |taps|
+  // times the largest sample, but the interpolated point is a floating-point
+  // sum of 24 products that can round a few ulps past it. Without the margin
+  // a frame could be skipped whose exact read would nudge the peak up by an
+  // ulp — and which frames are skipped depends on the order the meter visits
+  // channels and frames, which a sliced pass changes once there are two or
+  // more channels. With it the skip is strictly conservative, so the peak is
+  // the true maximum whatever the order, and the sliced meter's true peak is
+  // the synchronous one's to the bit.
+  (1 + 1e-12);
 
 /**
  * A cheap upper bound on |x| over every sample `forwardPeak(…, n)` reads, so
@@ -434,25 +443,42 @@ function measure(lanes: Lanes, sampleRate: number): LoudnessMeasurement {
 
 /**
  * How a cooperative pass behaves between slices. Every field is optional: a
- * pass with none of them still yields a macrotask between slices.
+ * pass with none of them still yields (through `yieldToMain`) between slices.
  */
 export interface LoudnessPacing {
   /** Checked at every slice boundary; an aborted signal rejects with `ExportAbortedError`. */
   signal?: AbortSignal;
   /** Told the fraction done, 0–1, after every slice (and, from `exportLoudness`, once at the end). */
   onProgress?: (fraction: number) => void;
-  /** What a boundary waits on: a macrotask (`setTimeout(…, 0)`) unless a test hands in its own. */
+  /**
+   * What a boundary waits on: the exporters' own MessageChannel `yieldToMain`
+   * unless a test hands in its own. Not a timer — a `setTimeout(…, 0)` chain
+   * is clamped to 4 ms in a visible tab and to once a second (once a minute
+   * after five minutes) in a hidden one, which is exactly the throttling a
+   * background-tab export must not meet.
+   */
   sleep?: () => Promise<void>;
-  /** Frames per slice; `loudnessSliceFrames(sampleRate)` unless a test asks for another boundary. */
+  /**
+   * Frames per slice; `loudnessSliceFrames(sampleRate)` unless a test asks for
+   * another boundary. Must be ≥ 1: 0 would loop forever.
+   */
   sliceFrames?: number;
 }
 
-const yieldToEventLoop = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+/**
+ * One slice boundary: hand the main thread back, then honour an abort. The
+ * one place the default yield lives — both the boundaries inside a pass and
+ * the one between the measurement and the limiter cross it.
+ */
+async function crossBoundary(pacing: LoudnessPacing): Promise<void> {
+  await (pacing.sleep ?? yieldToMain)();
+  checkAborted(pacing.signal);
+}
 
 /**
  * Walk `steps` (which yields frames done after every slice but the last),
  * reporting `from + span · done / frames` after each slice and, between
- * slices, waiting on `sleep` and then checking the signal. Nothing runs after
+ * slices, crossing a boundary (`crossBoundary`). Nothing runs after
  * the last slice but its report: no sleep, no check.
  */
 async function cooperate<T>(
@@ -462,13 +488,11 @@ async function cooperate<T>(
   from: number,
   span: number
 ): Promise<T> {
-  const { signal, onProgress, sleep = yieldToEventLoop } = pacing;
   for (;;) {
     const step = steps.next();
-    onProgress?.(from + span * (step.done ? 1 : step.value / frames));
+    pacing.onProgress?.(from + span * (step.done ? 1 : step.value / frames));
     if (step.done) return step.value;
-    await sleep();
-    checkAborted(signal);
+    await crossBoundary(pacing);
   }
 }
 
@@ -746,8 +770,7 @@ async function normalise(
   const { gainDb, limited } = gainForTarget(measured, targetLufs, TRUE_PEAK_CEILING_DBTP);
   if (limited) {
     // The boundary between the two passes is a boundary like any other.
-    await (pacing.sleep ?? yieldToEventLoop)();
-    checkAborted(pacing.signal);
+    await crossBoundary(pacing);
     await limitCooperatively(lanes, gainDb, TRUE_PEAK_CEILING_DBTP, sampleRate, pacing, 0.5, 0.5);
   } else {
     // The limiter's detector reads exactly the peaks the meter just measured,

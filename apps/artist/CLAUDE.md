@@ -4906,8 +4906,12 @@ and measures nothing.
   measurement and 3.4 s with the limiter on a 10-minute mix, with the main thread blocked, the
   dialog's Cancel dead and its live region silent. It is now `await`ed and walked in slices of
   `loudnessSliceFrames(sampleRate)` = 2 s of audio (`LOUDNESS_SLICE_SECONDS`): after each slice
-  it reports progress, then yields a macrotask (`setTimeout(…, 0)`; `LoudnessPacing.sleep` is the
-  test seam), then checks the export's `AbortSignal` — and once more before the first slice. It
+  it reports progress, then yields through the exporters' own MessageChannel `yieldToMain`
+  (`LoudnessPacing.sleep` is the test seam), then checks the export's `AbortSignal` — and once
+  more before the first slice, and at the boundary between the measurement and the limiter. Not a
+  `setTimeout(…, 0)`: a timer chain is clamped to 4 ms in a visible tab and to once a second (once
+  a minute after five minutes) in a hidden one, which would add minutes to a long mix in a
+  background tab. It
   is **not** a Worker: a transferred copy of a 10-minute mix is ~230 MB, and the yields are
   enough. The meter and the limiter are generators (`meterSteps`, `limiterSteps`) that carry
   every piece of state across a boundary — the biquads, the half-filled 100 ms sub-block, the
@@ -4919,7 +4923,10 @@ and measures nothing.
   `{ phase: 'measuring-loudness', message: 'Measuring loudness…' }` — one report per slice and a
   final one, at 10 → 12 in MP4 (between the extraction and the media load) and 15 → 17 in WebM
   (after "Initializing encoder…", where the Opus probe puts the call, before the first encoder),
-  through the ESCSUITE-215 throttle and the one live region; with a target the measurement takes
+  through the ESCSUITE-215 throttle and the one live region — the visible line and the bar follow
+  every report, but the measurement sits inside the extraction's ten-point band, so the region
+  speaks it only on the throttle's 5 s floor, which a mix of roughly 15 minutes or more reaches;
+  the phase reads "Measuring loudness" (`PHASE_LABELS`); with a target the measurement takes
   the first half and the limiter, if it runs, the second. Cancel rejects with
   `ExportAbortedError` at the next boundary (at most one slice later): in MP4 before any media is
   loaded, in WebM into the catch that releases the loaded media, with no encoder built in either.

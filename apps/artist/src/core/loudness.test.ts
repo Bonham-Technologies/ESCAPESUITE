@@ -791,6 +791,25 @@ describe('the cooperative pass (ESCSUITE-301)', () => {
       expect(firstDifference(mix.subarray(96000 * 2), before.subarray(96000 * 2))).toBe(-1)
     })
 
+    it('checks for an abort between the measurement and the limiter, before the limiter touches the mix', async () => {
+      const controller = new AbortController()
+      const mix = clicked()
+      const before = mix.slice()
+      const reports: number[] = []
+      const onProgress = (f: number) => {
+        reports.push(f)
+        // 0.5: the measurement's last slice, with the limiter still to come.
+        if (reports.length === 3) controller.abort()
+      }
+
+      await expect(
+        exportLoudness(mix, 2, SR, -14, { signal: controller.signal, onProgress, sleep: noSleep })
+      ).rejects.toBeInstanceOf(ExportAbortedError)
+
+      expect(reports).toEqual([0.2, 0.4, 0.5])
+      expect(firstDifference(mix, before)).toBe(-1)
+    })
+
     it('does no work at all for an export already cancelled', async () => {
       const controller = new AbortController()
       controller.abort()
@@ -806,18 +825,32 @@ describe('the cooperative pass (ESCSUITE-301)', () => {
       expect(firstDifference(mix, before)).toBe(-1)
     })
 
-    it('yields to the event loop with a timer when no sleep is given', async () => {
-      vi.useFakeTimers()
+    // The default boundary is the exporters' own MessageChannel yield
+    // (`yieldToMain`), not a timer: a setTimeout chain is clamped to 4 ms in a
+    // visible tab and to once a second — once a minute after five minutes — in
+    // a hidden one, which would add minutes to a long mix in a background tab.
+    // Timers are faked here, so a pass that waited on one would never settle.
+    it('yields through a MessageChannel, not a timer, when no sleep is given', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate'] })
       try {
         let settled = false
-        const run = exportLoudness(tone(), 2, SR, undefined).then(() => (settled = true))
-        for (let i = 0; i < 10; i++) await Promise.resolve()
-        // Parked on one timer after the first slice, not on a microtask.
+        // 3 s of stereo: two slices, so exactly one boundary.
+        const run = exportLoudness(stereo(sine(3, dbfs(-30))), 2, SR, undefined).then(() => (settled = true))
+        for (let i = 0; i < 50; i++) await Promise.resolve()
+        // Parked at the boundary, not on a microtask.
         expect(settled).toBe(false)
-        expect(vi.getTimerCount()).toBe(1)
-        await vi.runAllTimersAsync()
-        await run
+        const roundTrip = () =>
+          new Promise<void>((resolve) => {
+            const channel = new MessageChannel()
+            channel.port1.onmessage = () => {
+              channel.port1.close()
+              resolve()
+            }
+            channel.port2.postMessage(null)
+          })
+        for (let i = 0; i < 5 && !settled; i++) await roundTrip()
         expect(settled).toBe(true)
+        await run
       } finally {
         vi.useRealTimers()
       }

@@ -49,6 +49,20 @@ import { formatTime, formatFileSize } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
 
 /**
+ * What the progress line calls each phase. Shown in capitals, so the one
+ * phase with a hyphenated identifier gets words (ESCSUITE-301); every other
+ * phase is its own label.
+ */
+const PHASE_LABELS: Record<ExportProgress['phase'], string> = {
+  preparing: 'preparing',
+  'measuring-loudness': 'Measuring loudness',
+  encoding: 'encoding',
+  muxing: 'muxing',
+  complete: 'complete',
+  error: 'error',
+};
+
+/**
  * A resolution dropdown option's label, with its actual output dimensions
  * spelled out. Since ESCSUITE-94 a preset's width follows the *project's*
  * aspect, so a bare "1080p" is surprising on a portrait project (it exports
@@ -690,7 +704,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
           ) : progress ? (
             <div className={styles.progressSection}>
               <div className={styles.progressInfo}>
-                <span className={styles.progressPhase}>{progress.phase}</span>
+                <span className={styles.progressPhase}>{PHASE_LABELS[progress.phase]}</span>
                 {/* Out of the accessibility tree, not off the screen: this
                     line changes once per encoded frame, and the live region
                     below carries the same words at a rate a screen reader can
