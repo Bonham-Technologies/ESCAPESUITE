@@ -9,8 +9,11 @@
 // while the offer stands, so a second fresh tab opened with this one is offered
 // the next slot or none rather than the same session (ESCSUITE-283).
 // A slot is removed when it is restored (adopted by the restoring tab), when
-// it is declined, when its own tab starts a New Project, or here, at startup,
-// once it is older than `SESSION_SLOT_MAX_AGE_MS` — and an answer to the prompt
+// its own tab declines it (a reload) or the ownerless legacy row is declined,
+// when its own tab starts a New Project, or here, at startup, once it is older
+// than `SESSION_SLOT_MAX_AGE_MS`. Another tab's slot that is declined is left —
+// its tab may only have been discarded and will come back for it — and is not
+// offered to the declining tab again (ESCSUITE-306, `declinedSlots.ts`). An answer to the prompt
 // reads the offered slot again first, so a slot saved again or removed since it
 // was offered is neither deleted nor adopted on the old prompt's say (ESCSUITE-289).
 import {
@@ -20,6 +23,7 @@ import {
   type SessionSlot,
 } from '../core/storage';
 import { claimOfferLock, NO_HOLD, probeTabLock } from './sessionLock';
+import { readDeclinedSlots } from './declinedSlots';
 import { SESSION_SLOT_MAX_AGE_MS } from './appConstants';
 
 /**
@@ -61,8 +65,17 @@ const hasMedia = (slot: SessionSlot): boolean => slot.session.sourceVideos.lengt
  * it, so a second fresh tab asking at the same time finds the offer held and
  * moves on to the next slot; the tab lock is only probed, so the departed tab
  * coming back still finds its own id free.
+ *
+ * A slot this tab has declined (`declined`, this tab's own list by default) is
+ * skipped without a probe or a claim (ESCSUITE-306): it was left in storage for
+ * a tab that may come back for it, and this tab has already answered it. The
+ * list never stands in the way of this tab's own slot, which is chosen first.
  */
-export async function findOfferableSlot(tabId: string, now: number): Promise<OfferedSlot | null> {
+export async function findOfferableSlot(
+  tabId: string,
+  now: number,
+  declined: ReadonlySet<string> = readDeclinedSlots()
+): Promise<OfferedSlot | null> {
   const cutoff = now - SESSION_SLOT_MAX_AGE_MS;
   const candidates: SessionSlot[] = [];
   let own: SessionSlot | undefined;
@@ -84,6 +97,7 @@ export async function findOfferableSlot(tabId: string, now: number): Promise<Off
   for (const slot of candidates) {
     const owner = slot.tabId;
     if (owner === null) return { slot, release: NO_HOLD, ownerReturned: NO_OWNER };
+    if (declined.has(owner)) continue;
     if ((await probeTabLock(owner)) === 'held') continue;
     const release = await claimOfferLock(owner);
     if (release) {

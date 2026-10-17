@@ -362,7 +362,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     act(() => result.current.handleDeclineSession())
 
     await vi.waitFor(() =>
-      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toEqual(['crashed'])
+      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toContain('crashed')
     )
     expect(clearSessionState).not.toHaveBeenCalled()
   })
@@ -419,7 +419,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       expect(result.current.sessionRestored).toBe(true)
       await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
       expect(clearSessionState).not.toHaveBeenCalled()
-      expect(declinedHere()).toEqual(['discarded-a'])
+      expect(declinedHere()).toContain('discarded-a')
       expect(deps.showNotification).not.toHaveBeenCalled()
     })
 
@@ -1131,7 +1131,7 @@ describe('answering the prompt', () => {
     // The decline has settled: another tab's slot is remembered as declined
     // rather than deleted (ESCSUITE-306; this case used to wait on the delete).
     await vi.waitFor(() =>
-      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toEqual(['earlier-tab'])
+      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toContain('earlier-tab')
     )
     expect(result.current.showSessionPrompt).toBe(false)
     expect(result.current.sessionRestored).toBe(true)

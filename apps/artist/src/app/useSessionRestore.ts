@@ -24,6 +24,7 @@ import {
 import { repairEditorBlock } from '../store/projectMigration';
 import { applyEditorBlock } from './editorBlock';
 import { probeTabLock } from './sessionLock';
+import { rememberDeclinedSlot } from './declinedSlots';
 import {
   adoptSessionSlot,
   findOfferableSlot,
@@ -99,8 +100,9 @@ export function useSessionRestore({
   // This tab's id, read once per mount (a reload keeps it: `tabId.ts`), and
   // replaced only when the startup check finds it held by a live tab.
   const [tabId, setTabId] = useState(readTabId);
-  // The slot the prompt is offering: declining deletes it, restoring adopts
-  // it. A ref, not state — `pendingSession` already renders the prompt, and
+  // The slot the prompt is offering: declining deletes it if it is this tab's
+  // own or the legacy row (and otherwise leaves it, ESCSUITE-306), restoring
+  // adopts it. A ref, not state — `pendingSession` already renders the prompt, and
   // the two answers read this only when they run. It carries the release for
   // the offer lock this tab claimed while the slot is on offer (ESCSUITE-283):
   // every way the prompt closes lets go of it — except a restore whose
@@ -122,8 +124,8 @@ export function useSessionRestore({
   //   pass of `addSourceVideo` over the same sources;
   // - `handleDeclineSession` clears it, so a restore already past that guard
   //   finds it changed when its reads come back and does not commit — the
-  //   decline it lost the race to already ran `clearSessionState()` and
-  //   closed the prompt, and a restore that lands anyway would silently
+  //   decline it lost the race to already answered the slot and closed the
+  //   prompt, and a restore that lands anyway would silently
   //   undo the user's answer;
   // - a rejected read clears it itself (in the `catch` below), so a restore
   //   that cannot go on does not leave every later attempt permanently
@@ -272,31 +274,43 @@ export function useSessionRestore({
     // Cancel a restore in flight — see restoreAttemptRef's comment above.
     restoreAttemptRef.current = null;
     // Not awaited: the answer lands now whatever storage does about it. The
-    // catch is only so a rejection is logged rather than left unhandled. The
-    // slot deleted is the one offered, whichever tab's it was (ESCSUITE-274) —
-    // unless its tab has come back while the prompt was up (ESCSUITE-283): that
-    // slot is a live tab's work again, and is left alone. The offer is let go
-    // once the delete settles either way. And the slot is read again first
-    // (ESCSUITE-289): its tab may have come back, saved newer work into it and
-    // closed again, or removed it. A newer save is kept — the user turned down
-    // the older one, not this — and offered again on the next startup; a
-    // removed one leaves nothing to delete. Either is said once. A re-read that
-    // fails deletes nothing, the safe side, and is logged.
+    // catch is only so a rejection is logged rather than left unhandled.
+    //
+    // Only this tab's own slot (a reload) and the ownerless legacy row are
+    // deleted. Another tab's slot is left in storage and remembered as declined,
+    // so this tab does not offer it again (ESCSUITE-306): a free tab lock is not
+    // proof that tab is gone — Chrome's Memory Saver discards a background tab,
+    // freeing its lock while the tab keeps its sessionStorage and id, and it
+    // reloads looking for its own slot. The 30-day prune is what removes a slot
+    // whose tab never returns.
+    //
+    // Before any of that: if the slot's tab has come back while the prompt was
+    // up (ESCSUITE-283), the slot is a live tab's work again and is left alone;
+    // and the slot is read again (ESCSUITE-289) — its tab may have come back,
+    // saved newer work into it and closed again, or removed it. A newer save is
+    // kept and offered again on the next startup; a removed one leaves nothing
+    // to answer. Either is said once. A re-read that fails deletes nothing, the
+    // safe side, and is logged. The offer is let go once all this settles.
     const offered = offeredSlotRef.current!;
     offered
       .ownerReturned()
       .then(async (returned) => {
         if (returned) return;
         const atAnswer = await slotAtAnswer(offered.slot);
-        if (atAnswer === 'unchanged') return clearSessionState(offered.slot.tabId);
-        showNotification(atAnswer === 'removed' ? SESSION_REMOVED_NOTICE : SESSION_KEPT_NOTICE, 'info');
+        if (atAnswer !== 'unchanged') {
+          showNotification(atAnswer === 'removed' ? SESSION_REMOVED_NOTICE : SESSION_KEPT_NOTICE, 'info');
+          return;
+        }
+        const owner = offered.slot.tabId;
+        if (owner === null || owner === tabId) return clearSessionState(owner);
+        rememberDeclinedSlot(owner);
       })
       .catch(console.error)
       .then(offered.release);
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
-  }, [showNotification]);
+  }, [showNotification, tabId]);
 
   // Check for saved session on mount
   useEffect(() => {
