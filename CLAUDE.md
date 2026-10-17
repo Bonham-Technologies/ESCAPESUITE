@@ -5184,6 +5184,48 @@ deadline). `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts`, `exportGIF.perf.
 pin are byte-identical — one timer per load, none per frame. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-17 for ESCSUITE-330 (an
+export whose clip's source has no stored bytes — the row deleted by another tab's Clear All, or present with no
+blob — fails by name in all three exporters with one `ExportError` carrying the ticket's sentence and a new
+`code: 'SOURCE_MISSING'` (`sourceMissingError` in `core/exportTypes.ts`), instead of `loadElementSources`
+skipping the source silently and the frame loop drawing black under "Export complete!"; `loadElementSources`
+refuses at its `getVideoBlob` before the media-type branches, releasing what it had loaded through its
+existing rule, and `exportMP4.ts` at the same read in its load loop, the ESCSUITE-314 release terminating the
+worker — a load *failure* (ESCSUITE-325 / 328) keeps its own paths; the loaders read every clip on the
+timeline, exported range and hidden tracks included; the export dialog offers no cross-format retry on the code,
+as it does not on `SOURCE_NOT_SEEKABLE`; the kit maps it to a permanent failure; Clear All's and Remove's
+confirms gain ESCSUITE-268's cross-tab sentence), each in one sitting against the ESCSUITE-328 branch tip
+(`200ea5dd` for the artist source, `8b302705` — its docs commit — for the kit) over the 305 + 325 + 314 tree,
+the tree this branch was cut from so it could start before those landed; the next direct measurement of
+`main` corrects both table rows. **Artist**: 99.85 / 99.46 / 96.87 / 99.78, byte-identical on every
+percentage. The base gives 6,293 / 6,496 branches and this branch 6,290 / 6,493: the denominator *shrank* by
+three with the same 203 uncovered — `core/elementFrames.ts` 86 / 93 → 82 / 89, because the three
+`source?.name ?? sourceId` copies the loader carried became one `mediaName` computed once (six arms → two,
+reached with the source present and absent by the named and "names the id" cases) and the old `if (blob)`
+became `if (!blob) throw` one decision for one (the refusal side by the WebM and GIF cases and
+`elementFrames.test.ts`'s own, the other by every ordinary load), while `components/Export/ExportDialog.tsx`
+244 / 245 → 245 / 246 gains the `noOtherFormat` predicate's `SOURCE_MISSING` operand (reached by the two new
+no-retry cases against every other `ExportError` failure; the file's one pre-existing arm still uncovered);
+`core/exportMP4.ts`'s `if (blob)` → `if (!blob) throw` and its moved `?? sourceId` add no arm (the MP4 cases
+and the new MP4 "names the id" case reach both sides). Lines 9,854 / 9,868 → 9,858 / 9,872, statements
+11,192 / 11,252 → 11,198 / 11,258 and functions 2,334 / 2,339 → 2,335 / 2,340 (`sourceMissingError`, the one
+new function), every new unit covered, the same 14 / 60 / 5 uncovered. **Kit**: 99.60 / 99.52 / 98.65 / 98.87,
+identical on every percentage: `src/renderFailure.ts` 10 → 11 lines and 11 → 12 statements — the
+`SOURCE_MISSING` constant and its `PERMANENT_CODES` membership, a statement and no decision — branches
+659 / 668 and functions 176 / 178 on both trees, the same 4 / 5 / 9 / 2 uncovered; the kit figures predate
+ESCSUITE-326's, which this tree does not carry. Red first: the new `core/export.sourceMissing.test.ts` ran 18
+red of 21 on the base (`expected { …(4) } to be an instance of ExportError`; `expected undefined to be 'The
+media for "gone" is no longer in …'`), the three "unused byteless source completes" pins green throughout;
+`elementFrames.test.ts`'s refusal case, the two flipped "not in storage" cases, the four confirm strings, the
+kit's `expected false to be true` / `expected 1 to be 2` / `expected 200 to be 400`, and the two dialog cases
+(`expected document not to contain element, found <button … Try WebM Instead>`). The review (opus) ran seven
+mutations — each loader's refusal turned into a `continue`, both `?? sourceId` arms, the loader's catch and
+the MP4 catch made to skip their release, the kit code dropped from `PERMANENT_CODES` — and each red a named
+case; the re-review's one (the dialog operand dropped) reds exactly the two dialog cases. Every
+`*.perf.test.ts` and rerender pin is byte-identical, `ExportDialog.rerender*` included — one blob check per
+source at load, nothing per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's
+99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5191,7 +5233,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.82 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.46 | 96.87 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
