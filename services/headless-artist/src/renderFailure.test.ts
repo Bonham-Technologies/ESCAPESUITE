@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { CodedRenderError, isPermanentFailure, OUTPUT_SIZE_UNSUPPORTED, unwrapPageRender } from './renderFailure'
+import {
+  AUDIO_CODEC_UNAVAILABLE,
+  CodedRenderError,
+  isPermanentFailure,
+  OUTPUT_SIZE_UNSUPPORTED,
+  unwrapPageRender,
+} from './renderFailure'
 import type { RenderMeta, RenderOutcome } from './types'
 
-const META: RenderMeta = { format: 'mp4', byteLength: 5, durationSec: 1, width: 64, height: 48, gpu: false }
+const META: RenderMeta = { format: 'mp4', byteLength: 5, durationSec: 1, width: 64, height: 48, gpu: false, audio: true }
+
+const AAC_SENTENCE =
+  'This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.'
 
 const SIZE_SENTENCE =
   'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.'
@@ -24,6 +33,18 @@ describe('unwrapPageRender', () => {
     expect(thrown).toBeInstanceOf(CodedRenderError)
     expect(thrown).toMatchObject({ message: SIZE_SENTENCE, code: 'OUTPUT_SIZE_UNSUPPORTED' })
   })
+
+  // ESCSUITE-312: the no-AAC refusal crosses the same boundary the same way.
+  it('throws a coded error for the bundle\'s no-AAC refusal', () => {
+    let thrown: unknown
+    try {
+      unwrapPageRender({ failure: { message: AAC_SENTENCE, code: AUDIO_CODEC_UNAVAILABLE } })
+    } catch (err) {
+      thrown = err
+    }
+    expect(thrown).toBeInstanceOf(CodedRenderError)
+    expect(thrown).toMatchObject({ message: AAC_SENTENCE, code: 'AUDIO_CODEC_UNAVAILABLE' })
+  })
 })
 
 describe('isPermanentFailure', () => {
@@ -32,6 +53,16 @@ describe('isPermanentFailure', () => {
 
   it('is true for an output size H.264 refuses — the input, not the run, has to change', () => {
     expect(isPermanentFailure(failed({ code: 'OUTPUT_SIZE_UNSUPPORTED' }))).toBe(true)
+  })
+
+  // ESCSUITE-312: the image's Chromium will have no AAC encoder on every retry, so a sounded
+  // mp4 job is the job's problem: render webm, or say `allowSilentMp4`.
+  it('is true for a sounded mp4 refused for want of an AAC encoder', () => {
+    expect(isPermanentFailure(failed({ code: 'AUDIO_CODEC_UNAVAILABLE' }))).toBe(true)
+  })
+
+  it('is false for a code it does not know', () => {
+    expect(isPermanentFailure(failed({ code: 'SOMETHING_ELSE' }))).toBe(false)
   })
 
   it('is false for a failure that carries no code, which may succeed on a retry', () => {

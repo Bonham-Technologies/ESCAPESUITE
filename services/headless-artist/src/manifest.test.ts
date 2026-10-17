@@ -31,6 +31,7 @@ const baseMeta: RenderMeta = {
   width: 1920,
   height: 1080,
   gpu: true,
+  audio: true,
 }
 
 describe('buildManifest', () => {
@@ -71,6 +72,14 @@ describe('buildManifest', () => {
     const loudness = { measuredLufs: -21.4, truePeakDbtp: -4.1, gainDb: 5.4, targetLufs: -16 as const }
     const manifest = await buildManifest('job-l', filePath, { ...baseMeta, loudness }, versions)
     expect(manifest.loudness).toEqual(loudness)
+  })
+
+  // ESCSUITE-312: whether the file carries an audio track at all — `false` for every GIF, and
+  // for an mp4 rendered silent under `allowSilentMp4` by a Chromium with no AAC encoder.
+  it.each([true, false])('records audio: %s from the render', async (audio) => {
+    const filePath = await makeFile(Buffer.from('abc'))
+    const manifest = await buildManifest('job-a', filePath, { ...baseMeta, audio }, versions)
+    expect(manifest.audio).toBe(audio)
   })
 
   it('leaves loudness out when the render had no sound to measure', async () => {

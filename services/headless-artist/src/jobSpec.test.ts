@@ -332,6 +332,28 @@ describe('parseJobSpec', () => {
     )
   })
 
+  // ESCSUITE-312: render a sounded project as a silent mp4 on a Chromium with no AAC encoder,
+  // instead of having it refused with AUDIO_CODEC_UNAVAILABLE.
+  it.each([true, false])('keeps allowSilentMp4: %s', (allowSilentMp4) => {
+    const spec = parseJobSpec(validSpec({ options: { format: 'mp4', allowSilentMp4 } }))
+    expect(spec.options.allowSilentMp4).toBe(allowSilentMp4)
+  })
+
+  it('leaves allowSilentMp4 unset when a job does not ask for it', () => {
+    const spec = parseJobSpec(validSpec({ options: { format: 'mp4' } }))
+    expect('allowSilentMp4' in spec.options).toBe(false)
+  })
+
+  it('does not warn about allowSilentMp4 as an unknown field', () => {
+    expect(collectUnknownKeys(validSpec({ options: { format: 'mp4', allowSilentMp4: true } }))).toEqual([])
+  })
+
+  it.each(['true', 1, null, 0])('rejects an allowSilentMp4 of %s', (allowSilentMp4) => {
+    expect(() => parseJobSpec(validSpec({ options: { format: 'mp4', allowSilentMp4 } }))).toThrow(
+      /options\.allowSilentMp4 must be a boolean/,
+    )
+  })
+
   it('names gif in the format error', () => {
     expect(() => parseJobSpec(validSpec({ options: { format: 'avi' } }))).toThrow(
       /options\.format must be one of "mp4", "webm", or "gif"/,

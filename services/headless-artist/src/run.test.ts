@@ -24,6 +24,7 @@ const META: RenderMeta = {
   width: 64,
   height: 48,
   gpu: false,
+  audio: true,
 }
 
 const tempDirs: string[] = []
@@ -216,6 +217,26 @@ describe('runJob', () => {
       ok: false,
       error: 'The output size 64×8 is too small for H.264',
       code: 'OUTPUT_SIZE_UNSUPPORTED',
+    })
+  })
+
+  it('carries the no-AAC refusal\'s code into the outcome (ESCSUITE-312)', async () => {
+    const workDir = await makeTempDir()
+    const outDir = await makeTempDir()
+    vi.mocked(renderInChromium).mockRejectedValue(
+      new CodedRenderError('This Chromium has no AAC encoder, so an mp4 render would have no sound.', 'AUDIO_CODEC_UNAVAILABLE'),
+    )
+
+    const outcome = await runJob(
+      makeSpec({ output: { sink: 'volume', config: { dir: outDir } } }),
+      { bundlePath: '/bundle/headless.html', workDir, versions: VERSIONS, log },
+    )
+
+    expect(outcome).toMatchObject({
+      jobId: 'job-1',
+      ok: false,
+      error: 'This Chromium has no AAC encoder, so an mp4 render would have no sound.',
+      code: 'AUDIO_CODEC_UNAVAILABLE',
     })
   })
 

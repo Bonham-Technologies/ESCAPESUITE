@@ -555,6 +555,24 @@ describe('the exit code a render returns', () => {
     expect(stdout).toEqual([JSON.stringify(refused) + '\n'])
   })
 
+  // ESCSUITE-312: a sounded mp4 on a Chromium with no AAC encoder will be refused identically
+  // on every retry, so it is the same permanent input error — exit 2, the outcome on stdout.
+  it('exits 2 for a sounded mp4 refused because this Chromium has no AAC encoder', async () => {
+    const refused: RenderOutcome = {
+      ok: false,
+      jobId: 'job-1',
+      error: 'This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.',
+      code: 'AUDIO_CODEC_UNAVAILABLE',
+      durationMs: 30,
+    }
+    vi.mocked(runJob).mockResolvedValue(refused)
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+    expect(stdout).toEqual([JSON.stringify(refused) + '\n'])
+  })
+
   it('exits 2 for a spec the parser refuses, without dumping usage over the reason', async () => {
     // 'avi' rather than the 'gif' this case used before ESCSUITE-34, which is a
     // format the kit now renders.
