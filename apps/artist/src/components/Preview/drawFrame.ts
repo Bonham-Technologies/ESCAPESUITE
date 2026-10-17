@@ -19,7 +19,7 @@ import {
 } from '../../core/canvasRenderer';
 import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTypes';
 import { openOutputFrame } from '../../core/outputTransform';
-import { assignElementSlots, videoForSlot } from '../../core/elementSlots';
+import { videoForSlot } from '../../core/elementSlots';
 import { getClipsAtTime } from '../../store/projectStore';
 import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
@@ -55,14 +55,6 @@ function drawOptionsFor(filterScale: number): MediaDrawOptions {
   }
   return scaledDrawOptions;
 }
-
-/**
- * Each live clip's slot this frame (ESCSUITE-313), for a caller that hands in
- * none (`PreviewFrameMedia.slots`) — one map for the module, refilled by every
- * such `drawPreviewFrame`, which is synchronous, so a composite allocates
- * nothing for it.
- */
-const frameSlots = new Map<string, number>();
 
 /** The `<video>` a live clip draws from this frame: its source's element for its slot. */
 function videoFor(
@@ -106,10 +98,10 @@ export interface PreviewFrameMedia {
    * Each live clip's slot at this frame's time — the preview's render loop
    * decides it, stickily (ESCSUITE-323), before it seeks, plays or paints, and
    * this reads it, so a clip is drawn from the element the loop moved for it.
-   * Absent, the frame works the slots out itself with the stateless rule
-   * (`assignElementSlots`), which agrees with the loop's on any first frame.
+   * The frame never works slots out itself: it holds no state, and the one
+   * assignment is the loop's.
    */
-  slots?: ReadonlyMap<string, number>;
+  slots: ReadonlyMap<string, number>;
   imageElements: Map<string, HTMLImageElement>;
   /**
    * Holds the one scratch canvas a blur shape captures the frame so far into.
@@ -326,15 +318,9 @@ export function drawPreviewFrame(
   // Get active clips at this time
   const activeClips = getClipsAtTime(clips, tracks, time);
 
-  // Which of its source's elements each live clip draws from — the render
-  // loop's own assignment when it hands one in (ESCSUITE-323), else the same
-  // rule worked out here from the same track-ordered list (ESCSUITE-313,
-  // `core/elementSlots.ts`).
-  let slots = media.slots;
-  if (!slots) {
-    assignElementSlots(activeClips, activeTransition, frameSlots);
-    slots = frameSlots;
-  }
+  // Which of its source's elements each live clip draws from: the render
+  // loop's own assignment (ESCSUITE-313, ESCSUITE-323, `core/elementSlots.ts`).
+  const { slots } = media;
 
   // Sort ALL clips by track index (lower = bottom, rendered first)
   // This ensures proper z-ordering: blur overlays only affect content below them
