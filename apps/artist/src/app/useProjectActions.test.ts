@@ -333,10 +333,13 @@ describe('opening a project', () => {
     vi.mocked(showOpenProjectDialog).mockResolvedValue(file)
     const { result } = mountActions({ clipCount: 0 })
 
-    await act(async () => {
-      await result.current.handleLoadProject()
-    })
-    media.uninstall()
+    try {
+      await act(async () => {
+        await result.current.handleLoadProject()
+      })
+    } finally {
+      media.uninstall()
+    }
 
     expect(deps.showNotification).toHaveBeenCalledWith(
       'Failed to load project: videos[0] ("clip.mp4") could not be decoded',

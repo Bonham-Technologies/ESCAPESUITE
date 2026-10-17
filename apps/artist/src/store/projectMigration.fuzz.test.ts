@@ -39,10 +39,11 @@ const ITERATIONS = 600
 // Re-measured 2026-10-16 for ESCSUITE-302: 335 parsed, 265 refused. Exactly 19
 // inputs crossed from parsed to refused, every one a mutation of a clip's
 // `startTime` or `endTime`, which `parseProject` now refuses by name: 3 delete
-// the key (an absent trim point, which the migration does not supply), 4 inject
-// a number the rule refuses (Infinity, -Infinity, and a startTime of 1e+308 or
-// 2^53 that leaves endTime behind it), and 12 replace it with a list or a
-// nested object. Each of them used to parse into a clip whose source time read
+// the key (an absent trim point, which the migration does not supply), 5 inject
+// a number the rule refuses (Infinity, -Infinity twice, and a startTime of
+// 1e+308 or 2^53 that leaves endTime behind it), and 11 replace it with a list
+// (7) or a nested object (4) — counts replayed per iteration in the ESCSUITE-302
+// review. Each of them used to parse into a clip whose source time read
 // as NaN or ran backwards.
 const FLOORS = { accepted: 335, refused: 265 }
 
