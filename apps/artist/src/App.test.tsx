@@ -279,6 +279,7 @@ describe('App', () => {
         suppressRestore: false,
         title: null,
         hostOrigin: null,
+        tabKey: null,
         ...overrides,
       })
     }
@@ -356,6 +357,7 @@ describe('App', () => {
         suppressRestore: false,
         title: null,
         hostOrigin: null,
+        tabKey: null,
         ...overrides,
       })
     }

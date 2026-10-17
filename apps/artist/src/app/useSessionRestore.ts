@@ -13,8 +13,12 @@
 //
 // `suppressRestore` arrives as a boolean rather than the whole `urlParams`
 // object: it is the only field this concern reads, and the dependency the
-// effect carried inline was `urlParams.suppressRestore`.
+// effect carried inline was `urlParams.suppressRestore`. `tabKey` arrives the
+// same way (ESCSUITE-332): the host's name for this frame, which an embedded
+// editor's id is derived from instead of the `sessionStorage` it would share
+// with every other frame in the host page (`tabId.ts`).
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isEmbedded } from '@escapesuite/shared/config';
 import {
   clearSessionState,
   getVideo,
@@ -43,6 +47,8 @@ import type { ShowNotification } from './useNotification';
 export interface SessionRestoreDeps {
   /** `?suppressRestore=1`: the host drives its own state, so do not offer one. */
   suppressRestore: boolean;
+  /** `?tabKey=`: the host's name for this frame, read only when embedded (ESCSUITE-332). */
+  tabKey: string | null;
   setProject: (project: Project) => void;
   addSourceVideo: (video: SourceVideo) => void;
   /** Puts the playhead back where the session left it: a seek (ESCSUITE-287). */
@@ -101,6 +107,7 @@ interface RestoredSource {
 
 export function useSessionRestore({
   suppressRestore,
+  tabKey,
   setProject,
   addSourceVideo,
   seekTo,
@@ -113,8 +120,9 @@ export function useSessionRestore({
   const [showSessionPrompt, setShowSessionPrompt] = useState(false);
   const [pendingSession, setPendingSession] = useState<SessionState | null>(null);
   // This tab's id, read once per mount (a reload keeps it: `tabId.ts`), and
-  // replaced only when the startup check finds it held by a live tab.
-  const [tabId, setTabId] = useState(readTabId);
+  // replaced only when the startup check finds it held by a live tab. A frame's
+  // comes from the host's `?tabKey=` or lasts this page load (ESCSUITE-332).
+  const [tabId, setTabId] = useState(() => readTabId({ embedded: isEmbedded(), tabKey }));
   // The slot the prompt is offering: declining deletes it if it is this tab's
   // own or the legacy row (and otherwise leaves it, ESCSUITE-306), restoring
   // adopts it. A ref, not state — `pendingSession` already renders the prompt, and
@@ -388,9 +396,11 @@ export function useSessionRestore({
         let ownId = tabId;
         if ((await probeTabLock(ownId)) === 'held') {
           // A live tab already has this id: this tab is a duplicate of it,
-          // started with a copy of its sessionStorage. It takes an id of its
-          // own, so it neither writes over that tab's slot nor is offered it.
-          ownId = renewTabId();
+          // started with a copy of its sessionStorage — or, in a frame, a
+          // second frame the host gave the same `?tabKey=` (ESCSUITE-332). It
+          // takes an id of its own, so it neither writes over that tab's slot
+          // nor is offered it.
+          ownId = renewTabId({ embedded: isEmbedded(), tabKey });
           setTabId(ownId);
         }
         const offered = await findOfferableSlot(ownId, Date.now());
@@ -408,7 +418,7 @@ export function useSessionRestore({
     };
 
     checkSession();
-  }, [sessionRestored, suppressRestore, tabId]);
+  }, [sessionRestored, suppressRestore, tabId, tabKey]);
 
   return {
     sessionRestored,

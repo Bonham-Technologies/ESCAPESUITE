@@ -107,6 +107,7 @@ function App() {
     handleDeclineSession,
   } = useSessionRestore({
     suppressRestore: urlParams.suppressRestore,
+    tabKey: urlParams.tabKey,
     setProject,
     addSourceVideo,
     seekTo,
