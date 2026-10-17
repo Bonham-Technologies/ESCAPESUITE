@@ -452,8 +452,9 @@ describe('runJob (real Chromium)', () => {
   }, RENDER_TIMEOUT_MS)
 
   // ESCSUITE-312: the reference image's Linux Chromium has no AAC encoder (Chromium's AAC is a
-  // platform codec on macOS and Windows). A sounded mp4 job used to come back `ok: true` with a
-  // silent file; now the bundle refuses it with `AUDIO_CODEC_UNAVAILABLE`, which crosses the page
+  // platform codec on macOS and Windows). An mp4 job whose source carries an audio track used to
+  // come back `ok: true` with a silent file; now the bundle — having read the WAV's headers and
+  // found its audio track — refuses it with `AUDIO_CODEC_UNAVAILABLE`, which crosses the page
   // boundary as data the way `OUTPUT_SIZE_UNSUPPORTED` does, and `allowSilentMp4` renders the
   // picture alone with `audio: false` in the manifest. The source is a generated sine WAV, so the
   // case needs no ffmpeg. Skipped on an engine that HAS an AAC encoder (macOS), asked of the page

@@ -8,7 +8,7 @@ import type { RenderMeta, RenderOutcome } from './types'
 export const OUTPUT_SIZE_UNSUPPORTED = 'OUTPUT_SIZE_UNSUPPORTED'
 
 /**
- * The bundle's `ExportError.code` for an mp4 job whose project has sound, in a Chromium with
+ * The bundle's `ExportError.code` for an mp4 job whose sources carry an audio track, in a Chromium with
  * no AAC encoder (ESCSUITE-312) — Linux Chromium, the reference image's. Retrying on the same
  * image fails identically: the job has to render webm, or set `options.allowSilentMp4`.
  */

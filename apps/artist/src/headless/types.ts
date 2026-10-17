@@ -18,7 +18,7 @@ export interface RenderInput {
   options: Omit<ExportOptions, 'resolution'> & {
     resolution?: ExportOptions['resolution']
     /**
-     * Render an mp4 of a project with sound even though this Chromium has no AAC
+     * Render an mp4 whose sources carry an audio track even though this Chromium has no AAC
      * encoder, as the picture alone (ESCSUITE-312). Without it such a render is
      * refused with `AUDIO_CODEC_UNAVAILABLE`. A switch for the headless entry, not
      * an export option: it is never handed to the exporter.

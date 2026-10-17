@@ -111,9 +111,10 @@ function parseOptions(value: unknown): JobSpec['options'] {
     options.loudnessTarget = value.loudnessTarget as NonNullable<JobSpec['options']['loudnessTarget']>
   }
 
-  // Render a sounded project as an mp4 with no audio track where this Chromium has no AAC
-  // encoder, instead of having the job refused with AUDIO_CODEC_UNAVAILABLE (ESCSUITE-312).
-  // Any format: on webm or gif it has nothing to switch, and is harmless.
+  // Render an mp4 whose sources carry an audio track as the picture alone where this Chromium
+  // has no AAC encoder, instead of having the job refused with AUDIO_CODEC_UNAVAILABLE
+  // (ESCSUITE-312). Accepted on any format and ignored on webm and gif, the way `quality` is
+  // accepted on a gif job: a spec that sets it for every format is doing nothing wrong.
   if (value.allowSilentMp4 !== undefined) {
     if (typeof value.allowSilentMp4 !== 'boolean') {
       throw new Error('options.allowSilentMp4 must be a boolean')

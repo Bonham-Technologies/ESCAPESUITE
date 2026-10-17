@@ -2,6 +2,7 @@
 import { exportToGIF, exportToMP4, exportToWebM } from '../core/exporter'
 import {
   aacEncoderConfig,
+  audioCandidateSources,
   calculateTimelineDuration,
   EXPORT_AUDIO_CHANNELS,
   EXPORT_AUDIO_SAMPLE_RATE,
@@ -11,9 +12,9 @@ import {
   getResolution,
   gifFrameDelayMs,
   isAudioCodecSupported,
-  projectHasAudio,
   VIDEO_EXPORT_FRAME_RATE,
 } from '../core/exportTypes'
+import { anySourceCarriesAudio, containerHasAudioTrack } from './audioTrackProbe'
 import { parseProject } from '../store/projectMigration'
 import { seedSources } from './seedSources'
 import type { RenderFileInput, RenderInput, RenderMeta, RenderResult, SourceVideoInput } from './types'
@@ -60,7 +61,7 @@ function validateInput(request: RenderRequest): void {
 }
 
 /**
- * The refusal of a sounded mp4 in a Chromium with no AAC encoder
+ * The refusal of an mp4 whose sources carry an audio track, in a Chromium with no AAC encoder
  * (ESCSUITE-312). The reference image's Linux Chromium has none — Chromium's
  * AAC encoder is a platform codec on macOS and Windows — and `exportToMP4`
  * answers that by skipping the mix and returning a silent file, which the
@@ -179,19 +180,25 @@ async function render(
   // the fallback for an unrecognised value, which is what it has always been.
   const format: RenderMeta['format'] =
     options.format === 'webm' ? 'webm' : options.format === 'gif' ? 'gif' : 'mp4'
-  // A sounded project, an mp4, and no AAC encoder: refused before any exporter
-  // runs (ESCSUITE-312), unless the job asked for the picture alone. "Sounded" is
-  // the dialog's own `projectHasAudio` — so a video source with no audio track
-  // in it counts, the conservative direction — and the probe is the one
-  // `exportToMP4` itself runs, at the job's own bitrate, asked only once the
-  // cheaper questions have said a refusal is possible.
+  // A project whose sources carry an audio track, an mp4, and no AAC encoder:
+  // refused before any exporter runs (ESCSUITE-312), unless the job asked for the
+  // picture alone. The candidates are the dialog's own `projectHasAudio` sources
+  // (a clip on a present, visible, unmuted track, not an image); the AAC question
+  // is the probe `exportToMP4` itself runs, at the job's own bitrate; and only
+  // then is each candidate's container read for an audio track — headers, never
+  // a decode — so a video-only source renders as before with `audio: false`.
+  // Each question is asked only once the cheaper ones have said a refusal is
+  // still possible, so the header probe never runs when AAC exists, nor for
+  // webm or gif.
+  const candidates = audioCandidateSources(clips, tracks, sourceVideos)
   if (
     format === 'mp4' &&
     !allowSilentMp4 &&
-    projectHasAudio(clips, tracks, sourceVideos) &&
+    candidates.length > 0 &&
     !(await isAudioCodecSupported(
       aacEncoderConfig(EXPORT_AUDIO_SAMPLE_RATE, EXPORT_AUDIO_CHANNELS, getQualitySettings(options.quality).audioBitrate),
-    ))
+    )) &&
+    (await anySourceCarriesAudio(candidates, request.sourceBlobs, containerHasAudioTrack))
   ) {
     throw new ExportError(NO_AAC_MP4_REFUSAL, [], undefined, undefined, 'AUDIO_CODEC_UNAVAILABLE')
   }

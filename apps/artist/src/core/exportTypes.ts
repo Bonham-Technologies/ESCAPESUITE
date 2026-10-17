@@ -191,7 +191,7 @@ export class ExportError extends Error {
   /**
    * Set only on a failure that is a property of the *input* rather than of
    * this browser or this run — an output size the H.264 encoder refuses, or
-   * (headless only) a sounded mp4 in a Chromium with no AAC encoder
+   * (headless only) an mp4 whose sources carry an audio track, in a Chromium with no AAC encoder
    * ({@link ExportErrorCode}). `undefined` on every other throw. The
    * headless kit reads it to fail such a job as a permanent input error (exit
    * 2, or 400 under `serve`) rather than a retryable one (ESCSUITE-237).
@@ -221,7 +221,7 @@ export class ExportError extends Error {
  * - `OUTPUT_SIZE_UNSUPPORTED`: the output size is one the H.264 encoder
  *   refuses, in a browser that encodes H.264 at the 1280x720 reference size
  *   (ESCSUITE-237).
- * - `AUDIO_CODEC_UNAVAILABLE`: a headless mp4 render of a project with sound,
+ * - `AUDIO_CODEC_UNAVAILABLE`: a headless mp4 render whose sources carry an audio track,
  *   in a Chromium with no AAC encoder — Linux Chromium, the reference image's
  *   (ESCSUITE-312). Thrown by `headless/renderProject.ts` only; the editor's
  *   own export offers a silent MP4 with a note instead.
@@ -555,7 +555,7 @@ export function exportedWithoutSoundReason(format: VideoExportFormat): string {
  * every track is muted or hidden.
  *
  * One function for both readers (ESCSUITE-312): the dialog's completion
- * sentence, and the headless render's refusal of a sounded mp4 in a Chromium
+ * sentence, and the headless render's refusal of an mp4 in a Chromium
  * with no AAC encoder (`headless/renderProject.ts`). It lived inline in
  * `ExportDialog.tsx` until then.
  */
@@ -564,12 +564,28 @@ export function projectHasAudio(
   tracks: Track[],
   sourceVideos: SourceVideo[]
 ): boolean {
-  return clips.some((clip) => {
+  return audioCandidateSources(clips, tracks, sourceVideos).length > 0;
+}
+
+/**
+ * The sources {@link projectHasAudio} is true because of, each once, in first-use order: the
+ * source of every clip on a present, visible, unmuted track, unless it is an image. The headless
+ * render's no-AAC mp4 refusal reads each one's container headers to make the approximation exact
+ * (ESCSUITE-312, `headless/audioTrackProbe.ts`); the dialog only needs to know the list is empty.
+ */
+export function audioCandidateSources(
+  clips: Clip[],
+  tracks: Track[],
+  sourceVideos: SourceVideo[]
+): SourceVideo[] {
+  const candidates = new Set<SourceVideo>();
+  for (const clip of clips) {
     const track = tracks.find((t) => t.id === clip.trackId);
-    if (!track || track.muted || !track.visible) return false;
+    if (!track || track.muted || !track.visible) continue;
     const source = sourceVideos.find((v) => v.id === clip.sourceVideoId);
-    return source !== undefined && source.mediaType !== 'image';
-  });
+    if (source !== undefined && source.mediaType !== 'image') candidates.add(source);
+  }
+  return [...candidates];
 }
 
 /**
