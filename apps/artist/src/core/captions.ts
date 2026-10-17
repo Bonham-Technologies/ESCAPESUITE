@@ -338,10 +338,30 @@ export function wrapCaptionText(text: string, maxChars = 42): string {
 /** The text-clip fields an imported caption is given; its text is the cue's own. */
 export type CaptionStyle = Omit<TextOverlayData, 'text' | 'rotation' | 'scale'>;
 
+/** The caption font as a fraction of the frame's shorter side. */
+const CAPTION_FONT_FRACTION = 0.045;
+/** The share of the frame width a wrapped line may fill: a 4 % gutter each side. */
+const CAPTION_LINE_WIDTH_FRACTION = 0.92;
+/**
+ * A conservative average Latin glyph advance for Arial, in ems. A 42-character
+ * line at 49 px measured 961 px (0.467 em per character), so 0.55 leaves margin.
+ */
+const CAPTION_GLYPH_EM = 0.55;
+
+/**
+ * How many characters a caption line may hold on this frame at this font:
+ * `floor(width × 0.92 / (fontSize × 0.55))`, clamped to [20, 42]. 1920×1080
+ * stays at 42; 1080×1920 at 49 px gives 36.
+ */
+export function captionWrapColumns(resolution: { width: number; height: number }, fontSize: number): number {
+  const fit = Math.floor((resolution.width * CAPTION_LINE_WIDTH_FRACTION) / (fontSize * CAPTION_GLYPH_EM));
+  return Math.min(42, Math.max(20, fit));
+}
+
 /**
  * The caption look: white on translucent black, centred near the bottom, sized
- * to the project's height (`Math.round(height × 0.045)` — 49 px at 1080p, 32 at
- * 720p), in the first font the inspector offers (`FONT_OPTIONS[0]`, Arial), so
+ * to the project's shorter side (`Math.round(min(width, height) × 0.045)` — 49 px
+ * at 1080p and 1080×1920, 32 at 720p), in the first font the inspector offers (`FONT_OPTIONS[0]`, Arial), so
  * a caption reads like one and can still be restyled like any text clip.
  */
 export function captionStyleFor(resolution: { width: number; height: number }): CaptionStyle {
@@ -349,7 +369,7 @@ export function captionStyleFor(resolution: { width: number; height: number }): 
     x: 0.5,
     y: 0.88,
     textAlign: 'center',
-    fontSize: Math.round(resolution.height * 0.045),
+    fontSize: Math.round(Math.min(resolution.width, resolution.height) * CAPTION_FONT_FRACTION),
     fontFamily: FONT_OPTIONS[0].value,
     color: '#ffffff',
     backgroundColor: '#000000b3',

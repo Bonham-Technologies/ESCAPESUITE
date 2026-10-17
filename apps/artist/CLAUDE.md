@@ -1193,10 +1193,16 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   hands out the caption track, even emptied, so a title or a video looking for an empty track
   cannot land there and be read as a caption (review M2).
 - **The style.** `captionStyleFor(resolution)`: `x 0.5`, `y 0.88`, centred,
-  `fontSize Math.round(height × 0.045)` (49 at 1080p, 32 at 720p), `FONT_OPTIONS[0]` (Arial), white
-  on `#000000b3`, normal weight and style. The renderer never wraps, so the importer runs every cue
-  through `wrapCaptionText(text, 42)` first: source line breaks kept, longer lines wrapped at word
-  boundaries, a single over-long word left whole.
+  `fontSize Math.round(min(width, height) × 0.045)` (49 at 1920×1080, 1080×1080 and 1080×1920, 32 at
+  720p; ESCSUITE-309 — it was the height alone, which gave 86 px on a portrait frame),
+  `FONT_OPTIONS[0]` (Arial), white on `#000000b3`, normal weight and style. The renderer never
+  wraps, so the importer runs every cue through `wrapCaptionText(text, captionWrapColumns(resolution,
+  fontSize))` first: `floor(width × 0.92 / (fontSize × 0.55))` clamped to [20, 42] (0.92 leaves a 4 %
+  gutter each side; 0.55 em is a conservative Arial advance — a 42-character line at 49 px measured
+  961 px, 0.467 em). Landscape stays at 42; 1080×1080 and 1080×1920 give 36, 720×1280 gives 37. Measured
+  before the fix, a 42-character Arial line was 1687 px on 1080×1920 (font 86), 1137 on 720×1280
+  (58) and 1196 on 1080×1350 (61) against frames 1080, 720 and 1080 wide. Source line breaks kept,
+  longer lines wrapped at word boundaries, a single over-long word left whole.
 - **The import.** `components/VideoUploader.tsx` takes `.srt` / `.vtt` by extension, any case (a
   browser reports `.srt` with no MIME type); the picker's `accept` lists both. Captions and media
   may share a drop; a `.veditor` still wins and returns early. Each file is one notice: `Imported N

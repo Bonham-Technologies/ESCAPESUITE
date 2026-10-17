@@ -585,13 +585,13 @@ describe('captionWrapColumns (ESCSUITE-309)', () => {
   const columns = (width: number, height: number) =>
     captionWrapColumns({ width, height }, captionStyleFor({ width, height }).fontSize)
 
-  it('keeps 42 on every landscape and square frame', () => {
+  it('keeps 42 on every landscape frame', () => {
     expect(columns(1920, 1080)).toBe(42)
     expect(columns(1280, 720)).toBe(42)
-    expect(columns(1080, 1080)).toBe(42)
   })
 
-  it('derives fewer columns from the width on a portrait frame', () => {
+  it('derives fewer columns from the width on a square or portrait frame', () => {
+    expect(columns(1080, 1080)).toBe(36)
     expect(columns(1080, 1920)).toBe(36)
     expect(columns(720, 1280)).toBe(37)
   })
