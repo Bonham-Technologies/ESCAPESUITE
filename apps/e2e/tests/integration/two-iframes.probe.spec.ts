@@ -33,7 +33,7 @@ const bodyHtml = (frames: string) => `<!doctype html>
     <title>e2e two-iframe host page</title>
     <style>
       html, body { margin: 0; height: 100%; background: #101014; }
-      iframe { display: inline-block; border: 0; width: 50vw; height: 100vh; }
+      iframe { display: block; border: 0; width: 100vw; height: 100vh; }
     </style>
   </head>
   <body>${frames}</body>
