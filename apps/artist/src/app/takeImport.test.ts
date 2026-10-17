@@ -295,8 +295,8 @@ describe('importTake', () => {
 
     const take = await importTake(primary, addSourceVideo)
 
-    // Every part of a take is the same length by construction — one clock, one
-    // start, one stop — so borrowing the primary's beats refusing to place it.
+    // A part ESCAPECRAFT stored is the take's length unless it ended early
+    // (ESCSUITE-318), so borrowing the primary's beats refusing to place it.
     expect(take.clipParts[1].duration).toBe(6)
     expect(added[1].duration).toBe(6)
   })
@@ -313,6 +313,23 @@ describe('importTake', () => {
 
     expect(take.clipParts[1].duration).toBe(6)
     expect(added[1].duration).toBe(6)
+  })
+
+  it('places a companion stored shorter than the take at its own length (ESCSUITE-318)', async () => {
+    // A microphone unplugged 1.48 s into a 6 s take: ESCAPECRAFT stores the
+    // part at the length its own pipeline encoded, and that is the clip's
+    // length — not the take's, which would lay a 6 s clip over a 1.48 s file.
+    const shortMic: SourceVideo = { ...micMetadata, duration: 1.48 }
+    vi.mocked(getAllVideoMetadata).mockResolvedValue([primaryMetadata, shortMic])
+    vi.mocked(getVideo).mockResolvedValue({ blob: storedBlobs['take-1-mic'], metadata: shortMic })
+
+    const take = await importTake(primary, addSourceVideo)
+
+    expect(take.clipParts.map((part) => [part.sourceVideoId, part.duration])).toEqual([
+      ['take-1', 6],
+      ['take-1-mic', 1.48],
+    ])
+    expect(added.find((v) => v.id === 'take-1-mic')!.duration).toBe(1.48)
   })
 
   it('lists a part with an unknown role without placing it', async () => {
