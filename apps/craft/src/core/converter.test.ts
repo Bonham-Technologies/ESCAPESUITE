@@ -55,6 +55,7 @@ import {
 import { installRafDouble, type RafDouble } from '../test/doubles/raf'
 
 const fixWebmDurationMock = vi.hoisted(() => vi.fn())
+const writeKeyframeCuesMock = vi.hoisted(() => vi.fn())
 
 vi.mock('mediabunny', async () => {
   const { createMediabunnyDouble } = await import('../test/doubles/mediabunny')
@@ -62,6 +63,7 @@ vi.mock('mediabunny', async () => {
 })
 
 vi.mock('webm-duration-fix', () => ({ default: fixWebmDurationMock }))
+vi.mock('./webmCues', () => ({ writeKeyframeCues: writeKeyframeCuesMock }))
 
 // The rAF fallback path in captureFramesViaPlayback reschedules itself, so the
 // double has to hold pending callbacks under test control rather than letting
@@ -2032,20 +2034,32 @@ describe('converter', () => {
   // --- fixWebMMetadata -----------------------------------------------------
 
   describe('fixWebMMetadata', () => {
-    it('hands the blob to webm-duration-fix and returns its result', async () => {
-      const fixed = new Blob(['fixed'], { type: 'video/webm' })
-      fixWebmDurationMock.mockResolvedValue(fixed)
+    it('hands the blob to webm-duration-fix, then its result to the keyframe Cues step', async () => {
+      const durationFixed = new Blob(['duration-fixed'], { type: 'video/webm' })
+      const indexed = new Blob(['indexed'], { type: 'video/webm' })
+      fixWebmDurationMock.mockResolvedValue(durationFixed)
+      writeKeyframeCuesMock.mockResolvedValue(indexed)
 
       const result = await fixWebMMetadata(SOURCE)
 
       expect(fixWebmDurationMock).toHaveBeenCalledWith(SOURCE)
-      expect(result).toBe(fixed)
+      // One place a stored WebM is repaired (ESCSUITE-322): the Cues step reads
+      // what the library wrote, not the raw take.
+      expect(writeKeyframeCuesMock).toHaveBeenCalledWith(durationFixed)
+      expect(result).toBe(indexed)
     })
 
     it('propagates a metadata-fix failure to the caller', async () => {
       fixWebmDurationMock.mockRejectedValue(new Error('corrupt cluster'))
 
       await expect(fixWebMMetadata(SOURCE)).rejects.toThrow('corrupt cluster')
+    })
+
+    it('propagates a keyframe Cues failure to the caller, so the save still says NOT_SEEKABLE', async () => {
+      fixWebmDurationMock.mockResolvedValue(new Blob(['duration-fixed'], { type: 'video/webm' }))
+      writeKeyframeCuesMock.mockRejectedValue(new Error('no Cues element'))
+
+      await expect(fixWebMMetadata(SOURCE)).rejects.toThrow('no Cues element')
     })
   })
 
