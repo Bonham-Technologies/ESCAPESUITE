@@ -33,6 +33,7 @@ function settle<T>(promise: Promise<T>): { outcome: string[] } {
 describe('loadImageElement deadline (ESCSUITE-328)', () => {
   it('rejects with a MediaLoadTimeoutError naming the source at 15 s, the image torn down', async () => {
     const revoke = vi.spyOn(URL, 'revokeObjectURL')
+    const removeSrc = vi.spyOn(HTMLImageElement.prototype, 'removeAttribute')
     const { outcome } = settle(loadImageElement(IMAGE(), 'logo.png'))
     await vi.advanceTimersByTimeAsync(14_999)
     expect(outcome).toEqual([])
@@ -43,7 +44,7 @@ describe('loadImageElement deadline (ESCSUITE-328)', () => {
     const img = media.images[0]
     expect(img.onload).toBeNull()
     expect(img.onerror).toBeNull()
-    expect(img.getAttribute('src')).toBeNull()
+    expect(removeSrc).toHaveBeenCalledWith('src')
     expect(revoke).toHaveBeenCalledTimes(1)
   })
 
@@ -95,5 +96,13 @@ describe('waitForVideoLoad through the shared helper (ESCSUITE-328)', () => {
     expect(outcome[0]).toContain('MediaLoadTimeoutError')
     expect(revoke).not.toHaveBeenCalled()
     expect(video.load).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes the src of a video on expiry', async () => {
+    const removeSrc = vi.spyOn(HTMLVideoElement.prototype, 'removeAttribute')
+    const video = document.createElement('video')
+    settle(waitForVideoLoad(video, 'blob:x', 'clip.webm'))
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(removeSrc).toHaveBeenCalledWith('src')
   })
 })

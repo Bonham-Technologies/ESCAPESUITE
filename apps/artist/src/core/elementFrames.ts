@@ -118,7 +118,7 @@ export async function loadElementSources(
           // (ESCSUITE-156): one bad file in the library degrades the export
           // rather than failing it.
           try {
-            const img = await loadImageElement(blob, source?.name ?? sourceId);
+            const img = await loadImageElement(blob, source.name);
             imageElements.set(sourceId, img);
           } catch {
             console.warn(`Failed to load media ${sourceId}`);

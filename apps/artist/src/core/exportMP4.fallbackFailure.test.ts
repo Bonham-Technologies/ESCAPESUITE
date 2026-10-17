@@ -111,6 +111,46 @@ describe('a <video> fallback that fires error (ESCSUITE-328)', () => {
     expect(media.videos[0].onerror).toBeNull()
   })
 
+  it('names the id when the clip\'s source is missing from the sources list', async () => {
+    await storeSource('video1', 'video/webm')
+    media.script({ video: { fail: true } })
+
+    const error = await exportToMP4(
+      [clipOf('video1')],
+      [],
+      makeExportOptions({}),
+      vi.fn(),
+      [makeTrack()]
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toBe('Could not read video1 \u2014 the browser could not decode it')
+  })
+
+  it('releases an already-loaded image source when a later video fires error', async () => {
+    await storeSource('image1', 'image/png')
+    await storeSource('video1', 'video/webm')
+    media.script({ video: { fail: true } })
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
+
+    const error = await exportToMP4(
+      [clipOf('image1', 1), clipOf('video1', 2)],
+      [
+        makeSourceVideo({ id: 'image1', name: 'image1', mediaType: 'image' }),
+        makeSourceVideo({ id: 'video1', name: 'video1', mediaType: 'video', width: 640, height: 360 }),
+      ],
+      makeExportOptions({}),
+      vi.fn(),
+      [makeTrack()]
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toContain('Could not read video1')
+    expect(media.images).toHaveLength(1)
+    expect(revoke.mock.calls.filter((c) => c[0] === media.images[0].src)).toHaveLength(1)
+    expect(webcodecs.videoEncoders).toHaveLength(0)
+  })
+
   it('keeps the ESCSUITE-325 sentence for a silence', async () => {
     await storeSource('video1', 'video/webm')
     media.script({ video: { silent: true } })
@@ -139,6 +179,7 @@ describe('an image source (ESCSUITE-328)', () => {
     await storeSource('image1', 'image/png')
     media.script({ image: { silent: true } })
     vi.useFakeTimers()
+    const removeSrc = vi.spyOn(HTMLImageElement.prototype, 'removeAttribute')
 
     const box = await runFor(() => run('image1', 'image'), 14_999)
     expect(box.error).toBeUndefined()
@@ -149,7 +190,7 @@ describe('an image source (ESCSUITE-328)', () => {
       'Could not read image1 — the browser did not report its metadata within 15 s'
     )
     expect(media.images[0].onload).toBeNull()
-    expect(media.images[0].getAttribute('src')).toBeNull()
+    expect(removeSrc).toHaveBeenCalledWith('src')
     expect(webcodecs.videoEncoders).toHaveLength(0)
   })
 
