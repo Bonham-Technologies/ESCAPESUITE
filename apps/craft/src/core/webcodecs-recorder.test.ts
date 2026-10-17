@@ -1803,10 +1803,13 @@ describe('WebCodecsRecorder', () => {
 
       const [blob, companions] = callbacks.onStop.mock.calls[0]
       expect(blob).toBeInstanceOf(Blob)
+      // Each audio part says how long it is — here one 4-frame buffer at
+      // 48 kHz (ESCSUITE-318); the webcam part's file is probed at save.
+      const oneBuffer = 4 / 48000
       expect(companions).toEqual([
         { role: 'webcam', blob: expect.any(Blob), startOffset: 0 },
-        { role: 'mic', blob: expect.any(Blob), startOffset: 0 },
-        { role: 'system', blob: expect.any(Blob), startOffset: 0 },
+        { role: 'mic', blob: expect.any(Blob), startOffset: 0, duration: oneBuffer },
+        { role: 'system', blob: expect.any(Blob), startOffset: 0, duration: oneBuffer },
       ])
       // An audio companion is an audio file, and the save path reads the
       // blob's own type into the stored mimeType.
