@@ -20,18 +20,19 @@
 // ESCAPECRAFT WebCodecs take) is never rewritten.
 import {
   BlobSource,
-  BufferTarget,
   EncodedAudioPacketSource,
   EncodedPacketSink,
   EncodedVideoPacketSource,
   Input,
   Output,
+  StreamTarget,
   WEBM,
   WebMOutputFormat,
   type AudioCodec,
   type EncodedPacket,
   type InputAudioTrack,
   type InputTrack,
+  type StreamTargetChunk,
   type VideoCodec,
 } from 'mediabunny';
 
@@ -153,6 +154,58 @@ async function copyPackets(
 }
 
 /**
+ * Where the remux writes: a stream whose chunks are kept as separate Blob parts
+ * and joined into one Blob at the end, so the output is never one contiguous
+ * ArrayBuffer — for a long take that would be gigabytes, and an allocation that
+ * fails is an out-of-memory crash nothing can catch (review round 1).
+ *
+ * Mediabunny's muxer appends, and then writes back into bytes it has already
+ * written — a Cluster's size once the Cluster ends, the Segment's size, Duration
+ * and SeekHead at the finish. A write that lands on collected bytes overwrites
+ * them in the part (or parts) it covers, and whatever runs past the end is
+ * appended. Mediabunny pads any gap itself, so no write starts past the end.
+ */
+export function createChunkCollector(): {
+  writable: WritableStream<StreamTargetChunk>;
+  toBlob: (type: string) => Blob;
+} {
+  const parts: Uint8Array[] = [];
+  const starts: number[] = [];
+  let end = 0;
+
+  const write = ({ data, position }: StreamTargetChunk) => {
+    // The last part starting at or before `position`.
+    let lo = 0;
+    let hi = starts.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (starts[mid] <= position) lo = mid + 1;
+      else hi = mid;
+    }
+    let offset = 0;
+    for (let i = Math.max(0, lo - 1); i < parts.length && offset < data.byteLength; i++) {
+      const at = position + offset - starts[i];
+      const n = Math.min(parts[i].byteLength - at, data.byteLength - offset);
+      parts[i].set(data.subarray(offset, offset + n), at);
+      offset += n;
+    }
+    // Whatever is left lies past the end: append it. An append is all of it;
+    // a write-back that fit inside what was collected leaves nothing.
+    const rest = data.subarray(offset);
+    if (rest.byteLength > 0) {
+      parts.push(rest);
+      starts.push(end);
+      end += rest.byteLength;
+    }
+  };
+
+  return {
+    writable: new WritableStream<StreamTargetChunk>({ write }),
+    toBlob: (type) => new Blob(parts as BlobPart[], { type }),
+  };
+}
+
+/**
  * The same packets in a new WebM with a Cues index: every track's encoded
  * packets — timestamps, key flags, bytes and side data (a VP9 alpha plane
  * among them) — copied through Mediabunny's muxer with no decoder and no
@@ -165,8 +218,8 @@ async function copyPackets(
 export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
   const input = new Input({ source: new BlobSource(blob), formats: [WEBM] });
   try {
-    const target = new BufferTarget();
-    const output = new Output({ format: new WebMOutputFormat(), target });
+    const collector = createChunkCollector();
+    const output = new Output({ format: new WebMOutputFormat(), target: new StreamTarget(collector.writable) });
     const pumps: Array<() => Promise<void>> = [];
 
     for (const track of await input.getTracks()) {
@@ -193,7 +246,7 @@ export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
     await output.start();
     await Promise.all(pumps.map((pump) => pump()));
     await output.finalize();
-    return new Blob([target.buffer!], { type: blob.type });
+    return collector.toBlob(blob.type);
   } finally {
     input.dispose();
   }
@@ -206,8 +259,10 @@ export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
  * browser that can seek the file (Chromium) is no worse off than before.
  */
 export async function withSeekIndex(blob: Blob, name: string): Promise<Blob> {
-  if (!isWebmType(blob.type)) return blob;
   try {
+    // Inside the try: a record with no bytes at all is kept as it came, for the
+    // caller's own checks to decide about, rather than thrown on here.
+    if (!isWebmType(blob.type)) return blob;
     return (await needsSeekIndexRepair(blob)) ? await remuxWithSeekIndex(blob) : blob;
   } catch (error) {
     console.warn(`Could not add a seek index to "${name}"; keeping it as recorded:`, error);

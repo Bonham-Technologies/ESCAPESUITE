@@ -242,7 +242,7 @@ export const THUMBNAIL_SEEK_TIMEOUT_MS = 5_000;
  * Generate a thumbnail from a video at a specific time.
  *
  * One release path, run once on every settle: the deadline cleared, the
- * handlers detached and the object URL revoked. A seek that lands clears the
+ * handlers detached, the element unloaded and the object URL revoked. A seek that lands clears the
  * deadline and detaches the error handler first, so from then on the only
  * thing that can settle the promise is the frame it draws.
  */
@@ -264,6 +264,11 @@ export async function generateThumbnail(
       video.onloadedmetadata = null;
       video.onseeked = null;
       video.onerror = null;
+      // Unload the element, handlers first (an emptied source fires 'error'):
+      // a wedged element left holding its source is one of the four after
+      // which Firefox stops loading new <video>s at all (review round 1).
+      video.removeAttribute('src');
+      video.load();
       URL.revokeObjectURL(objectUrl);
     };
     const fail = (message: string) => {
