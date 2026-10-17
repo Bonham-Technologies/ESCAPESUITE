@@ -11,10 +11,18 @@ import { expect, type ConsoleMessage, type Page } from '@playwright/test'
  * takes the WebCodecs path instead and never touches that code, which is why
  * every other ESCAPECRAFT spec stayed green while the repair was broken.
  *
- * "Seekable" is asserted as the property a user would notice rather than as
- * bytes: an unrepaired MediaRecorder WebM has no Duration element, so a
- * `<video>` fed the stored blob reports `duration === Infinity` on
- * `loadedmetadata` and will not scrub. A repaired one reports a real number.
+ * "Seekable" is asserted two ways. First as the property a user would notice:
+ * an unrepaired MediaRecorder WebM has no Duration element, so a `<video>` fed
+ * the stored blob reports `duration === Infinity` on `loadedmetadata` and will
+ * not scrub; a repaired one reports a real number. Then as bytes, because the
+ * second half of the repair is invisible to Chromium: the stored file must carry
+ * a Cues element indexing every video keyframe. Chromium's `<video>` scans a
+ * WebM with an empty Cues element and seeks it anyway, but Firefox's seek into a
+ * cluster that does not open on a keyframe never settles (ESCSUITE-305), and
+ * `webm-duration-fix` alone left a PiP take's Cues empty because Chrome writes
+ * the compositor's alpha-VP9 frames as BlockGroups, which it does not index
+ * (ESCSUITE-322). These specs are Chromium-only, so the Cues are read, not
+ * exercised.
  *
  * Shared by the dev-server spec (`tests/escapecraft/pip-seekable.spec.ts`) and
  * the production-layout one (`tests/production/pip-seekable.spec.ts`) so the
@@ -168,10 +176,162 @@ export async function storedRecordingDuration(page: Page): Promise<StoredDuratio
   })
 }
 
+export interface StoredCues {
+  /** Whether the stored WebM has a Cues element at all. */
+  present: boolean
+  /** The Cues element's payload length — 0 is the empty element the bug left. */
+  payloadBytes: number
+  /** Every CuePoint's CueTime, in file order. */
+  cueTimes: number[]
+  /**
+   * The four bytes at each CuePoint's `segmentDataStart + CueClusterPosition`,
+   * as hex — `1f43b675`, a Cluster ID, when the position is right.
+   */
+  cueTargets: string[]
+  /** The time of every video keyframe found walking the Clusters. */
+  keyframeTimes: number[]
+}
+
+/**
+ * Read the stored recording's bytes in the page and walk its EBML: the Cues
+ * element's CuePoints, and every video keyframe in the Clusters — a SimpleBlock
+ * with the keyframe flag, or a BlockGroup with no ReferenceBlock, which is how
+ * Chrome writes an alpha-VP9 keyframe. Times are in the Segment's timecode
+ * units (cluster Timecode + the block's relative timecode). Same "last record"
+ * caveat as `storedRecordingDuration`.
+ */
+export async function storedRecordingCues(page: Page): Promise<StoredCues> {
+  return page.evaluate(async () => {
+    const blob = await new Promise<Blob>((resolve, reject) => {
+      const request = indexedDB.open('video-editor-db')
+      request.onerror = () => reject(new Error('Failed to open video-editor-db'))
+      request.onsuccess = () => {
+        const getAll = request.result
+          .transaction('videos', 'readonly')
+          .objectStore('videos')
+          .getAll()
+        getAll.onerror = () => reject(new Error('Failed to read videos store'))
+        getAll.onsuccess = () => {
+          const records = getAll.result as Array<{ blob: Blob }>
+          if (records.length === 0) reject(new Error('No recordings stored'))
+          else resolve(records[records.length - 1].blob)
+        }
+      }
+    })
+    const bytes = new Uint8Array(await blob.arrayBuffer())
+
+    const CLUSTER = 0x1f43b675
+    const vintLength = (byte: number) => Math.clz32(byte) - 23
+    const element = (at: number) => {
+      const idLength = vintLength(bytes[at])
+      let id = 0
+      for (let k = 0; k < idLength; k++) id = id * 256 + bytes[at + k]
+      const sizeAt = at + idLength
+      const sizeLength = vintLength(bytes[sizeAt])
+      const mask = 0xff >> sizeLength
+      let size = bytes[sizeAt] & mask
+      // Every value bit set is the reserved "unknown size" Chrome writes.
+      let unknown = size === mask
+      for (let k = 1; k < sizeLength; k++) {
+        size = size * 256 + bytes[sizeAt + k]
+        unknown = unknown && bytes[sizeAt + k] === 0xff
+      }
+      const dataStart = sizeAt + sizeLength
+      return { id, dataStart, end: unknown ? Infinity : dataStart + size }
+    }
+    const uint = (e: { dataStart: number; end: number }) => {
+      let v = 0
+      for (let k = e.dataStart; k < e.end; k++) v = v * 256 + bytes[k]
+      return v
+    }
+    const children = (e: { dataStart: number; end: number }) => {
+      const out: Array<ReturnType<typeof element>> = []
+      for (let at = e.dataStart; at < Math.min(e.end, bytes.length); ) {
+        const child = element(at)
+        out.push(child)
+        at = child.end
+      }
+      return out
+    }
+    const block = (at: number) => {
+      const length = vintLength(bytes[at])
+      let track = bytes[at] & (0xff >> length)
+      for (let k = 1; k < length; k++) track = track * 256 + bytes[at + k]
+      const rel = (((bytes[at + length] << 8) | bytes[at + length + 1]) << 16) >> 16
+      return { track, rel, flags: bytes[at + length + 2] }
+    }
+
+    const result = {
+      present: false,
+      payloadBytes: 0,
+      cueTimes: [] as number[],
+      cueTargets: [] as string[],
+      keyframeTimes: [] as number[],
+    }
+    const hex = (from: number) =>
+      Array.from(bytes.subarray(from, from + 4), (b) => b.toString(16).padStart(2, '0')).join('')
+    const videoTracks = new Set<number>()
+    const segment = element(element(0).end)
+    let at = segment.dataStart
+    while (at < bytes.length) {
+      const e = element(at)
+      if (e.id === 0x1654ae6b) {
+        for (const entry of children(e)) {
+          const fields = children(entry)
+          const number = fields.find((f) => f.id === 0xd7)
+          const type = fields.find((f) => f.id === 0x83)
+          if (number && type && uint(type) === 1) videoTracks.add(uint(number))
+        }
+      } else if (e.id === 0x1c53bb6b) {
+        result.present = true
+        result.payloadBytes = e.end - e.dataStart
+        for (const point of children(e)) {
+          const fields = children(point)
+          const time = fields.find((f) => f.id === 0xb3)
+          if (time) result.cueTimes.push(uint(time))
+          for (const positions of fields.filter((f) => f.id === 0xb7)) {
+            const cluster = children(positions).find((f) => f.id === 0xf1)
+            if (cluster) result.cueTargets.push(hex(segment.dataStart + uint(cluster)))
+          }
+        }
+      } else if (e.id === CLUSTER) {
+        // An unknown-size Cluster (Chrome's) runs until the next one starts.
+        let timecode = 0
+        let i = e.dataStart
+        while (i < Math.min(e.end, bytes.length)) {
+          const child = element(i)
+          if (child.id === CLUSTER) break
+          if (child.id === 0xe7) timecode = uint(child)
+          if (child.id === 0xa3) {
+            const b = block(child.dataStart)
+            if (videoTracks.has(b.track) && b.flags & 0x80) result.keyframeTimes.push(timecode + b.rel)
+          }
+          if (child.id === 0xa0) {
+            const parts = children(child)
+            const inner = parts.find((p) => p.id === 0xa1)
+            const referenced = parts.some((p) => p.id === 0xfb)
+            if (inner && !referenced) {
+              const b = block(inner.dataStart)
+              if (videoTracks.has(b.track)) result.keyframeTimes.push(timecode + b.rel)
+            }
+          }
+          i = child.end
+        }
+        at = i
+        continue
+      }
+      at = e.end
+    }
+    return result
+  })
+}
+
 /**
  * The whole assertion, so the two specs say the same thing: nothing in the
  * console blamed `webm-duration-fix`, no `NOT_SEEKABLE` notice reached the
- * header's live region, and the stored blob has a finite duration.
+ * header's live region, the stored blob has a finite duration, and it carries a
+ * Cues element with one CuePoint per video keyframe — Duration and Cues, the
+ * two things the repair writes.
  */
 export async function expectSeekableTake(page: Page, log: ConsoleCapture): Promise<void> {
   // The property that matters first, so a failure says what the user would see
@@ -183,6 +343,20 @@ export async function expectSeekableTake(page: Page, log: ConsoleCapture): Promi
     `stored recording reported duration ${stored.reported}; an unrepaired MediaRecorder WebM reports Infinity`
   ).toBe(true)
   expect(Number(stored.reported)).toBeGreaterThan(0)
+
+  // The seek index Firefox needs (ESCSUITE-322). A PiP take's video frames are
+  // BlockGroups, which `webm-duration-fix` alone never indexed: it left the
+  // Cues element present but empty.
+  const cues = await storedRecordingCues(page)
+  expect(cues.present, 'stored recording has no Cues element').toBe(true)
+  expect(cues.payloadBytes, 'stored recording has an empty Cues element').toBeGreaterThan(0)
+  expect(cues.keyframeTimes.length).toBeGreaterThanOrEqual(1)
+  expect(cues.cueTimes, 'every video keyframe is indexed, and nothing else').toEqual(cues.keyframeTimes)
+  // And each one points at a Cluster: CueClusterPosition is relative to the
+  // Segment's data start, in the stored file.
+  expect(cues.cueTargets, 'every CueClusterPosition lands on a Cluster ID').toEqual(
+    cues.cueTimes.map(() => '1f43b675')
+  )
 
   await expect(page.getByText(NOT_SEEKABLE_FRAGMENT)).toHaveCount(0)
   expect(log.matching(/fixWebmDuration is not a function/)).toEqual([])
