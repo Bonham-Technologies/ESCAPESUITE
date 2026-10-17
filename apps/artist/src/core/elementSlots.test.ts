@@ -1,8 +1,9 @@
-// `assignElementSlots` (ESCSUITE-313): which of its source's `<video>` elements
-// each live clip draws from. The composer, the in-page MP4 path and the
-// preview all ask it, so its rules are pinned here once.
+// `assignElementSlots` (ESCSUITE-313) and the preview's sticky assigner
+// (ESCSUITE-323): which of its source's `<video>` elements each live clip
+// draws from. The composer, the in-page MP4 path and the preview all ask
+// them, so their rules are pinned here once.
 import { describe, it, expect } from 'vitest'
-import { assignElementSlots, videoForSlot } from './elementSlots'
+import { assignElementSlots, createStickySlotAssigner, videoForSlot } from './elementSlots'
 import { makeClip } from '../test/fixtures/clipFixtures'
 import type { Clip } from '../store/types'
 
@@ -83,5 +84,85 @@ describe('videoForSlot', () => {
     expect(videoForSlot(videos, new Map([['v1', [null]]]), 'v1', 1)).toBeUndefined()
     expect(videoForSlot(videos, new Map(), 'v1', 1)).toBeUndefined()
     expect(videoForSlot(videos, undefined, 'v1', 1)).toBeUndefined()
+  })
+})
+
+// ESCSUITE-323: the preview's elements are playing playheads, so a live clip
+// keeps the slot it had for as long as it stays live, and a newcomer takes the
+// lowest slot of its source no live clip holds.
+describe('createStickySlotAssigner', () => {
+  const u = makeClip({ id: 'u', sourceVideoId: 'v1' })
+  const l = makeClip({ id: 'l', sourceVideoId: 'v1' })
+  const n = makeClip({ id: 'n', sourceVideoId: 'v1' })
+
+  function framesOf(assigner: ReturnType<typeof createStickySlotAssigner>) {
+    const out = new Map<string, number>()
+    return (activeClips: Array<{ clip: Clip }>, transition: Parameters<typeof assignElementSlots>[1] = null) => {
+      assigner.assign(activeClips, transition, out)
+      return Object.fromEntries(out)
+    }
+  }
+
+  it('keeps a live clip on its slot when another clip of its source starts below it', () => {
+    const frame = framesOf(createStickySlotAssigner())
+
+    expect(frame(live(u))).toEqual({ u: 0 })
+    // `l` is first in track order, and the stateless rule would give it 0.
+    expect(frame(live(l, u))).toEqual({ l: 1, u: 0 })
+    // `u` has left: `l` stays where it is rather than being re-packed to 0.
+    expect(frame(live(l))).toEqual({ l: 1 })
+    // A newcomer takes the lowest slot no live clip holds.
+    expect(frame(live(l, n))).toEqual({ l: 1, n: 0 })
+  })
+
+  it('agrees with the stateless rule on a first frame', () => {
+    const other = makeClip({ id: 'o', sourceVideoId: 'v2' })
+    const text = makeClip({ id: 't', sourceVideoId: '', overlayType: 'text' })
+    const frame = framesOf(createStickySlotAssigner())
+
+    expect(frame(live(text, l, other, u))).toEqual(slotsOf(live(text, l, other, u)))
+  })
+
+  it('keeps the slot a held incoming side was given once it is live, and the outgoing side\'s through the transition', () => {
+    const a = makeClip({ id: 'a', sourceVideoId: 'v1' })
+    const b = makeClip({ id: 'b', sourceVideoId: 'v1' })
+    const fade = { outgoingClip: a, incomingClip: b }
+    const frame = framesOf(createStickySlotAssigner())
+
+    // Before the cut: `b` is held on the next free slot.
+    expect(frame(live(a), fade)).toEqual({ a: 0, b: 1 })
+    // Past the cut, still inside the transition: `b` is live and keeps 1,
+    // `a` is no longer live but keeps 0 as the outgoing side.
+    expect(frame(live(b), fade)).toEqual({ a: 0, b: 1 })
+    // The transition is over: `a` is let go, `b` stays.
+    expect(frame(live(b))).toEqual({ b: 1 })
+    expect(frame(live(b, n))).toEqual({ b: 1, n: 0 })
+  })
+
+  it('numbers each source on its own and gives an overlay no slot', () => {
+    const other = makeClip({ id: 'o', sourceVideoId: 'v2' })
+    const text = makeClip({ id: 't', sourceVideoId: '', overlayType: 'text' })
+    const frame = framesOf(createStickySlotAssigner())
+
+    expect(frame(live(u))).toEqual({ u: 0 })
+    expect(frame(live(text, l, other, u))).toEqual({ l: 1, o: 0, u: 0 })
+  })
+
+  it('forgets every clip on reset', () => {
+    const assigner = createStickySlotAssigner()
+    const frame = framesOf(assigner)
+    frame(live(u))
+    frame(live(l, u))
+
+    assigner.reset()
+
+    expect(frame(live(l, u))).toEqual({ l: 0, u: 1 })
+  })
+
+  it('refills the map it is handed, dropping clips it did not assign this call', () => {
+    const out = new Map<string, number>([['gone', 3]])
+    createStickySlotAssigner().assign(live(u), null, out)
+
+    expect(Object.fromEntries(out)).toEqual({ u: 0 })
   })
 })
