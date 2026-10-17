@@ -858,3 +858,50 @@ describe('measureFrameRate on a 60 Hz display', () => {
   })
 })
 
+
+// ESCSUITE-327: the probe runs only on an engine whose rVFC metadata was
+// measured (Chromium). Elsewhere it answers undefined at once, so the caller
+// stores 30 'assumed' instead of a reading it cannot vouch for.
+describe('measureFrameRate engine gate', () => {
+  const CHROMIUM = { userAgent: 'x', userAgentData: { brands: [{ brand: 'Chromium' }] } }
+  const FIREFOX = { userAgent: 'Mozilla/5.0 (X11; rv:157.0) Gecko/20100101 Firefox/157.0' }
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('answers undefined at once, without playing, seeking or asking for a frame, when engineMeasured is false', async () => {
+    const v = probeVideo(spaced(1 / 60, 8))
+    const request = vi.spyOn(v.el, 'requestVideoFrameCallback')
+
+    await expect(measureFrameRate(v.el, { ...FRAME_RATE_PROBE, engineMeasured: false })).resolves.toBeUndefined()
+
+    expect(v.play).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
+    expect(v.seeks).toEqual([])
+    expect(v.el.muted).toBe(false)
+  })
+
+  it('runs as before when engineMeasured is true, whatever the navigator says', async () => {
+    vi.stubGlobal('navigator', FIREFOX)
+    const v = probeVideo(spaced(1 / 60, 8))
+
+    await expect(measureFrameRate(v.el, { ...FRAME_RATE_PROBE, engineMeasured: true })).resolves.toBe(60)
+    expect(v.play).toHaveBeenCalledTimes(1)
+  })
+
+  it('reads the engine predicate by default: Chromium measures', async () => {
+    vi.stubGlobal('navigator', CHROMIUM)
+    const v = probeVideo(spaced(1 / 60, 8))
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBe(60)
+  })
+
+  it('reads the engine predicate by default: Firefox does not', async () => {
+    vi.stubGlobal('navigator', FIREFOX)
+    const v = probeVideo(spaced(1 / 60, 8))
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBeUndefined()
+    expect(v.play).not.toHaveBeenCalled()
+  })
+})
