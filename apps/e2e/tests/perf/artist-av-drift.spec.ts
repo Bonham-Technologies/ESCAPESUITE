@@ -68,9 +68,10 @@ const RESULTS_ROOT = path.resolve(HERE, '../../av-drift-results')
 
 /**
  * Wall-clock budget per second of timeline, per export. The element path is
- * slow in a headless browser: the first Chromium WebM export of a 182 s take
- * took 976 s (5.4x real time), and Firefox's had reached frame 2625 of 5470
- * after 35 minutes (~0.8 s a frame) when a 35-minute budget ran out.
+ * slow in a headless browser: a Chromium WebM export of a 182 s take took
+ * 359 s on a quiet machine and 976 s on a busy one, and Firefox's took 4449 s
+ * (~0.8 s a frame: every seek of that ESCAPECRAFT WebM fell through the
+ * element path's 500 ms seek and 300 ms readiness fallbacks).
  */
 const EXPORT_BUDGET_PER_SECOND_MS = 40_000
 
