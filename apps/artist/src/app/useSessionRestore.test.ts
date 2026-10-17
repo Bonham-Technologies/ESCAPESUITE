@@ -19,6 +19,7 @@ import {
 } from './useSessionRestore'
 import { holdTabLock, offerLockName } from './sessionLock'
 import { TAB_ID_KEY } from './tabId'
+import { __resetDeclinedSlotsForTests } from './declinedSlots'
 import {
   clearSessionState,
   getThumbnail,
@@ -87,6 +88,9 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.restoreAllMocks()
   sessionStorage.clear()
+  // The declined list's same-document fallback (ESCSUITE-306) is module state:
+  // the throwing-sessionStorage case fills it, and it must not reach the next.
+  __resetDeclinedSlotsForTests()
 })
 
 describe('the startup session check', () => {
@@ -355,14 +359,17 @@ describe('one slot per tab (ESCSUITE-274)', () => {
   // ESCSUITE-306 changed this case: declining used to delete any slot it was
   // offered. Another tab's slot is now left (that tab may only be discarded).
   it('declining another tab\'s slot deletes nothing', async () => {
-    vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ tabId: 'crashed' }), 'crashed')])
+    const crashed = savedSession({ tabId: 'crashed' })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashed, 'crashed')])
     const { result } = mountRestore()
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
 
     act(() => result.current.handleDeclineSession())
 
     await vi.waitFor(() =>
-      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toContain('crashed')
+      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toEqual([
+        { tabId: 'crashed', timestamp: crashed.timestamp },
+      ])
     )
     expect(clearSessionState).not.toHaveBeenCalled()
   })
@@ -419,7 +426,7 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       expect(result.current.sessionRestored).toBe(true)
       await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
       expect(clearSessionState).not.toHaveBeenCalled()
-      expect(declinedHere()).toContain('discarded-a')
+      expect(declinedHere()).toEqual([{ tabId: 'discarded-a', timestamp: discarded.timestamp }])
       expect(deps.showNotification).not.toHaveBeenCalled()
     })
 
@@ -465,6 +472,24 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       await waitFor(() => expect(reloaded.result.current.showSessionPrompt).toBe(true))
       expect(reloaded.result.current.pendingSession).toBe(closed)
       expect(reloaded.result.current.tabId).toBe(THIS_TAB)
+    })
+
+    it('offers the slot again after a reload once its tab has saved newer work into it (fix round 1)', async () => {
+      const declined = savedSession({ tabId: 'discarded-a', timestamp: Date.now() - 60_000 })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(declined, 'discarded-a')])
+      const first = mountRestore()
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+      act(() => first.result.current.handleDeclineSession())
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
+      first.unmount()
+
+      // The discarded tab came back, saved newer work and was discarded again.
+      const newer = savedSession({ tabId: 'discarded-a', timestamp: Date.now() - 1_000 })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(newer, 'discarded-a')])
+      const reloaded = mountRestore()
+
+      await waitFor(() => expect(reloaded.result.current.showSessionPrompt).toBe(true))
+      expect(reloaded.result.current.pendingSession).toBe(newer)
     })
 
     it('a declined slot is still offered to another fresh tab, whose list does not name it', async () => {
@@ -1131,7 +1156,9 @@ describe('answering the prompt', () => {
     // The decline has settled: another tab's slot is remembered as declined
     // rather than deleted (ESCSUITE-306; this case used to wait on the delete).
     await vi.waitFor(() =>
-      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toContain('earlier-tab')
+      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toEqual([
+        { tabId: 'earlier-tab', timestamp: session.timestamp },
+      ])
     )
     expect(result.current.showSessionPrompt).toBe(false)
     expect(result.current.sessionRestored).toBe(true)

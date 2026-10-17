@@ -274,33 +274,55 @@ describe('findOfferableSlot claims the departed tab\'s offer (ESCSUITE-283)', ()
   })
 })
 
-// ESCSUITE-306: a slot this tab declined is another tab's work left in storage
+// ESCSUITE-306: a save this tab declined is another tab's work left in storage
 // for that tab to come back to (a tab Chrome's Memory Saver discarded keeps its
-// id). It is not offered to this tab again; another tab may still be offered it.
-describe('findOfferableSlot skips the slots this tab declined (ESCSUITE-306)', () => {
-  it('skips a declined slot and offers the next newest', async () => {
+// id). That save is not offered to this tab again; a newer save from the same
+// tab is (fix round 1: the entry names the save, `{ tabId, timestamp }`), and
+// another tab may still be offered it.
+describe('findOfferableSlot skips the saves this tab declined (ESCSUITE-306)', () => {
+  it('skips a declined save and offers the next newest', async () => {
     const older = slot('crashed-early', NOW - 60_000)
     const declined = slot('discarded', NOW - 1_000)
     vi.mocked(listSessionStates).mockResolvedValue([older, declined])
 
-    const offer = await findOfferableSlot('me', NOW, new Set(['discarded']))
+    const offer = await findOfferableSlot('me', NOW, [{ tabId: 'discarded', timestamp: NOW - 1_000 }])
 
     expect(offer?.slot).toBe(older)
     // Skipped before any lock is asked about: neither probed nor claimed.
     expect(fake.isHeld(offerLockName('discarded'))).toBe(false)
   })
 
-  it('offers nothing when the only free slot was declined', async () => {
+  it('offers nothing when the only free slot holds the declined save', async () => {
     vi.mocked(listSessionStates).mockResolvedValue([slot('discarded', NOW - 1_000)])
 
-    await expect(findOfferableSlot('me', NOW, new Set(['discarded']))).resolves.toBeNull()
+    await expect(
+      findOfferableSlot('me', NOW, [{ tabId: 'discarded', timestamp: NOW - 1_000 }])
+    ).resolves.toBeNull()
   })
 
-  it('still offers a declined slot to another tab, whose list does not name it', async () => {
+  it('offers the slot again once its tab has saved newer work into it', async () => {
+    const resaved = slot('discarded', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([resaved])
+
+    const offer = await findOfferableSlot('me', NOW, [{ tabId: 'discarded', timestamp: NOW - 60_000 }])
+
+    expect(offer?.slot).toBe(resaved)
+  })
+
+  it('does not let another tab\'s declined save hide this slot', async () => {
+    const other = slot('other', NOW - 1_000)
+    vi.mocked(listSessionStates).mockResolvedValue([other])
+
+    const offer = await findOfferableSlot('me', NOW, [{ tabId: 'discarded', timestamp: NOW - 1_000 }])
+
+    expect(offer?.slot).toBe(other)
+  })
+
+  it('still offers a declined save to another tab, whose list does not name it', async () => {
     const declined = slot('discarded', NOW - 1_000)
     vi.mocked(listSessionStates).mockResolvedValue([declined])
 
-    const offer = await findOfferableSlot('other-fresh-tab', NOW, new Set())
+    const offer = await findOfferableSlot('other-fresh-tab', NOW, [])
 
     expect(offer?.slot).toBe(declined)
   })
@@ -309,7 +331,7 @@ describe('findOfferableSlot skips the slots this tab declined (ESCSUITE-306)', (
     const mine = slot('me', NOW - 60_000)
     vi.mocked(listSessionStates).mockResolvedValue([mine])
 
-    const offer = await findOfferableSlot('me', NOW, new Set(['me']))
+    const offer = await findOfferableSlot('me', NOW, [{ tabId: 'me', timestamp: NOW - 60_000 }])
 
     expect(offer?.slot).toBe(mine)
   })
@@ -317,7 +339,10 @@ describe('findOfferableSlot skips the slots this tab declined (ESCSUITE-306)', (
   it('reads this tab\'s own list from sessionStorage when none is passed', async () => {
     const older = slot('crashed-early', NOW - 60_000)
     vi.mocked(listSessionStates).mockResolvedValue([older, slot('discarded', NOW - 1_000)])
-    sessionStorage.setItem('escapeartist-declined-slots', JSON.stringify(['discarded']))
+    sessionStorage.setItem(
+      'escapeartist-declined-slots',
+      JSON.stringify([{ tabId: 'discarded', timestamp: NOW - 1_000 }])
+    )
     try {
       await expect(offered('me', NOW)).resolves.toBe(older)
     } finally {
