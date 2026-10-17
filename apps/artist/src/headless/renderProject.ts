@@ -42,9 +42,10 @@ interface RenderRequest {
 }
 
 /**
- * Fail loudly on inconsistent input. The export engine silently skips clips
- * whose source is unknown (rendering black), which is acceptable interactively
- * but not for an unattended render — a missing source must be an error.
+ * Fail loudly on inconsistent input. The export engine now refuses a source
+ * with no bytes by name (`SOURCE_MISSING`, ESCSUITE-330), but this check names
+ * the clip before Chromium seeds anything — a missing source must be an error
+ * an unattended render reports up front.
  */
 function validateInput(request: RenderRequest): void {
   const { project, sourceVideos, sourceBlobs } = request
