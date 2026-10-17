@@ -263,7 +263,9 @@ otherwise. A bundle without `meta` on a source still works exactly as before —
 it from the bytes, the same as a manifest source with no `width`/`height`/`duration`. `meta`,
 wherever it appears, is validated the same way: an unrecognised `mediaType`, or a `width` or
 `height` that isn't a finite number `>= 0`, or a `duration` that isn't a finite positive number,
-is rejected before Chromium launches, naming the field (e.g. `bundle video #0 field
+is rejected before Chromium launches, naming the field. A `null` for any of the three counts as
+absent, the way it does for a source's `name` and `mimeType`, and the engine probes the value (JSON
+writes an unusable number as `null`; ESCSUITE-326). A bad value that is not `null` is still refused (e.g. `bundle video #0 field
 "meta.duration" must be a finite positive number`).
 
 `examples/job-veditor-volume.json` shows the job shape but points at
