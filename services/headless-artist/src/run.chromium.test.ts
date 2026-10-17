@@ -1,7 +1,7 @@
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium } from 'playwright'
 import { loadBundle } from './loaders'
@@ -449,6 +449,114 @@ describe('runJob (real Chromium)', () => {
       'The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.',
     )
     expect(await fs.readdir(workDir)).toEqual([])
+  }, RENDER_TIMEOUT_MS)
+
+  // ESCSUITE-312: the reference image's Linux Chromium has no AAC encoder (Chromium's AAC is a
+  // platform codec on macOS and Windows). An mp4 job whose source carries an audio track used to
+  // come back `ok: true` with a silent file; now the bundle — having read the WAV's headers and
+  // found its audio track — refuses it with `AUDIO_CODEC_UNAVAILABLE`, which crosses the page
+  // boundary as data the way `OUTPUT_SIZE_UNSUPPORTED` does, and `allowSilentMp4` renders the
+  // picture alone with `audio: false` in the manifest. The source is a generated sine WAV, so the
+  // case needs no ffmpeg. Skipped on an engine that HAS an AAC encoder (macOS), asked of the page
+  // itself — the same Linux-only shape as the font oracle below, decided by a probe rather than
+  // by `process.platform`, because what matters is this Chromium's encoder, not the OS.
+  it('refuses a sounded mp4 with no AAC encoder, and renders it silent under allowSilentMp4', async (context) => {
+    const dir = path.join(tmpRoot, 'no-aac')
+    await fs.mkdir(dir, { recursive: true })
+    const probePage = path.join(dir, 'probe.html')
+    await fs.writeFile(probePage, '<!doctype html><title>probe</title>')
+    const browser = await chromium.launch()
+    let hasAac: boolean
+    try {
+      const page = await browser.newPage()
+      // A file: page is a secure context, which WebCodecs needs; about:blank is not.
+      await page.goto(pathToFileURL(probePage).href)
+      hasAac = await page.evaluate(async () => {
+        if (typeof AudioEncoder === 'undefined') return false
+        const support = await AudioEncoder.isConfigSupported({
+          codec: 'mp4a.40.2', sampleRate: 48000, numberOfChannels: 2, bitrate: 256000,
+        })
+        return support.supported === true
+      })
+    } finally {
+      await browser.close()
+    }
+    if (hasAac) context.skip('this Chromium has an AAC encoder, so a sounded mp4 renders with sound')
+
+    const seconds = 1
+    const sampleRate = 48000
+    const frames = seconds * sampleRate
+    const wav = Buffer.alloc(44 + frames * 4)
+    wav.write('RIFF', 0)
+    wav.writeUInt32LE(36 + frames * 4, 4)
+    wav.write('WAVEfmt ', 8)
+    wav.writeUInt32LE(16, 16)
+    wav.writeUInt16LE(1, 20) // PCM
+    wav.writeUInt16LE(2, 22) // stereo
+    wav.writeUInt32LE(sampleRate, 24)
+    wav.writeUInt32LE(sampleRate * 4, 28)
+    wav.writeUInt16LE(4, 32)
+    wav.writeUInt16LE(16, 34)
+    wav.write('data', 36)
+    wav.writeUInt32LE(frames * 4, 40)
+    for (let i = 0; i < frames; i++) {
+      const v = Math.round(Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 8000)
+      wav.writeInt16LE(v, 44 + i * 4)
+      wav.writeInt16LE(v, 46 + i * 4)
+    }
+    await fs.writeFile(path.join(dir, 'tone.wav'), wav)
+    const project = JSON.parse(
+      await fs.readFile(path.join(SERVICE_ROOT, 'test/fixtures/manifest/project.json'), 'utf8'),
+    ).project
+    project.timeline.clips[0] = {
+      ...project.timeline.clips[0],
+      sourceVideoId: 'tone',
+      name: 'tone.wav',
+      endTime: seconds,
+      duration: seconds,
+    }
+    project.timeline.duration = seconds
+    await fs.writeFile(path.join(dir, 'project.json'), JSON.stringify({ project }))
+    await fs.writeFile(
+      path.join(dir, 'manifest.json'),
+      JSON.stringify({
+        project: { $ref: './project.json' },
+        sources: [{
+          id: 'tone', file: 'tone.wav', mimeType: 'audio/wav', name: 'tone.wav',
+          meta: { mediaType: 'audio', duration: seconds },
+        }],
+      }),
+    )
+
+    const refused = await runJob(
+      { ...makeSpec('e2e-no-aac', path.join(dir, 'manifest.json')), options: { format: 'mp4', quality: 'high' } },
+      { bundlePath: BUNDLE, workDir, versions: VERSIONS, log: quiet },
+    )
+
+    expect(refused.ok).toBe(false)
+    expect(refused.code).toBe('AUDIO_CODEC_UNAVAILABLE')
+    expect(refused.error).toBe(
+      'This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.',
+    )
+    expect(await fs.readdir(workDir)).toEqual([])
+
+    const silent = await runJob(
+      {
+        ...makeSpec('e2e-silent-mp4', path.join(dir, 'manifest.json')),
+        options: { format: 'mp4', quality: 'high', allowSilentMp4: true },
+      },
+      { bundlePath: BUNDLE, workDir, versions: VERSIONS, log: quiet },
+    )
+
+    expect(silent.error).toBeUndefined()
+    expect(silent.ok).toBe(true)
+    expect(silent.meta?.audio).toBe(false)
+    const manifest = JSON.parse(await fs.readFile(path.join(outDir, 'e2e-silent-mp4.manifest.json'), 'utf8'))
+    expect(manifest.audio).toBe(false)
+    if (FFPROBE) {
+      const probed = await probe(path.join(outDir, 'e2e-silent-mp4.mp4'))
+      expect(probed.streams.some((stream) => stream.codec_type === 'audio')).toBe(false)
+    }
   }, RENDER_TIMEOUT_MS)
 
   it('returns ok:false and cleans up when the headless bundle is missing', async () => {

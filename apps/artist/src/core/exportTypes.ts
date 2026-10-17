@@ -190,8 +190,9 @@ export class ExportError extends Error {
   public readonly totalFrames: number | undefined;
   /**
    * Set only on a failure that is a property of the *input* rather than of
-   * this browser or this run — today, an output size the H.264 encoder
-   * refuses ({@link ExportErrorCode}). `undefined` on every other throw. The
+   * this browser or this run — an output size the H.264 encoder refuses, or
+   * (headless only) an mp4 whose sources carry an audio track, in a Chromium with no AAC encoder
+   * ({@link ExportErrorCode}). `undefined` on every other throw. The
    * headless kit reads it to fail such a job as a permanent input error (exit
    * 2, or 400 under `serve`) rather than a retryable one (ESCSUITE-237).
    */
@@ -214,12 +215,18 @@ export class ExportError extends Error {
 }
 
 /**
- * The machine-readable causes an {@link ExportError} can carry. One today:
- * the output size is one the H.264 encoder refuses, in a browser that encodes
- * H.264 at the 1280x720 reference size (ESCSUITE-237) — so the job, not the
- * browser, is what has to change.
+ * The machine-readable causes an {@link ExportError} can carry. Each names a
+ * failure the job, not a retry, has to fix:
+ *
+ * - `OUTPUT_SIZE_UNSUPPORTED`: the output size is one the H.264 encoder
+ *   refuses, in a browser that encodes H.264 at the 1280x720 reference size
+ *   (ESCSUITE-237).
+ * - `AUDIO_CODEC_UNAVAILABLE`: a headless mp4 render whose sources carry an audio track,
+ *   in a Chromium with no AAC encoder — Linux Chromium, the reference image's
+ *   (ESCSUITE-312). Thrown by `headless/renderProject.ts` only; the editor's
+ *   own export offers a silent MP4 with a note instead.
  */
-export type ExportErrorCode = 'OUTPUT_SIZE_UNSUPPORTED';
+export type ExportErrorCode = 'OUTPUT_SIZE_UNSUPPORTED' | 'AUDIO_CODEC_UNAVAILABLE';
 
 /**
  * Check if abort was requested and throw if so
@@ -523,10 +530,62 @@ export function noAudioNote(format: VideoExportFormat, alternativeKeepsAudio = t
  * this browser turned out not to have.
  *
  * It asserts a **loss**, so the dialog also requires the project to have had
- * sound in it: see `projectHasAudio` in `ExportDialog.tsx`.
+ * sound in it: see {@link projectHasAudio}.
  */
 export function exportedWithoutSoundReason(format: VideoExportFormat): string {
   return `Exported without sound — this browser has no ${audioCodecName(format)} encoder.`;
+}
+
+/**
+ * Whether this project has anything that could carry sound: a clip whose
+ * track is present, visible and unmuted, whose source is not an image. That
+ * is `core/audioMixer.ts`'s own skip clause minus the per-blob
+ * `decodeAudioData` — which is the one part the export dialog cannot afford,
+ * and the whole reason the exporter can no longer answer this question itself
+ * (ESCSUITE-175 probes AAC *before* mixing, precisely so a browser with no
+ * AAC encoder never pays for the mix).
+ *
+ * Approximate in exactly one direction, and deliberately so: a **video file
+ * with no audio track in it** still counts as "could carry sound", so the
+ * dialog's completion sentence can appear where strictly nothing was lost.
+ * That is the conservative error — it over-reports rather than staying silent
+ * about a real loss — and making it exact would mean decoding every source,
+ * the cost ESCSUITE-175 removed. What it does rule out is the cases that are
+ * *knowably* silent: an image-only or overlay-only timeline, and one whose
+ * every track is muted or hidden.
+ *
+ * One function for both readers (ESCSUITE-312): the dialog's completion
+ * sentence, and the headless render's refusal of an mp4 in a Chromium
+ * with no AAC encoder (`headless/renderProject.ts`). It lived inline in
+ * `ExportDialog.tsx` until then.
+ */
+export function projectHasAudio(
+  clips: Clip[],
+  tracks: Track[],
+  sourceVideos: SourceVideo[]
+): boolean {
+  return audioCandidateSources(clips, tracks, sourceVideos).length > 0;
+}
+
+/**
+ * The sources {@link projectHasAudio} is true because of, each once, in first-use order: the
+ * source of every clip on a present, visible, unmuted track, unless it is an image. The headless
+ * render's no-AAC mp4 refusal reads each one's container headers to make the approximation exact
+ * (ESCSUITE-312, `headless/audioTrackProbe.ts`); the dialog only needs to know the list is empty.
+ */
+export function audioCandidateSources(
+  clips: Clip[],
+  tracks: Track[],
+  sourceVideos: SourceVideo[]
+): SourceVideo[] {
+  const candidates = new Set<SourceVideo>();
+  for (const clip of clips) {
+    const track = tracks.find((t) => t.id === clip.trackId);
+    if (!track || track.muted || !track.visible) continue;
+    const source = sourceVideos.find((v) => v.id === clip.sourceVideoId);
+    if (source !== undefined && source.mediaType !== 'image') candidates.add(source);
+  }
+  return [...candidates];
 }
 
 /**
@@ -738,8 +797,7 @@ export async function isMP4ExportSupported(
  *
  * So `audio: false` alone does not mean sound was lost, and the dialog does not
  * treat it that way: its completion sentence also requires the project to have
- * had something that could carry sound (`projectHasAudio` in
- * `ExportDialog.tsx`). A host reading `EXPORT_COMPLETE.audio` should read it the
+ * had something that could carry sound ({@link projectHasAudio}). A host reading `EXPORT_COMPLETE.audio` should read it the
  * same way — "this file has no audio track", not "your audio was dropped".
  *
  * One field across all three formats so the dialog reads it the same way

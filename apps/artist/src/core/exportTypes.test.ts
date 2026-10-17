@@ -28,6 +28,8 @@ import {
   gifFrameDelayMs,
   gifFrameRate,
   exportedWithoutSoundReason,
+  audioCandidateSources,
+  projectHasAudio,
   hasMP4EncodeGlobals,
   isAudioCodecSupported,
   isMP4ExportSupported,
@@ -699,10 +701,89 @@ describe('isMP4ExportSupported at a size H.264 refuses', () => {
   })
 })
 
+// ESCSUITE-312: lifted out of `ExportDialog.tsx` so the dialog's completion sentence and the
+// headless render's no-AAC refusal ask one question, not two that can drift.
+describe('projectHasAudio', () => {
+  const media = (id: string, mediaType: SourceVideo['mediaType']): SourceVideo =>
+    ({ id, width: 64, height: 48, mediaType } as unknown as SourceVideo)
+  const muted = (id: string): Track => ({ ...track(id, 0), muted: true })
+
+  it('is true for a video clip on a present, visible, unmuted track', () => {
+    expect(projectHasAudio([clip('c', 's', 't')], [track('t', 0)], [media('s', 'video')])).toBe(true)
+  })
+
+  it('is true for an audio clip', () => {
+    expect(projectHasAudio([clip('c', 's', 't')], [track('t', 0)], [media('s', 'audio')])).toBe(true)
+  })
+
+  it('is false for an image-only timeline', () => {
+    expect(projectHasAudio([clip('c', 's', 't')], [track('t', 0)], [media('s', 'image')])).toBe(false)
+  })
+
+  it('is false when the only sounded clip is on a muted track', () => {
+    expect(projectHasAudio([clip('c', 's', 't')], [muted('t')], [media('s', 'video')])).toBe(false)
+  })
+
+  it('is false when the only sounded clip is on a hidden track', () => {
+    expect(projectHasAudio([clip('c', 's', 't')], [track('t', 0, false)], [media('s', 'video')])).toBe(false)
+  })
+
+  it('is false when the clip names a track that is gone', () => {
+    expect(projectHasAudio([clip('c', 's', 'gone')], [track('t', 0)], [media('s', 'video')])).toBe(false)
+  })
+
+  it('is false for an overlay clip, which has no source', () => {
+    expect(projectHasAudio([clip('c', '', 't')], [track('t', 0)], [media('s', 'video')])).toBe(false)
+  })
+
+  it('is true when any one clip qualifies among silent ones', () => {
+    expect(
+      projectHasAudio(
+        [clip('a', 'img', 't'), clip('b', 's', 't')],
+        [track('t', 0)],
+        [media('img', 'image'), media('s', 'audio')],
+      ),
+    ).toBe(true)
+  })
+
+  it('is false for an empty timeline', () => {
+    expect(projectHasAudio([], [track('t', 0)], [])).toBe(false)
+  })
+})
+
+// ESCSUITE-312: the sources `projectHasAudio` is true because of — the headless refusal reads
+// each one's container headers, once per source however many clips use it.
+describe('audioCandidateSources', () => {
+  const media = (id: string, mediaType: SourceVideo['mediaType']): SourceVideo =>
+    ({ id, width: 64, height: 48, mediaType } as unknown as SourceVideo)
+
+  it('lists each sounded source once, in first-use order, and nothing else', () => {
+    const sources = [media('img', 'image'), media('v', 'video'), media('a', 'audio'), media('hid', 'video')]
+    const clips = [
+      clip('c1', 'v', 't'), clip('c2', 'img', 't'), clip('c3', 'v', 't'),
+      clip('c4', 'a', 't'), clip('c5', 'hid', 'hidden'), clip('c6', 'gone', 't'),
+    ]
+    const tracks = [track('t', 0), track('hidden', 1, false)]
+    expect(audioCandidateSources(clips, tracks, sources).map((s) => s.id)).toEqual(['v', 'a'])
+  })
+
+  it('is empty exactly when projectHasAudio is false', () => {
+    const tracks = [{ ...track('t', 0), muted: true }]
+    const sources = [media('v', 'video')]
+    expect(audioCandidateSources([clip('c', 'v', 't')], tracks, sources)).toEqual([])
+    expect(projectHasAudio([clip('c', 'v', 't')], tracks, sources)).toBe(false)
+  })
+})
+
 describe('ExportError code', () => {
   it('carries the code it is given', () => {
     const error = new ExportError('too small', [], undefined, undefined, 'OUTPUT_SIZE_UNSUPPORTED')
     expect(error.code).toBe('OUTPUT_SIZE_UNSUPPORTED')
+  })
+
+  it('carries the no-AAC refusal\'s code (ESCSUITE-312)', () => {
+    const error = new ExportError('no AAC', [], undefined, undefined, 'AUDIO_CODEC_UNAVAILABLE')
+    expect(error.code).toBe('AUDIO_CODEC_UNAVAILABLE')
   })
 
   it('has no code when none is given, as every existing throw does', () => {

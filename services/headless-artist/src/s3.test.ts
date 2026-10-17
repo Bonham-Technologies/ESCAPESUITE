@@ -64,6 +64,7 @@ function fakeManifest(overrides: Partial<VerificationManifest> = {}): Verificati
     width: 640,
     height: 480,
     gpu: false,
+    audio: true,
     sha256: 'deadbeef',
     chromiumVersion: '120.0.0',
     engineVersion: '1.0.0',

@@ -15,7 +15,16 @@ export interface RenderInput {
   /** Raw bytes per source id. A Blob (e.g. a File) is stored as-is — no copy. */
   sourceBlobs: Record<string, ArrayBuffer | Blob>
   /** Export options. `resolution` defaults to 'project' when omitted. */
-  options: Omit<ExportOptions, 'resolution'> & { resolution?: ExportOptions['resolution'] }
+  options: Omit<ExportOptions, 'resolution'> & {
+    resolution?: ExportOptions['resolution']
+    /**
+     * Render an mp4 whose sources carry an audio track even though this Chromium has no AAC
+     * encoder, as the picture alone (ESCSUITE-312). Without it such a render is
+     * refused with `AUDIO_CODEC_UNAVAILABLE`. A switch for the headless entry, not
+     * an export option: it is never handed to the exporter.
+     */
+    allowSilentMp4?: boolean
+  }
 }
 
 /** File-based variant used by the runner: sources come from the hidden <input type=file>. */
@@ -48,6 +57,16 @@ export interface RenderMeta {
   width: number
   height: number
   gpu: boolean
+  /**
+   * The exporter's own `ExportResult.audio` (ESCSUITE-312). `true` means this
+   * format's audio encoder was available — the file carries an audio track when
+   * the mix had sound, and none when it did not (a silent project's mp4 is still
+   * `true`). `false` means the file has no audio track: every GIF, and every mp4
+   * rendered by a Chromium with no AAC encoder (a project whose sources carry
+   * no audio track, or one under `options.allowSilentMp4`). Read `false` as
+   * "this file has no audio track", not "sound was lost".
+   */
+  audio: boolean
   /**
    * The mix's ITU-R BS.1770-4 loudness as measured before any gain, and the gain
    * applied to reach `options.loudnessTarget` (ESCSUITE-292). Absent when the

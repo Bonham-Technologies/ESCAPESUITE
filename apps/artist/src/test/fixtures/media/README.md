@@ -21,3 +21,4 @@ Each is a few kilobytes.
 | `h264-colr-only-709.mp4` | the same with `colr` 1/1/1 | the same with `bt709` for all three |
 | `h264-colr-disagrees.mp4` | `h264-tagged709-480p.mp4` (VUI 1/1/1) with a `colr` box saying 6/6/6 | `ffmpeg -i h264-tagged709-480p.mp4 -c copy -color_primaries smpte170m -color_trc smpte170m -colorspace smpte170m -movflags +write_colr h264-colr-disagrees.mp4` |
 | `h264-partial-tag-colr-disagrees.mp4` | `apps/e2e/fixtures/decode-worker/partial-tag.mp4` (VUI 2/2/1) with a `colr` box saying 6/6/6 | the same recipe over `partial-tag.mp4` |
+| `video-with-aac.mp4` | 0.1 s, 16x16 solid red H.264 plus a 440 Hz AAC track — the headless no-AAC probe's sounded source (ESCSUITE-312) | `ffmpeg -f lavfi -i color=c=red:s=16x16:d=0.1:r=10 -f lavfi -i sine=frequency=440:duration=0.1:sample_rate=48000 -c:v libx264 -pix_fmt yuv420p -c:a aac -b:a 32k -shortest -movflags +faststart video-with-aac.mp4` |

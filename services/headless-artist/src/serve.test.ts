@@ -463,6 +463,24 @@ describe('POST /render', () => {
     expect(await res.json()).toEqual(refused)
   })
 
+  // ESCSUITE-312: the same 400 for a sounded mp4 the image's Chromium cannot give sound to.
+  it('returns 400 when a sounded mp4 was refused because this Chromium has no AAC encoder', async () => {
+    const refused = {
+      jobId: 'job-1',
+      ok: false,
+      error: 'This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.',
+      code: 'AUDIO_CODEC_UNAVAILABLE',
+      durationMs: 3,
+    }
+    vi.mocked(runJob).mockResolvedValue(refused)
+    await start()
+
+    const res = await postSpec(validSpec('job-1'))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual(refused)
+  })
+
   it('reports unknown job-spec fields as warnings alongside the outcome', async () => {
     await start()
 
