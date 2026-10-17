@@ -5060,6 +5060,52 @@ so craft's branches floor goes 97 → 98** in `apps/craft/vite.config.ts` and `s
 — a floor is the achieved coverage rounded down, with nothing to spare, as shared's 92.00 was in
 ESCSUITE-221; craft's floors are now 100 / 99 / **98** / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-307 (the session slot follows the project's
+bytes, and a restore drops a source whose bytes are gone: the autosave deliberately never writes an empty
+snapshot (ESCSUITE-227), so Clear All, Clear Unused or the per-item Remove emptying a project left the last
+populated snapshot in the tab's slot, and a reload offered it back and `handleRestoreSession` re-added
+sources whose rows `deleteVideo` had removed — the ESCSUITE-149 / 154 byteless tile, reached through the
+autosave; now each of the three media-library clears calls the autosave's `clearSession()` right after its
+`removeSourceVideosPermanently` write when the write left the project with no sources and no clips
+(`holdsNoWork` in `store/projectFactory.ts`, the one predicate `isEmptySession` now reads too; `clearSession`
+is a REQUIRED prop threaded `App → MediaLibrarySidebar → VideoUploader` / `VideoLibrary`, a no-op under
+`?suppressRestore=1`; deleting every clip while sources remain clears nothing), and `handleRestoreSession`
+reads `getVideo(id)` beside each thumbnail read, drops a source with no row together with every clip that
+referenced it through `timelineWithoutSources` — the duration arithmetic `removeSourceVideosPermanently`
+now shares rather than copies — revokes its thumbnail once, nulls a selection naming a dropped clip,
+clamps the in/out block to the restored timeline and says `N file(s) in the saved session … left out`
+once through the editor's notice in place of "Session restored"; a read that REJECTS is not a missing row:
+the two reads settle together, every minted handle is recorded before anything can throw, and the
+rejection takes the existing failed-restore path — slot kept, prompt closed, "Failed to restore
+session" — revoking each minted thumbnail exactly once): 99.85 / **99.45** / 96.79 / 99.78 against the
+99.85 / 99.44 / 96.79 / 99.78 that `main` at `f5d65ac5` (the ESCSUITE-306 version-packages commit) measures
+in the same sitting — statements up a hundredth, the other three unmoved. The base gives 6,123 / 6,326
+branches and this branch 6,138 / 6,341: fifteen new branches, fifteen covered, the same 203 uncovered as
+before (lines 9,554 / 9,568 → 9,580 / 9,594, statements 10,834 / 10,894 → 10,869 / 10,929, functions
+2,273 / 2,278 → 2,285 / 2,290, every denominator growing by exactly what the numerator did; the same
+14 / 60 / 5 uncovered). The fifteen are `app/useSessionRestore.ts`'s twelve (36 → 48: the in-storage
+filter, the dropped-sources branch, the selection-survives check, and the two reads' fulfilled and
+rejected sides), `app/appFormat.ts`'s two (8 → 10: the notice's singular and plural) and
+`components/VideoUploader.tsx`'s one (151 / 156 → 152 / 157: the empty-after-write check, reached by Clear
+All on a project of only its own sources against a text clip left behind, a source left on a locked track
+and a Clear Unused that leaves a used source; the same five pre-existing arms uncovered);
+`store/projectFactory.ts` 11 / 14 → 15 / 18 gains `holdsNoWork` and `timelineWithoutSources` with the same
+three pre-existing arms uncovered, `app/sessionSnapshot.ts` 4 → 2 and `store/projectSlice.ts` 41 → 39 lose
+the predicate and the arithmetic they now call. Each is reached from both sides by the red cases — the
+headline `expected [ 'video1', 'video2' ] to deeply equal [ 'video2' ]`, every row gone `expected [ { id:
+'video1', …(8) }, …(1) ] to deeply equal []`, the Clear All / Clear Unused / Remove slot cases, the rejected
+read red under a `.catch(() => undefined)` mutation (`expected "vi.fn()" to not be called at all, but
+actually been called 1 times`, and `expected "vi.fn()" to be called with arguments: [ 'blob:mock-url-7' ]`
+for the leak before the fix) — and the implementer's mutations (the `clearSession` call removed → "empties
+the slot, once" red at 0 calls; `inStorage` forced true → three restore cases red). Two review rounds
+(opus, then a scoped sonnet): the first found the rejected-read path safe but unpinned and the minted
+thumbnails leaked on it, and had the one unfailable pin moved to the autosave level; the second asked for
+the exactly-once revoke assertion, which the coordinator added. Outside vitest's measurement,
+`apps/e2e/tests/escapeartist/take-import.spec.ts` (its restored-session seed now writes the source's
+storage row, which a real session always has) and `session-ownership.spec.ts` ran on Chromium: 9 / 9.
+Every `*.perf.test.ts` and rerender pin is byte-identical, and `App` gains no store subscription. **No
+floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5067,7 +5113,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.80 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.79 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
