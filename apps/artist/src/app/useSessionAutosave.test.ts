@@ -434,4 +434,27 @@ describe('an empty project never overwrites the slot (ESCSUITE-227)', () => {
     expect(saveSessionState).toHaveBeenCalledTimes(1)
     expect(vi.mocked(saveSessionState).mock.calls[0][0].sourceVideos).toEqual([video])
   })
+  // ESCSUITE-307: only a storage clear that leaves nothing empties the slot.
+  // Deleting every clip while its sources stay is not one — their bytes are
+  // still stored, so the snapshot holding them is still written, and the slot
+  // is never cleared.
+  it('keeps writing, and never clears the slot, when every clip is deleted but the sources stay', () => {
+    const trackId = useEditorStore.getState().project.timeline.tracks[0].id
+    useEditorStore.getState().addClipToTimeline(
+      { id: 'clip1', sourceVideoId: video.id, name: 'clip1', startTime: 0, endTime: 2, duration: 2 },
+      trackId,
+      0
+    )
+    const { rerender } = mountAutosave({ project: useEditorStore.getState().project })
+
+    useEditorStore.getState().removeClipFromTimeline('clip1')
+    rerender({ ...deps, project: useEditorStore.getState().project })
+    vi.advanceTimersByTime(AUTO_SAVE_DELAY * 2)
+
+    expect(clearSessionState).not.toHaveBeenCalled()
+    expect(saveSessionState).toHaveBeenCalledTimes(1)
+    const written = vi.mocked(saveSessionState).mock.calls[0][0]
+    expect(written.project.timeline.clips).toEqual([])
+    expect(written.sourceVideos.map((v) => v.id)).toEqual([video.id])
+  })
 })

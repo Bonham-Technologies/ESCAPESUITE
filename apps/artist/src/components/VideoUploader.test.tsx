@@ -1399,19 +1399,6 @@ describe('VideoUploader', () => {
         await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
         expect(clearSession).toHaveBeenCalledTimes(1)
       })
-
-      it('deleting every clip while its sources stay leaves the slot alone', async () => {
-        store().addSourceVideo(videoMeta)
-        addClip('clip1', 0, 4)
-        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
-        await screen.findByText('50.0 MB / 500.0 MB')
-
-        store().removeClipFromTimeline('clip1')
-
-        expect(store().project.timeline.clips).toHaveLength(0)
-        expect(store().sourceVideos).toHaveLength(1)
-        expect(clearSession).not.toHaveBeenCalled()
-      })
     })
   })
   // ESCSUITE-268: ESCSUITE-244 stopped an undone import orphaning its bytes,

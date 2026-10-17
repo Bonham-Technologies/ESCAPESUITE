@@ -1498,6 +1498,44 @@ describe('a source whose bytes are no longer in storage (ESCSUITE-307)', () => {
     )
   })
 
+  // Review round 1: a row read that REJECTS is not a missing row. It fails the
+  // restore the way a rejected thumbnail read does — nothing written, the slot
+  // left for a reload — rather than being read as "gone" and dropping a source
+  // whose bytes may well still be there. And every thumbnail handle minted
+  // before the failure is freed, including ones whose read lands after it.
+  it('a row read that rejects fails the restore, keeps the slot, and frees every thumbnail it minted', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(getVideo).mockImplementation(async (id) => {
+      if (id === 'video2') throw new Error('storage exploded')
+      return storedRow(id)
+    })
+    vi.mocked(getThumbnail).mockImplementation(async (id) => new Blob([`thumb-${id}`], { type: 'image/jpeg' }))
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
+    const session = twoSourceSession()
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
+    const view = mountRestore()
+    await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
+    const mintedBefore = vi.mocked(URL.createObjectURL).mock.results.length
+
+    await act(async () => {
+      await view.result.current.handleRestoreSession(session)
+    })
+
+    expect(deps.setProject).not.toHaveBeenCalled()
+    expect(deps.addSourceVideo).not.toHaveBeenCalled()
+    expect(clearSessionState).not.toHaveBeenCalled()
+    expect(saveSessionState).not.toHaveBeenCalled()
+    expect(deps.showNotification).toHaveBeenCalledWith('Failed to restore session', 'error')
+    expect(consoleError).toHaveBeenCalledWith('Failed to restore session:', expect.any(Error))
+    expect(view.result.current.showSessionPrompt).toBe(false)
+    expect(view.result.current.sessionRestored).toBe(true)
+    // Both sources' thumbnails were read and minted; neither handle is left live.
+    const minted = vi.mocked(URL.createObjectURL).mock.results.slice(mintedBefore).map((r) => r.value as string)
+    expect(minted).toHaveLength(2)
+    for (const url of minted) expect(revokeObjectURL).toHaveBeenCalledWith(url)
+    consoleError.mockRestore()
+  })
+
   it('frees the thumbnail it read for a source it left out, and keeps the one it restored', async () => {
     storedOnly('video2')
     vi.mocked(getThumbnail).mockImplementation(async (id) => new Blob([`thumb-${id}`], { type: 'image/jpeg' }))
