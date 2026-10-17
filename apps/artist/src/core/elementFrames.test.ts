@@ -823,7 +823,7 @@ describe('createFrameComposer with two live clips of one source', () => {
 
   it('skips the clip whose element will not load, once, and still draws the other', async () => {
     await store('v1')
-    const { composeFrame, ctx } = await composerFor(zoomedPair())
+    const { composeFrame, sources, ctx } = await composerFor(zoomedPair())
     media.script({ video: { fail: true } })
 
     await composeFrame(0)
@@ -835,6 +835,14 @@ describe('createFrameComposer with two live clips of one source', () => {
     // Not retried every frame: one failed element, one warning.
     expect(media.videos).toHaveLength(2)
     expect(warns.mock.calls.filter((call: unknown[]) => String(call[0]).includes('second element'))).toHaveLength(1)
+
+    // The failed slot is held as `null`, and the release walks past it: the one
+    // loaded element is paused once and the source's one URL revoked once.
+    for (const video of media.videos) vi.mocked(video.pause).mockClear()
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    expect(() => releaseElementSources(sources)).not.toThrow()
+    expect(media.videos[0].pause).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 
   it('gives three live clips of one source three elements over one URL, and makes none on the next frame', async () => {
