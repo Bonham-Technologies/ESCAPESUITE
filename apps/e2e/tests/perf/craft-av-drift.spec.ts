@@ -245,6 +245,9 @@ async function saveDownload(page: Page, button: ReturnType<Page['getByRole']>, t
 
 test.describe('ESCAPECRAFT A/V drift rig', () => {
   test.skip(!ENABLED, 'Opt-in: set AV_DRIFT=1 and run with --config=playwright.av-drift.config.ts')
+  // `AV_DRIFT_SOURCE` selects the ESCAPEARTIST arm (`artist-av-drift.spec.ts`),
+  // which reads a take this arm made; it must not start (and wipe) a new one.
+  test.skip(!!process.env.AV_DRIFT_SOURCE, 'AV_DRIFT_SOURCE selects the ESCAPEARTIST arm')
 
   test(`${MODE} take, ${LOAD}, ${SECONDS}s`, async ({ page, browserName }) => {
     test.skip(browserName !== 'chromium', 'Chromium only: CDP throttling and the WebCodecs recorder')
