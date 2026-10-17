@@ -1243,6 +1243,14 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   whole import with `null` (ESCSUITE-84 / 87); a hidden one still takes it. `findEmptyTrack` never
   hands out the caption track, even emptied, so a title or a video looking for an empty track
   cannot land there and be read as a caption (review M2).
+- **Overlapping cues and the gestures** (ESCSUITE-308). The import keeps overlapping cues where
+  the file put them, on the one track, and does not move them apart. The timeline's gestures
+  treat such a pair as an overlap they **found**: the long cue's trim handles run past the cue
+  inside it (an end trim used to clamp to the inner cue's start), either cue can be dragged and
+  keeps or changes its overlap with the other, and the two drag together as a selection — while a
+  cue the dragged or trimmed one did not overlap still stops a trim and refuses a drop. Paste and
+  duplicate still land a new clip in a free span. See "One row never holds two overlapping
+  clips" below.
 - **The style.** `captionStyleFor(resolution)`: `x 0.5`, `y 0.88`, centred,
   `fontSize Math.round(min(width, height) × 0.045)` (49 at 1920×1080, 1080×1080 and 1080×1920, 32 at
   720p; ESCSUITE-309 — it was the height alone, which gave 86 px on a portrait frame),
@@ -3235,7 +3243,38 @@ the invariant answers the same question.
 What this does **not** do is repair a project that already holds an overlap — a hand-edited or
 host-supplied `LOAD_PROJECT` timeline is taken as given, the way `parseProject` (ESCSUITE-102)
 checks shape and not geometry. The four writers above are the only ways the app itself can make
-one.
+one — bar one importer that places clips at times it did not choose: `addCaptionCues`
+(ESCSUITE-293) keeps a caption file's cues in file order on the one Captions track, so two cues
+that overlap in the file overlap on the row, by design.
+
+**An overlap a gesture found is not one it made** (ESCSUITE-308). Such a pair broke both
+gestures, because both assumed the invariant: `clampTrimToNeighbours` took the nearest clip
+start past the trimmed clip's start as an end trim's limit, so the first move of a 1–10 s cue's
+end handle, with a 2–3 s cue inside it, clamped the end to 2 s and a 9 s caption became 1 s
+(its start handle clamped to 3 s the same way); and `wouldOverlap` read the pair as already
+colliding, so `useClipDrag`'s single-clip veto and `canMoveSelectedClips`' group veto refused
+every drag of either cue. The rule now: **a gesture may keep, or change, an overlap it found;
+it may not make one with a clip it did not overlap.** It lives in `store/timelineSnapping.ts`
+as one comparison and one set — `overlapsSpan(clip, start, end)`, the comparison `wouldOverlap`
+itself now makes, and `preexistingOverlaps(clip, clips)`, the clips on the same row reaching
+into `clip` by more than `OVERLAP_EPSILON` — read by all three callers. The trim clamp leaves
+out any clip that reached into the trim's **origin** span (`trim.origin`, the mousedown's
+snapshot; two numbers, so the per-move clamp still allocates nothing, and the other clips do
+not move while a trim runs); the single-clip drag takes `preexistingOverlaps` **once, on
+mousedown**, beside its snap points, and leaves those clips out of `wouldOverlap`'s candidates
+at release; `canMoveSelectedClips` takes the same set **per member** from the clips it is
+handed (which a drag has not yet changed) and leaves each member's out of its own candidates,
+so two overlapping cues selected together move as a group and one may slide across the other.
+A clip that did not overlap at the gesture's start still clamps a trim and still vetoes a drop.
+**The tie falls on the touching side**, the side `wouldOverlap` puts it: a pair meeting within
+`OVERLAP_EPSILON` is butted, not overlapping, and has to be — a clamped end trim lands up to
+3.55e-15 s past its neighbour's start, and reading that miss as an overlap *found* would exempt
+the neighbour from the clip's next trim and let it run straight over it. `wouldOverlap` itself,
+the placement predicate, is unchanged. **Paste (`pasteClips`, `firstFreeGroupStart`) and
+`duplicateClip` keep the strict rule**: they make clips, and a clip made now has no overlap to
+have found, so each still lands in a free span. Pinned by `store/timelineSnapping.overlap.test.ts`
+and, through the real hooks and store, `components/Timeline/useTrimDrag.overlap.test.ts` and
+`useClipDrag.overlap.test.ts`; `timelineGestures.perf.test.ts` is byte-identical.
 
 **A locked track is locked for every component** (ESCSUITE-84). ESCSUITE-82 closed the pointer
 gestures; Delete, paste, split, duplicate, the inspector, the keyframe panel and a new clip
