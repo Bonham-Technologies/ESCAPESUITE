@@ -491,7 +491,10 @@ pnpm lint                # Run ESLint
   `waveformData`, `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
   `hasWebcam` it had (`id`/`name`/`mimeType` are already the entry's own top-level fields, and
   `size` is always the restored blob's). `saveProject` writes it from the `SourceVideo` it was
-  given; `loadProject` takes every field from it and never touches the blob when it is present.
+  given, **omitting** a `duration` that is not a finite number above 0 and a `width` or `height`
+  that is not a finite number >= 0 (a legitimate 0x0 audio source keeps its zeros) — JSON would
+  write `Infinity`/`NaN` as `null`, which the headless kit refuses, and absent already means
+  "probe it" to `loadProject` (it recovers the length from the blob) and to the kit (ESCSUITE-326); `loadProject` takes every field from it and never touches the blob when it is present.
   `meta` is optional and the file's `version` stays 1 — purely additive, so a project saved
   before this ticket, or by an older build, has no `meta` and `loadProject` falls back to
   `extractMetadataFromBlob` exactly as it always did. That fallback used to read a video or

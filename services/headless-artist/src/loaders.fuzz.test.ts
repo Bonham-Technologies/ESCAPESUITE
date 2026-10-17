@@ -39,15 +39,16 @@ const MANIFEST_SEED = 0x5eed0158
 const V1_SEED = 0x5eed0150
 const V2_SEED = 0x5eed0260
 const ITERATIONS = 400
-// Each loop's outcomes on its committed seed, measured 2026-10-15. Manifest: 304
-// loaded, 96 refused. v1 bundle: 285 loaded, 115 refused. v2 bundle: 36 loaded,
-// 364 refused. The floors ARE those counts: the seed is fixed, so a check
+// Each loop's outcomes on its committed seed, measured 2026-10-15, re-measured
+// 2026-10-17 for ESCSUITE-326 (a null `meta.duration`/`width`/`height` is absent now, so one,
+// four and one mutated inputs crossed from refused to loaded). Manifest: 305 loaded, 95
+// refused. v1 bundle: 289 loaded, 111 refused. v2 bundle: 37 loaded, 363 refused. The floors ARE those counts: the seed is fixed, so a check
 // dropped anywhere lowers `refused` and a new over-strict one lowers `accepted`.
 // A change that moves an input across the line on purpose updates the numbers
 // here and says why.
-const MANIFEST_FLOORS = { accepted: 304, refused: 96 }
-const V1_FLOORS = { accepted: 285, refused: 115 }
-const V2_FLOORS = { accepted: 36, refused: 364 }
+const MANIFEST_FLOORS = { accepted: 305, refused: 95 }
+const V1_FLOORS = { accepted: 289, refused: 111 }
+const V2_FLOORS = { accepted: 37, refused: 363 }
 /** Generous for a loop that takes about a second, so a slow, loaded runner cannot time it out. */
 const LOOP_TIMEOUT_MS = 15_000
 

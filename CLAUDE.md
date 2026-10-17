@@ -5211,6 +5211,44 @@ length is recoverable, which the fix round repaired; the second found one Low fo
 produce the repaired shape. `timelineGestures.perf.test.ts`, every other `*.perf.test.ts` and the rerender
 pins are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-17 for ESCSUITE-326 and
+ESCSUITE-310 (hardening from ESCSUITE-316's U-1, verified real but unreachable: a `.veditor` whose source
+`meta.duration` was non-finite serialised as `null` and the kit's `loadBundle` refused the whole bundle,
+`0` refused outright; `saveProject` now writes `meta.duration` only when it is a finite number above 0
+and `width` / `height` only when finite and non-negative — a 0×0 audio source keeps its zeros, which the
+kit accepts — through two small predicates, `isWritableDuration` and the loader's own
+`isUsableDimension`, so the writer and the reader share the rule; `SourceVideoMeta`'s three fields are
+optional, which every reader already handled (`resolveStoredDuration` asks `isUsableDuration` first,
+`resolveMetaDimensions` takes `number | undefined`, the headless `seedSources` probes on `== null`); the
+kit's `assertSourceMeta` treats `null` as absent for the same three fields the way ESCSUITE-294 made it
+treat `name` and `mimeType`, deleting the key so the `...meta` spread cannot forward a `null` over a probed
+value, while a present non-null bad value is still refused; and `utils/integration.ts`'s `LOAD_PROJECT`
+protocol comment, which listed four of `parseProject`'s twenty-six refusals, now names `parseProject` as
+the authority and the kit README as the maintained list, plus the three a host most often trips),
+each in one sitting against `main` at `40086222` (the ESCSUITE-317 version-packages commit).
+**Artist**: 99.85 / 99.44 / 96.79 / 99.78, byte-identical on every percentage to the base. The base gives
+6,123 / 6,326 branches and this branch 6,132 / 6,335: nine new branches, nine covered, the same 203
+uncovered (lines 9,554 / 9,568 → 9,555 / 9,569, statements 10,834 / 10,894 → 10,835 / 10,895, functions
+2,273 / 2,278 → 2,274 / 2,279, every denominator growing by exactly what the numerator did; the same
+14 / 60 / 5 uncovered). All nine are `core/projectManager.ts`'s (73 → 82, still 100 on branches): the
+three conditional spreads in the writer and `isUsableDimension`'s `typeof value === 'number'` operand —
+the one arm the review asked to see measured — each reached from both sides by the seven red cases
+(`expected true to be false` for `'duration' in meta` with `Infinity`, `NaN`, `0` and a negative, and for
+`'width' in meta` with three bad dimensions) against the finite positive write and the kept zeros, and
+by the load pin (a file saved with an `Infinity` duration loads, the duration recovered from the blob).
+**Kit**: 99.60 / **99.53** / **98.66** / 98.87 against 99.60 / 99.52 / 98.65 / 98.87 — statements and
+branches each up a hundredth, lines and functions unmoved: lines 997 / 1,001 → 999 / 1,003, statements
+1,056 / 1,061 → 1,060 / 1,065, branches 659 / 668 → 663 / 672 and functions 176 / 178 on both, every new
+unit covered, the same 4 / 5 / 9 / 2 uncovered. The four new branches are `src/loaders.ts`'s (160 → 164):
+the null-as-absent arm for `duration`, `width` and `height`, reached by the six red kit cases
+(`manifest source "src-0" field "meta.duration" must be a finite positive number`, `field "meta.width"
+must be a finite number >= 0`, the same for `bundle video #0`) against the `-1` and `'2'` refusals that
+still stand. The ESCSUITE-294 kit fuzz floors moved, by the rule change alone — a mutation setting one
+of those fields to `null` now loads — to manifest 305 / 95, v1 289 / 111 and v2 37 / 363, with the dated
+reason in `loaders.fuzz.test.ts`; the artist floors did not move. One review round (sonnet): approved.
+Every `*.perf.test.ts` and rerender pin is byte-identical. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5218,9 +5256,9 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.80 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.44 | 96.79 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
+| `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

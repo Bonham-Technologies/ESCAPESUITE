@@ -330,6 +330,69 @@ describe('saveProject', () => {
     expect(document.body.contains(anchor)).toBe(false)
   })
 
+  // ESCSUITE-326: JSON turns Infinity / NaN into null and the kit refuses a null duration, so
+  // the writer leaves out a value it cannot vouch for (absent means "probe it").
+  it.each([
+    ['Infinity', Infinity],
+    ['NaN', NaN],
+    ['0', 0],
+    ['a negative number', -3],
+  ])('omits an unusable duration (%s) from the index entry', async (_label, duration) => {
+    const videoId = uniqueId('vid')
+    const source = { ...sourceVideo(videoId), duration }
+    await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), source)
+
+    await saveProject(createTestProject(videoId), [source])
+
+    const { index } = await capturedSave()
+    expect('duration' in index.videos[0].meta!).toBe(false)
+    expect(index.videos[0].meta!.width).toBe(1920)
+  })
+
+  it('writes a finite positive duration, and a legitimate 0x0 audio source keeps its dimensions', async () => {
+    const videoId = uniqueId('vid')
+    const source = { ...sourceVideo(videoId), duration: 7.5, width: 0, height: 0 }
+    await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), source)
+
+    await saveProject(createTestProject(videoId), [source])
+
+    const { index } = await capturedSave()
+    expect(index.videos[0].meta).toMatchObject({ duration: 7.5, width: 0, height: 0 })
+  })
+
+  it.each([
+    ['Infinity', Infinity],
+    ['NaN', NaN],
+    ['negative', -1],
+  ])('omits an unusable width and height (%s)', async (_label, dimension) => {
+    const videoId = uniqueId('vid')
+    const source = { ...sourceVideo(videoId), width: dimension, height: dimension }
+    await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), source)
+
+    await saveProject(createTestProject(videoId), [source])
+
+    const { index } = await capturedSave()
+    expect('width' in index.videos[0].meta!).toBe(false)
+    expect('height' in index.videos[0].meta!).toBe(false)
+    expect(index.videos[0].meta!.duration).toBe(10)
+  })
+
+  it('writes a file with an omitted duration that loads, the duration recovered from the blob', async () => {
+    const videoId = uniqueId('vid')
+    const source = { ...sourceVideo(videoId), duration: Infinity }
+    await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), source)
+    await saveProject(createTestProject(videoId), [source])
+    const { file } = await capturedSave()
+
+    const media = installMediaElementDoubles({ video: { duration: 42, videoWidth: 1280, videoHeight: 720 } })
+    try {
+      const { sourceVideos } = await loadProject(file)
+      expect(sourceVideos[0].duration).toBe(42)
+    } finally {
+      media.uninstall()
+    }
+  })
+
   it('omits the thumbnail when none is stored', async () => {
     const videoId = uniqueId('vid')
     await storeVideo(videoId, new Blob([new Uint8Array([1])], { type: 'video/mp4' }), sourceVideo(videoId))

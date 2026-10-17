@@ -46,7 +46,12 @@ import {
  * metadata never set one) still round-trips: `undefined` values are dropped
  * by `JSON.stringify` rather than written as `null`.
  */
-export type SourceVideoMeta = Omit<SourceVideo, 'id' | 'name' | 'mimeType' | 'size' | 'thumbnailUrl'>;
+export type SourceVideoMeta = Omit<
+  SourceVideo,
+  'id' | 'name' | 'mimeType' | 'size' | 'thumbnailUrl' | 'duration' | 'width' | 'height'
+> &
+  // Optional on disk: a value that is not usable is left out by `saveProject` (ESCSUITE-326).
+  Partial<Pick<SourceVideo, 'duration' | 'width' | 'height'>>;
 
 /**
  * A v1 `.veditor`: one JSON document with every source base64-encoded inside
@@ -131,10 +136,12 @@ export async function saveProject(
     if (!videoData) continue;
     const thumbnail = await getThumbnail(video.id);
 
+    // A value JSON cannot carry (Infinity and NaN become null) or the kit would refuse is left
+    // out: absent means "probe it", which the loader and the kit both already do (ESCSUITE-326).
     const meta: SourceVideoMeta = {
-      duration: video.duration,
-      width: video.width,
-      height: video.height,
+      ...(isWritableDuration(video.duration) ? { duration: video.duration } : {}),
+      ...(isUsableDimension(video.width) ? { width: video.width } : {}),
+      ...(isUsableDimension(video.height) ? { height: video.height } : {}),
       frameRate: video.frameRate,
       frameRateSource: video.frameRateSource,
       mediaType: video.mediaType,
@@ -183,8 +190,13 @@ export async function saveProject(
  * catches what `JSON.parse` lets through that a live `SourceVideo` never
  * would: `null`, `NaN`, a negative number, or `Infinity` (review round 1).
  */
-function isUsableDimension(value: number): boolean {
-  return Number.isFinite(value) && value >= 0;
+function isUsableDimension(value: number | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+/** A duration `saveProject` can write: a real, positive number of seconds (ESCSUITE-326). */
+function isWritableDuration(value: number): boolean {
+  return Number.isFinite(value) && value > 0;
 }
 
 /**

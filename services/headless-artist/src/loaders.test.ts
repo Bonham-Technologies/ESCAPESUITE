@@ -331,6 +331,24 @@ describe('loadManifest "meta"', () => {
     )
   })
 
+  // ESCSUITE-326: JSON carries an unusable duration (Infinity, NaN) as null; null is absent,
+  // as it already is for "name" and "mimeType", and the engine probes the value instead.
+  it.each(['duration', 'width', 'height'])('treats a null "meta.%s" as absent', async (field) => {
+    const manifestPath = await writeManifestWithMeta({ [field]: null })
+
+    const job = await loadManifest(manifestPath)
+    expect(job.sourceVideos[0]).not.toHaveProperty(field)
+    await job.cleanup()
+  })
+
+  it.each([-1, '2'])('still rejects a present non-null "meta.duration" (%j)', async (bad) => {
+    const manifestPath = await writeManifestWithMeta({ duration: bad })
+
+    await expect(loadManifest(manifestPath)).rejects.toThrow(
+      'manifest source "src-0" field "meta.duration" must be a finite positive number',
+    )
+  })
+
   it('forwards a valid "meta.duration" into sourceVideos', async () => {
     // MAJOR 1 (review round 1): the accepting arm of isUsableDuration inside "meta" was never
     // exercised -- every prior test either omitted duration or passed the rejected 0.
@@ -764,6 +782,29 @@ describe('loadBundle video validation', () => {
     const dir = await makeTempDir()
     const video = await fixtureVideo()
     video.meta = { duration: 0 }
+    const bundlePath = await writeBundle(dir, [video])
+
+    await expect(loadBundle(bundlePath, dir)).rejects.toThrow(
+      'bundle video #0 field "meta.duration" must be a finite positive number',
+    )
+  })
+
+  it.each(['duration', 'width', 'height'])('treats a null "meta.%s" as absent in a bundle', async (field) => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = { mediaType: 'video', [field]: null }
+    const bundlePath = await writeBundle(dir, [video])
+
+    const job = await loadBundle(bundlePath, dir)
+    expect(job.sourceVideos[0]).not.toHaveProperty(field)
+    expect(job.sourceVideos[0].mediaType).toBe('video')
+    await job.cleanup()
+  })
+
+  it.each([-1, '2'])('still rejects a present non-null bundle "meta.duration" (%j)', async (bad) => {
+    const dir = await makeTempDir()
+    const video = await fixtureVideo()
+    video.meta = { duration: bad }
     const bundlePath = await writeBundle(dir, [video])
 
     await expect(loadBundle(bundlePath, dir)).rejects.toThrow(

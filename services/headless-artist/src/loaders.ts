@@ -105,11 +105,16 @@ function assertSourceMeta(value: unknown, context: string): asserts value is Ved
   if (value.mediaType !== undefined && !MEDIA_TYPES.includes(value.mediaType as (typeof MEDIA_TYPES)[number])) {
     throw new Error(`${context} field "meta.mediaType" must be one of ${MEDIA_TYPES.join(', ')}`)
   }
+  // `null` is absent (ESCSUITE-326), the way it is for a source's `name` and `mimeType`: JSON
+  // writes an unusable number as null. Dropped here so the spread that forwards `meta` does not
+  // carry it over the value the engine would probe.
   for (const field of META_DIMENSION_FIELDS) {
+    if (value[field] === null) delete value[field]
     if (value[field] !== undefined && !isUsableDimension(value[field])) {
       throw new Error(`${context} field "meta.${field}" must be a finite number >= 0`)
     }
   }
+  if (value.duration === null) delete value.duration
   if (value.duration !== undefined && !isUsableDuration(value.duration)) {
     throw new Error(`${context} field "meta.duration" must be a finite positive number`)
   }
