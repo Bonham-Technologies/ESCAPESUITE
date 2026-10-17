@@ -25,7 +25,7 @@ import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek, isWedgedSeek } from './seekWedge';
+import { countWedgedSeek } from './seekWedge';
 import {
   getActiveTransition,
   loadVideoElement,
@@ -216,16 +216,16 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
  * seek when the element is already within (a little under) half an output
  * frame of it.
  *
- * Resolves to whether the seek wedged (`seekWedge.ts`, ESCSUITE-305): its
- * fallback fired and, once the readiness wait is over too, the element is still
- * seeking with no frame. A skipped seek is never wedged.
+ * Resolves to whether a seek it issued landed ('seeked' fired) — what the
+ * wedge count reads alongside the element's state once both waits are over
+ * (`seekWedge.ts`, ESCSUITE-305). A skipped seek did not land.
  */
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
   frameRate: number
 ): Promise<boolean> {
-  let seekFellBack = false;
+  let seekLanded = false;
   // Skip if already within (a little under) half a frame of the target.
   const frameDuration = 1 / frameRate;
   if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
@@ -242,11 +242,11 @@ async function syncVideoToTime(
     await new Promise<void>((resolve) => {
       const onSeeked = () => {
         clearTimeout(fallback);
+        seekLanded = true;
         resolve();
       };
       const fallback = setTimeout(() => {
         video.removeEventListener('seeked', onSeeked);
-        seekFellBack = true;
         resolve();
       }, 500);
       video.addEventListener('seeked', onSeeked, { once: true });
@@ -280,7 +280,7 @@ async function syncVideoToTime(
     });
   }
 
-  return isWedgedSeek(video, seekFellBack);
+  return seekLanded;
 }
 
 export interface FrameComposerParams {
@@ -338,8 +338,11 @@ export function createFrameComposer({
 
   /** Sync one element and count it against the wedge limit; throws by name at the limit. */
   const syncCounted = async (sourceId: string, video: HTMLVideoElement, sourceTime: number) => {
-    const wedged = await syncVideoToTime(video, sourceTime, frameRate);
-    wedgedSeeks.set(video, countWedgedSeek(wedgedSeeks.get(video) ?? 0, wedged, sourceNames.get(sourceId)!));
+    const seekLanded = await syncVideoToTime(video, sourceTime, frameRate);
+    wedgedSeeks.set(
+      video,
+      countWedgedSeek(wedgedSeeks.get(video) ?? 0, video, seekLanded, sourceNames.get(sourceId)!)
+    );
   };
 
   /**

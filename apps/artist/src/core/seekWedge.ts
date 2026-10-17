@@ -9,12 +9,17 @@
 // count, per element, the consecutive seeks that end this way, and fail the
 // export by name at `WEDGED_SEEK_FRAMES`.
 //
-// A seek that merely runs slow — its fallback fires, but the element is no
-// longer seeking, or already has the frame — is not counted, and any seek that
-// completes starts the count again. Only the combination of all three is a
-// wedge: the fallback fired, `seeking` is still true, and there is no frame.
+// A seek that completes — 'seeked' fired — or an element that has a frame to
+// draw (`readyState >= 2`) resets the count. An element still `seeking` with no
+// frame adds one, whether this request issued the seek that wedged or found
+// the element still stuck on an earlier one: an incoming transition clip is
+// held at one time for many frames and seeks only on the first, and resetting
+// on the frames that issued no seek let such a source finish black (review
+// round 1). Anything else — a seek whose fallback fired over an element that is
+// no longer seeking but has no frame yet, a slow machine — leaves the count as
+// it was.
 
-/** Consecutive wedged seeks of one element before the export gives up on it. */
+/** Consecutive wedged requests of one element before the export gives up on it. */
 export const WEDGED_SEEK_FRAMES = 3;
 
 /**
@@ -27,26 +32,26 @@ export class SourceNotSeekableError extends Error {
 
   constructor(sourceName: string) {
     super(
-      `This browser cannot read "${sourceName}" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.`
+      `This browser cannot read "${sourceName}" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.`
     );
     this.name = 'SourceNotSeekableError';
   }
 }
 
 /**
- * Whether a seek that has been waited on is wedged: its fallback fired, the
- * element still says it is seeking, and it has no frame to draw.
+ * The next count of consecutive wedged requests for one element, once its
+ * waits are over: 0 when the seek landed or there is a frame, one more while
+ * the element is still seeking with none, unchanged otherwise. Throws by name
+ * when it reaches the limit.
  */
-export function isWedgedSeek(video: HTMLVideoElement, seekFellBack: boolean): boolean {
-  return seekFellBack && video.seeking && video.readyState < 2;
-}
-
-/**
- * The next count of consecutive wedged seeks for one element — reset by any
- * seek that is not wedged — throwing by name when it reaches the limit.
- */
-export function countWedgedSeek(previous: number, wedged: boolean, sourceName: string): number {
-  const run = wedged ? previous + 1 : 0;
-  if (run >= WEDGED_SEEK_FRAMES) throw new SourceNotSeekableError(sourceName);
-  return run;
+export function countWedgedSeek(
+  previous: number,
+  video: HTMLVideoElement,
+  seekLanded: boolean,
+  sourceName: string
+): number {
+  if (seekLanded || video.readyState >= 2) return 0;
+  if (!video.seeking) return previous;
+  if (previous + 1 >= WEDGED_SEEK_FRAMES) throw new SourceNotSeekableError(sourceName);
+  return previous + 1;
 }

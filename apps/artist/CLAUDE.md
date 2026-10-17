@@ -98,7 +98,9 @@ pnpm lint                # Run ESLint
   seeking within 5 s`. Firefox never completes a seek into a WebM with no Cues index whose
   target needs a Cluster that does not start with a key frame (see "Seek index repair at
   import"), and with no deadline the import of such a take sat on "Processing…" for ever.
-  One `release()` — clear the deadline, detach the three handlers, revoke the object URL — runs
+  One `release()` — clear the deadline, detach the three handlers, unload the element
+  (`removeAttribute('src')`, `load()`: a wedged element left holding its source counts toward
+  the four after which Firefox stops loading new `<video>`s), revoke the object URL — runs
   once on every settle; a seek that lands clears the deadline and detaches `onerror` first, so
   the frame it draws is the only thing left that can settle the promise. A thumbnail was
   already cosmetic: `finishVideoFile` catches a rejection, warns `Failed to generate
@@ -306,13 +308,17 @@ pnpm lint                # Run ESLint
   browser benchmarks' `preview-playback` and `export-webm` numbers move with this ticket — a
   second element decoding alongside the first, where before one element was sought back and forth
   a second every frame.
-  **A source that cannot seek** (ESCSUITE-305): `syncVideoToTime` resolves to whether its
-  seek wedged — the 500 ms fallback fired and, after the readiness wait, the element still
-  reports `seeking` with `readyState < 2` — and the composer counts those per **element**,
-  resetting on any seek that is not wedged; at `WEDGED_SEEK_FRAMES` (3, `core/seekWedge.ts`)
-  it throws `SourceNotSeekableError`, which both exporters' catch turns into an
+  **A source that cannot seek** (ESCSUITE-305): `syncVideoToTime` resolves to whether a seek
+  it issued landed, and once both waits are over the composer's `countWedgedSeek`
+  (`core/seekWedge.ts`) reads that with the element's state, per **element**: a landed seek or a
+  frame to draw (`readyState >= 2`) resets the count; an element still `seeking` with no frame
+  adds one — **whether or not this frame issued a seek**, because an incoming transition clip is
+  held at one time and seeks only on its first frame, and resetting on the frames that issued
+  none let such a source finish black (review round 1); anything else (a fallback over an
+  element no longer seeking but with no frame yet) leaves it. At `WEDGED_SEEK_FRAMES` (3) it
+  throws `SourceNotSeekableError`, which both exporters' catch turns into an
   `ExportError` with `code: 'SOURCE_NOT_SEEKABLE'` (`exportErrorCodeOf`) and the sentence
-  `This browser cannot read "<name>" frame by frame (its seek never completed). Re-save the
+  `This browser cannot read "<name>" frame by frame (its seeks never completed). Re-save the
   recording in ESCAPECRAFT, or export in Chrome or Edge.` The name is the `SourceVideo.name`,
   carried as `ElementSources.sourceNames` from `loadElementSources` (the id when the export
   was not handed the source's record). The count is per element, not per source, because an
@@ -4442,7 +4448,7 @@ The export pipeline includes several optimizations to improve performance:
 - **Background tab export (MP4)**: Uses WebCodecs `VideoDecoder` in a Web Worker for frame decoding, enabling full-speed exports even when the browser tab is in the background. Web Workers are not subject to browser throttling that affects `setTimeout` and `video.play()` on the main thread. (ESCSUITE-254: before this, the worker threw on every source and the export silently decoded in the page — see "Video Decode Worker".)
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for H.264 MP4 files (background-capable), wrapped so a frame the worker fails mid-export hands the source to `<video>`
-  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line. **One element per slot** (ESCSUITE-313): `getFrame(timestamp, slot)` serves slot 0 from the element the source was created with and slot k from a k-th element over the same object URL, made the first time it is asked for and disposed with the source; `exportMP4.ts`'s frame loop passes each clip's slot from the same `assignElementSlots` the element exporters use, through `getFrameAtTime(manager, sourceId, time, slot)`, so two clips of one source in one frame each hold their own frame until the draw. A further element that will not load is warned about once and its slot answers `null` from then on — the clip is left out, silently, for the rest of the export. `FailoverFrameSource` passes the slot to both sides; the worker ignores it (it answers each request on its own). `drawTransition` takes each side's `<video>` from its caller, so every caller resolves the two sides by slot. Chosen over returning a detached `new VideoFrame(video)` per request because that would cost one `VideoFrame` per fallback frame of every in-page export — every ESCAPECRAFT WebM recording — where this costs a second element only when two clips of one source overlap It carries the same wedge guard as the element exporters (ESCSUITE-305, `core/seekWedge.ts`): a request whose 500 ms seek fallback fired and whose element, after the 100 ms readiness wait, is still `seeking` with `readyState < 2` is counted per element — slot 0 and each further slot on its own — any other request on that element resets its count, and the third in a row throws `SourceNotSeekableError` by the source's name (`createSource` / `loadFrameSource` take it, `exportMP4.ts` passes `SourceVideo.name`). `getFrameAtTime` (`frameManager.ts`) rethrows that one error instead of warning and skipping the clip, and `FailoverFrameSource` does not swallow it either: the `<video>` a worker source was handed to is the last path there is, so a source that wedges there fails the export by name
+  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line. **One element per slot** (ESCSUITE-313): `getFrame(timestamp, slot)` serves slot 0 from the element the source was created with and slot k from a k-th element over the same object URL, made the first time it is asked for and disposed with the source; `exportMP4.ts`'s frame loop passes each clip's slot from the same `assignElementSlots` the element exporters use, through `getFrameAtTime(manager, sourceId, time, slot)`, so two clips of one source in one frame each hold their own frame until the draw. A further element that will not load is warned about once and its slot answers `null` from then on — the clip is left out, silently, for the rest of the export. `FailoverFrameSource` passes the slot to both sides; the worker ignores it (it answers each request on its own). `drawTransition` takes each side's `<video>` from its caller, so every caller resolves the two sides by slot. Chosen over returning a detached `new VideoFrame(video)` per request because that would cost one `VideoFrame` per fallback frame of every in-page export — every ESCAPECRAFT WebM recording — where this costs a second element only when two clips of one source overlap. It carries the same wedge guard as the element exporters (ESCSUITE-305, `core/seekWedge.ts`): a request whose seek landed, or whose element has a frame, resets the count; a request whose element is still `seeking` with `readyState < 2` after its waits is counted per element — slot 0 and each further slot on its own — including one that issued no seek because it asked for the time the element was last seeked to — and the third in a row throws `SourceNotSeekableError` by the source's name (`createSource` / `loadFrameSource` take it, `exportMP4.ts` passes `SourceVideo.name`). `getFrameAtTime` (`frameManager.ts`) rethrows that one error instead of warning and skipping the clip, and `FailoverFrameSource` does not swallow it either: the `<video>` a worker source was handed to is the last path there is, so a source that wedges there fails the export by name. Because a fetch can now reject, `exportMP4.ts` gathers the regular clips' frame fetches into one `Promise.all` before it awaits the transition fetches, and marks that promise handled, so a fetch that fails while a transition fetch is awaited (or after one already threw) leaves no unhandled rejection; the `await` of it still rethrows the first failure
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek only when the request is within half a frame of the element's current time: `seekToleranceFor(frameRate)` = `0.5 / max(frameRate, 30)` (ESCSUITE-263). The old rule was a strict `> 1/30`, and because the export's requests are one 1/30 frame apart the float difference often came out just under it, so about every other frame of an in-page MP4 export (every ESCAPECRAFT WebM recording, Safari, any source the worker refuses) was a repeat of the previous one; that is fixed. The floor at 30 keeps the window under the request spacing for a low-rate source, and a missing or non-finite rate counts as 30. An imported video's rate is measured at import since ESCSUITE-276 (`frameRateSource: 'measured'`, so a 120 fps file gets a 1/240 s window — `frameSource.measuredRate.test.ts`); a rate that could not be measured, an ESCAPECRAFT take (`'configured'`, 30) and every source imported before then still read 30, a 1/60 s window. The rate is threaded `exportMP4` -> `loadFrameSource` -> `createSource` -> `HTMLVideoFrameSource` (also on the failover path)
 - **Seek target (ESCSUITE-265)**: both element paths — `HTMLVideoFrameSource.getFrame()` (MP4) and `elementFrames.ts`'s `syncVideoToTime` (WebM, GIF) — seek to `elementSeekTarget(time)` = `time + ELEMENT_SEEK_BIAS` (0.1 ms, `core/elementSeek.ts`), not to `time` itself. An export's requests are frame-aligned (`clip.startTime + n / 30`), so most land exactly on a source frame's start, and a 30 fps frame starts 33333.33… µs after the last. Both measured engines resolve a seek at microsecond precision and land one short of the frame on a third of those starts, showing the frame before it: Chromium 153 on the starts whose fraction is .67 (it truncates the request — `currentTime` reads back 1.066666 for 1.0666…67), Firefox 155 on the .33 ones. Measured with a per-frame-coloured 30 fps source: 20 of 60 frames one early in each engine at bias 0, none at 1 µs, 10 µs or 0.1 ms; through the app's own trimmed MP4 export, 15 of 45 in each engine before and 0 after, and the WebM export 15 of 45 → 0 in Chromium. Waiting longer does not help — after `seeked`, after `requestVideoFrameCallback` and after a further 100 ms the picture is the same, and Firefox's rVFC `mediaTime` echoes the request rather than the frame drawn, so nothing an element reports can detect it. The bias is a hundred times the measured margin and a fortieth of a frame at 240 fps. A request that is not on a frame start moves 0.1 ms, so a time within 0.1 ms before a frame's start is treated as that frame — the convention the decode worker already applies within 0.5 ms (`TIME_TOLERANCE_US`, `workers/frameDecoder.ts`), only narrower. It changes neither seek count (the skip windows are 1/60 s on the MP4 path and 0.4 of an output frame on the element exporters, both far wider) nor any perf ceiling. Pinned by `frameSource.boundarySeek.test.ts` (a `<video>` double reproducing each engine's measured rounding, 30 and 60 fps sources, from 0 and from a 0.5 s trim) and `elementFrames.test.ts`. The preview's own seeks (`usePreviewRenderLoop.ts`) are separate and unchanged: they skip anything within 0.05 s, so the paused preview is not frame-accurate to begin with
 - **Encoder backpressure**: MP4's loop waits while `videoEncoder.encodeQueueSize > 5`, paired with
@@ -5124,10 +5130,13 @@ To prevent black frames during export:
   (measured: `{"seeked":31,"seekFallback":434,"readyFallback":434,"readyOk":0,"drawn":32}` over
   466 frames). Three consecutive wedged seeks of one element (`WEDGED_SEEK_FRAMES`) now throw
   `SourceNotSeekableError`, surfaced as `ExportError` `code: 'SOURCE_NOT_SEEKABLE'`; the dialog
-  shows its message as it does any `ExportError`'s, and the headless kit maps the code to a
-  permanent failure (exit 2 / 400). A frame that merely hits a fallback — a slow machine, a
-  seek that settles late, or one still in flight over a frame it can already draw — is not
-  counted, and any seek that is not wedged resets the count. The counter is one integer
+  shows its message as it does any `ExportError`'s but offers **no other video format** for it
+  — neither WebM's "Try MP4 Instead" nor MP4's failure screen and "Try WebM Instead" — because
+  the other format draws from the same `<video>` and wedges the same way (review round 1); and
+  the headless kit maps the code to a permanent failure (exit 2 / 400). A frame that merely hits
+  a fallback — a slow machine, a seek that settles late, or one still in flight over a frame it
+  can already draw — is not counted; a landed seek or a frame to draw resets the count, and a
+  frame held at one time over a seek still outstanding counts. The counter is one integer
   compare per seek; the perf ceilings are unchanged. The cure for the file itself is "Seek
   index repair at import"; this is what a source that was never repaired (stored before the
   repair, or a remux that failed) gets on Firefox
@@ -5647,8 +5656,12 @@ what is already stored.
   is a small EBML walk of its own.
 - **What is remuxed** (`remuxWithSeekIndex`): every track's encoded packets, copied through
   Mediabunny (`Input` + `BlobSource` -> `EncodedPacketSink` -> `EncodedVideoPacketSource` /
-  `EncodedAudioPacketSource` -> `Output` + `WebMOutputFormat` + `BufferTarget`) with no decoder
-  and no encoder. Mediabunny's muxer starts a Cluster at key frames and writes one CuePoint per
+  `EncodedAudioPacketSource` -> `Output` + `WebMOutputFormat` + `StreamTarget`) with no decoder
+  and no encoder. The `StreamTarget` writes into `createChunkCollector`, which keeps each chunk as
+  a separate Blob part (overwriting in place where the muxer writes back a size, Duration or the
+  SeekHead) and joins them into one Blob at the end, so the output is never one contiguous
+  `ArrayBuffer` — a `BufferTarget` would have been gigabytes for a long take, and an allocation
+  that fails is an out-of-memory crash nothing can catch (review round 1). Mediabunny's muxer starts a Cluster at key frames and writes one CuePoint per
   Cluster. The result keeps the original's MIME type. **Alpha is preserved**: Mediabunny reads a
   BlockGroup's BlockAdditional (BlockAddID 1) on an `AlphaMode` 1 track as `sideData.alpha` and
   writes it back the same way on a track it marks `AlphaMode` 1 — pinned over a hand-built
@@ -5669,7 +5682,11 @@ what is already stored.
   for a non-WebM or an indexed WebM, the remux for one that needs it, and — when the probe or the
   remux throws (a codec Mediabunny cannot name, a track that is neither video nor audio) — the
   original, with one `console.warn` naming the file. The import continues; on Firefox an export of
-  that source then fails by name (`SOURCE_NOT_SEEKABLE`), and Chromium works as before.
+  that source then fails by name (`SOURCE_NOT_SEEKABLE`), and Chromium works as before. A record
+  with no blob at all is kept as it came, not thrown on.
+- **Known gap (follow-up)**: the repair runs after `extractVideoMetadata`, so a WebM from outside
+  ESCAPECRAFT that is both headerless (no Duration) and Cues-less can still hit the 15 s
+  metadata deadline on Firefox before it is ever repaired.
 
 ## Keyboard shortcuts (ESCSUITE-247)
 

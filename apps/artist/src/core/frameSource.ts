@@ -13,7 +13,7 @@
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek, isWedgedSeek } from './seekWedge';
+import { countWedgedSeek } from './seekWedge';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -319,7 +319,7 @@ export class HTMLVideoFrameSource implements IFrameSource {
     // Check if we need to seek
     const currentTime = video.currentTime;
     const diff = timestamp - currentTime;
-    let seekFellBack = false;
+    let seekLanded = false;
 
     // Only seek if necessary: a request within half a frame (at the source's own
     // rate) of the current time is the frame already showing.
@@ -335,13 +335,13 @@ export class HTMLVideoFrameSource implements IFrameSource {
           video.removeEventListener('seeked', onSeeked);
           // Don't reject - just resolve with best effort; a run of these with
           // nothing to show for it is counted below.
-          seekFellBack = true;
           resolve();
         }, 500);
 
         const onSeeked = () => {
           clearTimeout(timeout);
           video.removeEventListener('seeked', onSeeked);
+          seekLanded = true;
           resolve();
         };
 
@@ -363,9 +363,11 @@ export class HTMLVideoFrameSource implements IFrameSource {
       }
     }
 
+    // A request that seeks nothing still counts while an earlier seek is stuck:
+    // an incoming transition clip asks for one time, frame after frame.
     this.wedgedSeeks.set(
       video,
-      countWedgedSeek(this.wedgedSeeks.get(video) ?? 0, isWedgedSeek(video, seekFellBack), this.sourceName)
+      countWedgedSeek(this.wedgedSeeks.get(video) ?? 0, video, seekLanded, this.sourceName)
     );
     return video;
   }
