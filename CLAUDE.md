@@ -5184,6 +5184,36 @@ deadline). `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts`, `exportGIF.perf.
 pin are byte-identical — one timer per load, none per frame. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-324 (a Cues-less, Duration-less WebM — raw
+MediaRecorder output from another app — is remuxed with a seek index BEFORE the metadata probe: Firefox's
+end-seek is the very seek that wedges on such a file, so ESCSUITE-97's duration probe ran its 5 s deadline
+out, "Could not determine the duration of <name>", before ESCSUITE-305's repair ever ran; one
+`withSeekIndexFirst(file)` in `core/videoProcessor.ts` calls `withSeekIndex` exactly once and answers
+`{ bytes, file }` — the same object back for an indexed or non-WebM file — and `processVideoFile` and both
+arms of `processMediaFile` (the `audio/*` arm too, since `isWebmType` accepts `audio/webm`, and the
+no-picture fallback) run it ahead of any probe, so the metadata probe, the thumbnail, the waveform and
+`storeVideo` all see the repaired bytes and the remux happens at most once; `processAudioFile` is a wrapper
+over the new `finishAudioFile({ bytes, file })` so the stored value stays the remux `Blob`):
+99.85 / 99.46 / 96.87 / 99.78, byte-identical on every percentage to the 99.85 / 99.46 / 96.87 / 99.78 that
+its base measures in the same sitting — the base being the ESCSUITE-305 and ESCSUITE-325 branches over
+`main` at `60fd2bc1` (`wip/325-on-305`, `d542be30`), the tree this branch was cut from so it could start
+before those two landed; the next direct measurement of `main` corrects the table row. The base gives
+6,283 / 6,486 branches and this branch the same 6,283 / 6,486: **no new branch at all** — the one
+conditional the change adds, `withSeekIndexFirst`'s `bytes === file ? file : new File(…)`, replaces
+`finishVideoFile`'s own remux ternary one for one, and the `audio/*` arm swaps one call for another; lines
+9,845 / 9,859 → 9,848 / 9,862, statements 11,180 / 11,240 → 11,183 / 11,243 and functions 2,332 / 2,337 →
+2,334 / 2,339 (the two new functions are `withSeekIndexFirst` and `finishAudioFile`), every new unit
+covered, the same 14 / 60 / 203 / 5 uncovered. The new conditional is reached from its remux side by the
+three red cases (a Cues-less `video/webm` through `processVideoFile` and through `processMediaFile`, and a
+Cues-less `audio/webm` through `processMediaFile`, each red before the fix at `expected Error: Could not
+determine the duration o… to not be an instance of Error`) and from its same-object side by the indexed
+`video/webm`, the indexed `audio/webm`, the non-WebM video and the `audio/mpeg` cases, all in the new
+`videoProcessor.seekIndexFirst.test.ts` (8 cases; `videoProcessor.test.ts` is another queued PR's file and
+is untouched). The review's mutation — the no-picture fallback pointed back at the raw file — reds exactly
+the "stored as audio from the remuxed bytes" case. `webmSeekIndex.ts` is unchanged; every
+`*.perf.test.ts` and rerender pin is byte-identical — one remux decision per import, nothing per frame.
+**No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5191,7 +5221,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.82 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.46 | 96.87 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
