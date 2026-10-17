@@ -488,8 +488,8 @@ pnpm lint                # Run ESLint
   clamped against a timeline of negative length and a range inside the restored one dropped. The restore
   now calls `repairEditorBlockForProject(raw, project)` (`store/projectMigration.ts`), which runs the same
   `ensureTimelineHasTracks` pass over the same (ESCSUITE-307-filtered) project and clamps against its
-  clips — identical to reading the store after `setProject`, without needing the store (the existing
-  restore suite mocks `setProject`); the one cost is that the 304 repair's `console.warn` can print twice on
+  clips — identical to reading the store after `setProject`, without needing the store (`useSessionRestore.test.ts` mocks `setProject`; the new
+  file restores through the real one); the one cost is that the 304 repair's `console.warn` can print twice on
   such a restore. Markers are never clamped, so only the points carry the pin
   (`useSessionRestore.repairedClamp.test.ts`).
   The host's `LOAD_PROJECT` passes no block and the kit ignores it. `ExportDialog` still derives its
