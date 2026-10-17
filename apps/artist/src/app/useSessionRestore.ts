@@ -277,8 +277,9 @@ export function useSessionRestore({
     // catch is only so a rejection is logged rather than left unhandled.
     //
     // Only this tab's own slot (a reload) and the ownerless legacy row are
-    // deleted. Another tab's slot is left in storage and remembered as declined,
-    // so this tab does not offer it again (ESCSUITE-306): a free tab lock is not
+    // deleted. Another tab's slot is left in storage and the save declined is
+    // remembered, so this tab does not offer that save again — a newer one from
+    // the same tab it does (ESCSUITE-306): a free tab lock is not
     // proof that tab is gone — Chrome's Memory Saver discards a background tab,
     // freeing its lock while the tab keeps its sessionStorage and id, and it
     // reloads looking for its own slot. The 30-day prune is what removes a slot
@@ -303,7 +304,7 @@ export function useSessionRestore({
         }
         const owner = offered.slot.tabId;
         if (owner === null || owner === tabId) return clearSessionState(owner);
-        rememberDeclinedSlot(owner);
+        rememberDeclinedSlot({ tabId: owner, timestamp: offered.slot.session.timestamp });
       })
       .catch(console.error)
       .then(offered.release);

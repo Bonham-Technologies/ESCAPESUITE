@@ -9,10 +9,11 @@ interface SessionRestorePromptProps {
   /** Restore the session. Handed the same session back. */
   onRestore: (session: SessionState) => void;
   /**
-   * Start fresh. **Destructive** as a rule: `useSessionRestore`'s
-   * `handleDeclineSession` deletes the offered slot — unless its tab has come
-   * back (ESCSUITE-283) or the slot was saved again or removed since it was
-   * offered (ESCSUITE-289), in which case it deletes nothing.
+   * Start fresh. **Destructive** for this tab's own or the legacy session:
+   * `useSessionRestore`'s `handleDeclineSession` deletes that slot, and leaves
+   * another tab's (ESCSUITE-306) — and deletes nothing when the slot's tab has
+   * come back (ESCSUITE-283) or the slot was saved again or removed since it
+   * was offered (ESCSUITE-289).
    */
   onDecline: () => void;
 }
@@ -24,7 +25,8 @@ interface SessionRestorePromptProps {
  * handed. The other two overlays hand it their cancel — the shortcut sheet's
  * close, the project-load dialog's Cancel — because dismissing those costs
  * nothing. This prompt has no such answer: its two buttons *both* settle the
- * question, and one of them (`onDecline`) deletes the saved session. Escape is
+ * question, and one of them (`onDecline`) deletes this tab's own or the legacy
+ * session, and leaves another tab's (ESCSUITE-306). Escape is
  * the key people press to make a thing go away, so routing it to either button
  * would either discard work or silently accept it.
  *
