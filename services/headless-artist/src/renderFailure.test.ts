@@ -4,6 +4,7 @@ import {
   CodedRenderError,
   isPermanentFailure,
   OUTPUT_SIZE_UNSUPPORTED,
+  SOURCE_NOT_SEEKABLE,
   unwrapPageRender,
 } from './renderFailure'
 import type { RenderMeta, RenderOutcome } from './types'
@@ -59,6 +60,12 @@ describe('isPermanentFailure', () => {
   // mp4 job is the job's problem: render webm, or say `allowSilentMp4`.
   it('is true for a sounded mp4 refused for want of an AAC encoder', () => {
     expect(isPermanentFailure(failed({ code: 'AUDIO_CODEC_UNAVAILABLE' }))).toBe(true)
+  })
+
+  // ESCSUITE-305: a source whose seeks never complete in this browser fails the
+  // same way on every retry; the job has to re-save the source or use another engine.
+  it('is true for a source the browser cannot seek frame by frame', () => {
+    expect(isPermanentFailure(failed({ code: SOURCE_NOT_SEEKABLE }))).toBe(true)
   })
 
   it('is false for a code it does not know', () => {

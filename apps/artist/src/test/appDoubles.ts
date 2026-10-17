@@ -50,6 +50,9 @@ export function storageDouble() {
     listSessionStates: vi.fn(() => Promise.resolve([] as SessionSlot[])),
     clearSessionState: vi.fn((_tabId: string | null) => Promise.resolve()),
     getVideo: vi.fn(() => Promise.resolve(undefined)),
+    // The handoff rewrites a take's primary in place when it remuxes it with
+    // a seek index (ESCSUITE-305).
+    storeVideo: vi.fn((_id: string, _blob: Blob, _metadata: SourceVideo) => Promise.resolve()),
     // The handoff asks for the whole library when the take it was given has a
     // takeId — that is how it finds the take's other parts (ESCSUITE-14).
     getAllVideoMetadata: vi.fn(() => Promise.resolve([] as SourceVideo[])),

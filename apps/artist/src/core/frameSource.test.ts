@@ -8,6 +8,7 @@ import {
   type IFrameSource,
 } from './frameSource';
 import { elementSeekTarget } from './elementSeek';
+import { SourceNotSeekableError } from './seekWedge';
 
 // A mutable slot a test can fill in before calling factory.initialize(), so
 // the *next* MockVideoDecodeManager's initialize() rejects once (ESCSUITE-29
@@ -129,6 +130,8 @@ interface ScriptedVideoOptions {
   /** Never fire 'canplay' — models frame data that never becomes ready. */
   stallCanPlay?: boolean;
   readyState?: number;
+  /** What `seeking` reports — true with `stallSeek` is Firefox's seek wedge (ESCSUITE-305). */
+  seeking?: boolean;
 }
 
 class ScriptedVideoElement {
@@ -141,14 +144,16 @@ class ScriptedVideoElement {
   videoWidth = 1920;
   videoHeight = 1080;
   readyState: number;
+  seeking: boolean;
   /** Event names the code under test removed listeners for, in order. */
   readonly removedListeners: string[] = [];
-  private options: ScriptedVideoOptions;
+  options: ScriptedVideoOptions;
   private errorHandler: (() => void) | null = null;
 
   constructor(options: ScriptedVideoOptions = {}) {
     this.options = options;
     this.readyState = options.readyState ?? 4;
+    this.seeking = options.seeking ?? false;
   }
 
   set src(_value: string) {
@@ -393,6 +398,96 @@ describe('frameSource', () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    // ESCSUITE-305: Firefox's seek wedge on a Cues-less WebM. Every request sat
+    // out the 500 ms seek fallback and the 100 ms readiness fallback and was
+    // handed back an element with no frame in it — a black clip in the export.
+    describe('a seek that never completes', () => {
+      /** Firefox's wedge: no 'seeked', no 'canplay', `seeking` true, HAVE_METADATA. */
+      const wedged = () =>
+        new ScriptedVideoElement({ stallSeek: true, stallCanPlay: true, readyState: 1, seeking: true });
+
+      /** Ask for the frame at `time`, sitting out every fallback the request waits on. */
+      async function request(source: HTMLVideoFrameSource, time: number): Promise<unknown> {
+        const pending = source.getFrame(time).then(
+          (frame) => frame,
+          (error: unknown) => error
+        );
+        await vi.advanceTimersByTimeAsync(600);
+        return pending;
+      }
+
+      beforeEach(() => {
+        vi.useFakeTimers();
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it('fails by name on the third consecutive wedged seek', async () => {
+        const element = wedged();
+        const source = HTMLVideoFrameSource.fromElement(
+          'take-1',
+          element as unknown as HTMLVideoElement,
+          30,
+          'recording_2026-10-17.webm'
+        );
+
+        expect(await request(source, 1)).toBe(element);
+        expect(await request(source, 2)).toBe(element);
+        const thrown = await request(source, 3);
+
+        expect(thrown).toBeInstanceOf(SourceNotSeekableError);
+        expect(thrown).toMatchObject({
+          code: 'SOURCE_NOT_SEEKABLE',
+          message:
+            'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
+        });
+      });
+
+      it('names the source by its id when it was given no name', async () => {
+        const source = HTMLVideoFrameSource.fromElement('take-1', wedged() as unknown as HTMLVideoElement);
+
+        await request(source, 1);
+        await request(source, 2);
+
+        expect(await request(source, 3)).toMatchObject({ message: expect.stringContaining('"take-1"') });
+      });
+
+      it('starts the count again after a seek that completes', async () => {
+        const element = wedged();
+        const source = HTMLVideoFrameSource.fromElement('take-1', element as unknown as HTMLVideoElement);
+
+        await request(source, 1);
+        await request(source, 2);
+        // One seek lands: the element has its frame.
+        element.options = {};
+        element.seeking = false;
+        element.readyState = 4;
+        expect(await request(source, 3)).toBe(element);
+        element.options = { stallSeek: true, stallCanPlay: true };
+        element.seeking = true;
+        element.readyState = 1;
+
+        expect(await request(source, 4)).toBe(element);
+        expect(await request(source, 5)).toBe(element);
+      });
+
+      it('does not count a seek that runs slow but settles (`seeking` false)', async () => {
+        const element = new ScriptedVideoElement({ stallSeek: true, stallCanPlay: true, readyState: 1 });
+        const source = HTMLVideoFrameSource.fromElement('slow', element as unknown as HTMLVideoElement);
+
+        for (let t = 1; t <= 5; t++) expect(await request(source, t)).toBe(element);
+      });
+
+      it('does not count a seek still in flight over a frame it can already draw', async () => {
+        const element = new ScriptedVideoElement({ stallSeek: true, seeking: true });
+        const source = HTMLVideoFrameSource.fromElement('drawable', element as unknown as HTMLVideoElement);
+
+        for (let t = 1; t <= 5; t++) expect(await request(source, t)).toBe(element);
+      });
     });
 
     it('reports the element dimensions, falling back to 1080p and zero duration', () => {
@@ -774,6 +869,40 @@ describe('frameSource', () => {
       // load either, the clip is skipped (the frame request rejects, as the
       // oracle's would) and disposing the source does not throw — a finished
       // export must not turn into a failure at cleanup.
+      // ESCSUITE-305: the <video> a source was handed to is the last path there
+      // is. When its seeks wedge, the export fails by name — the handover must
+      // not swallow the refusal and serve a black clip.
+      it('lets a wedged <video> fail the export after a mid-export handover', async () => {
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        vi.useFakeTimers();
+        try {
+          const factory = await factoryWithWorker();
+          const pendingSource = factory.createSource('a', mp4(), 'video/mp4', undefined, vi.fn(), 30, 'take.webm');
+          await vi.advanceTimersByTimeAsync(0);
+          const source = await pendingSource;
+          managerOf(factory).getFrame.mockRejectedValue(new Error('Decoder stalled'));
+          videoFactory = () =>
+            new ScriptedVideoElement({ stallSeek: true, stallCanPlay: true, readyState: 1, seeking: true });
+
+          const outcomes: unknown[] = [];
+          for (let t = 1; t <= 3; t++) {
+            const pending = source.getFrame(t).then(
+              () => 'frame',
+              (error: unknown) => error
+            );
+            await vi.advanceTimersByTimeAsync(600);
+            outcomes.push(await pending);
+          }
+
+          expect(outcomes.slice(0, 2)).toEqual(['frame', 'frame']);
+          expect(outcomes[2]).toBeInstanceOf(SourceNotSeekableError);
+          expect(outcomes[2]).toMatchObject({ message: expect.stringContaining('"take.webm"') });
+        } finally {
+          vi.useRealTimers();
+          warn.mockRestore();
+        }
+      });
+
       it('disposes cleanly after a handover whose <video> never loaded', async () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const factory = await factoryWithWorker();
