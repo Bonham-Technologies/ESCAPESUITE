@@ -334,7 +334,7 @@ pnpm lint                # Run ESLint
   crossfade — seeks two elements, each counted on its own, and whichever wedges three times
   running fails the export by the source's name rather than leaving a black file.
 
-  **Load deadline** (ESCSUITE-325): `loadVideoElement(blob, name)` waits for `loadeddata` under the same 15 s `waitForVideoLoad` deadline as the MP4 path. A silent source rejects with `MediaLoadTimeoutError`, which `loadElementSources` handles like any failed load — the existing `Failed to load video <id>` warning (the message names the `SourceVideo.name`, or the id when the map lacks it), then the image fallback, then skipped — so a WebM or GIF export completes without the clip instead of hanging. A further slot's element (ESCSUITE-313, `loadVideoElementFromUrl(url, name)`) goes through the same deadline without revoking the URL its source's first element still reads, and a silent one is treated as any further element that will not load: warned about once, kept as `null`, its clip left out. One timer per load, none per frame. The MP4/WebM split is deliberate and now covers both failure modes (ESCSUITE-328): on the MP4 path every `<video>` fallback rejection, an `error` event as much as the deadline, ends the export with one `ExportError` naming the source ("Could not read <name> — the browser did not report its metadata within 15 s" for the silence, "... the browser could not decode it" for the `error`), the worker released through the ESCSUITE-314 release, and a failed `<video>` is no longer retried as an image (a source that is not an image never decoded as one, and the retry is what hid the failure). The element exporters keep the oracle's warn-and-skip rule for both outcomes until ESCSUITE-330 revisits what they report. `loadImageElement(blob, name)` shares the wait with `<video>` (`waitForMediaLoad`, one `METADATA_LOAD_TIMEOUT_MS`): an image that never settles is torn down at 15 s, failing the MP4 export by name and skipped with a warning in WebM and GIF.
+  **Load deadline** (ESCSUITE-325): `loadVideoElement(blob, name)` waits for `loadeddata` under the same 15 s `waitForVideoLoad` deadline as the MP4 path. A silent source rejects with `MediaLoadTimeoutError`, which `loadElementSources` handles like any failed load — the existing `Failed to load video <id>` warning (the message names the `SourceVideo.name`, or the id when the map lacks it), then the image fallback, then skipped — so a WebM or GIF export completes without the clip instead of hanging. A further slot's element (ESCSUITE-313, `loadVideoElementFromUrl(url, name)`) goes through the same deadline without revoking the URL its source's first element still reads, and a silent one is treated as any further element that will not load: warned about once, kept as `null`, its clip left out. One timer per load, none per frame. The MP4/WebM split is deliberate and now covers both failure modes (ESCSUITE-328): on the MP4 path every `<video>` fallback rejection, an `error` event as much as the deadline, ends the export with one `ExportError` naming the source ("Could not read <name> — the browser did not report its metadata within 15 s" for the silence, "... the browser could not decode it" for the `error`), the worker released through the ESCSUITE-314 release, and a failed `<video>` is no longer retried as an image (a source that is not an image never decoded as one, and the retry is what hid the failure). The element exporters keep the oracle's warn-and-skip rule for both outcomes; what ESCSUITE-330 changed is a source with *no bytes* at all, which refuses by name in all three exporters with `code: 'SOURCE_MISSING'` — at the `getVideoBlob` in the MP4 load loop, the 314 release freeing the worker — because a load failure has bytes to try and a missing source has none. `loadImageElement(blob, name)` shares the wait with `<video>` (`waitForMediaLoad`, one `METADATA_LOAD_TIMEOUT_MS`): an image that never settles is torn down at 15 s, failing the MP4 export by name and skipped with a warning in WebM and GIF.
 
   **Who owns the elements** (ESCSUITE-156): `loadElementSources` owns every element it has
   created until it returns, and the caller owns them from then on — a caller only ever
@@ -345,9 +345,16 @@ pnpm lint                # Run ESLint
   warn-and-skip rather than failing the whole export, which is what it used to do — one
   corrupt PNG in the library aborted the load and leaked every element ahead of it. An image
   load has the same 15 s deadline a `<video>` does (ESCSUITE-328): one that never settles is
-  torn down and skipped like any other failed image. The one
-  rejection still possible inside the loop, a failed storage read, releases what it has
-  loaded before rethrowing. On the caller's side the ownership starts at the load, which is
+  torn down and skipped like any other failed image. The two
+  rejections still possible inside the loop release what it has loaded before rethrowing: a
+  failed storage read, and — since ESCSUITE-330 — a source with **no bytes** in storage at all
+  (the row gone, or holding no blob: another tab's Clear All or Remove deleted them). That one
+  is not a load failure, where the bytes exist and the browser cannot read them; a byteless
+  source has nothing to try, used to be skipped without a word, and left its clip
+  drawn as nothing in an export that reported "Export complete!". It refuses by name with
+  `sourceMissingError` (`exportTypes.ts`, `code: 'SOURCE_MISSING'`, the sentence on the export's
+  own trail, which the loader is handed as its third argument), whatever the source's
+  `mediaType`; a source no clip uses is never read. On the caller's side the ownership starts at the load, which is
   why **both exporters' `try` begins there and not at the frame loop**: `output.start()`,
   either `configure()`, the caller's own `onProgress`, the rewind and the GIF writer all sit
   between the two, and a throw from any of them used to escape past the only
@@ -3390,7 +3397,13 @@ clips with it — every clip that referenced a cleared source — so each one's 
 so: Clear All's stays the fixed "including any clip that still uses it", but Remove's names the
 actual count (ESCSUITE-154) — `Remove this video?` alone when nothing on the timeline uses it,
 and otherwise `Remove this video? This will also remove N clip(s) that use(s) it.` with the
-singular/plural chosen correctly at N=1.
+singular/plural chosen correctly at N=1. Both confirms end with ESCSUITE-268's cross-tab sentence
+too (ESCSUITE-330) — Clear All's "Another open editor tab could still be using them." before
+"This cannot be undone.", Remove's "...could still be using it." — because the bytes are shared
+by every editor tab: a second tab holding the same take kept its clip, and its next WebM export
+drew nothing for it and reported "Export complete!" (ESCSUITE-311 O-U2). That export now refuses
+by name (`SOURCE_MISSING`, see `elementFrames.ts` above); the sentence is the warning before the
+bytes go.
 
 **An import is not an undo step either** (ESCSUITE-244) — the same fact as the clears, in reverse.
 `addSourceVideo` is called after the bytes are already in the shared `videos` store

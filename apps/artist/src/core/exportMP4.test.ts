@@ -706,11 +706,15 @@ describe('exportToMP4 rendering', () => {
     expect(media.images).toHaveLength(0)
   })
 
-  it('skips a source that is not in storage', async () => {
-    await run({
+  // ESCSUITE-330: a source with no bytes in storage used to be skipped here,
+  // and the export drew nothing for its clip and called it complete. It
+  // refuses by name now; export.sourceMissing.test.ts covers the refusal.
+  it('refuses a source that is not in storage, loading nothing', async () => {
+    const error = await run({
       clips: [makeClip({ sourceVideoId: 'gone', duration: CLIP_DURATION, endTime: CLIP_DURATION })],
-    })
+    }).catch((e: unknown) => e)
 
+    expect((error as ExportError).code).toBe('SOURCE_MISSING')
     expect(media.videos).toHaveLength(0)
   })
 

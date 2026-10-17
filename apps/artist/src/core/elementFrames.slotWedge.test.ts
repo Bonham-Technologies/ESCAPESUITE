@@ -95,7 +95,8 @@ async function composer() {
   const clips = zoomedPair()
   const sources = await loadElementSources(
     clips,
-    new Map([['v1', makeSourceVideo({ id: 'v1', name: SOURCE_NAME, duration: 20 })]])
+    new Map([['v1', makeSourceVideo({ id: 'v1', name: SOURCE_NAME, duration: 20 })]]),
+    []
   )
   const playbackState = rewindElementSources(sources)
   const canvas = document.createElement('canvas')
