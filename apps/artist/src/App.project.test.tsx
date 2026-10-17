@@ -11,6 +11,7 @@ import { sampleVideo, slotOf } from './test/appDoubles'
 import { addClip } from './test/fixtures/projectStore'
 import { loadProject, saveProject, showOpenProjectDialog } from './core/projectManager'
 import { clearSessionState, listSessionStates, type SessionState } from './core/storage'
+import { TAB_ID_KEY } from './app/tabId'
 import styles from './App.module.css'
 
 vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
@@ -429,9 +430,12 @@ describe('App project lifecycle', () => {
       expect(screen.getByText(/1 video\(s\), 0 clip\(s\) on timeline/)).toBeInTheDocument()
     })
 
+    // ESCSUITE-306: this tab's own slot (a reload) is thrown away; another
+    // tab's is left in storage. This case used the default other tab's slot.
     it('throws the session away when the user starts fresh', async () => {
       const user = userEvent.setup()
-      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession())])
+      sessionStorage.setItem(TAB_ID_KEY, 'reloaded-tab')
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession(), 'reloaded-tab')])
       await renderApp()
 
       await user.click(await screen.findByRole('button', { name: 'Start Fresh' }))

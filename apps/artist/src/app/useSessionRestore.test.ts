@@ -19,6 +19,7 @@ import {
 } from './useSessionRestore'
 import { holdTabLock, offerLockName } from './sessionLock'
 import { TAB_ID_KEY } from './tabId'
+import { __resetDeclinedSlotsForTests } from './declinedSlots'
 import {
   clearSessionState,
   getThumbnail,
@@ -87,6 +88,9 @@ afterEach(() => {
   vi.clearAllMocks()
   vi.restoreAllMocks()
   sessionStorage.clear()
+  // The declined list's same-document fallback (ESCSUITE-306) is module state:
+  // the throwing-sessionStorage case fills it, and it must not reach the next.
+  __resetDeclinedSlotsForTests()
 })
 
 describe('the startup session check', () => {
@@ -352,15 +356,22 @@ describe('one slot per tab (ESCSUITE-274)', () => {
     expect(clearSessionState).not.toHaveBeenCalled()
   })
 
-  it('declining deletes the slot it was offered', async () => {
-    vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ tabId: 'crashed' }), 'crashed')])
+  // ESCSUITE-306 changed this case: declining used to delete any slot it was
+  // offered. Another tab's slot is now left (that tab may only be discarded).
+  it('declining another tab\'s slot deletes nothing', async () => {
+    const crashed = savedSession({ tabId: 'crashed' })
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashed, 'crashed')])
     const { result } = mountRestore()
     await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
 
     act(() => result.current.handleDeclineSession())
 
-    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledTimes(1))
-    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed'))
+    await vi.waitFor(() =>
+      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toEqual([
+        { tabId: 'crashed', timestamp: crashed.timestamp },
+      ])
+    )
+    expect(clearSessionState).not.toHaveBeenCalled()
   })
 
   it('offers the row an older build shared between tabs, and deletes it when declined', async () => {
@@ -388,6 +399,141 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
     await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(null))
     expect(saveSessionState).toHaveBeenCalledWith({ ...legacy, tabId: THIS_TAB, timestamp: expect.any(Number) })
+  })
+
+  // ESCSUITE-306: a free tab lock does not mean the tab is gone for good. Chrome's
+  // Memory Saver (on by default) discards a background tab — its page, and so
+  // its lock, is gone — but the tab stays in the strip with its sessionStorage,
+  // id and all, and comes back for its own slot when it is clicked. Start Fresh
+  // in another tab therefore deletes only this tab's own slot or the ownerless
+  // legacy row; another tab's slot is left, and this tab does not offer it again.
+  describe('Start Fresh on another tab\'s slot leaves it in storage (ESCSUITE-306)', () => {
+    /** The `sessionStorage` key this tab's declined slots are kept under. */
+    const DECLINED_KEY = 'escapeartist-declined-slots'
+    const declinedHere = (): unknown => JSON.parse(sessionStorage.getItem(DECLINED_KEY) ?? 'null')
+
+    it('deletes nothing, lets go of the offer and remembers the slot as declined', async () => {
+      const discarded = savedSession({ tabId: 'discarded-a' })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(discarded, 'discarded-a')])
+      const { result } = mountRestore()
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+      await flushLocks()
+      expect(fake.isHeld(offerLockName('discarded-a'))).toBe(true)
+
+      act(() => result.current.handleDeclineSession())
+
+      expect(result.current.showSessionPrompt).toBe(false)
+      expect(result.current.sessionRestored).toBe(true)
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
+      expect(declinedHere()).toEqual([{ tabId: 'discarded-a', timestamp: discarded.timestamp }])
+      expect(deps.showNotification).not.toHaveBeenCalled()
+    })
+
+    it('still deletes this tab\'s own slot — a reload — when it is declined', async () => {
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(savedSession({ tabId: THIS_TAB }), THIS_TAB)])
+      const { result } = mountRestore()
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(THIS_TAB))
+      expect(clearSessionState).toHaveBeenCalledTimes(1)
+      expect(declinedHere()).toBeNull()
+    })
+
+    it('still deletes the row an older build shared between tabs when it is declined', async () => {
+      const legacy: Partial<SessionState> = { ...savedSession() }
+      delete legacy.tabId
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(legacy as SessionState, null)])
+      const { result } = mountRestore()
+      await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith(null))
+      expect(declinedHere()).toBeNull()
+    })
+
+    it('does not offer a declined slot to this tab again after a reload, and still offers another tab\'s', async () => {
+      const discarded = savedSession({ tabId: 'discarded-a', timestamp: Date.now() - 1_000 })
+      const closed = savedSession({ tabId: 'closed-b', timestamp: Date.now() - 60_000 })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(discarded, 'discarded-a'), slotOf(closed, 'closed-b')])
+      const first = mountRestore()
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+      expect(first.result.current.pendingSession).toBe(discarded)
+      act(() => first.result.current.handleDeclineSession())
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
+      first.unmount()
+
+      // A reload: the same tab, the same sessionStorage, both slots still there.
+      const reloaded = mountRestore()
+
+      await waitFor(() => expect(reloaded.result.current.showSessionPrompt).toBe(true))
+      expect(reloaded.result.current.pendingSession).toBe(closed)
+      expect(reloaded.result.current.tabId).toBe(THIS_TAB)
+    })
+
+    it('offers the slot again after a reload once its tab has saved newer work into it (fix round 1)', async () => {
+      const declined = savedSession({ tabId: 'discarded-a', timestamp: Date.now() - 60_000 })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(declined, 'discarded-a')])
+      const first = mountRestore()
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+      act(() => first.result.current.handleDeclineSession())
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
+      first.unmount()
+
+      // The discarded tab came back, saved newer work and was discarded again.
+      const newer = savedSession({ tabId: 'discarded-a', timestamp: Date.now() - 1_000 })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(newer, 'discarded-a')])
+      const reloaded = mountRestore()
+
+      await waitFor(() => expect(reloaded.result.current.showSessionPrompt).toBe(true))
+      expect(reloaded.result.current.pendingSession).toBe(newer)
+    })
+
+    it('a declined slot is still offered to another fresh tab, whose list does not name it', async () => {
+      const discarded = savedSession({ tabId: 'discarded-a' })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(discarded, 'discarded-a')])
+      const first = mountRestore()
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+      act(() => first.result.current.handleDeclineSession())
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-a'))).toBe(false))
+      first.unmount()
+
+      // Another tab: its own (empty) sessionStorage and its own id.
+      sessionStorage.clear()
+      sessionStorage.setItem(TAB_ID_KEY, 'another-fresh-tab')
+      const other = mountRestore()
+
+      await waitFor(() => expect(other.result.current.showSessionPrompt).toBe(true))
+      expect(other.result.current.pendingSession).toBe(discarded)
+    })
+
+    it('completes the decline when sessionStorage throws, and skips the slot for the rest of this document', async () => {
+      const discarded = savedSession({ tabId: 'discarded-no-storage' })
+      vi.mocked(listSessionStates).mockResolvedValue([slotOf(discarded, 'discarded-no-storage')])
+      vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+        throw new DOMException('sandboxed', 'SecurityError')
+      })
+      vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('sandboxed', 'SecurityError')
+      })
+      const first = mountRestore()
+      await waitFor(() => expect(first.result.current.showSessionPrompt).toBe(true))
+
+      act(() => first.result.current.handleDeclineSession())
+
+      expect(first.result.current.showSessionPrompt).toBe(false)
+      expect(first.result.current.sessionRestored).toBe(true)
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('discarded-no-storage'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
+      first.unmount()
+
+      const again = mountRestore()
+      await waitFor(() => expect(again.result.current.sessionRestored).toBe(true))
+      expect(again.result.current.showSessionPrompt).toBe(false)
+    })
   })
 
   // ESCSUITE-283: the tab a departed tab's slot is offered to holds that
@@ -497,38 +643,33 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       expect(clearSessionState).not.toHaveBeenCalled()
     })
 
-    it('declining releases the claim once the slot is deleted', async () => {
-      let deleted: () => void = () => {}
-      vi.mocked(clearSessionState).mockImplementationOnce(
-        () => new Promise<void>((resolve) => { deleted = resolve })
-      )
+    // ESCSUITE-306 changed these two cases: they declined a departed tab's
+    // slot and waited on its delete, and that slot is no longer deleted. The
+    // claim is still let go once the answer has settled.
+    it('declining releases the claim, deleting nothing', async () => {
       vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashedLate(), 'crashed-late')])
       const { result } = mountTab('fresh-1')
       await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
-
-      act(() => result.current.handleDeclineSession())
-      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed-late'))
       await flushLocks()
-      // Still held while the delete is out: no other tab is offered a row on
-      // its way out of storage.
       expect(fake.isHeld(offerLockName('crashed-late'))).toBe(true)
 
-      deleted()
-      await flushLocks()
-      expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false)
+      act(() => result.current.handleDeclineSession())
+
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
     })
 
-    it('declining releases the claim even when the delete fails', async () => {
+    it('declining releases the claim even when the re-read of the slot fails', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {})
-      vi.mocked(clearSessionState).mockRejectedValueOnce(new Error('blocked'))
       vi.mocked(listSessionStates).mockResolvedValue([slotOf(crashedLate(), 'crashed-late')])
       const { result } = mountTab('fresh-1')
       await waitFor(() => expect(result.current.showSessionPrompt).toBe(true))
+      vi.mocked(listSessionStates).mockRejectedValue(new Error('db closed'))
 
       act(() => result.current.handleDeclineSession())
 
-      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('crashed-late'))
       await vi.waitFor(() => expect(fake.isHeld(offerLockName('crashed-late'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
     })
 
     it('restoring releases the claim once the adoption has deleted the old row', async () => {
@@ -697,7 +838,8 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
     })
 
-    it('Start Fresh on the re-offered save deletes that save', async () => {
+    // ESCSUITE-306 changed this case: it used to delete the re-offered save.
+    it('Start Fresh on the re-offered save leaves it, like any other tab\'s slot', async () => {
       const older = offeredAt()
       const { result } = await offerTabA(older)
       await tabASavesAndCloses(savedLater())
@@ -707,9 +849,8 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
       act(() => result.current.handleDeclineSession())
 
-      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('tab-a'))
-      await flushLocks()
-      expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('tab-a'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
     })
 
     it('a Restore that read thumbnails for the stale save frees them', async () => {
@@ -794,12 +935,14 @@ describe('one slot per tab (ESCSUITE-274)', () => {
       expect(fake.isHeld(offerLockName('tab-a'))).toBe(false)
     })
 
-    it('a slot unchanged since the offer is answered as before: Start Fresh deletes it', async () => {
+    // ESCSUITE-306 changed this case: Start Fresh used to delete the slot.
+    it('a slot unchanged since the offer is answered as before: Start Fresh leaves it and says nothing', async () => {
       const { result } = await offerTabA(offeredAt())
 
       act(() => result.current.handleDeclineSession())
 
-      await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalledWith('tab-a'))
+      await vi.waitFor(() => expect(fake.isHeld(offerLockName('tab-a'))).toBe(false))
+      expect(clearSessionState).not.toHaveBeenCalled()
       expect(deps.showNotification).not.toHaveBeenCalled()
     })
 
@@ -839,8 +982,8 @@ describe('one slot per tab (ESCSUITE-274)', () => {
 
 describe('answering the prompt', () => {
   /** Mount with a session waiting, the way the prompt is reached in the app. */
-  const mountWithPendingSession = async (session: SessionState) => {
-    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
+  const mountWithPendingSession = async (session: SessionState, slotTabId: string | null = 'earlier-tab') => {
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session, slotTabId)])
     const view = mountRestore()
     await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
     return view
@@ -1010,7 +1153,13 @@ describe('answering the prompt', () => {
     // "Start Fresh" while the restore's reads are still in flight.
     act(() => result.current.handleDeclineSession())
 
-    await vi.waitFor(() => expect(clearSessionState).toHaveBeenCalled())
+    // The decline has settled: another tab's slot is remembered as declined
+    // rather than deleted (ESCSUITE-306; this case used to wait on the delete).
+    await vi.waitFor(() =>
+      expect(JSON.parse(sessionStorage.getItem('escapeartist-declined-slots') ?? '[]')).toEqual([
+        { tabId: 'earlier-tab', timestamp: session.timestamp },
+      ])
+    )
     expect(result.current.showSessionPrompt).toBe(false)
     expect(result.current.sessionRestored).toBe(true)
 
@@ -1024,7 +1173,7 @@ describe('answering the prompt', () => {
     expect(deps.setProject).not.toHaveBeenCalled()
     expect(deps.addSourceVideo).not.toHaveBeenCalled()
     expect(deps.showNotification).not.toHaveBeenCalled()
-    // Nor adopt the slot the decline already deleted.
+    // Nor adopt the slot the decline already answered.
     expect(saveSessionState).not.toHaveBeenCalled()
   })
 
@@ -1126,8 +1275,10 @@ describe('answering the prompt', () => {
     consoleError.mockRestore()
   })
 
+  // ESCSUITE-306: these two decline this tab's own slot (a reload); another
+  // tab's is no longer thrown away.
   it('declining throws the stored session away and writes nothing', async () => {
-    const { result } = await mountWithPendingSession(savedSession())
+    const { result } = await mountWithPendingSession(savedSession({ tabId: THIS_TAB }), THIS_TAB)
 
     act(() => result.current.handleDeclineSession())
 
@@ -1142,7 +1293,7 @@ describe('answering the prompt', () => {
   it('logs a throw-away that fails rather than leaving it unhandled', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     vi.mocked(clearSessionState).mockRejectedValueOnce(new Error('blocked'))
-    const { result } = await mountWithPendingSession(savedSession())
+    const { result } = await mountWithPendingSession(savedSession({ tabId: THIS_TAB }), THIS_TAB)
 
     act(() => result.current.handleDeclineSession())
 

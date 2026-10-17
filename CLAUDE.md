@@ -125,8 +125,9 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
   CRAFT's two modals and all five of ARTIST's (export, shortcut sheet, project-load, session
   restore, the resolution-change confirm). Escape's *meaning* is per dialog, not inherited: the
   hook calls whatever it is handed, and ARTIST's session-restore prompt hands it a no-op because
-  declining discards the
-  saved session. See each app's CLAUDE.md "Dialogs" note
+  declining discards this tab's own (or the legacy) saved session — another tab's is left where it is
+  since ESCSUITE-306, because the tab may only be discarded, not gone. See each app's CLAUDE.md
+  "Dialogs" note
 - **Shared error boundary**: `ErrorBoundary` (`packages/shared/src/components`), available as
   `@escapesuite/shared/components` for a host app, is the one React error boundary for all three
   apps. `bootstrapApp()` mounts it around `<App />` for CRAFT and ARTIST; ESCAPEPLAN, which
@@ -4861,6 +4862,47 @@ Chromium case (a sine WAV refused on an engine with no AAC, then rendered `audio
 and rerender pin is byte-identical — one header read per candidate source on the no-AAC path, nothing per
 frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-306 (Start Fresh on another tab's offered
+session slot no longer deletes it: a tab Chrome's Memory Saver has discarded — or a mobile browser has
+killed in the background — releases its Web Lock the way a closed tab does, but keeps its `sessionStorage`
+and its place in the tab strip, so it comes back with its own `tabId` and looks for its own slot; a new
+ESCAPEARTIST tab opened meanwhile (ESCAPECRAFT's "Send to Editor" opens one) was offered that slot and its
+Start Fresh deleted it, and the discarded tab reactivated empty. The decline now deletes only this tab's own
+slot (a reload) or the legacy ownerless row, leaves any other tab's slot in storage, releases the offer claim
+either way, and remembers the save it turned down — `{ tabId, timestamp }` in `sessionStorage` under
+`escapeartist-declined-slots`, one entry per tab, kept for the document alone where storage throws — so
+`findOfferableSlot` skips that save and offers the same tab's slot again only once it holds a newer save;
+this tab's own slot still comes first; a malformed stored entry is dropped on read; Restore of another tab's
+slot still adopts it): 99.85 / 99.44 / **96.78** / **99.78** against the 99.85 / 99.44 / 96.77 / 99.77 that
+`main` at `1924dfe6` (the ESCSUITE-297 merge; its artist source is `31fa9edc`'s) measures in the same
+sitting — branches and functions each up a hundredth, lines and statements unmoved. The base gives
+6,091 / 6,294 branches and this branch 6,108 / 6,311: seventeen new branches, seventeen covered, the same 203
+uncovered as before (lines 9,513 / 9,527 → 9,534 / 9,548, statements 10,785 / 10,845 → 10,810 / 10,870,
+functions 2,263 / 2,268 → 2,269 / 2,274, every denominator growing by exactly what the numerator did; the
+same 14 / 60 / 5 uncovered). The seventeen are `app/declinedSlots.ts`'s eight on arrival (8 / 8: the stored
+value a list or not, each operand of the entry-shape check — a string `tabId`, a number `timestamp` — the
+same-document fallback when `setItem` throws, and the one-entry-per-tab replacement), `app/sessionSlots.ts`'s
+five (20 → 25: the declined-save skip's tab-and-timestamp match, placed after the own-slot-first choice and
+before any probe or claim) and `app/useSessionRestore.ts`'s four (32 → 36: the own-or-legacy delete against
+the foreign slot left and remembered, each after the ESCSUITE-283 owner probe and the ESCSUITE-289 re-read
+that still run first) — each reached from both sides by the red cases (the headline, a foreign decline: `expected
+"vi.fn()" to not be called at all, but actually been called 1 times — ["discarded-a"]`; a re-saved slot
+offered again, in the slots helper and through the hook after a reload; the same save still skipped; another
+tab's entry hiding nothing; malformed entries dropped; a throwing storage still completing the decline) against
+the own-slot and legacy-row declines, which keep deleting, and the 283 / 289 cases, unchanged in meaning
+(three of them now decline the tab's own slot so they still exercise a delete). Two review rounds (opus, then a
+scoped sonnet) put the save-not-tab rule there: the first version keyed the list on the tab id alone, which
+would have hidden that tab's newer work from this tab for good, against ESCSUITE-289's principle that the user
+turned down a save, not a tab; the same round reloaded the module between tests so the three `toContain`
+relaxations the shared same-document set had forced went back to exact `toEqual`. Mutations: a decline that
+always deletes → the headline red; the skip ignoring the timestamp → both re-saved cases red. Outside vitest's
+measurement, `apps/e2e/tests/escapeartist/session-ownership.spec.ts` gains the simulated-discard case (tab A's
+page closed with its `sessionStorage` carried into a new page through `addInitScript`, which is what a
+reactivated discarded tab looks like to the app; a fresh tab B offered A's slot declines it and is not offered
+it again on reload; A's successor is offered its own session and restores it) — the headed `chrome://discards`
+form is a comment; its Chromium run is recorded on the ticket. `App.*rerender*` and every `*.perf.test.ts` are
+byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4868,7 +4910,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.44 | 96.78 | 99.77 |
+| `@escapesuite/artist` | 99.85 | 99.44 | 96.78 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 

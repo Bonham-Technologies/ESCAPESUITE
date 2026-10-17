@@ -423,18 +423,40 @@ describe('one session slot per tab (ESCSUITE-274)', () => {
     expect((await slotsByTab())['tab-a']).toEqual(newer)
   })
 
-  it('Start Fresh deletes the slot it was offered and nothing else', async () => {
+  // ESCSUITE-306 changed this case: Start Fresh used to delete the slot it was
+  // offered, whichever tab's it was. A tab whose lock is free may only have
+  // been discarded by the browser (Chrome's Memory Saver) and will come back
+  // for it, so another tab's slot is left — and not offered to this tab again.
+  it('Start Fresh on another tab\'s slot deletes nothing, and this tab is not offered it again', async () => {
+    const closed = storedSession('tab-a', 'Tab A', Date.now() - 120_000)
     const live = storedSession('tab-b', 'Tab B', Date.now() - 1_000)
-    await saveSessionState(storedSession('tab-a', 'Tab A', Date.now() - 120_000))
+    await saveSessionState(closed)
     await saveSessionState(live)
     await aliveTab('tab-b')
+
+    const { unmount } = await renderApp()
+    await flushStorage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Start Fresh' }))
+    await flushStorage()
+
+    expect(await slotsByTab()).toEqual({ 'tab-a': closed, 'tab-b': live })
+
+    // A reload of this tab: the same sessionStorage, both slots still there.
+    unmount()
+    await renderApp()
+    await flushStorage()
+    expect(screen.queryByText('Resume Previous Session?')).not.toBeInTheDocument()
+  })
+
+  it('Start Fresh on this tab\'s own slot — a reload — deletes it', async () => {
+    await saveSessionState(storedSession(THIS_TAB, 'Mine', Date.now() - 1_000))
 
     await renderApp()
     await flushStorage()
     fireEvent.click(await screen.findByRole('button', { name: 'Start Fresh' }))
     await flushStorage()
 
-    expect(await slotsByTab()).toEqual({ 'tab-b': live })
+    expect(await slotsByTab()).toEqual({})
   })
 
   it('New Project clears this tab\'s slot and no other', async () => {
