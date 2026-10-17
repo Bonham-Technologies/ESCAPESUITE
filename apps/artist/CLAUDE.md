@@ -5692,7 +5692,7 @@ what is already stored.
   every one with alpha, and 258 Opus packets identical; 45 ms for 2 MB). Only an inferred block
   *duration* can differ, at a Cluster's last block — the demuxer infers it from the next block.
 - **Where**: once, at import, never at export load (an export must not rewrite the shared
-  database). `processMediaFile`'s video arm (`finishVideoFile`) stores the repaired bytes, with
+  database). `finishVideoFile` stores the repaired bytes, with
   `metadata.size` set to their size, and makes its thumbnail from them, so the thumbnail seeks
   on Firefox too. The `?loadVideo=` handoff (`app/takeImport.ts`) repairs the take's **primary**
   and rewrites ESCAPECRAFT's own row **in place**, `storeVideo` under the same id with the same
@@ -5706,9 +5706,16 @@ what is already stored.
   original, with one `console.warn` naming the file. The import continues; on Firefox an export of
   that source then fails by name (`SOURCE_NOT_SEEKABLE`), and Chromium works as before. A record
   with no blob at all is kept as it came, not thrown on.
-- **Known gap (follow-up, ESCSUITE-324)**: the repair runs after `extractVideoMetadata`, so a WebM from outside
-  ESCAPECRAFT that is both headerless (no Duration) and Cues-less can still hit the 15 s
-  metadata deadline on Firefox before it is ever repaired.
+- **Order (ESCSUITE-324)**: the repair runs **before** the metadata probe, on both entry points
+  that reach it, `processVideoFile` and `processMediaFile` (the uploader, `?video=` and
+  `LOAD_VIDEO`), through one `withSeekIndexFirst`. A WebM from outside ESCAPECRAFT that has neither
+  a Duration nor Cues is exactly the file whose end-seek wedges on Firefox, so the probe used to
+  run its deadline out before the remux that would have made it seekable; now `extractVideoMetadata`,
+  the thumbnail, the waveform and `storeVideo` all see the repaired bytes, and the remux runs at
+  most once per import. An indexed WebM and every other type come back as the same object, so
+  nothing else changes. The old gap is closed. Pinned by
+  `videoProcessor.seekIndexFirst.test.ts` (a `<video>` double that wedges only while it holds the raw
+  file).
 
 ## Keyboard shortcuts (ESCSUITE-247)
 
