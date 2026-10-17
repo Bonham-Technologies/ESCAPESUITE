@@ -1185,6 +1185,56 @@ describe('an overlay clip whose start and end times are not 0 / duration is repa
     expect(warn).not.toHaveBeenCalled()
   })
 
+  // Review round 1. The second half of a split overlay trimmed in past its
+  // inherited startTime: both extendable trim arms wrote endTime = the dragged
+  // length, and trimClip then stored duration = endTime - startTime <= 0. That
+  // exact shape can only have come from that trim, so the dragged length is
+  // endTime, and the clip is repaired before the duration / trim-point
+  // refusals see it. Every other <= 0 shape is still refused.
+  it('repairs a trim that drove the length to or below 0 to the length the drag asked for', () => {
+    const project = parsed(projectWith([overlay('o1', 4, 2, -2), overlay('o2', 4, 4, 0)]))
+
+    expect(clip(project, 'o1')).toMatchObject({ startTime: 0, endTime: 2, duration: 2 })
+    expect(clip(project, 'o2')).toMatchObject({ startTime: 0, endTime: 4, duration: 4 })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 2 overlay clips to 0 and their duration')
+  })
+
+  it('counts a trim-driven repair and a positive-duration repair in the one warning', () => {
+    const project = parsed(projectWith([overlay('o1', 4, 2, -2), overlay('o2', 4, 9, 5)]))
+
+    expect(clip(project, 'o1')).toMatchObject({ startTime: 0, endTime: 2, duration: 2 })
+    expect(clip(project, 'o2')).toMatchObject({ startTime: 0, endTime: 5, duration: 5 })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 2 overlay clips to 0 and their duration')
+  })
+
+  it.each([
+    ['a media clip with the same numbers', media('m1', 4, 2, -2), 'invalid duration'],
+    ['an overlay a trim drove to endTime 0', overlay('o1', 4, 0, -4), 'invalid duration'],
+    ['an overlay with duration 0 and endTime 0', overlay('o1', 0, 0, 0), 'invalid duration'],
+    ['an overlay whose end is shorter than the shortest trim', overlay('o1', 4, 0.05, 0.05 - 4), 'invalid duration'],
+    ['an overlay whose duration is not its end minus its start', overlay('o1', 4, 2, -5), 'invalid duration'],
+    ['an overlay whose start is not a finite number', { ...overlay('o1', 4, 2, -2), startTime: Infinity, duration: -Infinity }, 'invalid duration'],
+    ['an overlay whose end is not a number', { ...overlay('o1', 4, 2, -2), endTime: '2' }, 'invalid duration'],
+  ])('still refuses %s', (_label, bad, reason) => {
+    const result = parseProject(projectWith([bad]))
+
+    expect(result.ok).toBe(false)
+    expect(result.ok ? '' : result.reason).toContain(reason)
+  })
+
+  it('repairs the same trim-driven shape in the app\'s own session, never leaving it at or below 0', () => {
+    resetStoreForTest()
+    const session = projectWith([overlay('o1', 4, 2, -2)]) as unknown as Project
+
+    store().setProject(session)
+
+    expect(store().project.timeline.clips[0]).toMatchObject({ startTime: 0, endTime: 2, duration: 2 })
+    expect(store().project.timeline.duration).toBe(2)
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
   it('says nothing and changes nothing when every overlay is already 0 / duration', () => {
     const input = projectWith([overlay('ok', 0, 5, 5), media('m1', 4, 9, 5)])
     const project = parsed(input)

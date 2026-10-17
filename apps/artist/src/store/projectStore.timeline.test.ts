@@ -969,6 +969,23 @@ describe('projectStore remaining behaviours', () => {
       expect(second).toMatchObject({ timelinePosition: 4, startTime: 0, endTime: 6, duration: 6 })
     })
 
+    // Review round 1: a stale pair (an overlay saved before the fix, never
+    // trimmed since) must come out 0 / duration on BOTH halves — the first
+    // half's pair is not the media pair either.
+    it('gives both halves of an overlay carrying a stale pair a 0 / duration pair', () => {
+      store().addClipToTimeline(
+        { id: 'ov', sourceVideoId: '', name: 'ov', overlayType: 'text', startTime: 4, endTime: 10, duration: 6 },
+        undefined,
+        0
+      )
+
+      store().splitClip('ov', 2)
+
+      const [first, second] = halves()
+      expect(first).toMatchObject({ timelinePosition: 0, startTime: 0, endTime: 2, duration: 2 })
+      expect(second).toMatchObject({ timelinePosition: 2, startTime: 0, endTime: 4, duration: 4 })
+    })
+
     it('starts a media clip\'s second half at the split point in its source, as before', () => {
       store().addClipToTimeline(
         { id: 'm', sourceVideoId: video.id, name: 'm', startTime: 2, endTime: 12, duration: 10 },
