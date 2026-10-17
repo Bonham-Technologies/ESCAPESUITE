@@ -9,8 +9,12 @@
 // count, per element, the consecutive seeks that end this way, and fail the
 // export by name at `WEDGED_SEEK_FRAMES`.
 //
-// A seek that completes — 'seeked' fired — or an element that has a frame to
-// draw (`readyState >= 2`) resets the count. An element still `seeking` with no
+// A request that starts over an element no longer seeking resets the count:
+// whatever earlier seek was outstanding has landed, however late — a healthy
+// element on a slow machine whose seeks land after the fallbacks but before the
+// next request is never refused (re-review round 1). After the request's waits,
+// a seek that completed — 'seeked' fired — or an element that has a frame to
+// draw (`readyState >= 2`) resets the count too. An element still `seeking` with no
 // frame adds one, whether this request issued the seek that wedged or found
 // the element still stuck on an earlier one: an incoming transition clip is
 // held at one time for many frames and seeks only on the first, and resetting
@@ -36,6 +40,14 @@ export class SourceNotSeekableError extends Error {
     );
     this.name = 'SourceNotSeekableError';
   }
+}
+
+/**
+ * The count a request starts from: unchanged while the element is still
+ * seeking, 0 once it is not — the seek that was outstanding has landed.
+ */
+export function wedgeCountAtStart(previous: number, video: HTMLVideoElement): number {
+  return video.seeking ? previous : 0;
 }
 
 /**

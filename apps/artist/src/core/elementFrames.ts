@@ -25,7 +25,7 @@ import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek } from './seekWedge';
+import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
 import {
   getActiveTransition,
   loadVideoElement,
@@ -338,11 +338,9 @@ export function createFrameComposer({
 
   /** Sync one element and count it against the wedge limit; throws by name at the limit. */
   const syncCounted = async (sourceId: string, video: HTMLVideoElement, sourceTime: number) => {
+    const atStart = wedgeCountAtStart(wedgedSeeks.get(video) ?? 0, video);
     const seekLanded = await syncVideoToTime(video, sourceTime, frameRate);
-    wedgedSeeks.set(
-      video,
-      countWedgedSeek(wedgedSeeks.get(video) ?? 0, video, seekLanded, sourceNames.get(sourceId)!)
-    );
+    wedgedSeeks.set(video, countWedgedSeek(atStart, video, seekLanded, sourceNames.get(sourceId)!));
   };
 
   /**

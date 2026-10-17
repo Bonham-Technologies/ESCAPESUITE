@@ -518,7 +518,7 @@ describe('frameSource', () => {
         addEventListener(event: string, handler: () => void) {
           if (event === 'seeked') this.listeners.add(handler);
         }
-        removeEventListener(event: string, handler: () => void) {
+        removeEventListener(_event: string, handler: () => void) {
           this.listeners.delete(handler);
         }
         pause() {}

@@ -13,7 +13,7 @@
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek } from './seekWedge';
+import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -320,14 +320,24 @@ export class HTMLVideoFrameSource implements IFrameSource {
     const currentTime = video.currentTime;
     const diff = timestamp - currentTime;
     let seekLanded = false;
+    // An earlier seek that has landed since — however late — starts the count
+    // again (ESCSUITE-305 re-review round 1).
+    const wedgedAtStart = wedgeCountAtStart(this.wedgedSeeks.get(video) ?? 0, video);
 
     // Only seek if necessary: a request within half a frame (at the source's own
-    // rate) of the current time is the frame already showing.
-    if (Math.abs(diff) > this.seekTolerance) {
-      video.pause();
-      // Just past the requested time: a request on a frame's exact start would
-      // otherwise show the frame before it a third of the time (ESCSUITE-265).
-      video.currentTime = elementSeekTarget(timestamp);
+    // rate) of the current time is the frame already showing. A request that
+    // needs no seek over an element still seeking from an earlier one gets the
+    // same waits a seek does before it is counted, so a seek that is only slow
+    // is not refused by the requests held at its time (an incoming transition
+    // clip, or the outgoing one fetched twice a frame).
+    const needsSeek = Math.abs(diff) > this.seekTolerance;
+    if (needsSeek || video.seeking) {
+      if (needsSeek) {
+        video.pause();
+        // Just past the requested time: a request on a frame's exact start would
+        // otherwise show the frame before it a third of the time (ESCSUITE-265).
+        video.currentTime = elementSeekTarget(timestamp);
+      }
 
       // Wait for seek to complete
       await new Promise<void>((resolve) => {
@@ -365,10 +375,7 @@ export class HTMLVideoFrameSource implements IFrameSource {
 
     // A request that seeks nothing still counts while an earlier seek is stuck:
     // an incoming transition clip asks for one time, frame after frame.
-    this.wedgedSeeks.set(
-      video,
-      countWedgedSeek(this.wedgedSeeks.get(video) ?? 0, video, seekLanded, this.sourceName)
-    );
+    this.wedgedSeeks.set(video, countWedgedSeek(wedgedAtStart, video, seekLanded, this.sourceName));
     return video;
   }
 
