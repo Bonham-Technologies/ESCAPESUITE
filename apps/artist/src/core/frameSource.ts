@@ -14,6 +14,7 @@ import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
 import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
+import { loadVideoElementFromUrl } from './exportTypes';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -187,34 +188,24 @@ export function seekToleranceFor(frameRate: number | undefined): number {
 /**
  * A muted, inline `<video>` over `url`, once its first frame has loaded.
  *
- * Rejects if the element will not load, without revoking `url` — the caller
- * owns it, and a source's further elements read the URL its first one still
- * holds (ESCSUITE-313). The handlers stay attached for the element's life;
- * `releaseSourceVideo` takes them off.
+ * Rejects if the element will not load — an `error`, or nothing at all within
+ * `waitForVideoLoad`'s 15 s deadline (ESCSUITE-325), which rejects with a
+ * `MediaLoadTimeoutError` — without revoking `url`: the caller owns it, and a
+ * source's further elements read the URL its first one still holds
+ * (ESCSUITE-313). `name` is what the deadline's message calls the source.
  */
-function loadSourceVideo(url: string): Promise<HTMLVideoElement> {
-  const video = document.createElement('video');
-  video.playsInline = true;
-  video.preload = 'auto';
-  video.crossOrigin = 'anonymous';
-  video.muted = true;
-
-  return new Promise<HTMLVideoElement>((resolve, reject) => {
-    video.onloadeddata = () => resolve(video);
-    video.onerror = () => reject(new Error('Failed to load video'));
-    video.src = url;
-  });
+function loadSourceVideo(url: string, name: string): Promise<HTMLVideoElement> {
+  return loadVideoElementFromUrl(url, name);
 }
 
 /** Pause a `<video>` from `loadSourceVideo`, take its handlers off and empty it. */
 function releaseSourceVideo(video: HTMLVideoElement): void {
   video.pause();
-  // Detach BEFORE emptying src. `loadSourceVideo` leaves onloadeddata and
-  // onerror attached for the element's whole life, and the platform answers an
-  // empty `src` with an `error` event — so leaving onerror attached here hands
-  // that event back to a handler that rejects a promise settled long ago. A
-  // no-op today, but the same shape in ESCAPECRAFT's thumbnailGenerator was an
-  // endless error -> cleanup -> error loop because its handler rewrote `src`
+  // Detach BEFORE emptying src. `waitForVideoLoad` takes its own handlers off
+  // when the load settles (ESCSUITE-325), but the platform answers an empty
+  // `src` with an `error` event, and a handler left on an element here would
+  // be handed it back. The same shape in ESCAPECRAFT's thumbnailGenerator was
+  // an endless error -> cleanup -> error loop because its handler rewrote `src`
   // (ESCSUITE-55). Nulling them is what keeps this site from being one edit
   // away from that.
   video.onloadeddata = null;
@@ -280,7 +271,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
 
     let video: HTMLVideoElement;
     try {
-      video = await loadSourceVideo(url);
+      // Source name: the id is all this factory is handed (ESCSUITE-325).
+      video = await loadSourceVideo(url, sourceId);
     } catch (error) {
       URL.revokeObjectURL(url);
       throw error;
@@ -381,12 +373,13 @@ export class HTMLVideoFrameSource implements IFrameSource {
 
   /**
    * Slot `slot`'s element (slot 1 onwards), making any missing up to it. One
-   * that will not load is warned about once and settles to `null` for good.
+   * that will not load — an `error`, or silence past the 15 s deadline
+   * (ESCSUITE-325) — is warned about once and settles to `null` for good.
    */
   private elementFor(slot: number): Promise<HTMLVideoElement | null> {
     while (this.extras.length < slot) {
       this.extras.push(
-        loadSourceVideo(this.video.src).catch(() => {
+        loadSourceVideo(this.video.src, this.sourceId).catch(() => {
           console.warn(
             `Could not load a second element for video ${this.sourceId}; the clip it was for is left out`
           );
