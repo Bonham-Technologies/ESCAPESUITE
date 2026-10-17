@@ -752,7 +752,9 @@ describe('loadElementSources with a <video> that never loads (ESCSUITE-316, 325)
     const clear = vi.spyOn(globalThis, 'clearTimeout')
     const sources = await load([makeSourceVideo({ id: 'v1' })], ['v1'])
     expect(sources.videoElements.size).toBe(0)
-    expect(clear).toHaveBeenCalledTimes(1)
+    // The video's deadline and, since ESCSUITE-328, the image fallback's own:
+    // each load clears its one timer when it settles.
+    expect(clear).toHaveBeenCalledTimes(2)
     clear.mockRestore()
   })
 

@@ -1167,7 +1167,7 @@ describe('loadVideoElement / loadImageElement', () => {
 
   it('resolves with an image element once it loads', async () => {
     media.script({ image: { naturalWidth: 120, naturalHeight: 80 } })
-    const img = await loadImageElement(new Blob(['i'], { type: 'image/png' }))
+    const img = await loadImageElement(new Blob(['i'], { type: 'image/png' }), 'logo.png')
     expect(img.naturalWidth).toBe(120)
     expect(img.naturalHeight).toBe(80)
   })
@@ -1175,7 +1175,7 @@ describe('loadVideoElement / loadImageElement', () => {
   it('rejects and revokes the object URL when the image fails to load', async () => {
     media.script({ image: { fail: true } })
     const revoke = vi.spyOn(URL, 'revokeObjectURL')
-    await expect(loadImageElement(new Blob(['i'], { type: 'image/png' }))).rejects.toThrow('Failed to load image')
+    await expect(loadImageElement(new Blob(['i'], { type: 'image/png' }), 'logo.png')).rejects.toThrow('Failed to load image')
     expect(revoke).toHaveBeenCalledWith(lastObjectUrl())
     revoke.mockRestore()
   })

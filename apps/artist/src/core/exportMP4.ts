@@ -332,10 +332,26 @@ export async function exportToMP4(
       const blob = await getVideoBlob(sourceId);
 
       if (blob) {
+        const mediaName = source?.name ?? sourceId;
+        // Every load failure fails the export by name (ESCSUITE-328): a source
+        // the browser neither decodes (`error`) nor reports on within the 15 s
+        // deadline (ESCSUITE-325) would otherwise be dropped from the file
+        // without a word. The element exporters still warn and skip.
+        const loadFailure = (e: unknown): ExportError => {
+          const message =
+            e instanceof MediaLoadTimeoutError
+              ? e.message
+              : `Could not read ${mediaName} \u2014 the browser could not decode it`;
+          log('error', message);
+          return new ExportError(message, exportLog);
+        };
         if (source?.mediaType === 'image') {
           // Load as image
-          const img = await loadImageElement(blob);
-          imageElements.set(sourceId, img);
+          try {
+            imageElements.set(sourceId, await loadImageElement(blob, mediaName));
+          } catch (e) {
+            throw loadFailure(e);
+          }
         } else if (source?.mediaType !== 'audio') {
           // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
           try {
@@ -349,24 +365,12 @@ export async function exportToMP4(
               source?.name
             );
           } catch (e) {
-            // A load the export's Cancel rejected is not a source to try as an
-            // image (ESCSUITE-314).
+            // A load the export's Cancel rejected is not a failure to name
+            // (ESCSUITE-314).
             checkAborted(signal);
-            // A source the browser neither decodes nor rejects fails the export
-            // by name (ESCSUITE-325): skipping it would drop the clip from the
-            // file without a word. Every other load failure is skipped below.
-            if (e instanceof MediaLoadTimeoutError) {
-              log('error', e.message);
-              throw new ExportError(e.message, exportLog);
-            }
-            console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
-            // Try loading as image as fallback
-            try {
-              const img = await loadImageElement(blob);
-              imageElements.set(sourceId, img);
-            } catch {
-              console.warn(`Failed to load media ${sourceId}`);
-            }
+            // A source that is not an image was never going to decode as one,
+            // so a failed `<video>` is not retried as an image any more.
+            throw loadFailure(e);
           }
         }
       }

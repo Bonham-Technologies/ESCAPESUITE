@@ -694,22 +694,16 @@ describe('exportToMP4 rendering', () => {
     expect(ctx().argsFor('drawImage')).toHaveLength(0)
   })
 
-  it('retries an unloadable video as an image', async () => {
+  // ESCSUITE-328: was "retries an unloadable video as an image" and "gives up
+  // on media that loads as neither" — a source that is not an image was never
+  // going to decode as one, and the retry hid the failure. The replacements
+  // are in exportMP4.fallbackFailure.test.ts.
+  it('fails an unloadable video by name instead of retrying it as an image (ESCSUITE-328)', async () => {
     media.script({ video: { fail: true } })
 
-    await run()
+    await expect(run()).rejects.toThrow('Could not read test.mp4 \u2014 the browser could not decode it')
 
-    expect(warns.mock.calls[0][0]).toBe('Failed to load video video1, trying as image:')
-    expect(ctx().argsFor('drawImage')[0][0]).toBe(media.images[0])
-  })
-
-  it('gives up on media that loads as neither video nor image', async () => {
-    media.script({ video: { fail: true }, image: { fail: true } })
-
-    await run()
-
-    expect(warns).toHaveBeenCalledWith('Failed to load media video1')
-    expect(ctx().argsFor('drawImage')).toHaveLength(0)
+    expect(media.images).toHaveLength(0)
   })
 
   it('skips a source that is not in storage', async () => {
@@ -1365,22 +1359,6 @@ describe('a <video> fallback source that never loads (ESCSUITE-316, 325)', () =>
     expect(outcome).toBe('resolved')
     set.mockRestore()
     clear.mockRestore()
-  })
-
-  it('still skips a source that errors at once, without arming a late rejection', async () => {
-    await storeSource('video1', 'video/webm')
-    media.script({ video: { fail: true } })
-    vi.useFakeTimers()
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    let outcome: string | undefined
-    void run().then(
-      () => (outcome = 'resolved'),
-      () => (outcome = 'rejected')
-    )
-    await vi.advanceTimersByTimeAsync(20_000)
-    expect(warn.mock.calls.some((c) => String(c[0]).startsWith('Failed to load video video1'))).toBe(true)
-    expect(outcome).not.toBe('rejected')
-    warn.mockRestore()
   })
 })
 
