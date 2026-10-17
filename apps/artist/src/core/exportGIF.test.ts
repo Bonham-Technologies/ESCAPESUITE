@@ -162,7 +162,7 @@ async function runWedged<T>(start: () => Promise<T>): Promise<unknown> {
 }
 
 const UNSEEKABLE_SENTENCE =
-  'This browser cannot read "take.webm" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.'
+  'This browser cannot read "take.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.'
 
 beforeEach(async () => {
   gifWriters.length = 0

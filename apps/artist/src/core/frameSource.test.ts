@@ -443,7 +443,7 @@ describe('frameSource', () => {
         expect(thrown).toMatchObject({
           code: 'SOURCE_NOT_SEEKABLE',
           message:
-            'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
+            'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
         });
       });
 
@@ -473,6 +473,20 @@ describe('frameSource', () => {
 
         expect(await request(source, 4)).toBe(element);
         expect(await request(source, 5)).toBe(element);
+      });
+
+      // Review round 1, MINOR 3: a request for the time the element was last
+      // seeked to issues no seek; if that seek never completed, the request
+      // still counts — an incoming transition clip held at one time used to
+      // reset the run on every frame and finish black.
+      it('fails by name when the same time is asked for again over a seek that never completed', async () => {
+        const element = wedged();
+        const source = HTMLVideoFrameSource.fromElement('held', element as unknown as HTMLVideoElement, 30, 'incoming.webm');
+
+        expect(await request(source, 1)).toBe(element);
+        expect(await request(source, 1)).toBe(element);
+
+        expect(await request(source, 1)).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: expect.stringContaining('"incoming.webm"') });
       });
 
       it('does not count a seek that runs slow but settles (`seeking` false)', async () => {

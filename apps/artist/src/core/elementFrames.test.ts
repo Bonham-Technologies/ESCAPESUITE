@@ -976,7 +976,7 @@ describe('createFrameComposer seek wedge', () => {
     expect(thrown).toMatchObject({
       code: 'SOURCE_NOT_SEEKABLE',
       message:
-        'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
+        'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
     })
     // Frame 0 was drawn; the two wedged frames before the throw were not.
     expect(ctx.argsFor('drawImage')).toHaveLength(1)
@@ -1005,6 +1005,30 @@ describe('createFrameComposer seek wedge', () => {
 
     // Frames 0 and 3 had a picture to draw.
     expect(ctx.argsFor('drawImage')).toHaveLength(2)
+  })
+
+  // Review round 1, MINOR 3: an incoming transition clip is held at its first
+  // frame until the outgoing clip ends, so after one seek its element is asked
+  // for the same time every frame and no further seek is issued. A seek that
+  // never completed is still outstanding on those frames: they count, rather
+  // than resetting the run and finishing black.
+  it('fails by name on a source held at one time whose one seek never completed', async () => {
+    await store('v1')
+    await store('v2')
+    const held = elementSeekTarget(0.25)
+    media.script({ video: { wedgeSeekAt: (t) => t === held } })
+    const clips = [
+      makeClip({ id: 'a', sourceVideoId: 'v1', duration: 1, endTime: 1, transition: { type: 'fade', duration: 0.5 } }),
+      makeClip({ id: 'b', sourceVideoId: 'v2', startTime: 0.25, duration: 1, endTime: 1.25, timelinePosition: 1 }),
+    ]
+    const { composeFrame } = await composerOver(
+      clips,
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2', name: 'incoming.webm' })])
+    )
+
+    await frame(composeFrame, 15) // the incoming clip's one seek, to 0.25: wedged
+    await frame(composeFrame, 16) // held at 0.25: no seek, still seeking
+    await expect(frame(composeFrame, 17)).rejects.toThrow('This browser cannot read "incoming.webm" frame by frame')
   })
 
   it('does not count a seek that runs slow but settles (`seeking` false)', async () => {
