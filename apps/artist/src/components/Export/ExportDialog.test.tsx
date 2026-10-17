@@ -1864,6 +1864,48 @@ describe('ExportDialog', () => {
       }
     })
 
+    // ESCSUITE-330 review: a clip whose source has no stored bytes fails every
+    // exporter the same way — the bytes are gone for all of them — so, like the
+    // unseekable source above, neither failure screen offers the other format.
+    const MISSING =
+      'The media for "Probe 311 take" is no longer in storage (it was removed in another window or by Clear All); remove the clip or re-import the file'
+
+    it('does not offer an MP4 retry when the WebM export refused a source with no stored bytes', async () => {
+      mockExportToWebM.mockRejectedValue(new ExportError(MISSING, [], undefined, undefined, 'SOURCE_MISSING'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        await settle()
+        fireEvent.click(primaryExport())
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`Export failed: ${MISSING}`))
+        expect(screen.queryByRole('button', { name: 'Try MP4 Instead' })).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
+    it('does not offer a WebM retry when the MP4 export refused a source with no stored bytes', async () => {
+      mockExportToMP4.mockRejectedValue(new ExportError(MISSING, [], undefined, undefined, 'SOURCE_MISSING'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(advancedToggle())
+        fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+        fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(MISSING))
+        expect(screen.queryByRole('button', { name: 'Try WebM Instead' })).not.toBeInTheDocument()
+        expect(screen.queryByText(/You can try exporting as WebM instead/)).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
     it('offers a WebM retry after an MP4 failure and logs the diagnostic trail', async () => {
       const log = [{ phase: 'encode', detail: 'encoder died', timestamp: 1 }]
       mockExportToMP4.mockRejectedValue(new ExportError('Encoder unavailable', log))
