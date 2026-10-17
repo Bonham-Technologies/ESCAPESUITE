@@ -82,6 +82,7 @@ beforeEach(() => {
   sessionStorage.setItem(TAB_ID_KEY, THIS_TAB)
   deps = {
     suppressRestore: false,
+    tabKey: null,
     setProject: vi.fn(),
     addSourceVideo: vi.fn(),
     seekTo: vi.fn(),

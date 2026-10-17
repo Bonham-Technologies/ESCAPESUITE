@@ -103,6 +103,7 @@ export const defaultUrlParams = () => ({
   suppressRestore: false,
   title: null as string | null,
   hostOrigin: null as string | null,
+  tabKey: null as string | null,
 })
 
 export function integrationDouble() {
