@@ -44,8 +44,11 @@ test('an audio-only take shows one centred glyph, paused and playing', async ({ 
   const placeholder = dialog.getByTestId('audio-placeholder')
   await expect(placeholder).toHaveAttribute('data-glyph', 'play')
   expect(await glyphs()).toEqual({ count: 1, overlapArea: 0 })
+  // The controls still carry the state for assistive tech: one glyph on the picture, the real button below it.
+  await expect(dialog.getByRole('button', { name: /^Play \(Space\)$/ })).toBeVisible()
 
   await placeholder.click()
   await expect(placeholder).toHaveAttribute('data-glyph', 'speaker')
   expect(await glyphs()).toEqual({ count: 1, overlapArea: 0 })
+  await expect(dialog.getByRole('button', { name: /^Pause \(Space\)$/ })).toBeVisible()
 })
