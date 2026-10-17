@@ -2034,7 +2034,7 @@ A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element,
 source has one element per live clip** (ESCSUITE-313). `usePreviewMedia` keeps each source's
 own element in `videoElementsRef` and, slot 1 onwards, `extraVideoElementsRef`: the k-th
 clip of a source live at the playhead (track order, then a transition's incoming side —
-`core/elementSlots.ts`, the same assignment `drawFrame.ts` draws by) uses that source's k-th
+`core/elementSlots.ts`; kept per clip while it stays live, below) uses that source's k-th
 element, made by `previewVideoForSlot` over the same URL the first time a scrub or playback
 needs it, kept while the source is used and emptied with it. Before, two live clips off one
 source — a picture-in-picture arrangement, the same clip duplicated on two tracks, a split
@@ -2046,9 +2046,53 @@ elements. During playback both elements play — and both sound, as the export's
 and a transition's incoming side, which has not started, is held paused on its first frame on
 its own element, positioned once when the transition begins (`holdIncoming`); a timeline with
 no transition on it skips that lookup on every frame, decided once per playback run. The crop
-chrome's dim pass (`PreviewPlayer`'s `cropElementFor`) resolves the cropped clip's slot at the
-drawn time the same way, so the second of two live clips of one source dims over its own
-moment. The lifetimes differ: the preview's further elements are kept for as long as the source
+chrome's dim pass (`PreviewPlayer`'s `cropElementFor`) reads the cropped clip's slot from the
+same assignment, so the second of two live clips of one source dims over its own moment.
+
+**In the preview a live clip keeps its element for as long as it stays live** (ESCSUITE-323).
+The exporters' rule (`assignElementSlots`) is stateless — slot k is the k-th live clip of the
+source in track order, worked out afresh every frame — and that is right for them: they seek
+every element every frame, so a slot that moves when a clip starts costs at most one extra seek
+on a path that seeks anyway. A preview element is a *playing* playhead, though, and two cases
+moved a clip that had not changed onto another element, which then had to seek — a visible
+stall: a picture-in-picture of one recording whose lower clip starts after the upper one (the
+lower clip is first in track order, took slot 0, the upper clip's playing element, and pushed
+the upper clip onto a second one), and a split clip crossfading into itself (at the cut the
+incoming side, held paused on its first frame on slot 1 by `holdIncoming`, became live, took
+slot 0 — the outgoing side's element — and seeked, so the hold was wasted). The preview
+therefore asks `createStickySlotAssigner()` (`core/elementSlots.ts`): a clip keeps the slot it
+was given for as long as each assignment names it — live at the playhead, or a side of the
+running transition, so the outgoing side keeps its element until the transition ends and a held
+incoming side keeps the one it was held on — and a newcomer takes the lowest slot of its source
+no remembered clip holds, so a first assignment agrees with the stateless rule exactly. Its
+state is a `Map` of clip id to source and slot, allocated only when a clip appears; `assign`
+otherwise clears and refills the caller's map. The render loop owns the one assigner and writes
+one shared map, `elementSlotsRef` (created by `PreviewPlayer` and passed to both): the paused
+scrub and readiness effects, the playback loop (when the set of live clips changes, and when
+`holdIncoming` first holds an incoming side — each naming the running transition) all assign
+into it, and the frame's draw (`PreviewFrameMedia.slots`) and the crop chrome read it, so all
+of them agree on which element a clip is. `drawPreviewFrame` holds no state: it draws by the
+`slots` it is handed, which are required. The assigner is reset only when the project
+(`project.id`) changes, before the effects assign again. It is deliberately **not** reset when
+the element set (`videoUrlsKey`) changes, nor when playback stops: a slot names an element by
+index — the source's own, or its k-th further one, made lazily by `previewVideoForSlot` —
+resolved afresh on every lookup, so a remembered slot can never bind an element that is gone (one
+that does not exist yet is skipped for that frame, as before); and every assignment forgets each
+clip it does not name, so a clip that left takes its slot with it. Re-packing on either would
+move a picture-in-picture's two clips onto each other's elements: paused, both would seek; playing,
+nothing re-seeks the live clips until the live set changes, so the next assignment — the
+crossfade hold, say — would swap the two clips in the map and the draw would show each from the
+other's playing element for the rest of the fade (the review round's finding, pinned). Pinned by
+`elementSlots.test.ts` (the frame sequence U → L,U → L → L,N gives U 0, L 1, L 1, N 0, and the
+transition's two sides), by `usePreviewRenderLoop.test.ts` ("keeps the upper clip on its playing
+element when a clip of its source starts below it", "keeps a split clip's crossfade incoming side
+on the element it was held on, past the cut", "seeks neither element of a paused
+picture-in-picture when the element set changes", "keeps a playing picture-in-picture's slots
+across an element-set change into a crossfade" and the project-change reset), and by
+`PreviewPlayer.slots.test.tsx` (the mounted preview draws, and the crop chrome dims, each clip
+from the element the loop's slots name).
+
+The lifetimes differ: the preview's further elements are kept for as long as the source
 is on the timeline, an export's until the export ends — neither frees one when its clips stop overlapping.
 
 **A paused frame repaints once when its video decodes its first frame** (ESCSUITE-264).

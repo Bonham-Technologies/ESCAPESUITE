@@ -62,6 +62,7 @@ function harness(sources: string[] = [video.id]): LoopHarness {
     drawMultiSelectHandles: vi.fn(),
     videoElementsRef,
     extraVideoElementsRef,
+    elementSlotsRef: { current: new Map<string, number>() },
     audioElementsRef,
     isPlayingRef,
     currentTimeRef,
@@ -1388,12 +1389,177 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     expect(second!.currentTime).toBe(5)
     expect(second!.play).not.toHaveBeenCalled()
     expect(primary.currentTime).toBeLessThan(2)
+  })
 
-    // Past the cut `b` is the only live clip, back on the source's own
-    // element, and the element that held its first frame is let go.
-    vi.mocked(second!.pause).mockClear()
+  // ESCSUITE-323: past the cut `b` plays on from the element its first frame
+  // was held on — it is not moved onto the source's own element (which would
+  // seek that element and waste the hold), and `a`'s element is let go.
+  it('keeps a split clip\'s crossfade incoming side on the element it was held on, past the cut', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 5, endTime: 7, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness()
+    const primary = deps.videoElementsRef.current.get(video.id)!
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+
+    play()
+    await settle(300)
+    const second = secondElement(deps)!
+    expect(second.currentTime).toBe(5)
+    const seeksBefore = doubles.media.seeks.length
+    vi.mocked(primary.pause).mockClear()
+    vi.mocked(second.pause).mockClear()
+
+    // Past the cut (2 s): `b` is the only live clip.
     await settle(500)
-    expect(second!.pause).toHaveBeenCalled()
+
+    expect(second.currentTime).toBe(5)
+    expect(second.play).toHaveBeenCalled()
+    expect(second.pause).not.toHaveBeenCalled()
+    expect(primary.currentTime).toBeLessThan(2)
+    expect(primary.pause).toHaveBeenCalled()
+    expect(doubles.media.seeks.length - seeksBefore).toBe(0)
+  })
+
+  // ESCSUITE-323: a picture-in-picture of one recording whose lower clip
+  // starts after the upper one. The lower clip is first in track order, and
+  // the stateless rule would hand it the upper clip's playing element.
+  it('keeps the upper clip on its playing element when a clip of its source starts below it', async () => {
+    addClip('l', 0.05, 4)
+    store().addClipToTimeline(
+      { id: 'u', sourceVideoId: video.id, name: 'u', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const { deps, seek, play } = harness()
+    const primary = deps.videoElementsRef.current.get(video.id)!
+    seek(0)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    expect(primary.currentTime).toBe(10)
+    expect(secondElement(deps)).toBeUndefined()
+
+    play()
+    // Past 0.05 s: `l` has started below `u`.
+    await settle(200)
+
+    // `u`'s element was never sought away from where it plays.
+    expect(primary.currentTime).toBe(10)
+    // `l` plays on a fresh further element, from its own source time (within
+    // a frame of its start at 0 s, so the new element needed no seek).
+    const second = secondElement(deps)!
+    expect(second).toBeDefined()
+    expect(second.currentTime).toBeLessThan(0.1)
+    expect(second.play).toHaveBeenCalled()
+  })
+
+  // ESCSUITE-323 review: the remembered slots outlive a change of the element
+  // set. A slot names an element by index, resolved afresh on every lookup,
+  // so it cannot bind a released element — and re-packing here would move a
+  // picture-in-picture's two clips onto each other's elements and seek both.
+  it('seeks neither element of a paused picture-in-picture when the element set changes', async () => {
+    addClip('l', 0.05, 4)
+    store().addClipToTimeline(
+      { id: 'u', sourceVideoId: video.id, name: 'u', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const { deps, seek } = harness()
+    const primary = deps.videoElementsRef.current.get(video.id)!
+    seek(0)
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+    // `u` alone at 0 holds the source's own element; at 1 `l` joins on the next.
+    seek(1)
+    await settle(1000)
+    expect(primary.currentTime).toBe(11)
+    const seeksBefore = doubles.media.seeks.length
+
+    rerender({ ...deps, videoUrlsKey: 'video1,video2' })
+    await settle(1000)
+
+    expect(doubles.media.seeks.length - seeksBefore).toBe(0)
+    expect(primary.currentTime).toBe(11)
+    expect(secondElement(deps)!.currentTime).toBeCloseTo(0.95)
+  })
+
+  // ESCSUITE-323 review: during playback nothing re-seeks the live clips after
+  // an element-set change, so a re-pack at the next assignment — the
+  // crossfade hold, with the live set unchanged — would swap the two
+  // picture-in-picture clips in the map the draw reads, each then drawn from
+  // the other's playing element for the rest of the fade.
+  it('keeps a playing picture-in-picture\'s slots across an element-set change into a crossfade', async () => {
+    // `l` (0.05-1.05, below) fades over its last half second into `c`, a later
+    // part of the same source on the same track; `u`, above, spans it all.
+    const l = addClip('l', 0.05, 1)
+    store().updateClip('l', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'c', sourceVideoId: video.id, name: 'c', startTime: 20, endTime: 22, duration: 2 },
+      l.trackId,
+      1.05
+    )
+    store().addClipToTimeline(
+      { id: 'u', sourceVideoId: video.id, name: 'u', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const { deps, seek, play } = harness()
+    seek(0)
+    const { rerender } = renderHook((props: PreviewRenderLoopDeps) => usePreviewRenderLoop(props), {
+      initialProps: deps,
+    })
+    await settle(1000)
+
+    play()
+    // Past 0.05 s, before the fade (0.55 s): `u` kept 0, `l` took 1.
+    await settle(200)
+    expect(Object.fromEntries(deps.elementSlotsRef.current)).toEqual({ u: 0, l: 1 })
+
+    rerender({ ...deps, videoUrlsKey: 'video1,video2' })
+    // Into the fade: `c` is held on the next free slot.
+    await settle(500)
+
+    expect(Object.fromEntries(deps.elementSlotsRef.current)).toEqual({ l: 1, u: 0, c: 2 })
+  })
+
+  // ESCSUITE-323: and when another project is put in place, even one that
+  // reuses the same clip ids.
+  it('assigns afresh when the project changes', async () => {
+    addClip('l', 0.05, 4)
+    store().addClipToTimeline(
+      { id: 'u', sourceVideoId: video.id, name: 'u', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const { deps, seek } = harness()
+    const primary = deps.videoElementsRef.current.get(video.id)!
+    seek(0)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    seek(1)
+    await settle(1000)
+    expect(primary.currentTime).toBe(11)
+
+    act(() => {
+      const { project } = store()
+      store().setProject({
+        ...project,
+        id: 'another-project',
+        timeline: { ...project.timeline, clips: project.timeline.clips.map((clip) => ({ ...clip })) },
+      })
+    })
+    await settle(1000)
+
+    expect(primary.currentTime).toBeCloseTo(0.95)
+    expect(secondElement(deps)!.currentTime).toBe(11)
   })
 
   it('leaves a transition\'s incoming side alone when it is already playing on another track', async () => {

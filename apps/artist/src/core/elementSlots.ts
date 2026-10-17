@@ -13,8 +13,21 @@
 // had, so a source with one live clip costs exactly what it did. Slot k > 0 is
 // a k-th element over the same object URL, made the first time a frame needs it
 // and kept, so a transition does not create and tear one down every frame. The
-// export composer, the in-page MP4 source, the preview's seeks and its draw all
-// ask this one function, so they cannot disagree about which element a clip is.
+// export composer and the in-page MP4 source ask `assignElementSlots`, so they
+// cannot disagree about which element a clip is.
+//
+// The preview asks `createStickySlotAssigner` instead (ESCSUITE-323), because
+// its elements are playing playheads rather than frames seeked one at a time.
+// The stateless rule re-packs a source's slots by track order every frame, so
+// a clip of the source starting *below* a playing one took the playing one's
+// element and pushed it onto another, which then had to seek — a stall on a
+// clip that had not changed — and a split clip crossfading into itself lost,
+// at the cut, the element its first frame had been held on. The sticky rule
+// keeps a clip on the slot it had for as long as it stays live (or a side of
+// the running transition), and gives a newcomer the lowest slot of its source
+// no live clip holds. The exports keep the stateless rule: they seek every
+// element every frame anyway, so a slot that moves when a clip starts costs
+// them at most one extra seek, and a stateless answer cannot go stale.
 import type { Clip } from '../store/types';
 
 /** The two sides of a running transition — all the assignment reads of one. */
@@ -81,4 +94,100 @@ export function videoForSlot(
 ): HTMLVideoElement | undefined {
   if (slot === 0) return videos.get(sourceId);
   return extras?.get(sourceId)?.[slot - 1] ?? undefined;
+}
+
+/**
+ * The preview's slot assignment (ESCSUITE-323): `assign` answers the same
+ * question as {@link assignElementSlots}, over the same arguments, but
+ * remembers its answers. A clip keeps the slot it was given for as long as each
+ * call names it — live, or a side of the running transition — and a clip a
+ * call does not name is forgotten, its slot free again. A clip seen for the
+ * first time takes the lowest slot of its source that no remembered clip
+ * holds, in the order the call names them, so the first call after a reset
+ * agrees with the stateless rule exactly.
+ */
+export interface StickySlotAssigner {
+  assign(
+    activeClips: Iterable<{ clip: Clip }>,
+    transition: SlotTransition | null,
+    out: Map<string, number>
+  ): void;
+  /** Forget every clip: the next call assigns afresh. */
+  reset(): void;
+}
+
+/** A remembered clip: the source it plays and the slot it holds. */
+interface HeldSlot {
+  source: string;
+  slot: number;
+}
+
+/**
+ * A fresh {@link StickySlotAssigner}. Its state is the closure's own, so two
+ * previews (or two tests) never share one.
+ *
+ * `assign` runs on every paused scrub and whenever playback's set of live
+ * clips changes, so it allocates only when a clip appears: `out` is the
+ * caller's map, cleared and refilled, and the set of clips the call names is
+ * scratch kept with the state.
+ */
+export function createStickySlotAssigner(): StickySlotAssigner {
+  const held = new Map<string, HeldSlot>();
+  const named = new Set<string>();
+
+  const forgetIfUnnamed = (_: HeldSlot, clipId: string) => {
+    if (!named.has(clipId)) held.delete(clipId);
+  };
+
+  /** The lowest slot of `source` no remembered clip holds. */
+  const lowestFree = (source: string): number => {
+    for (let slot = 0; ; slot += 1) {
+      let taken = false;
+      for (const entry of held.values()) {
+        if (entry.source === source && entry.slot === slot) {
+          taken = true;
+          break;
+        }
+      }
+      if (!taken) return slot;
+    }
+  };
+
+  const place = (clip: Clip, out: Map<string, number>) => {
+    // Assumes a clip's `sourceVideoId` never changes while it is remembered —
+    // no editor action re-points a clip at another source — so a held entry's
+    // `source` is not checked against it again.
+    let entry = held.get(clip.id);
+    if (!entry) {
+      entry = { source: clip.sourceVideoId, slot: lowestFree(clip.sourceVideoId) };
+      held.set(clip.id, entry);
+    }
+    out.set(clip.id, entry.slot);
+  };
+
+  return {
+    assign(activeClips, transition, out) {
+      out.clear();
+      named.clear();
+      for (const { clip } of activeClips) {
+        if (!clip.overlayType) named.add(clip.id);
+      }
+      if (transition) {
+        named.add(transition.outgoingClip.id);
+        named.add(transition.incomingClip.id);
+      }
+      // Free the slots of clips that have left before handing any out.
+      held.forEach(forgetIfUnnamed);
+      for (const { clip } of activeClips) {
+        if (!clip.overlayType) place(clip, out);
+      }
+      if (transition) {
+        place(transition.outgoingClip, out);
+        place(transition.incomingClip, out);
+      }
+    },
+    reset() {
+      held.clear();
+    },
+  };
 }

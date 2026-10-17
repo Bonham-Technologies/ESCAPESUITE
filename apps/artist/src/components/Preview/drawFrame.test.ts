@@ -7,6 +7,23 @@ import { createRecordingContext, type RecordingCanvasRenderingContext2D } from '
 import { makeClip, makeTrack } from '../../test/fixtures/clipFixtures'
 import { DEFAULT_TEXT_OVERLAY_DATA } from '../../store/types'
 import { captionStyleFor } from '../../core/captions'
+import { assignElementSlots } from '../../core/elementSlots'
+import { getClipsAtTime } from '../../store/projectStore'
+import { getActiveTransition } from './transitions'
+
+/**
+ * Each live clip's slot at `time`, as the render loop would hand them to the
+ * frame on a first assignment — which the stateless rule gives exactly.
+ */
+function slotsAt(time: number, scene: PreviewFrameScene): Map<string, number> {
+  const slots = new Map<string, number>()
+  assignElementSlots(
+    getClipsAtTime(scene.clips, scene.tracks, time),
+    getActiveTransition(scene.clips, scene.tracks, time),
+    slots
+  )
+  return slots
+}
 
 /** One frame at `time`, onto a fresh 640x360 recording context; the texts it drew. */
 function textsDrawnAt(time: number, scene: PreviewFrameScene): string[] {
@@ -18,7 +35,7 @@ function textsDrawnAt(time: number, scene: PreviewFrameScene): string[] {
     ctx.canvas,
     time,
     scene,
-    { videoElements: new Map(), imageElements: new Map(), blurScratch: { current: null } }
+    { videoElements: new Map(), slots: slotsAt(time, scene), imageElements: new Map(), blurScratch: { current: null } }
   )
   return ctx.argsFor('fillText').map((args) => args[0] as string)
 }
@@ -69,7 +86,8 @@ describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
     time: number,
     scene: PreviewFrameScene,
     videoElements: Map<string, HTMLVideoElement>,
-    extraVideoElements?: Map<string, HTMLVideoElement[]>
+    extraVideoElements?: Map<string, HTMLVideoElement[]>,
+    slots?: Map<string, number>
   ): unknown[] {
     const ctx: RecordingCanvasRenderingContext2D = createRecordingContext()
     ctx.canvas.width = 640
@@ -77,6 +95,7 @@ describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
     drawPreviewFrame(ctx as unknown as CanvasRenderingContext2D, ctx.canvas, time, scene, {
       videoElements,
       extraVideoElements,
+      slots: slots ?? slotsAt(time, scene),
       imageElements: new Map(),
       blurScratch: { current: null },
     })
@@ -101,6 +120,20 @@ describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
     expect(drawnFrom(1, zoomedScene, new Map([['v1', first]]), new Map([['v1', [second]]]))).toEqual([
       first,
       second,
+    ])
+  })
+
+  // ESCSUITE-323: the render loop's own assignment, when it hands one in, is
+  // the one the frame draws by — here the upper clip kept the source's own
+  // element while the lower one started on the second.
+  it('draws each clip from the element the slots it is handed name', () => {
+    const first = fakeVideo(0)
+    const second = fakeVideo(1)
+    const slots = new Map([['A', 1], ['B', 0]])
+
+    expect(drawnFrom(1, zoomedScene, new Map([['v1', first]]), new Map([['v1', [second]]]), slots)).toEqual([
+      second,
+      first,
     ])
   })
 
