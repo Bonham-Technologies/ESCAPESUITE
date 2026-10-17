@@ -308,7 +308,10 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `blob:` (ESCSUITE-299): ESCAPECRAFT loads its AudioWorklet audio-capture module from a `blob:`
   URL, a worklet module is fetched under `script-src`, and without it every hosted take would
   quietly fall back to the ScriptProcessorNode capture. It admits nothing an injected script could
-  not already do under the policy's `'unsafe-inline'`. Pinned by
+  not already do under the policy's `'unsafe-inline'`. The offline single-file build has no policy
+  and no origin: opened from `file://`, its module URL is `blob:null/…`, which Chromium's worklet
+  loader refuses, so the capture retries the same module as a `data:text/javascript` URL and only
+  then falls back (ESCSUITE-317; `blob:` stays first so the hosted policy never has to admit `data:`). Pinned by
   `apps/e2e/tests/production/csp-audio-worklet.spec.ts` (under the served policy, and its inverse)
   and by `serve-dist.test.mjs`'s drift guard; a self-hosted build that sends its own policy needs
   the same.
