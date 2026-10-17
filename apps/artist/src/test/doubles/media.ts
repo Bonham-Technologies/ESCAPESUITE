@@ -107,6 +107,8 @@ export interface ImageScript {
   naturalWidth: number
   naturalHeight: number
   fail: boolean
+  /** Fire nothing at all when src is set — an image the browser neither decodes nor rejects (ESCSUITE-328). */
+  silent?: boolean
 }
 
 export interface AudioScript extends SeekScript {
@@ -330,6 +332,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'naturalWidth', s.naturalWidth)
     own(el, 'naturalHeight', s.naturalHeight)
     defineSrc(el, () => {
+      if (s.silent) return
       el.dispatchEvent(new Event(s.fail ? 'error' : 'load'))
     })
     images.push(el)
