@@ -5141,8 +5141,12 @@ never above what the suite actually achieves:
   ladder and the AAC probe ahead of mixing the audio and loading the media, so a refusal costs
   nothing). See `apps/artist/CLAUDE.md`'s
   "Export Dialog Browser Support"
-- MediaRecorder produces WebM without proper seek metadata (requires post-processing — guarded
-  end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline; composited PiP takes,
+- MediaRecorder produces WebM without proper seek metadata (requires post-processing: `webm-duration-fix`
+  for the Duration, then — since ESCSUITE-322 — `apps/craft/src/core/webmCues.ts` for a Cues index of every
+  video keyframe, because the library cues SimpleBlocks only and Chrome writes a composited-PiP take's
+  alpha-VP9 frames as BlockGroups, leaving a 0-byte Cues that Firefox's seek wedges on; guarded
+  end to end by `apps/e2e`'s `pip-seekable` specs, one per build pipeline, which read the stored take's
+  Cues back; composited PiP takes,
   audio-only takes and any browser without WebCodecs all reach that path, but a composited PiP
   take is the only one the specs can drive in headless Chromium. A separate-tracks PiP take is
   recorded by `WebCodecsRecorder` and needs no repair)
