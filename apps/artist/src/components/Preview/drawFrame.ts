@@ -57,15 +57,20 @@ function drawOptionsFor(filterScale: number): MediaDrawOptions {
 }
 
 /**
- * Each live clip's slot this frame (ESCSUITE-313) — one map for the module,
- * refilled by every `drawPreviewFrame`, which is synchronous, so a composite
- * allocates nothing for it.
+ * Each live clip's slot this frame (ESCSUITE-313), for a caller that hands in
+ * none (`PreviewFrameMedia.slots`) — one map for the module, refilled by every
+ * such `drawPreviewFrame`, which is synchronous, so a composite allocates
+ * nothing for it.
  */
 const frameSlots = new Map<string, number>();
 
 /** The `<video>` a live clip draws from this frame: its source's element for its slot. */
-function videoFor(media: PreviewFrameMedia, clip: Clip): HTMLVideoElement | undefined {
-  return videoForSlot(media.videoElements, media.extraVideoElements, clip.sourceVideoId, frameSlots.get(clip.id)!);
+function videoFor(
+  media: PreviewFrameMedia,
+  slots: ReadonlyMap<string, number>,
+  clip: Clip
+): HTMLVideoElement | undefined {
+  return videoForSlot(media.videoElements, media.extraVideoElements, clip.sourceVideoId, slots.get(clip.id)!);
 }
 
 /** Everything on the timeline that a preview frame is drawn from. */
@@ -97,6 +102,14 @@ export interface PreviewFrameMedia {
    * exist yet is not drawn this frame. Absent is the same as none.
    */
   extraVideoElements?: ReadonlyMap<string, readonly HTMLVideoElement[]>;
+  /**
+   * Each live clip's slot at this frame's time — the preview's render loop
+   * decides it, stickily (ESCSUITE-323), before it seeks, plays or paints, and
+   * this reads it, so a clip is drawn from the element the loop moved for it.
+   * Absent, the frame works the slots out itself with the stateless rule
+   * (`assignElementSlots`), which agrees with the loop's on any first frame.
+   */
+  slots?: ReadonlyMap<string, number>;
   imageElements: Map<string, HTMLImageElement>;
   /**
    * Holds the one scratch canvas a blur shape captures the frame so far into.
@@ -313,10 +326,15 @@ export function drawPreviewFrame(
   // Get active clips at this time
   const activeClips = getClipsAtTime(clips, tracks, time);
 
-  // Which of its source's elements each live clip draws from — the same
-  // assignment, from the same track-ordered list, the render loop seeks by
-  // (ESCSUITE-313, `core/elementSlots.ts`).
-  assignElementSlots(activeClips, activeTransition, frameSlots);
+  // Which of its source's elements each live clip draws from — the render
+  // loop's own assignment when it hands one in (ESCSUITE-323), else the same
+  // rule worked out here from the same track-ordered list (ESCSUITE-313,
+  // `core/elementSlots.ts`).
+  let slots = media.slots;
+  if (!slots) {
+    assignElementSlots(activeClips, activeTransition, frameSlots);
+    slots = frameSlots;
+  }
 
   // Sort ALL clips by track index (lower = bottom, rendered first)
   // This ensures proper z-ordering: blur overlays only affect content below them
@@ -339,7 +357,7 @@ export function drawPreviewFrame(
         continue;
       }
       // Draw clip normally
-      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, videoFor(media, clip), options);
+      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, videoFor(media, slots, clip), options);
     }
   }
 
@@ -347,8 +365,8 @@ export function drawPreviewFrame(
   if (activeTransition) {
     drawTransition(
       ctx,
-      videoFor(media, activeTransition.outgoingClip),
-      videoFor(media, activeTransition.incomingClip),
+      videoFor(media, slots, activeTransition.outgoingClip),
+      videoFor(media, slots, activeTransition.incomingClip),
       media.imageElements,
       activeTransition,
       time,

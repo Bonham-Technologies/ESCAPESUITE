@@ -13,7 +13,7 @@ import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { getActiveTransition } from './transitions';
 import * as cropOverlay from './cropOverlay';
-import { assignElementSlots, videoForSlot } from '../../core/elementSlots';
+import { videoForSlot } from '../../core/elementSlots';
 import { CropHandles } from './CropHandles';
 import { isTrackLocked } from '../../store/trackLock';
 import { usePreviewMedia } from './usePreviewMedia';
@@ -163,28 +163,30 @@ export function PreviewPlayer() {
    * `drawCropOverlay` take its veil fallback for exactly the window the spec
    * names.
    *
-   * A video is the element the CROPPED CLIP draws from at `time` — its
-   * source's element for its slot (ESCSUITE-313) — so the second of two live
-   * clips of one source dims over its own moment, not the first clip's. The
-   * slots are worked out the way the frame works them out; this runs only
-   * while paused in crop mode. The cropped clip is on screen at `time`
+   * A video is the element the CROPPED CLIP draws from — its source's
+   * element for its slot (ESCSUITE-313) — so the second of two live clips of
+   * one source dims over its own moment, not the first clip's. The slot is the
+   * render loop's, the one the frame was just drawn by (`elementSlotsRef`,
+   * ESCSUITE-323); this runs only while paused in crop mode, after the loop's
+   * paused effects assigned the playhead. The cropped clip is on screen there
    * (`visibleCropTarget`), so it has a slot.
    */
-  const cropSlotsRef = useRef(new Map<string, number>());
+  // Each live clip's slot — which of its source's elements it is. The render
+  // loop writes it (ESCSUITE-323) and everything that draws a clip's element
+  // reads it: the frame below and the crop chrome above.
+  const elementSlotsRef = useRef(new Map<string, number>());
   const cropElementFor = useCallback(
-    ({ clip, source }: cropOverlay.CropTarget, time: number): CanvasImageSource | undefined => {
+    ({ clip, source }: cropOverlay.CropTarget): CanvasImageSource | undefined => {
       if (source.mediaType === 'image') {
         const img = imageElementsRef.current.get(source.id);
         return isDrawableImage(img) ? img : undefined;
       }
-      const slots = cropSlotsRef.current;
-      assignElementSlots(getClipsAtTime(clips, tracks, time), getActiveTransition(clips, tracks, time), slots);
       const video = videoForSlot(
-        videoElementsRef.current, extraVideoElementsRef.current, source.id, slots.get(clip.id)!
+        videoElementsRef.current, extraVideoElementsRef.current, source.id, elementSlotsRef.current.get(clip.id)!
       );
       return isDrawableVideo(video) ? video : undefined;
     },
-    [clips, tracks, imageElementsRef, videoElementsRef, extraVideoElementsRef]
+    [imageElementsRef, videoElementsRef, extraVideoElementsRef]
   );
 
   // Draw a single frame to canvas
@@ -240,6 +242,7 @@ export function PreviewPlayer() {
       {
         videoElements: videoElementsRef.current,
         extraVideoElements: extraVideoElementsRef.current,
+        slots: elementSlotsRef.current,
         imageElements: imageElementsRef.current,
         blurScratch: blurCanvasRef,
       }
@@ -291,7 +294,7 @@ export function PreviewPlayer() {
         canvas,
         time,
         cropScene,
-        cropElementFor(cropping, time),
+        cropElementFor(cropping),
         canvasDimensions,
         handleScreenScale(canvas),
         // From the `time` the chrome is being drawn at, exactly as the selection
@@ -381,6 +384,7 @@ export function PreviewPlayer() {
     drawMultiSelectHandles,
     videoElementsRef,
     extraVideoElementsRef,
+    elementSlotsRef,
     audioElementsRef,
     isPlayingRef,
     currentTimeRef,
