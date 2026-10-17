@@ -323,6 +323,18 @@ export class AudioDataDouble extends FrameBase {
   constructor(init: Record<string, unknown>) {
     super('AudioData', init.data, init)
   }
+
+  /**
+   * µs, worked out from the frames and the rate as a real `AudioData`'s is —
+   * an `AudioDataInit` has no `duration` to read back. What the recorder adds
+   * to a companion's last stamp to say how long that part is (ESCSUITE-318).
+   */
+  override get duration(): number {
+    // A closed AudioData reports 0, as a real one does.
+    if (this.closed) return 0
+    const { numberOfFrames, sampleRate } = this.init as { numberOfFrames: number; sampleRate: number }
+    return (numberOfFrames / sampleRate) * 1_000_000
+  }
 }
 
 /** Every VideoFrame/AudioData the code under test constructed, oldest first. */

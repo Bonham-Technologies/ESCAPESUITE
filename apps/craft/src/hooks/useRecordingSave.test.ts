@@ -792,12 +792,36 @@ describe('useRecordingSave for a separate-tracks take', () => {
       expect(part.hasAudio).toBe(true)
       expect(part.hasWebcam).toBe(false)
       expect('overlayPlacement' in part).toBe(false)
-      // Every part of a take is the same length by construction: one
-      // recorder, one clock, one start, one stop.
+      // A part that reports no length of its own is stored at the take's
+      // (ESCSUITE-318): the recorder reports one for every audio part it
+      // delivers, so this is a caller that knows less than it does.
       expect(part.duration).toBe(6)
     }
     expect(mic.name).toMatch(/ — microphone$/)
     expect(system.name).toMatch(/ — system audio$/)
+  })
+
+  it('stores an audio part at the length the recorder reports for it, not the take\'s (ESCSUITE-318)', async () => {
+    recorderTypeRef.current = 'webcodecs'
+    const { result } = mountSave()
+
+    // The microphone was unplugged 1.48 s into a 6.51 s take; the system
+    // audio ran to the end.
+    await result.current(RAW, 6.51, [
+      companionPart,
+      { ...micPart, duration: 1.48 },
+      { ...systemPart, duration: 6.5 },
+    ])
+
+    const stored = await getRecordingsMetadata()
+    expect(stored.find(m => m.role === 'screen')!.duration).toBe(6.51)
+    expect(stored.find(m => m.role === 'mic')!.duration).toBe(1.48)
+    expect(stored.find(m => m.role === 'system')!.duration).toBe(6.5)
+    // ...and the library row says so, not only the stored metadata.
+    expect(added.find(entry => entry.role === 'mic')!.duration).toBe(1.48)
+    // The part is still not decoded for its length.
+    const probed = thumbnailModule.extractVideoMetadata.mock.calls.map(call => call[0])
+    expect(probed).not.toContain(MIC)
   })
 
   it('decodes nothing for an audio part — no metadata probe, no thumbnail', async () => {

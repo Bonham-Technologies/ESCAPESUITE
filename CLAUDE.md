@@ -214,7 +214,9 @@ ESCAPECRAFT recordings → IndexedDB → ESCAPEARTIST imports
 A **take** is not always one file. Since ESCSUITE-14 a recording made with "Record webcam as
 a separate track" is up to **four** `SourceVideo`s sharing a `takeId` — the screen, the webcam,
 the microphone and the system audio — each with a `role`
-(`'screen' | 'webcam' | 'mic' | 'system'`) and a `startOffset`; the take is named by its
+(`'screen' | 'webcam' | 'mic' | 'system'`) and a `startOffset`, and each part's stored
+`duration` is its own — an audio part whose track ended mid-take (a microphone unplugged) is
+stored at the shorter length its file holds, not the take's (ESCSUITE-318); the take is named by its
 primary (the primary's `takeId` is its own id), and the primary carries both the
 `overlayPlacement` the webcam was recorded at **and the mixed audio**, so a consumer that only
 knows how to read one file still gets a complete, audible recording. The `mic` and `system`
@@ -5287,13 +5289,49 @@ element). `drawFrame.perf.test.ts` — whose scene's twelve clips share one sour
 sticky path — every other `*.perf.test.ts` and the rerender pins are byte-identical: `assign` runs on a
 live-set change or a hold, never per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-17 for ESCSUITE-318 (a separate-tracks audio companion whose
+track ended mid-take — the microphone unplugged, the system-audio share stopped — is stored at its own length
+instead of the take's: `WebCodecsRecorder` keeps one `encodedEndUs` per audio pipeline, the last encoded
+`AudioData`'s timestamp plus its duration, one assignment after each `encode()` on both capture paths, and
+`finalizeCompanions` hands it over as `CompanionPart.duration` on every delivered audio part; `useRecordingSave`
+stores `companion.duration ?? recordedDuration`, the take's wall clock only when the recorder reports none;
+ESCAPEARTIST's handoff already trusted the stored figure and needed no code): 100.00 / 99.59 / 98.01 / 100.00,
+byte-identical on every percentage to the 100.00 / 99.59 / 98.01 / 100.00 that `main` at `e891dbd2` (the
+ESCSUITE-322 squash) measures in the same sitting. That base reads 99.59 / 98.01 where the table row recorded
+99.57 / 97.94: ESCSUITE-317 and 322 landed after the row was written, the drift ESCSUITE-91 and 113 recorded,
+and the row is corrected here to the direct measurement (ESCSUITE-322's own paragraph raised the branches floor
+to 98, which 98.01 clears by a hundredth — on this package the next untested branch turns CI red, by design).
+Lines 2,776 → 2,778, statements 2,982 / 2,994 → 2,984 / 2,996, branches 1,527 / 1,558 → 1,531 / 1,562 and
+functions 513 on both, every new unit covered; the same 12 statements and 31 branches uncovered, in the same
+four files. The four new branches are `hooks/useRecordingSave.ts`'s two (36 → 38: the `??` on the audio
+part's duration, reached with the recorder's figure by the new save case — red before the fix at
+`expected 6.51 to be 1.48` — and without one by the cases that were already there) and
+`core/webcodecs-recorder.ts`'s two (268 / 282 → 270 / 284: the audio-or-webcam choice on the delivered part's
+`duration` and `start()`'s reset of `encodedEndUs` beside `encodedCount`, an `else` on an existing `if`, each
+reached from both sides; the file's same fourteen pre-existing arms uncovered). The red-first cases in
+`webcodecsRecorder.companionDuration.test.ts` drive both capture paths — on the AudioWorklet path the unplugged
+microphone, the whole take and a paused take each read `expected undefined to be type of 'number'`; on the
+ScriptProcessor fallback the unplugged microphone `expected undefined to be close to 1.7066…` and the paused
+take `… 5.12`; the review's 44.1 kHz case reads `expected 1.70666… to be close to 1.85759…` with the rate forced
+to 48000 — and the review's three mutations (the companion reporting `getDuration()`, the stamp without
+`+ duration`, the save storing `recordedDuration`) turn three, four and one case red. A full-length companion is
+stored a little shorter than the primary — cut at the render frame where `stop()` was entered, where the
+primary's `recordedDuration` is read after flush and finalize — which the docs now say instead of "within one
+chunk". The ARTIST pin (`takeImport.test.ts`: a part stored shorter than the take is placed at its own length)
+was green on arrival and moves no artist figure. Outside vitest's measurement,
+`apps/e2e/tests/escapecraft/separate-tracks-companion-duration.spec.ts` ends the microphone track mid-take
+through the media mock and reads the stored part back: 1 / 1 on Chromium, twice. `webcodecsRecorder.perf.test.ts`,
+`recorder.perf.test.ts`, `compositor.perf.test.ts`, `converter.perf.test.ts` and every `App.*rerender*` are
+byte-identical — one number assignment per encoded `AudioData` is a statement, not a counted call. **No floor
+crossed**; craft's floors stay 100 / 99 / 98 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.59 | 98.01 | 100.00 |
 | `@escapesuite/artist` | 99.85 | 99.45 | 96.83 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
