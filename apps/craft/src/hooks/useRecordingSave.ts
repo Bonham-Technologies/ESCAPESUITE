@@ -294,13 +294,20 @@ export function useRecordingSave({
           // reports `videoWidth || 1920`, so probing an audio file would
           // store it as 1920x1080, and `generateThumbnail` would decode a
           // file with no picture and land on the placeholder. The length is
-          // the recorder's own: every part of a take is the same length by
-          // construction — one recorder, one clock, one start, one stop.
+          // the recorder's own figure for this part, not the take's: a part
+          // whose track ended early (a microphone unplugged, a system-audio
+          // share stopped) is shorter than the take, and storing the take's
+          // length had ESCAPEARTIST lay a clip of it over the shorter file
+          // (ESCSUITE-318). The recorder reports one, always positive, for
+          // every audio part it delivers; a caller that hands a part over
+          // without one gets the take's length, which is the part's own
+          // whenever its track ran to the end — every pipeline shares one
+          // clock, one start and one stop.
           companionSourceVideo = buildSourceVideo({
             id: companionId,
             now,
             blob: companion.blob,
-            duration: recordedDuration,
+            duration: companion.duration ?? recordedDuration,
             width: 0,
             height: 0,
             hasAudio: true,

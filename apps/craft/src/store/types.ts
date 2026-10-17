@@ -61,6 +61,19 @@ export interface CompanionPart {
   role: CompanionRole;
   blob: Blob;
   startOffset: number;
+  /**
+   * An audio part's own length, in seconds (ESCSUITE-318): the end of the last
+   * `AudioData` its pipeline encoded, on the take's recorded clock — so a
+   * pause is out of it as it is out of the take's. It is the take's length,
+   * to within a chunk, unless the part's track ended early (a microphone
+   * unplugged, a system-audio share stopped), when it is the shorter length
+   * the file really holds.
+   *
+   * Set by the recorder on every audio part it delivers, and always positive
+   * there: a pipeline that encoded nothing is never delivered. Absent on the
+   * webcam part, whose file the save probes for its length.
+   */
+  duration?: number;
 }
 
 /**

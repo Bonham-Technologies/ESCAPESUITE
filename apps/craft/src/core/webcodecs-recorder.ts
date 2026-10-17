@@ -183,6 +183,14 @@ interface AudioCompanionPipeline extends CompanionPipelineBase {
    * clock — which is what puts the parts on one timeline.
    */
   capture: AudioCapture | null;
+  /**
+   * Where the last `AudioData` this pipeline encoded ends — its stamp plus its
+   * length — in µs on the take's recorded clock (ESCSUITE-318). Both capture
+   * paths stamp recorded time, so this is the part's own length with every
+   * pause already out of it, and it stops where the part did when its track
+   * ended early. Delivered as the part's `duration`.
+   */
+  encodedEndUs: number;
 }
 
 type CompanionPipeline = VideoCompanionPipeline | AudioCompanionPipeline;
@@ -842,6 +850,7 @@ export class WebCodecsRecorder {
         packetSource,
         capture: null,
         encodedCount: 0,
+        encodedEndUs: 0,
         failed: false,
       };
 
@@ -895,6 +904,7 @@ export class WebCodecsRecorder {
         if (!encoder) return;
         encoder.encode(data);
         companion.encodedCount++;
+        companion.encodedEndUs = data.timestamp + data.duration;
       },
     });
     // Its encoder gave up before there was a capture to stop (`endCompanion`).
@@ -1040,6 +1050,12 @@ export class WebCodecsRecorder {
           // 0 for every pipeline in this build: one clock, one start(), every
           // first unit stamped from the same origin.
           startOffset: 0,
+          // An audio part says how long it is, because it can be shorter than
+          // the take: its track may have ended early (ESCSUITE-318). The
+          // webcam part's file is probed for its length at save.
+          ...(companion.kind === 'audio'
+            ? { duration: companion.encodedEndUs / 1_000_000 }
+            : {}),
         });
       } catch (e) {
         console.warn(
