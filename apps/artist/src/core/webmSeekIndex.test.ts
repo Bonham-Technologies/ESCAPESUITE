@@ -9,7 +9,13 @@
 // Cues would turn this red.
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BlobSource, EncodedPacketSink, Input, WEBM } from 'mediabunny'
-import { isWebmType, needsSeekIndexRepair, remuxWithSeekIndex, withSeekIndex } from './webmSeekIndex'
+import {
+  createChunkCollector,
+  isWebmType,
+  needsSeekIndexRepair,
+  remuxWithSeekIndex,
+  withSeekIndex,
+} from './webmSeekIndex'
 import { alphaFrames, buildWebm, hasNonEmptyCues, webmBlob } from '../test/fixtures/webmFixture'
 
 /** The first offset of `id` in `bytes`. */
@@ -169,8 +175,70 @@ describe('remuxWithSeekIndex', () => {
     expect(after).toEqual(before)
   })
 
+  // Review round 1, MAJOR 2: the remux used to build its output in one
+  // BufferTarget — the whole file in one ArrayBuffer, which for a long take is
+  // gigabytes and an out-of-memory crash nothing can catch. It now streams into
+  // Blob parts and joins them once at the end.
+  it('assembles its output from the streamed chunks, not one buffer', async () => {
+    const original = webmBlob({ cues: 'empty', audio: true, frames: alphaFrames(60, 10), clusterMs: 400 })
+    const RealBlob = globalThis.Blob
+    const partCounts: number[] = []
+    globalThis.Blob = class extends RealBlob {
+      // Every Blob is still a Blob to mediabunny's `instanceof` check.
+      static [Symbol.hasInstance](value: unknown) {
+        return value instanceof RealBlob
+      }
+      constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+        super(parts, options)
+        if (options?.type === 'video/webm') partCounts.push(parts?.length ?? 0)
+      }
+    } as typeof Blob
+    let remuxed: Blob
+    try {
+      remuxed = await remuxWithSeekIndex(original)
+    } finally {
+      globalThis.Blob = RealBlob
+    }
+
+    expect(partCounts).toHaveLength(1)
+    expect(partCounts[0]).toBeGreaterThan(1)
+    expect(await packetsOf(remuxed)).toEqual(await packetsOf(original))
+  })
+
   it('throws on a track it cannot name a codec for', async () => {
     await expect(remuxWithSeekIndex(webmBlob({ cues: 'empty', videoCodecId: 'V_NOT_A_CODEC' }))).rejects.toThrow()
+  })
+})
+
+describe('createChunkCollector', () => {
+  /** Write each chunk in order through the collector's stream, then read the bytes back. */
+  async function collect(chunks: Array<[number[], number]>): Promise<number[]> {
+    const collector = createChunkCollector()
+    const writer = collector.writable.getWriter()
+    for (const [data, position] of chunks) await writer.write({ type: 'write', data: new Uint8Array(data), position })
+    await writer.close()
+    return [...new Uint8Array(await collector.toBlob('video/webm').arrayBuffer())]
+  }
+
+  it('joins appended chunks in order', async () => {
+    expect(await collect([[[1, 2, 3], 0], [[4, 5], 3]])).toEqual([1, 2, 3, 4, 5])
+  })
+
+  it('overwrites bytes already collected when the muxer writes back into them', async () => {
+    // A size or a SeekHead patched after the bytes after it were written.
+    expect(await collect([[[1, 2, 3, 4], 0], [[5, 6, 7, 8], 4], [[9, 9], 1]])).toEqual([1, 9, 9, 4, 5, 6, 7, 8])
+  })
+
+  it('carries a write back across the boundary between two chunks', async () => {
+    expect(await collect([[[1, 2, 3, 4], 0], [[5, 6, 7, 8], 4], [[9, 9], 3]])).toEqual([1, 2, 3, 9, 9, 6, 7, 8])
+  })
+
+  it('overwrites the tail and appends the rest of a write that runs past the end', async () => {
+    expect(await collect([[[1, 2, 3, 4], 0], [[9, 9, 9], 2]])).toEqual([1, 2, 9, 9, 9])
+  })
+
+  it('makes an empty file of no writes', async () => {
+    expect(await collect([])).toEqual([])
   })
 })
 
@@ -209,6 +277,15 @@ describe('withSeekIndex', () => {
     expect(await withSeekIndex(blob, 'take.webm')).toBe(blob)
     expect(warn).toHaveBeenCalledTimes(1)
     expect(warn).toHaveBeenCalledWith('Could not add a seek index to "take.webm"; keeping it as recorded:', expect.any(Error))
+  })
+
+  // Review round 1, NIT: a record that arrived with no bytes at all is kept as
+  // it came — the caller's own checks are what decide about it — not thrown on.
+  it('keeps a record with no blob rather than throwing on it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(await withSeekIndex(undefined as unknown as Blob, 'gone.webm')).toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the original, and says so once, when the remux fails', async () => {

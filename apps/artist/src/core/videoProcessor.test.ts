@@ -550,9 +550,16 @@ describe('videoProcessor', () => {
 
         const pending = generateThumbnail(new File(['v'], 'take.webm', { type: 'video/webm' }), 1.5)
         const outcome = pending.then(() => null, (error: unknown) => error)
+        const video = media.videos[0]
+        const removeAttribute = vi.spyOn(video, 'removeAttribute')
         await vi.advanceTimersByTimeAsync(4_999)
         expect(revoke).not.toHaveBeenCalled()
         await vi.advanceTimersByTimeAsync(1)
+
+        // Review round 1, MINOR 5: the wedged element is unloaded, not left
+        // holding its source — Firefox stops loading new <video>s after four.
+        expect(removeAttribute).toHaveBeenCalledWith('src')
+        expect(video.load).toHaveBeenCalledTimes(1)
 
         expect(await outcome).toMatchObject({
           message: 'Could not capture a thumbnail of "take.webm" — the browser did not finish seeking within 5 s',

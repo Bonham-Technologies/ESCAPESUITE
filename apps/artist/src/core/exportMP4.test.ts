@@ -1341,9 +1341,55 @@ describe('exportToMP4 on a source that cannot seek', () => {
     expect(error).toMatchObject({
       code: 'SOURCE_NOT_SEEKABLE',
       message:
-        'This browser cannot read "take.webm" frame by frame (its seek never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
+        'This browser cannot read "take.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
       frameIndex: 3,
     })
     expect(webcodecs.videoEncoders[0].encodes).toHaveLength(3)
+  })
+
+  // Review round 1, MINOR 4: during a transition the outgoing clip's frame is
+  // fetched twice — once as an active clip, started first and awaited last,
+  // and once as the transition's own side, awaited at once. When the awaited
+  // fetch refuses the source, the other one must not reject with nobody
+  // listening.
+  it('fails by name with no unhandled rejection when the refusal lands on one of two fetches of a frame', async () => {
+    await storeSource('video2')
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      media.script({ video: { videoWidth: 640, videoHeight: 360, wedgeSeekAt: (t) => t > 0.02 } })
+      const clips = [
+        makeClip({ id: 'a', duration: 1, endTime: 1, transition: { type: 'fade', duration: 0.5 } }),
+        makeClip({ id: 'b', sourceVideoId: 'video2', duration: 1, endTime: 1, timelinePosition: 1 }),
+      ]
+      const sources = [
+        makeSourceVideo({ width: 640, height: 360, name: 'take.webm' }),
+        makeSourceVideo({ id: 'video2', width: 640, height: 360 }),
+      ]
+
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      let error: unknown
+      try {
+        let settled = false
+        run({ clips, sources, options: { timeRange: { start: 0.5, end: 0.8 } } }).then(
+          () => { settled = true },
+          (e: unknown) => { error = e; settled = true }
+        )
+        for (let i = 0; i < 200 && !settled; i++) await vi.advanceTimersByTimeAsync(100)
+        // Run out the fetch still waiting on its seek when the export failed,
+        // so a rejection nobody handles has the chance to happen.
+        await vi.advanceTimersByTimeAsync(2_000)
+      } finally {
+        vi.useRealTimers()
+      }
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(error).toBeInstanceOf(ExportError)
+      expect(error).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: expect.stringContaining('"take.webm"') })
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
