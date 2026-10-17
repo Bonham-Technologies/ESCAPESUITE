@@ -930,6 +930,58 @@ describe('projectStore remaining behaviours', () => {
       store().splitClip('clip1', 5)
       expect(store().project).toBe(before)
     })
+
+    // ESCSUITE-304. An overlay or an image has no source timeline: its pair is
+    // always 0 / duration. The second half used to inherit `startTime` = the
+    // split offset, so the trim's `duration = endTime - startTime` recompute
+    // came out short (or negative) on the next drag.
+    const halves = () => {
+      const clips = store().project.timeline.clips
+      return [clips.find((c) => c.name.endsWith('(1)'))!, clips.find((c) => c.name.endsWith('(2)'))!]
+    }
+
+    it('gives both halves of a text overlay a 0 / duration pair', () => {
+      store().addClipToTimeline(
+        { id: 'ov', sourceVideoId: '', name: 'ov', overlayType: 'text', startTime: 0, endTime: 10, duration: 10 },
+        undefined,
+        0
+      )
+
+      store().splitClip('ov', 4)
+
+      const [first, second] = halves()
+      expect(first).toMatchObject({ timelinePosition: 0, startTime: 0, endTime: 4, duration: 4 })
+      expect(second).toMatchObject({ timelinePosition: 4, startTime: 0, endTime: 6, duration: 6 })
+    })
+
+    it('gives both halves of an image clip a 0 / duration pair', () => {
+      store().addSourceVideo({ ...video, id: 'img1', mediaType: 'image', mimeType: 'image/png' })
+      store().addClipToTimeline(
+        { id: 'im', sourceVideoId: 'img1', name: 'im', startTime: 0, endTime: 10, duration: 10 },
+        undefined,
+        0
+      )
+
+      store().splitClip('im', 4)
+
+      const [first, second] = halves()
+      expect(first).toMatchObject({ startTime: 0, endTime: 4, duration: 4 })
+      expect(second).toMatchObject({ timelinePosition: 4, startTime: 0, endTime: 6, duration: 6 })
+    })
+
+    it('starts a media clip\'s second half at the split point in its source, as before', () => {
+      store().addClipToTimeline(
+        { id: 'm', sourceVideoId: video.id, name: 'm', startTime: 2, endTime: 12, duration: 10 },
+        undefined,
+        0
+      )
+
+      store().splitClip('m', 4)
+
+      const [first, second] = halves()
+      expect(first).toMatchObject({ timelinePosition: 0, startTime: 2, endTime: 6, duration: 4 })
+      expect(second).toMatchObject({ timelinePosition: 4, startTime: 6, endTime: 12, duration: 6 })
+    })
   })
 
   describe('duplicateClip', () => {

@@ -723,3 +723,53 @@ describe('useTrimDrag and the clip next to it (ESCSUITE-161)', () => {
     expect(theClip('clip1')).toMatchObject({ duration: 4, endTime: 4 })
   })
 })
+
+// ESCSUITE-304. A split text overlay's second half, trimmed by the real
+// gesture. Its second half used to keep `startTime` = the split offset, and
+// `trimClip`'s `duration = endTime - startTime` then took that offset off the
+// length the drag asked for: 1 s where the pointer said 5 s, or a negative
+// length that `parseProject` refused on reopen.
+describe('useTrimDrag on the second half of a split overlay (ESCSUITE-304)', () => {
+  /** A 10 s text overlay at 10 s on track A, split at 4 s: halves at 10–14 and 14–20. */
+  const splitOverlay = (): string => {
+    store().addClipToTimeline(
+      { id: 'ov', sourceVideoId: '', name: 'ov', overlayType: 'text', startTime: 0, endTime: 10, duration: 10 },
+      trackA,
+      10
+    )
+    store().splitClip('ov', 4)
+    return useEditorStore.getState().project.timeline.clips.find((c) => c.name === 'ov (2)')!.id
+  }
+
+  it('trims the end edge in by 1 s to a 5 s clip with a 0 / 5 pair', () => {
+    const id = splitOverlay()
+    const { result } = mountTrim()
+
+    grabEdge(result, 'end', id)
+    moveTo(19)
+    release()
+
+    expect(theClip(id)).toMatchObject({ timelinePosition: 14, startTime: 0, endTime: 5, duration: 5 })
+  })
+
+  it('trims the start edge in by 1 s to a 5 s clip with a 0 / 5 pair', () => {
+    const id = splitOverlay()
+    const { result } = mountTrim()
+
+    grabEdge(result, 'start', id)
+    moveTo(15)
+    release()
+
+    expect(theClip(id)).toMatchObject({ timelinePosition: 15, startTime: 0, endTime: 5, duration: 5 })
+  })
+
+  it('leaves a media clip\'s end trim measured in its source, as before', () => {
+    const { result } = mountTrim()
+
+    grabEdge(result, 'end')
+    moveTo(3.5)
+    release()
+
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, startTime: 0, endTime: 1.5, duration: 1.5 })
+  })
+})

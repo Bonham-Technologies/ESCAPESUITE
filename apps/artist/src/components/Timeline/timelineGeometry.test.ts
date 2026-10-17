@@ -248,13 +248,13 @@ describe('computeTrimUpdate', () => {
       // Original end is 10 + (7 - 2) = 15.
       expect(
         computeTrimUpdate({ edge: 'start', mouseTime: 12, clip, sourceVideo: undefined, origin })
-      ).toEqual({ timelinePosition: 12, duration: 3, endTime: 3 })
+      ).toEqual({ timelinePosition: 12, duration: 3, startTime: 0, endTime: 3 })
     })
 
     it('never moves the clip before zero', () => {
       expect(
         computeTrimUpdate({ edge: 'start', mouseTime: -4, clip, sourceVideo: undefined, origin })
-      ).toEqual({ timelinePosition: 0, duration: 15, endTime: 15 })
+      ).toEqual({ timelinePosition: 0, duration: 15, startTime: 0, endTime: 15 })
     })
 
     it('refuses a drag that would leave less than the minimum duration', () => {
@@ -299,10 +299,20 @@ describe('computeTrimUpdate', () => {
   describe('the end edge of an extendable clip', () => {
     const clip = makeClip({ timelinePosition: 10, startTime: 0 })
 
+    // ESCSUITE-304: an extendable clip's pair is 0 / duration on every write,
+    // so a clip carrying a stale non-zero startTime is put right by its trim
+    // rather than having it taken off the length the drag asked for.
+    it('writes a 0 / duration pair for an overlay that carried a stale startTime', () => {
+      const stale = makeClip({ overlayType: 'text', timelinePosition: 14, startTime: 4 })
+      expect(
+        computeTrimUpdate({ edge: 'end', mouseTime: 19, clip: stale, sourceVideo: undefined, origin })
+      ).toEqual({ duration: 5, startTime: 0, endTime: 5 })
+    })
+
     it('stretches an image clip past its source duration', () => {
       expect(
         computeTrimUpdate({ edge: 'end', mouseTime: 40, clip, sourceVideo: image, origin })
-      ).toEqual({ duration: 30, endTime: 30 })
+      ).toEqual({ duration: 30, startTime: 0, endTime: 30 })
     })
 
     it('refuses a drag back past the minimum duration', () => {

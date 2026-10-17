@@ -1113,3 +1113,83 @@ describe('a legacy overlay with no usable start and end time is repaired (ESCSUI
     expect(warn).not.toHaveBeenCalled()
   })
 })
+
+// ESCSUITE-304. Before the fix, splitting an overlay gave its second half a
+// non-zero `startTime`, and a trim then wrote that offset into the pair. The
+// app wrote such files itself, so the pair is repaired, not refused: an
+// overlay's pair is always 0 / duration. A media clip's pair is its source
+// window and is never touched. One warning per parse counts the repairs.
+describe('an overlay clip whose start and end times are not 0 / duration is repaired (ESCSUITE-304)', () => {
+  const baseClip = {
+    trackId: 't1', blendMode: 'normal',
+    transform: { x: 0.5, y: 0.5, scaleX: 1, scaleY: 1, rotation: 0, opacity: 1 },
+    effects: { blur: 0 }, transition: { type: 'none', duration: 0.5 },
+  }
+  const overlay = (id: string, startTime: number, endTime: number, duration: number) => ({
+    ...baseClip, id, sourceVideoId: '', name: id, overlayType: 'text', timelinePosition: 0,
+    textData: { text: id }, startTime, endTime, duration,
+  })
+  const media = (id: string, startTime: number, endTime: number, duration: number) => ({
+    ...baseClip, id, sourceVideoId: 'v1', name: id, timelinePosition: 0, startTime, endTime, duration,
+  })
+  const projectWith = (clips: Record<string, unknown>[]) => ({
+    id: 'p', name: 'p', created: 1, modified: 1, resolution: { width: 1920, height: 1080 },
+    timeline: {
+      tracks: [{ id: 't1', name: 'Track 1', index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60 }],
+      clips, textOverlays: [], shapeOverlays: [], duration: 5,
+    },
+  })
+  const parsed = (input: unknown) => {
+    const result = parseProject(input)
+    if (!result.ok) throw new Error(`refused: ${result.reason}`)
+    return result.project
+  }
+  const clip = (project: Project, id: string) => project.timeline.clips.find((c) => c.id === id)!
+
+  let warn: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    warn.mockRestore()
+  })
+
+  it('repairs a split half that carried its split offset as startTime, and warns once', () => {
+    const project = parsed(projectWith([overlay('o1', 4, 9, 5)]))
+
+    expect(clip(project, 'o1')).toMatchObject({ startTime: 0, endTime: 5, duration: 5 })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 1 overlay clip to 0 and its duration')
+  })
+
+  it('repairs an end time that is not the duration when the start is already 0', () => {
+    const project = parsed(projectWith([overlay('o1', 0, 7, 5)]))
+
+    expect(clip(project, 'o1')).toMatchObject({ startTime: 0, endTime: 5, duration: 5 })
+    expect(warn).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts every overlay it repaired in the one warning', () => {
+    const project = parsed(projectWith([overlay('o1', 4, 9, 5), overlay('o2', 2, 3, 1), overlay('ok', 0, 5, 5)]))
+
+    expect(clip(project, 'o2')).toMatchObject({ startTime: 0, endTime: 1, duration: 1 })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn.mock.calls[0].join(' ')).toBe('Repaired the start and end times of 2 overlay clips to 0 and their duration')
+  })
+
+  it('leaves a media clip with the same numbers alone: its pair is its source window', () => {
+    const input = projectWith([media('m1', 4, 9, 5)])
+    const project = parsed(input)
+
+    expect(clip(project, 'm1')).toMatchObject({ startTime: 4, endTime: 9, duration: 5 })
+    expect(warn).not.toHaveBeenCalled()
+  })
+
+  it('says nothing and changes nothing when every overlay is already 0 / duration', () => {
+    const input = projectWith([overlay('ok', 0, 5, 5), media('m1', 4, 9, 5)])
+    const project = parsed(input)
+
+    expect(project.timeline.clips).toEqual(input.timeline.clips)
+    expect(warn).not.toHaveBeenCalled()
+  })
+})
