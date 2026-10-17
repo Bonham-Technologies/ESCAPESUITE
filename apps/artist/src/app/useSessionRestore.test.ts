@@ -1532,7 +1532,9 @@ describe('a source whose bytes are no longer in storage (ESCSUITE-307)', () => {
     // Both sources' thumbnails were read and minted; neither handle is left live.
     const minted = vi.mocked(URL.createObjectURL).mock.results.slice(mintedBefore).map((r) => r.value as string)
     expect(minted).toHaveLength(2)
-    for (const url of minted) expect(revokeObjectURL).toHaveBeenCalledWith(url)
+    for (const url of minted) {
+      expect(revokeObjectURL.mock.calls.filter(([u]) => u === url)).toHaveLength(1)
+    }
     consoleError.mockRestore()
   })
 
