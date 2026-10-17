@@ -428,6 +428,41 @@ describe('integration', () => {
 
       expect(parseUrlParams().title).toBeNull()
     })
+
+    // ESCSUITE-332: a host framing more than one editor names each frame, so
+    // each keeps its own session slot across a host reload.
+    it('returns null for an absent tabKey', () => {
+      Object.defineProperty(window, 'location', { value: { search: '' }, writable: true })
+
+      expect(parseUrlParams().tabKey).toBeNull()
+    })
+
+    it('parses and trims the tabKey param, keeping any characters it carries', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?tabKey=${encodeURIComponent('  left pane: 1/2  ')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().tabKey).toBe('left pane: 1/2')
+    })
+
+    it('caps the tabKey at 120 characters', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?tabKey=${'k'.repeat(200)}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().tabKey).toBe('k'.repeat(120))
+    })
+
+    it('returns null for a blank tabKey', () => {
+      Object.defineProperty(window, 'location', {
+        value: { search: `?tabKey=${encodeURIComponent('   ')}` },
+        writable: true,
+      })
+
+      expect(parseUrlParams().tabKey).toBeNull()
+    })
   })
 
   describe('loadVideoFromUrl', () => {
