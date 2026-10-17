@@ -233,6 +233,9 @@ export class ExportError extends Error {
  * - `SOURCE_MISSING`: a clip's source has no bytes in storage — another tab's
  *   Clear All or Remove deleted them (ESCSUITE-330). Every exporter refuses by
  *   name ({@link sourceMissingError}) rather than drawing nothing for the clip.
+ *   The loaders read every clip on the timeline — in or out of the exported
+ *   range, hidden tracks included — so a byteless source used only by such a
+ *   clip refuses the whole export.
  */
 export type ExportErrorCode =
   | 'OUTPUT_SIZE_UNSUPPORTED'

@@ -380,8 +380,11 @@ pnpm lint                # Run ESLint
   drawn as nothing in an export that reported "Export complete!". It refuses by name with
   `sourceMissingError` (`exportTypes.ts`, `code: 'SOURCE_MISSING'`, the sentence on the export's
   own trail, which the loader is handed as its third argument), whatever the source's
-  `mediaType`; a source no clip uses is never read. On the caller's side the ownership starts at the load, which is
-  why **both exporters' `try` begins there and not at the frame loop**: `output.start()`,
+  `mediaType`; a source no clip uses is never read. The loaders read every clip on the
+  timeline — in or out of the exported range, hidden tracks included — so a byteless source
+  used only by such a clip refuses the whole export, and so does an overlay clip carrying a
+  stale `sourceVideoId` (the app writes `''`; only a hand-written kit job carries one). On the
+  caller's side the ownership starts at the load, which is why **both exporters' `try` begins there and not at the frame loop**: `output.start()`,
   either `configure()`, the caller's own `onProgress`, the rewind and the GIF writer all sit
   between the two, and a throw from any of them used to escape past the only
   `releaseElementSources` on the error path — one `<video>`/`<img>` and its object URL per
