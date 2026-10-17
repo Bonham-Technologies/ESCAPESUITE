@@ -5184,6 +5184,45 @@ deadline). `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts`, `exportGIF.perf.
 pin are byte-identical — one timer per load, none per frame. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-328 (the MP4 export's `<video>` fallback fails
+by name on EVERY load failure — an `error` event as well as ESCSUITE-325's 15 s timeout — through one
+`ExportError` naming the source, with no image retry for a failed `<video>` (a non-image source was never going
+to decode as one, and the retry is what hid the failure) and the worker released through the ESCSUITE-314
+release; and the image load gets the same deadline through one private `waitForMediaLoad` in
+`core/exportTypes.ts` that `waitForVideoLoad` and `loadImageElement(blob, name)` both call — one
+`METADATA_LOAD_TIMEOUT_MS` timer armed when the listeners attach, cleared on load, `error` and expiry, the
+element torn down and its URL revoked once on expiry; WebM and GIF keep `loadElementSources`' warn-and-skip
+for both outcomes, an image that never settles now skipped at 15 s rather than never): 99.85 / 99.46 / 96.87 /
+99.78, byte-identical on every percentage to the 99.85 / 99.46 / 96.87 / 99.78 that its base measures in the
+same sitting — the base being the ESCSUITE-314 / 315 branch (`8f0da7f4`) over the ESCSUITE-305 + 325 tree, the
+tree this branch was cut from so it could start before those landed; the next direct measurement of `main`
+corrects the table row. The base gives 6,289 / 6,492 branches and this branch 6,293 / 6,496: four new branches
+net, four covered, the same 203 uncovered as before; lines 9,859 / 9,873 → 9,854 / 9,868 and statements
+11,197 / 11,257 → 11,192 / 11,252 each FIVE smaller — `core/exportTypes.ts` 217 → 213 lines and 243 → 239
+statements, the two hand-rolled waits' handlers and timers having become one — and functions 2,333 / 2,338 →
+2,334 / 2,339 (the same 14 / 60 / 5 uncovered). The four are `core/exportMP4.ts`'s two (134 / 151 → 136 / 153:
+`loadFailure`'s `instanceof MediaLoadTimeoutError` choice between the 325 sentence and "could not decode it",
+and `source?.name ?? sourceId` — whose id arm the review found unreached and the fix round covered with a clip
+naming a source absent from the list; the same seventeen pre-existing arms uncovered; `loadFailure` is the one
+new function, the old warn-and-retry `try` / `catch` around the image fallback gone) and
+`core/elementFrames.ts`'s two (84 / 91 → 86 / 93: the fallback arm's `source?.name ?? sourceId`, reached with
+the source present and absent by the cases that were already there; the image arm reads `source.name`
+outright, its `??` having been dead inside the `mediaType === 'image'` test and deleted rather than kept; the
+same seven pre-existing arms uncovered). `core/exportTypes.ts`'s branch count did not move: `waitForMediaLoad`'s
+two `ownsUrl` arms replace the two the video wait carried, each reached from both sides by
+`exportTypes.mediaLoad.test.ts` (16 cases across the three new files after the review round), the 325 suites
+and the `frameSource.slots` cases. Red first: 9 of the first 13 cases on the base (`expected { …(4) } to be an
+instance of ExportError`; `expected 'Failed to load image' to be 'Could not read image1 — the browser c…'`;
+`TypeError: Cannot read properties of undefined (reading 'value')` where no deadline timer existed;
+`expected [] to deeply equal [ Array(1) ]`); the review's mutations — the `instanceof` arm, `checkAborted`
+first in the catch, the timer clear, `ownsUrl` on error — each red a named case, and the coordinator's own,
+the `src` teardown dropped on expiry, reds four once the fix round replaced the vacuous `getAttribute('src')`
+checks with `removeAttribute` spies. Two `exportMP4.test.ts` cases that pinned the image retry became one
+fail-by-name case and the "still skips a source that errors at once" pin went, its opposite being the ruling;
+`elementFrames.test.ts`'s `clearTimeout` count reads 2 where it read 1, the image fallback after a failed video
+now clearing a timer of its own. Every `*.perf.test.ts` and rerender pin is byte-identical — one timer per
+element load, nothing per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5191,7 +5230,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.82 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.46 | 96.87 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
