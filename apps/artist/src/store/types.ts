@@ -940,7 +940,11 @@ export interface ExportOptions {
 }
 
 export interface ExportProgress {
-  phase: 'preparing' | 'encoding' | 'muxing' | 'complete' | 'error';
+  /**
+   * `'measuring-loudness'` (ESCSUITE-301): the MP4 and WebM exporters' sliced
+   * loudness pass, between the audio mix and the first encoder.
+   */
+  phase: 'preparing' | 'measuring-loudness' | 'encoding' | 'muxing' | 'complete' | 'error';
   progress: number;       // 0-100
   message: string;
   /**
