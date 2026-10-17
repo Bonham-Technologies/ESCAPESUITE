@@ -1,3 +1,5 @@
+import { isMeasuredFrameRateEngine } from './workerDecodeEngine';
+
 // Measuring a source's frame rate from the frames its own <video> presents
 // (ESCSUITE-276).
 //
@@ -47,6 +49,15 @@ export interface FrameRateProbeOptions {
   maxMs: number;
   /** Play at this rate while probing; the element's own rate is put back after. */
   playbackRate: number;
+  /**
+   * Whether this engine's frame callbacks were measured (ESCSUITE-327). When
+   * false the probe answers `undefined` at once — no play, no seek, no frame
+   * request — and the caller stores 30 `'assumed'`. Defaults to
+   * `isMeasuredFrameRateEngine(navigator)`: Chromium only, because Firefox's
+   * `presentedFrames` and `mediaTime` stamps were never characterised per rate
+   * and container (a 120 fps MP4 read 124.62, a 30 fps WebM 34.33).
+   */
+  engineMeasured?: boolean;
 }
 
 /**
@@ -229,7 +240,8 @@ export function rateFromMediaTimes(
  * playback rate back, seeks it to 0 and answers `rateFromMediaTimes` of what it
  * saw. `mediaTime` is media time, so the rate it reads is the file's whatever
  * speed it plays at. Answers
- * `undefined` — without playing — for an element with no
+ * `undefined` — without playing — for an engine the probe was not measured on
+ * (`engineMeasured`, ESCSUITE-327) and for an element with no
  * `requestVideoFrameCallback`, and `undefined` at once when the browser
  * refuses to play. The caller owns the element and its `src`, which must stay
  * live until this settles.
@@ -240,8 +252,14 @@ export function rateFromMediaTimes(
  */
 export function measureFrameRate(
   video: HTMLVideoElement,
-  { maxFrames, maxMs, playbackRate }: FrameRateProbeOptions
+  {
+    maxFrames,
+    maxMs,
+    playbackRate,
+    engineMeasured = isMeasuredFrameRateEngine(globalThis.navigator),
+  }: FrameRateProbeOptions
 ): Promise<number | undefined> {
+  if (!engineMeasured) return Promise.resolve(undefined);
   if (typeof video.requestVideoFrameCallback !== 'function') {
     return Promise.resolve(undefined);
   }

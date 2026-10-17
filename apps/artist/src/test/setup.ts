@@ -58,3 +58,14 @@ vi.stubGlobal('OfflineAudioContext', class OfflineAudioContext {
   decodeAudioData = vi.fn()
   startRendering = vi.fn()
 })
+
+// The frame-rate probe measures only on an engine it was characterised on —
+// Chromium, read from `navigator.userAgentData` (ESCSUITE-327). jsdom is not
+// one, so every suite that expects the probe to run (videoProcessor, the probe's
+// own) would otherwise get 30 'assumed'. Defined on the navigator rather than
+// stubbed as a global so `vi.unstubAllGlobals()` cannot take it away; the gate's
+// own tests stub `navigator` per case to say otherwise.
+Object.defineProperty(navigator, 'userAgentData', {
+  configurable: true,
+  value: { brands: [{ brand: 'Chromium' }] },
+});
