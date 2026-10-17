@@ -12,23 +12,30 @@
  * ESCAPEARTIST export of the take on Firefox drew black frames (ESCSUITE-305).
  * The same file with a real keyframe index seeks on Firefox every time.
  *
- * This step is pure bytes and runs once per save. It walks the Segment once —
- * reading the file in windows of `CUES_READ_WINDOW_BYTES`, skipping every frame
- * payload, so a long take costs about one `slice()` per window rather than one
- * per block — notes each video keyframe (a SimpleBlock with the keyframe flag,
- * or a BlockGroup with no ReferenceBlock), and replaces the Cues element where
- * the library left it with one CuePoint per keyframe. Nothing else is
- * re-encoded or rewritten: the clusters, alpha included, are the input's own
- * bytes, handed on as a `slice()` of it.
+ * This step is pure bytes and runs once per save. It walks the Segment once,
+ * reading the file in windows of `CUES_READ_WINDOW_BYTES`. Frame payloads are
+ * not parsed, only the element and block headers, but they are still read: the
+ * pass costs about one 1 MiB `slice()` per MiB of file (a 56 MB take is about
+ * 56 reads), rather than one per block. It notes each video keyframe (a
+ * SimpleBlock with the keyframe flag, or a BlockGroup with no ReferenceBlock)
+ * and replaces the Cues element where the library left it with one CuePoint per
+ * keyframe. Nothing else is re-encoded or rewritten: the clusters, alpha
+ * included, are the input's own bytes, handed on as a `slice()` of it.
  *
  * What it relies on, all of it `makeMetadataSeekable`'s fixed output shape:
  * the Segment is written with unknown size (so growing the Cues element needs
  * no Segment size rewritten), the Cues element sits ahead of the first Cluster
- * (so every Cluster moves by exactly the change in its size), and the SeekHead
- * entries all point at elements ahead of it (so none of them moves).
+ * (so every Cluster moves by exactly the change in its size), and every SeekHead
+ * entry points at or ahead of the Cues element (so none of them moves — the
+ * Cues entry itself still points at its start). Each of the three is checked,
+ * and a file that breaks one is refused rather than given positions that are
+ * silently wrong; so is a video file in which no keyframe is found, which would
+ * otherwise be stored with the empty index this step exists to replace.
  */
 
 const ID = {
+  SEEK_HEAD: 0x114d9b74,
+  SEEK_POSITION: 0x53ac,
   TRACKS: 0x1654ae6b,
   TRACK_NUMBER: 0xd7,
   TRACK_TYPE: 0x83,
@@ -105,6 +112,13 @@ class ByteWindow {
   }
 }
 
+/**
+ * The smallest four-byte (level-1) element ID — Cluster, Cues, Tags and the
+ * rest of a Segment's children. Every element a Cluster can contain has an ID
+ * of two bytes or fewer, so a four-byte one ends an unknown-size Cluster.
+ */
+const LEVEL_ONE_ID_MIN = 0x10000000
+
 /** Length of an EBML vint from its first byte. */
 function vintLength(firstByte: number): number {
   return Math.clz32(firstByte) - 23
@@ -116,12 +130,20 @@ async function readElement(reader: ByteWindow, position: number): Promise<EbmlEl
   let id = 0
   for (let k = 0; k < idLength; k++) id = id * 256 + b[k]
   const sizeLength = vintLength(b[idLength])
-  let size = b[idLength] & (0xff >> sizeLength)
-  for (let k = 1; k < sizeLength; k++) size = size * 256 + b[idLength + k]
-  const dataStart = position + idLength + sizeLength
+  if (idLength > 4 || sizeLength > 8) {
+    throw new Error(`The WebM has an invalid EBML element header at byte ${position}`)
+  }
+  const mask = 0xff >> sizeLength
+  let size = b[idLength] & mask
   // Every value bit set is the reserved "unknown size" Chrome writes for the
   // Segment and for each Cluster.
-  return { id, dataStart, end: size === 2 ** (7 * sizeLength) - 1 ? Infinity : dataStart + size }
+  let unknown = size === mask
+  for (let k = 1; k < sizeLength; k++) {
+    size = size * 256 + b[idLength + k]
+    unknown = unknown && b[idLength + k] === 0xff
+  }
+  const dataStart = position + idLength + sizeLength
+  return { id, dataStart, end: unknown ? Infinity : dataStart + size }
 }
 
 async function readUint(reader: ByteWindow, element: EbmlElement): Promise<number> {
@@ -157,6 +179,21 @@ async function readVideoTracks(reader: ByteWindow, tracks: EbmlElement, into: Se
   }
 }
 
+/** The furthest SeekPosition a SeekHead names, relative to the Segment data. */
+async function readFurthestSeek(reader: ByteWindow, seekHead: EbmlElement): Promise<number> {
+  let furthest = 0
+  for (let i = seekHead.dataStart; i < seekHead.end; ) {
+    const seek = await readElement(reader, i)
+    for (let j = seek.dataStart; j < seek.end; ) {
+      const field = await readElement(reader, j)
+      if (field.id === ID.SEEK_POSITION) furthest = Math.max(furthest, await readUint(reader, field))
+      j = field.end
+    }
+    i = seek.end
+  }
+  return furthest
+}
+
 /** Walk one Cluster, noting its video keyframes; returns where it ends. */
 async function readCluster(
   reader: ByteWindow,
@@ -177,8 +214,8 @@ async function readCluster(
     })
   while (i < Math.min(cluster.end, fileEnd)) {
     const child = await readElement(reader, i)
-    // An unknown-size Cluster ends where the next one begins.
-    if (child.id === ID.CLUSTER) break
+    // An unknown-size Cluster ends where the next Segment child begins.
+    if (child.id >= LEVEL_ONE_ID_MIN) break
     switch (child.id) {
       case ID.TIMECODE:
         timecode = await readUint(reader, child)
@@ -260,11 +297,16 @@ export async function writeKeyframeCues(
   const videoTracks = new Set<number>()
   const keyframes: Keyframe[] = []
   let cues: { start: number; end: number } | undefined
+  let firstCluster = Infinity
+  let furthestSeek = 0
 
   let position = segment.dataStart
   while (position < blob.size) {
     const element = await readElement(reader, position)
     switch (element.id) {
+      case ID.SEEK_HEAD:
+        furthestSeek = Math.max(furthestSeek, await readFurthestSeek(reader, element))
+        break
       case ID.TRACKS:
         await readVideoTracks(reader, element, videoTracks)
         break
@@ -272,6 +314,7 @@ export async function writeKeyframeCues(
         cues = { start: position, end: element.end }
         break
       case ID.CLUSTER:
+        firstCluster = Math.min(firstCluster, position)
         position = await readCluster(reader, position, element, blob.size, videoTracks, keyframes)
         continue
     }
@@ -280,6 +323,19 @@ export async function writeKeyframeCues(
 
   if (videoTracks.size === 0) return blob
   if (!cues) throw new Error('The repaired WebM has no Cues element to index its keyframes into')
+  // The layout the positions below are computed for (see the header comment).
+  if (segment.end !== Infinity) {
+    throw new Error('The repaired WebM\'s Segment has a known size, which this repair does not rewrite')
+  }
+  if (firstCluster < cues.start) {
+    throw new Error('The repaired WebM has a Cluster ahead of its Cues element')
+  }
+  if (segment.dataStart + furthestSeek > cues.start) {
+    throw new Error('The repaired WebM has a SeekHead entry past its Cues element')
+  }
+  if (keyframes.length === 0) {
+    throw new Error('The repaired WebM has a video track but no video keyframe to index')
+  }
 
   const { start, end } = cues
   const grownBy = CUES_HEADER_BYTES + keyframes.length * CUE_POINT_BYTES - (end - start)

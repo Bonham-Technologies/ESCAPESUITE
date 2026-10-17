@@ -2124,16 +2124,20 @@ upstream-requests page has its own row.
   ARTIST's). ESCSUITE-305 measured the cure: the same bytes with a keyframe index written into
   the same place seeked 48/48 on Firefox, and that index is what this step writes. It is pure
   bytes, once per save: one forward pass over the Segment, read in 1 MiB windows
-  (`CUES_READ_WINDOW_BYTES`) with every frame payload skipped, noting each keyframe — a
-  SimpleBlock with the keyframe flag, or a BlockGroup with no ReferenceBlock — then the Cues
-  element rewritten in place (CueTime, CueTrack, CueClusterPosition, CueRelativePosition, each at
-  a fixed 8-byte width) and every other byte, alpha included, handed on as a `slice()` of the
-  input. It leans on `makeMetadataSeekable`'s fixed output shape (an unknown-size Segment, the
-  Cues ahead of the first Cluster, the SeekHead pointing only at elements ahead of it), so
-  growing the Cues moves every Cluster by exactly its growth and nothing else. A take with no
-  video track (microphone only) is handed back as the library left it. A video file with no
-  Cues element at all throws — the library always writes one — and the save reports it as
-  `NOT_SEEKABLE` like any other failed repair. Mediabunny's packet-copy remux was the other
+  (`CUES_READ_WINDOW_BYTES`). Frame payloads are not parsed, only element and block headers, but
+  they are still read, so the pass costs about one 1 MiB read per MiB of file (a 56 MB take is
+  about 56 reads). It notes each keyframe — a SimpleBlock with the keyframe flag, or a BlockGroup
+  with no ReferenceBlock — then rewrites the Cues element in place (CueTime, CueTrack,
+  CueClusterPosition, CueRelativePosition, each at a fixed 8-byte width) and hands every other
+  byte, alpha included, on as a `slice()` of the input. It leans on `makeMetadataSeekable`'s fixed
+  output shape — an unknown-size Segment, the Cues ahead of the first Cluster, and every SeekHead
+  entry pointing at or ahead of the Cues — so growing the Cues moves every Cluster by exactly its
+  growth and nothing else; **each of the three is checked**, and a file that breaks one is
+  refused rather than given silently wrong positions. A take with no video track (microphone
+  only) is handed back as the library left it. A video file with no Cues element, one in which no
+  keyframe is found (which would otherwise be stored with the very empty index this replaces), or
+  one with an invalid EBML element header (an ID over four bytes or a size over eight) throws too;
+  every such refusal is reported by the save as `NOT_SEEKABLE` like any other failed repair. Mediabunny's packet-copy remux was the other
   option and was not taken: it would rebuild every block, and whether it keeps the alpha
   BlockAdditions byte for byte is exactly what a rewrite of the Cues alone never has to prove.
   Takes stored before this carry the empty Cues; nothing repairs them in place
