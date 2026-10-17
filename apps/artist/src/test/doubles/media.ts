@@ -65,6 +65,14 @@ export interface SeekScript {
    * dispatched — on a `setTimeout`, so fake timers drive it.
    */
   seekLandsAfterMs?: number
+  /**
+   * `seekLandsAfterMs` chosen per seek target, so one element of a source can
+   * land late while another wedges (ESCSUITE-305 × ESCSUITE-313, the slot-wedge
+   * pins). A number for a target makes that seek land after that many
+   * milliseconds, as `seekLandsAfterMs` does; `undefined` leaves the seek to the
+   * rest of the script (`seekLandsAfterMs`, then `wedgeSeekAt`).
+   */
+  seekLandsAfterMsAt?: (time: number) => number | undefined
 }
 
 export interface VideoScript extends SeekScript {
@@ -216,14 +224,15 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
             queueMicrotask(() => el.dispatchEvent(new Event('durationchange')))
           }
         }
-        if (s.seekLandsAfterMs !== undefined) {
+        const landsAfterMs = s.seekLandsAfterMsAt?.(next) ?? s.seekLandsAfterMs
+        if (landsAfterMs !== undefined) {
           own(el, 'seeking', true)
           own(el, 'readyState', 1)
           setTimeout(() => {
             own(el, 'seeking', false)
             own(el, 'readyState', readyState)
             el.dispatchEvent(new Event('seeked'))
-          }, s.seekLandsAfterMs)
+          }, landsAfterMs)
           return
         }
         if (s.wedgeSeekAt) {
