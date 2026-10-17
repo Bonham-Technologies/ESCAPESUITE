@@ -667,26 +667,38 @@ function analyseArtistArm(dir, m, files, rawPrimary, minutes) {
   if (!raw) {
     verdicts.push('**H4 (ESCAPEARTIST)**: inconclusive — no drift fit for the source.')
   } else {
-    const outcomes = []
-    for (const x of files.filter((y) => y.kind.startsWith('artist-'))) {
-      const r = best(x)
-      if (!r) {
-        outcomes.push({ x, state: 'inconclusive', text: `${x.kind}: no drift fit` })
-        continue
-      }
-      const delta = r.b - raw.b
-      const se = Math.sqrt(r.seB ** 2 + raw.seB ** 2)
+    // A fit is usable with three or more points and a finite slope error.
+    const usable = (r) => !!r && r.n >= 3 && Number.isFinite(r.seB)
+    const classify = (r, ref) => {
+      if (!usable(r) || !usable(ref)) return { state: 'inconclusive', delta: NaN, se: NaN }
+      const delta = r.b - ref.b
+      const se = Math.sqrt(r.seB ** 2 + ref.seB ** 2)
       const state =
         Math.abs(delta) > SPLICE_MIN_MS_PER_MIN && Math.abs(delta) > 3 * se
           ? 'spliced'
           : Math.abs(delta) <= Math.max(FLAT_MS_PER_MIN, 3 * se)
             ? 'flat'
             : 'inconclusive'
+      return { state, delta, se }
+    }
+    const outcomes = []
+    for (const x of files.filter((y) => y.kind.startsWith('artist-'))) {
+      // A/V against the export's own picture (timecode), and — needing no
+      // picture at all — the export's beeps against the 10 s schedule they
+      // were emitted on, beside the source's: a splice moves every later beep
+      // earlier, so it shows on the audio grid too.
+      const av = classify(best(x), raw)
+      const grid = classify(x.audioGrid, rawPrimary?.audioGrid)
+      const state = av.state !== 'inconclusive' ? av.state : grid.state
       const endDiff = x.video && x.audio ? (x.audio.end - x.video.end) * 1000 : NaN
+      const pictureNote = usable(best(x)) ? '' : ' (picture unreadable: no usable timecode fit, so the audio grid decides)'
       outcomes.push({
         x,
         state,
-        text: `${x.kind}: b = ${fitText(r)} ms/min (Δ vs source ${signed(delta, 2)} ± ${f(se, 2)}), ${x.audio ? `${x.audio.gaps} PTS gaps (Σ ${f(x.audio.gapMs)} ms)` : 'no audio'}, audioEnd−videoEnd ${signed(endDiff, 0)} ms → ${state}`,
+        text:
+          `${x.kind}: A/V b = ${fitText(best(x))} ms/min (Δ vs source ${signed(av.delta, 2)} ± ${f(av.se, 2)}); ` +
+          `audio grid b = ${fitText(x.audioGrid)} (Δ vs source ${signed(grid.delta, 2)} ± ${f(grid.se, 2)}); ` +
+          `${x.audio ? `${x.audio.gaps} PTS gaps (Σ ${f(x.audio.gapMs)} ms)` : 'no audio'}, audioEnd−videoEnd ${signed(endDiff, 0)} ms → ${state}${pictureNote}`,
       })
     }
     const any = (state) => outcomes.some((o) => o.state === state)

@@ -66,6 +66,14 @@ const FFPROBE = process.env.FFPROBE ?? 'ffprobe'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_ROOT = path.resolve(HERE, '../../av-drift-results')
 
+/**
+ * Wall-clock budget per second of timeline, per export. The element path is
+ * slow in a headless browser: the first Chromium WebM export of a 182 s take
+ * took 976 s (5.4x real time), and Firefox's had reached frame 2625 of 5470
+ * after 35 minutes (~0.8 s a frame) when a 35-minute budget ran out.
+ */
+const EXPORT_BUDGET_PER_SECOND_MS = 40_000
+
 /** One output frame at the exporters' 30 fps. */
 const FRAME_S = 1 / 30
 /**
@@ -167,7 +175,6 @@ test.describe('ESCAPEARTIST A/V drift rig', () => {
   test.skip(!ENABLED, 'Opt-in: set AV_DRIFT=1 and AV_DRIFT_SOURCE, and run with --config=playwright.av-drift.config.ts')
 
   test(`export of ${path.basename(SOURCE) || 'a gapped take'}`, async ({ page, browserName }) => {
-    test.slow()
     expect(existsSync(SOURCE), `AV_DRIFT_SOURCE ${SOURCE} does not exist`).toBe(true)
 
     const formats: ('webm' | 'mp4')[] = ONLY ? [ONLY as 'webm' | 'mp4'] : browserName === 'firefox' ? ['webm'] : ['webm', 'mp4']
@@ -181,6 +188,8 @@ test.describe('ESCAPEARTIST A/V drift rig', () => {
     const rawName = `source-${path.basename(SOURCE)}`
     copyFileSync(SOURCE, path.join(dir, rawName))
     const sourceProbe = probe(SOURCE)
+    // The config's timeout is sized for an ESCAPECRAFT take; an export can take far longer.
+    test.setTimeout(formats.length * sourceProbe.duration * EXPORT_BUDGET_PER_SECOND_MS + 600_000)
     const sourceVideo = sourceProbe.streams.find((s) => s.codec_type === 'video')
     expect(sourceVideo, 'the source has a video stream').toBeTruthy()
     expect({ width: sourceVideo?.width, height: sourceVideo?.height }).toEqual(SIZE)
@@ -227,7 +236,7 @@ test.describe('ESCAPEARTIST A/V drift rig', () => {
     writeMeasurement()
 
     for (const format of formats) {
-      const { file, seconds } = await exportOnce(page, format, dir, clip.duration * 10_000 + 300_000)
+      const { file, seconds } = await exportOnce(page, format, dir, clip.duration * EXPORT_BUDGET_PER_SECOND_MS)
       // Tripwire: the export's picture is the timeline's length within a frame,
       // at the source's size, and it has sound running to the same end (give or
       // take the audio codec's framing). A WebM's streams carry no duration of
