@@ -2071,19 +2071,26 @@ one shared map, `elementSlotsRef` (created by `PreviewPlayer` and passed to both
 scrub and readiness effects, the playback loop (when the set of live clips changes, and when
 `holdIncoming` first holds an incoming side — each naming the running transition) all assign
 into it, and the frame's draw (`PreviewFrameMedia.slots`) and the crop chrome read it, so all
-of them agree on which element a clip is. `drawPreviewFrame` stays pure: given no `slots` it
-works them out with the stateless rule, as before. The assigner is reset when the element set
-(`videoUrlsKey`) or the project (`project.id`) changes, before the effects assign again, so a
-remembered slot can never outlive the elements or the clips it was for — and not when playback
-stops, because re-packing at a pause would put a picture-in-picture's two clips onto each
-other's elements and seek both. A slot names an element by index, resolved afresh on every
-lookup, so it never points at a released element; an element that does not exist yet is skipped
-for that frame as before. A reset mid-playback takes effect at the next change of the live set,
-until when the loop and the draw keep reading the map they last shared. Pinned by
+of them agree on which element a clip is. `drawPreviewFrame` holds no state: it draws by the
+`slots` it is handed, which are required. The assigner is reset only when the project
+(`project.id`) changes, before the effects assign again. It is deliberately **not** reset when
+the element set (`videoUrlsKey`) changes, nor when playback stops: a slot names an element by
+index — the source's own, or its k-th further one, made lazily by `previewVideoForSlot` —
+resolved afresh on every lookup, so a remembered slot can never bind an element that is gone (one
+that does not exist yet is skipped for that frame, as before); and every assignment forgets each
+clip it does not name, so a clip that left takes its slot with it. Re-packing on either would
+move a picture-in-picture's two clips onto each other's elements: paused, both would seek; playing,
+nothing re-seeks the live clips until the live set changes, so the next assignment — the
+crossfade hold, say — would swap the two clips in the map and the draw would show each from the
+other's playing element for the rest of the fade (the review round's finding, pinned). Pinned by
 `elementSlots.test.ts` (the frame sequence U → L,U → L → L,N gives U 0, L 1, L 1, N 0, and the
-transition's two sides) and by `usePreviewRenderLoop.test.ts` ("keeps the upper clip on its
-playing element when a clip of its source starts below it", "keeps a split clip's crossfade
-incoming side on the element it was held on, past the cut", and the two reset cases).
+transition's two sides), by `usePreviewRenderLoop.test.ts` ("keeps the upper clip on its playing
+element when a clip of its source starts below it", "keeps a split clip's crossfade incoming side
+on the element it was held on, past the cut", "seeks neither element of a paused
+picture-in-picture when the element set changes", "keeps a playing picture-in-picture's slots
+across an element-set change into a crossfade" and the project-change reset), and by
+`PreviewPlayer.slots.test.tsx` (the mounted preview draws, and the crop chrome dims, each clip
+from the element the loop's slots name).
 
 The lifetimes differ: the preview's further elements are kept for as long as the source
 is on the timeline, an export's until the export ends — neither frees one when its clips stop overlapping.

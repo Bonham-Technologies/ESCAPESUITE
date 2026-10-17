@@ -149,13 +149,21 @@ export function usePreviewRenderLoop({
   const [slotAssigner] = useState(createStickySlotAssigner);
   const projectId = useEditorStore((state) => state.project.id);
 
-  // Forget every remembered slot when the element set or the project changes,
-  // before the effects below assign again: the next assignment starts afresh,
-  // in track order. Not when playback stops — re-packing at a pause would move
-  // a picture-in-picture's clips onto each other's elements and seek both.
+  // Forget every remembered slot when the project changes, before the effects
+  // below assign again: the next assignment starts afresh, in track order.
+  //
+  // Not when the element set (`videoUrlsKey`) changes, and not when playback
+  // stops. A slot names an element by index — the source's own, or its k-th
+  // further one, made lazily by `previewVideoForSlot` — resolved afresh on
+  // every lookup, so a remembered slot can never bind an element that is gone;
+  // and every assignment forgets each clip it does not name, so a clip that
+  // left takes its slot with it. Re-packing on either would move a
+  // picture-in-picture's two clips onto each other's elements: paused, both
+  // would seek; playing, nothing re-seeks the live clips until the live set
+  // changes, so the draw would show each clip from the other's playing element.
   useEffect(() => {
     slotAssigner.reset();
-  }, [slotAssigner, videoUrlsKey, projectId]);
+  }, [slotAssigner, projectId]);
 
   /** Every preview `<video>`, each source's further elements included. */
   const forEachVideo = useCallback((visit: (video: HTMLVideoElement) => void) => {
