@@ -405,7 +405,15 @@ pnpm lint                # Run ESLint
   to revoke every object URL twice. Both exporters therefore hold a
   `createElementSourceRelease(sources)` closure and call *that* from both paths rather than
   `releaseElementSources` directly, which also keeps the success-path ordering (release,
-  then the `complete` report) exactly as it was. The composer takes
+  then the `complete` report) exactly as it was. **`exportMP4.ts` follows the same boundary**
+  (ESCSUITE-315), though it holds no elements of its own beyond images: its ownership begins at
+  `createFrameManager` — a decode worker that may hold up to 512 MB of samples — so its `try`
+  begins there too, where it used to begin at the frame loop with the media load,
+  `output.start()`, both `configure()` calls and the caller's `onProgress` above it, and a
+  throw from any of them left the worker alive until the tab closed. Its catch calls the same
+  kind of run-once `release` the success path does (the frame manager disposed, the worker
+  terminated, the image URLs revoked — once) and closes whatever its own `openEncoders` list
+  holds. The composer takes
   the output `frameRate` because the seek tolerance is a little under half a frame of it —
   the one value that had to become a parameter, 30 for WebM and 10/15/20 for GIF.
   `exportMP4.ts` is deliberately
@@ -768,7 +776,18 @@ the Chromium test exists once.
   hands a source whose load rejects to `<video>` with the reason, so the source that missed its
   deadline and every source after it fall back there, a source the worker already held hands
   itself over at its next frame (its frame request refused with the same reason), and the export
-  continues with the same once-per-export line.
+  continues with the same once-per-export line. **The export's Cancel runs the same terminate
+  path (ESCSUITE-314).** The `signal` `initialize()` takes for its startup wait now governs the
+  manager for its whole life, through one listener per manager rather than one per request: an
+  abort terminates the worker in the abort's own dispatch, rejects every load and frame request
+  in flight with the export's own `ExportAbortedError` — which `createSource`,
+  `FailoverFrameSource.getFrame` and `getFrameAtTime` pass straight on rather than handing to
+  `<video>` or skipping a frame for, and the dialog reads as a cancel — and refuses every later
+  load and request with it, starting no new worker. Without it a Cancel waited for the worker to
+  answer, which on a healthy slow decode posting `FRAME_PROGRESS` was as long as the decode took,
+  and every remaining source was still loaded; `exportMP4.ts` also checks the signal before each
+  source load and in the load's `catch`, so the `<video>` path stops loading too. A `<video>`
+  load already under way (ESCSUITE-325's 15 s wait) is not interrupted; the check after it is.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A source
