@@ -24,6 +24,12 @@ interface MediaLibrarySidebarProps {
   onProjectFile: (file: File) => void;
   /** Passed straight to `VideoUploader`: how it reports a Clear All partial failure. */
   showNotification: ShowNotification;
+  /**
+   * Passed straight to `VideoUploader` and `VideoLibrary`: the autosave's
+   * `clearSession`, which their storage clears call when they leave the
+   * project with no source and no clip (ESCSUITE-307).
+   */
+  clearSession: () => void;
 }
 
 /**
@@ -40,6 +46,7 @@ export function MediaLibrarySidebar({
   onConfirmOpenChange,
   onProjectFile,
   showNotification,
+  clearSession,
 }: MediaLibrarySidebarProps) {
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`}>
@@ -65,12 +72,12 @@ export function MediaLibrarySidebar({
       {!collapsed && (
         <>
           <div className={styles.uploaderContainer}>
-            <VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />
+            <VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />
             <ResolutionPicker onConfirmOpenChange={onConfirmOpenChange} />
           </div>
 
           <div className={styles.libraryContainer}>
-            <VideoLibrary showNotification={showNotification} />
+            <VideoLibrary showNotification={showNotification} clearSession={clearSession} />
           </div>
         </>
       )}

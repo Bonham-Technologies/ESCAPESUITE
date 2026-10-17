@@ -33,3 +33,14 @@ export function takeLoadedMessage(name: string, placed: number, missing: number)
   }
   return `Loaded recording: ${name}`;
 }
+
+/**
+ * What a session restore says when some of the saved session's files are no
+ * longer in storage and were left out (ESCSUITE-307). One sentence, in the one
+ * toast slot, in place of "Session restored".
+ */
+export function sessionSourcesLeftOutMessage(count: number): string {
+  return count === 1
+    ? '1 file in the saved session is no longer in storage and was left out'
+    : `${count} files in the saved session are no longer in storage and were left out`;
+}

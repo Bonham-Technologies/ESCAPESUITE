@@ -17,11 +17,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   clearSessionState,
+  getVideo,
   resolveThumbnailUrl,
   revokeSourceThumbnails,
   type SessionState,
 } from '../core/storage';
 import { repairEditorBlock } from '../store/projectMigration';
+import { timelineWithoutSources } from '../store/projectFactory';
+import { sessionSourcesLeftOutMessage } from './appFormat';
 import { applyEditorBlock } from './editorBlock';
 import { probeTabLock } from './sessionLock';
 import { rememberDeclinedSlot } from './declinedSlots';
@@ -83,6 +86,18 @@ export const SESSION_NEWER_NOTICE = 'That session changed in another window — 
 export const SESSION_KEPT_NOTICE = 'That session was changed in another window, so it was not deleted.';
 /** Either answer found the slot gone: nothing to delete or adopt. */
 export const SESSION_REMOVED_NOTICE = 'That session was removed in another window.';
+
+/**
+ * A restored source whose bytes are no longer in storage (ESCSUITE-307): the
+ * row was deleted after the session was saved — by a storage clear in another
+ * tab, by ESCAPECRAFT, or by a clear in this tab before ESCSUITE-307 made the
+ * clears empty the slot. Restoring it would put a tile in the library that
+ * nothing can play, place or export (the ESCSUITE-149/154 defect).
+ */
+interface RestoredSource {
+  video: SourceVideo;
+  inStorage: boolean;
+}
 
 export function useSessionRestore({
   suppressRestore,
@@ -165,14 +180,24 @@ export function useSessionRestore({
     // owner back (ESCSUITE-283), a re-read that fails (ESCSUITE-289) — can free
     // what they minted, and one before them has nothing to free.
     let restoredSourceVideos: SourceVideo[] = [];
+    // The ids whose bytes are gone (ESCSUITE-307): left out of the restore,
+    // with every clip that plays one, and counted in its one notice.
+    let leftOutIds: Set<string>;
     let atAnswer: SlotAtAnswer;
     try {
-      restoredSourceVideos = await Promise.all(
-        session.sourceVideos.map(async (video) => ({
-          ...video,
-          thumbnailUrl: await resolveThumbnailUrl(video.id),
-        }))
+      // Each source's stored thumbnail and its row, read together: a source
+      // whose row is gone is dropped, and the thumbnail just minted for it is
+      // freed at once rather than handed to nothing.
+      const restored: RestoredSource[] = await Promise.all(
+        session.sourceVideos.map(async (video) => {
+          const [thumbnailUrl, stored] = await Promise.all([resolveThumbnailUrl(video.id), getVideo(video.id)]);
+          return { video: { ...video, thumbnailUrl }, inStorage: stored !== undefined };
+        })
       );
+      restoredSourceVideos = restored.filter((r) => r.inStorage).map((r) => r.video);
+      const leftOut = restored.filter((r) => !r.inStorage).map((r) => r.video);
+      revokeSourceThumbnails(leftOut);
+      leftOutIds = new Set(leftOut.map((v) => v.id));
       // A stale offer (ESCSUITE-283): the tab that wrote this slot is open
       // again and has been offered it itself. Adopting it would take its work
       // out from under it, so this is refused the way a failed read is. An
@@ -241,16 +266,27 @@ export function useSessionRestore({
       return;
     }
 
-    setProject(session.project);
+    // A source whose bytes are gone takes its clips with it (ESCSUITE-307),
+    // the way a storage clear does — the same arithmetic, so the duration is
+    // recalculated the same way — and a selection naming one of those clips
+    // goes too, rather than being restored as a ghost (ESCSUITE-101). Nothing
+    // left out: the saved project and selection exactly as they were.
+    let project = session.project;
+    let selectedClipId = session.selectedClipId;
+    if (leftOutIds.size > 0) {
+      project = { ...session.project, timeline: timelineWithoutSources(session.project.timeline, leftOutIds) };
+      if (!project.timeline.clips.some((c) => c.id === selectedClipId)) selectedClipId = null;
+    }
+    setProject(project);
     restoredSourceVideos.forEach(addSourceVideo);
     seekTo(session.currentTime);
-    setSelectedClipId(session.selectedClipId);
+    setSelectedClipId(selectedClipId);
     setZoom(session.zoom);
     // ESCSUITE-245: the app's own autosave is repaired, not refused — a block
     // that fails the file's checks falls back to no range and no markers with
     // one warning, and an old snapshot with no block clears whatever the
     // editor held. Neither is an edit, so neither is undoable.
-    applyEditorBlock(repairEditorBlock(session.editor, session.project.timeline.clips));
+    applyEditorBlock(repairEditorBlock(session.editor, project.timeline.clips));
     clearHistory();
     // Another tab's slot — one that closed or crashed, or the legacy shared
     // row — becomes this tab's (ESCSUITE-274). Not awaited: the restore has
@@ -267,7 +303,11 @@ export function useSessionRestore({
     setShowSessionPrompt(false);
     setPendingSession(null);
     setSessionRestored(true);
-    showNotification('Session restored', 'success');
+    // One toast slot: a restore that left files out says so instead of
+    // reporting a clean success (ESCSUITE-14's "missing part skipped" shape) —
+    // and says so even when it left out everything and restored an empty project.
+    if (leftOutIds.size > 0) showNotification(sessionSourcesLeftOutMessage(leftOutIds.size), 'info');
+    else showNotification('Session restored', 'success');
   }, [setProject, addSourceVideo, seekTo, setSelectedClipId, setZoom, clearHistory, showNotification, tabId]);
 
   const handleDeclineSession = useCallback(() => {

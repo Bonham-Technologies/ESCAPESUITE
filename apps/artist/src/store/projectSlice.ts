@@ -7,7 +7,7 @@
 import type { StateCreator } from 'zustand';
 import type { EditorState, Project, SourceVideo } from './types';
 import { graftAddedSource, pushToHistory, scrubDeadThumbnails, scrubRemovedSources } from './storeHistory';
-import { createEmptyProject, calculateTimelineDuration } from './projectFactory';
+import { createEmptyProject, timelineWithoutSources } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
 import { ensureTimelineHasTracks } from './projectMigration';
 import { pruneSelection } from './selectionPrune';
@@ -164,22 +164,17 @@ export const createProjectSlice: StateCreator<EditorState, [], [], ProjectSlice>
       return history === state.history ? state : { history };
     }
     revokeSourceThumbnails(removed);
-    const { clips } = state.project.timeline;
-    const kept = clips.filter((c) => !c.sourceVideoId || !removedIds.has(c.sourceVideoId));
+    const timeline = timelineWithoutSources(state.project.timeline, removedIds);
     const newClipboard = state.clipboard && state.clipboard.some((c) => c.sourceVideoId && removedIds.has(c.sourceVideoId))
       ? state.clipboard.filter((c) => !c.sourceVideoId || !removedIds.has(c.sourceVideoId))
       : state.clipboard;
-    const pruned = pruneSelection(kept, state.selectedClipId, state.selectedClipIds);
+    const pruned = pruneSelection(timeline.clips, state.selectedClipId, state.selectedClipIds);
     return {
       sourceVideos: state.sourceVideos.filter((v) => !removedIds.has(v.id)),
       project: {
         ...state.project,
         modified: Date.now(),
-        timeline: {
-          ...state.project.timeline,
-          clips: kept,
-          duration: calculateTimelineDuration(kept),
-        },
+        timeline,
       },
       selectedClipId: pruned.selectedClipId,
       selectedClipIds: pruned.selectedClipIds,

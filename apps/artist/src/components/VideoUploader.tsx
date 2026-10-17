@@ -8,6 +8,7 @@ import { analytics } from '../utils/analytics';
 import { formatFileSize, formatDuration } from '../utils/timeUtils';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { lockedSourceVideoIds } from '../store/trackLock';
+import { holdsNoWork } from '../store/projectFactory';
 import type { SourceVideo } from '../store/types';
 import {
   CaptionParseError,
@@ -34,6 +35,22 @@ const CAPTION_FILE = /\.(srt|vtt)$/i;
 /** The one notice a storage clear raises for the ids it could not delete (ESCSUITE-142's shape). */
 function notRemovedMessage(failed: number): string {
   return `Could not remove ${failed} file${failed !== 1 ? 's' : ''} from storage`;
+}
+
+/**
+ * Empty this tab's saved session slot when a storage clear has just left the
+ * project holding no work at all — no source, no clip (ESCSUITE-307). Called
+ * by all three clears (per-item Remove, Clear Unused, Clear All) right after
+ * their `removeSourceVideosPermanently` write. The autosave never writes an
+ * empty project over the slot (ESCSUITE-227), so without this the slot kept
+ * the last snapshot that still had these sources in it, and a reload offered
+ * them back: tiles whose bytes this very clear deleted. A clear that leaves
+ * anything — a source still in use, a text clip — leaves the slot alone, and
+ * so does deleting clips while their sources stay: those bytes are still
+ * there, so the last snapshot with them is still worth offering.
+ */
+function clearSessionIfNothingLeft(clearSession: () => void): void {
+  if (holdsNoWork(useEditorStore.getState())) clearSession();
 }
 
 /**
@@ -107,9 +124,18 @@ interface VideoUploaderProps {
    * review round 2, NIT).
    */
   showNotification: (message: string, type: 'error' | 'success' | 'info') => void;
+  /**
+   * Empty this tab's saved session slot — the autosave's `clearSession`
+   * (`App` passes it down through `MediaLibrarySidebar`). Clear Unused and
+   * Clear All call it when they leave the project with no source and no clip,
+   * so a reload does not offer back the files they just deleted (ESCSUITE-307).
+   * Required for the same reason `onProjectFile` is: a caller that forgets it
+   * fails to compile rather than silently leaving a stale slot behind.
+   */
+  clearSession: () => void;
 }
 
-export function VideoUploader({ onProjectFile, showNotification }: VideoUploaderProps) {
+export function VideoUploader({ onProjectFile, showNotification, clearSession }: VideoUploaderProps) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
@@ -243,12 +269,15 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
         // Both run regardless of outcome (ESCSUITE-149 review, NIT 2): the
         // ids before a mid-loop failure are still permanently gone, and the
         // meter has to say so even when the clear as a whole did not finish.
-        if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
+        if (removedIds.length > 0) {
+          removeSourceVideosPermanently(removedIds);
+          clearSessionIfNothingLeft(clearSession);
+        }
         refreshStorageInfo();
         void refreshOrphans();
       }
     }
-  }, [unusedVideos, unusedSize, removeSourceVideosPermanently, refreshStorageInfo, refreshOrphans]);
+  }, [unusedVideos, unusedSize, removeSourceVideosPermanently, clearSession, refreshStorageInfo, refreshOrphans]);
 
   // Clear all storage — the bulk form of Clear Unused (ESCSUITE-142): per id,
   // over the editor's own `sourceVideos`, so its blast radius can only ever be
@@ -303,13 +332,16 @@ export function VideoUploader({ onProjectFile, showNotification }: VideoUploader
           }
         }
       } finally {
-        if (removedIds.length > 0) removeSourceVideosPermanently(removedIds);
+        if (removedIds.length > 0) {
+          removeSourceVideosPermanently(removedIds);
+          clearSessionIfNothingLeft(clearSession);
+        }
         refreshStorageInfo();
         void refreshOrphans();
       }
       if (failed > 0) showNotification(notRemovedMessage(failed), 'error');
     }
-  }, [clearableVideos, removeSourceVideosPermanently, refreshStorageInfo, refreshOrphans, showNotification]);
+  }, [clearableVideos, removeSourceVideosPermanently, clearSession, refreshStorageInfo, refreshOrphans, showNotification]);
 
   // Remove the files from earlier sessions (ESCSUITE-268). Only from this
   // click — nothing sweeps them on load. The same per-id `deleteVideo` (bytes
@@ -674,11 +706,18 @@ interface VideoLibraryProps {
    * and nothing here reaches into `app/` even for a type.
    */
   showNotification?: (message: string, type: 'error' | 'success' | 'info') => void;
+  /**
+   * Empty this tab's saved session slot, as `VideoUploaderProps.clearSession`
+   * does for Clear Unused and Clear All: a per-item Remove that leaves the
+   * project with no source and no clip calls it (ESCSUITE-307). Required, the
+   * way it is there.
+   */
+  clearSession: () => void;
 }
 
 // Video Library component to show uploaded videos
 // Check if media dimensions differ significantly from project resolution
-export function VideoLibrary({ showNotification }: VideoLibraryProps = {}) {
+export function VideoLibrary({ showNotification, clearSession }: VideoLibraryProps) {
   const sourceVideos = useEditorStore((state) => state.sourceVideos);
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -821,9 +860,10 @@ export function VideoLibrary({ showNotification }: VideoLibraryProps = {}) {
           return;
         }
         removeSourceVideosPermanently([id]);
+        clearSessionIfNothingLeft(clearSession);
       }
     },
-    [lockedMedia, clips, removeSourceVideosPermanently, showNotification]
+    [lockedMedia, clips, removeSourceVideosPermanently, showNotification, clearSession]
   );
 
   if (sourceVideos.length === 0) {

@@ -7,6 +7,7 @@
 // snapshot is tested without a store.
 import type { EditorState, SourceVideo } from '../store/types';
 import type { SessionState } from '../core/storage';
+import { holdsNoWork } from '../store/projectFactory';
 
 // `thumbnailUrl` is only ever an `URL.createObjectURL` handle
 // (videoProcessor.ts, takeImport.ts) — it dies with the document, so writing
@@ -36,12 +37,15 @@ export function buildSessionSnapshot(state: EditorState, timestamp: number, tabI
 
 /**
  * The snapshot holds no work at all: no source in the library and no clip on
- * the timeline (ESCSUITE-227). The autosave never writes such a snapshot, so a
- * tab with nothing in it — a tab that pressed Start Fresh, or New Project —
- * never writes an empty slot over the work it last held, and a reload still
- * offers that work back. A clip with no source (a text overlay) is work, and
- * so is a source with no clip.
+ * the timeline (ESCSUITE-227) — `holdsNoWork`, the one predicate the media
+ * library's storage clears also read (ESCSUITE-307). The autosave never writes
+ * such a snapshot, so a tab with nothing in it — a tab that pressed Start
+ * Fresh, or New Project — never writes an empty slot over the work it last
+ * held, and a reload still offers that work back. A storage clear that leaves
+ * the project this way empties the slot itself instead: that work's bytes are
+ * gone, so it is not worth offering back. A clip with no source (a text
+ * overlay) is work, and so is a source with no clip.
  */
 export function isEmptySession(session: SessionState): boolean {
-  return session.sourceVideos.length === 0 && session.project.timeline.clips.length === 0;
+  return holdsNoWork(session);
 }
