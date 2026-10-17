@@ -1141,14 +1141,65 @@ export class MediaLoadTimeoutError extends Error {
 }
 
 /**
+ * Point an element at `url` and wait for it to load (ESCSUITE-325, ESCSUITE-328).
+ * The one wait both export loads share — `<video>` (`waitForVideoLoad`) and
+ * `<img>` (`loadImageElement`) — so they carry one deadline, the import probe's
+ * `METADATA_LOAD_TIMEOUT_MS` (ESCSUITE-249), armed when the listeners attach and
+ * cleared on load, on `error` and on expiry. On expiry the element is torn down
+ * (handlers detached, `src` removed, `release`) and the wait rejects with a
+ * `MediaLoadTimeoutError`. `name` is what the message calls the source.
+ *
+ * `ready` is the handler property the element's first frame arrives on
+ * (`onloadeddata`, `onload`); `release` is the element-specific part of the
+ * teardown; `failure` is the plain error an `error` event rejects with.
+ * `ownsUrl` says whether a failure — an `error` or the deadline — revokes `url`.
+ */
+function waitForMediaLoad<E extends HTMLVideoElement | HTMLImageElement>(
+  element: E,
+  url: string,
+  name: string,
+  options: {
+    ready: 'onloadeddata' | 'onload'
+    failure: string
+    ownsUrl: boolean
+    release: (element: E) => void
+  }
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const detach = () => {
+      clearTimeout(timer);
+      element[options.ready] = null;
+      element.onerror = null;
+    };
+    const timer = setTimeout(() => {
+      detach();
+      element.removeAttribute('src');
+      options.release(element);
+      if (options.ownsUrl) URL.revokeObjectURL(url);
+      reject(
+        new MediaLoadTimeoutError(
+          `Could not read ${name} \u2014 the browser did not report its metadata within ${METADATA_LOAD_TIMEOUT_MS / 1000} s`
+        )
+      );
+    }, METADATA_LOAD_TIMEOUT_MS);
+    element[options.ready] = () => {
+      detach();
+      resolve();
+    };
+    element.onerror = () => {
+      detach();
+      if (options.ownsUrl) URL.revokeObjectURL(url);
+      reject(new Error(options.failure));
+    };
+    element.src = url;
+  });
+}
+
+/**
  * Point `video` at `url` and wait for its first frame (ESCSUITE-325). Shared by
  * every export `<video>` load — `loadVideoElement`, `loadVideoElementFromUrl`
  * and `HTMLVideoFrameSource`'s elements, slot 0 and every further slot
- * (ESCSUITE-313): one deadline, the import probe's (ESCSUITE-249), armed when
- * the listeners attach and cleared on `loadeddata`, on `error` and on expiry.
- * On expiry the element is torn down (handlers detached, `src` removed,
- * `load()`) and the wait rejects with a `MediaLoadTimeoutError`. `name` is what
- * the message calls the source.
+ * (ESCSUITE-313) — over `waitForMediaLoad`'s deadline.
  *
  * `ownsUrl` says whether a failure — an `error` or the deadline — revokes
  * `url`. It does by default; a source's further element reads the URL its first
@@ -1161,33 +1212,11 @@ export function waitForVideoLoad(
   name: string,
   ownsUrl = true
 ): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    const detach = () => {
-      clearTimeout(timer);
-      video.onloadeddata = null;
-      video.onerror = null;
-    };
-    const timer = setTimeout(() => {
-      detach();
-      video.removeAttribute('src');
-      video.load();
-      if (ownsUrl) URL.revokeObjectURL(url);
-      reject(
-        new MediaLoadTimeoutError(
-          `Could not read ${name} \u2014 the browser did not report its metadata within ${METADATA_LOAD_TIMEOUT_MS / 1000} s`
-        )
-      );
-    }, METADATA_LOAD_TIMEOUT_MS);
-    video.onloadeddata = () => {
-      detach();
-      resolve();
-    };
-    video.onerror = () => {
-      detach();
-      if (ownsUrl) URL.revokeObjectURL(url);
-      reject(new Error('Failed to load video'));
-    };
-    video.src = url;
+  return waitForMediaLoad(video, url, name, {
+    ready: 'onloadeddata',
+    failure: 'Failed to load video',
+    ownsUrl,
+    release: (v) => v.load(),
   });
 }
 
@@ -1225,23 +1254,19 @@ export async function loadVideoElementFromUrl(url: string, name: string): Promis
 }
 
 /**
- * Load an image blob and create an HTMLImageElement
+ * Load an image blob and create an HTMLImageElement, under the same 15 s
+ * deadline as a `<video>` (ESCSUITE-328). `name` is only for the deadline's
+ * message.
  */
-export async function loadImageElement(blob: Blob): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = document.createElement('img');
-    const url = URL.createObjectURL(blob);
-    img.src = url;
-
-    img.onload = () => {
-      resolve(img);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Failed to load image'));
-    };
+export async function loadImageElement(blob: Blob, name: string): Promise<HTMLImageElement> {
+  const img = document.createElement('img');
+  await waitForMediaLoad(img, URL.createObjectURL(blob), name, {
+    ready: 'onload',
+    failure: 'Failed to load image',
+    ownsUrl: true,
+    release: () => {},
   });
+  return img;
 }
 
 /**
