@@ -404,6 +404,9 @@ export async function exportToMP4(
   reportedProgress = { phase: 'encoding', progress: 18 };
   log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
 
+  // Each live clip's slot, refilled every frame (ESCSUITE-313).
+  const slots = new Map<string, number>();
+
   try {
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // Check for abort at start of each frame
@@ -449,7 +452,8 @@ export async function exportToMP4(
       // element, so two clips of one source — a split clip crossfading into
       // itself, a picture-in-picture copy — each hold their own frame until
       // the draw instead of sharing one playhead. The worker ignores it.
-      const slots = assignElementSlots(activeClips, activeTransition);
+      // Refilled into the export's one map: no allocation per frame.
+      assignElementSlots(activeClips, activeTransition, slots);
 
       // Fetch frames for all active media clips (runs at full speed with WebCodecs)
       const framePromises: Array<{ clip: Clip; clipTime: number; framePromise: Promise<DrawableMediaSource | null> }> = [];

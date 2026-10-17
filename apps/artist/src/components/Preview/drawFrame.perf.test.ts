@@ -311,7 +311,7 @@ describe('preview per-frame collections', () => {
     try {
       const preview = await renderPreview({ rect: RECT })
       await measureFrame(preview, time)
-      return perCall.at(-1)
+      return perCall[perCall.length - 1]
     } finally {
       spy.mockRestore()
     }

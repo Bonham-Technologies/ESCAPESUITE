@@ -8,7 +8,7 @@
 // it. A request now names its slot — the k-th live clip of that source this
 // frame — and slot k is a k-th element over the same object URL, created the
 // first time it is asked for and kept until the source is disposed.
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest'
 import { FrameSourceFactory, HTMLVideoFrameSource } from './frameSource'
 import { createFrameManager, getFrameAtTime, loadFrameSource } from './frameManager'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
@@ -111,6 +111,16 @@ describe('HTMLVideoFrameSource slots', () => {
   })
 
   it('leaves the clip out of every frame without a warning a frame through the frame manager', async () => {
+    // The manager tells a decoded VideoFrame from an element with `instanceof`;
+    // an export always runs where the class exists.
+    // Restored on its own, not with `vi.unstubAllGlobals()`, which would also
+    // drop the setup file's `URL` stubs (ESCSUITE-119).
+    const real = Object.getOwnPropertyDescriptor(globalThis, 'VideoFrame')
+    Object.defineProperty(globalThis, 'VideoFrame', { value: class {}, configurable: true, writable: true })
+    onTestFinished(() => {
+      if (real) Object.defineProperty(globalThis, 'VideoFrame', real)
+      else delete (globalThis as { VideoFrame?: unknown }).VideoFrame
+    })
     const manager = await createFrameManager(false)
     await loadFrameSource(manager, 'rec', blob(), 'video/mp4')
     media.script({ video: { fail: true } })

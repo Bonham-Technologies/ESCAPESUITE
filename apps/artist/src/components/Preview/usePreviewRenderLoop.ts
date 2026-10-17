@@ -130,6 +130,11 @@ export function usePreviewRenderLoop({
 
   const getDisplayTime = useCallback(() => displayTimeRef.current, []);
 
+  // Each live clip's slot (ESCSUITE-313) for the paused effects below — the
+  // scrub and the readiness listener, each of which fills it and reads it in
+  // one synchronous pass, so they share one map for the hook's life.
+  const pausedSlotsRef = useRef(new Map<string, number>());
+
   /** Every preview `<video>`, each source's further elements included. */
   const forEachVideo = useCallback((visit: (video: HTMLVideoElement) => void) => {
     videoElementsRef.current.forEach((video) => visit(video));
@@ -218,7 +223,8 @@ export function usePreviewRenderLoop({
 
     if (activeClips.length > 0) {
       const activeTransition = getActiveTransition(clips, tracks, currentTime);
-      const slots = assignElementSlots(activeClips, activeTransition);
+      const slots = pausedSlotsRef.current;
+      assignElementSlots(activeClips, activeTransition, slots);
 
       const wantSeek = (clip: Clip, sourceTime: number) => {
         const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
@@ -353,7 +359,8 @@ export function usePreviewRenderLoop({
     // has no element under its source id, so the lookup itself skips it.
     const activeClips = getClipsAtTime(clips, tracks, currentTime);
     const activeTransition = getActiveTransition(clips, tracks, currentTime);
-    const slots = assignElementSlots(activeClips, activeTransition);
+    const slots = pausedSlotsRef.current;
+    assignElementSlots(activeClips, activeTransition, slots);
     const waiting = new Set<HTMLVideoElement>();
     const watch = (clip: Clip) => {
       const video = videoForSlot(
@@ -461,7 +468,8 @@ export function usePreviewRenderLoop({
     // below, so it never moves a live clip's slot. An overlay has no slot and
     // no element under its empty source id, so the lookups return before
     // reading one.
-    let activeSlots = assignElementSlots(activeClips, null);
+    const activeSlots = new Map<string, number>();
+    assignElementSlots(activeClips, null, activeSlots);
     const elementFor = (clip: Clip) =>
       previewVideoForSlot(videoElementsRef.current, extraVideoElementsRef.current, clip.sourceVideoId, activeSlots.get(clip.id)!);
 
@@ -527,6 +535,10 @@ export function usePreviewRenderLoop({
     // clip changes, rather than every frame; an incoming clip that is already
     // live (on another track) is playing on its own slot and is left alone.
     let heldIncomingId: string | null = null;
+    const holdSlots = new Map<string, number>();
+    // Decided once per run: a timeline with no transition on it has nothing to
+    // hold, and the loop then asks for no transition at all, frame after frame.
+    const anyTransition = clips.some(c => c.transition.type !== 'none' && c.transition.duration > 0);
     const holdIncoming = (time: number, liveClips: typeof activeClips, liveClipIds: Set<string>) => {
       const transition = getActiveTransition(clips, tracks, time);
       const incoming = transition && !liveClipIds.has(transition.incomingClip.id) ? transition.incomingClip : null;
@@ -534,7 +546,8 @@ export function usePreviewRenderLoop({
       if (incomingId === heldIncomingId) return;
       heldIncomingId = incomingId;
       if (!incoming) return;
-      const slot = assignElementSlots(liveClips, transition).get(incoming.id)!;
+      assignElementSlots(liveClips, transition, holdSlots);
+      const slot = holdSlots.get(incoming.id)!;
       const video = previewVideoForSlot(videoElementsRef.current, extraVideoElementsRef.current, incoming.sourceVideoId, slot);
       if (!video) return;
       video.pause();
@@ -618,7 +631,7 @@ export function usePreviewRenderLoop({
       if (clipsChanged) {
         // Clips changed - need to update video playback and audio routing
         lastActiveClipIds = currentClipIds;
-        activeSlots = assignElementSlots(currentActiveClips, null);
+        assignElementSlots(currentActiveClips, null, activeSlots);
 
         // Pause videos that are no longer active — by element, since a source
         // can have one per live clip (ESCSUITE-313).
@@ -727,7 +740,7 @@ export function usePreviewRenderLoop({
         }
       }
 
-      holdIncoming(newTimelineTime, currentActiveClips, currentClipIds);
+      if (anyTransition) holdIncoming(newTimelineTime, currentActiveClips, currentClipIds);
 
       // Tell the readout where the playhead is — throttled, and never a
       // React setter on this path.

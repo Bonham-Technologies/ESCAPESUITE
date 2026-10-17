@@ -332,6 +332,32 @@ export function createFrameComposer({
     }
   };
 
+  // Which of its source's elements each live clip draws from: the k-th live
+  // clip of a source is that source's k-th element, so two clips of one
+  // source — a split clip crossfading into itself, a picture-in-picture
+  // copy — are two playheads, not one moved twice (ESCSUITE-313). A source
+  // with one live clip uses its own element and nothing else. One map for the
+  // composer's life, refilled every frame, and the lookups that read it built
+  // here once: the slot arithmetic costs a frame no allocation.
+  const slots = new Map<string, number>();
+  const videoFor = (clip: Clip) =>
+    videoForSlot(videoElements, extraVideoElements, clip.sourceVideoId, slots.get(clip.id)!);
+  // The further elements a clip's slot needs and its source does not have yet.
+  const missingSlots = (clip: Clip) => {
+    const extras = extraVideoElements.get(clip.sourceVideoId);
+    return extras && extras.length < slots.get(clip.id)! ? extras : undefined;
+  };
+  // The elements this frame seeks, cleared each frame rather than rebuilt.
+  const activeVideos = new Set<HTMLVideoElement>();
+  const pauseIfIdle = (video: HTMLVideoElement) => {
+    if (activeVideos.has(video)) return;
+    const state = playbackState.get(video)!;
+    if (state.playing) {
+      video.pause();
+      state.playing = false;
+    }
+  };
+
   return async function composeFrame(currentTime: number): Promise<void> {
     // Check for active transition
     const activeTransition = getActiveTransition(clips, tracks, currentTime);
@@ -355,20 +381,9 @@ export function createFrameComposer({
       }
     }
 
-    // Which of its source's elements each live clip draws from: the k-th live
-    // clip of a source is that source's k-th element, so two clips of one
-    // source — a split clip crossfading into itself, a picture-in-picture
-    // copy — are two playheads, not one moved twice (ESCSUITE-313). A source
-    // with one live clip uses its own element and nothing else.
-    const slots = assignElementSlots(activeClips, activeTransition);
-    const videoFor = (clip: Clip) =>
-      videoForSlot(videoElements, extraVideoElements, clip.sourceVideoId, slots.get(clip.id)!);
+    assignElementSlots(activeClips, activeTransition, slots);
     // The further elements this frame needs and does not have yet, made before
     // any seek so the seeks below still run together.
-    const missingSlots = (clip: Clip) => {
-      const extras = extraVideoElements.get(clip.sourceVideoId);
-      return extras && extras.length < slots.get(clip.id)! ? extras : undefined;
-    };
     for (const { clip } of mediaClips) {
       const extras = missingSlots(clip);
       if (extras) await growSlots(clip.sourceVideoId, extras, slots.get(clip.id)!);
@@ -380,7 +395,7 @@ export function createFrameComposer({
 
     // Sync all active videos to their target times
     const syncPromises: Promise<void>[] = [];
-    const activeVideos = new Set<HTMLVideoElement>();
+    activeVideos.clear();
 
     for (const { clip, clipTime } of mediaClips) {
       const video = videoFor(clip);
@@ -405,16 +420,14 @@ export function createFrameComposer({
       }
     }
 
-    // Pause videos that are no longer active
-    forEachVideoElement(sources, (video) => {
-      if (!activeVideos.has(video)) {
-        const state = playbackState.get(video)!;
-        if (state.playing) {
-          video.pause();
-          state.playing = false;
-        }
+    // Pause videos that are no longer active. Two plain loops rather than
+    // `forEachVideoElement` and a callback: this runs every frame.
+    for (const video of videoElements.values()) pauseIfIdle(video);
+    for (const extras of extraVideoElements.values()) {
+      for (const video of extras) {
+        if (video) pauseIfIdle(video);
       }
-    });
+    }
 
     await Promise.all(syncPromises);
 
@@ -502,7 +515,8 @@ export function createFrameComposer({
     // Draw transition if active
     if (activeTransition) {
       drawTransition(
-        ctx, videoFor, imageElements, activeTransition, currentTime,
+        ctx, videoFor(activeTransition.outgoingClip), videoFor(activeTransition.incomingClip),
+        imageElements, activeTransition, currentTime,
         projectSize.width, projectSize.height, drawOptions
       );
     }

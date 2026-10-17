@@ -56,6 +56,18 @@ function drawOptionsFor(filterScale: number): MediaDrawOptions {
   return scaledDrawOptions;
 }
 
+/**
+ * Each live clip's slot this frame (ESCSUITE-313) — one map for the module,
+ * refilled by every `drawPreviewFrame`, which is synchronous, so a composite
+ * allocates nothing for it.
+ */
+const frameSlots = new Map<string, number>();
+
+/** The `<video>` a live clip draws from this frame: its source's element for its slot. */
+function videoFor(media: PreviewFrameMedia, clip: Clip): HTMLVideoElement | undefined {
+  return videoForSlot(media.videoElements, media.extraVideoElements, clip.sourceVideoId, frameSlots.get(clip.id)!);
+}
+
 /** Everything on the timeline that a preview frame is drawn from. */
 export interface PreviewFrameScene {
   /**
@@ -304,9 +316,7 @@ export function drawPreviewFrame(
   // Which of its source's elements each live clip draws from — the same
   // assignment, from the same track-ordered list, the render loop seeks by
   // (ESCSUITE-313, `core/elementSlots.ts`).
-  const slots = assignElementSlots(activeClips, activeTransition);
-  const videoFor = (clip: Clip) =>
-    videoForSlot(media.videoElements, media.extraVideoElements, clip.sourceVideoId, slots.get(clip.id)!);
+  assignElementSlots(activeClips, activeTransition, frameSlots);
 
   // Sort ALL clips by track index (lower = bottom, rendered first)
   // This ensures proper z-ordering: blur overlays only affect content below them
@@ -329,7 +339,7 @@ export function drawPreviewFrame(
         continue;
       }
       // Draw clip normally
-      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, videoFor(clip), options);
+      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, videoFor(media, clip), options);
     }
   }
 
@@ -337,7 +347,8 @@ export function drawPreviewFrame(
   if (activeTransition) {
     drawTransition(
       ctx,
-      videoFor,
+      videoFor(media, activeTransition.outgoingClip),
+      videoFor(media, activeTransition.incomingClip),
       media.imageElements,
       activeTransition,
       time,

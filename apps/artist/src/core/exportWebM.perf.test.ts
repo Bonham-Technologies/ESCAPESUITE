@@ -414,11 +414,12 @@ describe('WebM export per-frame work', () => {
       sets: (long.sets - short.sets) / (FRAMES / 2),
     }
 
-    // Exact, measured 2026-10-17 on the tree before ESCSUITE-313 (31fa9edc):
+    // Exact, measured 2026-10-17. On the tree before ESCSUITE-313 (31fa9edc):
     // one Map — `getClipsAtTime`'s track lookup — and one Set, the frame's
-    // live elements (a live source-id set before the ticket). The first
-    // version of the ticket measured 3 Maps here: two per `assignElementSlots`
-    // call.
-    expect(perFrame).toEqual({ maps: 1, sets: 1 })
+    // live source ids. The ticket's first version measured 3 Maps and 1 Set
+    // (two Maps per `assignElementSlots` call); the fix round keeps the slot
+    // map, its scratch and the live-element set for the composer's life, so a
+    // frame now builds the one Map and no Set.
+    expect(perFrame).toEqual({ maps: 1, sets: 0 })
   })
 })

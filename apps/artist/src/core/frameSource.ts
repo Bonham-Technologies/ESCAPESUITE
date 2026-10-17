@@ -77,9 +77,11 @@ export interface IFrameSource {
    *   element, so two clips of one source in one frame do not share a
    *   playhead; the decode worker answers each request on its own and ignores
    *   it. Defaults to 0.
-   * @returns A drawable frame (VideoFrame, HTMLVideoElement, or HTMLImageElement)
+   * @returns A drawable frame (VideoFrame, HTMLVideoElement, or HTMLImageElement),
+   *   or `null` for a further slot whose element would not load — its clip is
+   *   left out, said once rather than every frame
    */
-  getFrame(timestamp: number, slot?: number): Promise<DrawableFrame>;
+  getFrame(timestamp: number, slot?: number): Promise<DrawableFrame | null>;
 
   /**
    * Get information about the source
@@ -232,8 +234,11 @@ function releaseSourceVideo(video: HTMLVideoElement): void {
  */
 export class HTMLVideoFrameSource implements IFrameSource {
   private video: HTMLVideoElement;
-  /** Slot 1 onwards, each a load in flight or done; see the class comment. */
-  private extras: Promise<HTMLVideoElement>[] = [];
+  /**
+   * Slot 1 onwards, each a load in flight or done; see the class comment. A
+   * load that failed settles to `null`, so the slot is given up on once.
+   */
+  private extras: Promise<HTMLVideoElement | null>[] = [];
   private seekTolerance: number;
   private sourceId: string;
   private objectUrl: string | null = null;
@@ -284,12 +289,13 @@ export class HTMLVideoFrameSource implements IFrameSource {
     return new HTMLVideoFrameSource(video, sourceId, null, frameRate);
   }
 
-  async getFrame(timestamp: number, slot = 0): Promise<HTMLVideoElement> {
+  async getFrame(timestamp: number, slot = 0): Promise<HTMLVideoElement | null> {
     if (this.disposed) {
       throw new Error('Source has been disposed');
     }
 
     const video = slot === 0 ? this.video : await this.elementFor(slot);
+    if (!video) return null;
 
     // Check if we need to seek
     const currentTime = video.currentTime;
@@ -338,10 +344,20 @@ export class HTMLVideoFrameSource implements IFrameSource {
     return video;
   }
 
-  /** Slot `slot`'s element (slot 1 onwards), making any missing up to it. */
-  private elementFor(slot: number): Promise<HTMLVideoElement> {
+  /**
+   * Slot `slot`'s element (slot 1 onwards), making any missing up to it. One
+   * that will not load is warned about once and settles to `null` for good.
+   */
+  private elementFor(slot: number): Promise<HTMLVideoElement | null> {
     while (this.extras.length < slot) {
-      this.extras.push(loadSourceVideo(this.video.src));
+      this.extras.push(
+        loadSourceVideo(this.video.src).catch(() => {
+          console.warn(
+            `Could not load a second element for video ${this.sourceId}; the clip it was for is left out`
+          );
+          return null;
+        })
+      );
     }
     return this.extras[slot - 1];
   }
@@ -364,8 +380,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
       this.disposed = true;
       releaseSourceVideo(this.video);
       // A slot whose element never loaded has nothing to release.
-      for (const extra of await Promise.allSettled(this.extras)) {
-        if (extra.status === 'fulfilled') releaseSourceVideo(extra.value);
+      for (const extra of await Promise.all(this.extras)) {
+        if (extra) releaseSourceVideo(extra);
       }
 
       if (this.objectUrl) {
@@ -395,7 +411,7 @@ class FailoverFrameSource implements IFrameSource {
     private readonly onFallback?: FallbackCallback
   ) {}
 
-  async getFrame(timestamp: number, slot?: number): Promise<DrawableFrame> {
+  async getFrame(timestamp: number, slot?: number): Promise<DrawableFrame | null> {
     if (!this.fallback) {
       try {
         return await this.primary.getFrame(timestamp, slot);

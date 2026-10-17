@@ -23,8 +23,18 @@ export interface SlotTransition {
   incomingClip: Clip;
 }
 
+/** How many slots each source has handed out this call — scratch, module-wide. */
+const taken = new Map<string, number>();
+
+function assign(clip: Clip, out: Map<string, number>): void {
+  if (out.has(clip.id)) return;
+  const slot = taken.get(clip.sourceVideoId) ?? 0;
+  taken.set(clip.sourceVideoId, slot + 1);
+  out.set(clip.id, slot);
+}
+
 /**
- * Each live media clip's slot, keyed by clip id.
+ * Each live media clip's slot, keyed by clip id, written into `out`.
  *
  * `activeClips` is the frame's live clips in the order the frame composites
  * them (`getClipsAtTime`'s track order), overlays included and skipped. The
@@ -33,30 +43,29 @@ export interface SlotTransition {
  * keeps its slot; the incoming clip, which has not started yet, takes the next
  * free slot of its source.
  *
+ * `out` is cleared first. Synchronous and re-entrant only in the sense that
+ * matters here: nothing it calls can call it back.
+ *
  * Stable within a frame, which is all it has to be: a clip whose slot changes
  * from one frame to the next — another clip of its source has started below it
  * — draws from a different element after one seek.
  */
 export function assignElementSlots(
   activeClips: Iterable<{ clip: Clip }>,
-  transition: SlotTransition | null
-): Map<string, number> {
-  const slots = new Map<string, number>();
-  const taken = new Map<string, number>();
-  const assign = (clip: Clip) => {
-    if (slots.has(clip.id)) return;
-    const slot = taken.get(clip.sourceVideoId) ?? 0;
-    taken.set(clip.sourceVideoId, slot + 1);
-    slots.set(clip.id, slot);
-  };
+  transition: SlotTransition | null,
+  out: Map<string, number>
+): void {
+  // Called every frame, so it allocates nothing: `out` is the caller's own
+  // map, cleared and refilled, and `taken` is this module's scratch.
+  out.clear();
+  taken.clear();
   for (const { clip } of activeClips) {
-    if (!clip.overlayType) assign(clip);
+    if (!clip.overlayType) assign(clip, out);
   }
   if (transition) {
-    assign(transition.outgoingClip);
-    assign(transition.incomingClip);
+    assign(transition.outgoingClip, out);
+    assign(transition.incomingClip, out);
   }
-  return slots;
 }
 
 /**

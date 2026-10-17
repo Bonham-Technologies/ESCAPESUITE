@@ -438,34 +438,11 @@ export function drawClipToCanvas(
 /**
  * Generic function to draw a clip (video or image) with transition modifiers
  */
-export function drawMediaWithModifiers(
+export function drawMediaElement(
   ctx: CanvasRenderingContext2D,
-  videoElements: Map<string, HTMLVideoElement>,
-  imageElements: Map<string, HTMLImageElement>,
-  clip: Clip,
-  clipTime: number, // Time relative to clip start (for animations)
-  canvasWidth: number,
-  canvasHeight: number,
-  modifiers?: TransitionModifiers,
-  options?: MediaDrawOptions
-) {
-  return drawMediaFromElement(
-    ctx, videoElements.get(clip.sourceVideoId), imageElements, clip, clipTime,
-    canvasWidth, canvasHeight, modifiers, options
-  );
-}
-
-/**
- * The `<video>` a clip draws from. A source can have more than one element —
- * one per clip of it live in the frame (ESCSUITE-313, `core/elementSlots.ts`)
- * — so a caller that has them hands a lookup per clip instead of a map by
- * source.
- */
-export type VideoForClip = (clip: Clip) => HTMLVideoElement | undefined;
-
-/** {@link drawMediaWithModifiers}, with the clip's `<video>` already looked up. */
-function drawMediaFromElement(
-  ctx: CanvasRenderingContext2D,
+  // The `<video>` this clip draws from, already chosen: a source can have one
+  // per clip of it live in the frame (ESCSUITE-313, `core/elementSlots.ts`),
+  // so the caller picks it rather than a map by source.
   video: HTMLVideoElement | undefined,
   imageElements: Map<string, HTMLImageElement>,
   clip: Clip,
@@ -711,10 +688,11 @@ function transitionSideModifiers(
  */
 export function drawTransition(
   ctx: CanvasRenderingContext2D,
-  // A map by source id, or — where a source has an element per live clip
-  // (ESCSUITE-313) — the element each side's clip draws from: a clip split
-  // and crossfaded into itself has its two sides on two elements of one source.
-  videos: Map<string, HTMLVideoElement> | VideoForClip,
+  // The `<video>` each side draws from, chosen by the caller: a source can have
+  // one element per clip of it live in the frame (ESCSUITE-313), so a clip
+  // split and crossfaded into itself has its two sides on two elements.
+  outgoingVideo: HTMLVideoElement | undefined,
+  incomingVideo: HTMLVideoElement | undefined,
   imageElements: Map<string, HTMLImageElement>,
   transition: TransitionInfo,
   currentTime: number, // Current timeline time (for calculating clip times)
@@ -730,11 +708,6 @@ export function drawTransition(
   // at/after the outgoing clip's end, so this is negative for the whole
   // transition otherwise — see getIncomingClipTime's doc comment.
   const inClipTime = getIncomingClipTime(transition, currentTime);
-
-  const videoFor: VideoForClip =
-    typeof videos === 'function' ? videos : (clip) => videos.get(clip.sourceVideoId);
-  const outgoingVideo = videoFor(outgoingClip);
-  const incomingVideo = videoFor(incomingClip);
 
   // Check if we have media for both clips
   const hasOutgoing = outgoingVideo !== undefined || imageElements.has(outgoingClip.sourceVideoId);
@@ -761,7 +734,7 @@ export function drawTransition(
   const drawSide = (side: TransitionSide): boolean => {
     const clip = side === 'outgoing' ? outgoingClip : incomingClip;
     const clipTime = side === 'outgoing' ? outClipTime : inClipTime;
-    return drawMediaFromElement(
+    return drawMediaElement(
       ctx,
       side === 'outgoing' ? outgoingVideo : incomingVideo,
       imageElements,
