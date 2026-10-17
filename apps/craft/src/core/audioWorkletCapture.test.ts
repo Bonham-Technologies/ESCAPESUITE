@@ -446,7 +446,10 @@ describe('createAudioCapture: which path a take gets', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
     expect(consoleInfo).toHaveBeenCalledTimes(1)
     expect(String(consoleInfo.mock.calls[0][0])).toMatch(/ScriptProcessorNode/)
-    expect(consoleInfo.mock.calls[0]).toContain(refusal)
+    const refused = String(consoleInfo.mock.calls[0][0])
+    expect(refused).toContain('blob: AbortError')
+    expect(refused).toContain('data: AbortError')
+    expect(refused).toContain('Failed to load worklet module script: data:text/javascript;charset=utf-8,…')
   })
 })
 
@@ -493,8 +496,11 @@ describe('createAudioCapture: the data: retry (ESCSUITE-317)', () => {
     expect(context.scriptProcessors).toHaveLength(1)
     expect(consoleInfo).toHaveBeenCalledTimes(1)
     expect(String(consoleInfo.mock.calls[0][0])).toMatch(/ScriptProcessorNode/)
-    const reason = consoleInfo.mock.calls[0][1] as DOMException
-    expect(reason.message).toContain('data:')
+    const line = String(consoleInfo.mock.calls[0][0])
+    expect(line).toContain('blob: AbortError: Failed to load worklet module script: blob:')
+    expect(line).toContain('data: AbortError: Failed to load worklet module script: data:text/javascript;charset=utf-8,…')
+    expect(line).not.toContain(encodeURIComponent(AUDIO_CAPTURE_WORKLET_SOURCE.slice(0, 40)))
+    expect(consoleInfo.mock.calls[0]).toHaveLength(1)
   })
 
   it('makes no addModule call at all when the browser has no AudioWorklet', async () => {

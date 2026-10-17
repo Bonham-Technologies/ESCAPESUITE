@@ -1360,7 +1360,7 @@ path is live — captures through an AudioWorklet wherever it can:
   it as a worklet module (`AbortError`) while accepting `data:`; Firefox 157 accepts both; WebKit is
   unmeasured (ESCSUITE-321). `blob:` stays first because the hosted `script-src` admits `blob:` and
   must not have to admit `data:`; the retry is the general rule rather than an `isFileOrigin()` gate,
-  so any opaque origin (a sandboxed frame) is covered. The one `console.info` line says which kind
+  so any opaque origin (a sandboxed frame) is covered. When both are refused the one fallback line names both rejections, `blob:` first, the `data:` payload elided (the CSP pin reads the `blob:` refusal from it). The one `console.info` line says which kind
   loaded — "(blob module)" or "(data module)". The processor gathers quanta into
   chunks of `CHUNK_FRAMES` (4096, the ~85 ms a ScriptProcessor buffer was) per channel and posts
   `{ frame, channels }`, `frame` the render position of the chunk's first sample, the two

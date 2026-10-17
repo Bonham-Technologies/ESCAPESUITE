@@ -180,6 +180,15 @@ const paths = new WeakMap<BaseAudioContext, Promise<CapturePath>>();
  * other opaque origin, a sandboxed frame say; `blob:null` is the measured case.
  * Only when that is refused too does the take fall back.
  */
+/** A rejection as one short phrase: name and message, the data: payload elided. */
+function describeRefusal(error: unknown): string {
+  const text =
+    error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : String(error);
+  return text.replace(/(data:[^,\s]*,)\S*/g, '$1…');
+}
+
 async function choosePath(context: BaseAudioContext): Promise<CapturePath> {
   const worklet: AudioWorklet | undefined = context.audioWorklet;
   if (!worklet) {
@@ -196,14 +205,17 @@ async function choosePath(context: BaseAudioContext): Promise<CapturePath> {
     } finally {
       URL.revokeObjectURL(url);
     }
-  } catch {
+  } catch (blobError) {
     kind = 'data';
     try {
       await worklet.addModule(
         `data:text/javascript;charset=utf-8,${encodeURIComponent(AUDIO_CAPTURE_WORKLET_SOURCE)}`
       );
-    } catch (e) {
-      console.info('Recording audio through a ScriptProcessorNode: the AudioWorklet module would not load:', e);
+    } catch (dataError) {
+      console.info(
+        'Recording audio through a ScriptProcessorNode: the AudioWorklet module would not load: ' +
+          `blob: ${describeRefusal(blobError)}; data: ${describeRefusal(dataError)}`
+      );
       return 'script-processor';
     }
   }
