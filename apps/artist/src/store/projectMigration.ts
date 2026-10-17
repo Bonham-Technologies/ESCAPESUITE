@@ -6,7 +6,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION } from './types'
 import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
 import { isValidCrop } from '../core/clipCrop';
-import { isExtendableClip } from './extendableClip';
+import { isExtendableClip, MIN_CLIP_DURATION } from './extendableClip';
 
 /**
  * Repair a clip transform the app itself once wrote (ESCSUITE-255): a scale
@@ -115,33 +115,69 @@ function repairLegacyOverlayWindows(project: Project): Project {
 }
 
 /**
+ * The length a trim asked for, when an overlay's numbers can only have come
+ * from that trim driving its length to or below zero (ESCSUITE-304, review
+ * round 1); `null` for every other clip. Before the fix, a split overlay's
+ * second half kept the split offset as its `startTime`; both extendable trim
+ * arms then wrote `endTime` = the dragged length and `trimClip` stored
+ * `duration = endTime - startTime`, which a trim in past the offset made
+ * zero or negative. A split never yields a length at or below zero, so an
+ * overlay with a finite `startTime`, a finite `endTime` of at least
+ * `MIN_CLIP_DURATION`, and `duration === endTime - startTime <= 0` is exactly
+ * that trim, and its dragged length is `endTime`. `startTime > 0` is implied
+ * (a positive `endTime` minus `startTime` at or below zero) and not tested.
+ * `parseProject` evaluates its duration and trim-point refusals against the
+ * repaired values, so such a file opens; `repairExtendableClipPairs` writes
+ * them, on the file path and the session path alike.
+ */
+function trimDrivenLength(clip: Partial<Clip>): number | null {
+  const { startTime, endTime, duration } = clip;
+  if (
+    isExtendableClip(clip, undefined) &&
+    isFiniteNumber(startTime) &&
+    isFiniteNumber(endTime) &&
+    endTime >= MIN_CLIP_DURATION &&
+    duration === endTime - startTime &&
+    duration <= 0
+  ) {
+    return endTime;
+  }
+  return null;
+}
+
+/**
  * Put an overlay clip's `startTime` / `endTime` back to `0` / `duration`
  * (ESCSUITE-304). An overlay has no source timeline, and that is the only pair
  * the app means to write for one, but `splitClip` used to give the second half
  * the split offset as its `startTime`, and a trim then carried the offset into
  * the stored pair. The app wrote those files itself, so they are repaired, not
- * refused (the ESCSUITE-173 / 255 split); `duration` is what the file says the
- * clip lasts and is kept. A media clip's pair is a window on its source and is
- * never touched. An image is extendable too, but the project carries no source
- * list to tell an image clip from a video one, so only overlays are repaired
- * here; a stored image clip's pair is put right by its next trim or split. One
- * `console.warn` counts the repairs. Returns the very same project when nothing
- * needs repair.
+ * refused (the ESCSUITE-173 / 255 split). A positive `duration` is what the
+ * file says the clip lasts and is kept; a trim that drove it to or below zero
+ * is given back the length the drag asked for (`trimDrivenLength`). A media
+ * clip's pair is a window on its source and is never touched. An image is
+ * extendable too, but the project carries no source list to tell it from a
+ * video, so only overlays are repaired here; a stored image clip's pair is put
+ * right by its next trim or split, and no reader depends on it before then.
+ * One `console.warn` counts both kinds of repair. (The project it returns is
+ * copied again by `ensureTimelineHasTracks` either way, so whether an
+ * unrepaired one comes back as the same object is not observable.)
  */
 function repairExtendableClipPairs(project: Project): Project {
   let repaired = 0;
   const clips = project.timeline.clips.map((clip) => {
     if (!isExtendableClip(clip, undefined)) return clip;
-    if (clip.startTime === 0 && clip.endTime === clip.duration) return clip;
+    const length = trimDrivenLength(clip) ?? clip.duration;
+    if (clip.startTime === 0 && clip.endTime === length) return clip;
     repaired++;
-    return { ...clip, startTime: 0, endTime: clip.duration };
+    return { ...clip, startTime: 0, endTime: length, duration: length };
   });
   if (repaired === 0) return project;
   console.warn(
     `Repaired the start and end times of ${repaired} ` +
       (repaired === 1 ? 'overlay clip to 0 and its duration' : 'overlay clips to 0 and their duration')
   );
-  return { ...project, timeline: { ...project.timeline, clips } };
+  // A trim-driven repair lengthens its clip, so the timeline's length follows.
+  return { ...project, timeline: { ...project.timeline, clips, duration: calculateTimelineDuration(clips) } };
 }
 
 // Ensure timeline has tracks and overlays arrays (migration helper)
@@ -529,15 +565,24 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
       return { ok: false, reason: `Clip "${id}" has an invalid crop` };
     }
 
+    // ESCSUITE-304 (review round 1): an overlay a pre-fix trim drove to a
+    // length at or below zero is repaired by the migration to the length the
+    // drag asked for, so the three refusals below see the repaired values.
+    // Every other shape reaches them as it is.
+    // `candidate` is not null here: the id check above has returned for it.
+    const present = candidate as Partial<Clip>;
+    const dragged = trimDrivenLength(present);
+    const timed: Partial<Clip> = dragged === null ? present : { ...present, startTime: 0, endTime: dragged, duration: dragged };
+
     // ESCSUITE-257. A clip with no positive duration gives a timeline of zero
     // or negative length, which the exporters cannot mix or encode. An absent
     // `timelinePosition` is left to the migration's sequential default.
-    if (typeof candidate?.duration !== 'number' || !Number.isFinite(candidate.duration) || candidate.duration <= 0) {
+    if (typeof timed.duration !== 'number' || !Number.isFinite(timed.duration) || timed.duration <= 0) {
       return { ok: false, reason: `Clip "${id}" has an invalid duration` };
     }
     if (
-      candidate.timelinePosition !== undefined &&
-      (typeof candidate.timelinePosition !== 'number' || !Number.isFinite(candidate.timelinePosition))
+      present.timelinePosition !== undefined &&
+      (typeof present.timelinePosition !== 'number' || !Number.isFinite(present.timelinePosition))
     ) {
       return { ok: false, reason: `Clip "${id}" has an invalid timelinePosition` };
     }
@@ -549,8 +594,9 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     // repaired to 0 / duration by `repairExtendableClipPairs` in the migration
     // below (ESCSUITE-304), which these two checks never pre-empt for a file
     // the app wrote — its trims kept `duration === endTime - startTime`, so a
-    // positive duration means `endTime > startTime`.
-    const { startTime, endTime } = candidate;
+    // positive duration means `endTime > startTime`, and the one shape whose
+    // duration is not positive was repaired into `timed` above.
+    const { startTime, endTime } = timed;
     if (typeof startTime !== 'number' || !Number.isFinite(startTime) || startTime < 0) {
       return { ok: false, reason: `Clip "${id}" has an invalid startTime` };
     }

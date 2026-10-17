@@ -8,7 +8,7 @@
 // module as free of the store as this one is.
 import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
-import { isExtendableClip } from '../../store/extendableClip';
+import { isExtendableClip, MIN_CLIP_DURATION } from '../../store/extendableClip';
 import type { Clip, SourceVideo, TrimOrigin } from '../../store/types';
 
 /**
@@ -41,8 +41,8 @@ export const MIN_PIXELS_PER_SECOND = PIXELS_PER_SECOND_BASE * 0.1;
 /** How close to a clip's edges the razor refuses to split, in seconds. */
 export const MIN_SPLIT_DISTANCE = 0.1;
 
-/** The shortest clip a trim may leave behind, in seconds. */
-export const MIN_CLIP_DURATION = 0.1;
+/** The shortest clip a trim may leave behind, in seconds — declared in `store/extendableClip.ts`. */
+export { MIN_CLIP_DURATION };
 
 /** How far the pointer must travel before a press becomes a marquee, in pixels. */
 export const MARQUEE_DRAG_THRESHOLD = 5;
