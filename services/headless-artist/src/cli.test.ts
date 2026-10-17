@@ -573,6 +573,24 @@ describe('the exit code a render returns', () => {
     expect(stdout).toEqual([JSON.stringify(refused) + '\n'])
   })
 
+  // ESCSUITE-330: a clip whose source has no bytes left in the bundle's storage fails the same
+  // way on every retry — the job's project has to change — so it is a permanent input error.
+  it('exits 2 for a render refused because a clip\'s source has no stored bytes', async () => {
+    const refused: RenderOutcome = {
+      ok: false,
+      jobId: 'job-1',
+      error: 'The media for "Probe 311 take" is no longer in storage (it was removed in another window or by Clear All); remove the clip or re-import the file',
+      code: 'SOURCE_MISSING',
+      durationMs: 30,
+    }
+    vi.mocked(runJob).mockResolvedValue(refused)
+    const jobFile = await writeJobSpec(validSpec())
+
+    expect(await main(['render', '--job', jobFile], {})).toBe(2)
+
+    expect(stdout).toEqual([JSON.stringify(refused) + '\n'])
+  })
+
   it('exits 2 for a spec the parser refuses, without dumping usage over the reason', async () => {
     // 'avi' rather than the 'gif' this case used before ESCSUITE-34, which is a
     // format the kit now renders.
