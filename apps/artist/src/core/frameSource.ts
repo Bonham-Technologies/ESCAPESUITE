@@ -71,9 +71,15 @@ export interface IFrameSource {
   /**
    * Get a drawable frame at the specified timestamp
    * @param timestamp Time in seconds
+   * @param slot Which live clip of this source the frame is for, this export
+   *   frame — 0 for the first in track order, 1 for the next (ESCSUITE-313,
+   *   `core/elementSlots.ts`). The `<video>` path serves each slot from its own
+   *   element, so two clips of one source in one frame do not share a
+   *   playhead; the decode worker answers each request on its own and ignores
+   *   it. Defaults to 0.
    * @returns A drawable frame (VideoFrame, HTMLVideoElement, or HTMLImageElement)
    */
-  getFrame(timestamp: number): Promise<DrawableFrame>;
+  getFrame(timestamp: number, slot?: number): Promise<DrawableFrame>;
 
   /**
    * Get information about the source
@@ -176,11 +182,58 @@ export function seekToleranceFor(frameRate: number | undefined): number {
 }
 
 /**
+ * A muted, inline `<video>` over `url`, once its first frame has loaded.
+ *
+ * Rejects if the element will not load, without revoking `url` — the caller
+ * owns it, and a source's further elements read the URL its first one still
+ * holds (ESCSUITE-313). The handlers stay attached for the element's life;
+ * `releaseSourceVideo` takes them off.
+ */
+function loadSourceVideo(url: string): Promise<HTMLVideoElement> {
+  const video = document.createElement('video');
+  video.playsInline = true;
+  video.preload = 'auto';
+  video.crossOrigin = 'anonymous';
+  video.muted = true;
+
+  return new Promise<HTMLVideoElement>((resolve, reject) => {
+    video.onloadeddata = () => resolve(video);
+    video.onerror = () => reject(new Error('Failed to load video'));
+    video.src = url;
+  });
+}
+
+/** Pause a `<video>` from `loadSourceVideo`, take its handlers off and empty it. */
+function releaseSourceVideo(video: HTMLVideoElement): void {
+  video.pause();
+  // Detach BEFORE emptying src. `loadSourceVideo` leaves onloadeddata and
+  // onerror attached for the element's whole life, and the platform answers an
+  // empty `src` with an `error` event — so leaving onerror attached here hands
+  // that event back to a handler that rejects a promise settled long ago. A
+  // no-op today, but the same shape in ESCAPECRAFT's thumbnailGenerator was an
+  // endless error -> cleanup -> error loop because its handler rewrote `src`
+  // (ESCSUITE-55). Nulling them is what keeps this site from being one edit
+  // away from that.
+  video.onloadeddata = null;
+  video.onerror = null;
+  video.src = '';
+  video.load();
+}
+
+/**
  * HTMLVideoElement-based frame source
  * Fallback for unsupported formats or when WebCodecs is not available
+ *
+ * One element per *slot* (ESCSUITE-313): slot 0 is the element the source was
+ * created with, and slot k a k-th element over the same object URL, made the
+ * first time a request names it and kept until the source is disposed. A
+ * source with one live clip is asked for slot 0 only, and costs one element,
+ * as it always has.
  */
 export class HTMLVideoFrameSource implements IFrameSource {
   private video: HTMLVideoElement;
+  /** Slot 1 onwards, each a load in flight or done; see the class comment. */
+  private extras: Promise<HTMLVideoElement>[] = [];
   private seekTolerance: number;
   private sourceId: string;
   private objectUrl: string | null = null;
@@ -207,22 +260,15 @@ export class HTMLVideoFrameSource implements IFrameSource {
     _onProgress?: LoadProgressCallback,
     frameRate?: number
   ): Promise<HTMLVideoFrameSource> {
-    const video = document.createElement('video');
-    video.playsInline = true;
-    video.preload = 'auto';
-    video.crossOrigin = 'anonymous';
-    video.muted = true;
-
     const url = URL.createObjectURL(blob);
 
-    await new Promise<void>((resolve, reject) => {
-      video.onloadeddata = () => resolve();
-      video.onerror = () => {
-        URL.revokeObjectURL(url);
-        reject(new Error('Failed to load video'));
-      };
-      video.src = url;
-    });
+    let video: HTMLVideoElement;
+    try {
+      video = await loadSourceVideo(url);
+    } catch (error) {
+      URL.revokeObjectURL(url);
+      throw error;
+    }
 
     return new HTMLVideoFrameSource(video, sourceId, url, frameRate);
   }
@@ -238,12 +284,12 @@ export class HTMLVideoFrameSource implements IFrameSource {
     return new HTMLVideoFrameSource(video, sourceId, null, frameRate);
   }
 
-  async getFrame(timestamp: number): Promise<HTMLVideoElement> {
+  async getFrame(timestamp: number, slot = 0): Promise<HTMLVideoElement> {
     if (this.disposed) {
       throw new Error('Source has been disposed');
     }
 
-    const video = this.video;
+    const video = slot === 0 ? this.video : await this.elementFor(slot);
 
     // Check if we need to seek
     const currentTime = video.currentTime;
@@ -292,6 +338,14 @@ export class HTMLVideoFrameSource implements IFrameSource {
     return video;
   }
 
+  /** Slot `slot`'s element (slot 1 onwards), making any missing up to it. */
+  private elementFor(slot: number): Promise<HTMLVideoElement> {
+    while (this.extras.length < slot) {
+      this.extras.push(loadSourceVideo(this.video.src));
+    }
+    return this.extras[slot - 1];
+  }
+
   getInfo(): SourceInfo {
     return {
       sourceId: this.sourceId,
@@ -308,20 +362,11 @@ export class HTMLVideoFrameSource implements IFrameSource {
   async dispose(): Promise<void> {
     if (!this.disposed) {
       this.disposed = true;
-      this.video.pause();
-      // Detach BEFORE emptying src. `create()` above leaves onloadeddata and
-      // onerror attached for the element's whole life, and the platform answers
-      // an empty `src` with an `error` event — so leaving onerror attached here
-      // hands that event back to a handler that revokes the object URL and
-      // rejects a promise settled long ago. Both are no-ops today, but the same
-      // shape in ESCAPECRAFT's thumbnailGenerator was an endless
-      // error -> cleanup -> error loop because its handler rewrote `src`
-      // (ESCSUITE-55). Nulling them is what keeps this site from being one edit
-      // away from that.
-      this.video.onloadeddata = null;
-      this.video.onerror = null;
-      this.video.src = '';
-      this.video.load();
+      releaseSourceVideo(this.video);
+      // A slot whose element never loaded has nothing to release.
+      for (const extra of await Promise.allSettled(this.extras)) {
+        if (extra.status === 'fulfilled') releaseSourceVideo(extra.value);
+      }
 
       if (this.objectUrl) {
         URL.revokeObjectURL(this.objectUrl);
@@ -350,15 +395,15 @@ class FailoverFrameSource implements IFrameSource {
     private readonly onFallback?: FallbackCallback
   ) {}
 
-  async getFrame(timestamp: number): Promise<DrawableFrame> {
+  async getFrame(timestamp: number, slot?: number): Promise<DrawableFrame> {
     if (!this.fallback) {
       try {
-        return await this.primary.getFrame(timestamp);
+        return await this.primary.getFrame(timestamp, slot);
       } catch (error) {
         this.handOver(error);
       }
     }
-    return (await this.fallback!).getFrame(timestamp);
+    return (await this.fallback!).getFrame(timestamp, slot);
   }
 
   getInfo(): SourceInfo {

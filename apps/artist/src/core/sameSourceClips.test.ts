@@ -55,10 +55,10 @@ beforeEach(async () => {
   const original = proto.getContext
   proto.getContext = function (this: HTMLCanvasElement, ...a: unknown[]) {
     const ctx = original.apply(this, a) as RecordingCanvasRenderingContext2D
-    const draw = ctx.drawImage
+    const draw = (ctx as unknown as { drawImage: (...x: unknown[]) => unknown }).drawImage
     ;(ctx as unknown as { drawImage: (...x: unknown[]) => unknown }).drawImage = (...x: unknown[]) => {
       if (x[0] instanceof HTMLVideoElement) drawnAt.push(x[0].currentTime)
-      return draw(...(x as []))
+      return draw(...x)
     }
     return ctx
   }

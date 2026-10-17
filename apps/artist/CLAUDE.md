@@ -264,6 +264,22 @@ pnpm lint                # Run ESLint
   `releaseElementSources` (pause everything and revoke the object URLs) and —
   ESCSUITE-159 — `createElementSourceRelease`, which wraps that last one in a
   run-at-most-once closure both exporters use.
+  **One element per live clip of a source** (ESCSUITE-313): `loadElementSources` loads one
+  `<video>` per source (`videoElements`, slot 0), and the composer gives the k-th clip of a
+  source live in a frame — in `getClipsAtTime`'s track order, then a transition's incoming
+  side — that source's k-th element (`core/elementSlots.ts`'s `assignElementSlots` /
+  `videoForSlot`). Slot k > 0 lives in `extraVideoElements`, made the first time a frame needs
+  it over the **same object URL** (one `createObjectURL` per source, N elements over it,
+  revoked once at release) and kept for the rest of the export, so a crossfade does not make
+  and drop one per frame; it arrives already paused at 0 and is not rewound, and one that will
+  not load is warned about once and kept as `null`, its clip left out. `VideoPlaybackState`
+  and the pause-the-rest bookkeeping are keyed by element. Before, a source had one element:
+  a clip split and crossfaded into a later part of itself, or the same recording duplicated on
+  a track above as a zoom or picture-in-picture, seeked it twice per frame and drew **both**
+  clips from the second seek's moment (`[10, 10]` where `[0, 10]` was meant; a worker-vs-
+  `<video>` parity MAD of 5.149 against 1.5). A source with one live clip still has exactly one
+  element. Pinned by `elementFrames.test.ts`, `sameSourceClips.test.ts` (all three exporters)
+  and the two-element case in `exportWebM.perf.test.ts` / `exportGIF.perf.test.ts`.
   **Who owns the elements** (ESCSUITE-156): `loadElementSources` owns every element it has
   created until it returns, and the caller owns them from then on — a caller only ever
   receives the map, so a rejection partway through the load would strand the elements before
@@ -1972,15 +1988,23 @@ ticks (it measures 0), with one `act()` per tick: batch the ten writes into one 
 re-introduced selector costs one render and slips under the ceiling. Round 2's write-up is
 [docs/performance/2026-09-13-timeline-profile.md](../../docs/performance/2026-09-13-timeline-profile.md).
 
-A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element, not
-per clip**. `usePreviewMedia` keeps one element per source, so two live clips off one
-source — a picture-in-picture arrangement, or the same clip duplicated on two tracks —
-share it; a per-clip loop moved that element for the first clip, measured it against the
-second clip's target, decided a seek was still needed and took the event-driven branch,
-painting the frame twice for one move of the playhead. The desired time is collected into
-a `Map` keyed by element (later writes win, and the incoming side of a transition is
-applied after the clips, so the frame on screen is the one that was always drawn), then
-each element is compared and seeked at most once.
+A scrub's seek check in `usePreviewRenderLoop.ts` works **per `<video>` element, and a
+source has one element per live clip** (ESCSUITE-313). `usePreviewMedia` keeps each source's
+own element in `videoElementsRef` and, slot 1 onwards, `extraVideoElementsRef`: the k-th
+clip of a source live at the playhead (track order, then a transition's incoming side —
+`core/elementSlots.ts`, the same assignment `drawFrame.ts` draws by) uses that source's k-th
+element, made by `previewVideoForSlot` over the same URL the first time a scrub or playback
+needs it, kept while the source is used and emptied with it. Before, two live clips off one
+source — a picture-in-picture arrangement, the same clip duplicated on two tracks, a split
+clip crossfading into itself — shared one element and both drew whichever seek won; earlier
+still, a per-clip seek loop also painted twice for one move. The desired time is collected
+into a `Map` keyed by element, then each element is compared and seeked at most once; the
+ESCSUITE-264 readiness listener and the ESCSUITE-275 `seeked` counter iterate the same
+elements. During playback both elements play — and both sound, as the export's mix has them —
+and a transition's incoming side, which has not started, is held paused on its first frame on
+its own element, positioned once when the transition begins (`holdIncoming`). The crop
+chrome's dim pass (`mediaElementFor`) still reads a source's own element, so cropping the
+second of two live clips of one source dims over the first clip's moment.
 
 **A paused frame repaints once when its video decodes its first frame** (ESCSUITE-264).
 `isDrawableVideo` (in `drawFrame.ts`) accepts a `<video>` at `readyState >= 1` — metadata, not
@@ -4376,7 +4400,7 @@ The export pipeline includes several optimizations to improve performance:
 - **Background tab export (MP4)**: Uses WebCodecs `VideoDecoder` in a Web Worker for frame decoding, enabling full-speed exports even when the browser tab is in the background. Web Workers are not subject to browser throttling that affects `setTimeout` and `video.play()` on the main thread. (ESCSUITE-254: before this, the worker threw on every source and the export silently decoded in the page — see "Video Decode Worker".)
 - **FrameSource abstraction**: `frameSource.ts` provides a unified interface for frame fetching with automatic fallback:
   - `WebCodecsFrameSource`: Uses `VideoDecodeManager` for H.264 MP4 files (background-capable), wrapped so a frame the worker fails mid-export hands the source to `<video>`
-  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line
+  - `HTMLVideoFrameSource`: Falls back to `<video>` element seeking for WebM, a source the worker refuses, or unsupported browsers — reported through `createSource`'s `onFallback`, which the MP4 exporter turns into its once-per-export "Decoding in the page" line. **One element per slot** (ESCSUITE-313): `getFrame(timestamp, slot)` serves slot 0 from the element the source was created with and slot k from a k-th element over the same object URL, made the first time it is asked for and disposed with the source; `exportMP4.ts`'s frame loop passes each clip's slot from the same `assignElementSlots` the element exporters use, through `getFrameAtTime(manager, sourceId, time, slot)`, so two clips of one source in one frame each hold their own frame until the draw. `FailoverFrameSource` passes the slot to both sides; the worker ignores it (it answers each request on its own). Chosen over returning a detached `new VideoFrame(video)` per request because that would cost one `VideoFrame` per fallback frame of every in-page export — every ESCAPECRAFT WebM recording — where this costs a second element only when two clips of one source overlap
 - **Frame tolerance**: `HTMLVideoFrameSource.getFrame()` skips the seek only when the request is within half a frame of the element's current time: `seekToleranceFor(frameRate)` = `0.5 / max(frameRate, 30)` (ESCSUITE-263). The old rule was a strict `> 1/30`, and because the export's requests are one 1/30 frame apart the float difference often came out just under it, so about every other frame of an in-page MP4 export (every ESCAPECRAFT WebM recording, Safari, any source the worker refuses) was a repeat of the previous one; that is fixed. The floor at 30 keeps the window under the request spacing for a low-rate source, and a missing or non-finite rate counts as 30. An imported video's rate is measured at import since ESCSUITE-276 (`frameRateSource: 'measured'`, so a 120 fps file gets a 1/240 s window — `frameSource.measuredRate.test.ts`); a rate that could not be measured, an ESCAPECRAFT take (`'configured'`, 30) and every source imported before then still read 30, a 1/60 s window. The rate is threaded `exportMP4` -> `loadFrameSource` -> `createSource` -> `HTMLVideoFrameSource` (also on the failover path)
 - **Seek target (ESCSUITE-265)**: both element paths — `HTMLVideoFrameSource.getFrame()` (MP4) and `elementFrames.ts`'s `syncVideoToTime` (WebM, GIF) — seek to `elementSeekTarget(time)` = `time + ELEMENT_SEEK_BIAS` (0.1 ms, `core/elementSeek.ts`), not to `time` itself. An export's requests are frame-aligned (`clip.startTime + n / 30`), so most land exactly on a source frame's start, and a 30 fps frame starts 33333.33… µs after the last. Both measured engines resolve a seek at microsecond precision and land one short of the frame on a third of those starts, showing the frame before it: Chromium 153 on the starts whose fraction is .67 (it truncates the request — `currentTime` reads back 1.066666 for 1.0666…67), Firefox 155 on the .33 ones. Measured with a per-frame-coloured 30 fps source: 20 of 60 frames one early in each engine at bias 0, none at 1 µs, 10 µs or 0.1 ms; through the app's own trimmed MP4 export, 15 of 45 in each engine before and 0 after, and the WebM export 15 of 45 → 0 in Chromium. Waiting longer does not help — after `seeked`, after `requestVideoFrameCallback` and after a further 100 ms the picture is the same, and Firefox's rVFC `mediaTime` echoes the request rather than the frame drawn, so nothing an element reports can detect it. The bias is a hundred times the measured margin and a fortieth of a frame at 240 fps. A request that is not on a frame start moves 0.1 ms, so a time within 0.1 ms before a frame's start is treated as that frame — the convention the decode worker already applies within 0.5 ms (`TIME_TOLERANCE_US`, `workers/frameDecoder.ts`), only narrower. It changes neither seek count (the skip windows are 1/60 s on the MP4 path and 0.4 of an output frame on the element exporters, both far wider) nor any perf ceiling. Pinned by `frameSource.boundarySeek.test.ts` (a `<video>` double reproducing each engine's measured rounding, 30 and 60 fps sources, from 0 and from a 0.5 s trim) and `elementFrames.test.ts`. The preview's own seeks (`usePreviewRenderLoop.ts`) are separate and unchanged: they skip anything within 0.05 s, so the paused preview is not frame-accurate to begin with
 - **Encoder backpressure**: MP4's loop waits while `videoEncoder.encodeQueueSize > 5`, paired with

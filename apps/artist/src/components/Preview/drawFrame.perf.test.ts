@@ -280,6 +280,11 @@ describe('preview per-frame work', () => {
     // immediately and again when `seeked` arrives: two composites for one move.
     // A picture-in-picture arrangement, or the same clip duplicated on two
     // tracks, is exactly this shape.
+    //
+    // Since ESCSUITE-313 the two live clips do not share that element at all:
+    // a source has one element per live clip, so each element has one target
+    // and the nudge finds both already there. Re-measured 2026-10-17: still 1,
+    // and every count in this file unchanged.
     expect(frame.composites).toBe(1)
   })
 })

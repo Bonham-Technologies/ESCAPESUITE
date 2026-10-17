@@ -74,17 +74,23 @@ export async function loadFrameSource(
 /**
  * Get a frame from a source at the specified timestamp
  * Returns the frame without auto-cleanup - caller must manage frame lifecycle
+ *
+ * `slot` is which live clip of this source the frame is for, this export frame
+ * (`core/elementSlots.ts`): on the `<video>` path each slot has its own
+ * element, so two clips of one source in one frame each hold their own frame
+ * until the draw (ESCSUITE-313).
  */
 export async function getFrameAtTime(
   manager: FrameManager,
   sourceId: string,
-  timestamp: number
+  timestamp: number,
+  slot = 0
 ): Promise<DrawableMediaSource | null> {
   const source = manager.sources.get(sourceId);
   if (!source) return null;
 
   try {
-    const frame = await source.getFrame(timestamp);
+    const frame = await source.getFrame(timestamp, slot);
 
     // Track VideoFrame objects for cleanup at end of frame iteration. Add
     // rather than key-and-overwrite: the same (sourceId, timestamp) can be

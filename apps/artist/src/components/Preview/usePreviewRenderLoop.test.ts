@@ -1387,5 +1387,84 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     expect(second!.currentTime).toBe(5)
     expect(second!.play).not.toHaveBeenCalled()
     expect(primary.currentTime).toBeLessThan(2)
+
+    // Past the cut `b` is the only live clip, back on the source's own
+    // element, and the element that held its first frame is let go.
+    vi.mocked(second!.pause).mockClear()
+    await settle(500)
+    expect(second!.pause).toHaveBeenCalled()
+  })
+
+  it('leaves a transition\'s incoming side alone when it is already playing on another track', async () => {
+    // `a` fades out over 1.5-2 s; `b`, the same source on a track above, has
+    // been live since 1 s, so it is the incoming side and already playing.
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 10, endTime: 13, duration: 3 },
+      undefined,
+      1
+    )
+    const { deps, seek, play } = harness()
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const second = secondElement(deps)!
+
+    play()
+    await settle(FRAME_MS * 2)
+    vi.mocked(second.pause).mockClear()
+    await settle(250)
+
+    expect(second.pause).not.toHaveBeenCalled()
+    expect(second.currentTime).toBeGreaterThan(10)
+  })
+
+  it('holds another source\'s incoming side without a seek when it already sits on its first frame', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness([video.id, 'video2'])
+    const incoming = deps.videoElementsRef.current.get('video2')!
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const seeksBefore = doubles.media.seeks.length
+    vi.mocked(incoming.pause).mockClear()
+
+    play()
+    await settle(300)
+
+    expect(incoming.pause).toHaveBeenCalled()
+    expect(incoming.currentTime).toBe(0)
+    // Only the outgoing side's own start seek: the incoming element was already there.
+    expect(doubles.media.seeks.length - seeksBefore).toBe(1)
+  })
+
+  it('plays on through a transition into a clip whose source has no element', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness()
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    play()
+    await settle(1000)
+
+    // Into the fade, past the cut, and on: nothing to hold, nothing to play.
+    const times = drawnTimes(deps)
+    expect(times[times.length - 1]).toBeGreaterThan(2)
+    expect(deps.extraVideoElementsRef.current.size).toBe(0)
   })
 })

@@ -1,4 +1,6 @@
-// The media the preview draws from: one object URL and one element per source.
+// The media the preview draws from: one object URL and one element per source
+// — and, for a source with more than one clip live at once, one element per
+// such clip, all over that one URL (ESCSUITE-313).
 //
 // Every clip on the timeline points at a source blob in IndexedDB. Something
 // has to turn those blobs into things a canvas can draw — a <video>, an <img>
@@ -16,8 +18,15 @@ import { getVideoBlob } from '../../core/storage';
 
 /** What the preview needs to draw and play the timeline's media. */
 export interface PreviewMedia {
-  /** One <video> per loaded video source, keyed by source id. */
+  /** One <video> per loaded video source, keyed by source id: each source's slot 0. */
   videoElementsRef: RefObject<Map<string, HTMLVideoElement>>;
+  /**
+   * A video source's further elements, slot 1 onwards (ESCSUITE-313,
+   * `core/elementSlots.ts`): one per clip of that source live at the playhead
+   * beyond the first, made by `previewVideoForSlot` the first time a frame
+   * needs it, kept while the source is used, emptied with it.
+   */
+  extraVideoElementsRef: RefObject<Map<string, HTMLVideoElement[]>>;
   /** One <img> per loaded image source, keyed by source id. */
   imageElementsRef: RefObject<Map<string, HTMLImageElement>>;
   /** One <audio> per loaded audio-only source, keyed by source id. */
@@ -30,6 +39,55 @@ export interface PreviewMedia {
   imageUrlsKey: string;
 }
 
+/** A preview `<video>` over `url`: muted until playback routes its sound. */
+function createPreviewVideoElement(url: string): HTMLVideoElement {
+  const video = document.createElement('video');
+  video.src = url;
+  video.preload = 'auto';
+  video.playsInline = true;
+  video.muted = true; // Start muted, we'll unmute the active audio track
+  video.crossOrigin = 'anonymous';
+  return video;
+}
+
+/**
+ * A source's `slot`-th preview element, making any missing up to it over the
+ * URL its own element reads (ESCSUITE-313). Slot 0 is the source's own
+ * element; a source with none has no further ones either.
+ *
+ * Synchronous, like everything else the preview does with its elements: an
+ * element is usable — seekable, and drawn once `isDrawableVideo` says so — from
+ * the moment it exists, and the paused frame's readiness listener
+ * (ESCSUITE-264) paints again when its first frame lands.
+ */
+export function previewVideoForSlot(
+  videos: ReadonlyMap<string, HTMLVideoElement>,
+  extras: Map<string, HTMLVideoElement[]>,
+  sourceId: string,
+  slot: number
+): HTMLVideoElement | undefined {
+  const own = videos.get(sourceId);
+  if (!own || slot === 0) return own;
+  let list = extras.get(sourceId);
+  if (!list) {
+    list = [];
+    extras.set(sourceId, list);
+  }
+  while (list.length < slot) {
+    list.push(createPreviewVideoElement(own.src));
+  }
+  return list[slot - 1];
+}
+
+/** Pause and empty a source's further elements, and forget them. */
+function releaseExtraVideos(extras: Map<string, HTMLVideoElement[]>, sourceId: string): void {
+  for (const video of extras.get(sourceId) ?? []) {
+    video.pause();
+    video.src = '';
+  }
+  extras.delete(sourceId);
+}
+
 /**
  * Load, reconcile and release the preview's media elements.
  *
@@ -38,6 +96,7 @@ export interface PreviewMedia {
  */
 export function usePreviewMedia(): PreviewMedia {
   const videoElementsRef = useRef<Map<string, HTMLVideoElement>>(new Map());
+  const extraVideoElementsRef = useRef<Map<string, HTMLVideoElement[]>>(new Map());
   const imageElementsRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const [videoUrls, setVideoUrls] = useState<Map<string, string>>(new Map());
@@ -163,13 +222,7 @@ export function usePreviewMedia(): PreviewMedia {
       if (existingVideos.has(sourceId)) {
         newVideos.set(sourceId, existingVideos.get(sourceId)!);
       } else {
-        const video = document.createElement('video');
-        video.src = url;
-        video.preload = 'auto';
-        video.playsInline = true;
-        video.muted = true; // Start muted, we'll unmute the active audio track
-        video.crossOrigin = 'anonymous';
-        newVideos.set(sourceId, video);
+        newVideos.set(sourceId, createPreviewVideoElement(url));
       }
     });
 
@@ -177,6 +230,7 @@ export function usePreviewMedia(): PreviewMedia {
       if (!newVideos.has(id)) {
         video.pause();
         video.src = '';
+        releaseExtraVideos(extraVideoElementsRef.current, id);
       }
     });
 
@@ -243,13 +297,17 @@ export function usePreviewMedia(): PreviewMedia {
 
   // Cleanup
   useEffect(() => {
+    // One map for the hook's life — further elements are added to it, never a
+    // new one put in its place — so the cleanup can hold it from here.
+    const extraVideos = extraVideoElementsRef.current;
     return () => {
       for (const urls of urlsRef.current) {
         urls.forEach(url => URL.revokeObjectURL(url));
       }
-      videoElementsRef.current.forEach(video => {
+      videoElementsRef.current.forEach((video, id) => {
         video.pause();
         video.src = '';
+        releaseExtraVideos(extraVideos, id);
       });
       audioElementsRef.current.forEach(audio => {
         audio.pause();
@@ -265,6 +323,7 @@ export function usePreviewMedia(): PreviewMedia {
 
   return {
     videoElementsRef,
+    extraVideoElementsRef,
     imageElementsRef,
     audioElementsRef,
     isLoading,

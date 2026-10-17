@@ -1117,6 +1117,21 @@ export const TAB_VISIBLE_NOTE = 'needs this tab visible';
  * Load a video blob and create an HTMLVideoElement
  */
 export async function loadVideoElement(blob: Blob): Promise<HTMLVideoElement> {
+  const url = URL.createObjectURL(blob);
+  try {
+    return await loadVideoElementFromUrl(url);
+  } catch (error) {
+    URL.revokeObjectURL(url);
+    throw error;
+  }
+}
+
+/**
+ * Load a `<video>` over an object URL something else owns — a source's second
+ * element, reading the URL its first one already holds (ESCSUITE-313). A
+ * failure rejects without revoking the URL: the first element still reads it.
+ */
+export function loadVideoElementFromUrl(url: string): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     video.playsInline = true;
@@ -1124,7 +1139,6 @@ export async function loadVideoElement(blob: Blob): Promise<HTMLVideoElement> {
     video.crossOrigin = 'anonymous';
     video.muted = true;
 
-    const url = URL.createObjectURL(blob);
     video.src = url;
 
     video.onloadeddata = () => {
@@ -1132,7 +1146,6 @@ export async function loadVideoElement(blob: Blob): Promise<HTMLVideoElement> {
     };
 
     video.onerror = () => {
-      URL.revokeObjectURL(url);
       reject(new Error('Failed to load video'));
     };
   });

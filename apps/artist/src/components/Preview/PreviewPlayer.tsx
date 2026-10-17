@@ -118,6 +118,7 @@ export function PreviewPlayer() {
   // the object URLs behind them, loaded and released as the timeline changes.
   const {
     videoElementsRef,
+    extraVideoElementsRef,
     imageElementsRef,
     audioElementsRef,
     isLoading,
@@ -226,12 +227,13 @@ export function PreviewPlayer() {
       },
       {
         videoElements: videoElementsRef.current,
+        extraVideoElements: extraVideoElementsRef.current,
         imageElements: imageElementsRef.current,
         blurScratch: blurCanvasRef,
       }
     );
   }, [canvasDimensions, clips, tracks, sourceVideos, editingTextClipId,
-      videoElementsRef, imageElementsRef]);
+      videoElementsRef, extraVideoElementsRef, imageElementsRef]);
 
   /**
    * Project pixels per CSS pixel of the box the canvas is laid out in.
@@ -366,6 +368,7 @@ export function PreviewPlayer() {
     drawSelectionHandles,
     drawMultiSelectHandles,
     videoElementsRef,
+    extraVideoElementsRef,
     audioElementsRef,
     isPlayingRef,
     currentTimeRef,

@@ -827,12 +827,14 @@ describe('createFrameComposer with two live clips of one source', () => {
     media.script({ video: { fail: true } })
 
     await composeFrame(0)
+    expect(ctx.argsFor('drawImage').map((args) => args[0])).toEqual([media.videos[0]])
     await composeFrame(1 / 30)
 
-    expect(drawnAt(ctx)).toEqual([expect.closeTo(0, 2), expect.closeTo(1 / 30, 2)])
+    // A, from the source's own element, each frame; B nowhere.
+    expect(ctx.argsFor('drawImage').map((args) => args[0])).toEqual([media.videos[0], media.videos[0]])
     // Not retried every frame: one failed element, one warning.
     expect(media.videos).toHaveLength(2)
-    expect(warns.mock.calls.filter(([message]) => String(message).includes('second element'))).toHaveLength(1)
+    expect(warns.mock.calls.filter((call: unknown[]) => String(call[0]).includes('second element'))).toHaveLength(1)
   })
 
   it('draws two clips of one image from the one image', async () => {

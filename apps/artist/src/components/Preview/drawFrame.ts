@@ -19,6 +19,7 @@ import {
 } from '../../core/canvasRenderer';
 import type { MediaDrawOptions, TransitionModifiers } from '../../core/exportTypes';
 import { openOutputFrame } from '../../core/outputTransform';
+import { assignElementSlots, videoForSlot } from '../../core/elementSlots';
 import { getClipsAtTime } from '../../store/projectStore';
 import { getAnimatedValues } from '../../utils/animation';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../../store/types';
@@ -74,7 +75,16 @@ export interface PreviewFrameScene {
 
 /** The decoded media a frame draws with, and the scratch canvas blur borrows. */
 export interface PreviewFrameMedia {
+  /** Each video source's own element: slot 0. */
   videoElements: Map<string, HTMLVideoElement>;
+  /**
+   * Each video source's further elements, slot 1 onwards (ESCSUITE-313): the
+   * k-th clip of a source live in this frame draws from its k-th element, so a
+   * split clip crossfading into itself, or a picture-in-picture copy of a
+   * recording, shows each clip's own moment. A clip whose element does not
+   * exist yet is not drawn this frame. Absent is the same as none.
+   */
+  extraVideoElements?: ReadonlyMap<string, readonly HTMLVideoElement[]>;
   imageElements: Map<string, HTMLImageElement>;
   /**
    * Holds the one scratch canvas a blur shape captures the frame so far into.
@@ -122,7 +132,8 @@ function drawClip(
   clip: Clip,
   clipTime: number, // Time relative to clip start (for animations)
   scene: Pick<PreviewFrameScene, 'sourceVideos'>,
-  media: Pick<PreviewFrameMedia, 'videoElements' | 'imageElements'>,
+  media: Pick<PreviewFrameMedia, 'imageElements'>,
+  video: HTMLVideoElement | undefined,
   options: MediaDrawOptions,
   transitionModifiers?: TransitionModifiers
 ): void {
@@ -143,7 +154,6 @@ function drawClip(
     return;
   }
 
-  const video = media.videoElements.get(clip.sourceVideoId);
   if (!isDrawableVideo(video)) return;
   drawClipToCanvas(
     ctx, video, clip, clipTime, size.width, size.height, transitionModifiers, options
@@ -291,6 +301,13 @@ export function drawPreviewFrame(
   // Get active clips at this time
   const activeClips = getClipsAtTime(clips, tracks, time);
 
+  // Which of its source's elements each live clip draws from — the same
+  // assignment, from the same track-ordered list, the render loop seeks by
+  // (ESCSUITE-313, `core/elementSlots.ts`).
+  const slots = assignElementSlots(activeClips, activeTransition);
+  const videoFor = (clip: Clip) =>
+    videoForSlot(media.videoElements, media.extraVideoElements, clip.sourceVideoId, slots.get(clip.id)!);
+
   // Sort ALL clips by track index (lower = bottom, rendered first)
   // This ensures proper z-ordering: blur overlays only affect content below them
   const sortedClips = [...activeClips].sort((a, b) => {
@@ -312,7 +329,7 @@ export function drawPreviewFrame(
         continue;
       }
       // Draw clip normally
-      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, options);
+      drawClip(ctx, projectSize, clip, time - clip.timelinePosition, scene, media, videoFor(clip), options);
     }
   }
 
@@ -320,7 +337,7 @@ export function drawPreviewFrame(
   if (activeTransition) {
     drawTransition(
       ctx,
-      media.videoElements,
+      videoFor,
       media.imageElements,
       activeTransition,
       time,

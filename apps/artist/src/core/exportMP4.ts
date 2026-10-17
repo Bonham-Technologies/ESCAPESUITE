@@ -55,6 +55,7 @@ import {
   disposeFrameManager,
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
+import { assignElementSlots } from './elementSlots';
 import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
 // `ExportLogEntry` and `ExportError` live in exportTypes.ts (moved there by
@@ -443,6 +444,13 @@ export async function exportToMP4(
       // Helper to calculate clip time
       const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;
 
+      // Which live clip of its source each clip is this frame (ESCSUITE-313,
+      // `core/elementSlots.ts`): on the `<video>` path each slot is its own
+      // element, so two clips of one source — a split clip crossfading into
+      // itself, a picture-in-picture copy — each hold their own frame until
+      // the draw instead of sharing one playhead. The worker ignores it.
+      const slots = assignElementSlots(activeClips, activeTransition);
+
       // Fetch frames for all active media clips (runs at full speed with WebCodecs)
       const framePromises: Array<{ clip: Clip; clipTime: number; framePromise: Promise<DrawableMediaSource | null> }> = [];
 
@@ -453,7 +461,7 @@ export async function exportToMP4(
           framePromises.push({
             clip,
             clipTime,
-            framePromise: getFrameAtTime(frameManager, clip.sourceVideoId, sourceTime),
+            framePromise: getFrameAtTime(frameManager, clip.sourceVideoId, sourceTime, slots.get(clip.id)!),
           });
         } else if (imageElements.has(clip.sourceVideoId)) {
           // Image - resolve immediately
@@ -482,14 +490,20 @@ export async function exportToMP4(
 
         // Fetch outgoing frame
         if (frameManager.sources.has(activeTransition.outgoingClip.sourceVideoId)) {
-          outgoingFrame = await getFrameAtTime(frameManager, activeTransition.outgoingClip.sourceVideoId, outSourceTime);
+          outgoingFrame = await getFrameAtTime(
+            frameManager, activeTransition.outgoingClip.sourceVideoId, outSourceTime,
+            slots.get(activeTransition.outgoingClip.id)!
+          );
         } else if (imageElements.has(activeTransition.outgoingClip.sourceVideoId)) {
           outgoingFrame = imageElements.get(activeTransition.outgoingClip.sourceVideoId)!;
         }
 
         // Fetch incoming frame
         if (frameManager.sources.has(activeTransition.incomingClip.sourceVideoId)) {
-          incomingFrame = await getFrameAtTime(frameManager, activeTransition.incomingClip.sourceVideoId, inSourceTime);
+          incomingFrame = await getFrameAtTime(
+            frameManager, activeTransition.incomingClip.sourceVideoId, inSourceTime,
+            slots.get(activeTransition.incomingClip.id)!
+          );
         } else if (imageElements.has(activeTransition.incomingClip.sourceVideoId)) {
           incomingFrame = imageElements.get(activeTransition.incomingClip.sourceVideoId)!;
         }
