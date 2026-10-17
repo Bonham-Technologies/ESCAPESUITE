@@ -46,6 +46,12 @@
   color: #94a3b8;
 }
 
+/* ESCSUITE-319: the play triangle takes the speaker's place at the same size. */
+.audioPlaceholder svg {
+  width: 72px;
+  height: 72px;
+}
+
 /* Play overlay when paused */
 .playOverlay {
   position: absolute;

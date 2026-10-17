@@ -409,6 +409,53 @@ describe('VideoPlayer', () => {
     });
   });
 
+  // ESCSUITE-319. One centred glyph carries the state for an audio take: the
+  // play triangle while paused, the speaker while playing. Nothing stacks.
+  describe('audio-only recordings: one glyph', () => {
+    const load = () => {
+      const video = document.querySelector('video')!;
+      act(() => {
+        fireEvent.loadedMetadata(video);
+      });
+      return video;
+    };
+
+    it('paused: exactly one glyph, the play triangle, and no separate play overlay', async () => {
+      render(<VideoPlayer {...defaultProps} mediaType="audio" autoPlay={false} />);
+      load();
+      await waitFor(() => {
+        expect(screen.getByTestId('audio-placeholder').getAttribute('data-glyph')).toBe('play');
+      });
+      const placeholder = screen.getByTestId('audio-placeholder');
+      expect(placeholder.getAttribute('aria-hidden')).toBe('true');
+      expect(placeholder.querySelectorAll('svg')).toHaveLength(1);
+      expect(document.querySelector('[class*="playOverlay"]')).toBeNull();
+      expect(document.querySelectorAll('[class*="videoWrapper"] svg')).toHaveLength(1);
+    });
+
+    it('playing: the speaker alone', async () => {
+      render(<VideoPlayer {...defaultProps} mediaType="audio" autoPlay={false} />);
+      const video = load();
+      act(() => {
+        fireEvent.play(video);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('audio-placeholder').getAttribute('data-glyph')).toBe('speaker');
+      });
+      expect(document.querySelectorAll('[class*="videoWrapper"] svg')).toHaveLength(1);
+      expect(document.querySelector('[class*="playOverlay"]')).toBeNull();
+    });
+
+    it('a video take paused keeps its play overlay and has no speaker', async () => {
+      render(<VideoPlayer {...defaultProps} mediaType="video" autoPlay={false} />);
+      load();
+      await waitFor(() => {
+        expect(document.querySelector('[class*="playOverlay"]')).toBeTruthy();
+      });
+      expect(screen.queryByTestId('audio-placeholder')).toBeNull();
+    });
+  });
+
   describe('error handling', () => {
     it('says "recording", not "video", in the error overlay', async () => {
       render(<VideoPlayer {...defaultProps} />);

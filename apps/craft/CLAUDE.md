@@ -519,6 +519,10 @@ Reusable video player with full playback controls:
   keyboard model and the Space/chord handling remain one implementation) but is visually
   hidden by `.videoAudio` (1px, transparent, no pointer events) and an `aria-hidden` speaker
   glyph is drawn over the same dark surface; a click on the wrapper still toggles playback.
+  The glyph is the only one (ESCSUITE-319): the same 72px centred slot shows the play triangle
+  while paused (`data-glyph="play"`) and the speaker while playing (`"speaker"`), and the
+  separate `.playOverlay` is rendered for a video take only, so the two never stack. It stays
+  `aria-hidden`; the controls' play/pause button carries the state for assistive tech
   `useRecordingLibrary` carries the row's `mediaType` as `playbackMediaType` (`'audio'` only
   for a row marked so; unmarked rows are video) through `App` to `PlaybackDialog`. The error
   overlay says "This recording could not be played." / "It may be corrupted or in an

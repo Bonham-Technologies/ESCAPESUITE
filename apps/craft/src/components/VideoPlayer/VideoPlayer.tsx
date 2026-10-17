@@ -333,6 +333,7 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, mediaT
 
   // Calculate progress percentage
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const showPlayGlyph = isLoaded && !isPlaying && !hasError;
 
   return (
     <div className={styles.playerContainer}>
@@ -354,16 +355,23 @@ export function VideoPlayer({ src, title, autoPlay = true, knownDuration, mediaT
           onPause={handlePause}
         />
 
-        {/* Audio-only take: the glyph stands in for the picture. The click
-            toggles playback through the wrapper, as it does on a video. */}
+        {/* Audio-only take: ONE centred glyph stands in for the picture and
+            carries the state (ESCSUITE-319): the play triangle while paused,
+            the speaker while playing. The click toggles playback through the
+            wrapper, as it does on a video. */}
         {mediaType === 'audio' && (
-          <div className={styles.audioPlaceholder} data-testid="audio-placeholder" aria-hidden="true">
-            <SpeakerIcon />
+          <div
+            className={styles.audioPlaceholder}
+            data-testid="audio-placeholder"
+            data-glyph={showPlayGlyph ? 'play' : 'speaker'}
+            aria-hidden="true"
+          >
+            {showPlayGlyph ? <PlayIcon /> : <SpeakerIcon />}
           </div>
         )}
 
-        {/* Play overlay when paused */}
-        {isLoaded && !isPlaying && !hasError && (
+        {/* Play overlay when paused (a video take; an audio take's glyph is above) */}
+        {mediaType !== 'audio' && showPlayGlyph && (
           <div className={styles.playOverlay}>
             <PlayIcon />
           </div>
