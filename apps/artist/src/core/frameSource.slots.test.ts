@@ -10,6 +10,7 @@
 // first time it is asked for and kept until the source is disposed.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { FrameSourceFactory, HTMLVideoFrameSource } from './frameSource'
+import { createFrameManager, getFrameAtTime, loadFrameSource } from './frameManager'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 
 vi.mock('./workerDecodeEngine', () => ({ isMeasuredWorkerDecodeEngine: () => true }))
@@ -94,19 +95,36 @@ describe('HTMLVideoFrameSource slots', () => {
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
   })
 
-  it('rejects a slot whose element will not load, without revoking the URL the first still reads', async () => {
+  it('serves nothing for a slot whose element will not load, says so once, and keeps the URL the first reads', async () => {
     const source = await HTMLVideoFrameSource.create('rec', blob())
     media.script({ video: { fail: true } })
 
-    await expect(source.getFrame(10, 1)).rejects.toThrow('Failed to load video')
+    // Three frames of the export: the slot is given up on at the first and
+    // not retried, and only the first says so.
+    for (let frame = 0; frame < 3; frame++) {
+      await expect(source.getFrame(10 + frame / 30, 1)).resolves.toBeNull()
+    }
+    expect(media.videos).toHaveLength(2)
+    expect(warns.mock.calls.filter((call: unknown[]) => String(call[0]).includes('second element'))).toHaveLength(1)
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
     await expect(source.getFrame(1, 0)).resolves.toBe(media.videos[0])
+  })
+
+  it('leaves the clip out of every frame without a warning a frame through the frame manager', async () => {
+    const manager = await createFrameManager(false)
+    await loadFrameSource(manager, 'rec', blob(), 'video/mp4')
+    media.script({ video: { fail: true } })
+
+    for (let frame = 0; frame < 3; frame++) {
+      expect(await getFrameAtTime(manager, 'rec', 10 + frame / 30, 1)).toBeNull()
+    }
+    expect(warns).toHaveBeenCalledTimes(1)
   })
 
   it('disposes cleanly while a slot it was asked for never loaded', async () => {
     const source = await HTMLVideoFrameSource.create('rec', blob())
     media.script({ video: { fail: true } })
-    await expect(source.getFrame(10, 1)).rejects.toThrow('Failed to load video')
+    await expect(source.getFrame(10, 1)).resolves.toBeNull()
 
     await expect(source.dispose()).resolves.toBeUndefined()
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)

@@ -53,6 +53,7 @@ import {
   sceneSource,
 } from '../test/fixtures/perfScene'
 import { makeExportOptions } from '../test/fixtures/clipFixtures'
+import { countCollectionConstructions } from '../test/collectionConstructions'
 import type { Clip, ExportProgress } from '../store/types'
 
 vi.mock('mediabunny', async () => {
@@ -380,5 +381,44 @@ describe('WebM export per-frame work', () => {
     // first frame, whose clip starts at source 0, where the new element already
     // sits.
     expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS - 1)
+  })
+  // ESCSUITE-313 fix round. Which element each live clip draws from is worked
+  // out every frame, and the arithmetic must not cost the frame a collection:
+  // the composer refills one slot map it owns and a scratch map of the
+  // module's, with its lookups built once at construction. Counted as the
+  // difference between a 30-frame and a 15-frame export of the same scene, so
+  // everything the export builds once — the media load, the second element,
+  // the encoder — cancels and only the per-frame cost is left.
+  it('builds no more Maps or Sets per frame than it did before slots existed', async () => {
+    const measure = async (range: { start: number; end: number }) => {
+      const counted = countCollectionConstructions()
+      try {
+        await exportToWebM(
+          buildSceneClips(),
+          [sceneSource],
+          makeExportOptions({ format: 'webm', resolution: 'project', timeRange: range }),
+          () => {},
+          SCENE_TRACKS,
+          undefined,
+          { ...SCENE_RESOLUTION }
+        )
+        return { maps: counted.maps, sets: counted.sets }
+      } finally {
+        counted.uninstall()
+      }
+    }
+    const long = await measure(RANGE)
+    const short = await measure({ start: RANGE.start, end: RANGE.start + 0.5 })
+    const perFrame = {
+      maps: (long.maps - short.maps) / (FRAMES / 2),
+      sets: (long.sets - short.sets) / (FRAMES / 2),
+    }
+
+    // Exact, measured 2026-10-17 on the tree before ESCSUITE-313 (31fa9edc):
+    // one Map — `getClipsAtTime`'s track lookup — and one Set, the frame's
+    // live elements (a live source-id set before the ticket). The first
+    // version of the ticket measured 3 Maps here: two per `assignElementSlots`
+    // call.
+    expect(perFrame).toEqual({ maps: 1, sets: 1 })
   })
 })

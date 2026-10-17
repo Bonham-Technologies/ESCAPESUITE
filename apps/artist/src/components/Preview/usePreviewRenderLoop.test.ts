@@ -15,6 +15,7 @@ import {
 } from './usePreviewRenderLoop'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { useEditorStore } from '../../store/projectStore'
+import * as transitions from './transitions'
 import { FRAME_MS, installPreviewDoubles, last, settle, type PreviewDoubles } from '../../test/renderPreview'
 
 let doubles: PreviewDoubles
@@ -1466,5 +1467,65 @@ describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () 
     const times = drawnTimes(deps)
     expect(times[times.length - 1]).toBeGreaterThan(2)
     expect(deps.extraVideoElementsRef.current.size).toBe(0)
+  })
+
+  // ESCSUITE-313 fix round: a timeline with no transition on it asks for none
+  // on the playback path — the incoming-side hold is decided off once per run.
+  it('looks for no transition during playback when no clip carries one', async () => {
+    const { deps, seek, play } = twoClipsOfOneSource()
+    seek(1)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const lookups = vi.spyOn(transitions, 'getActiveTransition')
+
+    try {
+      play()
+      await settle(FRAME_MS * 6)
+
+      expect(drawnTimes(deps).length).toBeGreaterThan(3)
+      expect(lookups).not.toHaveBeenCalled()
+    } finally {
+      lookups.mockRestore()
+    }
+  })
+
+  it('holds a crossfade\'s incoming side once, not once a frame', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 5, endTime: 7, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness()
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+
+    play()
+    // Ten-odd frames inside the fade (1.5-2 s).
+    await settle(400)
+
+    const second = secondElement(deps)!
+    expect(drawnTimes(deps).filter((t) => t >= 1.5 && t < 2).length).toBeGreaterThan(5)
+    expect(second.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('repaints a paused frame once when a second element decodes its first frame (ESCSUITE-264)', async () => {
+    const { deps, seek } = twoClipsOfOneSource()
+    // The second element is made by the first scrub, and has no frame yet.
+    doubles.media.script({ video: { readyState: 0, silent: true, stallSeek: true } })
+    seek(1)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    doubles.media.script({ video: { readyState: 4, silent: false, stallSeek: false } })
+    const second = secondElement(deps)!
+    expect(second.readyState).toBe(0)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    becomeReady(second)
+    await settle(FRAME_MS)
+
+    expect(drawnTimes(deps)).toEqual([1])
   })
 })

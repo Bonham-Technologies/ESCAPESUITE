@@ -837,6 +837,34 @@ describe('createFrameComposer with two live clips of one source', () => {
     expect(warns.mock.calls.filter((call: unknown[]) => String(call[0]).includes('second element'))).toHaveLength(1)
   })
 
+  it('gives three live clips of one source three elements over one URL, and makes none on the next frame', async () => {
+    await store('v1')
+    const urlsBefore = vi.mocked(URL.createObjectURL).mock.calls.length
+    const clips = [
+      ...zoomedPair(),
+      makeClip({ id: 'C', sourceVideoId: 'v1', trackId: 'tC', startTime: 5, endTime: 6, duration: 1 }),
+    ]
+    const { composeFrame, sources, ctx } = await composerFor(clips, [
+      ...TWO_TRACKS,
+      makeTrack({ id: 'tC', index: 2 }),
+    ])
+
+    await composeFrame(0)
+    expect(drawnAt(ctx)).toEqual([expect.closeTo(0, 2), expect.closeTo(10, 2), expect.closeTo(5, 2)])
+    expect(new Set(ctx.argsFor('drawImage').map((args) => args[0])).size).toBe(3)
+    expect(media.videos).toHaveLength(3)
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length - urlsBefore).toBe(1)
+
+    await composeFrame(1 / 30)
+    expect(media.videos).toHaveLength(3)
+
+    for (const video of media.videos) vi.mocked(video.pause).mockClear()
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    releaseElementSources(sources)
+    for (const video of media.videos) expect(video.pause).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+  })
+
   it('draws two clips of one image from the one image', async () => {
     await store('i1', 'image/png', 'image')
     const clips = zoomedPair().map((c) => ({ ...c, sourceVideoId: 'i1' }))

@@ -42,6 +42,8 @@ import {
 import { getContextCallCount } from '../../test/doubles/canvas'
 import { useEditorStore } from '../../store/projectStore'
 import * as animation from '../../utils/animation'
+import * as drawFrameModule from './drawFrame'
+import { countCollectionConstructions } from '../../test/collectionConstructions'
 
 vi.mock('../../core/storage', async () => (await import('../../test/appDoubles')).storageDouble())
 
@@ -286,6 +288,44 @@ describe('preview per-frame work', () => {
     // and the nudge finds both already there. Re-measured 2026-10-17: still 1,
     // and every count in this file unchanged.
     expect(frame.composites).toBe(1)
+  })
+})
+
+// ESCSUITE-313 fix round. Which element each live clip draws from is worked
+// out on every composite; the arithmetic must not cost the frame a collection.
+// Counted inside `drawPreviewFrame` itself, with the counting constructors in
+// place for exactly that synchronous call and no longer.
+describe('preview per-frame collections', () => {
+  async function collectionsPerComposite(time: number) {
+    const real = drawFrameModule.drawPreviewFrame
+    const perCall: Array<{ maps: number; sets: number }> = []
+    const spy = vi.spyOn(drawFrameModule, 'drawPreviewFrame').mockImplementation((...args) => {
+      const counted = countCollectionConstructions()
+      try {
+        real(...args)
+      } finally {
+        counted.uninstall()
+      }
+      perCall.push({ maps: counted.maps, sets: counted.sets })
+    })
+    try {
+      const preview = await renderPreview({ rect: RECT })
+      await measureFrame(preview, time)
+      return perCall.at(-1)
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it.each([
+    ['the effects frame', EFFECTS_FRAME_TIME],
+    ['the transition frame', TRANSITION_FRAME_TIME],
+  ])('builds one Map and no Set per composite on %s', async (_, time) => {
+    // Exact, measured 2026-10-17 on the tree before ESCSUITE-313 (31fa9edc):
+    // one Map — `getClipsAtTime`'s track lookup — and no Set. The first
+    // version of the ticket measured 3 Maps here: two per `assignElementSlots`
+    // call.
+    expect(await collectionsPerComposite(time)).toEqual({ maps: 1, sets: 0 })
   })
 })
 
