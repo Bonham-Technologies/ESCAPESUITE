@@ -6,6 +6,7 @@ import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { storeVideo, storeThumbnail } from './storage';
 import { extractWaveformData } from '../utils/waveform';
 import { FRAME_RATE_PROBE, measureFrameRate } from './frameRateProbe';
+import { withSeekIndex } from './webmSeekIndex';
 
 /**
  * Seek target used to make a browser discover a duration it did not read from
@@ -228,7 +229,22 @@ export async function resolveStoredDuration(blob: Blob, metadata: SourceVideo): 
 }
 
 /**
- * Generate a thumbnail from a video at a specific time
+ * How long the thumbnail's own element has to load and land its seek
+ * (ESCSUITE-305). Firefox never completes a seek into a WebM with no Cues index
+ * whose target needs a Cluster that does not start with a key frame, and with
+ * no deadline the import sat on "Processing..." for ever. The same shape and
+ * the same five seconds as ESCAPECRAFT's `THUMBNAIL_TIMEOUT_MS` (ESCSUITE-180):
+ * a thumbnail is cosmetic, and `finishVideoFile` stores the video without one.
+ */
+export const THUMBNAIL_SEEK_TIMEOUT_MS = 5_000;
+
+/**
+ * Generate a thumbnail from a video at a specific time.
+ *
+ * One release path, run once on every settle: the deadline cleared, the
+ * handlers detached, the element unloaded and the object URL revoked. A seek that lands clears the
+ * deadline and detaches the error handler first, so from then on the only
+ * thing that can settle the promise is the frame it draws.
  */
 export async function generateThumbnail(
   file: File,
@@ -242,7 +258,30 @@ export async function generateThumbnail(
     video.muted = true;
 
     const objectUrl = URL.createObjectURL(file);
-    video.src = objectUrl;
+
+    const release = () => {
+      clearTimeout(deadline);
+      video.onloadedmetadata = null;
+      video.onseeked = null;
+      video.onerror = null;
+      // Unload the element, handlers first (an emptied source fires 'error'):
+      // a wedged element left holding its source is one of the four after
+      // which Firefox stops loading new <video>s at all (review round 1).
+      video.removeAttribute('src');
+      video.load();
+      URL.revokeObjectURL(objectUrl);
+    };
+    const fail = (message: string) => {
+      release();
+      reject(new Error(message));
+    };
+    const deadline = setTimeout(
+      () =>
+        fail(
+          `Could not capture a thumbnail of "${file.name}" — the browser did not finish seeking within ${THUMBNAIL_SEEK_TIMEOUT_MS / 1000} s`
+        ),
+      THUMBNAIL_SEEK_TIMEOUT_MS
+    );
 
     video.onloadedmetadata = () => {
       // Seek to the specified time (or 10% into the video if time is 0)
@@ -250,6 +289,10 @@ export async function generateThumbnail(
     };
 
     video.onseeked = () => {
+      // The seek landed: the deadline is met, and no load error can follow.
+      clearTimeout(deadline);
+      video.onerror = null;
+
       const canvas = document.createElement('canvas');
       const aspectRatio = video.videoWidth / video.videoHeight;
 
@@ -264,8 +307,7 @@ export async function generateThumbnail(
 
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        URL.revokeObjectURL(objectUrl);
-        reject(new Error('Failed to get canvas context'));
+        fail('Failed to get canvas context');
         return;
       }
 
@@ -273,7 +315,7 @@ export async function generateThumbnail(
 
       canvas.toBlob(
         (blob) => {
-          URL.revokeObjectURL(objectUrl);
+          release();
           if (blob) {
             resolve(blob);
           } else {
@@ -285,10 +327,9 @@ export async function generateThumbnail(
       );
     };
 
-    video.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
-      reject(new Error(`Failed to load video for thumbnail: ${file.name}`));
-    };
+    video.onerror = () => fail(`Failed to load video for thumbnail: ${file.name}`);
+
+    video.src = objectUrl;
   });
 }
 
@@ -300,14 +341,23 @@ export async function processVideoFile(file: File): Promise<SourceVideo> {
 }
 
 /** The rest of `processVideoFile`, once the metadata is in hand. */
-async function finishVideoFile(file: File, metadata: SourceVideo): Promise<SourceVideo> {
+async function finishVideoFile(original: File, metadata: SourceVideo): Promise<SourceVideo> {
   metadata.mediaType = 'video';
+
+  // A WebM with no usable seek index is stored remuxed with one, so a browser
+  // that cannot seek it without one (Firefox) can — and so can the thumbnail
+  // below (ESCSUITE-305, `webmSeekIndex.ts`). Anything else is stored exactly
+  // as it came; `withSeekIndex` hands the same object back.
+  const bytes = await withSeekIndex(original, original.name);
+  metadata.size = bytes.size;
+  const thumbnailSource =
+    bytes === original ? original : new File([bytes], original.name, { type: bytes.type });
 
   // Generate thumbnail. The time is passed explicitly because generateThumbnail
   // loads its own element, which for a file with no duration header reports the
   // same Infinity this metadata was recovered from.
   try {
-    const thumbnail = await generateThumbnail(file, metadata.duration * 0.1);
+    const thumbnail = await generateThumbnail(thumbnailSource, metadata.duration * 0.1);
     await storeThumbnail(metadata.id, thumbnail);
     metadata.thumbnailUrl = URL.createObjectURL(thumbnail);
   } catch (error) {
@@ -316,7 +366,7 @@ async function finishVideoFile(file: File, metadata: SourceVideo): Promise<Sourc
 
   // Extract audio waveform data (videos may have audio tracks)
   try {
-    const { peaks, hasAudio } = await extractWaveformData(file);
+    const { peaks, hasAudio } = await extractWaveformData(original);
     metadata.waveformData = peaks;
     metadata.hasAudio = hasAudio;
   } catch (error) {
@@ -325,7 +375,7 @@ async function finishVideoFile(file: File, metadata: SourceVideo): Promise<Sourc
   }
 
   // Store the video blob
-  await storeVideo(metadata.id, file, metadata);
+  await storeVideo(metadata.id, bytes, metadata);
 
   return metadata;
 }

@@ -5325,6 +5325,84 @@ through the media mock and reads the stored part back: 1 / 1 on Chromium, twice.
 byte-identical — one number assignment per encoded `AudioData` is a statement, not a counted call. **No floor
 crossed**; craft's floors stay 100 / 99 / 98 / 100.
 
+`@escapesuite/artist` and `@escapesuite/headless-artist` were re-measured 2026-10-17 for ESCSUITE-305 (a
+WebM a browser cannot seek fails the export by name instead of rendering black, the import thumbnail's
+seek has a deadline, and a stored WebM with an empty or missing Cues index is remuxed seekable at import —
+Firefox will not seek a Cues-less WebM into a cluster that does not open on a keyframe: `seeked` never
+fires, `seeking` stays true and `readyState` stays 1 for good, so every composited-PiP ESCAPECRAFT take
+(stored with a 0-byte Cues until ESCSUITE-322) exported on Firefox as 0.8 s/frame of black under "Export
+complete!" and hung the import on "Processing…". Now `core/seekWedge.ts` holds one counting rule both
+element paths apply — the WebM/GIF composer in `elementFrames.ts` and the in-page MP4 path's
+`HTMLVideoFrameSource.getFrame` — a request that starts over an element not `seeking` resets the count,
+one that ends with the seek landed or a drawable frame resets it, one that ends over an element still
+`seeking` with no frame counts whether or not it issued a seek (an incoming transition clip is held at
+one time), and at `WEDGED_SEEK_FRAMES` = 3 the export throws `ExportError` `SOURCE_NOT_SEEKABLE` naming
+the source — "This browser cannot read "<name>" frame by frame (its seeks never completed). Re-save the
+recording in ESCAPECRAFT, or export in Chrome or Edge." — which `frameManager.getFrameAtTime` lets
+through where it skipped every other failed frame, the failover handover does not swallow, the dialog
+shows without offering the other video format (which wedges on the same source), and the kit maps to
+exit 2 / 400 as a permanent code; `generateThumbnail` gets `THUMBNAIL_SEEK_TIMEOUT_MS` (5 s), rejecting by
+name and tearing the element down, and the import stores the source without a thumbnail as it already
+did for any thumbnail failure; and `core/webmSeekIndex.ts` reads a WebM's first 64 KiB (the Cues directly
+or through the SeekHead) and, for one with no index, copies its packets through Mediabunny — no decoder,
+no encoder, alpha BlockAdditions kept, into a `StreamTarget` whose chunks a `createChunkCollector()`
+gathers as Blob parts, patching Mediabunny's write-backs in place, so the whole file is never one
+ArrayBuffer — once, at import, in `processMediaFile`'s video arm and in the `?loadVideo=` handoff, where
+the take's primary is rewritten in place under its id; an indexed file is returned as the same object),
+each in one sitting against `main` at `60fd2bc1` (the ESCSUITE-322 version-packages commit; its artist
+source is `c3814373`'s, the ESCSUITE-313 release, over which this branch was rebased — see below). **Artist**:
+99.85 / **99.46** / **96.86** / 99.78 against 99.85 / 99.45 / 96.82 / 99.78 — statements up a hundredth,
+branches up four, lines and functions unmoved. The base gives 6,187 / 6,390 branches and this branch
+6,274 / 6,477: eighty-seven new branches, eighty-seven covered, the same 203 uncovered as before (lines
+9,674 / 9,688 → 9,830 / 9,844, statements 10,976 / 11,036 → 11,164 / 11,224, functions 2,300 / 2,305 →
+2,329 / 2,334, every denominator growing by exactly what the numerator did; the same 14 / 60 / 5
+uncovered). The two new modules arrive at 100 on all four — `core/seekWedge.ts` 9 / 12 / 10 / 3
+and `core/webmSeekIndex.ts` 103 / 130 / 52 / 19 (the Cues walk's direct and SeekHead arms, the
+first-Cluster stop, the non-WebM and blob-less early returns, the collector's in-part, cross-part,
+at-end and past-end writes, the remux-throws-keep-the-original arm) — and the readers gained
+`elementFrames.ts` 78 / 85 → 82 / 89 and `frameSource.ts` 62 / 63 → 70 / 71 (the skip-path wait over a
+still-seeking element, `needsSeek || video.seeking`, and — since the rebase over ESCSUITE-313 — the wedge
+count kept **per element** rather than per source, a `Map<HTMLVideoElement, number>` in the composer's
+`syncCounted(sourceId, video, time)` and in `HTMLVideoFrameSource`, so a source's two live clips are judged
+each on its own `<video>`), `frameManager.ts` 4 → 6 (the rethrow), `exportTypes.ts`
+144 / 148 → 146 / 150, `videoProcessor.ts` 68 → 70, `app/takeImport.ts` 35 → 37 (the handoff's remux and
+its untouched-when-indexed side) and `components/Export/ExportDialog.tsx` 239 / 240 → 244 / 245 (the two
+offers gated on the code), each with the same pre-existing arms uncovered. The rebase's own pins are
+`elementFrames.slotWedge.test.ts` (five cases over 313's zoomed-pair fixture: the extra slot wedging beside a
+healthy slot 0, the same with slot 0's seeks landing after the stuck element's waits, the mirror on each
+side, and both healthy — the four stuck cases failing by name with the exact sentence, the healthy one
+running 10 frames with 20 draws from 2 elements) and `frameSource.slotWedge.test.ts` (four, both slots
+fetched together through `Promise.all` as `exportMP4.ts` gathers them); under a per-**source** count
+exactly the two late-landing mirror cases go red (`expected null to be an instance of
+SourceNotSeekableError`, the export completing with slot 0 black), and the headers say why the other shape
+stays green either way: slot 0's count is written first each frame, so a healthy element that lands late is
+the only write that can pull a shared count back below the threshold. Each is reached from both
+sides by the red cases — the headline `exportWebM.test.ts > on a source that cannot seek > fails by name
+instead of finishing a black file: expected { …(4) } to be an instance of ExportError`, the GIF and MP4
+twins, the held-target cases, the late-landing seek on both paths (`promise resolved "undefined" instead of
+rejecting` and its MP4 mirror), the two dialog offers, the unhandled-rejection pin on `exportMP4.ts`'s
+sibling frame promises, the thumbnail deadline, and the collector's five cases — and by the reviewers'
+mutations (the frameManager rethrow removed → 2 red; `storeVideo` always called in the handoff → 1;
+the `readyState < 2` operand dropped → 2; the counter never resetting → 2; the threshold throw removed →
+8). Two review rounds (opus, then two scoped opus re-reviews) put the last of them there: the first
+found the dialog still offering the other format and the remux holding the whole file in one buffer, the
+second that a slow-but-healthy element could reach 3 because nothing reset the count when an earlier
+seek landed between requests. **Kit**: 99.60 / 99.52 / 98.65 / 98.87, byte-identical on every percentage to the base — lines
+997 / 1,001 → 998 / 1,002 and statements 1,056 / 1,061 → 1,057 / 1,062, the one new unit the code joining
+`PERMANENT_CODES`, covered by the existing permanent-code case; branches 659 / 668 and functions 176 / 178
+on both; 493 passed / 2 skipped. Outside vitest's measurement, the real 15.52 s take was imported and
+exported as WebM on Firefox 157 through the ESCSUITE-305 probe spec three times, once per round, and the
+ESCSUITE-254 / 313 parity oracle (`decode-worker.spec.ts`, Chromium) ran 10 / 10 on the rebased tree with
+the same-source crossfade at MAD 0.000: 466
+frames and mean luma 176 / 168 / 85 / 61 / 166 at 0.5 / 2 / 5 / 9 / 14 s every time, against 164 / 0 / 0 /
+0 / 0 before the fix; 70 s wall on an idle machine, 134–137 s with a coverage run beside it (358 s before).
+The remux of that take keeps all 434 VP9 packets (alpha included) and 258 Opus packets byte-identical.
+Every `*.perf.test.ts` and rerender pin is byte-identical — the wedge count is one compare per request on
+a path that already branched on `readyState`, and the probe and remux run once per import. What is left
+is ESCSUITE-324: the remux runs after the metadata probe, so a headerless AND Cues-less WebM from outside
+ESCAPECRAFT can still hit the 15 s metadata deadline on Firefox first. **No floor crossed**; artist's
+floors stay 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5332,7 +5410,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.01 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.83 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.46 | 96.86 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 

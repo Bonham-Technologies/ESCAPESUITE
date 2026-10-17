@@ -15,6 +15,7 @@ import {
   rewindElementSources,
 } from './elementFrames'
 import { elementSeekTarget } from './elementSeek'
+import { SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
 import { getVideoBlob, storeVideo } from './storage'
 import {
   getLastCanvasContext,
@@ -896,5 +897,179 @@ describe('createFrameComposer with two live clips of one source', () => {
 
     expect(ctx.argsFor('drawImage')).toHaveLength(2)
     expect(media.videos).toHaveLength(0)
+  })
+})
+
+
+// ESCSUITE-305. Firefox will not seek a Cues-less WebM into a Cluster that does
+// not start with a key frame: 'seeked' never fires, `seeking` stays true and
+// `readyState` stays at HAVE_METADATA for good. Each frame then sat out the
+// 500 ms seek fallback and the 300 ms readiness fallback, the `readyState >= 2`
+// gate skipped the draw, and the export finished "complete" with a black
+// picture. Three consecutive seeks of one element that end that way now fail
+// the export by name; one that merely runs slow does not.
+describe('createFrameComposer seek wedge', () => {
+  /** A composer over `clips`, drawing from the sources named in `sources`. */
+  async function composerOver(clips: Clip[], sourceMap: Map<string, SourceVideo>) {
+    const sources = await loadElementSources(clips, sourceMap)
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack()],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+    return { composeFrame, ctx, sources }
+  }
+
+  /** Compose frame `index` at 30 fps, sitting out every fallback the frame waits on. */
+  async function frame(composeFrame: (t: number) => Promise<void>, index: number): Promise<void> {
+    const pending = composeFrame(index / 30)
+    // Settle the rejection's handling before advancing, so a throw is observed
+    // as the frame's own result rather than as an unhandled rejection.
+    pending.catch(() => {})
+    await vi.advanceTimersByTimeAsync(800)
+    return pending
+  }
+
+  let raf: ReturnType<typeof installCountedRaf>
+
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    // The readiness poll is this stub's: it never answers, so the 300 ms
+    // fallback is what settles a wait for frame data that never arrives.
+    raf = installCountedRaf()
+  })
+
+  afterEach(() => {
+    raf.uninstall()
+    vi.useRealTimers()
+  })
+
+  const oneClip = () => [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
+
+  it('fails by name on the third consecutive seek that never completes', async () => {
+    await store('v1')
+    // Every seek but the rewind's to 0 wedges, the way Firefox's did past 1.07 s.
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame, ctx } = await composerOver(
+      oneClip(),
+      sourceMapOf([makeSourceVideo({ id: 'v1', name: 'recording_2026-10-17.webm' })])
+    )
+
+    await frame(composeFrame, 0) // no seek: the rewind left it at 0
+    await frame(composeFrame, 1) // wedged #1
+    await frame(composeFrame, 2) // wedged #2
+    const thrown = await frame(composeFrame, 3).then(
+      () => null,
+      (error: unknown) => error
+    )
+
+    expect(thrown).toBeInstanceOf(SourceNotSeekableError)
+    expect(thrown).toMatchObject({
+      code: 'SOURCE_NOT_SEEKABLE',
+      message:
+        'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
+    })
+    // Frame 0 was drawn; the two wedged frames before the throw were not.
+    expect(ctx.argsFor('drawImage')).toHaveLength(1)
+    expect(WEDGED_SEEK_FRAMES).toBe(3)
+  })
+
+  it('names the source by its id when the export was not handed its record', async () => {
+    await store('v1')
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame } = await composerOver(oneClip(), new Map())
+
+    await frame(composeFrame, 1)
+    await frame(composeFrame, 2)
+
+    await expect(frame(composeFrame, 3)).rejects.toThrow('This browser cannot read "v1" frame by frame')
+  })
+
+  it('starts the count again after a seek that completes', async () => {
+    await store('v1')
+    // Frames 1, 2, 4 and 5 wedge; frame 3 lands. Never three in a row.
+    const wedged = new Set([1, 2, 4, 5].map((i) => elementSeekTarget(i / 30)))
+    media.script({ video: { wedgeSeekAt: (t) => wedged.has(t) } })
+    const { composeFrame, ctx } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+
+    for (let i = 0; i < 6; i++) await frame(composeFrame, i)
+
+    // Frames 0 and 3 had a picture to draw.
+    expect(ctx.argsFor('drawImage')).toHaveLength(2)
+  })
+
+  // Review round 1, MINOR 3: an incoming transition clip is held at its first
+  // frame until the outgoing clip ends, so after one seek its element is asked
+  // for the same time every frame and no further seek is issued. A seek that
+  // never completed is still outstanding on those frames: they count, rather
+  // than resetting the run and finishing black.
+  it('fails by name on a source held at one time whose one seek never completed', async () => {
+    await store('v1')
+    await store('v2')
+    const held = elementSeekTarget(0.25)
+    media.script({ video: { wedgeSeekAt: (t) => t === held } })
+    const clips = [
+      makeClip({ id: 'a', sourceVideoId: 'v1', duration: 1, endTime: 1, transition: { type: 'fade', duration: 0.5 } }),
+      makeClip({ id: 'b', sourceVideoId: 'v2', startTime: 0.25, duration: 1, endTime: 1.25, timelinePosition: 1 }),
+    ]
+    const { composeFrame } = await composerOver(
+      clips,
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2', name: 'incoming.webm' })])
+    )
+
+    await frame(composeFrame, 15) // the incoming clip's one seek, to 0.25: wedged
+    await frame(composeFrame, 16) // held at 0.25: no seek, still seeking
+    await expect(frame(composeFrame, 17)).rejects.toThrow('This browser cannot read "incoming.webm" frame by frame')
+  })
+
+  // Re-review round 1, F1: a healthy element on a slow machine whose every
+  // seek lands at ~900 ms — after both fallbacks, so each frame ends still
+  // seeking — but lands before the next frame begins. The earlier seek landed,
+  // so the next frame starts the count again: it is never refused.
+  it('never refuses a source whose every seek lands late, between frames', async () => {
+    await store('v1')
+    media.script({ video: { seekLandsAfterMs: 900 } })
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
+    const { composeFrame } = await composerOver(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+
+    for (let i = 1; i <= 10; i++) {
+      const pending = composeFrame(i / 30)
+      pending.catch(() => {})
+      // 800 ms for the frame's own waits, then the seek lands before the next.
+      await vi.advanceTimersByTimeAsync(1_000)
+      await pending
+    }
+  })
+
+  it('does not count a seek that runs slow but settles (`seeking` false)', async () => {
+    await store('v1')
+    // No 'seeked' and no frame data in time, but the element is not stuck seeking.
+    media.script({ video: { stallSeek: true, readyState: 1 } })
+    const { composeFrame } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+
+    for (let i = 0; i < 5; i++) await frame(composeFrame, i)
+  })
+
+  it('does not count a seek still in flight over a frame it can already draw', async () => {
+    await store('v1')
+    media.script({ video: { stallSeek: true } })
+    const { composeFrame, ctx, sources } = await composerOver(
+      oneClip(),
+      sourceMapOf([makeSourceVideo({ id: 'v1' })])
+    )
+    Object.defineProperty(sources.videoElements.get('v1')!, 'seeking', { value: true, configurable: true })
+
+    for (let i = 0; i < 5; i++) await frame(composeFrame, i)
+
+    expect(ctx.argsFor('drawImage')).toHaveLength(5)
   })
 })

@@ -5,6 +5,7 @@ import { isTrackVisible, isVisibleTrack } from '../store/trackVisibility';
 import { PRESET_SUPPRESSION } from '../utils/animation';
 import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
 import type { ExportLoudness } from './loudness';
+import { SourceNotSeekableError } from './seekWedge';
 
 /**
  * A drawable media source that can be used with canvas drawImage.
@@ -225,8 +226,21 @@ export class ExportError extends Error {
  *   in a Chromium with no AAC encoder — Linux Chromium, the reference image's
  *   (ESCSUITE-312). Thrown by `headless/renderProject.ts` only; the editor's
  *   own export offers a silent MP4 with a note instead.
+ * - `SOURCE_NOT_SEEKABLE`: a `<video>` source whose seeks never complete in this
+ *   browser — Firefox on a WebM with no Cues index (ESCSUITE-305). Every frame
+ *   would be drawn black; the export fails by name instead.
  */
-export type ExportErrorCode = 'OUTPUT_SIZE_UNSUPPORTED' | 'AUDIO_CODEC_UNAVAILABLE';
+export type ExportErrorCode = 'OUTPUT_SIZE_UNSUPPORTED' | 'AUDIO_CODEC_UNAVAILABLE' | 'SOURCE_NOT_SEEKABLE';
+
+/**
+ * The {@link ExportErrorCode} a failure from inside an export carries, for the
+ * exporters' catch to keep when it wraps the failure in an `ExportError` with
+ * the diagnostic log: `SOURCE_NOT_SEEKABLE` from a source whose seeks never
+ * complete in this browser (`seekWedge.ts`, ESCSUITE-305), nothing otherwise.
+ */
+export function exportErrorCodeOf(error: unknown): ExportErrorCode | undefined {
+  return error instanceof SourceNotSeekableError ? error.code : undefined;
+}
 
 /**
  * Check if abort was requested and throw if so

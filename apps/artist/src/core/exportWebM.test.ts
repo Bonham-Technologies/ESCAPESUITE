@@ -105,6 +105,37 @@ function run({
 
 const ctx = () => getLastCanvasContext() as RecordingCanvasRenderingContext2D
 
+/**
+ * Run an export whose source seeks never complete (ESCSUITE-305), sitting out
+ * every seek and readiness fallback on fake timers. The readiness poll's
+ * `requestAnimationFrame` is replaced by one that never answers, so its 300 ms
+ * fallback — not a decoded frame — is what ends each wait.
+ */
+async function runWedged<T>(start: () => Promise<T>): Promise<unknown> {
+  const realRaf = globalThis.requestAnimationFrame
+  const realCancel = globalThis.cancelAnimationFrame
+  globalThis.requestAnimationFrame = (() => 1) as typeof globalThis.requestAnimationFrame
+  globalThis.cancelAnimationFrame = (() => {}) as typeof globalThis.cancelAnimationFrame
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  try {
+    let outcome: unknown
+    let settled = false
+    start().then(
+      (value) => { outcome = value; settled = true },
+      (error: unknown) => { outcome = error; settled = true }
+    )
+    for (let i = 0; i < 200 && !settled; i++) await vi.advanceTimersByTimeAsync(100)
+    return outcome
+  } finally {
+    vi.useRealTimers()
+    globalThis.requestAnimationFrame = realRaf
+    globalThis.cancelAnimationFrame = realCancel
+  }
+}
+
+const UNSEEKABLE_SENTENCE =
+  'This browser cannot read "take.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.'
+
 beforeEach(async () => {
   resetMediabunnyDouble()
   mixAudio.mockReset()
@@ -1432,5 +1463,32 @@ describe('burning in captions (ESCSUITE-293)', () => {
     await run({ clips, tracks })
 
     expect(framesDrawing('Burned in')).toEqual([5, 6, 7])
+  })
+})
+
+// ESCSUITE-305: Firefox exported a Cues-less ESCAPECRAFT take as a black WebM —
+// every seek wedged, every frame skipped its draw, and the export reported
+// "complete". It now fails by name on the third wedged frame.
+describe('exportToWebM on a source that cannot seek', () => {
+  it('fails by name instead of finishing a black file', async () => {
+    media.script({ video: { videoWidth: 640, videoHeight: 360, wedgeSeekAt: (t) => t > 0.02 } })
+
+    const error = await runWedged(() =>
+      run({ sources: [makeSourceVideo({ width: 640, height: 360, name: 'take.webm' })] })
+    )
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect(error).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: UNSEEKABLE_SENTENCE, frameIndex: 3 })
+    // Frame 0 and the two wedged frames before the refusal; nothing after it.
+    expect(webcodecs.videoEncoders[0].encodes).toHaveLength(3)
+  })
+
+  it('finishes when one frame wedges and the next seek lands', async () => {
+    const wedged = elementSeekTarget(2 / 30)
+    media.script({ video: { videoWidth: 640, videoHeight: 360, wedgeSeekAt: (t) => t === wedged } })
+
+    const result = await runWedged(() => run())
+
+    expect(result).toMatchObject({ framesEncoded: 6 })
   })
 })

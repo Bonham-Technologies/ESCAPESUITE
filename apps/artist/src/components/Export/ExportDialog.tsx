@@ -572,9 +572,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // Track the failure
       analytics.exportFailed(format, errorType, failProgress);
 
+      // A source this browser cannot seek wedges the other video format exactly
+      // as it wedged this one — both draw from the same <video> — and the
+      // refusal itself says to use Chrome or Edge, so neither format's failure
+      // offers the other for it (ESCSUITE-305 review round 1).
+      const unseekable = err instanceof ExportError && err.code === 'SOURCE_NOT_SEEKABLE';
+
       // If MP4 failed, show the fallback dialog instead of just an error
       if (isCurrentRun()) {
-        if (format === 'mp4') {
+        if (format === 'mp4' && !unseekable) {
           setMp4FailedError(errorMessage);
         } else {
           setError(errorMessage);
@@ -585,7 +591,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
           // the same thing MP4's own failure screen offers for WebM. A GIF
           // failure is not a codec problem another codec would solve, so it is
           // offered nothing further (ESCSUITE-34).
-          setOfferMp4Fallback(format === 'webm' && err instanceof ExportError && mp4Supported);
+          setOfferMp4Fallback(format === 'webm' && err instanceof ExportError && mp4Supported && !unseekable);
         }
         setProgress(null);
       }

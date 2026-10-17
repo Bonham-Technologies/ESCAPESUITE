@@ -49,6 +49,30 @@ export interface SeekScript {
    * that reveals the end only as the position the seek landed on.
    */
   durationStaysUnknown: boolean
+  /**
+   * Firefox's seek wedge (ESCSUITE-305): a seek to a time this answers true for
+   * never completes — no 'seeked', `seeking` stays true and `readyState` drops
+   * to HAVE_METADATA (1) — while a seek it answers false lands normally,
+   * clearing `seeking` and restoring the scripted `readyState`. Firefox wedges
+   * this way on a Cues-less WebM whose target needs a Cluster that does not
+   * start with a key frame. Leave it unset and seeks behave as they always have.
+   */
+  wedgeSeekAt?: (time: number) => boolean
+  /**
+   * A slow but healthy seek (ESCSUITE-305 re-review): the seek reports
+   * `seeking` true at HAVE_METADATA (1) until this many milliseconds later,
+   * when it lands — `seeking` false, the scripted `readyState` back, 'seeked'
+   * dispatched — on a `setTimeout`, so fake timers drive it.
+   */
+  seekLandsAfterMs?: number
+  /**
+   * `seekLandsAfterMs` chosen per seek target, so one element of a source can
+   * land late while another wedges (ESCSUITE-305 × ESCSUITE-313, the slot-wedge
+   * pins). A number for a target makes that seek land after that many
+   * milliseconds, as `seekLandsAfterMs` does; `undefined` leaves the seek to the
+   * rest of the script (`seekLandsAfterMs`, then `wedgeSeekAt`).
+   */
+  seekLandsAfterMsAt?: (time: number) => number | undefined
 }
 
 export interface VideoScript extends SeekScript {
@@ -173,7 +197,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
    * <audio>, since the duration discovery both model is the same browser
    * behaviour reached through two importers.
    */
-  function defineCurrentTime(el: HTMLMediaElement, s: SeekScript): void {
+  function defineCurrentTime(el: HTMLMediaElement, s: SeekScript, readyState?: number): void {
     let currentTime = 0
     Object.defineProperty(el, 'currentTime', {
       configurable: true,
@@ -199,6 +223,23 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
             own(el, 'duration', s.durationAfterSeek)
             queueMicrotask(() => el.dispatchEvent(new Event('durationchange')))
           }
+        }
+        const landsAfterMs = s.seekLandsAfterMsAt?.(next) ?? s.seekLandsAfterMs
+        if (landsAfterMs !== undefined) {
+          own(el, 'seeking', true)
+          own(el, 'readyState', 1)
+          setTimeout(() => {
+            own(el, 'seeking', false)
+            own(el, 'readyState', readyState)
+            el.dispatchEvent(new Event('seeked'))
+          }, landsAfterMs)
+          return
+        }
+        if (s.wedgeSeekAt) {
+          const wedged = s.wedgeSeekAt(next)
+          own(el, 'seeking', wedged)
+          own(el, 'readyState', wedged ? 1 : readyState)
+          if (wedged) return
         }
         if (!s.stallSeek) queueMicrotask(() => el.dispatchEvent(new Event('seeked')))
       },
@@ -266,7 +307,7 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
     own(el, 'load', vi.fn())
     if (s.frameTimes) defineFrameCallbacks(el, s.frameTimes, s.presentedFrames)
 
-    defineCurrentTime(el, s)
+    defineCurrentTime(el, s, s.readyState)
 
     defineSrc(el, () => {
       if (s.silent) return

@@ -8,6 +8,8 @@ import {
   type FrameManager,
 } from './frameManager'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
+import { SourceNotSeekableError } from './seekWedge'
+import type { IFrameSource } from './frameSource'
 import { VideoFrameDouble, allFramesClosed, resetFrameRegistry } from '../test/doubles/webcodecs'
 
 // The decode manager owns a Web Worker running WebCodecs, neither of which
@@ -189,6 +191,24 @@ describe('frameManager', () => {
       )
       expect(manager.currentFrames.size).toBe(0)
       warn.mockRestore()
+    })
+
+    // ESCSUITE-305: a source whose seeks never complete is not a missing frame
+    // to skip — skipping it is how a WebM on Firefox exported as black. The
+    // refusal reaches the exporter.
+    it('lets a source that cannot seek fail the export instead of skipping the clip', async () => {
+      const manager = await createFrameManager(true)
+      const source = { getFrame: vi.fn(async () => { throw new SourceNotSeekableError('take.webm') }) }
+      manager.sources.set('clip-a', source as unknown as IFrameSource)
+
+      await expect(getFrameAtTime(manager, 'clip-a', 2)).rejects.toBeInstanceOf(SourceNotSeekableError)
+    })
+
+    it('carries the source name to the <video> path it loads', async () => {
+      const manager = await createFrameManager(false)
+      const source = await loadFrameSource(manager, 'clip-webm', new Blob(['webm'], { type: 'video/webm' }), 'video/webm', undefined, 30, 'take.webm')
+
+      expect((source as unknown as { sourceName: string }).sourceName).toBe('take.webm')
     })
 
     it('does not track an HTMLVideoElement frame for closing', async () => {

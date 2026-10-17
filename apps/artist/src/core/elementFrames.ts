@@ -25,6 +25,7 @@ import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
+import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
 import {
   getActiveTransition,
   loadVideoElement,
@@ -55,6 +56,12 @@ export interface ElementSources {
    * source has an entry, empty until a frame needs a second element.
    */
   extraVideoElements: Map<string, (HTMLVideoElement | null)[]>;
+  /**
+   * The name each loaded `<video>`'s source is known by — its `SourceVideo.name`,
+   * or its id when the export was not handed its record — for the refusal a
+   * source whose seeks never complete fails the export with (ESCSUITE-305).
+   */
+  sourceNames: Map<string, string>;
 }
 
 /**
@@ -94,6 +101,7 @@ export async function loadElementSources(
   const videoElements: Map<string, HTMLVideoElement> = new Map();
   const imageElements: Map<string, HTMLImageElement> = new Map();
   const extraVideoElements: Map<string, (HTMLVideoElement | null)[]> = new Map();
+  const sourceNames: Map<string, string> = new Map();
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
   const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
@@ -121,6 +129,7 @@ export async function loadElementSources(
             const video = await loadVideoElement(blob);
             videoElements.set(sourceId, video);
             extraVideoElements.set(sourceId, []);
+            sourceNames.set(sourceId, source?.name ?? sourceId);
           } catch (e) {
             console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
             // Try loading as image as fallback
@@ -138,11 +147,11 @@ export async function loadElementSources(
     // Nothing reaches a caller, so nothing else could free what is already
     // loaded. Both media branches warn and skip, so the only way here is a
     // failed storage read.
-    releaseElementSources({ videoElements, imageElements, extraVideoElements });
+    releaseElementSources({ videoElements, imageElements, extraVideoElements, sourceNames });
     throw e;
   }
 
-  return { videoElements, imageElements, extraVideoElements };
+  return { videoElements, imageElements, extraVideoElements, sourceNames };
 }
 
 /**
@@ -206,12 +215,17 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
  * (`elementSeekTarget`, ESCSUITE-265) for frame-accurate export, skipping the
  * seek when the element is already within (a little under) half an output
  * frame of it.
+ *
+ * Resolves to whether a seek it issued landed ('seeked' fired) — what the
+ * wedge count reads alongside the element's state once both waits are over
+ * (`seekWedge.ts`, ESCSUITE-305). A skipped seek did not land.
  */
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
   frameRate: number
-): Promise<void> {
+): Promise<boolean> {
+  let seekLanded = false;
   // Skip if already within (a little under) half a frame of the target.
   const frameDuration = 1 / frameRate;
   if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
@@ -228,6 +242,7 @@ async function syncVideoToTime(
     await new Promise<void>((resolve) => {
       const onSeeked = () => {
         clearTimeout(fallback);
+        seekLanded = true;
         resolve();
       };
       const fallback = setTimeout(() => {
@@ -264,6 +279,8 @@ async function syncVideoToTime(
       check();
     });
   }
+
+  return seekLanded;
 }
 
 export interface FrameComposerParams {
@@ -311,7 +328,20 @@ export function createFrameComposer({
   drawOptions,
   frameRate,
 }: FrameComposerParams): FrameComposer {
-  const { videoElements, imageElements, extraVideoElements } = sources;
+  const { videoElements, imageElements, extraVideoElements, sourceNames } = sources;
+  // Consecutive wedged seeks per element (ESCSUITE-305): one integer per
+  // element, compared once per seek, on a path that already waits on it. Keyed
+  // by element, not by source — a source's further elements (ESCSUITE-313) each
+  // have a playhead of their own, so each wedges, or recovers, on its own — and
+  // the refusal names the source the element reads.
+  const wedgedSeeks = new Map<HTMLVideoElement, number>();
+
+  /** Sync one element and count it against the wedge limit; throws by name at the limit. */
+  const syncCounted = async (sourceId: string, video: HTMLVideoElement, sourceTime: number) => {
+    const atStart = wedgeCountAtStart(wedgedSeeks.get(video) ?? 0, video);
+    const seekLanded = await syncVideoToTime(video, sourceTime, frameRate);
+    wedgedSeeks.set(video, countWedgedSeek(atStart, video, seekLanded, sourceNames.get(sourceId)!));
+  };
 
   /**
    * Make a source's further elements up to `slot` (ESCSUITE-313), each over the
@@ -403,7 +433,7 @@ export function createFrameComposer({
 
       const sourceTime = clip.startTime + clipTime;
       activeVideos.add(video);
-      syncPromises.push(syncVideoToTime(video, sourceTime, frameRate));
+      syncPromises.push(syncCounted(clip.sourceVideoId, video, sourceTime));
     }
 
     // Also sync transition clips
@@ -416,7 +446,7 @@ export function createFrameComposer({
           ? activeTransition.incomingClip.startTime + incomingClipTime
           : activeTransition.incomingClip.startTime;
         activeVideos.add(incomingVideo);
-        syncPromises.push(syncVideoToTime(incomingVideo, sourceTime, frameRate));
+        syncPromises.push(syncCounted(activeTransition.incomingClip.sourceVideoId, incomingVideo, sourceTime));
       }
     }
 

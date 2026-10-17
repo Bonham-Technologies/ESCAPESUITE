@@ -33,6 +33,7 @@ import {
   isAudioCodecSupported,
   waitForEncoderBackpressure,
   ExportError,
+  exportErrorCodeOf,
   EXPORT_AUDIO_CHANNELS,
   EXPORT_AUDIO_SAMPLE_RATE,
   noAudioNote,
@@ -66,6 +67,9 @@ import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './lou
 // which re-exports from here) keeps resolving unchanged.
 export type { ExportLogEntry } from './exportTypes';
 export { ExportError } from './exportTypes';
+
+/** Marks a promise's rejection handled where another `await` of it rethrows it. */
+const ignoreRejection = (): void => {};
 
 /**
  * Export timeline to MP4 using WebCodecs + Mediabunny
@@ -309,7 +313,8 @@ export async function exportToMP4(
             blob,
             blob.type || 'video/mp4',
             reportInPageDecoding,
-            source?.frameRate
+            source?.frameRate,
+            source?.name
           );
         } catch (e) {
           console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
@@ -478,6 +483,23 @@ export async function exportToMP4(
         }
       }
 
+      // Gather the regular clips' frames now, before the transition fetches
+      // below are awaited (ESCSUITE-305 review round 1): a fetch can reject —
+      // a source whose seeks never complete fails the export by name — and one
+      // that rejects while a transition fetch is being awaited, or after one
+      // has already thrown, must still have someone listening. `Promise.all`
+      // listens to every fetch from here on; the no-op `catch` listens to it in
+      // turn for the one case nothing else will, a transition fetch throwing
+      // first, and the `await` below still rethrows the first failure.
+      const regularFrames = Promise.all(
+        framePromises.map(async ({ clip, clipTime, framePromise }) => ({
+          clip,
+          clipTime,
+          frame: await framePromise,
+        }))
+      );
+      regularFrames.catch(ignoreRejection);
+
       // Also fetch frames for transition clips if active
       let outgoingFrame: DrawableMediaSource | null = null;
       let incomingFrame: DrawableMediaSource | null = null;
@@ -514,13 +536,7 @@ export async function exportToMP4(
       }
 
       // Wait for all regular clip frames
-      const frames = await Promise.all(
-        framePromises.map(async ({ clip, clipTime, framePromise }) => ({
-          clip,
-          clipTime,
-          frame: await framePromise,
-        }))
-      );
+      const frames = await regularFrames;
 
       // Composite media and overlay clips in one pass, in `activeClips`' own
       // track order — the same single interleaved pass the preview draws
@@ -776,6 +792,6 @@ export async function exportToMP4(
     // Wrap other errors in ExportError to carry the diagnostic log
     const message = error instanceof Error ? error.message : String(error);
     log('error', `Export failed: ${message}`);
-    throw new ExportError(message, exportLog, frameCount, totalFrames);
+    throw new ExportError(message, exportLog, frameCount, totalFrames, exportErrorCodeOf(error));
   }
 }

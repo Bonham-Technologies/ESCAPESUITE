@@ -443,7 +443,12 @@ describe('the ?video= parameter', () => {
 })
 
 describe('the ?loadVideo= handoff from ESCAPECRAFT', () => {
-  const recording = { metadata: { ...sampleVideo, id: 'rec-1', name: 'Recording.webm' } }
+  // A stored record always carries its bytes; since ESCSUITE-305 the handoff
+  // reads the primary's head to decide whether it needs a seek index.
+  const recording = {
+    blob: new Blob(['webm'], { type: 'video/webm' }),
+    metadata: { ...sampleVideo, id: 'rec-1', name: 'Recording.webm' },
+  }
 
   it('adds the recording, with its thumbnail', async () => {
     vi.mocked(getVideo).mockResolvedValue(recording as never)

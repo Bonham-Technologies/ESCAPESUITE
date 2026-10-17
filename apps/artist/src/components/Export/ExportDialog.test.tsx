@@ -1821,6 +1821,49 @@ describe('ExportDialog', () => {
       }
     })
 
+    // ESCSUITE-305 review round 1, MAJOR 1: a source Firefox cannot seek wedges
+    // the other video format exactly the same way — both draw from the same
+    // <video> — and the refusal itself says to use Chrome or Edge, so neither
+    // failure screen offers the other format for it.
+    const UNSEEKABLE =
+      'This browser cannot read "take.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.'
+
+    it('does not offer an MP4 retry when the WebM export refused a source it cannot seek', async () => {
+      mockExportToWebM.mockRejectedValue(new ExportError(UNSEEKABLE, [], 3, 6, 'SOURCE_NOT_SEEKABLE'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        await settle()
+        fireEvent.click(primaryExport())
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(`Export failed: ${UNSEEKABLE}`))
+        expect(screen.queryByRole('button', { name: 'Try MP4 Instead' })).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
+    it('does not offer a WebM retry when the MP4 export refused a source it cannot seek', async () => {
+      mockExportToMP4.mockRejectedValue(new ExportError(UNSEEKABLE, [], 3, 6, 'SOURCE_NOT_SEEKABLE'))
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const debugLog = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+        fireEvent.click(advancedToggle())
+        fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+        fireEvent.click(screen.getByRole('button', { name: /download mp4/i }))
+
+        await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(UNSEEKABLE))
+        expect(screen.queryByRole('button', { name: 'Try WebM Instead' })).not.toBeInTheDocument()
+        expect(screen.queryByText(/You can try exporting as WebM instead/)).not.toBeInTheDocument()
+      } finally {
+        errorLog.mockRestore()
+        debugLog.mockRestore()
+      }
+    })
+
     it('offers a WebM retry after an MP4 failure and logs the diagnostic trail', async () => {
       const log = [{ phase: 'encode', detail: 'encoder died', timestamp: 1 }]
       mockExportToMP4.mockRejectedValue(new ExportError('Encoder unavailable', log))

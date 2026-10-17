@@ -23,6 +23,7 @@ import {
   calculateTimelineDuration,
   gifFrameRate,
   ExportError,
+  exportErrorCodeOf,
   type ExportLogEntry,
 } from './exportTypes';
 import {
@@ -268,6 +269,6 @@ export async function exportToGIF(
 
     const message = error instanceof Error ? error.message : String(error);
     log('error', `Export failed: ${message}`);
-    throw new ExportError(message, exportLog, frameCount, totalFrames);
+    throw new ExportError(message, exportLog, frameCount, totalFrames, exportErrorCodeOf(error));
   }
 }
