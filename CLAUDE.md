@@ -5635,6 +5635,48 @@ the "stored as audio from the remuxed bytes" case. `webmSeekIndex.ts` is unchang
 `*.perf.test.ts` and rerender pin is byte-identical — one remux decision per import, nothing per frame.
 **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-314 and ESCSUITE-315 (the MP4 export honours
+Cancel while the decode worker loads or decodes — `VideoDecodeManager.initialize(signal)` keeps the export's
+`AbortSignal` once, with one listener per manager, and an abort runs the same terminate path a missed deadline
+runs, rejecting every pending request and load with `ExportAbortedError`, which `createSource`,
+`FailoverFrameSource.getFrame` and `getFrameAtTime` now pass straight on instead of falling back to `<video>`
+or skipping the frame, while `exportMP4.ts` checks the signal before each source load and first in the load's
+`catch`; and a setup throw after the media load releases the worker — MP4's `try` begins at `createFrameManager`,
+one run-once release is called from the success path and the catch, and an `openEncoders` list replaces the
+per-encoder close blocks, WebM's shape since ESCSUITE-156 / 159; a `<video>` fallback load already under way
+is deliberately not interrupted, so on that path Cancel can take up to ESCSUITE-325's 15 s to settle):
+99.85 / 99.46 / 96.87 / 99.78, byte-identical on every percentage to the 99.85 / 99.46 / 96.87 / 99.78 that
+its base measures in the same sitting — the base being the ESCSUITE-305 and ESCSUITE-325 branches over `main`
+at `60fd2bc1` (`wip/325-on-305`, `d542be30`), the tree this branch was cut from so it could start before those
+two landed; the next direct measurement of `main` corrects the table row. The base gives 6,283 / 6,486 branches
+and this branch 6,289 / 6,492: six new branches net, six covered, the same 203 uncovered as before (lines
+9,845 / 9,859 → 9,859 / 9,873, statements 11,180 / 11,240 → 11,197 / 11,257, functions 2,332 / 2,337 →
+2,333 / 2,338, every denominator growing by exactly what the numerator did; the same 14 / 60 / 5 uncovered). The
+six net four files: `core/videoDecodeManager.ts` 73 / 80 → 75 / 82 (the `if (signal)` that registers the abort
+listener and `terminate()`'s `abortCleanup?.()`, each reached from both sides by the six abort cases against the
+no-signal `initialize()` and plain-`terminate()` cases that were already there; `loadDeadlineMissed` became
+`refusal` one decision for one; the same seven pre-existing arms uncovered; the two new functions are the
+`onAbort` and `abortCleanup` arrows), `core/frameSource.ts` 70 / 71 → 74 / 75 (the `instanceof
+ExportAbortedError` rethrow in `createSource`'s catch and in `FailoverFrameSource.getFrame`'s, reached on the
+abort side by the exporter's Cancel-while-loading and Cancel-during-request cases and on the other by the
+`decodeFallback` handover and refusal cases; the same one pre-existing arm uncovered), `core/frameManager.ts`
+7 → 9 (the `|| instanceof ExportAbortedError` operand in `getFrameAtTime`'s catch, reached by
+Cancel-during-request, which also asserts zero frames encoded, against the warn-and-`null` cases) and
+`core/exportMP4.ts` 136 / 153 → 134 / 151, which **lost** two: the `openEncoders` loop's one
+`encoder.state !== 'closed'` replaces the old `videoEncoder.state !== 'closed'` and `audioEncoder &&
+audioEncoder.state !== 'closed'` pair, and the run-once `if (released) return` is the one arm it gains (reached
+by the "complete report throws after the release" case against every ordinary export); the 325 timeout
+branch's inline `imageElements.forEach` arrow is the function it loses, so functions net +1. Red first: 13 of
+the 14 new cases failed on the base with the texts the implementer recorded (`expected "terminate" to be called
+1 times, but got 0 times`; `expected 'pending' to be an instance of ExportAbortedError`; `expected [ 'video1',
+'video2', 'video3' ] to deeply equal [ 'video1' ]`; `expected +0 to be 1`; `expected 2 to be 1` for the image
+URL revoked twice), the fourteenth being the ordinary-export dispose-once pin; the review (opus) ran eight
+mutations — both rethrows, the `getFrameAtTime` operand, the listener removal, the `refusal` set, both
+`checkAborted` calls and the run-once guard — and each turned a named case red. `exportMP4.perf.test.ts`,
+every other `*.perf.test.ts` and the rerender pins are byte-identical — one abort check per load and per
+request, none per frame beyond the one that was already there. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
