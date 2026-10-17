@@ -4948,6 +4948,74 @@ and loads the `data:` one. `recorder.perf.test.ts`, `compositor.perf.test.ts`, `
 and every `App.*rerender*` are byte-identical. **No floor crossed**; craft's floors stay
 100 / 99 / 97 / 100.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-313 (two live clips of one source each
+draw their own moment on every `<video>` path — before this every element-drawing path held one
+`<video>` per **source**, the composer seeked it to each live clip's time in turn and then drew every
+clip, so a clip split and crossfaded into itself, or the same recording used twice at once as a zoomed
+copy or a picture-in-picture, drew the last seek's frame twice: `[10, 10]` where `[0, 10]` was asked for,
+`[5, 5]` in the crossfade, a worker-versus-`<video>` parity of 5.149 / 255 against the 1.5 tolerance, on
+every WebM and GIF export, every in-page MP4 export (every ESCAPECRAFT recording), the kit's webm and gif
+jobs and the preview alike; `core/elementSlots.ts`'s `assignElementSlots` gives each live clip of a
+source a slot — the k-th live clip in track order, then a transition's incoming side — and the composer,
+`HTMLVideoFrameSource.getFrame(timestamp, slot)` through `FailoverFrameSource`, and the preview's
+seeking, readiness and drawing all read that one rule; a source's further element is made the first
+time a frame needs it over the same object URL — one `createObjectURL` per source, revoked once — and
+kept until the export ends or, in the preview, while the source is on the timeline; the common case of
+one clip per source is byte-identical in cost, which the review's first pass found was not yet true and
+the fix round made so: `assignElementSlots` refills a caller-owned map with module-level scratch, the
+composer builds its lookups and live-element set once at construction, and `drawTransition` takes each
+side's `<video>` directly, so a frame allocates one `Map` (`getClipsAtTime`'s, main's own) and no `Set`
+where main's composer allocated one Set per frame — pinned as an allocation law in `exportWebM.perf.test.ts`
+and `drawFrame.perf.test.ts` through a `new Map` / `new Set` counter): 99.85 / **99.45** / **96.80** /
+**99.78** against the 99.85 / 99.44 / 96.77 / 99.77 that `main` at `1924dfe6` (the ESCSUITE-297 merge; its
+artist source is `31fa9edc`'s) measures in the same sitting — statements up a hundredth, branches up
+three, functions up one, lines unmoved. The base gives 6,091 / 6,294 branches and this branch
+6,155 / 6,358: sixty-four new branches, sixty-four covered, the same 203 uncovered as before (lines
+9,513 / 9,527 → 9,633 / 9,647, statements 10,785 / 10,845 → 10,927 / 10,987, functions 2,263 / 2,268 →
+2,290 / 2,295, every denominator growing by exactly what the numerator did; the same 14 / 60 / 5
+uncovered). The sixty-four are `core/elementSlots.ts`'s twelve on arrival (12 / 12: the track-order
+slot, an overlay skipped, the outgoing side keeping its slot and the incoming side taking the next free
+one, sources assigned independently, a `null` slot), `core/elementFrames.ts`'s fourteen (64 / 71 →
+78 / 85: the lazy second element, the one-URL growth, a second element that will not load — held as `null`,
+warned about once, its clip left out, and walked past by the release, the arm the last measurement found
+unreached — and the per-element playback state; the same seven pre-existing arms uncovered),
+`components/Preview/usePreviewRenderLoop.ts`'s twenty (145 / 157 → 165 / 177: the per-element scrub and
+ESCSUITE-264 / 275 waits, `holdIncoming` positioning a not-yet-started incoming side once per transition
+and skipped outright when no clip on the timeline carries one, decided once per playback run; the same
+twelve pre-existing arms uncovered), `components/Preview/usePreviewMedia.ts`'s eight (38 → 46: the pool's
+growth and its release on source removal and unmount), `core/frameSource.ts`'s seven (55 / 56 → 62 / 63:
+the per-slot element on the in-page MP4 path and the failed slot answering `null` after one warning; the
+same one pre-existing arm uncovered), `core/canvasRenderer.ts`'s two (199 / 207 → 201 / 209:
+`drawTransition`'s per-side null element, the Map branch and the test-only `drawMediaWithModifiers` gone;
+the same eight pre-existing arms uncovered) and `core/frameManager.ts`'s one — each reached from both
+sides by the thirty-five red cases of the first commit (the headline: `expected [ 10.0001, 10.0001 ] to
+deeply equal [ NumberCloseTo 0 (2 digits), … ]`, the same shape for MP4, WebM and GIF, `[5.0001,
+5.0001]` for the crossfade), the fix round's reds (the allocation law `expected { maps: 3, sets: 1 } to
+deeply equal { maps: 1, sets: 0 }`, the transition lookup `expected "getActiveTransition" to not be
+called at all, but actually been called 6 times`, the crop dim pass drawing the first clip's element, the
+failed slot `promise rejected "Error: Failed to load video" instead of resolving` and its three warnings),
+and the mutations (the slot ignored → 19 red; one extra `new Map` per frame → three red; the
+once-per-transition guard deleted → `expected "vi.fn()" to be called 1 times, but got 19 times`; the
+readiness watch back on the source's own element → `expected [] to deeply equal [ 1 ]`). **Perf laws
+re-stated with dated reasons** (called out in the PR): every media clip of `perfScene.ts` uses one source,
+so two elements are live from 1 s to 12 s of the scene and three inside its 5.5–6 s transition;
+`exportWebM.perf.test.ts`'s seeks go 61 → 60 and `exportGIF.perf.test.ts`'s 31 → 30 — the second
+element's first frame needs no seek, its new element already sitting at 0, so the law is now
+`1 + FRAMES × ACTIVE_MEDIA_CLIPS − 1` with the initialisation seek counted per source — and both gain a
+two-elements-one-URL case; `drawFrame.perf.test.ts`'s counts are unchanged; `exportMP4.perf.test.ts` and
+every rerender pin are byte-identical. The browser benchmarks' `preview-playback` and `export-webm`
+numbers will move with this ticket for the same reason, and the next `pnpm perf` reading should say so.
+Two review rounds (opus, then a scoped opus): the first verified the seek arithmetic and agreed with the
+per-slot element over a `VideoFrame` per fallback frame (which would have cost one per frame of every
+in-page export and moved the created-equals-closed law), and asked for the allocation fix and seven
+smaller items; the second confirmed the common path allocates nothing beyond main and found two wording
+errors. Keeping a clip's slot while it stays live — the preview's self-crossfade and same-source
+picture-in-picture each re-seek at a cut under the per-frame rule — is ESCSUITE-323. Outside vitest's
+measurement, `apps/e2e/tests/export/decode-worker.spec.ts` gains a same-source case (a clip split and
+crossfaded into itself, worker export against `<video>` export, MAD < 1.5 at frames 3 / 8 / 10 / 13 / 15,
+with a frame-10-versus-frame-15 check that would fail on main) and ran here on Chromium: 10 / 10. **No
+floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -4955,7 +5023,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.57 | 97.94 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.44 | 96.78 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.80 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
