@@ -5403,6 +5403,52 @@ is ESCSUITE-324: the remux runs after the metadata probe, so a headerless AND Cu
 ESCAPECRAFT can still hit the 15 s metadata deadline on Firefox first. **No floor crossed**; artist's
 floors stay 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-325 (a `<video>` export source that never
+fires `loadeddata` or `error` fails within 15 s instead of parking the export at "Loading media files…"
+for ever: `HTMLVideoFrameSource.create` (the in-page MP4 fallback) and `loadVideoElement` (the WebM and GIF
+loader) both awaited the load with no deadline — ESCSUITE-316's U-2, confirmed in vitest with the media
+double's `silent` script and pinned red with two `it.fails` cases before the fix; now one
+`waitForVideoLoad(video, url, name, ownsUrl)` in `core/exportTypes.ts` serves both waits, reusing the import
+probe's `METADATA_LOAD_TIMEOUT_MS` rather than a second number, armed when the listeners attach and cleared
+on `loadeddata`, `error` and expiry, which detaches the handlers, unloads the element, revokes the URL when
+the wait owns it and rejects with `MediaLoadTimeoutError` ("Could not read <name> — the browser did not
+report its metadata within 15 s"); WebM and GIF skip such a source through the existing `Failed to load
+video` warning, and MP4 fails the export by name through `ExportError` after releasing what it had loaded —
+deliberately unlike an MP4 `error` event, which keeps its pre-existing silent skip, the disagreement
+ESCSUITE-328 settles. Rebased over ESCSUITE-313's one-element-per-live-clip, the deadline covers every kind of
+`<video>` load: `loadVideoElementFromUrl(url, name)` builds a further slot's element over the source's
+shared object URL through the same wait with `ownsUrl` false, so a further slot that never loads is warned
+about once, answers `null` and leaves its clip out — 313's existing shape for a further element that fails —
+without revoking the URL slot 0 still reads, while slot 0's own timeout is still the named
+`MediaLoadTimeoutError`): 99.85 / 99.45 / 96.82 / 99.78, byte-identical on every percentage to the
+99.85 / 99.45 / 96.82 / 99.78 that `main` at `60fd2bc1` (the ESCSUITE-322 version-packages commit; its
+artist source is `c3814373`'s, the ESCSUITE-313 release) measures in the same sitting. The base gives
+6,187 / 6,390 branches and this branch 6,196 / 6,399: nine new branches, nine covered, the same 203 uncovered
+as before (lines 9,674 / 9,688 → 9,689 / 9,703, statements 10,976 / 11,036 → 10,992 / 11,052, functions
+2,300 / 2,305 → 2,303 / 2,308, every denominator growing by exactly what the numerator did; the same
+14 / 60 / 5 uncovered). The nine are `core/exportTypes.ts`'s five (144 / 148 → 149 / 153: the `ownsUrl`
+default and the revoke-or-keep choice on the timeout and `error` arms, reached by `loadVideoElement`'s own
+URL against `loadVideoElementFromUrl`'s shared one; the same four pre-existing arms uncovered),
+`core/exportMP4.ts`'s two (134 / 151 → 136 / 153: the `instanceof MediaLoadTimeoutError` arm against the
+`error`-event skip; the same seventeen pre-existing arms uncovered) and `core/elementFrames.ts`'s two
+(78 / 85 → 80 / 87: `source?.name ?? sourceId`, reached by a named source and by an id with no record; the
+same seven pre-existing arms uncovered); `core/exportTypes.ts` gains seventeen lines and five functions at
+100 (the wait, its three settle paths, the error class and the URL loader) and `core/frameSource.ts` loses
+eight lines and three functions, its inline wait and its own element builder having become the calls. Each
+arm is reached from both sides by the two flipped pins (`expected undefined to be an instance of
+ExportError`, `expected undefined to be defined`), the 14.9 s case that pins `clearTimeout` on the
+deadline's own handle, the two direct `waitForVideoLoad` cases (a `loadeddata` or `error` after expiry
+settles nothing and revokes nothing; no handler survives expiry), the error-event cases that were already
+there, and `frameSource.slotDeadline.test.ts`'s three (a further slot that never loads → `null` at 15 s,
+one warning, no revoke, slot 0 still served, dispose revoking once — red before the rebase's fix as
+`expected [] to deeply equal [ null ]`; a slot loading at 14.9 s kept; `loadVideoElementFromUrl` rejecting
+by name without revoking — red with `ownsUrl` ignored, four cases across this file and
+`frameSource.slots.test.ts`). One review round (sonnet): approved, with the two test-tightening items taken
+and two follow-ups filed as ESCSUITE-328 (the MP4 `error`-event skip, and the image load's own missing
+deadline). `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts`, `exportGIF.perf.test.ts` and every rerender
+pin are byte-identical — one timer per load, none per frame. **No floor crossed**; artist's floors stay
+99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5410,7 +5456,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.01 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.46 | 96.86 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.82 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 
