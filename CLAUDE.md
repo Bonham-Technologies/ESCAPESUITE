@@ -5249,6 +5249,44 @@ reason in `loaders.fuzz.test.ts`; the artist floors did not move. One review rou
 Every `*.perf.test.ts` and rerender pin is byte-identical. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99 and the kit's 99 / 99 / 98 / 98.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-323 (a live preview clip keeps its
+`<video>` while it stays live: `core/elementSlots.ts`'s `createStickySlotAssigner()` sits beside the
+exporters' stateless `assignElementSlots` — a clip keeps the slot it had on the previous frame for as long
+as it is live or held as a transition's incoming side, a newcomer takes the lowest slot of its source no
+live clip holds, and every assignment forgets each clip it does not name — owned by the render loop and
+read by the scrub effect, the readiness paint, the playback loop, its crossfade hold, `drawPreviewFrame`
+(whose `slots` is now required, the stateless fallback deleted) and the crop chrome, so a clip starting on a
+lower track no longer takes over the element a clip above is playing and a self-crossfade's held incoming
+side keeps its element past the cut; reset on a project change only — the review's one MEDIUM was an
+element-set reset mid-playback, which `holdIncoming`'s re-pack turned into a picture-in-picture drawn from
+swapped elements, and a slot is an index resolved per lookup so no reset is needed for safety):
+99.85 / 99.45 / **96.83** / 99.78 against the 99.85 / 99.45 / 96.82 / 99.78 that `main` at `e891dbd2`
+(the ESCSUITE-322 squash; its artist source is `c3814373`'s) measures in the same sitting — branches up a
+hundredth, the other three unmoved. That base reads above the table row (99.85 / 99.44 / 96.78 / 99.78):
+ESCSUITE-312, 306 and 317 landed after the row was written, the drift ESCSUITE-91 and 113 recorded, and
+the row is corrected here to the direct measurement. The base gives 6,187 / 6,390 branches and this
+branch 6,207 / 6,410: twenty new branches, twenty covered, the same 203 uncovered as before (lines
+9,674 / 9,688 → 9,707 / 9,721, statements 10,976 / 11,036 → 11,014 / 11,074, functions
+2,300 / 2,305 → 2,308 / 2,313, every denominator growing by exactly what the numerator did; the same
+14 / 60 / 5 uncovered). The twenty are `core/elementSlots.ts`'s eighteen (12 → 30: the held-or-newcomer
+choice per clip, the lowest-free search skipping held slots, the forget of unnamed clips, the
+transition's two sides and the reset, each reached from both sides by the assigner's cases — U alone, L
+then U, L alone keeping 1, a newcomer taking 0, the incoming side keeping its held slot, a second source
+numbered on its own) and `components/Preview/usePreviewRenderLoop.ts`'s two (165 / 177 → 167 / 179: the
+project-change reset and the live-set-changed assignment, reached by the project-change case and the
+PiP, self-crossfade and element-set-change cases; the file's same twelve pre-existing arms uncovered).
+`PreviewPlayer.tsx` and `drawFrame.ts` each lost two lines and the latter its only fallback branch, so
+both read 100 where they did before. Red-first: the pure assigner cases against a stateless stub
+(`expected { l: 0, u: 1 } to deeply equal { l: 1, u: 0 }`), the PiP (`expected 0.00599 to be 10` — the
+upper element was seeked) and self-crossfade (`expected "vi.fn()" to be called at least once`) render-loop
+cases against the stateless loop, and the two element-set-change pins against the dropped reset
+(`expected 2 to be +0`; `expected { l: 0, u: 1, c: 2 } to deeply equal { l: 1, u: 0, c: 2 }`); the two
+`PreviewPlayer.slots.test.tsx` pins go red under the review's two mutations (`slots:` deleted →
+`expected [ 0, 1 ] to deeply equal [ 1, 0 ]`; `cropElementFor` stateless → the dim pass drawing the other
+element). `drawFrame.perf.test.ts` — whose scene's twelve clips share one source and so runs through the
+sticky path — every other `*.perf.test.ts` and the rerender pins are byte-identical: `assign` runs on a
+live-set change or a hold, never per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5256,7 +5294,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.44 | 96.79 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.83 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 
