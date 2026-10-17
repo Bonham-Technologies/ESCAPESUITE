@@ -299,7 +299,8 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   "Resume Previous Session?" prompt (ARTIST then neither offers nor writes the saved session —
   the autosave is off too), `?title=<name>` to name the project (trimmed, max 120 chars;
   applied only while the name is still the default `Untitled Project`), and `?tabKey=<name>` to
-  name the frame when a host frames more than one editor (ESCSUITE-332, below). `?video=url` (and the
+  name the frame — **every** host that frames ARTIST should pass one, whether it frames one editor or
+  several (ESCSUITE-332, below). `?video=url` (and the
   inbound `LOAD_VIDEO` message, below) fetch the URL from the page itself, so both are bound by
   its own `connect-src` — on the hosted deployment (`connect-src 'self' ...` in `vercel.json`)
   that means a **same-origin URL only**; a cross-origin one is refused before it leaves the page,
@@ -337,8 +338,8 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a
   self-hosted or standalone build must set its own.
 - **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
-  one host page keep a saved session each (ESCSUITE-332). **Pass a different one to each frame**
-  when a page frames more than one editor: every same-origin frame of a page shares the top-level
+  one host page keep a saved session each (ESCSUITE-332). **Every host should pass one — a page that
+  frames a single editor included — and a different one to each frame** when it frames several: every same-origin frame of a page shares the top-level
   tab's `sessionStorage`, where a top-level tab keeps its id, so before this ticket the second frame
   renewed the first's id and wrote over it, and after a host reload the two frames swapped sessions
   (ESCSUITE-311's two-iframes probe). Trimmed, max 120 chars, blank ignored, otherwise taken as it
@@ -348,7 +349,11 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   its own session after a host reload. **An embedded editor never reads or writes the shared
   `sessionStorage` id**, with a key or without: without one its id lasts that page load, so nothing
   is overwritten or lost, but after a host reload each frame's last session is offered like any
-  closed tab's — newest free first, to whichever frame asks. Two frames given the **same** key is the
+  closed tab's — newest free first, to whichever frame asks — and that is the cost a single-frame
+  host pays too: it loses own-slot-first across a reload, and because that slot now counts as another
+  tab's, Start Fresh leaves it in storage and remembers the save as declined (ESCSUITE-306) instead of
+  deleting it, so a keyless host whose user reloads and starts fresh piles up one slot per reload
+  until the 30-day prune, each holding its sources off ESCSUITE-268's reclaim list for that long. Two frames given the **same** key is the
   host's mistake: the second warns once in the console naming the key and takes an id for that page
   load, overwriting nothing. The frames of one page share the declined-session list
   (`declinedSlots.ts`, also `sessionStorage`): a save declined in one is not offered to another. A
