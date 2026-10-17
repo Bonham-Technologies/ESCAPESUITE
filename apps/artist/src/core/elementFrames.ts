@@ -28,9 +28,11 @@ import { elementSeekTarget } from './elementSeek';
 import {
   getActiveTransition,
   loadVideoElement,
+  loadVideoElementFromUrl,
   loadImageElement,
   type MediaDrawOptions,
 } from './exportTypes';
+import { assignElementSlots, videoForSlot } from './elementSlots';
 import {
   drawClipToCanvas,
   drawImageToCanvasWithModifiers,
@@ -41,12 +43,35 @@ import {
 
 /** The `<video>` and `<img>` elements an export draws its media clips from, by source id. */
 export interface ElementSources {
+  /** Each video source's own element: slot 0 (`core/elementSlots.ts`). */
   videoElements: Map<string, HTMLVideoElement>;
   imageElements: Map<string, HTMLImageElement>;
+  /**
+   * Each video source's further elements, slot 1 onwards (ESCSUITE-313): one
+   * per clip of that source live in the same frame beyond the first, made the
+   * first time a frame needs it, over the source's one object URL, and kept
+   * for the rest of the export. `null` is a slot whose element would not load;
+   * its clip is left out rather than retried every frame. Every loaded video
+   * source has an entry, empty until a frame needs a second element.
+   */
+  extraVideoElements: Map<string, (HTMLVideoElement | null)[]>;
 }
 
-/** Whether each loaded `<video>` is playing, and where it was last asked to be. */
-export type VideoPlaybackState = Map<string, { playing: boolean; targetTime: number }>;
+/**
+ * Whether each `<video>` is playing, and where it was last asked to be — by
+ * element, since a source can have more than one (ESCSUITE-313).
+ */
+export type VideoPlaybackState = Map<HTMLVideoElement, { playing: boolean; targetTime: number }>;
+
+/** Every `<video>` an export holds, each source's further elements included. */
+function forEachVideoElement(sources: ElementSources, visit: (video: HTMLVideoElement) => void): void {
+  sources.videoElements.forEach((video) => visit(video));
+  sources.extraVideoElements.forEach((extras) => {
+    for (const video of extras) {
+      if (video) visit(video);
+    }
+  });
+}
 
 /**
  * Load every unique media source the clips reference into an element.
@@ -68,6 +93,7 @@ export async function loadElementSources(
 ): Promise<ElementSources> {
   const videoElements: Map<string, HTMLVideoElement> = new Map();
   const imageElements: Map<string, HTMLImageElement> = new Map();
+  const extraVideoElements: Map<string, (HTMLVideoElement | null)[]> = new Map();
 
   // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
   const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
@@ -94,6 +120,7 @@ export async function loadElementSources(
           try {
             const video = await loadVideoElement(blob);
             videoElements.set(sourceId, video);
+            extraVideoElements.set(sourceId, []);
           } catch (e) {
             console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
             // Try loading as image as fallback
@@ -111,11 +138,11 @@ export async function loadElementSources(
     // Nothing reaches a caller, so nothing else could free what is already
     // loaded. Both media branches warn and skip, so the only way here is a
     // failed storage read.
-    releaseElementSources({ videoElements, imageElements });
+    releaseElementSources({ videoElements, imageElements, extraVideoElements });
     throw e;
   }
 
-  return { videoElements, imageElements };
+  return { videoElements, imageElements, extraVideoElements };
 }
 
 /**
@@ -123,24 +150,30 @@ export async function loadElementSources(
  * before its first frame. The returned map is the state the composer keeps.
  *
  * These are the seeks `exportWebM.perf.test.ts` discounts as `initSeeks` — one
- * per element, never part of the per-frame cost.
+ * per element, never part of the per-frame cost. An element the composer makes
+ * later for a second live clip of a source (ESCSUITE-313) is not rewound: it
+ * arrives freshly loaded, already paused at 0, and the composer enters it here
+ * itself.
  */
 export function rewindElementSources(sources: ElementSources): VideoPlaybackState {
   const playbackState: VideoPlaybackState = new Map();
-  for (const [sourceId, video] of sources.videoElements) {
+  forEachVideoElement(sources, (video) => {
     video.pause();
     video.currentTime = 0;
-    playbackState.set(sourceId, { playing: false, targetTime: 0 });
-  }
+    playbackState.set(video, { playing: false, targetTime: 0 });
+  });
   return playbackState;
 }
 
-/** Pause every `<video>` and revoke every element's object URL. */
+/**
+ * Pause every `<video>` and revoke every object URL — once per source: a
+ * source's further elements read the URL its own element holds.
+ */
 export function releaseElementSources(sources: ElementSources): void {
   sources.videoElements.forEach((v) => {
-    v.pause();
     URL.revokeObjectURL(v.src);
   });
+  forEachVideoElement(sources, (v) => v.pause());
   sources.imageElements.forEach((img) => {
     URL.revokeObjectURL(img.src);
   });
@@ -278,7 +311,52 @@ export function createFrameComposer({
   drawOptions,
   frameRate,
 }: FrameComposerParams): FrameComposer {
-  const { videoElements, imageElements } = sources;
+  const { videoElements, imageElements, extraVideoElements } = sources;
+
+  /**
+   * Make a source's further elements up to `slot` (ESCSUITE-313), each over the
+   * URL its own element reads. One that will not load is warned about once and
+   * kept as `null`, so its clip is left out instead of retried every frame.
+   */
+  const growSlots = async (sourceId: string, extras: (HTMLVideoElement | null)[], slot: number) => {
+    const url = videoElements.get(sourceId)!.src;
+    while (extras.length < slot) {
+      try {
+        const video = await loadVideoElementFromUrl(url);
+        playbackState.set(video, { playing: false, targetTime: 0 });
+        extras.push(video);
+      } catch {
+        console.warn(`Could not load a second element for video ${sourceId}; the clip it was for is left out`);
+        extras.push(null);
+      }
+    }
+  };
+
+  // Which of its source's elements each live clip draws from: the k-th live
+  // clip of a source is that source's k-th element, so two clips of one
+  // source — a split clip crossfading into itself, a picture-in-picture
+  // copy — are two playheads, not one moved twice (ESCSUITE-313). A source
+  // with one live clip uses its own element and nothing else. One map for the
+  // composer's life, refilled every frame, and the lookups that read it built
+  // here once: the slot arithmetic costs a frame no allocation.
+  const slots = new Map<string, number>();
+  const videoFor = (clip: Clip) =>
+    videoForSlot(videoElements, extraVideoElements, clip.sourceVideoId, slots.get(clip.id)!);
+  // The further elements a clip's slot needs and its source does not have yet.
+  const missingSlots = (clip: Clip) => {
+    const extras = extraVideoElements.get(clip.sourceVideoId);
+    return extras && extras.length < slots.get(clip.id)! ? extras : undefined;
+  };
+  // The elements this frame seeks, cleared each frame rather than rebuilt.
+  const activeVideos = new Set<HTMLVideoElement>();
+  const pauseIfIdle = (video: HTMLVideoElement) => {
+    if (activeVideos.has(video)) return;
+    const state = playbackState.get(video)!;
+    if (state.playing) {
+      video.pause();
+      state.playing = false;
+    }
+  };
 
   return async function composeFrame(currentTime: number): Promise<void> {
     // Check for active transition
@@ -303,41 +381,51 @@ export function createFrameComposer({
       }
     }
 
+    assignElementSlots(activeClips, activeTransition, slots);
+    // The further elements this frame needs and does not have yet, made before
+    // any seek so the seeks below still run together.
+    for (const { clip } of mediaClips) {
+      const extras = missingSlots(clip);
+      if (extras) await growSlots(clip.sourceVideoId, extras, slots.get(clip.id)!);
+    }
+    const incomingExtras = activeTransition && missingSlots(activeTransition.incomingClip);
+    if (incomingExtras) {
+      await growSlots(activeTransition.incomingClip.sourceVideoId, incomingExtras, slots.get(activeTransition.incomingClip.id)!);
+    }
+
     // Sync all active videos to their target times
     const syncPromises: Promise<void>[] = [];
-    const activeVideoIds = new Set<string>();
+    activeVideos.clear();
 
     for (const { clip, clipTime } of mediaClips) {
-      const video = videoElements.get(clip.sourceVideoId);
+      const video = videoFor(clip);
       if (!video) continue;
 
       const sourceTime = clip.startTime + clipTime;
-      activeVideoIds.add(clip.sourceVideoId);
+      activeVideos.add(video);
       syncPromises.push(syncVideoToTime(video, sourceTime, frameRate));
     }
 
     // Also sync transition clips
     if (activeTransition) {
-      const incomingVideo = videoElements.get(activeTransition.incomingClip.sourceVideoId);
+      const incomingVideo = videoFor(activeTransition.incomingClip);
       if (incomingVideo) {
         const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
         const incomingClipTime = currentTime - clipEnd;
         const sourceTime = incomingClipTime >= 0
           ? activeTransition.incomingClip.startTime + incomingClipTime
           : activeTransition.incomingClip.startTime;
-        activeVideoIds.add(activeTransition.incomingClip.sourceVideoId);
+        activeVideos.add(incomingVideo);
         syncPromises.push(syncVideoToTime(incomingVideo, sourceTime, frameRate));
       }
     }
 
-    // Pause videos that are no longer active
-    for (const [sourceId, video] of videoElements) {
-      if (!activeVideoIds.has(sourceId)) {
-        const state = playbackState.get(sourceId)!;
-        if (state.playing) {
-          video.pause();
-          state.playing = false;
-        }
+    // Pause videos that are no longer active. Two plain loops rather than
+    // `forEachVideoElement` and a callback: this runs every frame.
+    for (const video of videoElements.values()) pauseIfIdle(video);
+    for (const extras of extraVideoElements.values()) {
+      for (const video of extras) {
+        if (video) pauseIfIdle(video);
       }
     }
 
@@ -362,7 +450,7 @@ export function createFrameComposer({
         const clipTime = getClipTime(clip);
 
         // Try video first, then image - require readyState >= 2 (frame data available)
-        const video = videoElements.get(clip.sourceVideoId);
+        const video = videoFor(clip);
         if (video && video.readyState >= 2) {
           drawClipToCanvas(
             ctx, video, clip, clipTime, projectSize.width, projectSize.height, undefined, drawOptions
@@ -427,7 +515,8 @@ export function createFrameComposer({
     // Draw transition if active
     if (activeTransition) {
       drawTransition(
-        ctx, videoElements, imageElements, activeTransition, currentTime,
+        ctx, videoFor(activeTransition.outgoingClip), videoFor(activeTransition.incomingClip),
+        imageElements, activeTransition, currentTime,
         projectSize.width, projectSize.height, drawOptions
       );
     }

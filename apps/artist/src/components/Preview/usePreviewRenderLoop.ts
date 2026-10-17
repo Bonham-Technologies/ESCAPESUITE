@@ -23,6 +23,8 @@ import { useEditorStore, getClipsAtTime } from '../../store/projectStore';
 import { getAnimatedVolume } from '../../utils/animation';
 import type { Clip, Track } from '../../store/types';
 import { getActiveTransition } from './transitions';
+import { assignElementSlots, videoForSlot } from '../../core/elementSlots';
+import { previewVideoForSlot } from './usePreviewMedia';
 
 /** Everything the render loop needs that does not come from the store. */
 export interface PreviewRenderLoopDeps {
@@ -33,6 +35,13 @@ export interface PreviewRenderLoopDeps {
   /** Paint the multi-selection's bounding boxes over the frame. */
   drawMultiSelectHandles: (time: number) => void;
   videoElementsRef: RefObject<Map<string, HTMLVideoElement>>;
+  /**
+   * Each video source's further elements, slot 1 onwards (ESCSUITE-313): the
+   * loop makes one, through `previewVideoForSlot`, the first time a second
+   * clip of a source is live at the playhead, and seeks, plays and pauses it
+   * like any other.
+   */
+  extraVideoElementsRef: RefObject<Map<string, HTMLVideoElement[]>>;
   audioElementsRef: RefObject<Map<string, HTMLAudioElement>>;
   /** Mirrors of the store's playback state, read inside the rAF loop. */
   isPlayingRef: RefObject<boolean>;
@@ -83,6 +92,7 @@ export function usePreviewRenderLoop({
   drawSelectionHandles,
   drawMultiSelectHandles,
   videoElementsRef,
+  extraVideoElementsRef,
   audioElementsRef,
   isPlayingRef,
   currentTimeRef,
@@ -119,6 +129,17 @@ export function usePreviewRenderLoop({
   }, []);
 
   const getDisplayTime = useCallback(() => displayTimeRef.current, []);
+
+  // Each live clip's slot (ESCSUITE-313) for the paused effects below — the
+  // scrub and the readiness listener, each of which fills it and reads it in
+  // one synchronous pass, so they share one map for the hook's life.
+  const pausedSlotsRef = useRef(new Map<string, number>());
+
+  /** Every preview `<video>`, each source's further elements included. */
+  const forEachVideo = useCallback((visit: (video: HTMLVideoElement) => void) => {
+    videoElementsRef.current.forEach((video) => visit(video));
+    extraVideoElementsRef.current.forEach((extras) => extras.forEach((video) => visit(video)));
+  }, [videoElementsRef, extraVideoElementsRef]);
 
   const clips = useEditorStore((state) => state.project.timeline.clips);
   const tracks = useEditorStore((state) => state.project.timeline.tracks);
@@ -188,29 +209,30 @@ export function usePreviewRenderLoop({
 
     // Where each <video> element has to be for this frame.
     //
-    // Collected per *element*, not per clip: `usePreviewMedia` keeps one
-    // element per source, so two live clips off one source — a
-    // picture-in-picture arrangement, or the same clip duplicated on two
-    // tracks — share it. Seeking per clip moved that element for the first
-    // clip, then measured it against the second clip's target, decided a seek
-    // was still needed and took the event-driven branch below, which paints
-    // the frame twice for one move of the playhead.
-    //
-    // Later writes win, which is what the per-clip loop already did in effect
-    // (each clip overwrote the element's currentTime), so the frame the user
-    // sees is unchanged: the last live clip's target, or the incoming side of
-    // a transition, which is applied after the clips for the same reason.
+    // Collected per *element*: per element, and a source has one element per
+    // live clip (ESCSUITE-313). Two live clips off one source — a
+    // picture-in-picture arrangement, the same clip duplicated on two tracks,
+    // a split clip crossfading into itself — used to share the source's one
+    // element: the first clip's seek moved it, the second clip's target was a
+    // second away, and both clips drew whichever target won. Each now has its
+    // own element, chosen by the same slot assignment the frame draws by
+    // (`core/elementSlots.ts`), made here the first time it is needed, so
+    // each element has exactly one target and no write overwrites another.
     const seekTargets = new Map<HTMLVideoElement, number>();
     const activeClips = getClipsAtTime(clips, tracks, currentTime);
 
     if (activeClips.length > 0) {
       const activeTransition = getActiveTransition(clips, tracks, currentTime);
+      const slots = pausedSlotsRef.current;
+      assignElementSlots(activeClips, activeTransition, slots);
 
-      const wantSeek = (sourceVideoId: string, sourceTime: number) => {
-        const sourceMedia = sourceVideos.find(s => s.id === sourceVideoId);
+      const wantSeek = (clip: Clip, sourceTime: number) => {
+        const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
         if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') return;
 
-        const video = videoElementsRef.current.get(sourceVideoId);
+        const video = previewVideoForSlot(
+          videoElementsRef.current, extraVideoElementsRef.current, clip.sourceVideoId, slots.get(clip.id)!
+        );
         if (!video) return;
 
         seekTargets.set(video, sourceTime);
@@ -218,13 +240,13 @@ export function usePreviewRenderLoop({
 
       for (const { clip, clipTime } of activeClips) {
         if (clip.overlayType) continue; // Text/shape overlays don't need seeking
-        wantSeek(clip.sourceVideoId, clip.startTime + clipTime);
+        wantSeek(clip, clip.startTime + clipTime);
       }
 
       if (activeTransition) {
         const { incomingClip } = activeTransition;
         const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
-        wantSeek(incomingClip.sourceVideoId, incomingClip.startTime + inClipTime);
+        wantSeek(incomingClip, incomingClip.startTime + inClipTime);
       }
     }
 
@@ -298,7 +320,7 @@ export function usePreviewRenderLoop({
         video.removeEventListener('seeked', onSeeked);
       }
     };
-  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, publishDisplayTime]);
+  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, sourceVideos, videoElementsRef, extraVideoElementsRef, publishDisplayTime]);
 
   // Paint once more when a paused frame's video decodes its first frame
   // (ESCSUITE-264).
@@ -332,18 +354,24 @@ export function usePreviewRenderLoop({
 
     // Every element the frame draws: the clips at the playhead, and the
     // incoming side of a transition, whose clip has not started yet and so is
-    // not among them. An overlay has no element under its source id, so the
-    // lookup itself skips it.
+    // not among them — each on the element its slot names, a source's second
+    // live clip on that source's second element (ESCSUITE-313). An overlay
+    // has no element under its source id, so the lookup itself skips it.
+    const activeClips = getClipsAtTime(clips, tracks, currentTime);
+    const activeTransition = getActiveTransition(clips, tracks, currentTime);
+    const slots = pausedSlotsRef.current;
+    assignElementSlots(activeClips, activeTransition, slots);
     const waiting = new Set<HTMLVideoElement>();
-    const watch = (sourceVideoId: string) => {
-      const video = videoElementsRef.current.get(sourceVideoId);
+    const watch = (clip: Clip) => {
+      const video = videoForSlot(
+        videoElementsRef.current, extraVideoElementsRef.current, clip.sourceVideoId, slots.get(clip.id)!
+      );
       if (video && video.readyState < HAVE_CURRENT_DATA) waiting.add(video);
     };
-    for (const { clip } of getClipsAtTime(clips, tracks, currentTime)) {
-      watch(clip.sourceVideoId);
+    for (const { clip } of activeClips) {
+      watch(clip);
     }
-    const incomingClip = getActiveTransition(clips, tracks, currentTime)?.incomingClip;
-    if (incomingClip) watch(incomingClip.sourceVideoId);
+    if (activeTransition) watch(activeTransition.incomingClip);
 
     const paint = () => {
       drawFrame(currentTime);
@@ -358,13 +386,13 @@ export function usePreviewRenderLoop({
         video.removeEventListener('loadeddata', paint);
       }
     };
-  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, videoElementsRef]);
+  }, [currentTime, isPlaying, clips, tracks, videoUrlsKey, drawFrame, drawSelectionHandles, drawMultiSelectHandles, videoElementsRef, extraVideoElementsRef]);
 
   // Handle playback
   useEffect(() => {
     if (!isPlaying) {
       // Stop all videos
-      videoElementsRef.current.forEach(video => {
+      forEachVideo(video => {
         video.pause();
         video.muted = true;
       });
@@ -433,13 +461,25 @@ export function usePreviewRenderLoop({
       audio.pause();
     });
 
+    // Which of its source's elements each live clip plays on (ESCSUITE-313):
+    // two clips of one source are two elements, both playing — and both
+    // sounding, as the export's mix has them. Recomputed only when the set of
+    // live clips changes; a transition's incoming side is appended separately
+    // below, so it never moves a live clip's slot. An overlay has no slot and
+    // no element under its empty source id, so the lookups return before
+    // reading one.
+    const activeSlots = new Map<string, number>();
+    assignElementSlots(activeClips, null, activeSlots);
+    const elementFor = (clip: Clip) =>
+      previewVideoForSlot(videoElementsRef.current, extraVideoElementsRef.current, clip.sourceVideoId, activeSlots.get(clip.id)!);
+
     // Start all active videos at correct positions (skip images and audio)
     for (const { clip, clipTime } of activeClips) {
       const sourceMedia = sourceVideos.find(s => s.id === clip.sourceVideoId);
       // Skip image and audio clips - they don't need video playback
       if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') continue;
 
-      const video = videoElementsRef.current.get(clip.sourceVideoId);
+      const video = elementFor(clip);
       if (!video) continue;
 
       const track = tracks.find(t => t.id === clip.trackId);
@@ -488,6 +528,34 @@ export function usePreviewRenderLoop({
     // Track last active clips to detect transitions
     let lastActiveClipIds = new Set(activeClips.map(c => c.clip.id));
 
+    // The incoming side of a running transition has not started, so it shows
+    // its first frame, held — on the element its slot names, which for a
+    // split clip crossfading into itself is a second element of the one
+    // source (ESCSUITE-313). Positioned once per transition, when its incoming
+    // clip changes, rather than every frame; an incoming clip that is already
+    // live (on another track) is playing on its own slot and is left alone.
+    let heldIncomingId: string | null = null;
+    const holdSlots = new Map<string, number>();
+    // Decided once per run: a timeline with no transition on it has nothing to
+    // hold, and the loop then asks for no transition at all, frame after frame.
+    const anyTransition = clips.some(c => c.transition.type !== 'none' && c.transition.duration > 0);
+    const holdIncoming = (time: number, liveClips: typeof activeClips, liveClipIds: Set<string>) => {
+      const transition = getActiveTransition(clips, tracks, time);
+      const incoming = transition && !liveClipIds.has(transition.incomingClip.id) ? transition.incomingClip : null;
+      const incomingId = incoming ? incoming.id : null;
+      if (incomingId === heldIncomingId) return;
+      heldIncomingId = incomingId;
+      if (!incoming) return;
+      assignElementSlots(liveClips, transition, holdSlots);
+      const slot = holdSlots.get(incoming.id)!;
+      const video = previewVideoForSlot(videoElementsRef.current, extraVideoElementsRef.current, incoming.sourceVideoId, slot);
+      if (!video) return;
+      video.pause();
+      if (Math.abs(video.currentTime - incoming.startTime) > 0.1) {
+        video.currentTime = incoming.startTime;
+      }
+    };
+
     // Animation loop - runs independently of React
     const animate = () => {
       if (!isPlayingRef.current) return;
@@ -520,7 +588,7 @@ export function usePreviewRenderLoop({
           // loopStart itself). Emptying lastActiveClipIds below forces the
           // clipsChanged branch on the very next frame, which already computes
           // that per clip and seeks each element correctly.
-          videoElementsRef.current.forEach(video => {
+          forEachVideo(video => {
             video.pause();
           });
           audioElementsRef.current.forEach(audio => {
@@ -531,6 +599,7 @@ export function usePreviewRenderLoop({
           setCurrentTime(loopStart);
           publishDisplayTime(loopStart, true);
           lastActiveClipIds = new Set();
+          heldIncomingId = null;
           lastStoreUpdateTime = loopStart;
           seekSequenceAtLastWrite = useEditorStore.getState().seekSequence;
           frameTime = loopStart;
@@ -541,7 +610,7 @@ export function usePreviewRenderLoop({
         } else {
           // Stop playback at the end — of the timeline, or of a loop region
           // too short to loop (loopEnd is the timeline's end with the loop off)
-          videoElementsRef.current.forEach(video => video.pause());
+          forEachVideo(video => video.pause());
           audioElementsRef.current.forEach(audio => audio.pause());
           setIsPlaying(false);
           setCurrentTime(loopEnd);
@@ -562,11 +631,17 @@ export function usePreviewRenderLoop({
       if (clipsChanged) {
         // Clips changed - need to update video playback and audio routing
         lastActiveClipIds = currentClipIds;
+        assignElementSlots(currentActiveClips, null, activeSlots);
 
-        // Pause videos that are no longer active
-        videoElementsRef.current.forEach((video, sourceId) => {
-          const isActive = currentActiveClips.some(c => c.clip.sourceVideoId === sourceId);
-          if (!isActive) {
+        // Pause videos that are no longer active — by element, since a source
+        // can have one per live clip (ESCSUITE-313).
+        const activeVideos = new Set<HTMLVideoElement>();
+        for (const { clip } of currentActiveClips) {
+          const video = elementFor(clip);
+          if (video) activeVideos.add(video);
+        }
+        forEachVideo((video) => {
+          if (!activeVideos.has(video)) {
             video.pause();
             video.muted = true;
           }
@@ -587,7 +662,7 @@ export function usePreviewRenderLoop({
           // Skip image and audio clips
           if (sourceMedia?.mediaType === 'image' || sourceMedia?.mediaType === 'audio') continue;
 
-          const video = videoElementsRef.current.get(clip.sourceVideoId);
+          const video = elementFor(clip);
           if (!video) continue;
 
           const track = tracks.find(t => t.id === clip.trackId);
@@ -655,13 +730,17 @@ export function usePreviewRenderLoop({
             }
           } else if (sourceMedia.mediaType !== 'image') {
             // Video clips
-            const video = videoElementsRef.current.get(clip.sourceVideoId);
+            const video = videoForSlot(
+              videoElementsRef.current, extraVideoElementsRef.current, clip.sourceVideoId, activeSlots.get(clip.id)!
+            );
             if (video && !track?.muted) {
               video.volume = combinedVolume;
             }
           }
         }
       }
+
+      if (anyTransition) holdIncoming(newTimelineTime, currentActiveClips, currentClipIds);
 
       // Tell the readout where the playhead is — throttled, and never a
       // React setter on this path.
@@ -718,7 +797,7 @@ export function usePreviewRenderLoop({
         setCurrentTime(frameTime);
       }
     };
-  }, [isPlaying, clips, tracks, timelineDuration, setIsPlaying, setCurrentTime, drawFrame, sourceVideos, videoElementsRef, audioElementsRef, isPlayingRef, publishDisplayTime]);
+  }, [isPlaying, clips, tracks, timelineDuration, setIsPlaying, setCurrentTime, drawFrame, sourceVideos, videoElementsRef, extraVideoElementsRef, audioElementsRef, isPlayingRef, publishDisplayTime, forEachVideo]);
 
   return useMemo(
     () => ({ subscribeDisplayTime, getDisplayTime }),

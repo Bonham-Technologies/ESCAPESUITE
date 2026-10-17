@@ -15,6 +15,7 @@ import {
 } from './usePreviewRenderLoop'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { useEditorStore } from '../../store/projectStore'
+import * as transitions from './transitions'
 import { FRAME_MS, installPreviewDoubles, last, settle, type PreviewDoubles } from '../../test/renderPreview'
 
 let doubles: PreviewDoubles
@@ -46,6 +47,7 @@ interface LoopHarness {
  */
 function harness(sources: string[] = [video.id]): LoopHarness {
   const videoElementsRef = { current: new Map<string, HTMLVideoElement>() }
+  const extraVideoElementsRef = { current: new Map<string, HTMLVideoElement[]>() }
   const audioElementsRef = { current: new Map<string, HTMLAudioElement>() }
   for (const id of sources) {
     videoElementsRef.current.set(id, document.createElement('video'))
@@ -59,6 +61,7 @@ function harness(sources: string[] = [video.id]): LoopHarness {
     drawSelectionHandles: vi.fn(),
     drawMultiSelectHandles: vi.fn(),
     videoElementsRef,
+    extraVideoElementsRef,
     audioElementsRef,
     isPlayingRef,
     currentTimeRef,
@@ -1257,5 +1260,272 @@ describe('usePreviewRenderLoop display time', () => {
 
     expect(published).toEqual([])
     expect(result.current.getDisplayTime()).toBeGreaterThan(0)
+  })
+})
+
+// ESCSUITE-313: two clips of one source live at the playhead each get an
+// element of their own — the source's primary for the first in track order,
+// a second one, created when first needed over the same URL, for the next.
+describe('usePreviewRenderLoop with two clips of one source (ESCSUITE-313)', () => {
+  /**
+   * `a` shows video1 from 0 s and `b`, on a track above it, video1 from 10 s;
+   * both span timeline 0-4. At timeline 1 `a` wants source 1 and `b` source 11.
+   */
+  function twoClipsOfOneSource() {
+    addClip('a', 0, 4)
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const loop = harness()
+    const primary = loop.deps.videoElementsRef.current.get(video.id)!
+    primary.src = 'blob:video1'
+    return { ...loop, primary }
+  }
+
+  /** The source's second element, once the loop has made it. */
+  function secondElement(deps: PreviewRenderLoopDeps): HTMLVideoElement | undefined {
+    return deps.extraVideoElementsRef.current.get(video.id)?.[0]
+  }
+
+  it('seeks each clip\'s own element to its own source time while paused', async () => {
+    const { deps, seek, primary } = twoClipsOfOneSource()
+    seek(1)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+
+    const second = secondElement(deps)
+    expect(second).toBeDefined()
+    expect(second).not.toBe(primary)
+    expect(second!.src).toBe('blob:video1')
+    expect([primary.currentTime, second!.currentTime].sort((x, y) => x - y)).toEqual([1, 11])
+    expect(drawnTimes(deps)).toContain(1)
+  })
+
+  it('makes the second element once, and moves both on the next scrub', async () => {
+    const { deps, seek, primary } = twoClipsOfOneSource()
+    seek(1)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const second = secondElement(deps)
+
+    seek(2)
+    await settle(1000)
+
+    expect(secondElement(deps)).toBe(second)
+    expect(deps.extraVideoElementsRef.current.get(video.id)).toHaveLength(1)
+    expect([primary.currentTime, second!.currentTime].sort((x, y) => x - y)).toEqual([2, 12])
+  })
+
+  it('plays both elements, each from its own source time', async () => {
+    const { deps, seek, play, pause, primary } = twoClipsOfOneSource()
+    seek(1)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const second = secondElement(deps)!
+    vi.mocked(primary.play).mockClear()
+    vi.mocked(second.play).mockClear()
+
+    play()
+    await settle(FRAME_MS * 2)
+
+    expect(primary.play).toHaveBeenCalled()
+    expect(second.play).toHaveBeenCalled()
+    expect([primary.currentTime, second.currentTime].sort((x, y) => x - y)).toEqual([1, 11])
+
+    vi.mocked(second.pause).mockClear()
+    pause()
+    await settle(FRAME_MS * 2)
+    expect(second.pause).toHaveBeenCalled()
+  })
+
+  it('pauses the second element when its clip ends mid-playback', async () => {
+    addClip('a', 0, 4)
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 10, endTime: 10.1, duration: 0.1 },
+      undefined,
+      0
+    )
+    const { deps, seek, play } = harness()
+    seek(0)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const second = secondElement(deps)!
+
+    play()
+    await settle(FRAME_MS * 2)
+    vi.mocked(second.pause).mockClear()
+    // `b` ends at 0.1 s; a few frames on, only `a` is live.
+    await settle(200)
+
+    expect(second.pause).toHaveBeenCalled()
+  })
+
+  it('holds the incoming side of a split clip\'s crossfade on its own element during playback', async () => {
+    // `a` (source 0-2) fades over its last half second into `b`, the same
+    // source from 5 s, which starts at timeline 2.
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 5, endTime: 7, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness()
+    const primary = deps.videoElementsRef.current.get(video.id)!
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+
+    play()
+    // Into the fade (1.5-2 s), not yet past the cut.
+    await settle(300)
+
+    const second = secondElement(deps)
+    expect(second).toBeDefined()
+    expect(second!.currentTime).toBe(5)
+    expect(second!.play).not.toHaveBeenCalled()
+    expect(primary.currentTime).toBeLessThan(2)
+
+    // Past the cut `b` is the only live clip, back on the source's own
+    // element, and the element that held its first frame is let go.
+    vi.mocked(second!.pause).mockClear()
+    await settle(500)
+    expect(second!.pause).toHaveBeenCalled()
+  })
+
+  it('leaves a transition\'s incoming side alone when it is already playing on another track', async () => {
+    // `a` fades out over 1.5-2 s; `b`, the same source on a track above, has
+    // been live since 1 s, so it is the incoming side and already playing.
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 10, endTime: 13, duration: 3 },
+      undefined,
+      1
+    )
+    const { deps, seek, play } = harness()
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const second = secondElement(deps)!
+
+    play()
+    await settle(FRAME_MS * 2)
+    vi.mocked(second.pause).mockClear()
+    await settle(250)
+
+    expect(second.pause).not.toHaveBeenCalled()
+    expect(second.currentTime).toBeGreaterThan(10)
+  })
+
+  it('holds another source\'s incoming side without a seek when it already sits on its first frame', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness([video.id, 'video2'])
+    const incoming = deps.videoElementsRef.current.get('video2')!
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const seeksBefore = doubles.media.seeks.length
+    vi.mocked(incoming.pause).mockClear()
+
+    play()
+    await settle(300)
+
+    expect(incoming.pause).toHaveBeenCalled()
+    expect(incoming.currentTime).toBe(0)
+    // Only the outgoing side's own start seek: the incoming element was already there.
+    expect(doubles.media.seeks.length - seeksBefore).toBe(1)
+  })
+
+  it('plays on through a transition into a clip whose source has no element', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video2', name: 'b', startTime: 0, endTime: 2, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness()
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    play()
+    await settle(1000)
+
+    // Into the fade, past the cut, and on: nothing to hold, nothing to play.
+    const times = drawnTimes(deps)
+    expect(times[times.length - 1]).toBeGreaterThan(2)
+    expect(deps.extraVideoElementsRef.current.size).toBe(0)
+  })
+
+  // ESCSUITE-313 fix round: a timeline with no transition on it asks for none
+  // on the playback path — the incoming-side hold is decided off once per run.
+  it('looks for no transition during playback when no clip carries one', async () => {
+    const { deps, seek, play } = twoClipsOfOneSource()
+    seek(1)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    const lookups = vi.spyOn(transitions, 'getActiveTransition')
+
+    try {
+      play()
+      await settle(FRAME_MS * 6)
+
+      expect(drawnTimes(deps).length).toBeGreaterThan(3)
+      expect(lookups).not.toHaveBeenCalled()
+    } finally {
+      lookups.mockRestore()
+    }
+  })
+
+  it('holds a crossfade\'s incoming side once, not once a frame', async () => {
+    addClip('a', 0, 2)
+    store().updateClip('a', { transition: { type: 'fade', duration: 0.5 } })
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: video.id, name: 'b', startTime: 5, endTime: 7, duration: 2 },
+      store().project.timeline.clips.find((c) => c.id === 'a')!.trackId,
+      2
+    )
+    const { deps, seek, play } = harness()
+    seek(1.4)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+
+    play()
+    // Ten-odd frames inside the fade (1.5-2 s).
+    await settle(400)
+
+    const second = secondElement(deps)!
+    expect(drawnTimes(deps).filter((t) => t >= 1.5 && t < 2).length).toBeGreaterThan(5)
+    expect(second.pause).toHaveBeenCalledTimes(1)
+  })
+
+  it('repaints a paused frame once when a second element decodes its first frame (ESCSUITE-264)', async () => {
+    const { deps, seek } = twoClipsOfOneSource()
+    // The second element is made by the first scrub, and has no frame yet.
+    doubles.media.script({ video: { readyState: 0, silent: true, stallSeek: true } })
+    seek(1)
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    doubles.media.script({ video: { readyState: 4, silent: false, stallSeek: false } })
+    const second = secondElement(deps)!
+    expect(second.readyState).toBe(0)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    becomeReady(second)
+    await settle(FRAME_MS)
+
+    expect(drawnTimes(deps)).toEqual([1])
   })
 })

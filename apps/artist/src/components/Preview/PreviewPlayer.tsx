@@ -13,6 +13,7 @@ import { contentBox, previewRaster, projectSizeOf } from './previewGeometry';
 import * as selectionOverlay from './selectionOverlay';
 import { getActiveTransition } from './transitions';
 import * as cropOverlay from './cropOverlay';
+import { assignElementSlots, videoForSlot } from '../../core/elementSlots';
 import { CropHandles } from './CropHandles';
 import { isTrackLocked } from '../../store/trackLock';
 import { usePreviewMedia } from './usePreviewMedia';
@@ -21,7 +22,6 @@ import { useTransformHandles } from './useTransformHandles';
 import { InlineTextEditorAnchor } from './InlineTextEditorAnchor';
 import { MarqueeSelection } from './MarqueeSelection';
 import { PreviewTimecode } from './PreviewTimecode';
-import type { SourceVideo } from '../../store/types';
 import styles from './PreviewPlayer.module.css';
 
 export function PreviewPlayer() {
@@ -118,6 +118,7 @@ export function PreviewPlayer() {
   // the object URLs behind them, loaded and released as the timeline changes.
   const {
     videoElementsRef,
+    extraVideoElementsRef,
     imageElementsRef,
     audioElementsRef,
     isLoading,
@@ -161,17 +162,29 @@ export function PreviewPlayer() {
    * the ring neither dimmed nor veiled. Handing back `undefined` is what makes
    * `drawCropOverlay` take its veil fallback for exactly the window the spec
    * names.
+   *
+   * A video is the element the CROPPED CLIP draws from at `time` — its
+   * source's element for its slot (ESCSUITE-313) — so the second of two live
+   * clips of one source dims over its own moment, not the first clip's. The
+   * slots are worked out the way the frame works them out; this runs only
+   * while paused in crop mode. The cropped clip is on screen at `time`
+   * (`visibleCropTarget`), so it has a slot.
    */
-  const mediaElementFor = useCallback(
-    (source: SourceVideo): CanvasImageSource | undefined => {
+  const cropSlotsRef = useRef(new Map<string, number>());
+  const cropElementFor = useCallback(
+    ({ clip, source }: cropOverlay.CropTarget, time: number): CanvasImageSource | undefined => {
       if (source.mediaType === 'image') {
         const img = imageElementsRef.current.get(source.id);
         return isDrawableImage(img) ? img : undefined;
       }
-      const video = videoElementsRef.current.get(source.id);
+      const slots = cropSlotsRef.current;
+      assignElementSlots(getClipsAtTime(clips, tracks, time), getActiveTransition(clips, tracks, time), slots);
+      const video = videoForSlot(
+        videoElementsRef.current, extraVideoElementsRef.current, source.id, slots.get(clip.id)!
+      );
       return isDrawableVideo(video) ? video : undefined;
     },
-    [imageElementsRef, videoElementsRef]
+    [clips, tracks, imageElementsRef, videoElementsRef, extraVideoElementsRef]
   );
 
   // Draw a single frame to canvas
@@ -226,12 +239,13 @@ export function PreviewPlayer() {
       },
       {
         videoElements: videoElementsRef.current,
+        extraVideoElements: extraVideoElementsRef.current,
         imageElements: imageElementsRef.current,
         blurScratch: blurCanvasRef,
       }
     );
   }, [canvasDimensions, clips, tracks, sourceVideos, editingTextClipId,
-      videoElementsRef, imageElementsRef]);
+      videoElementsRef, extraVideoElementsRef, imageElementsRef]);
 
   /**
    * Project pixels per CSS pixel of the box the canvas is laid out in.
@@ -277,7 +291,7 @@ export function PreviewPlayer() {
         canvas,
         time,
         cropScene,
-        mediaElementFor(cropping.source),
+        cropElementFor(cropping, time),
         canvasDimensions,
         handleScreenScale(canvas),
         // From the `time` the chrome is being drawn at, exactly as the selection
@@ -299,7 +313,7 @@ export function PreviewPlayer() {
       transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
   }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
-      handleScreenScale, cropping, cropScene, mediaElementFor]);
+      handleScreenScale, cropping, cropScene, cropElementFor]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {
@@ -366,6 +380,7 @@ export function PreviewPlayer() {
     drawSelectionHandles,
     drawMultiSelectHandles,
     videoElementsRef,
+    extraVideoElementsRef,
     audioElementsRef,
     isPlayingRef,
     currentTimeRef,

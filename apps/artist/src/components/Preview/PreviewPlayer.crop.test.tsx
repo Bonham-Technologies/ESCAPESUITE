@@ -206,6 +206,31 @@ describe('crop mode on the preview', () => {
     expect(veilFills(preview)).toHaveLength(0)
   })
 
+  // ESCSUITE-313 fix round: the chrome dims over the frame of the clip it is
+  // cropping, so a clip that is the second of two live clips of one source
+  // dims from that source's second element, not from the first clip's moment.
+  it('dims the second of two live clips of one source from its own element', async () => {
+    addClip('a', 0, 4)
+    store().addClipToTimeline(
+      { id: 'b', sourceVideoId: 'video1', name: 'b', startTime: 10, endTime: 14, duration: 4 },
+      undefined,
+      0
+    )
+    const [a, b] = ['a', 'b'].map((id) => store().project.timeline.clips.find((c) => c.id === id)!)
+    const indexOf = (trackId: string) => store().project.timeline.tracks.find((t) => t.id === trackId)!.index
+    expect(indexOf(b.trackId)).toBeGreaterThan(indexOf(a.trackId))
+    store().setSelectedClipId('b')
+    store().setCropClipId('b')
+    const preview = await renderPreview()
+    preview.clearCalls()
+
+    store().setCurrentTime(1)
+
+    const [dim] = dimDraws(preview)
+    expect(doubles.media.videos).toHaveLength(2)
+    expect(dim.args[0]).toBe(doubles.media.videos[1])
+  })
+
   it('dims an image clip from its decoded <img>', async () => {
     // The image arm of the chrome's element lookup: an image source draws from
     // `imageElementsRef`, not from the video map, which would always veil.

@@ -53,6 +53,7 @@ import {
   sceneSource,
 } from '../test/fixtures/perfScene'
 import { makeExportOptions } from '../test/fixtures/clipFixtures'
+import { countCollectionConstructions } from '../test/collectionConstructions'
 import type { Clip, ExportProgress } from '../store/types'
 
 vi.mock('mediabunny', async () => {
@@ -168,10 +169,11 @@ interface ExportMeasurement {
    * `video.currentTime` assignments (`test/doubles/media.ts`'s `seeks`) for the
    * whole export — the WebM path's own per-frame cost, with no equivalent in
    * the MP4 path's decode-manager pipeline. One of these is a one-time
-   * initialisation seek (`video.currentTime = 0` for every loaded video,
-   * before the frame loop starts); the rest are the frame loop's own, one per
-   * active media clip per frame — this scene's two active clips share one
-   * `<video>` element, so each frame reassigns its position twice.
+   * initialisation seek (`video.currentTime = 0` for the video loaded up
+   * front, before the frame loop starts); the rest are the frame loop's own,
+   * one per active media clip per frame. This scene's two active clips are of
+   * one source, and since ESCSUITE-313 each has its own `<video>` — the second
+   * made the first time a frame needs it, already at 0, and never rewound.
    */
   seeks: number
   /** `(seeks - the one-time initialisation seeks) / framesEncoded`. */
@@ -205,10 +207,12 @@ async function measureExport(clips: Clip[] = buildSceneClips()): Promise<ExportM
 
   const lookups = getAnimatedValues.mock.calls.length
   const seeks = media.seeks.length - seeksBefore
-  // The exporter sets `video.currentTime = 0` once per loaded video element
-  // before the frame loop starts (its "initialize all videos as paused"
-  // step) — one seek per element that is never part of the per-frame cost.
-  const initSeeks = media.videos.length
+  // The exporter sets `video.currentTime = 0` once per element it loads before
+  // the frame loop starts (its "initialize all videos as paused" step) — one
+  // seek per source, never part of the per-frame cost. A source's second
+  // element is made inside the loop already at 0 and is not rewound
+  // (ESCSUITE-313), so this counts sources, not `media.videos`.
+  const initSeeks = new Set(clips.filter((c) => !c.overlayType).map((c) => c.sourceVideoId)).size
 
   const measurement: ExportMeasurement = {
     framesEncoded: frames.length,
@@ -259,14 +263,17 @@ describe('WebM export per-frame work', () => {
     expect(measured.savesPerFrame).toBe(measured.restoresPerFrame)
     // Exact: one canvas for the whole export, not one per frame.
     expect(measured.getContexts).toBe(1)
-    // Exact, and specific to this pipeline: two active media clips share one
-    // `<video>` element (the scene reuses one source across every clip), so
-    // each frame's sync loop reassigns its position exactly once per clip —
-    // measured 2026-09-27: 2 per frame in steady state, plus the one
-    // initialisation seek the exporter makes before the frame loop starts
-    // (61 total for the 30-frame range: 1 + 30 x 2).
-    expect(measured.steadyStateSeeksPerFrame).toBe(ACTIVE_MEDIA_CLIPS)
-    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS)
+    // Exact, and specific to this pipeline: the two active media clips are of
+    // the scene's one source. Measured 2026-09-27, when they shared one
+    // `<video>`: 2 seeks per frame, plus the one initialisation seek (61 for
+    // the 30-frame range: 1 + 30 x 2). Re-measured 2026-10-17 for ESCSUITE-313,
+    // which gives each its own element: still one seek per element per frame,
+    // except the second element's first frame, whose clip starts at source 0,
+    // where the newly made element already sits — 1 + 30 x 2 - 1 = 60, and
+    // 59 frame-loop seeks over 30 frames. Fewer seeks, not more: before, the
+    // one element jumped a second back and forth every frame.
+    expect(measured.steadyStateSeeksPerFrame).toBe((FRAMES * ACTIVE_MEDIA_CLIPS - 1) / FRAMES)
+    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS - 1)
   })
 
   it('encodes the masked and stroked scene within its per-frame ceilings', async () => {
@@ -304,8 +311,9 @@ describe('WebM export per-frame work', () => {
     )
     expect(measured.getContexts).toBe(1)
     // Exact, and unmoved by the mask/stroke feature: neither touches how the
-    // video elements are synced.
-    expect(measured.steadyStateSeeksPerFrame).toBe(ACTIVE_MEDIA_CLIPS)
+    // video elements are synced (re-stated 2026-10-17, ESCSUITE-313: see the
+    // first case).
+    expect(measured.steadyStateSeeksPerFrame).toBe((FRAMES * ACTIVE_MEDIA_CLIPS - 1) / FRAMES)
   })
 
   it('creates and closes exactly one VideoFrame per encoded frame with masks on', async () => {
@@ -346,5 +354,72 @@ describe('WebM export per-frame work', () => {
     // shape overlays), so 4 per frame and 120 for the 30-frame range.
     expect(measured.animationLookupsPerFrame).toBe(ACTIVE_CLIPS)
     expect(measured.animationLookups).toBe(FRAMES * ACTIVE_CLIPS)
+  })
+  // ESCSUITE-313. The second this file measures is itself a two-clip,
+  // one-source frame — the blurred V1 clip and the picture-in-picture V2 clip
+  // both draw from the scene's one source, a second of source time apart — so
+  // it now takes two `<video>` elements, the second made the first time a frame
+  // needs it and read off the first one's object URL.
+  it('draws the two live clips of the one source from two elements over one object URL', async () => {
+    const urlsBefore = vi.mocked(URL.createObjectURL).mock.calls.length
+
+    const measured = await measureExport()
+
+    // Exact, measured 2026-10-17: two elements, one object URL for the export.
+    expect(media.videos).toHaveLength(ACTIVE_MEDIA_CLIPS)
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length - urlsBefore).toBe(1)
+    // Exact: every frame draws twice, from two different elements.
+    const frames = splitFrames(getLastCanvasContext()!.calls)
+    expect(frames).toHaveLength(FRAMES)
+    for (const frame of frames) {
+      const drawn = frame.filter((c) => c.method === 'drawImage').map((c) => c.args[0])
+      expect(drawn).toHaveLength(ACTIVE_MEDIA_CLIPS)
+      expect(new Set(drawn).size).toBe(ACTIVE_MEDIA_CLIPS)
+    }
+    // Exact, measured 2026-10-17: the one rewind of the element loaded up
+    // front, then one seek per element per frame — except the second element's
+    // first frame, whose clip starts at source 0, where the new element already
+    // sits.
+    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS - 1)
+  })
+  // ESCSUITE-313 fix round. Which element each live clip draws from is worked
+  // out every frame, and the arithmetic must not cost the frame a collection:
+  // the composer refills one slot map it owns and a scratch map of the
+  // module's, with its lookups built once at construction. Counted as the
+  // difference between a 30-frame and a 15-frame export of the same scene, so
+  // everything the export builds once — the media load, the second element,
+  // the encoder — cancels and only the per-frame cost is left.
+  it('builds no more Maps or Sets per frame than it did before slots existed', async () => {
+    const measure = async (range: { start: number; end: number }) => {
+      const counted = countCollectionConstructions()
+      try {
+        await exportToWebM(
+          buildSceneClips(),
+          [sceneSource],
+          makeExportOptions({ format: 'webm', resolution: 'project', timeRange: range }),
+          () => {},
+          SCENE_TRACKS,
+          undefined,
+          { ...SCENE_RESOLUTION }
+        )
+        return { maps: counted.maps, sets: counted.sets }
+      } finally {
+        counted.uninstall()
+      }
+    }
+    const long = await measure(RANGE)
+    const short = await measure({ start: RANGE.start, end: RANGE.start + 0.5 })
+    const perFrame = {
+      maps: (long.maps - short.maps) / (FRAMES / 2),
+      sets: (long.sets - short.sets) / (FRAMES / 2),
+    }
+
+    // Exact, measured 2026-10-17. On the tree before ESCSUITE-313 (31fa9edc):
+    // one Map — `getClipsAtTime`'s track lookup — and one Set, the frame's
+    // live source ids. The ticket's first version measured 3 Maps and 1 Set
+    // (two Maps per `assignElementSlots` call); the fix round keeps the slot
+    // map, its scratch and the live-element set for the composer's life, so a
+    // frame now builds the one Map and no Set.
+    expect(perFrame).toEqual({ maps: 1, sets: 0 })
   })
 })

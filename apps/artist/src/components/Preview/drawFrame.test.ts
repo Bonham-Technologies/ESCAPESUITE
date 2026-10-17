@@ -56,3 +56,75 @@ describe('drawPreviewFrame — a caption (ESCSUITE-293)', () => {
     expect(textsDrawnAt(3, scene)).toEqual([])
   })
 })
+
+// ESCSUITE-313: two clips of one source in one frame draw from two elements —
+// the k-th live clip of a source from that source's k-th element, which
+// `usePreviewMedia` keeps in `extraVideoElements` (slot 1 onwards).
+describe('drawPreviewFrame — two clips of one source (ESCSUITE-313)', () => {
+  // Told apart by `slot`, so `toEqual` cannot pass on two lookalike elements.
+  const fakeVideo = (slot: number) =>
+    ({ slot, readyState: 4, videoWidth: 640, videoHeight: 360 }) as unknown as HTMLVideoElement
+
+  function drawnFrom(
+    time: number,
+    scene: PreviewFrameScene,
+    videoElements: Map<string, HTMLVideoElement>,
+    extraVideoElements?: Map<string, HTMLVideoElement[]>
+  ): unknown[] {
+    const ctx: RecordingCanvasRenderingContext2D = createRecordingContext()
+    ctx.canvas.width = 640
+    ctx.canvas.height = 360
+    drawPreviewFrame(ctx as unknown as CanvasRenderingContext2D, ctx.canvas, time, scene, {
+      videoElements,
+      extraVideoElements,
+      imageElements: new Map(),
+      blurScratch: { current: null },
+    })
+    return ctx.argsFor('drawImage').map((args) => args[0])
+  }
+
+  const zoomedScene: PreviewFrameScene = {
+    projectSize: { width: 640, height: 360 },
+    clips: [
+      makeClip({ id: 'A', sourceVideoId: 'v1', trackId: 'tA', duration: 2, endTime: 2 }),
+      makeClip({ id: 'B', sourceVideoId: 'v1', trackId: 'tB', startTime: 10, duration: 2, endTime: 12 }),
+    ],
+    tracks: [makeTrack({ id: 'tA', index: 0 }), makeTrack({ id: 'tB', index: 1 })],
+    sourceVideos: [],
+    editingTextClipId: null,
+  }
+
+  it('draws the lower clip from the first element and the upper from the second', () => {
+    const first = fakeVideo(0)
+    const second = fakeVideo(1)
+
+    expect(drawnFrom(1, zoomedScene, new Map([['v1', first]]), new Map([['v1', [second]]]))).toEqual([
+      first,
+      second,
+    ])
+  })
+
+  it('draws nothing for a clip whose element does not exist yet', () => {
+    const first = fakeVideo(0)
+
+    expect(drawnFrom(1, zoomedScene, new Map([['v1', first]]))).toEqual([first])
+  })
+
+  it('draws a split clip crossfading into itself from two elements', () => {
+    const first = fakeVideo(0)
+    const second = fakeVideo(1)
+    const scene: PreviewFrameScene = {
+      ...zoomedScene,
+      clips: [
+        makeClip({ id: 'A', sourceVideoId: 'v1', duration: 2, endTime: 2, transition: { type: 'fade', duration: 0.5 } }),
+        makeClip({ id: 'B', sourceVideoId: 'v1', startTime: 5, duration: 2, endTime: 7, timelinePosition: 2 }),
+      ],
+      tracks: [makeTrack()],
+    }
+
+    expect(drawnFrom(1.75, scene, new Map([['v1', first]]), new Map([['v1', [second]]]))).toEqual([
+      first,
+      second,
+    ])
+  })
+})

@@ -438,18 +438,20 @@ export function drawClipToCanvas(
 /**
  * Generic function to draw a clip (video or image) with transition modifiers
  */
-export function drawMediaWithModifiers(
+export function drawMediaElement(
   ctx: CanvasRenderingContext2D,
-  videoElements: Map<string, HTMLVideoElement>,
+  // The `<video>` this clip draws from, already chosen: a source can have one
+  // per clip of it live in the frame (ESCSUITE-313, `core/elementSlots.ts`),
+  // so the caller picks it rather than a map by source.
+  video: HTMLVideoElement | undefined,
   imageElements: Map<string, HTMLImageElement>,
   clip: Clip,
-  clipTime: number, // Time relative to clip start (for animations)
+  clipTime: number,
   canvasWidth: number,
   canvasHeight: number,
   modifiers?: TransitionModifiers,
   options?: MediaDrawOptions
-) {
-  const video = videoElements.get(clip.sourceVideoId);
+): boolean {
   if (video && video.readyState >= 1) {
     drawClipToCanvas(ctx, video, clip, clipTime, canvasWidth, canvasHeight, modifiers, options);
     return true;
@@ -686,7 +688,11 @@ function transitionSideModifiers(
  */
 export function drawTransition(
   ctx: CanvasRenderingContext2D,
-  videoElements: Map<string, HTMLVideoElement>,
+  // The `<video>` each side draws from, chosen by the caller: a source can have
+  // one element per clip of it live in the frame (ESCSUITE-313), so a clip
+  // split and crossfaded into itself has its two sides on two elements.
+  outgoingVideo: HTMLVideoElement | undefined,
+  incomingVideo: HTMLVideoElement | undefined,
   imageElements: Map<string, HTMLImageElement>,
   transition: TransitionInfo,
   currentTime: number, // Current timeline time (for calculating clip times)
@@ -704,16 +710,12 @@ export function drawTransition(
   const inClipTime = getIncomingClipTime(transition, currentTime);
 
   // Check if we have media for both clips
-  const hasOutgoing = videoElements.has(outgoingClip.sourceVideoId) || imageElements.has(outgoingClip.sourceVideoId);
-  const hasIncoming = videoElements.has(incomingClip.sourceVideoId) || imageElements.has(incomingClip.sourceVideoId);
+  const hasOutgoing = outgoingVideo !== undefined || imageElements.has(outgoingClip.sourceVideoId);
+  const hasIncoming = incomingVideo !== undefined || imageElements.has(incomingClip.sourceVideoId);
 
   if (!hasOutgoing && !hasIncoming) {
     return false;
   }
-
-  // Check video readyState before attempting to draw
-  const outgoingVideo = videoElements.get(outgoingClip.sourceVideoId);
-  const incomingVideo = videoElements.get(incomingClip.sourceVideoId);
 
   // Warn if videos exist but aren't ready (potential black flash cause)
   // Using readyState >= 1 like preview player for forgiving rendering
@@ -732,9 +734,9 @@ export function drawTransition(
   const drawSide = (side: TransitionSide): boolean => {
     const clip = side === 'outgoing' ? outgoingClip : incomingClip;
     const clipTime = side === 'outgoing' ? outClipTime : inClipTime;
-    return drawMediaWithModifiers(
+    return drawMediaElement(
       ctx,
-      videoElements,
+      side === 'outgoing' ? outgoingVideo : incomingVideo,
       imageElements,
       clip,
       clipTime,

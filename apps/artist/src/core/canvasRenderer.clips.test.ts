@@ -1,6 +1,6 @@
 // Clip compositing: the geometry, blend mode, alpha, blur and clip region a
 // media clip is drawn with, and the source-selection rules the two dispatchers
-// (`drawMediaWithModifiers`, `drawMediaWithFrame`) apply. The real animation
+// (`drawMediaElement`, `drawMediaWithFrame`) apply. The real animation
 // engine computes the values; only the drawing surface and the media elements
 // are doubles.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -8,7 +8,7 @@ import {
   drawClipToCanvas,
   drawImageToCanvasWithModifiers,
   drawMediaWithFrame,
-  drawMediaWithModifiers,
+  drawMediaElement,
 } from './canvasRenderer'
 import {
   createRecordingContext,
@@ -251,15 +251,15 @@ describe('drawImageToCanvasWithModifiers', () => {
   })
 })
 
-describe('drawMediaWithModifiers', () => {
+describe('drawMediaElement', () => {
   it('prefers a video whose first frame has arrived', () => {
     const video = loadedVideo(1280, 720, 1)
     const image = loadedImage(800, 600)
     const clip = makeClip()
 
-    const drew = drawMediaWithModifiers(
+    const drew = drawMediaElement(
       asCtx(),
-      new Map([[clip.sourceVideoId, video]]),
+      video,
       new Map([[clip.sourceVideoId, image]]),
       clip,
       0,
@@ -276,9 +276,9 @@ describe('drawMediaWithModifiers', () => {
     const image = loadedImage(800, 600)
     const clip = makeClip()
 
-    const drew = drawMediaWithModifiers(
+    const drew = drawMediaElement(
       asCtx(),
-      new Map([[clip.sourceVideoId, video]]),
+      video,
       new Map([[clip.sourceVideoId, image]]),
       clip,
       0,
@@ -294,9 +294,9 @@ describe('drawMediaWithModifiers', () => {
     const image = loadedImage(800, 600)
     const clip = makeClip()
 
-    const drew = drawMediaWithModifiers(
+    const drew = drawMediaElement(
       asCtx(),
-      new Map(),
+      undefined,
       new Map([[clip.sourceVideoId, image]]),
       clip,
       0,
@@ -308,8 +308,8 @@ describe('drawMediaWithModifiers', () => {
     expect(ctx.argsFor('drawImage')[0][0]).toBe(image)
   })
 
-  it('draws nothing and reports failure when the source is loaded in neither map', () => {
-    const drew = drawMediaWithModifiers(asCtx(), new Map(), new Map(), makeClip(), 0, W, H)
+  it('draws nothing and reports failure with no video and no image for the source', () => {
+    const drew = drawMediaElement(asCtx(), undefined, new Map(), makeClip(), 0, W, H)
 
     expect(drew).toBe(false)
     expect(ctx.calls).toEqual([])
@@ -353,7 +353,7 @@ describe('MediaDrawOptions', () => {
     const clip = makeClip({ effects: { blur: 4 } })
     const images = new Map([[clip.sourceVideoId, image]])
 
-    drawMediaWithModifiers(asCtx(), new Map(), images, clip, 0, W, H, undefined, {
+    drawMediaElement(asCtx(), undefined, images, clip, 0, W, H, undefined, {
       filterScale: 0.5,
     })
 

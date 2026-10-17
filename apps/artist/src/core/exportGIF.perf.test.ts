@@ -184,9 +184,13 @@ async function measureExport(): Promise<GifMeasurement> {
   const frames = splitFrames(ctx.calls)
   const lookups = getAnimatedValues.mock.calls.length
   const seeks = media.seeks.length - seeksBefore
-  // One `video.currentTime = 0` per loaded element before the frame loop
-  // starts (`rewindElementSources`) — never part of the per-frame cost.
-  const initSeeks = media.videos.length
+  // One `video.currentTime = 0` per element loaded before the frame loop
+  // starts (`rewindElementSources`) — one per source, never part of the
+  // per-frame cost. A source's second element is made inside the loop already
+  // at 0 and is not rewound (ESCSUITE-313), so this counts sources.
+  const initSeeks = new Set(
+    buildSceneClips().filter((c) => !c.overlayType).map((c) => c.sourceVideoId)
+  ).size
 
   const measurement: GifMeasurement = {
     framesDrawn: frames.length,
@@ -242,11 +246,15 @@ describe('GIF export per-frame work', () => {
     // Exact, and this pipeline's own law: one full-raster read-back per frame.
     // Two would double the most expensive thing a GIF export does.
     expect(measured.getImageDataPerFrame).toBe(1)
-    // Exact: the two active media clips share one `<video>` element, so each
-    // frame reassigns its position once per clip, plus the one rewind before
-    // the loop.
-    expect(measured.steadyStateSeeksPerFrame).toBe(ACTIVE_MEDIA_CLIPS)
-    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS)
+    // Exact. Measured 2026-10-01, when the two active media clips (both of the
+    // scene's one source) shared one `<video>`: one seek per clip per frame,
+    // plus the one rewind before the loop (31: 1 + 15 x 2). Re-measured
+    // 2026-10-17 for ESCSUITE-313, which gives each clip its own element:
+    // still one seek per element per frame, except the second element's first
+    // frame, whose clip starts at source 0 where the new element already sits
+    // — 1 + 15 x 2 - 1 = 30.
+    expect(measured.steadyStateSeeksPerFrame).toBe((FRAMES * ACTIVE_MEDIA_CLIPS - 1) / FRAMES)
+    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS - 1)
   })
 
   it('encodes exactly one frame per drawn frame, through one writer', async () => {
@@ -282,5 +290,32 @@ describe('GIF export per-frame work', () => {
     // clip, and the text and shape overlays).
     expect(measured.animationLookupsPerFrame).toBe(ACTIVE_CLIPS)
     expect(measured.animationLookups).toBe(FRAMES * ACTIVE_CLIPS)
+  })
+  // ESCSUITE-313. The second this file measures is itself a two-clip,
+  // one-source frame — the blurred V1 clip and the picture-in-picture V2 clip
+  // both draw from the scene's one source, a second of source time apart — so
+  // it now takes two `<video>` elements, the second made the first time a frame
+  // needs it and read off the first one's object URL.
+  it('draws the two live clips of the one source from two elements over one object URL', async () => {
+    const urlsBefore = vi.mocked(URL.createObjectURL).mock.calls.length
+
+    const measured = await measureExport()
+
+    // Exact, measured 2026-10-17: two elements, one object URL for the export.
+    expect(media.videos).toHaveLength(ACTIVE_MEDIA_CLIPS)
+    expect(vi.mocked(URL.createObjectURL).mock.calls.length - urlsBefore).toBe(1)
+    // Exact: every frame draws twice, from two different elements.
+    const frames = splitFrames(getLastCanvasContext()!.calls)
+    expect(frames).toHaveLength(FRAMES)
+    for (const frame of frames) {
+      const drawn = frame.filter((c) => c.method === 'drawImage').map((c) => c.args[0])
+      expect(drawn).toHaveLength(ACTIVE_MEDIA_CLIPS)
+      expect(new Set(drawn).size).toBe(ACTIVE_MEDIA_CLIPS)
+    }
+    // Exact, measured 2026-10-17: the one rewind of the element loaded up
+    // front, then one seek per element per frame — except the second element's
+    // first frame, whose clip starts at source 0, where the new element already
+    // sits.
+    expect(measured.seeks).toBe(1 + FRAMES * ACTIVE_MEDIA_CLIPS - 1)
   })
 })

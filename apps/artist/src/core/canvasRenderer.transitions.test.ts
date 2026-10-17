@@ -3,7 +3,7 @@
 // recorded geometry: which source was drawn, with what alpha, clip region or
 // offset, at a given progress.
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
-import { drawClipToCanvas, drawTransition, drawTransitionWithFrames } from './canvasRenderer'
+import { drawClipToCanvas, drawTransition as drawTransitionFrom, drawTransitionWithFrames } from './canvasRenderer'
 import {
   createRecordingContext,
   destBox,
@@ -35,6 +35,29 @@ const incomingClip: Clip = makeClip({
   duration: 5,
   endTime: 5,
 })
+
+/**
+ * `drawTransition` with each side's `<video>` looked up by its clip's source,
+ * the way every caller looked them up before a source could have one element
+ * per live clip (ESCSUITE-313) — these cases are about the transition, not the
+ * lookup, so they keep their maps.
+ */
+function drawTransition(
+  ctx: CanvasRenderingContext2D,
+  videos: Map<string, HTMLVideoElement>,
+  images: Map<string, HTMLImageElement>,
+  transition: TransitionInfo,
+  ...rest: [number, number, number, MediaDrawOptions?]
+): boolean {
+  return drawTransitionFrom(
+    ctx,
+    videos.get(transition.outgoingClip.sourceVideoId),
+    videos.get(transition.incomingClip.sourceVideoId),
+    images,
+    transition,
+    ...rest
+  )
+}
 
 const transitionOf = (type: TransitionType, progress: number): TransitionInfo => ({
   outgoingClip,
