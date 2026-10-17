@@ -5132,6 +5132,32 @@ one glyph with zero overlap paused and playing, the controls' button present) ra
 twice. `App.*rerender*` and every `*.perf.test.ts` are byte-identical. **No floor crossed**; craft's floors
 stay 100 / 99 / 97 / 100 (98 on branches once ESCSUITE-322 lands).
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-309 (imported captions fit the frame on a
+portrait project: `captionStyleFor` sized the font from the height alone and the importer wrapped every
+cue at 42 characters whatever the width, so a 42-character Arial line on 1080×1920 was 86 px tall and
+1687 px wide in a 1080 px frame; the font is now `round(min(width, height) × 0.045)` — unchanged for every
+landscape project, 49 on 1080×1920 instead of 86 — and the wrap column count comes from one pure
+`captionWrapColumns(resolution, fontSize)`, `floor(width × 0.92 / (fontSize × 0.55))` clamped to [20, 42],
+0.55 em being a conservative Arial advance (the 42-character line at 49 px measured 0.467 em per
+character; all-caps averages about 0.68 em and can still run wide, a stated limit): landscape stays at 42,
+1080×1920 gives 36, 720×1280 gives 37, and a square project now wraps at 36 where it wrapped at 42 — the
+one existing shape the change moves, named in the changeset): 99.85 / 99.44 / 96.79 / 99.78, byte-identical
+on every percentage to the 99.85 / 99.44 / 96.79 / 99.78 that `main` at `40086222` (the ESCSUITE-317
+version-packages commit) measures in the same sitting. The base gives 6,123 / 6,326 branches and this
+branch the same 6,123 / 6,326: the change adds no decision at all — `Math.min`, `Math.max` and
+`Math.floor` are calls, not arms — with lines 9,554 / 9,568 → 9,562 / 9,576, statements 10,834 / 10,894 →
+10,842 / 10,902 and functions 2,273 / 2,278 → 2,274 / 2,279 (the one new function is
+`captionWrapColumns`), every new unit covered and the same 14 / 60 / 203 / 5 uncovered.
+`core/captions.ts` stays at 100 on all four and `components/VideoUploader.tsx` gains three covered lines
+at its caption call site (the style and the columns computed once per file). Red first:
+`expected 86 to be 49` for the portrait font, `TypeError: captionWrapColumns is not a function` for the
+three column cases, and the portrait import case on its wrapped text; the mutation (`min` → `height`)
+reds the portrait font case and the square columns case. One review round (sonnet): approved once the
+changeset and the "The style" bullet said the square change out loud and the all-caps limit was written
+beside the constant, which the coordinator did. Every `*.perf.test.ts` and rerender pin is
+byte-identical — the renderer is untouched and the arithmetic runs once per imported file. **No floor
+crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5139,7 +5165,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.79 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.44 | 96.79 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
