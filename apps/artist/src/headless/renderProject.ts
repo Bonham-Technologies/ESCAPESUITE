@@ -1,10 +1,17 @@
 // apps/artist/src/headless/renderProject.ts
 import { exportToGIF, exportToMP4, exportToWebM } from '../core/exporter'
 import {
+  aacEncoderConfig,
   calculateTimelineDuration,
+  EXPORT_AUDIO_CHANNELS,
+  EXPORT_AUDIO_SAMPLE_RATE,
+  ExportError,
   getBaseDimensions,
+  getQualitySettings,
   getResolution,
   gifFrameDelayMs,
+  isAudioCodecSupported,
+  projectHasAudio,
   VIDEO_EXPORT_FRAME_RATE,
 } from '../core/exportTypes'
 import { parseProject } from '../store/projectMigration'
@@ -51,6 +58,17 @@ function validateInput(request: RenderRequest): void {
     }
   }
 }
+
+/**
+ * The refusal of a sounded mp4 in a Chromium with no AAC encoder
+ * (ESCSUITE-312). The reference image's Linux Chromium has none — Chromium's
+ * AAC encoder is a platform codec on macOS and Windows — and `exportToMP4`
+ * answers that by skipping the mix and returning a silent file, which the
+ * editor's dialog says before and after the click. An unattended render has no
+ * one to tell, so it is refused by name instead, with the two ways out.
+ */
+export const NO_AAC_MP4_REFUSAL =
+  'This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.'
 
 /**
  * How long the encoded file plays, in seconds: the frames the exporter encoded
@@ -104,7 +122,10 @@ async function render(
   }
   const project: Project = parsed.project
   validateInput({ ...request, project })
-  const options: ExportOptions = { resolution: 'project', ...request.options }
+  // `allowSilentMp4` is a switch for this entry, not an export option: taken out
+  // here so the exporter receives exactly the options the dialog would hand it.
+  const { allowSilentMp4, ...exportOptions } = request.options
+  const options: ExportOptions = { resolution: 'project', ...exportOptions }
   // The seeded list is the completed one (probed width/height/duration); the
   // engine and the meta below both need those fields.
   const sourceVideos = await seedSources(request.sourceVideos, request.sourceBlobs)
@@ -158,10 +179,28 @@ async function render(
   // the fallback for an unrecognised value, which is what it has always been.
   const format: RenderMeta['format'] =
     options.format === 'webm' ? 'webm' : options.format === 'gif' ? 'gif' : 'mp4'
+  // A sounded project, an mp4, and no AAC encoder: refused before any exporter
+  // runs (ESCSUITE-312), unless the job asked for the picture alone. "Sounded" is
+  // the dialog's own `projectHasAudio` — so a video source with no audio track
+  // in it counts, the conservative direction — and the probe is the one
+  // `exportToMP4` itself runs, at the job's own bitrate, asked only once the
+  // cheaper questions have said a refusal is possible.
+  if (
+    format === 'mp4' &&
+    !allowSilentMp4 &&
+    projectHasAudio(clips, tracks, sourceVideos) &&
+    !(await isAudioCodecSupported(
+      aacEncoderConfig(EXPORT_AUDIO_SAMPLE_RATE, EXPORT_AUDIO_CHANNELS, getQualitySettings(options.quality).audioBitrate),
+    ))
+  ) {
+    throw new ExportError(NO_AAC_MP4_REFUSAL, [], undefined, undefined, 'AUDIO_CODEC_UNAVAILABLE')
+  }
+
   // The exporters hand back `{ blob, audio, framesEncoded, loudness? }`; the
-  // kit's manifest describes the bytes, so the blob, the frame count and the
-  // mix's measured loudness are read here and `audio` is not.
-  const { blob, framesEncoded, loudness } = format === 'webm'
+  // kit's manifest describes the bytes, so every field is read here — `audio`
+  // since ESCSUITE-312, which this entry used to drop, leaving a silent Linux
+  // mp4 reported as an ordinary success.
+  const { blob, audio, framesEncoded, loudness } = format === 'webm'
     ? await exportToWebM(clips, sourceVideos, options, progress, tracks, undefined, resolution)
     : format === 'gif'
       ? await exportToGIF(clips, sourceVideos, options, progress, tracks, undefined, resolution)
@@ -184,6 +223,7 @@ async function render(
       width: out.width,
       height: out.height,
       gpu: false, // set by the runner based on launch flags (Plan 2)
+      audio,
       // ESCSUITE-292: the manifest's four fields — the exporter's own
       // `limited` flag stays in the editor's completion line.
       ...(loudness

@@ -8,6 +8,16 @@ import type { RenderMeta, RenderOutcome } from './types'
 export const OUTPUT_SIZE_UNSUPPORTED = 'OUTPUT_SIZE_UNSUPPORTED'
 
 /**
+ * The bundle's `ExportError.code` for an mp4 job whose project has sound, in a Chromium with
+ * no AAC encoder (ESCSUITE-312) — Linux Chromium, the reference image's. Retrying on the same
+ * image fails identically: the job has to render webm, or set `options.allowSilentMp4`.
+ */
+export const AUDIO_CODEC_UNAVAILABLE = 'AUDIO_CODEC_UNAVAILABLE'
+
+/** Every code that names a failure of the job's input rather than of this run. */
+const PERMANENT_CODES: ReadonlySet<string> = new Set([OUTPUT_SIZE_UNSUPPORTED, AUDIO_CODEC_UNAVAILABLE])
+
+/**
  * What the in-page render hands back across the Playwright evaluate boundary. Playwright
  * carries a rejected in-page error's message across and nothing else — not its `code` — so a
  * coded failure is returned as data instead, and turned back into an error on this side.
@@ -39,5 +49,5 @@ export function unwrapPageRender(result: PageRenderResult): RenderMeta {
  * job-spec error, and `serve` answers 400; every other failure stays exit 1 / a 200 `ok: false`.
  */
 export function isPermanentFailure(outcome: RenderOutcome): boolean {
-  return outcome.code === OUTPUT_SIZE_UNSUPPORTED
+  return outcome.code !== undefined && PERMANENT_CODES.has(outcome.code)
 }

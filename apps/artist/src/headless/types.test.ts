@@ -13,7 +13,7 @@ describe('headless render contract', () => {
       options: { format: 'mp4' } as RenderInput['options'],
     }
     expect(input.options.format).toBe('mp4')
-    const meta: RenderMeta = { format: 'mp4', byteLength: 0, durationSec: 0, width: 2, height: 2, gpu: false }
+    const meta: RenderMeta = { format: 'mp4', byteLength: 0, durationSec: 0, width: 2, height: 2, gpu: false, audio: false }
     expect(meta.format).toBe('mp4')
   })
 })

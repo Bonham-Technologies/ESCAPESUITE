@@ -4713,6 +4713,10 @@ source actually carries an audio track means decoding it — the cost the probe-
 exists to avoid. So the dialog answers the second half itself: a clip whose track is present,
 `visible` and not `muted`, whose source `mediaType !== 'image'`. That is `core/audioMixer.ts`'s own
 skip clause minus its per-blob `decodeAudioData`, memoised on `clips`/`tracks`/`sourceVideos`.
+Since ESCSUITE-312 the rule is one pure `projectHasAudio(clips, tracks, sourceVideos)` in
+`core/exportTypes.ts` rather than an inline closure in `ExportDialog.tsx`, because the headless
+render asks the same question before refusing a sounded mp4 in a Chromium with no AAC encoder
+(see "Headless Render Bundle"); the dialog `useMemo`s a call to it and behaves exactly as before.
 
 It is **approximate in one direction only**: a video file with no audio track in it still counts,
 so the sentence can appear where strictly nothing was lost. That is the conservative error — it
@@ -5349,6 +5353,30 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   `SecurityError: Failed to construct 'Worker'`.
 - `options.resolution` defaults to `'project'`; `meta` describes the encoded output
   (honours `resolution` and `timeRange`).
+- **`meta.audio` says whether the file carries sound, and a sounded mp4 with no AAC encoder is
+  refused** (ESCSUITE-312). Linux Chromium — the kit's reference image — has no AAC encoder
+  (Chromium's AAC is a platform codec on macOS and Windows). `exportToMP4` already answers that
+  the ESCSUITE-175 way: it probes AAC first, skips the mix, reports `noAudioNote('mp4')` through
+  `onProgress` and returns `ExportResult.audio: false`. This entry used to read
+  `{ blob, framesEncoded, loudness }` and drop `audio`, so every kit mp4 job on Linux came back
+  `ok: true`, exit 0, a picture-only file, with any `loudnessTarget` silently ignored. Now
+  `RenderMeta.audio: boolean` (required) is the exporter's own flag for every format (a GIF's is
+  always `false`), returned by both `__renderProject` and `__renderProjectToFile` and written to
+  the kit's verification manifest beside `loudness`. And before any exporter runs, an `mp4` whose
+  project has sound — the shared `projectHasAudio` above, so a video source counts even when its
+  file has no audio track — in a Chromium where `isAudioCodecSupported(aacEncoderConfig(...))` (the
+  probe `exportToMP4` runs, at the job's own quality bitrate) answers `false` throws an
+  `ExportError` with `code: 'AUDIO_CODEC_UNAVAILABLE'` and `NO_AAC_MP4_REFUSAL`: "This Chromium has
+  no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4
+  to render the picture alone." The code crosses the Playwright boundary as data exactly as
+  `OUTPUT_SIZE_UNSUPPORTED` does, and the kit maps it to exit 2 / 400. The probe is asked only
+  after the format, the opt-out and `projectHasAudio` have said a refusal is possible.
+  `options.allowSilentMp4?: boolean` (`RenderInput['options']`, so the kit's `JobSpec` too) skips
+  the refusal and renders the picture alone with `audio: false`; it is destructured out of the
+  options before the spread, so the exporter never sees it. A silent project — images, overlays,
+  every track muted or hidden — renders mp4 as before with `audio: false`. WebM and GIF are never
+  refused by this rule. The editor's own export is unchanged: it still offers a silent MP4 with a
+  note, because a person is there to read it.
 - **`options.timeRange` is clamped to the timeline before the exporter ever sees it**
   (ESCSUITE-191, hunt-j J-9): `render()` clamps `{start, end}` to `[0, timelineDuration]`
   — an `end` past the timeline is pulled in to it, a negative `start` is floored at

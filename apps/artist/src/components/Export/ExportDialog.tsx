@@ -32,6 +32,7 @@ import {
   TAB_VISIBLE_NOTE,
   calculateTimelineDuration,
   exportLengthReason,
+  projectHasAudio as computeProjectHasAudio,
 } from '../../core/exportTypes';
 import { LOUDNESS_TARGETS, formatLoudnessSummary, loudnessTargetOrOff } from '../../core/loudness';
 import type { LoudnessTarget } from '../../core/loudness';
@@ -270,30 +271,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     ? null
     : bothVideoFormatsBlockedReason ?? mp4Support.outputSizeReason ?? MP4_NO_CODEC_REASON;
 
-  // Whether this project has anything that could carry sound: a clip whose
-  // track is present, visible and unmuted, whose source is not an image. That
-  // is `core/audioMixer.ts`'s own skip clause minus the per-blob
-  // `decodeAudioData` — which is the one part the dialog cannot afford, and the
-  // whole reason the exporter can no longer answer this question itself
-  // (ESCSUITE-175 probes AAC *before* mixing, precisely so a browser with no
-  // AAC encoder never pays for the mix).
-  //
-  // Approximate in exactly one direction, and deliberately so: a **video file
-  // with no audio track in it** still counts as "could carry sound", so the
-  // completion sentence can appear where strictly nothing was lost. That is the
-  // conservative error — it over-reports rather than staying silent about a real
-  // loss — and making it exact would mean decoding every source, the cost this
-  // ticket removed. What it does rule out is the cases that are *knowably*
-  // silent: an image-only or overlay-only timeline, and one whose every track is
-  // muted or hidden.
+  // Whether this project has anything that could carry sound — the rule, and
+  // the one direction it errs in, are documented on `projectHasAudio` in
+  // `core/exportTypes.ts`, which the headless render shares (ESCSUITE-312).
   const projectHasAudio = useMemo(
-    () =>
-      clips.some((clip) => {
-        const track = tracks.find((t) => t.id === clip.trackId);
-        if (!track || track.muted || !track.visible) return false;
-        const source = sourceVideos.find((v) => v.id === clip.sourceVideoId);
-        return source !== undefined && source.mediaType !== 'image';
-      }),
+    () => computeProjectHasAudio(clips, tracks, sourceVideos),
     [clips, tracks, sourceVideos]
   );
 

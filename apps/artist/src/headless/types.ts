@@ -15,7 +15,16 @@ export interface RenderInput {
   /** Raw bytes per source id. A Blob (e.g. a File) is stored as-is — no copy. */
   sourceBlobs: Record<string, ArrayBuffer | Blob>
   /** Export options. `resolution` defaults to 'project' when omitted. */
-  options: Omit<ExportOptions, 'resolution'> & { resolution?: ExportOptions['resolution'] }
+  options: Omit<ExportOptions, 'resolution'> & {
+    resolution?: ExportOptions['resolution']
+    /**
+     * Render an mp4 of a project with sound even though this Chromium has no AAC
+     * encoder, as the picture alone (ESCSUITE-312). Without it such a render is
+     * refused with `AUDIO_CODEC_UNAVAILABLE`. A switch for the headless entry, not
+     * an export option: it is never handed to the exporter.
+     */
+    allowSilentMp4?: boolean
+  }
 }
 
 /** File-based variant used by the runner: sources come from the hidden <input type=file>. */
@@ -48,6 +57,14 @@ export interface RenderMeta {
   width: number
   height: number
   gpu: boolean
+  /**
+   * Whether the encoded file carries an audio track (ESCSUITE-312): the
+   * exporter's own `ExportResult.audio`. `false` for every GIF, and for an mp4
+   * rendered by a Chromium with no AAC encoder under `options.allowSilentMp4`.
+   * Read it as "this file has no audio track", not "sound was lost": a silent
+   * project rendered by such a Chromium is `false` too.
+   */
+  audio: boolean
   /**
    * The mix's ITU-R BS.1770-4 loudness as measured before any gain, and the gain
    * applied to reach `options.loudnessTarget` (ESCSUITE-292). Absent when the

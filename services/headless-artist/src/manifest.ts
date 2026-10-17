@@ -51,6 +51,9 @@ export async function buildManifest(
     width: meta.width,
     height: meta.height,
     gpu: meta.gpu,
+    // ESCSUITE-312: whether the file carries an audio track at all — `false` for every GIF and
+    // for an mp4 rendered silent under `allowSilentMp4`. Always present, beside `loudness`.
+    audio: meta.audio,
     // ESCSUITE-292: present exactly when the render measured its mix — additive, so a consumer
     // that reads only the fields it always has is unaffected.
     ...(meta.loudness ? { loudness: meta.loudness } : {}),
