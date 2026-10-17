@@ -4906,13 +4906,43 @@ it again on reload; A's successor is offered its own session and restores it) �
 form is a comment; its Chromium run is recorded on the ticket. `App.*rerender*` and every `*.perf.test.ts` are
 byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/craft` was re-measured 2026-10-17 for ESCSUITE-317 (the offline single-file ESCAPECRAFT
+records through the AudioWorklet in Chromium again: opened from `file://` its module URL is
+`blob:null/…`, which Chromium's worklet loader refuses — so since ESCSUITE-299 every offline Chromium
+take had quietly taken the ScriptProcessorNode fallback with ESCSUITE-296's gap filler, the one
+`console.info` line the only trace — and `choosePath` now tries the `blob:` module first, revokes it
+either way, retries once with the same source as a `data:text/javascript;charset=utf-8` URL when the
+first is refused, and only then falls back naming the `data:` rejection; the info line says which kind
+loaded, "(blob module)" or "(data module)"; `blob:` stays first so the hosted Content-Security-Policy
+never has to admit `data:`): 100.00 / 99.57 / 97.93 / 100.00, byte-identical on every percentage to the
+100.00 / 99.57 / 97.93 / 100.00 that `main` at `31fa9edc` (the ESCSUITE-301 version-packages commit)
+measures in the same sitting. Lines 2,626 → 2,631 and statements 2,810 / 2,822 → 2,815 / 2,827, every new
+unit covered; branches 1,473 / 1,504 and functions 497 on both trees — the retry adds no decision v8
+counts: it is a `try` / `catch` around the second `addModule`, statements to Istanbul, and the module kind
+is set in each arm — and the same 12 statements and 31 branches uncovered, in the same four files. All five
+new lines are `core/audioWorkletCapture.ts`'s (122 → 127, 133 → 138 statements), reached by the four red
+cases through an `AudioWorkletNode` double that can refuse a `blob:` module, a `data:` module or both
+(the `data:` payload decoded back to `PROCESSOR_SOURCE` exactly): `blob:` accepted → one `addModule`,
+"(blob module)"; `blob:` refused, `data:` accepted → two calls, "(data module)", red before the fix at
+`expected "vi.fn()" to be called 2 times, but got 1 times`; both refused → the ScriptProcessor fallback
+naming the `data:` rejection; no `audioWorklet` at all → the fallback with no call. One deliberate
+perf-pin addition, called out in the PR: `webcodecsRecorder.perf.test.ts`'s existing worklet law (one
+`addModule` per take) is untouched and a new case states the retry path's own law — two `addModule`
+calls, the same chunk laws. The review's mutation (the catch returning `'script-processor'` without the
+retry) turned four cases red. Outside vitest's measurement, `apps/e2e/tests/standalone/craft.spec.ts`
+gains a `file://` case asserting exactly one "through an AudioWorklet" line and no ScriptProcessor line on
+Chromium and Firefox, with WebKit logging its answer for ESCSUITE-321; it is run by the coordinator
+against `pnpm build:standalone`, and its result is recorded on the ticket. `recorder.perf.test.ts`,
+`compositor.perf.test.ts`, `converter.perf.test.ts` and every `App.*rerender*` are byte-identical. **No
+floor crossed**; craft's floors stay 100 / 99 / 97 / 100.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.53 | 97.85 | 100.00 |
+| `@escapesuite/craft` | 100.00 | 99.57 | 97.93 | 100.00 |
 | `@escapesuite/artist` | 99.85 | 99.44 | 96.78 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
