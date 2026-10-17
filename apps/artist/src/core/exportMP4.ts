@@ -34,6 +34,7 @@ import {
   waitForEncoderBackpressure,
   ExportError,
   exportErrorCodeOf,
+  sourceMissingError,
   MediaLoadTimeoutError,
   EXPORT_AUDIO_CHANNELS,
   EXPORT_AUDIO_SAMPLE_RATE,
@@ -329,49 +330,53 @@ export async function exportToMP4(
       checkAborted(signal);
 
       const source = sourceMap.get(sourceId);
+      const mediaName = source?.name ?? sourceId;
       const blob = await getVideoBlob(sourceId);
 
-      if (blob) {
-        const mediaName = source?.name ?? sourceId;
-        // Every load failure fails the export by name (ESCSUITE-328): a source
-        // the browser neither decodes (`error`) nor reports on within the 15 s
-        // deadline (ESCSUITE-325) would otherwise be dropped from the file
-        // without a word. The element exporters still warn and skip.
-        const loadFailure = (e: unknown): ExportError => {
-          const message =
-            e instanceof MediaLoadTimeoutError
-              ? e.message
-              : `Could not read ${mediaName} \u2014 the browser could not decode it`;
-          log('error', message);
-          return new ExportError(message, exportLog);
-        };
-        if (source?.mediaType === 'image') {
-          // Load as image
-          try {
-            imageElements.set(sourceId, await loadImageElement(blob, mediaName));
-          } catch (e) {
-            throw loadFailure(e);
-          }
-        } else if (source?.mediaType !== 'audio') {
-          // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
-          try {
-            await loadFrameSource(
-              frameManager,
-              sourceId,
-              blob,
-              blob.type || 'video/mp4',
-              reportInPageDecoding,
-              source?.frameRate,
-              source?.name
-            );
-          } catch (e) {
-            // A load the export's Cancel rejected is not a failure to name
-            // (ESCSUITE-314).
-            checkAborted(signal);
-            // A source that is not an image was never going to decode as one,
-            // so a failed `<video>` is not retried as an image any more.
-            throw loadFailure(e);
-          }
+      // No bytes to load at all — another tab's Clear All deleted them
+      // (ESCSUITE-330): refuse by name, whatever the source's media type. The
+      // `catch` below releases the decode worker and every source already
+      // loaded, as it does for a load failure.
+      if (!blob) throw sourceMissingError(mediaName, exportLog);
+
+      // Every load failure fails the export by name (ESCSUITE-328): a source
+      // the browser neither decodes (`error`) nor reports on within the 15 s
+      // deadline (ESCSUITE-325) would otherwise be dropped from the file
+      // without a word. The element exporters still warn and skip.
+      const loadFailure = (e: unknown): ExportError => {
+        const message =
+          e instanceof MediaLoadTimeoutError
+            ? e.message
+            : `Could not read ${mediaName} \u2014 the browser could not decode it`;
+        log('error', message);
+        return new ExportError(message, exportLog);
+      };
+      if (source?.mediaType === 'image') {
+        // Load as image
+        try {
+          imageElements.set(sourceId, await loadImageElement(blob, mediaName));
+        } catch (e) {
+          throw loadFailure(e);
+        }
+      } else if (source?.mediaType !== 'audio') {
+        // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
+        try {
+          await loadFrameSource(
+            frameManager,
+            sourceId,
+            blob,
+            blob.type || 'video/mp4',
+            reportInPageDecoding,
+            source?.frameRate,
+            source?.name
+          );
+        } catch (e) {
+          // A load the export's Cancel rejected is not a failure to name
+          // (ESCSUITE-314).
+          checkAborted(signal);
+          // A source that is not an image was never going to decode as one,
+          // so a failed `<video>` is not retried as an image any more.
+          throw loadFailure(e);
         }
       }
     }

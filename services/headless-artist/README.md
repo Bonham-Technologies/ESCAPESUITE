@@ -601,6 +601,7 @@ the description with the operators in `test/fuzz.ts` (the same harness ESCAPEART
 | `2` | The job ran and was refused for its input: the output size is one the H.264 encoder refuses — `options.format: "mp4"` at a size with a side under 16 px, such as 64x8 or 3840x2, or one too large for the encoder, in a Chromium that encodes H.264 at 1280x720 (ESCSUITE-237). Retrying identically will fail identically; change the size, or render `webm` or `gif`, which are unaffected. | One JSON `RenderOutcome` line with `"ok": false`, the reason in `error` (`The output size 64×8 is too small for H.264 — MP4 needs at least 16×16; WebM and GIF are unaffected.`, or for a size too large for it `The output size 7680×4320 is too large for H.264 in this browser; WebM and GIF are unaffected.`) and `"code": "OUTPUT_SIZE_UNSUPPORTED"`. |
 | `2` | The job ran and was refused for its input: `options.format: "mp4"` for a project whose sources carry an audio track, in a Chromium with no AAC encoder — Linux Chromium, the reference image's (ESCSUITE-312). Retrying on the same image will fail identically; render `webm`, or set `options.allowSilentMp4` to render the picture alone. | One JSON `RenderOutcome` line with `"ok": false`, the reason in `error` (`This Chromium has no AAC encoder, so an mp4 render would have no sound. Render webm, or set options.allowSilentMp4 to render the picture alone.`) and `"code": "AUDIO_CODEC_UNAVAILABLE"`. |
 | `2` | The job ran and was refused for its input: a video source whose seeks never complete in this browser (ESCSUITE-305) — a WebM with no Cues index, in an engine that cannot seek one. Every frame would have been black, so the render fails by name instead; retrying on the same engine fails identically. Chromium, the reference image's engine, seeks such a file, so a job rendered there should not meet this refusal. ESCAPEARTIST now repairs such a file when it is imported, so a bundle saved from a project whose sources were imported after this release carries a seekable copy. | One JSON `RenderOutcome` line with `"ok": false`, the reason in `error` (`This browser cannot read "<source name>" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.`) and `"code": "SOURCE_NOT_SEEKABLE"`. |
+| `2` | The job ran and was refused for its input: a clip whose source has no bytes in the page's storage (ESCSUITE-330). The loaders refuse a clip naming a source the job does not carry before Chromium launches, and every source the job carries is stored, so a job should not meet this; it is mapped as permanent so that one that does is not retried. | One JSON `RenderOutcome` line with `"ok": false`, the reason in `error` (`The media for "<source name>" is no longer in storage (it was removed in another window or by Clear All); remove the clip or re-import the file`) and `"code": "SOURCE_MISSING"`. |
 
 An exit `2` also covers a `volume` job whose output directory cannot be created or written by
 the user the process runs as (checked by writing and removing a private temp file before Chromium
@@ -723,7 +724,8 @@ is a working loop; the contract it relies on is small:
   `"code": "OUTPUT_SIZE_UNSUPPORTED"` (ESCSUITE-237), and an MP4 whose sources carry an audio track on
   a Chromium with no AAC encoder, whose outcome carries `"code": "AUDIO_CODEC_UNAVAILABLE"` (ESCSUITE-312), and
   a source whose seeks never complete in the render's browser, whose outcome carries
-  `"code": "SOURCE_NOT_SEEKABLE"` (ESCSUITE-305). Before
+  `"code": "SOURCE_NOT_SEEKABLE"` (ESCSUITE-305), and a clip whose source has no stored bytes,
+  whose outcome carries `"code": "SOURCE_MISSING"` (ESCSUITE-330). Before
   ESCSUITE-237 the first exited 1, inviting a retry that could only fail the same way; before
   ESCSUITE-312 the second exited 0 with a silent file.
 - **Read `outputLocation` from the outcome**, don't reconstruct it — it differs per sink.
@@ -832,11 +834,12 @@ progress tears such a request down immediately instead of waiting for the next s
 
 | Status | When | Body |
 | --- | --- | --- |
-| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200, except for a job refused for its input (the second and third `400` rows). | `RenderOutcome` |
+| `200` | The job ran. **Including when it failed** — `ok: false` with an `error` is still a 200, except for a job refused for its input (every `400` row after the first). | `RenderOutcome` |
 | `400` | The body is not JSON, or the job spec is invalid. The job never started. | `{"error": "options.format must be one of \"mp4\", \"webm\", or \"gif\""}` |
 | `400` | The job ran and was refused for its input: an MP4 at an output size the H.264 encoder refuses (ESCSUITE-237) — the CLI's second exit `2`. Resending it can never succeed. | The `RenderOutcome`, with `"ok": false`, the reason in `error` and `"code": "OUTPUT_SIZE_UNSUPPORTED"`. |
 | `400` | The job ran and was refused for its input: an MP4 of a project whose sources carry an audio track, in a Chromium with no AAC encoder (ESCSUITE-312) — the CLI's third exit `2`. Resending it to the same image can never succeed. | The `RenderOutcome`, with `"ok": false`, the reason in `error` and `"code": "AUDIO_CODEC_UNAVAILABLE"`. |
 | `400` | The job ran and was refused for its input: a video source whose seeks never complete in this browser (ESCSUITE-305) — the CLI's fourth exit `2`. Resending it to the same engine can never succeed. | The `RenderOutcome`, with `"ok": false`, the reason in `error` and `"code": "SOURCE_NOT_SEEKABLE"`. |
+| `400` | The job ran and was refused for its input: a clip whose source has no stored bytes (ESCSUITE-330) — the CLI's fifth exit `2`. Resending it can never succeed. | The `RenderOutcome`, with `"ok": false`, the reason in `error` and `"code": "SOURCE_MISSING"`. |
 | `403` | The job asked for a sink this server does not enable. Decided before it was queued — see [the sink allow-list](#the-sink-allow-list). | `{"error": "sink \"command\" is not enabled on this server (HEADLESS_SINKS)"}` |
 | `404` | No such route. Only `/healthz` and `/render` exist. | `{"error": "not found: /renderr"}` |
 | `405` | Right path, wrong method — `GET /render`, `POST /healthz`. Carries an `Allow` header. | `{"error": "…"}` |

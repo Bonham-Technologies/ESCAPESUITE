@@ -194,7 +194,9 @@ export async function exportToWebM(
   // Load all unique source media (videos and images)
   onProgress({ phase: 'preparing', progress: 12, message: 'Loading media files...' });
 
-  const sources = await loadElementSources(clips, sourceMap);
+  // A clip whose source has no stored bytes refuses here, by name, the loader
+  // freeing what it had loaded before it (ESCSUITE-330).
+  const sources = await loadElementSources(clips, sourceMap, exportLog);
 
   // From here on the media elements are this function's to free, so the `try`
   // starts at the load and not at the frame loop (ESCSUITE-156). Everything

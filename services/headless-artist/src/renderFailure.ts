@@ -22,11 +22,20 @@ export const AUDIO_CODEC_UNAVAILABLE = 'AUDIO_CODEC_UNAVAILABLE'
  */
 export const SOURCE_NOT_SEEKABLE = 'SOURCE_NOT_SEEKABLE'
 
+/**
+ * The bundle's `ExportError.code` for a clip whose source has no bytes in the page's storage
+ * (ESCSUITE-330) — in the editor, another tab's Clear All deleted them. The kit's loaders refuse a
+ * clip naming a source the job does not carry before Chromium launches, and every source the job
+ * carries is seeded, so a job should not meet this; if one does, retrying it fails identically.
+ */
+export const SOURCE_MISSING = 'SOURCE_MISSING'
+
 /** Every code that names a failure of the job's input rather than of this run. */
 const PERMANENT_CODES: ReadonlySet<string> = new Set([
   OUTPUT_SIZE_UNSUPPORTED,
   AUDIO_CODEC_UNAVAILABLE,
   SOURCE_NOT_SEEKABLE,
+  SOURCE_MISSING,
 ])
 
 /**

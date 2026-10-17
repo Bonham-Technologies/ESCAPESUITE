@@ -192,7 +192,7 @@ describe.each(EXPORTERS)('a %s export whose clip\'s source has no stored bytes (
     expect((error as ExportError).message).toBe(missing('Probe 311 take'))
     expect((error as ExportError).code).toBe('SOURCE_MISSING')
     // The trail says what happened, as every other refusal's does.
-    expect((error as ExportError).exportLog.at(-1)).toMatchObject({ phase: 'error', detail: missing('Probe 311 take') })
+    expect((error as ExportError).exportLog[(error as ExportError).exportLog.length - 1]).toMatchObject({ phase: 'error', detail: missing('Probe 311 take') })
     expect(nothingEncoded()).toBe(true)
     expect(media.videos).toHaveLength(0)
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
