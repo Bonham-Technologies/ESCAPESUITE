@@ -14,7 +14,7 @@ import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
 import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
-import { loadVideoElementFromUrl } from './exportTypes';
+import { ExportAbortedError, loadVideoElementFromUrl } from './exportTypes';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -427,7 +427,9 @@ export class HTMLVideoFrameSource implements IFrameSource {
  *
  * The worker answers every request (it bounds its own waits), so a failure
  * arrives as a rejection here. Requests already in flight when it happens are
- * served by the same `<video>` source; the worker's copy is disposed.
+ * served by the same `<video>` source; the worker's copy is disposed. A
+ * rejection that is the export's own Cancel (ESCSUITE-314) is not a failure
+ * and hands nothing over: it is passed straight on.
  */
 class FailoverFrameSource implements IFrameSource {
   private fallback: Promise<IFrameSource> | null = null;
@@ -444,6 +446,7 @@ class FailoverFrameSource implements IFrameSource {
       try {
         return await this.primary.getFrame(timestamp, slot);
       } catch (error) {
+        if (error instanceof ExportAbortedError) throw error;
         this.handOver(error);
       }
     }
@@ -527,7 +530,10 @@ export class FrameSourceFactory {
    *
    * `signal`, when given, is forwarded to the decode manager so a cancelled
    * export does not have to wait out the manager's full startup timeout
-   * (ESCSUITE-29 Mechanism 2).
+   * (ESCSUITE-29 Mechanism 2) — nor, once it is running, a source load or a
+   * frame request: an abort terminates the worker and rejects them with
+   * ExportAbortedError, which createSource() and a source's getFrame() pass on
+   * rather than falling back to `<video>` for (ESCSUITE-314).
    *
    * If the decode worker fails to start for any reason — missing from a
    * standalone download (ESCSUITE-153), blocked by CSP, timed out, or the
@@ -604,6 +610,9 @@ export class FrameSourceFactory {
           onFallback
         );
       } catch (error) {
+        // The export was cancelled while this source was loading
+        // (ESCSUITE-314): there is nothing to fall back for.
+        if (error instanceof ExportAbortedError) throw error;
         // Fall back to HTMLVideoElement on error — and say so: before
         // ESCSUITE-254 this warning was the only trace that every source
         // fell back.

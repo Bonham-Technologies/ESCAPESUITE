@@ -267,163 +267,180 @@ export async function exportToMP4(
   const frameManager = await createFrameManager(isWebCodecsAvailable(), signal);
   const imageElements: Map<string, HTMLImageElement> = new Map();
 
-  // Tell the user when any of this export decodes in the page: the dialog's
-  // own copy promises background-tab encoding, which only holds when
-  // WebCodecs decodes every video source. Said once per export, at the
-  // progress the export has reached, whichever way it happens — the decode
-  // worker could not start (ESCSUITE-153 / ESCSUITE-29 Mechanism 2),
-  // WebCodecs/Worker was never available, or the worker started but refused
-  // a source or gave up on one mid-export (ESCSUITE-254). Without this, the
-  // only signal of the degraded path is a console.warn nobody but a developer
-  // will see — which is how the worker went nine months without decoding a
-  // single source.
-  let inPageDecodingReported = false;
-  let reportedProgress: Pick<ExportProgress, 'phase' | 'progress'> = { phase: 'preparing', progress: 12 };
-  const reportInPageDecoding = () => {
-    if (inPageDecodingReported) return;
-    inPageDecodingReported = true;
-    onProgress({ ...reportedProgress, message: 'Decoding in the page; keep this tab in the foreground' });
-  };
-
-  // Log which mode we're using
-  if (frameManager.useWebCodecs) {
-    console.log('[MP4 Export] Using WebCodecs for video decoding (background-capable)');
-  } else {
-    console.log('[MP4 Export] Using HTMLVideoElement for video decoding (standard mode)');
-    reportInPageDecoding();
-  }
-
-  // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
-  const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
-
-  for (const sourceId of uniqueSourceIds) {
-    const source = sourceMap.get(sourceId);
-    const blob = await getVideoBlob(sourceId);
-
-    if (blob) {
-      if (source?.mediaType === 'image') {
-        // Load as image
-        const img = await loadImageElement(blob);
-        imageElements.set(sourceId, img);
-      } else if (source?.mediaType !== 'audio') {
-        // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
-        try {
-          await loadFrameSource(
-            frameManager,
-            sourceId,
-            blob,
-            blob.type || 'video/mp4',
-            reportInPageDecoding,
-            source?.frameRate,
-            source?.name
-          );
-        } catch (e) {
-          // A source the browser neither decodes nor rejects fails the export
-          // by name (ESCSUITE-325): skipping it would drop the clip from the
-          // file without a word. Every other load failure is skipped below.
-          if (e instanceof MediaLoadTimeoutError) {
-            cleanupIterationFrames(frameManager);
-            await disposeFrameManager(frameManager);
-            imageElements.forEach((img) => URL.revokeObjectURL(img.src));
-            log('error', e.message);
-            throw new ExportError(e.message, exportLog);
-          }
-          console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
-          // Try loading as image as fallback
-          try {
-            const img = await loadImageElement(blob);
-            imageElements.set(sourceId, img);
-          } catch {
-            console.warn(`Failed to load media ${sourceId}`);
-          }
-        }
-      }
-    }
-  }
-
-  onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
-
-  // Create Mediabunny output with MP4 format
-  const target = new BufferTarget();
-  const output = new Output({
-    format: new Mp4OutputFormat({
-      fastStart: 'in-memory',
-    }),
-    target,
-  });
-
-  // Create video packet source
-  const videoSource = new EncodedVideoPacketSource('avc');
-  output.addVideoTrack(videoSource, { frameRate });
-
-  // Create audio packet source if we have audio. AAC was probed before the mix
-  // ran (above), so reaching here with audio data means the encoder exists.
-  let audioSource: EncodedAudioPacketSource | null = null;
-  if (audioData) {
-    audioSource = new EncodedAudioPacketSource('aac');
-    output.addAudioTrack(audioSource);
-  }
-
-  // Start the output
-  await output.start();
-
-  // Create video encoder with error tracking
-  let videoEncoderError: Error | null = null;
-  const videoEncoder = new VideoEncoder({
-    output: async (chunk, meta) => {
-      await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-    },
-    error: (e) => {
-      console.error('Video encoder error:', e);
-      videoEncoderError = e instanceof Error ? e : new Error(String(e));
-    },
-  });
-
-  await videoEncoder.configure(videoConfig);
-
-  // Create audio encoder if we have audio
-  let audioEncoder: AudioEncoder | null = null;
-  let audioEncoderError: Error | null = null;
-  if (audioData && audioSource) {
-    audioEncoder = new AudioEncoder({
-      output: async (chunk, meta) => {
-        await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
-      },
-      error: (e) => {
-        console.error('Audio encoder error:', e);
-        audioEncoderError = e instanceof Error ? e : new Error(String(e));
-      },
-    });
-
-    await audioEncoder.configure(aacConfig);
-  }
-
-  // WebCodecs-based frame fetching runs at full speed (no browser throttling)
-  const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
-  let frameCount = 0;
-
-  // Helper to clean up resources on abort or completion
-  const cleanup = async () => {
-    // Clean up any remaining iteration frames
+  // Release the decode worker, its sources and every image URL: the frame
+  // manager owns a worker that may hold up to 512 MB of samples, so everything
+  // from here to the end of the export sits inside the `try` below, whose
+  // `catch` releases it however far the setup got (ESCSUITE-315) — the media
+  // load, `output.start()`, both `configure()` calls and the caller's own
+  // `onProgress` used to sit above it, as WebM's and GIF's did before
+  // ESCSUITE-156. Run at most once (the ESCSUITE-159 shape): the success path
+  // releases before its "complete" report, and anything that throws after it
+  // reaches the `catch` too.
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
     cleanupIterationFrames(frameManager);
-
-    // Dispose frame manager (closes VideoFrames and frame sources)
+    // Closes VideoFrames and frame sources, and terminates the decode worker.
     await disposeFrameManager(frameManager);
-
-    // Clean up image elements
     imageElements.forEach((img) => {
       URL.revokeObjectURL(img.src);
     });
   };
 
-  onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
-  reportedProgress = { phase: 'encoding', progress: 18 };
-  log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
-
-  // Each live clip's slot, refilled every frame (ESCSUITE-313).
-  const slots = new Map<string, number>();
+  // What the `catch` needs to close, however far construction got, and the
+  // count its trail reports.
+  const openEncoders: Array<VideoEncoder | AudioEncoder> = [];
+  let frameCount = 0;
 
   try {
+    // Tell the user when any of this export decodes in the page: the dialog's
+    // own copy promises background-tab encoding, which only holds when
+    // WebCodecs decodes every video source. Said once per export, at the
+    // progress the export has reached, whichever way it happens — the decode
+    // worker could not start (ESCSUITE-153 / ESCSUITE-29 Mechanism 2),
+    // WebCodecs/Worker was never available, or the worker started but refused
+    // a source or gave up on one mid-export (ESCSUITE-254). Without this, the
+    // only signal of the degraded path is a console.warn nobody but a developer
+    // will see — which is how the worker went nine months without decoding a
+    // single source.
+    let inPageDecodingReported = false;
+    let reportedProgress: Pick<ExportProgress, 'phase' | 'progress'> = { phase: 'preparing', progress: 12 };
+    const reportInPageDecoding = () => {
+      if (inPageDecodingReported) return;
+      inPageDecodingReported = true;
+      onProgress({ ...reportedProgress, message: 'Decoding in the page; keep this tab in the foreground' });
+    };
+
+    // Log which mode we're using
+    if (frameManager.useWebCodecs) {
+      console.log('[MP4 Export] Using WebCodecs for video decoding (background-capable)');
+    } else {
+      console.log('[MP4 Export] Using HTMLVideoElement for video decoding (standard mode)');
+      reportInPageDecoding();
+    }
+
+    // Get unique source IDs, filtering out empty ones (overlay clips have no sourceVideoId)
+    const uniqueSourceIds = [...new Set(clips.map(c => c.sourceVideoId).filter(id => id && id.length > 0))];
+
+    for (const sourceId of uniqueSourceIds) {
+      // A Cancel during the loads loads no further source (ESCSUITE-314); one
+      // that lands during a worker load rejects that load, below.
+      checkAborted(signal);
+
+      const source = sourceMap.get(sourceId);
+      const blob = await getVideoBlob(sourceId);
+
+      if (blob) {
+        if (source?.mediaType === 'image') {
+          // Load as image
+          const img = await loadImageElement(blob);
+          imageElements.set(sourceId, img);
+        } else if (source?.mediaType !== 'audio') {
+          // Load as video using frame manager (supports WebCodecs or HTMLVideoElement)
+          try {
+            await loadFrameSource(
+              frameManager,
+              sourceId,
+              blob,
+              blob.type || 'video/mp4',
+              reportInPageDecoding,
+              source?.frameRate,
+              source?.name
+            );
+          } catch (e) {
+            // A load the export's Cancel rejected is not a source to try as an
+            // image (ESCSUITE-314).
+            checkAborted(signal);
+            // A source the browser neither decodes nor rejects fails the export
+            // by name (ESCSUITE-325): skipping it would drop the clip from the
+            // file without a word. Every other load failure is skipped below.
+            if (e instanceof MediaLoadTimeoutError) {
+              log('error', e.message);
+              throw new ExportError(e.message, exportLog);
+            }
+            console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
+            // Try loading as image as fallback
+            try {
+              const img = await loadImageElement(blob);
+              imageElements.set(sourceId, img);
+            } catch {
+              console.warn(`Failed to load media ${sourceId}`);
+            }
+          }
+        }
+      }
+    }
+
+    onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
+
+    // Create Mediabunny output with MP4 format
+    const target = new BufferTarget();
+    const output = new Output({
+      format: new Mp4OutputFormat({
+        fastStart: 'in-memory',
+      }),
+      target,
+    });
+
+    // Create video packet source
+    const videoSource = new EncodedVideoPacketSource('avc');
+    output.addVideoTrack(videoSource, { frameRate });
+
+    // Create audio packet source if we have audio. AAC was probed before the mix
+    // ran (above), so reaching here with audio data means the encoder exists.
+    let audioSource: EncodedAudioPacketSource | null = null;
+    if (audioData) {
+      audioSource = new EncodedAudioPacketSource('aac');
+      output.addAudioTrack(audioSource);
+    }
+
+    // Start the output
+    await output.start();
+
+    // Create video encoder with error tracking
+    let videoEncoderError: Error | null = null;
+    const videoEncoder = new VideoEncoder({
+      output: async (chunk, meta) => {
+        await videoSource.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+      },
+      error: (e) => {
+        console.error('Video encoder error:', e);
+        videoEncoderError = e instanceof Error ? e : new Error(String(e));
+      },
+    });
+    openEncoders.push(videoEncoder);
+
+    await videoEncoder.configure(videoConfig);
+
+    // Create audio encoder if we have audio
+    let audioEncoder: AudioEncoder | null = null;
+    let audioEncoderError: Error | null = null;
+    if (audioData && audioSource) {
+      audioEncoder = new AudioEncoder({
+        output: async (chunk, meta) => {
+          await audioSource!.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+        },
+        error: (e) => {
+          console.error('Audio encoder error:', e);
+          audioEncoderError = e instanceof Error ? e : new Error(String(e));
+        },
+      });
+      openEncoders.push(audioEncoder);
+
+      await audioEncoder.configure(aacConfig);
+    }
+
+    // WebCodecs-based frame fetching runs at full speed (no browser throttling)
+    const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+
+    onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
+    reportedProgress = { phase: 'encoding', progress: 18 };
+    log('frames', `Starting frame loop: ${totalFrames} total frames at ${frameRate}fps`);
+
+    // Each live clip's slot, refilled every frame (ESCSUITE-313).
+    const slots = new Map<string, number>();
+
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
       // Check for abort at start of each frame
       checkAborted(signal);
@@ -762,8 +779,8 @@ export async function exportToMP4(
     // so the catch below does the cleanup and rethrows the abort as-is.
     checkAborted(signal);
 
-    // Clean up media elements
-    await cleanup();
+    // Release the worker and the media, once.
+    await release();
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
@@ -779,21 +796,21 @@ export async function exportToMP4(
     // dialog pairs this with its own `projectHasAudio` before claiming a loss.
     return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported, framesEncoded: frameCount, loudness };
   } catch (error) {
-    // Clean up resources on error
-    await cleanup();
+    // The same release the success path made, run at most once: the two paths
+    // are not exclusive — the "complete" report and the empty-buffer refusal
+    // both sit after it and both reach here.
+    await release();
 
-    // Close encoders if they exist
-    try {
-      if (videoEncoder.state !== 'closed') {
-        videoEncoder.close();
-      }
-    } catch { /* ignore */ }
-
-    try {
-      if (audioEncoder && audioEncoder.state !== 'closed') {
-        audioEncoder.close();
-      }
-    } catch { /* ignore */ }
+    // Close every encoder that was built — none when the setup threw before
+    // the first one (a Cancel during the loads, say), one when it threw
+    // between them.
+    for (const encoder of openEncoders) {
+      try {
+        if (encoder.state !== 'closed') {
+          encoder.close();
+        }
+      } catch { /* ignore */ }
+    }
 
     // Re-throw ExportAbortedError and ExportError as-is
     if (error instanceof ExportError || (error instanceof Error && error.name === 'ExportAbortedError')) {

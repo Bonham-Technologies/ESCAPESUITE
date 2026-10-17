@@ -31,6 +31,7 @@ import type {
   ProgressResponse,
   ErrorResponse,
 } from '../workers/decodeWorker.types';
+import { ExportAbortedError } from './exportTypes';
 
 /**
  * Progress callback for source loading
@@ -155,14 +156,19 @@ export class VideoDecodeManager {
   >();
 
   /**
-   * Set when a load missed its deadline and terminated the worker, presumed
-   * dead: every later load is refused with the same reason rather than
-   * starting another worker, so the rest of the export's sources go straight
-   * to `<video>`, and a frame request from a source the worker had already
-   * loaded is refused with it too, so that source's handover names the
-   * deadline (ESCSUITE-273).
+   * Set when the worker was terminated for good — a load missed its deadline
+   * and the worker is presumed dead (ESCSUITE-273), or the export was
+   * cancelled (ESCSUITE-314): every later load is refused with the same reason
+   * rather than starting another worker, so after a missed deadline the rest
+   * of the export's sources go straight to `<video>`, and a frame request from
+   * a source the worker had already loaded is refused with it too, so that
+   * source's handover names the deadline. After a Cancel the reason is the
+   * export's own ExportAbortedError, which nothing hands over.
    */
-  private loadDeadlineMissed: Error | null = null;
+  private refusal: Error | null = null;
+
+  /** Takes initialize()'s abort listener back off the export's signal; see there. */
+  private abortCleanup: (() => void) | null = null;
 
   // Callbacks
   private progressCallbacks = new Map<string, ProgressCallback>();
@@ -206,6 +212,15 @@ export class VideoDecodeManager {
    * or when `signal` aborts while the wait is still pending (reject) — so a
    * worker that fails to start, for any reason, never leaves a caller hanging
    * (ESCSUITE-153 / ESCSUITE-29 Mechanism 2).
+   *
+   * `signal` is the export's, and it governs the manager for the rest of its
+   * life, not only the startup wait (ESCSUITE-314): an abort at any point runs
+   * the terminate path a missed deadline runs — the worker terminated in the
+   * abort's own dispatch, every load and frame request in flight rejected with
+   * the export's ExportAbortedError, every later one refused with it — so a
+   * Cancel never waits on the worker, and its memory is released at once. One
+   * listener per manager, taken once here rather than per request, so a frame
+   * costs nothing for it.
    */
   async initialize(signal?: AbortSignal): Promise<void> {
     if (this.worker) {
@@ -278,6 +293,17 @@ export class VideoDecodeManager {
       this.readyResolve = null;
       this.readyReject = null;
       throw error;
+    }
+
+    if (signal) {
+      // After the startup wait's own listener, so an abort during the wait
+      // still rejects initialize() with that wait's reason first.
+      const onAbort = () => {
+        this.refusal = new ExportAbortedError();
+        this.terminate(this.refusal);
+      };
+      signal.addEventListener('abort', onAbort);
+      this.abortCleanup = () => signal.removeEventListener('abort', onAbort);
     }
 
     this.worker.onmessage = (event: MessageEvent<DecodeWorkerResponse | { type: 'WORKER_READY' }>) => {
@@ -471,6 +497,10 @@ export class VideoDecodeManager {
    * another worker, so each source falls back to `<video>` (ESCSUITE-273).
    * `exportMP4.ts` awaits every load before its frame loop makes a single
    * frame request, so without this a worker killed mid-load hung the export.
+   *
+   * An abort of the export's signal while it is loading rejects it at once
+   * with ExportAbortedError, through the same terminate (ESCSUITE-314; see
+   * initialize()).
    */
   async loadSource(
     sourceId: string,
@@ -478,8 +508,8 @@ export class VideoDecodeManager {
     mimeType: string,
     onProgress?: ProgressCallback
   ): Promise<VideoSourceInfo> {
-    if (this.loadDeadlineMissed) {
-      throw this.loadDeadlineMissed;
+    if (this.refusal) {
+      throw this.refusal;
     }
 
     await this.initialize();
@@ -515,10 +545,10 @@ export class VideoDecodeManager {
       // terminate() rejects that one along with everything else.
       if (this.sourceLoadPromises.get(sourceId) === entry) {
         entry.deadline = setTimeout(() => {
-          this.loadDeadlineMissed = new Error(
+          this.refusal = new Error(
             `Decode worker did not finish loading ${sourceId} (${oneDecimal(byteLength / MIB)} MiB) within ${oneDecimal(deadlineMs / 1000)} s`
           );
-          this.terminate(this.loadDeadlineMissed);
+          this.terminate(this.refusal);
         }, deadlineMs);
       }
     });
@@ -536,10 +566,12 @@ export class VideoDecodeManager {
    * worker that missed one deadline is presumed dead, so every other request
    * and load in flight fails at once with the same reason and each source
    * falls back now, rather than after a deadline of its own (ESCSUITE-266).
+   * An abort of the export's signal rejects it at once with ExportAbortedError,
+   * however much progress the worker is reporting (ESCSUITE-314).
    */
   async getFrame(sourceId: string, timestamp: number): Promise<VideoFrame> {
     if (!this.isReady) {
-      throw this.loadDeadlineMissed ?? new Error('Manager not initialized');
+      throw this.refusal ?? new Error('Manager not initialized');
     }
 
     const requestId = this.nextRequestId++;
@@ -661,6 +693,8 @@ export class VideoDecodeManager {
    */
   terminate(reason: Error = new Error('Manager terminated')): void {
     this.clearReadyWait();
+    this.abortCleanup?.();
+    this.abortCleanup = null;
 
     if (this.worker) {
       this.worker.terminate();

@@ -210,7 +210,31 @@ describe('exportToMP4 honours Cancel while it waits on the decode worker (ESCSUI
     expect(worker.loaded).toEqual(['video1'])
     expect(terminatedAtAbort).toBe(1)
     expect(worker.terminated).toBe(1)
-    // An aborted load is not a refused source: no <video> stands in for it.
+    // An aborted load is not a refused source: no <video> stands in for it,
+    // and it is not tried again as an image.
+    expect(media.videos).toHaveLength(0)
+    expect(media.images).toHaveLength(0)
+  })
+
+  it('Cancel before the first load loads nothing, on the in-page path too', async () => {
+    const controller = new AbortController()
+    const progress: ExportProgress[] = []
+    const onProgress = (p: ExportProgress) => {
+      progress.push(p)
+      // Before the frame manager is made: the worker never starts, so every
+      // source would take the <video> path.
+      if (p.message === 'Loading media files...') controller.abort()
+    }
+    const clips = SOURCES.map((id, i) =>
+      makeClip({ id: `c${i}`, sourceVideoId: id, trackId: `track-${i}`, duration: 0.2, endTime: 0.2 })
+    )
+    const tracks = SOURCES.map((_, i) => makeTrack({ id: `track-${i}`, index: i }))
+
+    await expect(
+      exportToMP4(clips, SOURCES.map((id) => makeSourceVideo({ id })), makeExportOptions(), onProgress, tracks, controller.signal)
+    ).rejects.toBeInstanceOf(ExportAbortedError)
+
+    expect(worker.loaded).toEqual([])
     expect(media.videos).toHaveLength(0)
   })
 
