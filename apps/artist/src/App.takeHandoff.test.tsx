@@ -72,7 +72,12 @@ beforeEach(() => {
   store().clearHistory()
   installCanvasDouble()
   vi.mocked(parseUrlParams).mockReturnValue({ ...defaultUrlParams(), loadVideoId: 'rec-1' })
-  vi.mocked(getVideo).mockResolvedValue({ metadata: HANDED_OVER } as never)
+  // A stored record always carries its bytes; since ESCSUITE-305 the handoff
+  // reads the primary's head to decide whether it needs a seek index.
+  vi.mocked(getVideo).mockResolvedValue({
+    blob: new Blob(['webm'], { type: 'video/webm' }),
+    metadata: HANDED_OVER,
+  } as never)
   vi.mocked(listSessionStates).mockImplementation(
     () =>
       new Promise((resolve) => {

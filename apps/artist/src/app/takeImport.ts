@@ -32,8 +32,9 @@
 // One more rule, and the reason the library is a *parameter* here: a take any
 // part of which the library already holds is refused whole, before the first
 // write. `isInLibrary` is how the caller lends this module that question.
-import { getAllVideoMetadata, getThumbnail, getVideo } from '../core/storage';
+import { getAllVideoMetadata, getThumbnail, getVideo, storeVideo } from '../core/storage';
 import { resolveStoredDuration } from '../core/videoProcessor';
+import { withSeekIndex } from '../core/webmSeekIndex';
 import { isPlaceableRole, orderTakeParts } from '../utils/takeParts';
 import { extractWaveformData } from '../utils/waveform';
 import type { SourceVideo, TakeClipPart } from '../store/types';
@@ -191,10 +192,25 @@ export async function importTake(
     return { clipParts: [], missingParts: 0, alreadyInLibrary: true };
   }
 
+  // Every composited-PiP take ESCAPECRAFT has stored carries an empty Cues
+  // index, which Firefox cannot seek: its export came out black (ESCSUITE-305).
+  // Such a primary is remuxed with a real index here, once, and ESCAPECRAFT's
+  // own row is rewritten in place under the same id — the same packets, so the
+  // same recording, and the only cure for a wedged seek. A primary that already
+  // has an index (or is not a WebM) is the very same blob back, and nothing is
+  // written. A rewrite that cannot be stored costs only the rewrite: this import
+  // carries on with the repaired bytes, and the stored row stays as it was.
+  const primaryBlob = await withSeekIndex(primary.blob, metadata.name);
+  if (primaryBlob !== primary.blob) {
+    await storeVideo(metadata.id, primaryBlob, { ...metadata, size: primaryBlob.size }).catch((error) => {
+      console.warn(`Could not store the re-indexed copy of "${metadata.name}":`, error);
+    });
+  }
+
   // The stored duration is trusted unless it is unusable — a CRAFT take whose
   // WebM lost its Duration element is stored as Infinity — in which case the
   // length is recovered from the blob.
-  const takeDuration = await resolveStoredDuration(primary.blob, metadata);
+  const takeDuration = await resolveStoredDuration(primaryBlob, metadata);
 
   const clipParts: TakeClipPart[] = [];
   // Kept only to revoke on a part-way failure below (ESCSUITE-117): every URL
@@ -225,7 +241,7 @@ export async function importTake(
       // The primary's bytes are already in hand; a companion's are the ones
       // storage hands back below. Both are needed twice over — for the length
       // and for the waveform — so the blob is carried rather than re-read.
-      let blob = primary.blob;
+      let blob = primaryBlob;
       let duration = takeDuration;
 
       if (!isPrimary) {

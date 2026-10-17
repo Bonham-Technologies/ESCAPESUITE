@@ -13,6 +13,7 @@
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
+import { countWedgedSeek, isWedgedSeek } from './seekWedge';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
 /**
@@ -241,18 +242,27 @@ export class HTMLVideoFrameSource implements IFrameSource {
   private extras: Promise<HTMLVideoElement | null>[] = [];
   private seekTolerance: number;
   private sourceId: string;
+  /** What a refusal calls the source: its `SourceVideo.name`, or its id when given none. */
+  readonly sourceName: string;
   private objectUrl: string | null = null;
   private disposed = false;
+  /**
+   * Consecutive seeks that wedged, per element (ESCSUITE-305, `seekWedge.ts`):
+   * slot 0's and each further slot's (ESCSUITE-313) counted on their own.
+   */
+  private wedgedSeeks = new Map<HTMLVideoElement, number>();
 
   private constructor(
     video: HTMLVideoElement,
     sourceId: string,
     objectUrl: string | null,
-    frameRate?: number
+    frameRate?: number,
+    sourceName?: string
   ) {
     this.video = video;
     this.seekTolerance = seekToleranceFor(frameRate);
     this.sourceId = sourceId;
+    this.sourceName = sourceName ?? sourceId;
     this.objectUrl = objectUrl;
   }
 
@@ -263,7 +273,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
     sourceId: string,
     blob: Blob,
     _onProgress?: LoadProgressCallback,
-    frameRate?: number
+    frameRate?: number,
+    sourceName?: string
   ): Promise<HTMLVideoFrameSource> {
     const url = URL.createObjectURL(blob);
 
@@ -275,7 +286,7 @@ export class HTMLVideoFrameSource implements IFrameSource {
       throw error;
     }
 
-    return new HTMLVideoFrameSource(video, sourceId, url, frameRate);
+    return new HTMLVideoFrameSource(video, sourceId, url, frameRate, sourceName);
   }
 
   /**
@@ -284,11 +295,19 @@ export class HTMLVideoFrameSource implements IFrameSource {
   static fromElement(
     sourceId: string,
     video: HTMLVideoElement,
-    frameRate?: number
+    frameRate?: number,
+    sourceName?: string
   ): HTMLVideoFrameSource {
-    return new HTMLVideoFrameSource(video, sourceId, null, frameRate);
+    return new HTMLVideoFrameSource(video, sourceId, null, frameRate, sourceName);
   }
 
+  /**
+   * A request whose seek never completes hands back an element with no frame
+   * in it — a black clip. Three in a row on one element and the source is
+   * refused by name, since this is the last path a frame can come from
+   * (ESCSUITE-305). The run is counted per element: each slot (ESCSUITE-313)
+   * has a playhead of its own.
+   */
   async getFrame(timestamp: number, slot = 0): Promise<HTMLVideoElement | null> {
     if (this.disposed) {
       throw new Error('Source has been disposed');
@@ -300,6 +319,7 @@ export class HTMLVideoFrameSource implements IFrameSource {
     // Check if we need to seek
     const currentTime = video.currentTime;
     const diff = timestamp - currentTime;
+    let seekFellBack = false;
 
     // Only seek if necessary: a request within half a frame (at the source's own
     // rate) of the current time is the frame already showing.
@@ -313,7 +333,9 @@ export class HTMLVideoFrameSource implements IFrameSource {
       await new Promise<void>((resolve) => {
         const timeout = setTimeout(() => {
           video.removeEventListener('seeked', onSeeked);
-          // Don't reject - just resolve with best effort
+          // Don't reject - just resolve with best effort; a run of these with
+          // nothing to show for it is counted below.
+          seekFellBack = true;
           resolve();
         }, 500);
 
@@ -341,6 +363,10 @@ export class HTMLVideoFrameSource implements IFrameSource {
       }
     }
 
+    this.wedgedSeeks.set(
+      video,
+      countWedgedSeek(this.wedgedSeeks.get(video) ?? 0, isWedgedSeek(video, seekFellBack), this.sourceName)
+    );
     return video;
   }
 
@@ -536,6 +562,8 @@ export class FrameSourceFactory {
    *   the worker is running — an MP4 refused now or given up on mid-export, or
    *   a source that is not an MP4 at all (ESCSUITE-261)
    * @param frameRate The source's own frame rate, for the `<video>` path's seek tolerance
+   * @param sourceName The source's name, for the refusal a `<video>` whose seeks never
+   *   complete fails the export with (ESCSUITE-305); its id when omitted
    * @returns A frame source (WebCodecs or HTMLVideoElement based)
    */
   async createSource(
@@ -544,7 +572,8 @@ export class FrameSourceFactory {
     mimeType: string,
     onProgress?: LoadProgressCallback,
     onFallback?: FallbackCallback,
-    frameRate?: number
+    frameRate?: number,
+    sourceName?: string
   ): Promise<IFrameSource> {
     // Use WebCodecs for MP4 files when supported
     if (this.useWebCodecs && this.manager && mimeType.includes('mp4')) {
@@ -566,7 +595,10 @@ export class FrameSourceFactory {
         return new FailoverFrameSource(
           source,
           sourceId,
-          () => HTMLVideoFrameSource.create(sourceId, blob, onProgress, frameRate),
+          // The handover's <video> is the last path there is: a source whose
+          // seeks wedge there fails the export by name (ESCSUITE-305), and
+          // `getFrame` below lets that refusal through rather than retrying.
+          () => HTMLVideoFrameSource.create(sourceId, blob, onProgress, frameRate, sourceName),
           onFallback
         );
       } catch (error) {
@@ -587,7 +619,7 @@ export class FrameSourceFactory {
     }
 
     // Fall back to HTMLVideoElement
-    return HTMLVideoFrameSource.create(sourceId, blob, onProgress, frameRate);
+    return HTMLVideoFrameSource.create(sourceId, blob, onProgress, frameRate, sourceName);
   }
 
   /**
