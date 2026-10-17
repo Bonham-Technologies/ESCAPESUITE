@@ -1277,6 +1277,8 @@ export class WebCodecsRecorder {
       if (companion.kind === 'video') {
         companion.timing = newFrameTiming();
         companion.readerActive = true;
+      } else {
+        companion.encodedEndUs = 0;
       }
     }
     this.startCompanionCaptures();
