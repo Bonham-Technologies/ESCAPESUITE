@@ -48,7 +48,11 @@
 // ever sees it, so an end trim stops at the next clip's start and a start trim
 // at the previous clip's end. Once the pointer is out past that edge every move
 // computes the same update, so `changesClip` refuses the write rather than
-// re-rendering the timeline per frame for no change.
+// re-rendering the timeline per frame for no change. A clip that already
+// overlapped this one when the trim began — two imported caption cues, which
+// `addCaptionCues` keeps where the file put them — is no neighbour
+// (ESCSUITE-308): the clamp measures that against `trim.origin`, which is the
+// mousedown's snapshot, so nothing is taken or allocated per move.
 //
 // **The clamp lives here and not in `trimClip`**, deliberately, for three
 // reasons. The **ripple** tool's end trim is excepted: it lengthens the clip
