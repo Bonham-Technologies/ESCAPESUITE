@@ -5449,6 +5449,35 @@ deadline). `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts`, `exportGIF.perf.
 pin are byte-identical — one timer per load, none per frame. **No floor crossed**; artist's floors stay
 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-308 (an overlap a gesture found is not one
+it made: `addCaptionCues` keeps overlapping cues on the one Captions track by design, and the two
+ESCSUITE-161 / 80 guards assumed the row invariant — so the first move of a 1–10 s cue's end handle, with
+a 2–3 s cue inside it, clamped the end to 2 s, and `wouldOverlap` read the pair as already colliding and
+refused every drag of either; `store/timelineSnapping.ts` gains the one overlap comparison `overlapsSpan`,
+which `wouldOverlap` now calls, and `preexistingOverlaps(clip, clips)`; `clampTrimToNeighbours` skips a clip
+overlapping the trim's **origin** span, `useClipDrag` builds the dragged clip's pre-existing set once on
+mousedown and leaves it out of the veto's candidates, and `canMoveSelectedClips` does the same per member;
+a third clip the edited clip did not overlap clamps and refuses as before, and a pair touching within
+`OVERLAP_EPSILON` counts as touching, the side `wouldOverlap` already takes): 99.85 / 99.45 / 96.82 / 99.78,
+byte-identical on every percentage to the 99.85 / 99.45 / 96.82 / 99.78 that `main` at `60fd2bc1` (the
+ESCSUITE-322 version-packages commit; its artist source is `c3814373`'s) measures in the same sitting. The
+base gives 6,187 / 6,390 branches and this branch 6,195 / 6,398: eight new branches, eight covered, the same
+203 uncovered as before (lines 9,674 / 9,688 → 9,687 / 9,701, statements 10,976 / 11,036 → 10,993 / 11,053,
+functions 2,300 / 2,305 → 2,304 / 2,309, every denominator growing by exactly what the numerator did; the
+same 14 / 60 / 5 uncovered). All eight are `store/timelineSnapping.ts`'s (60 → 68, still 100 on all four):
+`overlapsSpan`'s two operands, the per-row and not-self filters in `preexistingOverlaps`, the origin-span
+exemption in `clampTrimToNeighbours` on each edge, and the per-member exclusion in `canMoveSelectedClips` —
+each reached from both sides by the eighteen red cases across `timelineSnapping.overlap.test.ts`,
+`useTrimDrag.overlap.test.ts` and `useClipDrag.overlap.test.ts` (the end trim `expected 2 to be 10.5`, the
+start trim `expected 3 to be 0.5`, the non-overlapping neighbour still clamping `expected 2 to be 12`, a
+pair 1e-6 s deep counted and one meeting within the epsilon not, the three group vetoes `expected false to
+be true`) against the butted-clip and third-clip guards that were green on both trees.
+`components/Timeline/useClipDrag.ts` gained four lines and one function — the mousedown ref and its one
+loop — and no decision. Two mutations: every clip treated as a neighbour → 16 of 21 red; every clip treated
+as pre-existing → the 8 guard cases red; the review's own (the group filter dropped) → 4 red.
+`timelineGestures.perf.test.ts` and every other `*.perf.test.ts` / rerender pin are byte-identical — nothing
+per move. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 

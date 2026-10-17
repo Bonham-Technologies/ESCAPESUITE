@@ -51,6 +51,15 @@
 // applies the same locked rule inline to every member's origin and landing
 // row. A refused drop is silent, like the other vetoes.
 //
+// **An overlap the drag found is not in its way** (ESCSUITE-308). Imported
+// caption cues can overlap on their one row (`addCaptionCues` keeps them in file
+// order), and the veto read such a pair as already colliding, so neither cue
+// could be dragged at all. `preexistingOverlaps` names, on mousedown, the clips
+// the dragged one already overlapped; the single-clip commit leaves them out of
+// `wouldOverlap`'s candidates and `canMoveSelectedClips` does the same per
+// member. A drop onto a clip the dragged one did not overlap is refused as
+// before.
+//
 // **One listener pair, one measurement, one snap array — per gesture, not per
 // pointer frame.** The listeners go through `useDocumentListener`, whose
 // `enabled` flag is `dragState !== null`: a boolean that flips twice a gesture,
@@ -68,6 +77,7 @@ import { useDocumentListener } from '../../hooks/useDocumentListener';
 import {
   canMoveSelectedClips,
   getSnapPoints,
+  preexistingOverlaps,
   trackIndexDelta,
   trackRefusesDrop,
   wouldOverlap,
@@ -153,6 +163,13 @@ export function useClipDrag({
   const dragRef = useRef<DragState | null>(null);
   /** The snap targets, taken once on mousedown. */
   const snapPointsRef = useRef<number[]>([]);
+  /**
+   * The clips the dragged one already overlapped where it stood, taken once on
+   * mousedown beside the snap points (ESCSUITE-308). The single-clip veto
+   * leaves them out of its candidates: a drop may keep or change an overlap
+   * the drag found — two imported caption cues — but may not make a new one.
+   */
+  const foundOverlapsRef = useRef<ReadonlySet<string>>(new Set());
   /**
    * Where the pointer grabbed the clip, in seconds into it — taken once on
    * mousedown, like the snap points, but re-read into pixels at the *current*
@@ -268,10 +285,11 @@ export function useClipDrag({
           // Check the row and the ground before committing: a locked row (or
           // one that has left the timeline) takes nothing, and neither does a
           // spot another clip is standing on.
+          const found = foundOverlapsRef.current;
           const refused =
             trackRefusesDrop(tracks, drag.currentTrackId) ||
             wouldOverlap(
-              clips,
+              clips.filter((other) => !found.has(other.id)),
               drag.currentTrackId,
               drag.currentPosition,
               clip.duration,
@@ -377,6 +395,7 @@ export function useClipDrag({
       // pixel figure from it at whatever zoom is current on each move.
       trackArea.begin(trackContainerRef.current, true);
       snapPointsRef.current = getSnapPoints(clips, clip.id);
+      foundOverlapsRef.current = preexistingOverlaps(clip, clips);
       offsetSecondsRef.current = pixelsToTime(offsetX, pixelsPerSecond);
 
       const initial: DragState = {
