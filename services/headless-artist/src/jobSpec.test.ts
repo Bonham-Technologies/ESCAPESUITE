@@ -339,6 +339,11 @@ describe('parseJobSpec', () => {
     expect(spec.options.allowSilentMp4).toBe(allowSilentMp4)
   })
 
+  it.each(['webm', 'gif'])('accepts allowSilentMp4 on a %s job, which ignores it', (format) => {
+    const spec = parseJobSpec(validSpec({ options: { format, allowSilentMp4: true } }))
+    expect(spec.options.allowSilentMp4).toBe(true)
+  })
+
   it('leaves allowSilentMp4 unset when a job does not ask for it', () => {
     const spec = parseJobSpec(validSpec({ options: { format: 'mp4' } }))
     expect('allowSilentMp4' in spec.options).toBe(false)

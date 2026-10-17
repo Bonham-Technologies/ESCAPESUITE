@@ -75,7 +75,9 @@ const baseInput = (): RenderInput => ({
   options: { format: 'mp4' } as RenderInput['options'],
 })
 
-beforeEach(() => { exportToMP4.mockClear(); exportToWebM.mockClear(); exportToGIF.mockClear() })
+// mockReset rather than mockClear: it also drops a `mockResolvedValueOnce` a failing test left
+// unconsumed, and vitest restores each `vi.fn(impl)`'s default implementation.
+beforeEach(() => { exportToMP4.mockReset(); exportToWebM.mockReset(); exportToGIF.mockReset() })
 
 describe('renderProject', () => {
   it('routes mp4 to exportToMP4 with editor arg order and returns base64 + meta', async () => {
@@ -645,6 +647,8 @@ describe('renderProject — sound', () => {
 
     expect(exportToMP4).toHaveBeenCalledTimes(1)
     expect(res.meta.audio).toBe(false)
+    // No candidates, so the AAC probe is never asked either: candidates come before it.
+    expect(probedConfigs).toEqual([])
     expect(headerProbe).not.toHaveBeenCalled()
   })
 

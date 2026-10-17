@@ -58,11 +58,13 @@ export interface RenderMeta {
   height: number
   gpu: boolean
   /**
-   * Whether the encoded file carries an audio track (ESCSUITE-312): the
-   * exporter's own `ExportResult.audio`. `false` for every GIF, and for an mp4
-   * rendered by a Chromium with no AAC encoder under `options.allowSilentMp4`.
-   * Read it as "this file has no audio track", not "sound was lost": a silent
-   * project rendered by such a Chromium is `false` too.
+   * The exporter's own `ExportResult.audio` (ESCSUITE-312). `true` means this
+   * format's audio encoder was available — the file carries an audio track when
+   * the mix had sound, and none when it did not (a silent project's mp4 is still
+   * `true`). `false` means the file has no audio track: every GIF, and every mp4
+   * rendered by a Chromium with no AAC encoder (a project whose sources carry
+   * no audio track, or one under `options.allowSilentMp4`). Read `false` as
+   * "this file has no audio track", not "sound was lost".
    */
   audio: boolean
   /**

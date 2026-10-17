@@ -5362,8 +5362,10 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   `onProgress` and returns `ExportResult.audio: false`. This entry used to read
   `{ blob, framesEncoded, loudness }` and drop `audio`, so every kit mp4 job on Linux came back
   `ok: true`, exit 0, a picture-only file, with any `loudnessTarget` silently ignored. Now
-  `RenderMeta.audio: boolean` (required) is the exporter's own flag for every format (a GIF's is
-  always `false`), returned by both `__renderProject` and `__renderProjectToFile` and written to
+  `RenderMeta.audio: boolean` (required) is the exporter's own flag for every format: `true` means
+  the format's audio encoder was available, so the file carries a track when the mix had sound
+  (`exportToMP4` adds one only `if (audioData)`, so a silent project's mp4 is `true` with no track);
+  `false` means the file has none (every GIF). It is returned by both `__renderProject` and `__renderProjectToFile` and written to
   the kit's verification manifest beside `loudness`. And before any exporter runs, an `mp4` in a Chromium where
   `isAudioCodecSupported(aacEncoderConfig(...))` (the probe `exportToMP4` runs, at the job's own
   quality bitrate) answers `false`, whose project has a source that **carries an audio track in
