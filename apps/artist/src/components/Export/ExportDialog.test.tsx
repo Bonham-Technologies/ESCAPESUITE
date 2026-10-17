@@ -19,6 +19,7 @@ import type { ExportProgress } from '../../store/types'
 import styles from './ExportDialog.module.css'
 import { lastObjectUrl } from '../../test/objectUrls'
 import { disposeLiveExport } from './liveExport'
+import { ANNOUNCE_INTERVAL_MS } from './progressAnnouncement'
 import { ErrorBoundary } from '@escapesuite/shared/components'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -1506,6 +1507,84 @@ describe('ExportDialog', () => {
 
       scripted.rejectExport(new ExportAbortedError())
       await settle()
+    })
+
+    // ESCSUITE-301: the loudness measurement used to run as one synchronous
+    // call, seconds long on a long mix, with nothing on screen moving. It is
+    // now a phase of its own, reported per slice through the same channel and
+    // the same ESCSUITE-215 throttle as every other report. This passes on
+    // main too, by design: the dialog shows whatever phase and message it is
+    // handed, and the throttle is not the measurement's to change. It pins the
+    // real sequence — the measurement follows the extraction inside the same
+    // ten-point band, so the live region only speaks it on the 5 s floor.
+    it('shows the loudness measurement as it follows the extraction, and speaks it on the throttle', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'preparing', progress: 0, message: 'Preparing MP4 export...' })
+      await scripted.report({ phase: 'preparing', progress: 10, message: 'Extracting audio...' })
+      expect(liveRegion()?.textContent).toBe('Extracting audio... (10%)')
+
+      await scripted.report({ phase: 'measuring-loudness', progress: 10.8, message: 'Measuring loudness…' })
+
+      // The visible line and the bar follow every report…
+      expect(screen.getByText('Measuring loudness…')).toBeInTheDocument()
+      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '11')
+      // …the live region does not: same band, under five seconds.
+      expect(liveRegion()?.textContent).toBe('Extracting audio... (10%)')
+
+      act(() => {
+        vi.advanceTimersByTime(ANNOUNCE_INTERVAL_MS)
+      })
+      await scripted.report({ phase: 'measuring-loudness', progress: 11.6, message: 'Measuring loudness…' })
+
+      expect(liveRegion()?.textContent).toBe('Measuring loudness… (12%)')
+      expect(document.querySelectorAll('[role="status"]')).toHaveLength(1)
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    // The phase is shown in capitals; the raw identifier read
+    // "MEASURING-LOUDNESS". Every other phase is its own label.
+    it('labels the measuring phase in words', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'measuring-loudness', progress: 10.8, message: 'Measuring loudness…' })
+
+      expect(document.querySelector(`.${styles.progressPhase}`)?.textContent).toBe('Measuring loudness')
+
+      await scripted.report({ phase: 'encoding', progress: 18, message: 'Encoding frames...' })
+
+      expect(document.querySelector(`.${styles.progressPhase}`)?.textContent).toBe('encoding')
+
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+    })
+
+    it('cancels during the loudness measurement the way it cancels during encoding', async () => {
+      const scripted = scriptedExport()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      fireEvent.click(primaryExport())
+      await scripted.report({ phase: 'measuring-loudness', progress: 11.6, message: 'Measuring loudness…' })
+      const signal = webmArgs()[5]
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+
+      expect(signal.aborted).toBe(true)
+      expect(onClose).toHaveBeenCalledTimes(1)
+
+      // The exporter rejects at its next slice boundary.
+      scripted.rejectExport(new ExportAbortedError())
+      await settle()
+
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+      expect(mockSendMessage).not.toHaveBeenCalled()
     })
 
     // ESCSUITE-215. The per-frame message was visual only; this is the one

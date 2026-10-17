@@ -45,7 +45,7 @@ import {
   rewindElementSources,
 } from './elementFrames';
 import { extractAndMixAudio } from './audioMixer';
-import { exportLoudness, formatLoudnessSummary } from './loudness';
+import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
 /**
  * Export timeline to WebM using WebCodecs + webm-muxer
@@ -256,8 +256,15 @@ export async function exportToWebM(
     // Measure the sound this file will carry — the exported range, as mixed,
     // and only once the Opus probe has said it can be carried — and normalise
     // it onto the chosen target in place, before the encoder is fed
-    // (ESCSUITE-292). One pass over the mix; nothing per frame.
-    const loudness = exportLoudness(audioData, audioChannels, sampleRate, options.loudnessTarget);
+    // (ESCSUITE-292). One pass over the mix; nothing per frame. Sliced
+    // (ESCSUITE-301): it reports between this 15 and the frames' 18, yields
+    // between slices and rejects with ExportAbortedError at the next boundary
+    // after Cancel — into the catch below, which releases the loaded media;
+    // no encoder exists yet and the muxer has not started.
+    const loudness = await exportLoudness(audioData, audioChannels, sampleRate, options.loudnessTarget, {
+      signal,
+      onProgress: (f) => onProgress({ phase: 'measuring-loudness', progress: 15 + 2 * f, message: MEASURING_LOUDNESS }),
+    });
     if (loudness) log('audio', `Loudness: ${formatLoudnessSummary(loudness)}`);
 
     // Start the output

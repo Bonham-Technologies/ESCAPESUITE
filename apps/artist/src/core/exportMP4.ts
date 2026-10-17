@@ -55,7 +55,7 @@ import {
   disposeFrameManager,
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
-import { exportLoudness, formatLoudnessSummary } from './loudness';
+import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
 // `ExportLogEntry` and `ExportError` live in exportTypes.ts (moved there by
 // ESCSUITE-152, independently of ESCSUITE-29 Mechanism 1 doing the same
@@ -235,7 +235,14 @@ export async function exportToMP4(
   // and normalise it onto the chosen target in place, before any encoder sees
   // it (ESCSUITE-292). One pass over the mix; nothing per frame. `null` when
   // there is no mix, or no AAC encoder to carry one (the mix was skipped).
-  const loudness = exportLoudness(audioData, audioChannels, sampleRate, options.loudnessTarget);
+  // Sliced (ESCSUITE-301): it reports between the extraction's 10 and the
+  // media load's 12, yields between slices and rejects with
+  // ExportAbortedError at the next boundary after Cancel — before any media is
+  // loaded or any encoder built, so there is nothing here to release.
+  const loudness = await exportLoudness(audioData, audioChannels, sampleRate, options.loudnessTarget, {
+    signal,
+    onProgress: (f) => onProgress({ phase: 'measuring-loudness', progress: 10 + 2 * f, message: MEASURING_LOUDNESS }),
+  });
   if (loudness) log('audio', `Loudness: ${formatLoudnessSummary(loudness)}`);
 
   // Create canvas for frame rendering

@@ -6,8 +6,10 @@
 // from the coefficient table printed in BS.1770-4 itself (48 kHz), and each
 // fixture's gating arithmetic is written out beside it. Tolerance is the
 // ticket's ±0.1 LU throughout.
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+import { ExportAbortedError } from './exportTypes'
 import {
+  LOUDNESS_SLICE_SECONDS,
   LOUDNESS_TARGETS,
   MAX_GAIN_DB,
   TRUE_PEAK_CEILING_DBTP,
@@ -16,9 +18,12 @@ import {
   exportLoudness,
   formatLoudnessSummary,
   gainForTarget,
+  applyInterleavedGainWithLimiterAsync,
   kWeightingCoefficients,
+  loudnessSliceFrames,
   loudnessTargetOrOff,
   measureInterleavedLoudness,
+  measureInterleavedLoudnessAsync,
   measureLoudness,
 } from './loudness'
 
@@ -484,15 +489,15 @@ describe('loudnessTargetOrOff', () => {
 describe('exportLoudness', () => {
   const stereo = (x: Float32Array) => interleave(x, x)
 
-  it('has nothing to say about a mix that is absent or silent', () => {
-    expect(exportLoudness(null, 2, SR, -14)).toBeUndefined()
-    expect(exportLoudness(new Float32Array(2 * SR), 2, SR, -14)).toBeUndefined()
+  it('has nothing to say about a mix that is absent or silent', async () => {
+    expect(await exportLoudness(null, 2, SR, -14)).toBeUndefined()
+    expect(await exportLoudness(new Float32Array(2 * SR), 2, SR, -14)).toBeUndefined()
   })
 
-  it('measures without touching the mix when no target is set', () => {
+  it('measures without touching the mix when no target is set', async () => {
     const mix = stereo(sine(3, dbfs(-30)))
     const copy = mix.slice()
-    const result = exportLoudness(mix, 2, SR, undefined)
+    const result = await exportLoudness(mix, 2, SR, undefined)
     expect(result).toEqual({
       measuredLufs: expect.closeTo(-30, 1),
       truePeakDbtp: expect.closeTo(-30, 1),
@@ -503,10 +508,10 @@ describe('exportLoudness', () => {
     expect(Array.from(mix)).toEqual(Array.from(copy))
   })
 
-  it('normalises the mix in place onto the target, under the ceiling', () => {
+  it('normalises the mix in place onto the target, under the ceiling', async () => {
     const mix = stereo(sine(3, dbfs(-30)))
     const before = mix.slice()
-    const result = exportLoudness(mix, 2, SR, -16)!
+    const result = (await exportLoudness(mix, 2, SR, -16))!
     // Under the ceiling the limiter cannot engage, so this is a plain gain.
     const g = 10 ** (result.gainDb / 20)
     for (let i = 0; i < mix.length; i += 89) expect(mix[i]).toBeCloseTo(before[i] * g, 6)
@@ -516,17 +521,17 @@ describe('exportLoudness', () => {
     expect(measureInterleavedLoudness(mix, 2, SR).integratedLufs).toBeCloseTo(-16, 1)
   })
 
-  it('reports the limiter when the target asks for more than the ceiling allows', () => {
+  it('reports the limiter when the target asks for more than the ceiling allows', async () => {
     // A stereo sine reads at its own peak level, so −20 → −14 LUFS lifts its
     // peak to −14 dBTP: well under the ceiling, no limiting.
-    expect(exportLoudness(stereo(sine(3, dbfs(-20))), 2, SR, -14)!.limited).toBe(false)
+    expect((await exportLoudness(stereo(sine(3, dbfs(-20))), 2, SR, -14))!.limited).toBe(false)
     // The same quiet tone with one 0.9 click: the loudness barely moves
     // (≈ −30 LUFS) but the true peak is ≈ −0.9 dBTP, so the +16 dB the target
     // needs would put it at ≈ +15 dBTP — the limiter has to hold it.
     const x = sine(3, dbfs(-30))
     x[SR] = 0.9
     const mix = stereo(x)
-    const result = exportLoudness(mix, 2, SR, -14)!
+    const result = (await exportLoudness(mix, 2, SR, -14))!
     expect(result.gainDb).toBeCloseTo(16, 0)
     expect(result.limited).toBe(true)
     const after = measureInterleavedLoudness(mix, 2, SR)
@@ -536,18 +541,320 @@ describe('exportLoudness', () => {
     expect(after.integratedLufs).toBeCloseTo(-14, 0)
   })
 
-  it('applies, and reports, no more than the capped boost to a very quiet mix', () => {
+  it('applies, and reports, no more than the capped boost to a very quiet mix', async () => {
     const mix = stereo(sine(3, dbfs(-60)))
     const before = mix.slice()
-    const result = exportLoudness(mix, 2, SR, -14)!
+    const result = (await exportLoudness(mix, 2, SR, -14))!
     expect(result.gainDb).toBe(MAX_GAIN_DB)
     for (let i = 0; i < mix.length; i += 89) expect(mix[i]).toBeCloseTo(before[i] * 10, 6)
     expect(measureInterleavedLoudness(mix, 2, SR).integratedLufs).toBeCloseTo(-40, 1)
   })
 
-  it('treats a stale or unknown target as off', () => {
+  it('treats a stale or unknown target as off', async () => {
     const mix = stereo(sine(3, dbfs(-30)))
-    expect(exportLoudness(mix, 2, SR, -20)?.targetLufs).toBeNull()
+    expect((await exportLoudness(mix, 2, SR, -20))?.targetLufs).toBeNull()
+  })
+})
+
+// ESCSUITE-301: the export's pass is cooperative — sliced at about 2 s of
+// audio, yielding a macrotask between slices, reporting progress after each
+// one and checking the export's AbortSignal at every boundary — and gives
+// exactly the synchronous pass's answer. `toEqual` on the measurements and
+// `firstDifference` on the buffers are exact: every number is compared with
+// Object.is, never to a tolerance.
+describe('the cooperative pass (ESCSUITE-301)', () => {
+  const noSleep = () => Promise.resolve()
+  const stereo = (x: Float32Array) => interleave(x, x)
+
+  /** The first index at which two buffers differ bit for bit, or −1 when they are identical. */
+  const firstDifference = (a: Float32Array, b: Float32Array) => {
+    if (a.length !== b.length) return -2
+    for (let i = 0; i < a.length; i++) if (!Object.is(a[i], b[i])) return i
+    return -1
+  }
+
+  /** Planar channels as one interleaved buffer, any channel count. */
+  const interleaveAll = (channels: Float32Array[]) => {
+    const n = channels[0].length
+    const out = new Float32Array(n * channels.length)
+    for (let i = 0; i < n; i++) for (let c = 0; c < channels.length; c++) out[i * channels.length + c] = channels[c][i]
+    return out
+  }
+
+  /** 3 s of programme with a gap, a level change and a click: every limiter state is visited. */
+  const programme = () => {
+    const l = concat(sine(1, dbfs(-18)), new Float32Array(0.5 * SR), sine(1.5, dbfs(-30)))
+    const r = concat(sine(1, dbfs(-24), 440), new Float32Array(0.5 * SR), sine(1.5, dbfs(-27), 440))
+    l[2 * SR] = 0.9
+    return interleave(l, r)
+  }
+
+  it('slices at about two seconds of audio at the rate it measures', () => {
+    expect(LOUDNESS_SLICE_SECONDS).toBe(2)
+    expect(loudnessSliceFrames(48000)).toBe(96000)
+    expect(loudnessSliceFrames(44100)).toBe(88200)
+  })
+
+  describe('measures exactly what the one synchronous pass measures', () => {
+    const a23 = () => amplitudeForMonoLufs(-23)
+    const fixtures: Array<[string, () => Float32Array[], number]> = [
+      ['the −23 LUFS mono sine', () => [sine(10, a23())], SR],
+      ['a stereo sine', () => [sine(5, dbfs(-23)), sine(5, dbfs(-23))], SR],
+      ['the silent half', () => [concat(tone1k(10, a23()), new Float32Array(10 * SR))], SR],
+      ['a 5.1 layout, surround and LFE weighted', () => {
+        const x = tone1k(2, dbfs(-30))
+        const z = new Float32Array(x.length)
+        return [x, z, z, x, x, z]
+      }, SR],
+      ['a 997 Hz stereo sine at 44.1 kHz', () => [sine(10, dbfs(-23), 997, 44100), sine(10, dbfs(-23), 997, 44100)], 44100],
+    ]
+    it.each(fixtures)('%s', { timeout: 60_000 }, async (_name, make, rate) => {
+      const channels = make()
+      const sync = measureLoudness(channels, rate)
+      expect(await measureInterleavedLoudnessAsync(interleaveAll(channels), channels.length, rate, { sleep: noSleep }))
+        .toEqual(sync)
+    })
+
+    // 80 s of stereo, 40 slices. The synchronous pass alone took 5.35 s under
+    // coverage (ESCSUITE-292's measurement); this runs it and the sliced one.
+    it('EBU Tech 3341 case 3', { timeout: 120_000 }, async () => {
+      const quiet = tone1k(10, dbfs(-36))
+      const l = concat(quiet, tone1k(60, dbfs(-23)), quiet)
+      const sync = measureLoudness([l, l], SR)
+      expect(sync.gatedBlocks).toBe(603)
+      expect(await measureInterleavedLoudnessAsync(stereo(l), 2, SR, { sleep: noSleep })).toEqual(sync)
+    })
+  })
+
+  // Where a slice ends relative to the meter's 100 ms sub-blocks and 400 ms
+  // blocks, and to the interpolator's 24-sample chunks, must not matter: the
+  // filter state, the half-filled sub-block, the window bound and the
+  // limiter's envelope all continue across the boundary.
+  describe.each([
+    ['exactly on a 100 ms hop', 4800],
+    ['inside a 100 ms hop', 2000],
+    ['inside a 400 ms block, between two of its hops', 19000],
+    ["smaller than the interpolator's 24-sample chunk", 23],
+  ])('with a slice boundary %s', { timeout: 60_000 }, (_name, sliceFrames) => {
+    it('measures the same loudness and true peak', async () => {
+      const mix = programme()
+      expect(await measureInterleavedLoudnessAsync(mix, 2, SR, { sleep: noSleep, sliceFrames }))
+        .toEqual(measureInterleavedLoudness(mix, 2, SR))
+    })
+
+    it('limits to the same samples', async () => {
+      const sync = programme()
+      applyInterleavedGainWithLimiter(sync, 2, 24, TRUE_PEAK_CEILING_DBTP)
+      const sliced = programme()
+      await applyInterleavedGainWithLimiterAsync(sliced, 2, 24, TRUE_PEAK_CEILING_DBTP, SR, { sleep: noSleep, sliceFrames })
+      expect(firstDifference(sliced, sync)).toBe(-1)
+    })
+  })
+
+  describe('limits to exactly the samples the one synchronous pass writes', () => {
+    const spike = () => {
+      const x = new Float32Array(SR).fill(0.1)
+      x[1000] = 1
+      return x
+    }
+    it.each([
+      ['the hold and release at 48 kHz', () => spike(), 1, 0, -6, 48000],
+      ['the hold and release at 44.1 kHz', () => spike(), 1, 0, -6, 44100],
+      ['a sine held at the ceiling', () => stereo(sine(3, dbfs(-20))), 2, 25, TRUE_PEAK_CEILING_DBTP, SR],
+      ['the interleaved twins', () => interleave(concat(sine(0.5, 1), sine(0.5, dbfs(-30))), sine(1, dbfs(-9), 440)), 2, 3, -1, SR],
+      ['a square wave already past the ceiling', () => {
+        const sq = new Float32Array(3 * SR)
+        for (let i = 0; i < sq.length; i++) sq[i] = i % 48 < 24 ? 1 : -1
+        return sq
+      }, 1, 0, -1, SR],
+    ] as const)('%s', async (_name, make, channels, gainDb, ceiling, rate) => {
+      const sync = make()
+      applyInterleavedGainWithLimiter(sync, channels, gainDb, ceiling, rate)
+      const sliced = make()
+      await applyInterleavedGainWithLimiterAsync(sliced, channels, gainDb, ceiling, rate, { sleep: noSleep, sliceFrames: 777 })
+      expect(firstDifference(sliced, sync)).toBe(-1)
+    })
+  })
+
+  describe('exportLoudness', () => {
+    /** 5 s of stereo: three 2 s slices at 48 kHz (96000, 96000 and 48000 frames). */
+    const tone = () => stereo(sine(5, dbfs(-30)))
+    const clicked = () => {
+      const x = sine(5, dbfs(-30))
+      x[SR] = 0.9
+      return stereo(x)
+    }
+    const paced = () => {
+      const reports: number[] = []
+      const sleep = vi.fn(noSleep)
+      return { reports, sleep, pacing: { onProgress: (f: number) => reports.push(f), sleep } }
+    }
+
+    it.each([
+      ['a click the limiter has to hold', () => clicked(), true],
+      ['a very quiet mix, raised by no more than the cap', () => stereo(sine(5, dbfs(-60))), false],
+    ] as const)('gives the synchronous pass its exact answer: %s', async (_name, make, expectLimited) => {
+      const mix = make()
+      const measured = measureInterleavedLoudness(mix, 2, SR)
+      const { gainDb, limited } = gainForTarget(measured, -14, TRUE_PEAK_CEILING_DBTP)
+      expect(limited).toBe(expectLimited)
+      const sync = mix.slice()
+      if (limited) applyInterleavedGainWithLimiter(sync, 2, gainDb, TRUE_PEAK_CEILING_DBTP, SR)
+      else for (let i = 0; i < sync.length; i++) sync[i] *= 10 ** (gainDb / 20)
+
+      const result = await exportLoudness(mix, 2, SR, -14, { sleep: noSleep })
+
+      expect(result).toEqual({
+        measuredLufs: measured.integratedLufs,
+        truePeakDbtp: measured.truePeakDbtp,
+        gainDb,
+        targetLufs: -14,
+        limited,
+      })
+      expect(firstDifference(mix, sync)).toBe(-1)
+    })
+
+    it('reports once per slice and once at the end, and sleeps only between slices', async () => {
+      const { reports, sleep, pacing } = paced()
+      await exportLoudness(tone(), 2, SR, undefined, pacing)
+      expect(reports).toEqual([0.4, 0.8, 1, 1])
+      expect(sleep).toHaveBeenCalledTimes(2)
+    })
+
+    it('gives the measurement the first half of the bar when a target may need the limiter', async () => {
+      const { reports, sleep, pacing } = paced()
+      const result = await exportLoudness(clicked(), 2, SR, -14, pacing)
+      expect(result?.limited).toBe(true)
+      expect(reports).toEqual([0.2, 0.4, 0.5, 0.7, 0.9, 1, 1])
+      // Two boundaries in each pass, and the one between them.
+      expect(sleep).toHaveBeenCalledTimes(5)
+    })
+
+    it('goes straight to the end when the target needs no limiter', async () => {
+      const { reports, sleep, pacing } = paced()
+      const result = await exportLoudness(tone(), 2, SR, -16, pacing)
+      expect(result?.limited).toBe(false)
+      expect(reports).toEqual([0.2, 0.4, 0.5, 1])
+      expect(sleep).toHaveBeenCalledTimes(2)
+    })
+
+    it('runs a mix shorter than one slice in one go, without yielding', async () => {
+      const { reports, sleep, pacing } = paced()
+      await exportLoudness(stereo(sine(1, dbfs(-30))), 2, SR, undefined, pacing)
+      expect(reports).toEqual([1, 1])
+      expect(sleep).not.toHaveBeenCalled()
+    })
+
+    it('reports the end for a mix with nothing measurable, and still says nothing about it', async () => {
+      const { reports, pacing } = paced()
+      expect(await exportLoudness(new Float32Array(2 * SR), 2, SR, -14, pacing)).toBeUndefined()
+      // A target was asked for, so the measurement had the first half.
+      expect(reports).toEqual([0.5, 1])
+    })
+
+    it('stops at the boundary after an abort, before the next slice is measured or reported', async () => {
+      const controller = new AbortController()
+      const reports: number[] = []
+      const onProgress = (f: number) => {
+        reports.push(f)
+        if (reports.length === 2) controller.abort()
+      }
+      const sleep = vi.fn(noSleep)
+
+      await expect(
+        exportLoudness(tone(), 2, SR, undefined, { signal: controller.signal, onProgress, sleep })
+      ).rejects.toBeInstanceOf(ExportAbortedError)
+
+      expect(reports).toEqual([0.4, 0.8])
+      expect(sleep).toHaveBeenCalledTimes(2)
+    })
+
+    it('stops the limiter at a boundary too, leaving the slices it never reached untouched', async () => {
+      const controller = new AbortController()
+      const mix = clicked()
+      const before = mix.slice()
+      const reports: number[] = []
+      const onProgress = (f: number) => {
+        reports.push(f)
+        // The fourth report is the limiter's first slice.
+        if (reports.length === 4) controller.abort()
+      }
+
+      await expect(
+        exportLoudness(mix, 2, SR, -14, { signal: controller.signal, onProgress, sleep: noSleep })
+      ).rejects.toBeInstanceOf(ExportAbortedError)
+
+      expect(reports).toEqual([0.2, 0.4, 0.5, 0.7])
+      // The first slice was gained (the gain is written 13 frames behind the
+      // detector); from the second slice on, nothing was touched.
+      expect(mix[0.5 * SR * 2]).not.toBe(before[0.5 * SR * 2])
+      expect(firstDifference(mix.subarray(96000 * 2), before.subarray(96000 * 2))).toBe(-1)
+    })
+
+    it('checks for an abort between the measurement and the limiter, before the limiter touches the mix', async () => {
+      const controller = new AbortController()
+      const mix = clicked()
+      const before = mix.slice()
+      const reports: number[] = []
+      const onProgress = (f: number) => {
+        reports.push(f)
+        // 0.5: the measurement's last slice, with the limiter still to come.
+        if (reports.length === 3) controller.abort()
+      }
+
+      await expect(
+        exportLoudness(mix, 2, SR, -14, { signal: controller.signal, onProgress, sleep: noSleep })
+      ).rejects.toBeInstanceOf(ExportAbortedError)
+
+      expect(reports).toEqual([0.2, 0.4, 0.5])
+      expect(firstDifference(mix, before)).toBe(-1)
+    })
+
+    it('does no work at all for an export already cancelled', async () => {
+      const controller = new AbortController()
+      controller.abort()
+      const mix = tone()
+      const before = mix.slice()
+      const { reports, sleep, pacing } = paced()
+
+      await expect(exportLoudness(mix, 2, SR, -16, { ...pacing, signal: controller.signal }))
+        .rejects.toBeInstanceOf(ExportAbortedError)
+
+      expect(reports).toEqual([])
+      expect(sleep).not.toHaveBeenCalled()
+      expect(firstDifference(mix, before)).toBe(-1)
+    })
+
+    // The default boundary is the exporters' own MessageChannel yield
+    // (`yieldToMain`), not a timer: a setTimeout chain is clamped to 4 ms in a
+    // visible tab and to once a second — once a minute after five minutes — in
+    // a hidden one, which would add minutes to a long mix in a background tab.
+    // Timers are faked here, so a pass that waited on one would never settle.
+    it('yields through a MessageChannel, not a timer, when no sleep is given', async () => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setImmediate'] })
+      try {
+        let settled = false
+        // 3 s of stereo: two slices, so exactly one boundary.
+        const run = exportLoudness(stereo(sine(3, dbfs(-30))), 2, SR, undefined).then(() => (settled = true))
+        for (let i = 0; i < 50; i++) await Promise.resolve()
+        // Parked at the boundary, not on a microtask.
+        expect(settled).toBe(false)
+        const roundTrip = () =>
+          new Promise<void>((resolve) => {
+            const channel = new MessageChannel()
+            channel.port1.onmessage = () => {
+              channel.port1.close()
+              resolve()
+            }
+            channel.port2.postMessage(null)
+          })
+        for (let i = 0; i < 5 && !settled; i++) await roundTrip()
+        expect(settled).toBe(true)
+        await run
+      } finally {
+        vi.useRealTimers()
+      }
+    })
   })
 })
 

@@ -36,8 +36,20 @@
 //
 // Cost: one pass over the mix, after it is mixed and before any encoder sees
 // it — never per video frame. The only allocations are the per-100-ms block
-// accumulators (one number per 100 ms of programme) and the limiter's
-// constant-size gain delay line.
+// accumulators (one number per 100 ms of programme), a few numbers of filter
+// state per channel and the limiter's constant-size gain delay line.
+//
+// Cooperative (ESCSUITE-301): the export walks that one pass in slices of
+// about 2 s of audio (`loudnessSliceFrames`), yielding through a MessageChannel between
+// slices, reporting progress after each and checking the export's
+// AbortSignal at every boundary — on a 10-minute mix the single synchronous
+// call held the main thread for seconds, with the dialog's Cancel dead. The
+// meter and the limiter are generators that carry every piece of state across
+// a boundary (the filters, the half-filled sub-block, the window bound, the
+// limiter's envelope and hold), so a sliced pass is bit-identical to the
+// synchronous one — which is the same generator run with no yields.
+
+import { checkAborted, yieldToMain } from './exportTypes';
 
 /** The integrated loudnesses the export offers to normalise to, in LUFS. */
 export type LoudnessTarget = -14 | -16 | -23;
@@ -59,6 +71,17 @@ export const TRUE_PEAK_CEILING_DBTP = -1;
  * the gain reported is the gain applied.
  */
 export const MAX_GAIN_DB = 20;
+
+/** The progress line both video exporters show while the loudness pass runs (ESCSUITE-301). */
+export const MEASURING_LOUDNESS = 'Measuring loudness…';
+
+/** How much audio one cooperative slice covers (ESCSUITE-301). */
+export const LOUDNESS_SLICE_SECONDS = 2;
+
+/** `LOUDNESS_SLICE_SECONDS` in frames at `sampleRate`: 96 000 at the export's 48 kHz. */
+export function loudnessSliceFrames(sampleRate: number): number {
+  return Math.round(LOUDNESS_SLICE_SECONDS * sampleRate);
+}
 
 /**
  * One of the three targets, or `undefined` for off — for a value read back
@@ -224,9 +247,18 @@ function forwardPeak(d: Float32Array, o: number, stride: number, frames: number,
  * from: the largest sum of |taps| of the three phases (≈ 2.3; at least 1,
  * since each phase sums to 1).
  */
-const INTERPOLATION_GAIN = Math.max(
-  ...[QUARTER, HALF, THREE_QUARTERS].map((taps) => taps.reduce((sum, t) => sum + Math.abs(t), 0))
-);
+const INTERPOLATION_GAIN =
+  Math.max(...[QUARTER, HALF, THREE_QUARTERS].map((taps) => taps.reduce((sum, t) => sum + Math.abs(t), 0))) *
+  // A hair of margin (ESCSUITE-301): the bound is the exact sum of |taps|
+  // times the largest sample, but the interpolated point is a floating-point
+  // sum of 24 products that can round a few ulps past it. Without the margin
+  // a frame could be skipped whose exact read would nudge the peak up by an
+  // ulp — and which frames are skipped depends on the order the meter visits
+  // channels and frames, which a sliced pass changes once there are two or
+  // more channels. With it the skip is strictly conservative, so the peak is
+  // the true maximum whatever the order, and the sliced meter's true peak is
+  // the synchronous one's to the bit.
+  (1 + 1e-12);
 
 /**
  * A cheap upper bound on |x| over every sample `forwardPeak(…, n)` reads, so
@@ -277,7 +309,31 @@ const RELATIVE_GATE_FACTOR = 0.1;
  */
 const ANTI_DENORMAL = 1e-20;
 
-function measure(lanes: Lanes, sampleRate: number): LoudnessMeasurement {
+/** One channel's meter state, carried from one slice to the next. */
+interface ChannelMeter {
+  /** The two biquads' transposed-direct-form-II state. */
+  z1: number;
+  z2: number;
+  w1: number;
+  w2: number;
+  /** Sum of squares so far in the current sub-block, and how many frames it holds. */
+  sum: number;
+  inSub: number;
+  /** The sub-block this channel is filling. */
+  sub: number;
+  bound: (n: number) => number;
+}
+
+/**
+ * The meter as a resumable walk: frames `[start, start + sliceFrames)` of
+ * every channel, then a yield of how many frames are done, until the last
+ * slice, after which it gates the blocks and returns the measurement. Each
+ * channel's filter state, half-filled sub-block and window bound are carried
+ * across a yield, and each sub-block still takes its channels' energies in
+ * channel order, so the answer is the same — to the bit — whatever the slice
+ * length. One slice of the whole mix is the synchronous meter.
+ */
+function* meterSteps(lanes: Lanes, sampleRate: number, sliceFrames: number): Generator<number, LoudnessMeasurement, void> {
   const { data, offset, stride, frames } = lanes;
   const channelCount = data.length;
   const { pre, rlb } = kWeightingCoefficients(sampleRate);
@@ -288,36 +344,56 @@ function measure(lanes: Lanes, sampleRate: number): LoudnessMeasurement {
   const subCount = Math.floor(frames / subLength);
   const subEnergy = new Float64Array(subCount);
   let peak = 0;
+  const meters: ChannelMeter[] = data.map((d, c) => ({
+    z1: 0,
+    z2: 0,
+    w1: 0,
+    w2: 0,
+    sum: 0,
+    inSub: 0,
+    sub: 0,
+    bound: windowBound(d, offset[c], stride, frames),
+  }));
 
-  for (let c = 0; c < channelCount; c++) {
-    const d = data[c];
-    const weight = channelWeight(c, channelCount);
-    // Transposed direct form II, one state pair per stage.
-    let z1 = 0;
-    let z2 = 0;
-    let w1 = 0;
-    let w2 = 0;
-    let sum = 0;
-    let inSub = 0;
-    let sub = 0;
-    const bound = windowBound(d, offset[c], stride, frames);
-    for (let n = 0, at = offset[c]; n < frames; n++, at += stride) {
-      const x = d[at] + ANTI_DENORMAL;
-      const y = pre.b0 * x + z1;
-      z1 = pre.b1 * x - pre.a1 * y + z2;
-      z2 = pre.b2 * x - pre.a2 * y;
-      const k = rlb.b0 * y + w1;
-      w1 = rlb.b1 * y - rlb.a1 * k + w2;
-      w2 = rlb.b2 * y - rlb.a2 * k;
-      sum += k * k;
-      if (++inSub === subLength) {
-        subEnergy[sub++] += weight * sum;
-        sum = 0;
-        inSub = 0;
+  for (let start = 0; start < frames; ) {
+    const end = Math.min(frames, start + sliceFrames);
+    for (let c = 0; c < channelCount; c++) {
+      const d = data[c];
+      const weight = channelWeight(c, channelCount);
+      const meter = meters[c];
+      // Transposed direct form II, one state pair per stage — in locals for
+      // the slice, written back at its end.
+      let { z1, z2, w1, w2, sum, inSub, sub } = meter;
+      const bound = meter.bound;
+      for (let n = start, at = offset[c] + start * stride; n < end; n++, at += stride) {
+        const x = d[at] + ANTI_DENORMAL;
+        const y = pre.b0 * x + z1;
+        z1 = pre.b1 * x - pre.a1 * y + z2;
+        z2 = pre.b2 * x - pre.a2 * y;
+        const k = rlb.b0 * y + w1;
+        w1 = rlb.b1 * y - rlb.a1 * k + w2;
+        w2 = rlb.b2 * y - rlb.a2 * k;
+        sum += k * k;
+        if (++inSub === subLength) {
+          subEnergy[sub++] += weight * sum;
+          sum = 0;
+          inSub = 0;
+        }
+        // The peak only grows, so a frame that cannot beat it changes nothing.
+        // (Which frames are skipped depends on the order they are visited in;
+        // the maximum does not.)
+        if (bound(n) > peak) peak = Math.max(peak, forwardPeak(d, offset[c], stride, frames, n));
       }
-      // The peak only grows, so a frame that cannot beat it changes nothing.
-      if (bound(n) > peak) peak = Math.max(peak, forwardPeak(d, offset[c], stride, frames, n));
+      meter.z1 = z1;
+      meter.z2 = z2;
+      meter.w1 = w1;
+      meter.w2 = w2;
+      meter.sum = sum;
+      meter.inSub = inSub;
+      meter.sub = sub;
     }
+    start = end;
+    if (start < frames) yield start;
   }
 
   // Each block's energy is the mean square over its four sub-blocks.
@@ -354,6 +430,74 @@ function measure(lanes: Lanes, sampleRate: number): LoudnessMeasurement {
 }
 
 /**
+ * The synchronous pass. Both callers hand the walk an infinite slice, so it
+ * never yields and the first `next()` is the whole walk — there is no loop
+ * here because its "not done yet" arm could never run (ESCSUITE-301 measurement).
+ */
+function runToEnd<T>(steps: Generator<number, T, void>): T {
+  return steps.next().value as T;
+}
+
+function measure(lanes: Lanes, sampleRate: number): LoudnessMeasurement {
+  return runToEnd(meterSteps(lanes, sampleRate, Infinity));
+}
+
+/**
+ * How a cooperative pass behaves between slices. Every field is optional: a
+ * pass with none of them still yields (through `yieldToMain`) between slices.
+ */
+export interface LoudnessPacing {
+  /** Checked at every slice boundary; an aborted signal rejects with `ExportAbortedError`. */
+  signal?: AbortSignal;
+  /** Told the fraction done, 0–1, after every slice (and, from `exportLoudness`, once at the end). */
+  onProgress?: (fraction: number) => void;
+  /**
+   * What a boundary waits on: the exporters' own MessageChannel `yieldToMain`
+   * unless a test hands in its own. Not a timer — a `setTimeout(…, 0)` chain
+   * is clamped to 4 ms in a visible tab and to once a second (once a minute
+   * after five minutes) in a hidden one, which is exactly the throttling a
+   * background-tab export must not meet.
+   */
+  sleep?: () => Promise<void>;
+  /**
+   * Frames per slice; `loudnessSliceFrames(sampleRate)` unless a test asks for
+   * another boundary. Must be ≥ 1: 0 would loop forever.
+   */
+  sliceFrames?: number;
+}
+
+/**
+ * One slice boundary: hand the main thread back, then honour an abort. The
+ * one place the default yield lives — both the boundaries inside a pass and
+ * the one between the measurement and the limiter cross it.
+ */
+async function crossBoundary(pacing: LoudnessPacing): Promise<void> {
+  await (pacing.sleep ?? yieldToMain)();
+  checkAborted(pacing.signal);
+}
+
+/**
+ * Walk `steps` (which yields frames done after every slice but the last),
+ * reporting `from + span · done / frames` after each slice and, between
+ * slices, crossing a boundary (`crossBoundary`). Nothing runs after
+ * the last slice but its report: no sleep, no check.
+ */
+async function cooperate<T>(
+  steps: Generator<number, T, void>,
+  frames: number,
+  pacing: LoudnessPacing,
+  from: number,
+  span: number
+): Promise<T> {
+  for (;;) {
+    const step = steps.next();
+    pacing.onProgress?.(from + span * (step.done ? 1 : step.value / frames));
+    if (step.done) return step.value;
+    await crossBoundary(pacing);
+  }
+}
+
+/**
  * BS.1770-4 integrated loudness and true peak of planar `channels` (one array
  * per channel, L R [C …] order; extra length in a longer channel is ignored).
  */
@@ -368,6 +512,30 @@ export function measureInterleavedLoudness(
   sampleRate: number
 ): LoudnessMeasurement {
   return measure(interleavedLanes(data, channelCount), sampleRate);
+}
+
+/**
+ * `measureInterleavedLoudness`, sliced: the same answer to the bit, with the
+ * main thread handed back between slices (ESCSUITE-301).
+ */
+export function measureInterleavedLoudnessAsync(
+  data: Float32Array,
+  channelCount: number,
+  sampleRate: number,
+  pacing: LoudnessPacing = {}
+): Promise<LoudnessMeasurement> {
+  return measureCooperatively(interleavedLanes(data, channelCount), sampleRate, pacing, 0, 1);
+}
+
+function measureCooperatively(
+  lanes: Lanes,
+  sampleRate: number,
+  pacing: LoudnessPacing,
+  from: number,
+  span: number
+): Promise<LoudnessMeasurement> {
+  const sliceFrames = pacing.sliceFrames ?? loudnessSliceFrames(sampleRate);
+  return cooperate(meterSteps(lanes, sampleRate, sliceFrames), lanes.frames, pacing, from, span);
 }
 
 // --- Normalising ------------------------------------------------------------
@@ -399,7 +567,20 @@ const RELEASE_SECONDS = 0.05;
  */
 const WRITE_LAG = TAPS_HALF + 1;
 
-function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number, sampleRate: number): void {
+/**
+ * The limiter as a resumable walk, the meter's way: frames
+ * `[start, start + sliceFrames)`, then a yield of frames done, until the last
+ * slice and the tail of the delay line. The envelope, the hold count, the
+ * previous frame's peak, the delay line and the window bounds all live across
+ * a yield, so every sample written is the one the synchronous pass writes.
+ */
+function* limiterSteps(
+  lanes: Lanes,
+  gainDb: number,
+  ceilingDbtp: number,
+  sampleRate: number,
+  sliceFrames: number
+): Generator<number, void, void> {
   const { data, offset, stride, frames } = lanes;
   const channelCount = data.length;
   // Two scalars per call, in frames at this rate.
@@ -423,29 +604,51 @@ function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number, samp
     for (let c = 0; c < channelCount; c++) data[c][offset[c] + m * stride] *= g;
   };
 
-  for (let n = 0; n < frames; n++) {
-    // Linked: one detector across every channel, so the stereo image holds.
-    // Frame n's neighbourhood is [n − 1, n + 1), the two intervals it bounds.
-    let forward = 0;
-    for (let c = 0; c < channelCount; c++) {
-      const bound = bounds[c](n);
-      forward = Math.max(forward, bound <= quiet ? bound : forwardPeak(data[c], offset[c], stride, frames, n));
+  for (let start = 0; start < frames; ) {
+    const end = Math.min(frames, start + sliceFrames);
+    for (let n = start; n < end; n++) {
+      // Linked: one detector across every channel, so the stereo image holds.
+      // Frame n's neighbourhood is [n − 1, n + 1), the two intervals it bounds.
+      let forward = 0;
+      for (let c = 0; c < channelCount; c++) {
+        const bound = bounds[c](n);
+        forward = Math.max(forward, bound <= quiet ? bound : forwardPeak(data[c], offset[c], stride, frames, n));
+      }
+      const truePeak = gain * Math.max(previous, forward);
+      previous = forward;
+      const required = truePeak > ceiling ? ceiling / truePeak : 1;
+      if (required < env) {
+        env = required;
+        hold = holdFrames;
+      } else if (hold > 0) {
+        hold--;
+      } else {
+        env = Math.min(required, env + (1 - env) * release);
+      }
+      envelope[n % (WRITE_LAG + 1)] = env;
+      if (n >= WRITE_LAG) write(n - WRITE_LAG);
     }
-    const truePeak = gain * Math.max(previous, forward);
-    previous = forward;
-    const required = truePeak > ceiling ? ceiling / truePeak : 1;
-    if (required < env) {
-      env = required;
-      hold = holdFrames;
-    } else if (hold > 0) {
-      hold--;
-    } else {
-      env = Math.min(required, env + (1 - env) * release);
-    }
-    envelope[n % (WRITE_LAG + 1)] = env;
-    if (n >= WRITE_LAG) write(n - WRITE_LAG);
+    start = end;
+    if (start < frames) yield start;
   }
   for (let m = Math.max(0, frames - WRITE_LAG); m < frames; m++) write(m);
+}
+
+function gainWithLimiter(lanes: Lanes, gainDb: number, ceilingDbtp: number, sampleRate: number): void {
+  runToEnd(limiterSteps(lanes, gainDb, ceilingDbtp, sampleRate, Infinity));
+}
+
+function limitCooperatively(
+  lanes: Lanes,
+  gainDb: number,
+  ceilingDbtp: number,
+  sampleRate: number,
+  pacing: LoudnessPacing,
+  from: number,
+  span: number
+): Promise<void> {
+  const sliceFrames = pacing.sliceFrames ?? loudnessSliceFrames(sampleRate);
+  return cooperate(limiterSteps(lanes, gainDb, ceilingDbtp, sampleRate, sliceFrames), lanes.frames, pacing, from, span);
 }
 
 /**
@@ -488,6 +691,21 @@ export function applyInterleavedGainWithLimiter(
   gainWithLimiter(interleavedLanes(data, channelCount), gainDb, ceilingDbtp, sampleRate);
 }
 
+/**
+ * `applyInterleavedGainWithLimiter`, sliced: the same samples to the bit,
+ * with the main thread handed back between slices (ESCSUITE-301).
+ */
+export function applyInterleavedGainWithLimiterAsync(
+  data: Float32Array,
+  channelCount: number,
+  gainDb: number,
+  ceilingDbtp: number,
+  sampleRate: number,
+  pacing: LoudnessPacing = {}
+): Promise<void> {
+  return limitCooperatively(interleavedLanes(data, channelCount), gainDb, ceilingDbtp, sampleRate, pacing, 0, 1);
+}
+
 // --- The export's one call --------------------------------------------------
 
 /** What an export says about its sound, when it had any to measure. */
@@ -510,22 +728,51 @@ export interface ExportLoudness {
  * `undefined` — nothing to say — for no mix at all and for a mix with no
  * measurable loudness (silence, or nothing above −70 LUFS for 400 ms), which
  * is left exactly as it is.
+ *
+ * Cooperative (ESCSUITE-301): sliced at about 2 s of audio, with a yield, a
+ * progress report and an abort check at every boundary — see
+ * `LoudnessPacing`. Progress runs 0 → 1 over the measurement alone when there
+ * is no target; with one, the measurement takes the first half and the
+ * limiter, if it is needed, the second (a plain gain is one quick multiply
+ * and jumps to the end). One final report of 1 follows either way. An abort
+ * rejects with `ExportAbortedError` at the next boundary — part-way through
+ * the limiter that leaves the mix partly gained, which is harmless: the export
+ * is abandoned and nothing reads this buffer again.
  */
-export function exportLoudness(
+export async function exportLoudness(
   data: Float32Array | null,
   channelCount: number,
   sampleRate: number,
-  target: unknown
-): ExportLoudness | undefined {
+  target: unknown,
+  pacing: LoudnessPacing = {}
+): Promise<ExportLoudness | undefined> {
   if (!data) return undefined;
-  const measured = measureInterleavedLoudness(data, channelCount, sampleRate);
+  checkAborted(pacing.signal);
+  const lanes = interleavedLanes(data, channelCount);
+  const targetLufs = loudnessTargetOrOff(target);
+  const measureSpan = targetLufs === undefined ? 1 : 0.5;
+  const measured = await measureCooperatively(lanes, sampleRate, pacing, 0, measureSpan);
+  const result = await normalise(lanes, data, measured, targetLufs, sampleRate, pacing);
+  pacing.onProgress?.(1);
+  return result;
+}
+
+async function normalise(
+  lanes: Lanes,
+  data: Float32Array,
+  measured: LoudnessMeasurement,
+  targetLufs: LoudnessTarget | undefined,
+  sampleRate: number,
+  pacing: LoudnessPacing
+): Promise<ExportLoudness | undefined> {
   if (measured.gatedBlocks === 0) return undefined;
   const base = { measuredLufs: measured.integratedLufs, truePeakDbtp: measured.truePeakDbtp };
-  const targetLufs = loudnessTargetOrOff(target);
   if (targetLufs === undefined) return { ...base, gainDb: 0, targetLufs: null, limited: false };
   const { gainDb, limited } = gainForTarget(measured, targetLufs, TRUE_PEAK_CEILING_DBTP);
   if (limited) {
-    applyInterleavedGainWithLimiter(data, channelCount, gainDb, TRUE_PEAK_CEILING_DBTP, sampleRate);
+    // The boundary between the two passes is a boundary like any other.
+    await crossBoundary(pacing);
+    await limitCooperatively(lanes, gainDb, TRUE_PEAK_CEILING_DBTP, sampleRate, pacing, 0.5, 0.5);
   } else {
     // The limiter's detector reads exactly the peaks the meter just measured,
     // so when the gained true peak is under the ceiling it could never engage:
