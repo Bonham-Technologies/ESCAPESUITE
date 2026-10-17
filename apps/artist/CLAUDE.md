@@ -320,8 +320,11 @@ pnpm lint                # Run ESLint
   only on its first frame, so resetting on the frames that issued none let such a source finish
   black (review round 1); and leaves it for anything else (a fallback over an element no longer
   seeking but with no frame yet). A healthy seek that lands late — after the fallbacks, so its
-  own request counts one — is cleared by the next request's start, so a slow machine is never
-  refused (re-review round 1); only an element that stays `seeking` across three requests is.
+  own request counts one — is cleared by the next request's start, so a slow machine whose seeks
+  land between requests is never refused (re-review round 1); only an element that stays `seeking`
+  across three requests is — a new seek aborts the one in flight, so seeks that each outlast the
+  waits plus the gap to the next request are refused too, and those frames could not have been
+  drawn either way.
   At `WEDGED_SEEK_FRAMES` (3) it throws `SourceNotSeekableError`, which both exporters' catch turns into an
   `ExportError` with `code: 'SOURCE_NOT_SEEKABLE'` (`exportErrorCodeOf`) and the sentence
   `This browser cannot read "<name>" frame by frame (its seeks never completed). Re-save the
@@ -5238,9 +5241,15 @@ To prevent black frames during export:
   whenever a request starts over an element no longer seeking, or ends with a landed seek or a
   frame to draw. So a seek still in flight over a frame it can already draw is not counted; a
   seek that settles late, after the fallbacks, counts for its own request and is cleared by the
-  next one's start — a slow machine is never refused; a fallback over an element that stopped
-  seeking but has no frame yet leaves the count alone; and a request held at one time over a
-  seek still outstanding counts, after the same waits a seek gets, on both paths. The measured
+  next one's start — a slow machine whose seeks land between requests is never refused (a new
+  seek aborts the one in flight, so an element whose every seek outlasts the waits plus the gap to
+  the next request — about 800 ms on WebM/GIF, 600 ms on MP4 — stays `seeking` across three
+  requests and is refused; those frames could not have been drawn either way, since the draw
+  needs `readyState >= 2`); a fallback over an element that stopped seeking but has no frame yet
+  leaves the count alone; and a request held at one time over a seek still outstanding counts
+  after a wait: on the MP4 path the same 500 ms `seeked` wait plus 100 ms readiness wait a seek
+  gets, on the WebM/GIF path the composer's 300 ms readiness wait alone (no seek is issued, so
+  no `seeked` wait) — the rule is the same, the slack per held request differs. The measured
   wedge keeps `seeking` true for good, so it is refused on its third request. The counter is
   two integer compares per request; the perf ceilings are unchanged. The cure for the file itself is "Seek
   index repair at import"; this is what a source that was never repaired (stored before the
