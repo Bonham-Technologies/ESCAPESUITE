@@ -938,8 +938,8 @@ Three things the import refuses to do, each chosen rather than defaulted:
   mean the first is never read. A companion is placed at its own stored length — ESCAPECRAFT
   stores an audio part whose track ended early (a microphone unplugged) at the shorter length its
   file really holds, not the take's (ESCSUITE-318, pinned in `takeImport.test.ts`). A companion
-  whose own length cannot be read borrows the take's instead of being left off, because a part
-  that ran to the end of the take is the take's length — one clock, one start, one stop.
+  whose own length cannot be read borrows the take's instead of being left off: the right figure,
+  near enough, for a part that ran to the end, and a placeable one for the rest.
   The primary's own path is exempt from both: its blob is already in hand, and a primary whose
   length cannot be resolved still throws, because that is the take failing rather than a part
   of it. A `getThumbnail` that rejects, for any part including the primary, costs that part its

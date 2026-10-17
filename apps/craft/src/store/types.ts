@@ -64,10 +64,11 @@ export interface CompanionPart {
   /**
    * An audio part's own length, in seconds (ESCSUITE-318): the end of the last
    * `AudioData` its pipeline encoded, on the take's recorded clock — so a
-   * pause is out of it as it is out of the take's. It is the take's length,
-   * to within a chunk, unless the part's track ended early (a microphone
-   * unplugged, a system-audio share stopped), when it is the shorter length
-   * the file really holds.
+   * pause is out of it as it is out of the take's. It is the length the file
+   * holds: a little under the take's stored length for a part that ran to
+   * the end (the part is cut where `stop()` was entered, the take's length
+   * read after the flush), and shorter still when the part's track ended
+   * early (a microphone unplugged, a system-audio share stopped).
    *
    * Set by the recorder on every audio part it delivers, and always positive
    * there: a pipeline that encoded nothing is never delivered. Absent on the

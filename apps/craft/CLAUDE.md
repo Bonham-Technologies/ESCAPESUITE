@@ -2036,9 +2036,14 @@ microphone unplugged, a system-audio share stopped — is finalised early and it
 stamp plus its length, `encodedEndUs`) and delivers that on the part as `CompanionPart.duration`,
 in seconds. Both capture paths stamp *recorded* time — the AudioWorklet from the render position
 of each recorded span, cut at `stop()` or at the track's end; the ScriptProcessorNode fallback
-from the samples it counted while recording — so a pause is out of the figure exactly as it is
-out of the primary's, and a part that ran to the end reports the take's length to within one
-chunk (~85 ms). `useRecordingSave` stores `companion.duration ?? recordedDuration`: the recorder
+from the samples it counted while recording, plus any silence ESCSUITE-296's gap filler encoded —
+so a pause is out of the figure exactly as it is out of the primary's, at the context's own rate
+(a 44.1 kHz context is pinned). A part that ran to the end is cut at the render frame where
+`stop()` was entered, while the primary's `recordedDuration` is read from `getDuration()` only
+after the encoders have flushed and the outputs finalised (`onStop` in
+`useRecordingController.ts`), so a full-length audio part is stored a little *shorter* than the
+primary — by the stop-and-flush latency, tens to a few hundred milliseconds — and never longer;
+its figure is the length its file holds. `useRecordingSave` stores `companion.duration ?? recordedDuration`: the recorder
 reports one, always positive, for every audio part it delivers (a pipeline that encoded nothing
 is never delivered), and the take's length is the fallback for a caller that hands a part over
 without one. Which part carries which figure: the **primary** is stored at the take's
@@ -2050,7 +2055,7 @@ trusts the stored figure, `app/takeImport.ts`) placed a clip of the take's lengt
 file and the library row showed the take's length — measured, a microphone that went at ~1.5 s of
 a 6.5 s take was stored at 6.51 s over a 1.48 s file. Pinned by
 `core/webcodecsRecorder.companionDuration.test.ts` (both capture paths: an unplugged microphone,
-a whole take, a paused take), `useRecordingSave.test.ts`, ARTIST's `takeImport.test.ts`, and the
+a whole take, a paused take; the fallback at 44.1 kHz too), `useRecordingSave.test.ts`, ARTIST's `takeImport.test.ts`, and the
 Playwright `escapecraft/separate-tracks-companion-duration.spec.ts`. Since ESCSUITE-143 the *primary* of a take recorded with
 no picture at all — Screen and Webcam both off — is stored the same way, with no role and no
 companions: `mediaType: 'audio'`, `frameRate: 0`, 0x0, no thumbnail, the recorder's own duration

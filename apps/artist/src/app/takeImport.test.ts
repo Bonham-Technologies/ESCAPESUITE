@@ -295,8 +295,8 @@ describe('importTake', () => {
 
     const take = await importTake(primary, addSourceVideo)
 
-    // A part ESCAPECRAFT stored is the take's length unless it ended early
-    // (ESCSUITE-318), so borrowing the primary's beats refusing to place it.
+    // A part ESCAPECRAFT stored is close to the take's length unless it ended
+    // early (ESCSUITE-318), so borrowing the primary's beats refusing to place it.
     expect(take.clipParts[1].duration).toBe(6)
     expect(added[1].duration).toBe(6)
   })

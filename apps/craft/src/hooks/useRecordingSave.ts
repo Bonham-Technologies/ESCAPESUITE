@@ -300,9 +300,9 @@ export function useRecordingSave({
           // length had ESCAPEARTIST lay a clip of it over the shorter file
           // (ESCSUITE-318). The recorder reports one, always positive, for
           // every audio part it delivers; a caller that hands a part over
-          // without one gets the take's length, which is the part's own
-          // whenever its track ran to the end — every pipeline shares one
-          // clock, one start and one stop.
+          // without one gets the take's length, which is close to the part's
+          // own whenever its track ran to the end — every pipeline shares one
+          // clock and one start.
           companionSourceVideo = buildSourceVideo({
             id: companionId,
             now,
