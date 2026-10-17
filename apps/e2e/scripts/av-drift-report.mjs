@@ -51,6 +51,7 @@ import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { isWorkletTake, lostCallbacksCell, WORKLET_H1A_VERDICT } from './av-drift-path.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const RESULTS_ROOT = path.resolve(HERE, '../av-drift-results')
@@ -775,7 +776,7 @@ function analyseArm(dir) {
   lines.push('| Instrument | Value |')
   lines.push('|---|---|')
   lines.push(
-    `| lost callbacks (in window) | **${m.lostCallbacks}**${m.nodes.length ? ` — ${m.nodes.map((n, i) => `node ${i}${i === 0 ? ' (mix)' : ''}: ${n.lostInWindow} by playbackTime, ${n.lostByPerfSpan} by performance.now() span, over ${n.callsInWindow} callbacks` + `; ${n.stepsAboveOne} late steps, ${f((n.alignedStepShare ?? NaN) * 100, 0)} % buffer-aligned, longest dispatch gap ${f(n.largestDispatchGapMs, 0)} ms`).join('; ')}` : ' (no ScriptProcessor — MediaRecorder path)'} |`
+    `| lost callbacks (in window) | ${lostCallbacksCell(m, `**${m.lostCallbacks}**${m.nodes.length ? ` — ${m.nodes.map((n, i) => `node ${i}${i === 0 ? ' (mix)' : ''}: ${n.lostInWindow} by playbackTime, ${n.lostByPerfSpan} by performance.now() span, over ${n.callsInWindow} callbacks` + `; ${n.stepsAboveOne} late steps, ${f((n.alignedStepShare ?? NaN) * 100, 0)} % buffer-aligned, longest dispatch gap ${f(n.largestDispatchGapMs, 0)} ms`).join('; ')}` : ' (no ScriptProcessor — MediaRecorder path)'}}`)} |`
   )
   lines.push(`| \`playbackTime\` exposed | ${m.nodes.length ? (m.playbackTimeAvailable ? 'yes' : '**no**') : 'n/a'} |`)
   lines.push(
@@ -808,7 +809,9 @@ function analyseArm(dir) {
   const raw = best(rawPrimary)
   const end = rawPrimary?.video && rawPrimary?.audio ? (rawPrimary.audio.end - rawPrimary.video.end) * 1000 : NaN
   const verdicts = []
-  if (m.recorder === 'webcodecs') {
+  if (isWorkletTake(m)) {
+    verdicts.push(WORKLET_H1A_VERDICT)
+  } else if (m.recorder === 'webcodecs') {
     const kMix = m.nodes[0]?.lostInWindow ?? 0
     const expected = -kMix * BUFFER_MS
     if (!m.playbackTimeAvailable) {
