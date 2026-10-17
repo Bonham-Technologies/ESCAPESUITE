@@ -442,11 +442,90 @@ describe('createAudioCapture: which path a take gets', () => {
 
     expect(context.workletNodes).toHaveLength(0)
     expect(context.scriptProcessors).toHaveLength(2)
-    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(1)
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(2)
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
     expect(consoleInfo).toHaveBeenCalledTimes(1)
     expect(String(consoleInfo.mock.calls[0][0])).toMatch(/ScriptProcessorNode/)
-    expect(consoleInfo.mock.calls[0]).toContain(refusal)
+    const refused = String(consoleInfo.mock.calls[0][0])
+    expect(refused).toContain('blob: AbortError')
+    expect(refused).toContain('data: AbortError')
+  })
+})
+
+describe('createAudioCapture: the data: retry (ESCSUITE-317)', () => {
+  const dataPrefix = 'data:text/javascript;charset=utf-8,'
+
+  it('loads the blob: module when it works: one call, "blob module"', async () => {
+    enableAudioWorkletDouble()
+    const context = newContext()
+    await capture(context)
+
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(1)
+    expect(context.workletNodes).toHaveLength(1)
+    expect(consoleInfo).toHaveBeenCalledTimes(1)
+    expect(String(consoleInfo.mock.calls[0][0])).toBe('Recording audio through an AudioWorklet (blob module)')
+  })
+
+  it('retries with a data: module when the blob: one is refused, and uses the worklet', async () => {
+    enableAudioWorkletDouble({ blobModulesRefused: true })
+    const context = newContext()
+    await capture(context)
+    await capture(context, 'Microphone')
+
+    const addModule = context.audioWorklet!.addModule
+    expect(addModule).toHaveBeenCalledTimes(2)
+    expect(String(addModule.mock.calls[0][0])).toMatch(/^blob:/)
+    const retried = String(addModule.mock.calls[1][0])
+    expect(retried.startsWith(dataPrefix)).toBe(true)
+    expect(decodeURIComponent(retried.slice(dataPrefix.length))).toBe(AUDIO_CAPTURE_WORKLET_SOURCE)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(context.workletNodes).toHaveLength(2)
+    expect(context.scriptProcessors).toHaveLength(0)
+    expect(consoleInfo).toHaveBeenCalledTimes(1)
+    expect(String(consoleInfo.mock.calls[0][0])).toBe('Recording audio through an AudioWorklet (data module)')
+  })
+
+  it('falls back to a ScriptProcessorNode when both are refused, naming the data: rejection', async () => {
+    enableAudioWorkletDouble({ blobModulesRefused: true, dataModulesRefused: true })
+    const context = newContext()
+    await capture(context)
+
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(2)
+    expect(context.workletNodes).toHaveLength(0)
+    expect(context.scriptProcessors).toHaveLength(1)
+    expect(consoleInfo).toHaveBeenCalledTimes(1)
+    expect(String(consoleInfo.mock.calls[0][0])).toMatch(/ScriptProcessorNode/)
+    const line = String(consoleInfo.mock.calls[0][0])
+    expect(line).toContain('blob: AbortError: Failed to load worklet module script: blob:')
+    expect(line).toContain('data: AbortError: Failed to load worklet module script: data:text/javascript;charset=utf-8,…')
+    expect(line).not.toContain(encodeURIComponent(AUDIO_CAPTURE_WORKLET_SOURCE.slice(0, 40)))
+    expect(consoleInfo.mock.calls[0]).toHaveLength(1)
+  })
+
+  it('reads an Error rejection by its name and message in the fallback line (a real browser rejects with a DOMException, which is an Error there)', async () => {
+    // jsdom's DOMException is not an `instanceof Error` in the test realm, so the
+    // double's refusals above reach `describeRefusal`'s String arm; a browser's
+    // AbortError reaches its Error arm, which this case drives with a plain Error.
+    enableAudioWorkletDouble({
+      addModuleError: Object.assign(new Error('Failed to load worklet module script: blob:null/0f3a'), { name: 'AbortError' }),
+    })
+    const context = newContext()
+    await capture(context)
+
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(2)
+    expect(context.scriptProcessors).toHaveLength(1)
+    const line = String(consoleInfo.mock.calls[0][0])
+    expect(line).toContain('blob: AbortError: Failed to load worklet module script: blob:null/0f3a')
+    expect(line).toContain('data: AbortError: Failed to load worklet module script: blob:null/0f3a')
+    expect(consoleInfo.mock.calls[0]).toHaveLength(1)
+  })
+
+  it('makes no addModule call at all when the browser has no AudioWorklet', async () => {
+    const context = newContext()
+    await capture(context)
+    expect(context.audioWorklet).toBeUndefined()
+    expect(context.scriptProcessors).toHaveLength(1)
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
   })
 })
 

@@ -388,6 +388,26 @@ describe('WebCodecsRecorder work ceilings', () => {
         uninstallTrackProcessorDouble()
       }
     })
+
+    // ESCSUITE-317, 2026-10-17: the retry path. A blob: module a page cannot
+    // load (the offline build opened from disk) costs exactly one more
+    // addModule per take — the data: retry — and nothing per chunk.
+    it('a refused blob: module costs one retry per take: two addModule calls, same chunk laws', async () => {
+      enableAudioWorkletDouble({ blobModulesRefused: true })
+      await initializeWithAudio()
+      recorder.start()
+
+      const context = lastAudioContext()
+      context.render(CHUNKS * AUDIO_BUFFER_FRAMES)
+      await flush()
+
+      expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(2)
+      expect(context.workletNodes).toHaveLength(1)
+      expect(context.scriptProcessors).toHaveLength(0)
+      expect(getCreatedFrames('AudioData')).toHaveLength(CHUNKS)
+      await recorder.stop()
+      expect(allFramesClosed()).toBe(true)
+    })
   })
 
   describe('one take of separate tracks', () => {

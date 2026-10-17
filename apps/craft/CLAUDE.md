@@ -1354,7 +1354,14 @@ path is live — captures through an AudioWorklet wherever it can:
 
 - **The processor** (`AUDIO_CAPTURE_WORKLET_SOURCE`, registered as `'escapecraft-capture'`) is
   loaded with `addModule()` from a `text/javascript` Blob URL — there is no file to serve it from
-  in a single-file build — and the URL is revoked once `addModule()` settles. It gathers quanta into
+  in a single-file build — and the URL is revoked once `addModule()` settles. **If that rejects, the
+  same source is retried once as a `data:text/javascript;charset=utf-8,…` URL** (ESCSUITE-317):
+  opened from disk (`file://`, the offline build), Chromium 156 mints `blob:null/<uuid>` and refuses
+  it as a worklet module (`AbortError`) while accepting `data:`; Firefox 157 accepts both; WebKit is
+  unmeasured (ESCSUITE-321). `blob:` stays first because the hosted `script-src` admits `blob:` and
+  must not have to admit `data:`; the retry is the general rule rather than an `isFileOrigin()` gate,
+  so any opaque origin (a sandboxed frame) is covered. When both are refused the one fallback line names both rejections, `blob:` first, the `data:` payload elided (the CSP pin reads the `blob:` refusal from it). The one `console.info` line says which kind
+  loaded — "(blob module)" or "(data module)". The processor gathers quanta into
   chunks of `CHUNK_FRAMES` (4096, the ~85 ms a ScriptProcessor buffer was) per channel and posts
   `{ frame, channels }`, `frame` the render position of the chunk's first sample, the two
   `Float32Array`s transferred. Once the page has encoded a chunk (copied planar first, so nothing
@@ -1387,7 +1394,7 @@ path is live — captures through an AudioWorklet wherever it can:
   has stopped cannot hold a take hostage. A chunk that arrives after that is ignored. `close()` (the
   recorder's `cleanup()`) lets the node go at once and settles a pending `stop()`.
 - **The fallback**: a context with no `audioWorklet` (a browser without one, or an insecure
-  context) or whose `addModule()` rejects gets ESCSUITE-296's ScriptProcessorNode capture from the
+  context) or whose `addModule()` rejects both the blob: and the data: module gets ESCSUITE-296's ScriptProcessorNode capture from the
   same call, exactly as it was — the samples delivered counted into the stamps, the gap filler
   filling what the page never saw, the context-time video clock unchanged.
 - **The choice is made once per `AudioContext`** — once per take, however many pipelines it has —
