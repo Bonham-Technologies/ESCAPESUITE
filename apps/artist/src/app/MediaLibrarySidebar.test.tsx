@@ -20,10 +20,10 @@ beforeEach(() => {
 /**
  * The sidebar with its required props, any of which a test can override.
  *
- * Three of them are pure pass-throughs the sidebar has no behaviour of its own
- * for — the picker's confirm-open report, the uploader's project-file handoff
- * and its notice channel (ESCSUITE-142) — and every case below needs them
- * filled in.
+ * Four of them are pure pass-throughs the sidebar has no behaviour of its own
+ * for — the picker's confirm-open report, the uploader's project-file handoff,
+ * its notice channel (ESCSUITE-142) and the autosave's `clearSession`
+ * (ESCSUITE-307) — and every case below needs them filled in.
  */
 const renderSidebar = (overrides: Partial<ComponentProps<typeof MediaLibrarySidebar>> = {}) =>
   render(
@@ -33,6 +33,7 @@ const renderSidebar = (overrides: Partial<ComponentProps<typeof MediaLibrarySide
       onConfirmOpenChange={vi.fn()}
       onProjectFile={vi.fn()}
       showNotification={vi.fn()}
+      clearSession={vi.fn()}
       {...overrides}
     />
   );
@@ -110,5 +111,24 @@ describe('MediaLibrarySidebar', () => {
     fireEvent.drop(zone, { dataTransfer: { files: [dropped] } });
 
     await waitFor(() => expect(onProjectFile).toHaveBeenCalledWith(dropped));
+  });
+
+  // ESCSUITE-307: the library's storage clears empty the saved session slot
+  // through the autosave's own `clearSession`, handed down from `App` here.
+  it("passes its caller's clearSession through to the library's Remove", async () => {
+    const clearSession = vi.fn();
+    // A spy, restored on its own: `vi.unstubAllGlobals()` would also drop the
+    // URL stubs `src/test/setup.ts` installs (ESCSUITE-119).
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    try {
+      renderSidebar({ clearSession });
+
+      // resetStoreForTest leaves one source in the library and no clip.
+      fireEvent.click(screen.getByTitle('Remove media'));
+
+      await waitFor(() => expect(clearSession).toHaveBeenCalledTimes(1));
+    } finally {
+      confirm.mockRestore();
+    }
   });
 });

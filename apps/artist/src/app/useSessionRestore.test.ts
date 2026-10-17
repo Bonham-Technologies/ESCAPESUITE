@@ -23,6 +23,7 @@ import { __resetDeclinedSlotsForTests } from './declinedSlots'
 import {
   clearSessionState,
   getThumbnail,
+  getVideo,
   listSessionStates,
   revokeSourceThumbnails,
   saveSessionState,
@@ -44,6 +45,9 @@ vi.mock('../core/storage', async () => (await import('../test/appDoubles')).stor
 const THIS_TAB = 'this-tab'
 
 let deps: SessionRestoreDeps
+
+/** The row `getVideo` hands back for a source whose bytes are still stored. */
+const storedRow = (id: string) => ({ blob: new Blob(['bytes']), metadata: { ...sampleVideo, id } })
 
 const savedSession = (overrides: Partial<SessionState> = {}): SessionState => ({
   tabId: 'earlier-tab',
@@ -70,6 +74,10 @@ beforeEach(() => {
   vi.mocked(revokeSourceThumbnails).mockClear()
   vi.mocked(listSessionStates).mockResolvedValue([])
   vi.mocked(getThumbnail).mockResolvedValue(undefined)
+  // Every source a session names still has its bytes in storage — the case
+  // every restore before ESCSUITE-307 assumed. A case about a source whose row
+  // is gone scripts that itself.
+  vi.mocked(getVideo).mockImplementation(async (id) => storedRow(id))
   sessionStorage.clear()
   sessionStorage.setItem(TAB_ID_KEY, THIS_TAB)
   deps = {
@@ -1370,3 +1378,144 @@ describe('the editor block (ESCSUITE-245)', () => {
   })
 })
 
+
+// ESCSUITE-307: a saved session can outlive its sources' bytes — a storage
+// clear in another tab, ESCAPECRAFT deleting a recording, or (before this
+// ticket) a clear in this tab that the autosave never wrote over. A restore
+// that added such a source put a tile in the library nothing could play,
+// place or export. The row is read beside the thumbnail, and a source whose
+// row is gone is left out with every clip that plays it.
+describe('a source whose bytes are no longer in storage (ESCSUITE-307)', () => {
+  const videoOne = { ...sampleVideo, id: 'video1' }
+  const videoTwo = { ...sampleVideo, id: 'video2', name: 'two.mp4' }
+
+  /**
+   * A session naming both sources: clip-two (video2) at 0–4, clip-one (video1)
+   * at 4–10, so leaving video1 out shortens the timeline from 10 to 4.
+   */
+  const twoSourceSession = (overrides: Partial<SessionState> = {}): SessionState => {
+    const timeline = useEditorStore.getState().project.timeline
+    const trackId = timeline.tracks[0].id
+    const clipOn = (id: string, sourceVideoId: string, timelinePosition: number, duration: number) => ({
+      id, sourceVideoId, trackId, name: id, startTime: 0, endTime: duration, duration, timelinePosition,
+    })
+    return savedSession({
+      project: {
+        ...useEditorStore.getState().project,
+        timeline: {
+          ...timeline,
+          clips: [clipOn('clip-two', 'video2', 0, 4), clipOn('clip-one', 'video1', 4, 6)] as never,
+          duration: 10,
+        },
+      },
+      sourceVideos: [videoOne, videoTwo],
+      selectedClipId: 'clip-two',
+      editor: { inPoint: 1, outPoint: 9, markers: [] },
+      ...overrides,
+    })
+  }
+
+  /** Only these ids still have a row in storage. */
+  const storedOnly = (...ids: string[]) =>
+    vi.mocked(getVideo).mockImplementation(async (id) => (ids.includes(id) ? storedRow(id) : undefined))
+
+  /** Restore `session` through the real store, from an empty library. */
+  const restoreIntoStore = async (session: SessionState) => {
+    store().removeSourceVideosPermanently(['video1'])
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
+    const view = mountRestore({
+      setProject: (p) => store().setProject(p),
+      addSourceVideo: (v) => store().addSourceVideo(v),
+      seekTo: (t) => store().seekTo(t),
+      setSelectedClipId: (id) => store().setSelectedClipId(id),
+      clearHistory: () => store().clearHistory(),
+    })
+    await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
+    await act(async () => {
+      await view.result.current.handleRestoreSession(session)
+    })
+    return view
+  }
+
+  it('leaves out a source whose row is gone, with its clips, and says so once', async () => {
+    storedOnly('video2')
+
+    await restoreIntoStore(twoSourceSession())
+
+    const state = useEditorStore.getState()
+    expect(state.sourceVideos.map((v) => v.id)).toEqual(['video2'])
+    expect(state.project.timeline.clips.map((c) => c.id)).toEqual(['clip-two'])
+    // Recalculated from the clips that are left, not carried over from the save.
+    expect(state.project.timeline.duration).toBe(4)
+    // The selection named a clip that stayed, so it stays.
+    expect(state.selectedClipId).toBe('clip-two')
+    // The saved range is clamped to the timeline that was restored, not the saved one.
+    expect(state.outPoint).toBe(4)
+    expect(getVideo).toHaveBeenCalledWith('video1')
+    expect(getVideo).toHaveBeenCalledWith('video2')
+    // One notice, in place of "Session restored" — the toast is one slot.
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      '1 file in the saved session is no longer in storage and was left out',
+      'info'
+    )
+  })
+
+  it('restores everything, and says nothing more, when every row is still there', async () => {
+    const session = twoSourceSession()
+    vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
+    const view = mountRestore()
+    await waitFor(() => expect(view.result.current.showSessionPrompt).toBe(true))
+
+    await act(async () => {
+      await view.result.current.handleRestoreSession(session)
+    })
+
+    // The saved project itself, not a copy with clips filtered out of it.
+    expect(deps.setProject).toHaveBeenCalledWith(session.project)
+    expect(vi.mocked(deps.setProject).mock.calls[0][0]).toBe(session.project)
+    expect(vi.mocked(deps.addSourceVideo).mock.calls.map(([v]) => v.id)).toEqual(['video1', 'video2'])
+    expect(deps.setSelectedClipId).toHaveBeenCalledWith('clip-two')
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenCalledWith('Session restored', 'success')
+  })
+
+  it('restores an empty project when every row is gone, and still says so', async () => {
+    storedOnly()
+
+    await restoreIntoStore(twoSourceSession({ selectedClipId: 'clip-one' }))
+
+    const state = useEditorStore.getState()
+    expect(state.sourceVideos).toEqual([])
+    expect(state.project.timeline.clips).toEqual([])
+    expect(state.project.timeline.duration).toBe(0)
+    // The selected clip was left out with its source, so nothing is selected.
+    expect(state.selectedClipId).toBeNull()
+    expect(deps.showNotification).toHaveBeenCalledTimes(1)
+    expect(deps.showNotification).toHaveBeenCalledWith(
+      '2 files in the saved session are no longer in storage and were left out',
+      'info'
+    )
+  })
+
+  it('frees the thumbnail it read for a source it left out, and keeps the one it restored', async () => {
+    storedOnly('video2')
+    vi.mocked(getThumbnail).mockImplementation(async (id) => new Blob([`thumb-${id}`], { type: 'image/jpeg' }))
+    const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
+
+    await restoreIntoStore(twoSourceSession())
+
+    const kept = useEditorStore.getState().sourceVideos.find((v) => v.id === 'video2')!
+    expect(kept.thumbnailUrl).toMatch(/^blob:/)
+    // The handle minted for video1 during the restore: the one freed with a
+    // thumbnail on it (emptying the library first freed the seeded video1,
+    // which had none).
+    const leftOutUrl = vi.mocked(revokeSourceThumbnails).mock.calls
+      .flatMap(([sources]) => sources)
+      .find((v) => v.id === 'video1' && v.thumbnailUrl)?.thumbnailUrl
+    expect(leftOutUrl).toMatch(/^blob:/)
+    expect(leftOutUrl).not.toBe(kept.thumbnailUrl)
+    expect(revokeObjectURL).toHaveBeenCalledWith(leftOutUrl)
+    expect(revokeObjectURL).not.toHaveBeenCalledWith(kept.thumbnailUrl)
+  })
+})
