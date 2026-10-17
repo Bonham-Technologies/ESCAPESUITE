@@ -8,6 +8,7 @@
 // module as free of the store as this one is.
 import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
+import { isExtendableClip, MIN_CLIP_DURATION } from '../../store/extendableClip';
 import type { Clip, SourceVideo, TrimOrigin } from '../../store/types';
 
 /**
@@ -40,8 +41,8 @@ export const MIN_PIXELS_PER_SECOND = PIXELS_PER_SECOND_BASE * 0.1;
 /** How close to a clip's edges the razor refuses to split, in seconds. */
 export const MIN_SPLIT_DISTANCE = 0.1;
 
-/** The shortest clip a trim may leave behind, in seconds. */
-export const MIN_CLIP_DURATION = 0.1;
+/** The shortest clip a trim may leave behind, in seconds — declared in `store/extendableClip.ts`. */
+export { MIN_CLIP_DURATION };
 
 /** How far the pointer must travel before a press becomes a marquee, in pixels. */
 export const MARQUEE_DRAG_THRESHOLD = 5;
@@ -188,23 +189,13 @@ export function getSplitOffset(
 }
 
 /**
- * Whether a clip can be trimmed past its source's length: overlays and images
- * have no fixed source duration, so trimming them changes how long they show.
- *
- * Its only production call site is `computeTrimUpdate`, forty lines below. It
- * is `export`ed anyway so that its overlay / image / video cases can be
- * asserted by name in `timelineGeometry.test.ts` rather than only indirectly,
- * through whichever edge×kind branch of `computeTrimUpdate` happens to reach
- * them — the same trade the four constants above make.
+ * `isExtendableClip` lives in `store/extendableClip.ts` (ESCSUITE-304: the
+ * store's `splitClip` and the migration read it too, and the store may not
+ * import from a component). Re-exported here, not redeclared, so its overlay /
+ * image / video cases are still asserted by name in `timelineGeometry.test.ts`
+ * beside `computeTrimUpdate`, its call site in this module.
  */
-export function isExtendableClip(
-  clip: Pick<Clip, 'overlayType'>,
-  sourceVideo: Pick<SourceVideo, 'mediaType'> | undefined
-): boolean {
-  const isOverlay = clip.overlayType === 'text' || clip.overlayType === 'shape';
-  const isImage = sourceVideo?.mediaType === 'image';
-  return isOverlay || isImage;
-}
+export { isExtendableClip };
 
 /** A span of timeline, in seconds. */
 export interface TimeRange {
@@ -250,9 +241,13 @@ export function computeTrimUpdate({
       const newDuration = originalEnd - newTimelinePosition;
 
       if (newDuration >= MIN_CLIP_DURATION) {
+        // ESCSUITE-304: the whole pair, 0 / duration, on every write — a clip
+        // carrying a stale non-zero startTime would otherwise have it taken
+        // off the length by `trimClip`'s `endTime - startTime` recompute.
         return {
           timelinePosition: newTimelinePosition,
           duration: newDuration,
+          startTime: 0,
           endTime: newDuration,
         };
       }
@@ -283,6 +278,7 @@ export function computeTrimUpdate({
     if (newDuration >= MIN_CLIP_DURATION) {
       return {
         duration: newDuration,
+        startTime: 0,
         endTime: newDuration,
       };
     }

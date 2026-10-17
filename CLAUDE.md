@@ -5158,6 +5158,54 @@ beside the constant, which the coordinator did. Every `*.perf.test.ts` and reren
 byte-identical — the renderer is untouched and the arithmetic runs once per imported file. **No floor
 crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-304 (an extendable clip — an image, a text
+or a shape overlay — always carries `startTime 0` and `endTime = duration`: `splitClip` used to give the
+second half of a split `startTime = splitOffset`, right for a media clip whose source time starts there,
+wrong for a clip with no source timeline, and the trim path then recomputed `duration = endTime −
+startTime` with the inherited offset, so trimming the second half of a split overlay from either edge
+came out shorter than the drag or negative (`startTime 4, endTime 5, duration 1` for a 10 s overlay split
+at 4 s and trimmed in by 1 s), which the ESCSUITE-257 check refused on reopen; now one predicate,
+`isExtendableClip` in the new `store/extendableClip.ts` (re-exported from `timelineGeometry.ts`, since a
+store may not import a component), decides it in `splitClip` — both halves `0 / own duration` — and in both
+extendable branches of `computeTrimUpdate`, which write `startTime: 0` beside `endTime`; a file already
+holding the pair is REPAIRED, not refused (the app wrote it): `repairExtendableClipPairs` in
+`ensureTimelineHasTracks` resets an overlay's pair to `0 / duration`, and the trim-driven shape a positive
+repair cannot reach — finite `startTime`, finite `endTime ≥ MIN_CLIP_DURATION`, `duration === endTime −
+startTime ≤ 0`, which only that trim can produce and whose dragged length is `endTime` — is repaired to
+`0 / endTime / endTime` before `parseProject`'s ESCSUITE-257 / 302 refusals and on the session path, the
+timeline's length recomputed, one warning per parse counting both; every other `≤ 0` shape is still
+refused): 99.85 / **99.45** / **96.80** / 99.78 against the 99.85 / 99.44 / 96.79 / 99.78 that `main` at
+`40086222` (the ESCSUITE-317 version-packages commit) measures in the same sitting — statements and
+branches each up a hundredth, lines and functions unmoved. The base gives 6,123 / 6,326 branches and this
+branch 6,149 / 6,352: twenty-six new branches, twenty-six covered, the same 203 uncovered as before (lines
+9,554 / 9,568 → 9,576 / 9,590, statements 10,834 / 10,894 → 10,859 / 10,919, functions 2,273 / 2,278 →
+2,277 / 2,282, every denominator growing by exactly what the numerator did; the same 14 / 60 / 5
+uncovered). The twenty-six net three files: `store/projectMigration.ts` 241 → 263 (`trimDrivenLength`'s six
+operands — extendable, finite start, finite end, `endTime ≥ MIN_CLIP_DURATION`, `duration === endTime −
+startTime`, `duration ≤ 0` — each reached from both sides by the repaired cases against one refusal per
+operand: a media clip with the same numbers, `startTime Infinity`, `endTime '2'`, `endTime 0` / `0.05` /
+`0/0/0`, a mismatched duration, a positive equal pair; the positive-pair repair's own arms and the two
+warning wordings), `store/clipSlice.ts` 165 / 167 → 169 / 171 (the split's extendable choice, reached by an
+overlay, an image and a media clip, with the stale-pair case `4 / 10 / 6` pinning the first half — the
+media-pair mutation reds exactly it; the same two pre-existing arms uncovered), `store/extendableClip.ts`
+4 / 4 on arrival, and `components/Timeline/timelineGeometry.ts` 42 → 38, whose predicate and
+`MIN_CLIP_DURATION` moved out. The dropped `startTime > 0` operand is implied (an `endTime ≥ 0.1` minus a
+`startTime` at or below zero cannot be ≤ 0) and was left out rather than tested. Red first: the drag
+`- "duration": 5 / + "duration": 1 … - "startTime": 0 / + "startTime": 4`; the parse path `refused: Clip
+"o1" has an invalid duration`; the session path `- "duration": 2 / + "duration": -2`. Mutations: the split
+normalisation removed → two split cases red; the trim normalisation removed → five red; both → the drag
+reads `startTime 4, duration 1`. Two review rounds (opus, then a scoped sonnet): the first upheld both of
+the implementer's concerns — an image clip's stale pair is not repaired on load because a `Project`
+carries no source list, and no reader breaks on it (the element paths seek videos only, every length
+reader uses the difference, which equals `duration` on every app-written clip); and ESCSUITE-302's "an
+extended image or overlay legitimately outgrows its own pair" was wrong, no write path ever did, so its
+paragraph and comment are rewritten — and found the trim-driven `≤ 0` shape still refused though its
+length is recoverable, which the fix round repaired; the second found one Low follow-up, ESCSUITE-329
+(the session restore clamps the editor block against the raw clips, not the repaired ones).
+`store/projectMigration.fuzz.test.ts`'s floors (335 / 265) did not move: a single mutation cannot
+produce the repaired shape. `timelineGestures.perf.test.ts`, every other `*.perf.test.ts` and the rerender
+pins are byte-identical. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5165,7 +5213,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.44 | 96.79 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.80 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
