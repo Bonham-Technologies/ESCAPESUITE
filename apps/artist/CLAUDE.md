@@ -5706,15 +5706,18 @@ what is already stored.
   original, with one `console.warn` naming the file. The import continues; on Firefox an export of
   that source then fails by name (`SOURCE_NOT_SEEKABLE`), and Chromium works as before. A record
   with no blob at all is kept as it came, not thrown on.
-- **Order (ESCSUITE-324)**: the repair runs **before** the metadata probe, on both entry points
-  that reach it, `processVideoFile` and `processMediaFile` (the uploader, `?video=` and
-  `LOAD_VIDEO`), through one `withSeekIndexFirst`. A WebM from outside ESCAPECRAFT that has neither
-  a Duration nor Cues is exactly the file whose end-seek wedges on Firefox, so the probe used to
-  run its deadline out before the remux that would have made it seekable; now `extractVideoMetadata`,
-  the thumbnail, the waveform and `storeVideo` all see the repaired bytes, and the remux runs at
-  most once per import. An indexed WebM and every other type come back as the same object, so
-  nothing else changes. The old gap is closed. Pinned by
-  `videoProcessor.seekIndexFirst.test.ts` (a `<video>` double that wedges only while it holds the raw
+- **Order (ESCSUITE-324)**: at import the repair runs **before** any metadata probe, on every
+  entry that loads a WebM into an element — `processVideoFile` and `processMediaFile` (the
+  uploader, `?video=` and `LOAD_VIDEO`), for `video/webm` and `audio/webm` alike — through one
+  `withSeekIndexFirst`. A WebM from outside ESCAPECRAFT with neither a Duration nor Cues is the
+  file whose **end-seek** wedges on Firefox: `loadedmetadata` arrives (so the 15 s metadata
+  deadline never fires for this shape), the seek never lands, and the import used to fail on the
+  duration probe's 5 s deadline with "Could not determine the duration of <name>" before the remux
+  that would have made it seekable. Now the metadata probe, the thumbnail, the waveform and
+  `storeVideo` (`finishVideoFile`, or `finishAudioFile` for audio and a video-typed file with no
+  picture) all see the repaired bytes, and the remux runs at most once per import. An indexed WebM
+  and every other type come back as the same object. Pinned by
+  `videoProcessor.seekIndexFirst.test.ts` (media doubles that wedge only while they hold the raw
   file).
 
 ## Keyboard shortcuts (ESCSUITE-247)

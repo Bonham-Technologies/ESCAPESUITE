@@ -635,6 +635,11 @@ export async function generateAudioThumbnail(
  * Process and store an audio file
  */
 export async function processAudioFile(file: File): Promise<SourceVideo> {
+  return finishAudioFile({ bytes: file, file });
+}
+
+/** `processAudioFile` over a file already given its seek index (ESCSUITE-324). */
+async function finishAudioFile({ bytes, file }: IndexedImport): Promise<SourceVideo> {
   // Extract metadata
   const metadata = await extractAudioMetadata(file);
 
@@ -658,7 +663,7 @@ export async function processAudioFile(file: File): Promise<SourceVideo> {
   }
 
   // Store the audio blob
-  await storeVideo(metadata.id, file, metadata);
+  await storeVideo(metadata.id, bytes, metadata);
 
   return metadata;
 }
@@ -685,14 +690,14 @@ export async function processMediaFile(file: File): Promise<SourceVideo> {
     return processImageFile(file);
   }
   if (file.type.startsWith('audio/')) {
-    return processAudioFile(file);
+    return finishAudioFile(await withSeekIndexFirst(file));
   }
   const indexed = await withSeekIndexFirst(file);
   const probed = await extractVideoMetadata(indexed.file);
   if (probed.width > 0 && probed.height > 0) {
     return finishVideoFile(indexed, probed);
   }
-  return processAudioFile(indexed.file);
+  return finishAudioFile(indexed);
 }
 
 /**
