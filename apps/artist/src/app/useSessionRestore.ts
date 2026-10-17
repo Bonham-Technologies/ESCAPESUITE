@@ -176,24 +176,37 @@ export function useSessionRestore({
     restoreAttemptRef.current = attempt;
     const offered = offeredSlotRef.current!;
 
-    // Empty until the thumbnail reads land, so a refusal after them — the
-    // owner back (ESCSUITE-283), a re-read that fails (ESCSUITE-289) — can free
-    // what they minted, and one before them has nothing to free.
+    // Every thumbnail handle the reads below minted, once they have all
+    // settled — so a failure anywhere after that point (a rejected read, the
+    // owner back, ESCSUITE-283; a re-read that fails, ESCSUITE-289) frees each
+    // of them in the catch. Empty only while the reads are still in flight,
+    // and nothing can throw then: every read is settled, never raced.
     let restoredSourceVideos: SourceVideo[] = [];
     // The ids whose bytes are gone (ESCSUITE-307): left out of the restore,
     // with every clip that plays one, and counted in its one notice.
     let leftOutIds: Set<string>;
     let atAnswer: SlotAtAnswer;
     try {
-      // Each source's stored thumbnail and its row, read together: a source
-      // whose row is gone is dropped, and the thumbnail just minted for it is
-      // freed at once rather than handed to nothing.
-      const restored: RestoredSource[] = await Promise.all(
+      // Each source's stored thumbnail and its row, read together and each
+      // allowed to settle: a rejected read must not leave a sibling's read in
+      // flight to mint a handle nobody frees (ESCSUITE-307 review round 1).
+      const reads = await Promise.all(
         session.sourceVideos.map(async (video) => {
-          const [thumbnailUrl, stored] = await Promise.all([resolveThumbnailUrl(video.id), getVideo(video.id)]);
-          return { video: { ...video, thumbnailUrl }, inStorage: stored !== undefined };
+          const [thumbnail, stored] = await Promise.allSettled([resolveThumbnailUrl(video.id), getVideo(video.id)]);
+          return { video, thumbnail, stored };
         })
       );
+      restoredSourceVideos = reads.flatMap(({ video, thumbnail }) =>
+        thumbnail.status === 'fulfilled' ? [{ ...video, thumbnailUrl: thumbnail.value }] : []
+      );
+      // A read that rejected fails the restore — a row read that fails is not
+      // a row that is gone. Otherwise a source whose row is gone is dropped,
+      // and the thumbnail just minted for it is freed at once.
+      const restored: RestoredSource[] = reads.map(({ video, thumbnail, stored }) => {
+        if (thumbnail.status === 'rejected') throw thumbnail.reason;
+        if (stored.status === 'rejected') throw stored.reason;
+        return { video: { ...video, thumbnailUrl: thumbnail.value }, inStorage: stored.value !== undefined };
+      });
       restoredSourceVideos = restored.filter((r) => r.inStorage).map((r) => r.video);
       const leftOut = restored.filter((r) => !r.inStorage).map((r) => r.video);
       revokeSourceThumbnails(leftOut);

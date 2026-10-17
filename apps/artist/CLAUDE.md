@@ -3821,7 +3821,10 @@ Saver discard — A's page closed, and a new page started with A's `sessionStora
 `addInitScript`, which is what a reactivated discarded tab looks like to the app — and checks that
 a fresh B's Start Fresh leaves A's slot, B's reload is not offered it again, and A comes back to its
 own session (a headed `chrome://discards` "Urgent discard" form is in a comment there, not run in
-CI). The returning-owner and stale-offer cases are
+CI). When the slot a failed restore kept for the next reload is this tab's own (a reload's offer),
+importing a file and removing it again within the autosave's 2 s debounce now deletes that kept slot
+(ESCSUITE-307: the Remove leaves no source and no clip and calls `clearSession`); before, the
+debounced write skipped the empty project and the slot survived. The returning-owner and stale-offer cases are
 pinned in the restore hook's ESCSUITE-283 describe, and the overtaken-offer cases (saved again,
 removed, a re-read that fails, unchanged) in its ESCSUITE-289 describe and `sessionSlots.test.ts`'s
 `slotAtAnswer` cases. The own-slot-first rule is pinned in `sessionSlots.test.ts` and
