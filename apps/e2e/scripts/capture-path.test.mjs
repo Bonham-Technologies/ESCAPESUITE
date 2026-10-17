@@ -21,9 +21,9 @@ test('maps the three shapes the recorder logs, and nothing else', () => {
   assert.equal(capturePathFromLine('Using WebCodecs-based recorder (seekable output)'), null)
 })
 
-test('a MediaRecorder take is media-recorder whatever it logged; a WebCodecs take is its first recorder line', () => {
+test('a recorder line decides the path whatever the arm; with none, the arm\'s recorder does', () => {
   assert.equal(resolveCapturePath([], 'mediarecorder'), 'media-recorder')
-  assert.equal(resolveCapturePath(['Recording audio through an AudioWorklet (blob module)'], 'mediarecorder'), 'media-recorder')
+  assert.equal(resolveCapturePath(['Recording audio through an AudioWorklet (blob module)'], 'mediarecorder'), 'worklet')
   assert.equal(
     resolveCapturePath(['noise', 'Recording audio through an AudioWorklet (blob module)'], 'webcodecs'),
     'worklet'

@@ -256,6 +256,8 @@ test.describe('ESCAPECRAFT A/V drift rig', () => {
     test.slow()
 
     const arm = ARMS[MODE]
+    // A bad AV_DRIFT_EXPECT_PATH is a configuration error: fail before the take.
+    const expectedPath = expectedCapturePath(arm.recorder, process.env.AV_DRIFT_EXPECT_PATH)
     rmSync(RESULTS_DIR, { recursive: true, force: true })
     mkdirSync(RESULTS_DIR, { recursive: true })
 
@@ -346,9 +348,7 @@ test.describe('ESCAPECRAFT A/V drift rig', () => {
     // Tripwire (ESCSUITE-320): the take measured the capture path this arm meant
     // to — `AV_DRIFT_EXPECT_PATH` states another expectation (Firefox, a
     // forced ScriptProcessor fallback).
-    expect(capturePath, 'the audio capture path the take used').toBe(
-      expectedCapturePath(arm.recorder, process.env.AV_DRIFT_EXPECT_PATH)
-    )
+    expect(capturePath, 'the audio capture path the take used').toBe(expectedPath)
 
     // Every stored part, exactly as the app's own WebM download hands it out.
     const rawButtons = page.getByRole('button', { name: /^Download (?!.+ as ).+$/ })

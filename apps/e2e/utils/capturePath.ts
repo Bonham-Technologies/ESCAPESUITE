@@ -4,7 +4,7 @@
  * WebCodecs take's audio goes through an AudioWorklet instead, so "no
  * ScriptProcessor node" no longer means "MediaRecorder". The recorder says
  * which path it chose in one `console.info` line
- * (`apps/craft/src/core/audioWorkletCapture.ts`, `choosePath`); this maps it.
+ * (`choosePath` in `apps/craft/src/core/audioWorkletCapture.ts`); this maps it.
  *
  * Pure and import-free so `scripts/capture-path.test.mjs` can run it under
  * node:test.
@@ -21,17 +21,17 @@ export function capturePathFromLine(line: string): CapturePath | null {
 }
 
 /**
- * The path of a take: a MediaRecorder take never reaches the capture code, so
- * the recorder choice decides it; a WebCodecs take is whichever path the first
- * recorder line names (`null` when it logged none).
+ * The path of a take: the first recorder line any take logged decides it, so a
+ * MediaRecorder arm that somehow ran the worklet reads `worklet` and trips the
+ * rig's tripwire. With no such line, a MediaRecorder arm is `media-recorder`
+ * (it never reaches the capture code) and any other arm is `null`.
  */
 export function resolveCapturePath(lines: readonly string[], recorder: string): CapturePath | null {
-  if (recorder === 'mediarecorder') return 'media-recorder'
   for (const line of lines) {
     const path = capturePathFromLine(line)
     if (path) return path
   }
-  return null
+  return recorder === 'mediarecorder' ? 'media-recorder' : null
 }
 
 /** The path an arm means to measure; `override` (AV_DRIFT_EXPECT_PATH) wins when set. */
