@@ -442,7 +442,7 @@ describe('createAudioCapture: which path a take gets', () => {
 
     expect(context.workletNodes).toHaveLength(0)
     expect(context.scriptProcessors).toHaveLength(2)
-    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(1)
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(2)
     expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
     expect(consoleInfo).toHaveBeenCalledTimes(1)
     expect(String(consoleInfo.mock.calls[0][0])).toMatch(/ScriptProcessorNode/)

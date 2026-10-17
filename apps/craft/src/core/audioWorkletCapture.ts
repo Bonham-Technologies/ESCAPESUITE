@@ -168,8 +168,17 @@ const paths = new WeakMap<BaseAudioContext, Promise<CapturePath>>();
 
 /**
  * Load the processor into this context, or say why not. The module goes in as
- * a Blob URL — there is no file to serve it from in a single-file build — and
- * the URL is revoked as soon as `addModule()` has settled either way.
+ * a Blob URL first — there is no file to serve it from in a single-file build,
+ * and the hosted policy admits `blob:` in `script-src` without having to admit
+ * `data:` — and the URL is revoked as soon as `addModule()` has settled either
+ * way.
+ *
+ * ESCSUITE-317: from a `file://` page (the offline build) Chromium mints
+ * `blob:null/<uuid>` and `addModule()` rejects it with an `AbortError`, while a
+ * `data:` URL loads (Firefox takes both). So a rejection is retried once with
+ * the same source as a `data:` URL — the general rule, which also covers any
+ * other opaque origin, a sandboxed frame say; `blob:null` is the measured case.
+ * Only when that is refused too does the take fall back.
  */
 async function choosePath(context: BaseAudioContext): Promise<CapturePath> {
   const worklet: AudioWorklet | undefined = context.audioWorklet;
@@ -180,15 +189,25 @@ async function choosePath(context: BaseAudioContext): Promise<CapturePath> {
   const url = URL.createObjectURL(
     new Blob([AUDIO_CAPTURE_WORKLET_SOURCE], { type: 'text/javascript' })
   );
+  let kind: 'blob' | 'data' = 'blob';
   try {
-    await worklet.addModule(url);
-  } catch (e) {
-    console.info('Recording audio through a ScriptProcessorNode: the AudioWorklet module would not load:', e);
-    return 'script-processor';
-  } finally {
-    URL.revokeObjectURL(url);
+    try {
+      await worklet.addModule(url);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  } catch {
+    kind = 'data';
+    try {
+      await worklet.addModule(
+        `data:text/javascript;charset=utf-8,${encodeURIComponent(AUDIO_CAPTURE_WORKLET_SOURCE)}`
+      );
+    } catch (e) {
+      console.info('Recording audio through a ScriptProcessorNode: the AudioWorklet module would not load:', e);
+      return 'script-processor';
+    }
   }
-  console.info('Recording audio through an AudioWorklet');
+  console.info(`Recording audio through an AudioWorklet (${kind} module)`);
   return 'worklet';
 }
 

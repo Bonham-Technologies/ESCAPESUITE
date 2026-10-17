@@ -395,4 +395,39 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     await page.waitForTimeout(500)
     expect(opened).toEqual([])
   })
+
+  // ESCSUITE-317: Chromium mints `blob:null/…` from a file:// page and refuses
+  // it as a worklet module, so the offline build used to fall back to the
+  // ScriptProcessorNode path on every take. The module is retried as a data: URL.
+  test('a take records its audio through the AudioWorklet, not the fallback', async ({ page, browserName }) => {
+    const lines: string[] = []
+    page.on('console', (message) => {
+      const text = message.text()
+      if (/Recording audio through/.test(text)) lines.push(text)
+    })
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto(CRAFT_FILE)
+    expect(page.url().startsWith('file://')).toBe(true)
+    await waitForAppReady(page, 'craft')
+
+    const screenSource = page.locator('[class*="sourceToggle"]').filter({ hasText: 'Screen' }).last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 30_000 })
+    await page.waitForTimeout(1000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+    // The path is logged when the take starts; give the line a moment to land.
+    await expect.poll(() => lines.length, { timeout: 10_000 }).toBeGreaterThan(0)
+
+    if (browserName === 'webkit') {
+      // ESCSUITE-321 reads this answer; nothing is asserted for WebKit yet.
+      console.log(`ESCSUITE-317 WebKit capture path: ${lines.join(' | ')}`)
+      return
+    }
+    expect(lines.filter((line) => /through an AudioWorklet/.test(line))).toHaveLength(1)
+    expect(lines.filter((line) => /ScriptProcessorNode/.test(line))).toHaveLength(0)
+  })
 })
