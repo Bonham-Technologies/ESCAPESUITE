@@ -10,7 +10,7 @@ import { installMediaPlaybackStubs } from './test/doubles/media'
 import { sampleVideo, slotOf } from './test/appDoubles'
 import { addClip } from './test/fixtures/projectStore'
 import { loadProject, saveProject, showOpenProjectDialog } from './core/projectManager'
-import { clearSessionState, listSessionStates, type SessionState } from './core/storage'
+import { clearSessionState, getVideo, listSessionStates, type SessionState } from './core/storage'
 import { TAB_ID_KEY } from './app/tabId'
 import styles from './App.module.css'
 
@@ -378,8 +378,16 @@ describe('App project lifecycle', () => {
     // read, not just the first one to arrive, and puts the double's default
     // (no saved session) back afterwards — `vi.clearAllMocks()` keeps a
     // scripted implementation.
+    //
+    // A restore reads each source's row too (ESCSUITE-307) and leaves out one
+    // whose bytes are gone, so these cases have every row still stored — and
+    // put the double's own default (nothing stored) back afterwards.
+    beforeEach(() => {
+      vi.mocked(getVideo).mockImplementation(async (id) => ({ blob: new Blob(['bytes']), metadata: { ...sampleVideo, id } }))
+    })
     afterEach(() => {
       vi.mocked(listSessionStates).mockImplementation(() => Promise.resolve([]))
+      vi.mocked(getVideo).mockImplementation(async () => undefined)
     })
 
     it('restores the saved session', async () => {

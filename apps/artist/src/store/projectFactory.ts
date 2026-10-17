@@ -2,7 +2,7 @@
 // plus the timeline-duration calculation every clip mutation re-runs.
 
 import { v4 as uuidv4 } from 'uuid';
-import type { Clip, Project, Timeline, Track } from './types';
+import type { Clip, Project, SourceVideo, Timeline, Track } from './types';
 
 // Create a default track
 function createDefaultTrack(index: number = 0): Track {
@@ -77,6 +77,30 @@ function calculateTimelineDuration(clips: Clip[]): number {
   return Math.max(...clips.map(c => c.timelinePosition + c.duration));
 }
 
+/**
+ * `timeline` without every clip that plays one of `removedIds`, its duration
+ * recalculated. The one place that arithmetic lives: the media library's
+ * storage clears (`removeSourceVideosPermanently`, ESCSUITE-149) and a session
+ * restore that finds a source's bytes gone (ESCSUITE-307) both drop a source's
+ * clips this way. A clip with no source (a text overlay) is always kept.
+ */
+function timelineWithoutSources(timeline: Timeline, removedIds: ReadonlySet<string>): Timeline {
+  const clips = timeline.clips.filter((c) => !c.sourceVideoId || !removedIds.has(c.sourceVideoId));
+  return { ...timeline, clips, duration: calculateTimelineDuration(clips) };
+}
+
+/**
+ * The editor holds no work at all: no source in the library and no clip on the
+ * timeline (ESCSUITE-227). Read by the autosave, which never writes such a
+ * session over this tab's slot (`isEmptySession`), and by the media library's
+ * three storage clears, which empty the slot themselves when one of them is
+ * what left the project this way (ESCSUITE-307). A clip with no source (a text
+ * overlay) is work, and so is a source with no clip.
+ */
+function holdsNoWork(state: { sourceVideos: readonly SourceVideo[]; project: Project }): boolean {
+  return state.sourceVideos.length === 0 && state.project.timeline.clips.length === 0;
+}
+
 export {
   createDefaultTrack,
   createTrackAtTop,
@@ -84,4 +108,6 @@ export {
   createEmptyTimeline,
   createEmptyProject,
   calculateTimelineDuration,
+  timelineWithoutSources,
+  holdsNoWork,
 };

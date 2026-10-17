@@ -151,7 +151,10 @@ async function seedTake(page: Page, parts: typeof TAKE_PARTS) {
  * project is what the take's overlay geometry is measured against, so leaving
  * it to `ensureTimelineHasTracks`'s migration default would make this test's
  * arithmetic depend on that migration. The prompt only appears for a session
- * that holds source videos, which is what `seeded-video` is for.
+ * that holds source videos, which is what `seeded-video` is for — and since
+ * ESCSUITE-307 a restore leaves out a source whose row is not in the `videos`
+ * store, with its clip, so `seeded-video` has a row of its own too. Its bytes
+ * are a placeholder, not a decodable video: nothing here plays it.
  */
 async function seedSession(page: Page) {
   await page.evaluate(
@@ -168,7 +171,22 @@ async function seedSession(page: Page) {
         request.onerror = () => reject(new Error(`session open failed: ${String(request.error)}`))
         request.onsuccess = () => {
           const db = request.result
-          const tx = db.transaction('settings', 'readwrite')
+          const tx = db.transaction(['settings', 'videos'], 'readwrite')
+          const seededVideo = {
+            id: 'seeded-video',
+            name: 'seeded.webm',
+            duration: 5,
+            width: 1920,
+            height: 1080,
+            frameRate: 30,
+            mimeType: 'video/webm',
+            size: 1024,
+          }
+          tx.objectStore('videos').put({
+            id: 'seeded-video',
+            blob: new Blob(['seeded'], { type: 'video/webm' }),
+            metadata: seededVideo,
+          })
           tx.objectStore('settings').put(
             {
               project: {
@@ -219,18 +237,7 @@ async function seedSession(page: Page) {
                   duration: 5,
                 },
               },
-              sourceVideos: [
-                {
-                  id: 'seeded-video',
-                  name: 'seeded.webm',
-                  duration: 5,
-                  width: 1920,
-                  height: 1080,
-                  frameRate: 30,
-                  mimeType: 'video/webm',
-                  size: 1024,
-                },
-              ],
+              sourceVideos: [seededVideo],
               currentTime: 0,
               selectedClipId: null,
               zoom: 1,

@@ -112,8 +112,10 @@ export function useSessionAutosave({
         // This tab's own slot (ESCSUITE-274): no other tab writes it, so a
         // tab that crashes keeps its session however long another edits.
         const session: SessionState = buildSessionSnapshot(state, Date.now(), tabId);
-        // An empty project never overwrites the slot — Start Fresh and New
-        // Project's own clears are the ways a slot is emptied on purpose.
+        // An empty project never overwrites the slot — Start Fresh, New
+        // Project's own clear and a media-library storage clear that leaves
+        // no source and no clip (ESCSUITE-307, `components/VideoUploader.tsx`)
+        // are the ways a slot is emptied on purpose.
         if (isEmptySession(session)) return;
         saveSessionState(session).then(
           () => {

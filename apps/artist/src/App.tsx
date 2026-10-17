@@ -260,6 +260,7 @@ function App() {
           onConfirmOpenChange={setResolutionConfirmOpen}
           onProjectFile={handleProjectFile}
           showNotification={showNotification}
+          clearSession={clearSession}
         />
 
         {/* Center - Preview */}

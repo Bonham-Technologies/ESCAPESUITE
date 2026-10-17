@@ -96,6 +96,16 @@ let onProjectFile: Mock<(file: File) => void>
 /** What `App` passes down: the notice-channel report of a Clear All partial failure. */
 let showNotification: Mock<ShowNotification>
 
+/**
+ * What `App` passes down to both components: the autosave's `clearSession`,
+ * which a storage clear calls when it leaves the project holding nothing
+ * (ESCSUITE-307). Fresh for every case in the file, whichever describe it is in.
+ */
+let clearSession: Mock<() => void>
+beforeEach(() => {
+  clearSession = vi.fn()
+})
+
 const dropZone = () => screen.getByText('Drop media or click to browse').parentElement!
 const fileInput = () => screen.getByLabelText('Add media files') as HTMLInputElement
 
@@ -136,7 +146,7 @@ describe('VideoUploader', () => {
      * unasserted.
      */
     async function renderUploader(): Promise<void> {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       await act(async () => {
         await Promise.resolve()
       })
@@ -173,7 +183,7 @@ describe('VideoUploader', () => {
 
   describe('storage information', () => {
     it('reports what is used against the quota', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       expect(await screen.findByText('50.0 MB / 500.0 MB')).toBeInTheDocument()
       const fill = document.querySelector<HTMLElement>(`.${styles.storageProgressFill}`)!
@@ -183,7 +193,7 @@ describe('VideoUploader', () => {
 
     it('warns when less than 100MB is left', async () => {
       scriptStorage(60 * MB, 100 * MB)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       await waitFor(() =>
         expect(document.querySelector(`.${styles.storageBar}`)).toHaveClass(styles.storageWarning)
@@ -197,7 +207,7 @@ describe('VideoUploader', () => {
       })
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
         await waitFor(() =>
           expect(errorLog).toHaveBeenCalledWith(
@@ -214,7 +224,7 @@ describe('VideoUploader', () => {
 
   describe('importing media', () => {
     it('imports a dropped video into the media library', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const dropped = file('test.mp4', 'video/mp4')
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [dropped] } })
@@ -240,7 +250,7 @@ describe('VideoUploader', () => {
       // An edit made before the import, so the undo below lands on a real
       // snapshot (one taken before the file existed) rather than doing nothing.
       store().setProjectResolution(1920, 1080)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const pastBefore = useEditorStore.getState().history.past.length
       expect(pastBefore).toBeGreaterThan(0)
 
@@ -260,7 +270,7 @@ describe('VideoUploader', () => {
 
       // Remove is the way out, and it deletes the bytes.
       cleanup()
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
       fireEvent.click(screen.getByTitle('Remove media'))
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('video1')
@@ -270,7 +280,7 @@ describe('VideoUploader', () => {
     // every file to processMediaFile and reports the type that came back.
     it('hands an image to the one media processor and reports an image', async () => {
       mockProcessMediaFile.mockResolvedValue(imageMeta)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const picked = file('test.png', 'image/png')
 
       selectFiles([picked])
@@ -282,7 +292,7 @@ describe('VideoUploader', () => {
 
     it('hands audio to the one media processor and reports audio', async () => {
       mockProcessMediaFile.mockResolvedValue(audioMeta)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('test.mp3', 'audio/mp3')])
 
@@ -294,7 +304,7 @@ describe('VideoUploader', () => {
     it('stores and reports as audio a video/webm file that decodes no picture (ESCSUITE-255)', async () => {
       const micOnly = { ...audioMeta, id: 'mic1', name: 'take.webm', mimeType: 'video/webm' }
       mockProcessMediaFile.mockResolvedValue(micOnly)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const picked = file('take.webm', 'video/webm')
 
       selectFiles([picked])
@@ -306,7 +316,7 @@ describe('VideoUploader', () => {
     })
 
     it('clears the file input so the same file can be picked again', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const input = fileInput()
       // jsdom never reports a non-empty value for a file input, so record what
       // the component writes rather than reading the value back.
@@ -326,7 +336,7 @@ describe('VideoUploader', () => {
 
     it('drops the finished upload from the list after a moment, fading first (ESCSUITE-4)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
       await act(async () => {
@@ -361,7 +371,7 @@ describe('VideoUploader', () => {
     // still leave on their own schedules.
     it('fades only the upload whose own timer has fired, leaving a sibling untouched (ESCSUITE-4)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('first.mp4', 'video/mp4')] } })
       await act(async () => {
@@ -429,7 +439,7 @@ describe('VideoUploader', () => {
     // that failed CI with every assertion green.
     it('arms no timer past its own unmount (ESCSUITE-120)', async () => {
       vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] })
-      const { unmount } = render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      const { unmount } = render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('a.mp4', 'video/mp4'), file('b.mp4', 'video/mp4')] } })
       await act(async () => {
@@ -454,7 +464,7 @@ describe('VideoUploader', () => {
     // complete. role="status" carries an implicit aria-live="polite", so no
     // separate aria-live attribute is needed alongside it.
     it('announces the upload status to assistive tech (ESCSUITE-4)', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [file('test.mp4', 'video/mp4')] } })
 
@@ -462,7 +472,7 @@ describe('VideoUploader', () => {
     })
 
     it('rejects files that are not media at all', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('notes.txt', 'text/plain')])
 
@@ -478,7 +488,7 @@ describe('VideoUploader', () => {
     })
 
     it('says nothing about a file it accepts', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -497,7 +507,7 @@ describe('VideoUploader', () => {
           .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
         const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
         try {
-          render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+          render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
           selectFiles([file('clip.mp4', 'video/mp4'), file('clip.mp4', 'video/mp4')])
 
@@ -524,7 +534,7 @@ describe('VideoUploader', () => {
           .mockRejectedValueOnce(new Error('second failed'))
         const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
         try {
-          render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+          render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
           selectFiles([file('clip.mp4', 'video/mp4'), file('clip.mp4', 'video/mp4')])
 
@@ -548,7 +558,7 @@ describe('VideoUploader', () => {
         mockProcessMediaFile
           .mockResolvedValueOnce(videoMeta)
           .mockImplementationOnce(() => new Promise((resolve) => { finishSecond = resolve }))
-        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
         selectFiles([file('clip.mp4', 'video/mp4'), file('clip.mp4', 'video/mp4')])
         await act(async () => { await vi.advanceTimersByTimeAsync(0) })
@@ -565,7 +575,7 @@ describe('VideoUploader', () => {
 
     it('refuses a file that would not fit in the remaining quota', async () => {
       scriptStorage(10 * MB, 15 * MB)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('big.mp4', 'video/mp4', 'x'.repeat(2048))])
 
@@ -581,7 +591,7 @@ describe('VideoUploader', () => {
       mockProcessMediaFile.mockRejectedValue(new Error('Unsupported codec'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -601,7 +611,7 @@ describe('VideoUploader', () => {
       mockProcessMediaFile.mockRejectedValue(new Error('QuotaExceededError: no room'))
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -617,7 +627,7 @@ describe('VideoUploader', () => {
       mockProcessMediaFile.mockRejectedValue('kaboom')
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
       try {
-        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
         selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -636,7 +646,7 @@ describe('VideoUploader', () => {
     // `useProjectActions` now; the seven cases that drove the uploader's own
     // dialog moved there and to App.project.test.tsx with them.
     it('hands a dropped project file up, and asks nothing itself', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const projectFile = file('my.veditor', '')
 
       fireEvent.drop(dropZone(), { dataTransfer: { files: [projectFile] } })
@@ -646,7 +656,7 @@ describe('VideoUploader', () => {
     })
 
     it('hands a picked project file up the same way', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const projectFile = file('my.veditor', '')
 
       selectFiles([projectFile])
@@ -656,7 +666,7 @@ describe('VideoUploader', () => {
 
     it('hands it up whatever is on the timeline — the caller decides what to ask', async () => {
       addClip('clip1', 0, 2)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('my.veditor', '')])
 
@@ -666,7 +676,7 @@ describe('VideoUploader', () => {
     })
 
     it('ignores the media alongside a project file', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('my.veditor', ''), file('test.mp4', 'video/mp4')])
 
@@ -677,7 +687,7 @@ describe('VideoUploader', () => {
     // ESCSUITE-249: the test was case-sensitive, so a project saved or renamed
     // in upper case fell through to the "not media" refusal.
     it('recognises the extension in any case', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const projectFile = file('PROJECT.VEDITOR', '')
 
       selectFiles([projectFile])
@@ -689,7 +699,7 @@ describe('VideoUploader', () => {
     })
 
     it('leaves a file that is not a project to the media path', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       selectFiles([file('test.mp4', 'video/mp4')])
 
@@ -709,7 +719,7 @@ describe('VideoUploader', () => {
     const captionTexts = () => store().project.timeline.clips.map((clip) => clip.textData?.text)
 
     function renderUploader() {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
     }
 
     it('puts a dropped .srt on the Captions track and says how many', async () => {
@@ -854,7 +864,7 @@ describe('VideoUploader', () => {
     it('clears every stored video once confirmed', async () => {
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo(videoMeta)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -886,7 +896,7 @@ describe('VideoUploader', () => {
         trackId, 0
       )
       const pastLengthBeforeClear = useEditorStore.getState().history.past.length
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -914,7 +924,7 @@ describe('VideoUploader', () => {
       const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
       await storeVideo('video1', new Blob(['bytes']), videoMeta)
       store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:thumb-1' })
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -926,7 +936,7 @@ describe('VideoUploader', () => {
       vi.mocked(globalThis.confirm).mockReturnValue(false)
       await storeVideo('kept', new Blob(['bytes']), { ...videoMeta, id: 'kept' })
       store().addSourceVideo(videoMeta)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -948,7 +958,7 @@ describe('VideoUploader', () => {
       // The reported defect was `db.clear('videos')` *and* `db.clear('thumbnails')`
       // — pin the other half of the loss too (NIT 1).
       await storeThumbnail('craft-take', new Blob(['thumb']))
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -974,7 +984,7 @@ describe('VideoUploader', () => {
       store().updateTrack(clip.trackId, { locked: true })
       await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'other.mp4' })
       store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'other.mp4' })
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -1005,7 +1015,7 @@ describe('VideoUploader', () => {
       const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
       Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
 
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const callsBeforeClick = estimate.mock.calls.length
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
@@ -1039,7 +1049,7 @@ describe('VideoUploader', () => {
         return realDeleteVideo(id)
       })
 
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -1078,7 +1088,7 @@ describe('VideoUploader', () => {
       Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
       const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
 
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const callsBeforeClick = estimate.mock.calls.length
       const historyBefore = useEditorStore.getState().history
 
@@ -1125,7 +1135,7 @@ describe('VideoUploader', () => {
         return realDeleteVideo(id)
       })
 
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
@@ -1141,7 +1151,7 @@ describe('VideoUploader', () => {
       store().addSourceVideo(videoMeta)
       const clip = addClip('clip1', 0, 4)
       store().updateTrack(clip.trackId, { locked: true })
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       const button = await screen.findByTitle('Every file is on a locked track')
       expect(button).toBeDisabled()
@@ -1160,7 +1170,7 @@ describe('VideoUploader', () => {
     // MAJOR 1: this must not be a silent no-op behind a button that looks
     // live — it must say so and refuse to open the confirm at all.
     it('disables Clear All, with a reason, when this library is empty', async () => {
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       const button = await screen.findByTitle('Nothing to clear')
       expect(button).toBeDisabled()
@@ -1173,7 +1183,7 @@ describe('VideoUploader', () => {
 
     it('hides the clear-all button when almost nothing is stored', async () => {
       scriptStorage(1024, 500 * MB)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       await screen.findByText('1.0 KB / 500.0 MB')
       expect(screen.queryByRole('button', { name: 'Clear All' })).not.toBeInTheDocument()
@@ -1184,7 +1194,7 @@ describe('VideoUploader', () => {
       store().addSourceVideo(videoMeta)
       store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
       addClip('clip1', 0, 2) // references video1
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
@@ -1200,7 +1210,7 @@ describe('VideoUploader', () => {
         ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048, thumbnailUrl: 'blob:unused-thumb',
       })
       addClip('clip1', 0, 2) // references video1
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
@@ -1228,7 +1238,7 @@ describe('VideoUploader', () => {
       const estimate = vi.fn(() => Promise.resolve({ usage: 50 * MB, quota: 500 * MB }))
       Object.defineProperty(navigator, 'storage', { configurable: true, value: { estimate } })
 
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const callsBeforeClick = estimate.mock.calls.length
 
       fireEvent.click(await screen.findByRole('button', { name: /Clear Unused/ }))
@@ -1269,7 +1279,7 @@ describe('VideoUploader', () => {
       const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
       const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
 
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
       const callsBeforeClick = estimate.mock.calls.length
       const historyBefore = useEditorStore.getState().history
 
@@ -1295,7 +1305,7 @@ describe('VideoUploader', () => {
       store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
       const usedClip = addClip('clip1', 0, 2) // references video1
       const pastLengthBeforeClear = useEditorStore.getState().history.past.length
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
@@ -1312,10 +1322,83 @@ describe('VideoUploader', () => {
     it('hides the clear-unused button when every source is in use', async () => {
       store().addSourceVideo(videoMeta)
       addClip('clip1', 0, 2)
-      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       await screen.findByText('50.0 MB / 500.0 MB')
       expect(screen.queryByRole('button', { name: /Clear Unused/ })).not.toBeInTheDocument()
+    })
+
+    // ESCSUITE-307: the autosave never writes an empty project over this tab's
+    // slot (ESCSUITE-227), so a clear that empties the project used to leave
+    // the last snapshot that still held the cleared sources — and a reload
+    // offered them back, tiles whose bytes this clear had deleted. A clear that
+    // leaves nothing at all empties the slot itself; one that leaves anything
+    // leaves the slot alone.
+    describe('the saved session slot (ESCSUITE-307)', () => {
+      it('Clear All on a project of only its own sources empties the slot, once', async () => {
+        await storeVideo('video1', new Blob(['bytes']), videoMeta)
+        store().addSourceVideo(videoMeta)
+        addClip('clip1', 0, 4)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+        await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+        expect(store().project.timeline.clips).toHaveLength(0)
+        expect(clearSession).toHaveBeenCalledTimes(1)
+      })
+
+      it('Clear All that leaves a source on a locked track leaves the slot alone', async () => {
+        await storeVideo('video1', new Blob(['bytes']), videoMeta)
+        store().addSourceVideo(videoMeta)
+        const clip = addClip('clip1', 0, 4)
+        store().updateTrack(clip.trackId, { locked: true })
+        await storeVideo('video2', new Blob(['bytes']), { ...videoMeta, id: 'video2', name: 'other.mp4' })
+        store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'other.mp4' })
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+        await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+        expect(clearSession).not.toHaveBeenCalled()
+      })
+
+      it('Clear All that leaves a text clip leaves the slot alone: a clip with no source is still work', async () => {
+        await storeVideo('video1', new Blob(['bytes']), videoMeta)
+        store().addSourceVideo(videoMeta)
+        store().addTextOverlayClip()
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
+
+        await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+        expect(store().project.timeline.clips).toHaveLength(1)
+        expect(clearSession).not.toHaveBeenCalled()
+      })
+
+      it('Clear Unused that leaves a used source leaves the slot alone', async () => {
+        await storeVideo('unused', new Blob(['bytes']), { ...videoMeta, id: 'unused' })
+        store().addSourceVideo(videoMeta)
+        store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
+        addClip('clip1', 0, 2) // references video1
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
+
+        fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
+
+        await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+        expect(clearSession).not.toHaveBeenCalled()
+      })
+
+      it('Clear Unused that takes every source of a clipless project empties the slot', async () => {
+        await storeVideo('video1', new Blob(['bytes']), videoMeta)
+        store().addSourceVideo(videoMeta)
+        render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
+
+        fireEvent.click(await screen.findByRole('button', { name: /Clear Unused/ }))
+
+        await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+        expect(clearSession).toHaveBeenCalledTimes(1)
+      })
     })
   })
   // ESCSUITE-268: ESCSUITE-244 stopped an undone import orphaning its bytes,
@@ -1333,7 +1416,7 @@ describe('VideoUploader', () => {
     }
 
     function renderUploader(): ReturnType<typeof render> {
-      return render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} />)
+      return render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
     }
 
     /** Its accessible name says what it removes (review L4), not a bare "Remove". */
@@ -1683,20 +1766,20 @@ describe('VideoLibrary', () => {
   })
 
   it('shows an empty state when nothing has been imported', () => {
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     expect(screen.getByText('No media uploaded yet')).toBeInTheDocument()
   })
 
   it('counts one item and many items', () => {
     store().addSourceVideo(videoMeta)
-    const { rerender } = render(<VideoLibrary />)
+    const { rerender } = render(<VideoLibrary clearSession={clearSession} />)
     expect(screen.getByText('1 item')).toBeInTheDocument()
 
     act(() => {
       store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'second.mp4' })
     })
-    rerender(<VideoLibrary />)
+    rerender(<VideoLibrary clearSession={clearSession} />)
 
     expect(screen.getByText('2 items')).toBeInTheDocument()
   })
@@ -1704,7 +1787,7 @@ describe('VideoLibrary', () => {
   it('describes a video by duration, dimensions and size', () => {
     store().addSourceVideo({ ...videoMeta, name: 'My Test Video.mp4', duration: 65 })
 
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     expect(screen.getByText('My Test Video.mp4')).toBeInTheDocument()
     expect(screen.getByText('1:05 · 1920x1080 · 976.6 KB')).toBeInTheDocument()
@@ -1713,7 +1796,7 @@ describe('VideoLibrary', () => {
   it('describes an image without a duration', () => {
     store().addSourceVideo(imageMeta)
 
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     expect(screen.getByText('Image · 800x600 · 976.6 KB')).toBeInTheDocument()
     expect(screen.getByText('IMG')).toBeInTheDocument()
@@ -1722,7 +1805,7 @@ describe('VideoLibrary', () => {
   it('describes audio without dimensions', () => {
     store().addSourceVideo(audioMeta)
 
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     expect(screen.getByText('2:00 · 976.6 KB')).toBeInTheDocument()
     expect(screen.getByText('AUD')).toBeInTheDocument()
@@ -1731,7 +1814,7 @@ describe('VideoLibrary', () => {
   it('shows the thumbnail when one was generated', () => {
     store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:thumb' })
 
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     const img = screen.getByAltText('test.mp4') as HTMLImageElement
     expect(img.src).toContain('blob:thumb')
@@ -1739,7 +1822,7 @@ describe('VideoLibrary', () => {
 
   it('adds a video to the timeline at its native scale', () => {
     store().addSourceVideo(videoMeta)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Add to timeline'))
 
@@ -1753,7 +1836,7 @@ describe('VideoLibrary', () => {
 
   it('gives an image the default still duration rather than its own', () => {
     store().addSourceVideo(imageMeta)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Add to timeline'))
 
@@ -1766,7 +1849,7 @@ describe('VideoLibrary', () => {
   it('removes a video once confirmed', async () => {
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1785,7 +1868,7 @@ describe('VideoLibrary', () => {
     store().addSourceVideo(videoMeta)
     const clip = addClip('clip1', 0, 4)
     store().updateTrack(clip.trackId, { locked: true })
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     const button = screen.getByTitle('Used by a clip on a locked track')
     expect(button).toBeDisabled()
@@ -1804,7 +1887,7 @@ describe('VideoLibrary', () => {
     store().updateTrack(clip.trackId, { locked: false })
     const otherTrack = store().addTrack('Other')
     store().updateTrack(otherTrack.id, { locked: true })
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     expect(screen.getByTitle('Remove media')).toBeEnabled()
 
@@ -1817,7 +1900,7 @@ describe('VideoLibrary', () => {
     vi.mocked(globalThis.confirm).mockReturnValue(false)
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1837,7 +1920,7 @@ describe('VideoLibrary', () => {
     // for canUndo() to report.
     store().setProjectResolution(1280, 720)
     const pastLengthBeforeRemove = useEditorStore.getState().history.past.length
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1861,7 +1944,7 @@ describe('VideoLibrary', () => {
     store().addSourceVideo(videoMeta)
     addClip('clip1', 0, 4)
     useEditorStore.getState().setSelectedClipId('clip1')
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1885,7 +1968,7 @@ describe('VideoLibrary', () => {
   // promise chain to land during a later test.
   it('asks a plain question when nothing on the timeline uses it', async () => {
     store().addSourceVideo(videoMeta)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1893,10 +1976,50 @@ describe('VideoLibrary', () => {
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
+  // ESCSUITE-307: the per-item Remove empties this tab's saved session slot
+  // when it takes the project's last source and last clip, the way Clear All
+  // and Clear Unused do — and leaves it alone otherwise.
+  it('removing the last source, whose clip was the last clip, empties the saved session slot', async () => {
+    await storeVideo('video1', new Blob(['bytes']), videoMeta)
+    store().addSourceVideo(videoMeta)
+    addClip('clip1', 0, 4)
+    render(<VideoLibrary clearSession={clearSession} />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
+    expect(store().project.timeline.clips).toHaveLength(0)
+    expect(clearSession).toHaveBeenCalledTimes(1)
+  })
+
+  it('removing one source while another stays leaves the saved session slot alone', async () => {
+    store().addSourceVideo(videoMeta)
+    store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'second.mp4' })
+    render(<VideoLibrary clearSession={clearSession} />)
+
+    fireEvent.click(screen.getAllByTitle('Remove media')[0])
+
+    await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video2']))
+    expect(clearSession).not.toHaveBeenCalled()
+  })
+
+  it('a Remove whose delete rejects leaves the saved session slot alone', async () => {
+    store().addSourceVideo(videoMeta)
+    vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
+    render(<VideoLibrary clearSession={clearSession} />)
+
+    fireEvent.click(screen.getByTitle('Remove media'))
+
+    await waitFor(() => expect(storageModule.deleteVideo).toHaveBeenCalledWith('video1'))
+    expect(store().sourceVideos).toHaveLength(1)
+    expect(clearSession).not.toHaveBeenCalled()
+    vi.mocked(storageModule.deleteVideo).mockRestore()
+  })
+
   it('says one clip, singular, when exactly one clip uses it', async () => {
     store().addSourceVideo(videoMeta)
     addClip('clip1', 0, 4)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1910,7 +2033,7 @@ describe('VideoLibrary', () => {
     store().addSourceVideo(videoMeta)
     addClip('clip1', 0, 4)
     addClip('clip2', 4, 2)
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1933,7 +2056,7 @@ describe('VideoLibrary', () => {
     store().addSourceVideo(videoMeta)
     vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
     const removeSourceVideosPermanently = vi.spyOn(useEditorStore.getState(), 'removeSourceVideosPermanently')
-    render(<VideoLibrary />)
+    render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -1955,7 +2078,7 @@ describe('VideoLibrary', () => {
     store().addSourceVideo(videoMeta)
     vi.spyOn(storageModule, 'deleteVideo').mockRejectedValueOnce(new Error('disk full'))
     const onNotification = vi.fn()
-    render(<VideoLibrary showNotification={onNotification} />)
+    render(<VideoLibrary showNotification={onNotification} clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
@@ -2002,7 +2125,7 @@ describe('VideoLibrary', () => {
       // is demonstrably the function the component reaches.
       const setSourceThumbnail = vi.spyOn(useEditorStore.getState(), 'setSourceThumbnail')
 
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
 
       const img = (await screen.findByAltText('test.mp4')) as HTMLImageElement
       expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1')
@@ -2019,7 +2142,7 @@ describe('VideoLibrary', () => {
       storedThumbnail()
       store().addSourceVideo({ ...videoMeta, thumbnailUrl: 'blob:already-live' })
 
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
 
       await waitFor(() => expect(screen.getByAltText('test.mp4')).toBeInTheDocument())
       expect(mockResolveThumbnailUrl).not.toHaveBeenCalled()
@@ -2030,7 +2153,7 @@ describe('VideoLibrary', () => {
       store().addSourceVideo(videoMeta)
       const revokesBefore = vi.mocked(URL.revokeObjectURL).mock.calls.length
 
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
 
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
       expect(store().sourceVideos[0].thumbnailUrl).toBeUndefined()
@@ -2046,7 +2169,7 @@ describe('VideoLibrary', () => {
       store().addSourceVideo(videoMeta)
       store().addSourceVideo(audioMeta)
 
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
 
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
       expect(mockResolveThumbnailUrl).not.toHaveBeenCalledWith('audio1')
@@ -2056,7 +2179,7 @@ describe('VideoLibrary', () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)
       const setSourceThumbnail = vi.spyOn(useEditorStore.getState(), 'setSourceThumbnail')
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
       act(() => { store().removeSourceVideosPermanently(['video1']) })
@@ -2072,7 +2195,7 @@ describe('VideoLibrary', () => {
     it('frees the handle it minted when the editor went away before the read landed', async () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)
-      const { unmount } = render(<VideoLibrary />)
+      const { unmount } = render(<VideoLibrary clearSession={clearSession} />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
       unmount()
@@ -2086,13 +2209,13 @@ describe('VideoLibrary', () => {
     it('reads a source once, however many times it re-renders while the read is parked', async () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)
-      const { rerender } = render(<VideoLibrary />)
+      const { rerender } = render(<VideoLibrary clearSession={clearSession} />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
       act(() => {
         store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'second.mp4', thumbnailUrl: 'blob:second' })
       })
-      rerender(<VideoLibrary />)
+      rerender(<VideoLibrary clearSession={clearSession} />)
 
       expect(mockResolveThumbnailUrl.mock.calls.filter(([id]) => id === 'video1')).toHaveLength(1)
       await land('video1', undefined)
@@ -2110,7 +2233,7 @@ describe('VideoLibrary', () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)
       store().addSourceVideo({ ...videoMeta, id: 'video2', name: 'second.mp4' })
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledTimes(2))
 
       await land('video1', 'blob:rebuilt-1')
@@ -2129,7 +2252,7 @@ describe('VideoLibrary', () => {
     it('keeps the handle it minted when an unrelated source joins the library mid-read', async () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
       act(() => {
@@ -2150,7 +2273,7 @@ describe('VideoLibrary', () => {
     it('frees the handle it minted when a real load won the race', async () => {
       const land = parkedReads()
       store().addSourceVideo(videoMeta)
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
       await waitFor(() => expect(mockResolveThumbnailUrl).toHaveBeenCalledWith('video1'))
 
       act(() => {
@@ -2168,7 +2291,7 @@ describe('VideoLibrary', () => {
       store().addSourceVideo(videoMeta)
       const revokesBefore = vi.mocked(URL.revokeObjectURL).mock.calls.length
 
-      render(<VideoLibrary />)
+      render(<VideoLibrary clearSession={clearSession} />)
 
       await waitFor(() =>
         expect(consoleError).toHaveBeenCalledWith('Failed to rebuild thumbnail:', expect.any(Error))

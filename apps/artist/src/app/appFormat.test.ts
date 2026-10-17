@@ -1,6 +1,6 @@
 // appFormat on its own: no App, no notification state — just the strings.
 import { describe, it, expect } from 'vitest';
-import { clipCountMessage, formatTimeForNotification, takeLoadedMessage } from './appFormat';
+import { clipCountMessage, formatTimeForNotification, sessionSourcesLeftOutMessage, takeLoadedMessage } from './appFormat';
 
 describe('clipCountMessage', () => {
   it('pluralises "clips" for zero', () => {
@@ -59,6 +59,20 @@ describe('takeLoadedMessage', () => {
     );
     expect(takeLoadedMessage('Screen recording', 1, 2)).toBe(
       'Loaded recording: Screen recording — 2 missing parts skipped'
+    );
+  });
+});
+
+describe('sessionSourcesLeftOutMessage (ESCSUITE-307)', () => {
+  it('says one file, singular', () => {
+    expect(sessionSourcesLeftOutMessage(1)).toBe(
+      '1 file in the saved session is no longer in storage and was left out'
+    );
+  });
+
+  it('says how many files, plural', () => {
+    expect(sessionSourcesLeftOutMessage(2)).toBe(
+      '2 files in the saved session are no longer in storage and were left out'
     );
   });
 });
