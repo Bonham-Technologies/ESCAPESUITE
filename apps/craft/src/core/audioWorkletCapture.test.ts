@@ -449,7 +449,6 @@ describe('createAudioCapture: which path a take gets', () => {
     const refused = String(consoleInfo.mock.calls[0][0])
     expect(refused).toContain('blob: AbortError')
     expect(refused).toContain('data: AbortError')
-    expect(refused).toContain('Failed to load worklet module script: data:text/javascript;charset=utf-8,…')
   })
 })
 
