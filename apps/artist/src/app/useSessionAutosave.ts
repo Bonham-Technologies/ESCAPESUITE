@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { clearSessionState, saveSessionState, type SessionState } from '../core/storage';
+import { STORAGE_QUOTA_MESSAGE, isQuotaExceeded } from '../core/storageErrors';
 import { AUTO_SAVE_DELAY } from './appConstants';
 import { buildSessionSnapshot, isEmptySession } from './sessionSnapshot';
 import { holdTabLock } from './sessionLock';
@@ -22,41 +23,24 @@ import type { ShowNotification } from './useNotification';
 
 /**
  * The same sentence `components/VideoUploader.tsx` already shows for a quota
- * failure on import — kept verbatim so a quota error reads the same way
- * wherever ESCAPEARTIST hits it.
+ * failure on import — one constant (`core/storageErrors.ts`) so a quota error
+ * reads the same way wherever ESCAPEARTIST hits it.
  */
-export const AUTOSAVE_QUOTA_NOTICE =
-  'Storage quota exceeded. Remove some media to free up space.';
+export const AUTOSAVE_QUOTA_NOTICE = STORAGE_QUOTA_MESSAGE;
 
 /** What the autosave says when the rejection is not a quota error at all. */
 export const AUTOSAVE_GENERIC_NOTICE = 'Your session could not be saved — storage may be full.';
 
 /**
- * The DOMException name behind a rejected session write, the same shape
- * ESCAPECRAFT's `failureName` reads (ESCSUITE-210,
- * `hooks/useRecordingController.ts`): a caller that wants to attach more
- * context reaches for `new Error('…', { cause })`, carrying the browser's own
- * `DOMException` — and its real name — as `cause`, while a rejection
- * `saveSessionState` can hit directly (the e2e quota mock, `idb`'s own
- * rejections) is a bare `DOMException` with no wrapper at all. Reading
- * `error.cause ?? error` covers both; the error itself is read when it is
- * not wrapped, or when the rejection is not an object at all (nothing today
- * rejects with a bare value, but the optional chain holds rather than
- * crashing if something ever does).
- */
-function failureName(error: unknown): string | undefined {
-  const err = error as { name?: string; cause?: unknown } | null | undefined;
-  return ((err?.cause ?? err) as { name?: string } | null | undefined)?.name;
-}
-
-/**
  * What the editor's notice says about a rejected autosave: the media
  * library's own quota sentence when the browser's error says
- * `QuotaExceededError`, the generic one for anything else — a session write
- * can fail for reasons a quota check cannot name.
+ * `QuotaExceededError` — read through `error.cause ?? error`
+ * (`isQuotaExceeded`, the ESCSUITE-210 shape) — and the generic one for
+ * anything else: a session write can fail for reasons a quota check cannot
+ * name.
  */
 export function autosaveFailureNotice(error: unknown): string {
-  return failureName(error) === 'QuotaExceededError' ? AUTOSAVE_QUOTA_NOTICE : AUTOSAVE_GENERIC_NOTICE;
+  return isQuotaExceeded(error) ? AUTOSAVE_QUOTA_NOTICE : AUTOSAVE_GENERIC_NOTICE;
 }
 
 /** What re-arms the autosave, and what switches it off. */

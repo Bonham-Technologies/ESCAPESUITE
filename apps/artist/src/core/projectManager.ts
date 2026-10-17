@@ -12,12 +12,14 @@ import {
   revokeSourceThumbnails,
 } from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
+import { STORAGE_QUOTA_MESSAGE, isQuotaExceeded } from './storageErrors';
 import { parseProject } from '../store/projectMigration';
 import {
   ProjectFileError,
   assertRangesTile,
   encodeProjectFile,
   formatSize,
+  readOrRefuse,
   readProjectFileIndex,
   sliceRange,
   type ProjectFileIndex,
@@ -223,6 +225,38 @@ interface LoadedFile {
 }
 
 /**
+ * A source's metadata, by the rules `restoreSource` explains: the file's own
+ * `meta` when it has one, else the row already stored under this id, each
+ * with its duration and dimensions recovered from the blob only when unusable;
+ * else a full probe of the blob. Rejects when a probe it needed rejects.
+ */
+async function probeMetadata(entry: SourceEntry, blob: Blob, existing: StoredSource): Promise<SourceVideo> {
+  if (entry.meta) {
+    const duration = await resolveStoredDuration(blob, {
+      ...entry.meta,
+      name: entry.name,
+    } as SourceVideo);
+    const { width, height } = await resolveMetaDimensions(blob, entry.meta, entry);
+    return {
+      ...entry.meta,
+      id: entry.id,
+      name: entry.name,
+      mimeType: entry.mimeType,
+      size: blob.size,
+      duration,
+      width,
+      height,
+    };
+  }
+  if (existing) {
+    const duration = await resolveStoredDuration(blob, existing.metadata);
+    const { width, height } = await resolveMetaDimensions(blob, existing.metadata, existing.metadata);
+    return { ...existing.metadata, duration, width, height };
+  }
+  return extractMetadataFromBlob(blob, entry);
+}
+
+/**
  * Restore one source from either file version (ESCSUITE-260): `blob` is the
  * source's bytes, decoded from v1 base64 or sliced out of a v2 payload, and
  * `thumbnail` likewise. One helper for both versions, so the metadata
@@ -235,6 +269,8 @@ interface LoadedFile {
  * this source's bytes and thumbnail are written to the DB at all.
  */
 async function restoreSource(
+  /** The entry's place in the file's `videos`, for naming it in a refusal. */
+  i: number,
   entry: SourceEntry,
   blob: Blob,
   thumbnail: Blob | undefined,
@@ -266,29 +302,16 @@ async function restoreSource(
   // a `duration: Infinity` or an unusable dimension (review round 3). Only a
   // source this DB has never heard of falls back to reconstructing
   // everything from the blob, through `extractMetadataFromBlob`.
+  //
+  // A probe that rejects (a source the browser cannot decode, or ESCSUITE-249's
+  // metadata deadline) is refused by name, with the probe's own sentence as
+  // its cause (ESCSUITE-302), inside `restoreSources`' rollback.
+  const at = `videos[${i}] ("${entry.name}")`;
   let metadata: SourceVideo;
-  if (entry.meta) {
-    const duration = await resolveStoredDuration(blob, {
-      ...entry.meta,
-      name: entry.name,
-    } as SourceVideo);
-    const { width, height } = await resolveMetaDimensions(blob, entry.meta, entry);
-    metadata = {
-      ...entry.meta,
-      id: entry.id,
-      name: entry.name,
-      mimeType: entry.mimeType,
-      size: blob.size,
-      duration,
-      width,
-      height,
-    };
-  } else if (existing) {
-    const duration = await resolveStoredDuration(blob, existing.metadata);
-    const { width, height } = await resolveMetaDimensions(blob, existing.metadata, existing.metadata);
-    metadata = { ...existing.metadata, duration, width, height };
-  } else {
-    metadata = await extractMetadataFromBlob(blob, entry);
+  try {
+    metadata = await probeMetadata(entry, blob, existing);
+  } catch (error) {
+    throw new ProjectFileError(`${at} could not be decoded`, { cause: error });
   }
 
   // A stored thumbnail (below) is the only legitimate source of a live
@@ -329,13 +352,24 @@ async function restoreSource(
     delete metadata.startOffset;
     delete metadata.overlayPlacement;
 
-    await storeVideo(entry.id, blob, metadata);
-    // Recorded as soon as the row exists, so a thumbnail write that fails
-    // next still rolls this video back.
-    written.push(entry.id);
-    if (thumbnail) {
-      await storeThumbnail(entry.id, thumbnail);
-      metadata.thumbnailUrl = await resolveThumbnailUrl(entry.id);
+    // A write that rejects is refused by name (ESCSUITE-302): a quota error,
+    // read through `error.cause ?? error`, in the media library's own quota
+    // sentence; anything else as "could not be stored". The write's own error
+    // is the cause, and `restoreSources` still rolls back what was written.
+    try {
+      await storeVideo(entry.id, blob, metadata);
+      // Recorded as soon as the row exists, so a thumbnail write that fails
+      // next still rolls this video back.
+      written.push(entry.id);
+      if (thumbnail) {
+        await storeThumbnail(entry.id, thumbnail);
+        metadata.thumbnailUrl = await resolveThumbnailUrl(entry.id);
+      }
+    } catch (error) {
+      throw new ProjectFileError(
+        isQuotaExceeded(error) ? `${at} could not be stored: ${STORAGE_QUOTA_MESSAGE}` : `${at} could not be stored`,
+        { cause: error }
+      );
     }
   }
 
@@ -465,7 +499,7 @@ async function loadJsonFile(
   file: File,
   onProgress?: (progress: number, message: string) => void
 ): Promise<LoadedFile> {
-  const projectFile = readJsonFile(await file.text());
+  const projectFile = readJsonFile(await readOrRefuse(() => file.text()));
   assertProjectParses(projectFile.project, projectFile.editor);
 
   const sourceVideos = await restoreSources(
@@ -477,7 +511,7 @@ async function loadJsonFile(
       const thumbnail = videoData.thumbnail
         ? base64ToBlob(videoData.thumbnail, 'image/jpeg', `videos[${i}].thumbnail`)
         : undefined;
-      return restoreSource(videoData, blob, thumbnail, await getVideo(videoData.id), written);
+      return restoreSource(i, videoData, blob, thumbnail, await getVideo(videoData.id), written);
     },
     onProgress
   );
@@ -540,7 +574,7 @@ async function loadContainer(
       const thumbnail = video.thumbnail
         ? sliceRange(file, payloadStart, video.thumbnail, video.thumbnail.mimeType)
         : undefined;
-      return restoreSource(video, blob, thumbnail, existing[i], written);
+      return restoreSource(i, video, blob, thumbnail, existing[i], written);
     },
     onProgress
   );

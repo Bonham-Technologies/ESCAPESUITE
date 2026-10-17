@@ -47,9 +47,41 @@ export const MAX_INDEX_BYTES = 64 * 1024 * 1024;
 const MIB = 1024 * 1024;
 const GIB = 1024 * MIB;
 
-/** A file this module refuses, or a project the writer refuses. The message is shown to the user. */
+/**
+ * A file this module refuses, or a project the writer refuses. The message is
+ * shown to the user. A refusal that wraps a failure of its own (a read, a
+ * write or a metadata probe that rejected, ESCSUITE-302) carries that failure
+ * as `cause`, so the console keeps the browser's own words.
+ */
 export class ProjectFileError extends Error {
   name = 'ProjectFileError';
+  // `declare`: no own property on a refusal that has no cause. The app's lib
+  // is ES2020, whose `Error` has no `cause` and no options argument.
+  declare readonly cause?: unknown;
+
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message);
+    if (options) Object.assign(this, { cause: options.cause });
+  }
+}
+
+/**
+ * Read part of a project file, or refuse by name when the read rejects
+ * (ESCSUITE-302): a `RangeError` is V8's string or ArrayBuffer ceiling, "the
+ * file is too large to read"; anything else (the file moved, a permission
+ * lost) is "the file could not be read". Either way the read's own error is
+ * the `cause`. Used for the v1 `file.text()` and for the header and index
+ * reads every file goes through.
+ */
+export async function readOrRefuse<T>(read: () => Promise<T>): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    throw new ProjectFileError(
+      error instanceof RangeError ? 'the file is too large to read' : 'the file could not be read',
+      { cause: error }
+    );
+  }
 }
 
 /** A span of the payload, counted from the payload's first byte. */
@@ -258,7 +290,7 @@ export function isV2Header(bytes: Uint8Array): boolean {
 export async function readProjectFileIndex(
   blob: Blob
 ): Promise<{ index: ProjectFileIndex; payloadStart: number } | null> {
-  const head = new Uint8Array(await blob.slice(0, HEADER_BYTES).arrayBuffer());
+  const head = new Uint8Array(await readOrRefuse(() => blob.slice(0, HEADER_BYTES).arrayBuffer()));
   if (!isV2Header(head)) {
     // The magic alone decides the version, as it does in the headless kit: a
     // file that opens with it but stops short of a whole header is a broken
@@ -286,7 +318,7 @@ export async function readProjectFileIndex(
     fail(`the file ends before its index does: it is ${blob.size} bytes and its index runs to byte ${payloadStart}`);
   }
 
-  const text = await blob.slice(HEADER_BYTES, payloadStart).text();
+  const text = await readOrRefuse(() => blob.slice(HEADER_BYTES, payloadStart).text());
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
