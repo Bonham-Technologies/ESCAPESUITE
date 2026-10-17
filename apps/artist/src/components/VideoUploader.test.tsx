@@ -762,6 +762,17 @@ describe('VideoUploader', () => {
       expect(store().project.timeline.clips[0].textData).toMatchObject({ fontSize: 32, y: 0.88, backgroundColor: '#000000b3' })
     })
 
+    it('wraps at the columns the frame width allows on a portrait project (ESCSUITE-309)', async () => {
+      store().setProjectResolution(1080, 1920)
+      renderUploader()
+      const long = 'This caption is far too long to sit on one line of a video frame'
+
+      selectFiles([file('long.srt', '', `00:00:01,000 --> 00:00:02,000\n${long}\n`)])
+
+      await waitFor(() => expect(captionTexts()).toEqual(['This caption is far too long to sit\non one line of a video frame']))
+      expect(store().project.timeline.clips[0].textData).toMatchObject({ fontSize: 49 })
+    })
+
     it('refuses a file it cannot read, saying why, and adds nothing', async () => {
       renderUploader()
 
