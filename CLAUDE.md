@@ -5106,6 +5106,45 @@ storage row, which a real session always has) and `session-ownership.spec.ts` ra
 Every `*.perf.test.ts` and rerender pin is byte-identical, and `App` gains no store subscription. **No
 floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-17 for ESCSUITE-327 (the import-time frame-rate probe
+measures only on an engine it was measured on: ESCSUITE-316 U-3 ran the nine committed fixtures on Playwright's
+Firefox 157 and found two wrong `'measured'` claims — the 120 fps MP4 stored as 124.62, the 30 fps WebM as
+34.33 — beside five safe `'assumed'` refusals, Firefox's and WebKit's rVFC metadata never having been
+characterised the way ESCSUITE-276 / 278 characterised Chromium's; `measureFrameRate` gains `engineMeasured`,
+defaulting to a new `isMeasuredFrameRateEngine(navigator)` in `core/workerDecodeEngine.ts` — Chromium alone, by
+the `userAgentData.brands` test the decode worker's allow-list reads, and deliberately narrower than that list,
+which admits Firefox on a parity the probe never had — and answers `undefined` before any play, seek or rVFC
+request when it is false, so a Firefox or Safari import stores 30 `'assumed'`; `isMeasuredWorkerDecodeEngine` is
+now that predicate plus `isFirefoxEngine`, so the Chromium test exists once; jsdom stays an unmeasured engine,
+each suite that needs the probe to run setting Chromium per file through `src/test/engine.ts`'s
+`setEngine` / `restoreEngine`, which restore exactly what they set): 99.85 / 99.45 / 96.83 / 99.78,
+byte-identical on every percentage to the 99.85 / 99.45 / 96.83 / 99.78 that `main` at `3ec5b248` (the
+ESCSUITE-307 version-packages commit; its artist source is `28f045f6`'s) measures in the same sitting. That
+base reads 96.83 where the table row recorded 96.79 from ESCSUITE-307's own tree, 313 and 322 having landed
+beneath it — the drift ESCSUITE-91 and 113 recorded — and the row is corrected here to the direct
+measurement. The base gives 6,202 / 6,405 branches and this branch 6,207 / 6,410: five new branches, five
+covered, the same 203 uncovered as before (lines 9,700 / 9,714 → 9,703 / 9,717, statements 11,011 / 11,071 →
+11,016 / 11,076, functions 2,312 / 2,317 → 2,313 / 2,318, every denominator growing by exactly what the
+numerator did; the same 14 / 60 / 5 uncovered). The five are `core/frameRateProbe.ts`'s three (40 → 43, still
+100 on all four: the `engineMeasured` default and the gate's refusal, reached from both sides by
+`engineMeasured: false` against the existing probe cases, and by the default read off a Firefox navigator
+against a Chromium one) and `core/workerDecodeEngine.ts`'s two (8 → 10, 100 on all four: the new predicate's
+missing-navigator and brands arms, reached by Chromium brands, a Firefox user agent — asserted beside the
+worker predicate's opposite answer — WebKit and no navigator), the one new function being the predicate;
+`videoProcessor.frameRateGate.test.ts` pins both sides through `processVideoFile` (Firefox → 30 `'assumed'`,
+never played; Chromium → 60 `'measured'`), and `core/videoProcessor.ts` is untouched. Red first:
+4 × `isMeasuredFrameRateEngine is not a function`, `expected 60 to be undefined` twice, `expected 60 to be 30`.
+Mutations: the gate forced true → exactly the two Firefox cases red; the predicate admitting Firefox → 3 red;
+the worker predicate restored to its inline test → 0 red, the pure refactor. One opus review round held the
+branch on two test-environment points — two `vi.unstubAllGlobals()` calls (the ESCSUITE-119 regression, proven
+red by a `URL` mock pin) and a global Chromium `userAgentData` definition in `src/test/setup.ts` that made both
+allow-lists answer yes for every artist test — and the fix round replaced both with the per-file stubs above,
+each file ending with the ESCSUITE-119 pin; a scoped sonnet re-review confirmed all four items. Outside vitest's
+measurement, `apps/e2e/tests/escapeartist/frame-rate-probe.spec.ts` keeps its Chromium-only skip and gains one
+Firefox-only case, the 120 fps MP4 stored as 30 `'assumed'`: 1 passed / 9 skipped on Firefox. Every
+`*.perf.test.ts` and rerender pin is byte-identical — the probe runs once per import, nothing per frame.
+**No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
@@ -5113,7 +5152,7 @@ never above what the suite actually achieves:
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
 | `@escapesuite/craft` | 100.00 | 99.59 | 98.00 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.45 | 96.79 | 99.78 |
+| `@escapesuite/artist` | 99.85 | 99.45 | 96.83 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.52 | 98.65 | 98.87 |
 
