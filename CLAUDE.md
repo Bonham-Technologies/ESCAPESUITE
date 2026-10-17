@@ -4758,6 +4758,56 @@ while the ESCSUITE-297 rig ran); the figures above are the clean run, 5,855 gree
 `--testTimeout 20000` guard. Every `*.perf.test.ts` and `App.*rerender*` pin is byte-identical. **No floor
 crossed**; artist's floors stay 99 / 99 / 96 / 99.
 
+`@escapesuite/artist` was re-measured 2026-10-16 for ESCSUITE-301 (the export loudness pass is
+cooperative: `exportLoudness` is async and walks the mix in slices of `LOUDNESS_SLICE_SECONDS` = 2 s
+(`loudnessSliceFrames(sampleRate)`, 96,000 frames at 48 kHz), handing the main thread back at every
+slice boundary and between the measurement and the limiter through one `crossBoundary` whose default is
+the exporters' own MessageChannel `yieldToMain()` — not a timer, which a visible tab clamps to 4 ms after
+five levels and a hidden tab to once a second, exactly the throttling the background-tab export exists
+to avoid — then honouring the export's `AbortSignal` with `ExportAbortedError` inside one slice; the
+meter and the limiter are generators (`meterSteps`, `limiterSteps`) that carry the biquad state, the
+400 ms / 100 ms block grid, the true-peak interpolator's history and the limiter's envelope, hold and
+delay line across a boundary, and the synchronous `measureLoudness` / `applyInterleavedGainWithLimiter`
+run the same generators with an infinite slice, so there is one copy of the DSP and the sliced result is
+bit-identical to the synchronous one — pinned by `toEqual` / `Object.is` on every ESCSUITE-292 fixture
+and at boundaries on a hop, inside a hop, inside a block and every 23 samples, and checked by the
+implementer against SHA-256 snapshots of main's output on stereo 48 k, mono 44.1 k and 5.1 fixtures;
+the exporters report `{ phase: 'measuring-loudness', message: 'Measuring loudness…' }` once per slice
+plus once at the end, MP4 at 10 → 12 between the mix and the media load and WebM at 15 → 17 after the
+Opus probe, and the dialog's one render site maps the phase to "Measuring loudness" through
+`PHASE_LABELS`, a `Record` over the whole phase union; `INTERPOLATION_GAIN` carries a `(1 + 1e-12)`
+margin so the true-peak window skip is strictly conservative whatever the slice length and visit order):
+99.85 / 99.44 / **96.76** / 99.77 against the 99.85 / 99.44 / 96.75 / 99.77 that `main` at `02a3feca`
+measures in the same sitting — branches up a hundredth, the other three unmoved. The base gives
+6,056 / 6,259 branches and this branch 6,075 / 6,278: nineteen new branches, nineteen covered, the same
+203 uncovered as before (lines 9,457 / 9,471 → 9,496 / 9,510, statements 10,718 / 10,778 →
+10,764 / 10,824, functions 2,243 / 2,248 → 2,257 / 2,262, every denominator growing by exactly what the
+numerator did; the same 14 / 60 / 5 uncovered). All nineteen are `core/loudness.ts`'s (54 → 73: the
+slice-or-run-to-end choice in each generator, the boundary's abort check, the pacing defaults for
+`sleep` and `sliceFrames`, the between-pass boundary, the progress fraction's measure-then-limit split
+when a target is set, the no-mix and nothing-measurable early returns), each reached from both sides by
+the loudness suite's forty-one new cases — the bit-identical cases per boundary position, a mix shorter
+than one slice, a 0-frame mix, mono and 5.1, abort at a slice boundary and between the two passes (the
+latter the review's one unpinned check: reports `[0.2, 0.4, 0.5]`, the mix untouched), the MessageChannel
+default (not settled after fifty microtasks, settled after one round-trip), an injected `sleep` counted
+once per boundary and never after the last slice — and the exporters' and the dialog's new cases;
+`core/exportMP4.ts`, `core/exportWebM.ts` and `components/Export/ExportDialog.tsx` gained a line, a
+statement and (the exporters) a function each and no decision, the `await` and the label map being
+unconditional. The first measurement of the branch came back one arm short — 74 / 75 in `loudness.ts`:
+`runToEnd`'s loop had a "not done yet" arm that both callers, passing an infinite slice, could never
+reach — and it was deleted rather than tested (the generator never yields there, so the first `next()`
+is the whole walk), the ESCSUITE-110 / 118 rule. Two review rounds (opus, then a scoped sonnet) put the
+MessageChannel default there: the brief had ruled a `setTimeout(0)` yield, and the review measured what a
+chained timer costs a hidden tab; its five smaller findings — the between-pass abort pin, the dialog test
+scripting the real report sequence (a measuring report is spoken only on the ESCSUITE-215 throttle's 5 s
+floor, since it sits in the same ten-point band as "Extracting audio…"), the margin, the label map and
+the `sliceFrames` comment — are the same fix round. `exportMP4.perf.test.ts`, `exportWebM.perf.test.ts`
+and every rerender pin are byte-identical: the perf scenes mix no audio, and nothing per frame moved.
+This branch and ESCSUITE-302's were measured against the same base in one sitting and land one after the
+other, so whichever table row lands second is that branch's own figure, a hundredth or two off `main`'s,
+the drift ESCSUITE-91 and 113 recorded. The suite measured 5,862 green with the `--testTimeout 20000`
+guard. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
