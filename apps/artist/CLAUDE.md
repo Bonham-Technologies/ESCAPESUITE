@@ -787,7 +787,9 @@ the Chromium test exists once.
   answer, which on a healthy slow decode posting `FRAME_PROGRESS` was as long as the decode took,
   and every remaining source was still loaded; `exportMP4.ts` also checks the signal before each
   source load and in the load's `catch`, so the `<video>` path stops loading too. A `<video>`
-  load already under way (ESCSUITE-325's 15 s wait) is not interrupted; the check after it is.
+  load already under way is not interrupted — ESCSUITE-325's 15 s wait, on the in-page path and on
+  `FailoverFrameSource`'s mid-export handover alike — so on that path Cancel can take up to 15 s to
+  settle; the check after the load is what then throws `ExportAbortedError`.
   `exportMP4.ts` turns any report — and the worker not starting, or the engine not being admitted —
   into the progress line "Decoding in the page; keep this tab in the foreground", **once per
   export**, at the progress the export has reached. The `console.warn` keeps the detail. A source
