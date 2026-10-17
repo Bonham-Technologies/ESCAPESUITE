@@ -935,8 +935,11 @@ Three things the import refuses to do, each chosen rather than defaulted:
   is worse than a take that arrived a track short and said so. The toast then says
   `Loaded recording: <name> — 1 missing part skipped` (`'info'`) *instead of* the success
   sentence, because `useNotification` is one slot on a three-second timer and two messages
-  mean the first is never read. A companion whose own length cannot be read borrows the take's
-  instead of being left off, because every part of a take is the same length by construction.
+  mean the first is never read. A companion is placed at its own stored length — ESCAPECRAFT
+  stores an audio part whose track ended early (a microphone unplugged) at the shorter length its
+  file really holds, not the take's (ESCSUITE-318, pinned in `takeImport.test.ts`). A companion
+  whose own length cannot be read borrows the take's instead of being left off, because a part
+  that ran to the end of the take is the take's length — one clock, one start, one stop.
   The primary's own path is exempt from both: its blob is already in hand, and a primary whose
   length cannot be resolved still throws, because that is the take failing rather than a part
   of it. A `getThumbnail` that rejects, for any part including the primary, costs that part its

@@ -55,9 +55,12 @@ export interface ImportedTake {
 /**
  * The length to give a companion.
  *
- * Every part of a take is the same length by construction — one recorder, one
- * clock, one start, one stop — so a companion whose own file cannot be measured
- * borrows the take's length rather than being left off the timeline.
+ * The part's own stored length, which ESCAPECRAFT records as the part's own:
+ * an audio part whose track ended early is stored shorter than the take
+ * (ESCSUITE-318). A part that ran to the end is the take's length — one
+ * recorder, one clock, one start, one stop — so a companion whose own file
+ * cannot be measured borrows the take's length rather than being left off the
+ * timeline.
  */
 async function resolvePartDuration(
   blob: Blob,
