@@ -450,6 +450,62 @@ describe('createAudioCapture: which path a take gets', () => {
   })
 })
 
+describe('createAudioCapture: the data: retry (ESCSUITE-317)', () => {
+  const dataPrefix = 'data:text/javascript;charset=utf-8,'
+
+  it('loads the blob: module when it works: one call, "blob module"', async () => {
+    enableAudioWorkletDouble()
+    const context = newContext()
+    await capture(context)
+
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(1)
+    expect(context.workletNodes).toHaveLength(1)
+    expect(consoleInfo).toHaveBeenCalledTimes(1)
+    expect(String(consoleInfo.mock.calls[0][0])).toBe('Recording audio through an AudioWorklet (blob module)')
+  })
+
+  it('retries with a data: module when the blob: one is refused, and uses the worklet', async () => {
+    enableAudioWorkletDouble({ blobModulesRefused: true })
+    const context = newContext()
+    await capture(context)
+    await capture(context, 'Microphone')
+
+    const addModule = context.audioWorklet!.addModule
+    expect(addModule).toHaveBeenCalledTimes(2)
+    expect(String(addModule.mock.calls[0][0])).toMatch(/^blob:/)
+    const retried = String(addModule.mock.calls[1][0])
+    expect(retried.startsWith(dataPrefix)).toBe(true)
+    expect(decodeURIComponent(retried.slice(dataPrefix.length))).toBe(AUDIO_CAPTURE_WORKLET_SOURCE)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(context.workletNodes).toHaveLength(2)
+    expect(context.scriptProcessors).toHaveLength(0)
+    expect(consoleInfo).toHaveBeenCalledTimes(1)
+    expect(String(consoleInfo.mock.calls[0][0])).toBe('Recording audio through an AudioWorklet (data module)')
+  })
+
+  it('falls back to a ScriptProcessorNode when both are refused, naming the data: rejection', async () => {
+    enableAudioWorkletDouble({ blobModulesRefused: true, dataModulesRefused: true })
+    const context = newContext()
+    await capture(context)
+
+    expect(context.audioWorklet!.addModule).toHaveBeenCalledTimes(2)
+    expect(context.workletNodes).toHaveLength(0)
+    expect(context.scriptProcessors).toHaveLength(1)
+    expect(consoleInfo).toHaveBeenCalledTimes(1)
+    expect(String(consoleInfo.mock.calls[0][0])).toMatch(/ScriptProcessorNode/)
+    const reason = consoleInfo.mock.calls[0][1] as DOMException
+    expect(reason.message).toContain('data:')
+  })
+
+  it('makes no addModule call at all when the browser has no AudioWorklet', async () => {
+    const context = newContext()
+    await capture(context)
+    expect(context.audioWorklet).toBeUndefined()
+    expect(context.scriptProcessors).toHaveLength(1)
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+  })
+})
+
 describe('the AudioWorklet capture', () => {
   let worklet: AudioWorkletDoubleControl
   let context: AudioContextDoubleInstance

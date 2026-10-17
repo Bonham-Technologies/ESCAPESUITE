@@ -220,6 +220,14 @@ export interface AudioContextDoubleControl {
 export interface AudioWorkletDoubleControl {
   /** What `addModule()` rejects with; null (the default) resolves. */
   addModuleError: unknown
+  /**
+   * Refuse a `blob:` module URL the way Chromium does from a `file://` page
+   * (`blob:null/…`, ESCSUITE-317): `addModule()` rejects it with an
+   * `AbortError` while a `data:` URL still loads.
+   */
+  blobModulesRefused: boolean
+  /** Refuse a `data:` module URL too (a CSP without `data:` in `script-src`). */
+  dataModulesRefused: boolean
   /** Held open to park `addModule()` mid-flight. Null resolves at once. */
   addModuleGate: Promise<void> | null
   /**
@@ -255,6 +263,8 @@ export function enableAudioWorkletDouble(
 ): AudioWorkletDoubleControl {
   control.audioWorklet = {
     addModuleError: null,
+    blobModulesRefused: false,
+    dataModulesRefused: false,
     addModuleGate: null,
     holdMessages: false,
     processorDeaf: false,
@@ -550,12 +560,19 @@ export class AudioContextDoubleInstance {
         sampleRate: { get: () => this.sampleRate },
       })
       this.audioWorklet = {
-        addModule: vi.fn(async () => {
-          const blob = lastObjectUrlBlob()
+        addModule: vi.fn(async (url: string) => {
+          const isData = url.startsWith('data:')
+          const blob = isData ? null : lastObjectUrlBlob()
           const worklet = control.audioWorklet!
           if (worklet.addModuleGate) await worklet.addModuleGate
           if (worklet.addModuleError !== null) throw worklet.addModuleError
-          evaluateWorkletModule(await blob.text(), scope)
+          if (isData ? worklet.dataModulesRefused : worklet.blobModulesRefused) {
+            throw new DOMException(`Failed to load worklet module script: ${url.slice(0, 40)}`, 'AbortError')
+          }
+          evaluateWorkletModule(
+            isData ? decodeURIComponent(url.slice(url.indexOf(',') + 1)) : await blob!.text(),
+            scope
+          )
         }),
       }
     }
