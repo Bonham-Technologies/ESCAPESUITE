@@ -54,6 +54,7 @@ const restore = async (session: SessionState) => {
   vi.mocked(listSessionStates).mockResolvedValue([slotOf(session)])
   const deps: SessionRestoreDeps = {
     suppressRestore: false,
+    tabKey: null,
     setProject: (p) => store().setProject(p),
     addSourceVideo: (v) => store().addSourceVideo(v),
     seekTo: (t) => store().seekTo(t),
