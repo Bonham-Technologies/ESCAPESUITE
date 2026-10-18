@@ -336,28 +336,45 @@ export async function generateThumbnail(
 /**
  * Process and store a video file
  */
-export async function processVideoFile(file: File): Promise<SourceVideo> {
-  return finishVideoFile(file, await extractVideoMetadata(file));
+export async function processVideoFile(original: File): Promise<SourceVideo> {
+  const indexed = await withSeekIndexFirst(original);
+  return finishVideoFile(indexed, await extractVideoMetadata(indexed.file));
+}
+
+/**
+ * The file an import should work from: a WebM with no usable seek index
+ * remuxed with one, so a browser that cannot seek it without one (Firefox) can
+ * — ESCSUITE-305, `webmSeekIndex.ts`. It runs before the metadata probe
+ * (ESCSUITE-324): a WebM with neither a Duration nor Cues is the file whose
+ * end-seek wedges on Firefox, so the probe, the thumbnail, the waveform and the
+ * stored bytes all read the repaired file. Anything else comes back as the very
+ * same object, so an indexed WebM and every other type cost one header read at
+ * most and are stored exactly as they came.
+ */
+async function withSeekIndexFirst(file: File): Promise<IndexedImport> {
+  const bytes = await withSeekIndex(file, file.name);
+  return {
+    bytes,
+    file: bytes === file ? file : new File([bytes], file.name, { type: bytes.type }),
+  };
+}
+
+/** The bytes to store and the `File` the element-based probes load them from. */
+interface IndexedImport {
+  bytes: Blob;
+  file: File;
 }
 
 /** The rest of `processVideoFile`, once the metadata is in hand. */
-async function finishVideoFile(original: File, metadata: SourceVideo): Promise<SourceVideo> {
+async function finishVideoFile({ bytes, file }: IndexedImport, metadata: SourceVideo): Promise<SourceVideo> {
   metadata.mediaType = 'video';
-
-  // A WebM with no usable seek index is stored remuxed with one, so a browser
-  // that cannot seek it without one (Firefox) can — and so can the thumbnail
-  // below (ESCSUITE-305, `webmSeekIndex.ts`). Anything else is stored exactly
-  // as it came; `withSeekIndex` hands the same object back.
-  const bytes = await withSeekIndex(original, original.name);
   metadata.size = bytes.size;
-  const thumbnailSource =
-    bytes === original ? original : new File([bytes], original.name, { type: bytes.type });
 
   // Generate thumbnail. The time is passed explicitly because generateThumbnail
   // loads its own element, which for a file with no duration header reports the
   // same Infinity this metadata was recovered from.
   try {
-    const thumbnail = await generateThumbnail(thumbnailSource, metadata.duration * 0.1);
+    const thumbnail = await generateThumbnail(file, metadata.duration * 0.1);
     await storeThumbnail(metadata.id, thumbnail);
     metadata.thumbnailUrl = URL.createObjectURL(thumbnail);
   } catch (error) {
@@ -366,7 +383,7 @@ async function finishVideoFile(original: File, metadata: SourceVideo): Promise<S
 
   // Extract audio waveform data (videos may have audio tracks)
   try {
-    const { peaks, hasAudio } = await extractWaveformData(original);
+    const { peaks, hasAudio } = await extractWaveformData(file);
     metadata.waveformData = peaks;
     metadata.hasAudio = hasAudio;
   } catch (error) {
@@ -618,6 +635,11 @@ export async function generateAudioThumbnail(
  * Process and store an audio file
  */
 export async function processAudioFile(file: File): Promise<SourceVideo> {
+  return finishAudioFile({ bytes: file, file });
+}
+
+/** `processAudioFile` over a file already given its seek index (ESCSUITE-324). */
+async function finishAudioFile({ bytes, file }: IndexedImport): Promise<SourceVideo> {
   // Extract metadata
   const metadata = await extractAudioMetadata(file);
 
@@ -641,7 +663,7 @@ export async function processAudioFile(file: File): Promise<SourceVideo> {
   }
 
   // Store the audio blob
-  await storeVideo(metadata.id, file, metadata);
+  await storeVideo(metadata.id, bytes, metadata);
 
   return metadata;
 }
@@ -668,13 +690,14 @@ export async function processMediaFile(file: File): Promise<SourceVideo> {
     return processImageFile(file);
   }
   if (file.type.startsWith('audio/')) {
-    return processAudioFile(file);
+    return finishAudioFile(await withSeekIndexFirst(file));
   }
-  const probed = await extractVideoMetadata(file);
+  const indexed = await withSeekIndexFirst(file);
+  const probed = await extractVideoMetadata(indexed.file);
   if (probed.width > 0 && probed.height > 0) {
-    return finishVideoFile(file, probed);
+    return finishVideoFile(indexed, probed);
   }
-  return processAudioFile(file);
+  return finishAudioFile(indexed);
 }
 
 /**
