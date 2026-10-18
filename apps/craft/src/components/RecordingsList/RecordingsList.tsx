@@ -248,7 +248,7 @@ export function RecordingsList({
                             ? `Converting to ${convertingLabel}…`
                             : 'Download audio only (M4A)')
                         }
-                        aria-label={`Download ${recording.name} as audio (M4A)`}
+                        aria-label={`Download ${recording.name} as M4A audio`}
                         aria-describedby={conversionDescribedBy}
                         disabled={converting !== null || m4aReason !== null}
                       >

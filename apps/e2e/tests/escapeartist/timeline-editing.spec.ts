@@ -17,7 +17,7 @@ test.describe('ESCAPEARTIST Timeline Editing', () => {
     // The timeline's own chrome — Add Track and the zoom controls — rather
     // than a `[class*="timeline"]` substring that could match any of several
     // elements.
-    await expect(page.getByRole('button', { name: 'Add new track' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add Track' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Zoom in timeline' })).toBeVisible()
   })
 

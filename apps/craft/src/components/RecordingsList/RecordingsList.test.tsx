@@ -243,7 +243,7 @@ describe('RecordingsList MP4 downloads', () => {
     expect(mp4).toBeDisabled()
     expect(mp4).toHaveAttribute('title', MP4_NO_VIDEO_REASON)
     // The take is still audible, so both of the other downloads are untouched.
-    expect(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Take Seven as M4A audio' })).toBeEnabled()
     expect(screen.getByRole('button', { name: 'Download Take Seven' })).toBeEnabled()
   })
 
@@ -338,7 +338,7 @@ describe('RecordingsList M4A downloads', () => {
   it('offers M4A beside MP4, named after its recording', () => {
     renderList([makeRecording({ name: 'Standup Demo' })])
 
-    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
+    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as M4A audio' })
     expect(m4a).toHaveAttribute('title', 'Download audio only (M4A)')
     expect(m4a).toBeEnabled()
     expect(m4a).toHaveTextContent('M4A')
@@ -348,7 +348,7 @@ describe('RecordingsList M4A downloads', () => {
     const user = userEvent.setup()
     const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })])
 
-    await user.click(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' }))
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as M4A audio' }))
 
     expect(calls.onDownloadM4a).toHaveBeenCalledWith('r7', 'Take Seven')
     expect(calls.onDownloadMp4).not.toHaveBeenCalled()
@@ -359,7 +359,7 @@ describe('RecordingsList M4A downloads', () => {
     // so it is the one gate `RecordingsList` decides for itself.
     renderList([makeRecording({ id: 'r7', name: 'Take Seven', hasAudio: false })])
 
-    const m4a = screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })
+    const m4a = screen.getByRole('button', { name: 'Download Take Seven as M4A audio' })
     expect(m4a).toBeDisabled()
     expect(m4a).toHaveAttribute('title', 'This recording has no audio')
     // The take is still a video, so both of the other downloads are untouched.
@@ -375,7 +375,7 @@ describe('RecordingsList M4A downloads', () => {
       mp4Note: silent,
     })
 
-    const m4a = screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })
+    const m4a = screen.getByRole('button', { name: 'Download Take Seven as M4A audio' })
     expect(m4a).toBeDisabled()
     expect(m4a).toHaveAttribute('title', silent)
     const describedBy = m4a.getAttribute('aria-describedby')!
@@ -400,7 +400,7 @@ describe('RecordingsList M4A downloads', () => {
     )
     // Both downloads are disabled while it runs, and both say which conversion
     // is holding the processor.
-    for (const name of ['Download Take Seven as MP4', 'Download Take Seven as audio (M4A)']) {
+    for (const name of ['Download Take Seven as MP4', 'Download Take Seven as M4A audio']) {
       const button = screen.getByRole('button', { name })
       expect(button).toBeDisabled()
       expect(button).toHaveAttribute('title', 'Converting to M4A…')
@@ -419,7 +419,7 @@ describe('RecordingsList M4A downloads', () => {
       }
     )
 
-    const other = screen.getByRole('button', { name: 'Download Second as audio (M4A)' })
+    const other = screen.getByRole('button', { name: 'Download Second as M4A audio' })
     expect(other).toBeDisabled()
     expect(other).toHaveAttribute('title', busy)
   })
@@ -470,7 +470,7 @@ describe('RecordingsList upload to host', () => {
       'Play Take Seven',
       'Download Take Seven',
       'Download Take Seven as MP4',
-      'Download Take Seven as audio (M4A)',
+      'Download Take Seven as M4A audio',
       'Upload Take Seven to host',
       'Open Take Seven in Editor',
       'Delete Take Seven',
@@ -515,7 +515,7 @@ describe('a take recorded as separate tracks', () => {
       screen.queryByRole('button', { name: 'Download Standup Demo — webcam as MP4' })
     ).toBeNull()
     expect(
-      screen.queryByRole('button', { name: 'Download Standup Demo — webcam as audio (M4A)' })
+      screen.queryByRole('button', { name: 'Download Standup Demo — webcam as M4A audio' })
     ).toBeNull()
   })
 
@@ -589,7 +589,7 @@ describe('a take recorded as separate tracks', () => {
     expect(describedBy.split(' ')).toHaveLength(1)
     expect(document.getElementById(describedBy)).toHaveTextContent(silent)
 
-    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as audio (M4A)' })
+    const m4a = screen.getByRole('button', { name: 'Download Standup Demo as M4A audio' })
     expect(m4a.getAttribute('aria-describedby')).toBe(describedBy)
   })
 
@@ -629,7 +629,7 @@ describe('a take recorded as separate tracks', () => {
     // primary. Offering a conversion of a part would be slice 4's composite
     // pretending to exist.
     expect(
-      screen.queryByRole('button', { name: 'Download Standup Demo — microphone as audio (M4A)' })
+      screen.queryByRole('button', { name: 'Download Standup Demo — microphone as M4A audio' })
     ).toBeNull()
     expect(
       screen.queryByRole('button', { name: 'Download Standup Demo — system audio as MP4' })

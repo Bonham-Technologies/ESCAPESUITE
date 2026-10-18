@@ -369,7 +369,7 @@ test.describe('ESCAPECRAFT A/V drift rig', () => {
       files.push({ file: await saveDownload(page, mp4, conversionTimeout), kind: 'mp4', row: 'primary', role: 'primary' })
       writeMeasurement()
 
-      const m4a = page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })
+      const m4a = page.getByRole('button', { name: /Download .+ as M4A audio/ })
       await expect(m4a).toBeEnabled({ timeout: 60_000 })
       files.push({ file: await saveDownload(page, m4a, conversionTimeout), kind: 'm4a', row: 'primary', role: 'primary' })
       writeMeasurement()

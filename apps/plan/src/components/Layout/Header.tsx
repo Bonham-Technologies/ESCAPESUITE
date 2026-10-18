@@ -15,7 +15,9 @@ export default function Header() {
                 strokeLinecap="round"
                 strokeLinejoin="round"/>
         </svg>
-        <span className={styles.logoText}>ESCAPE</span>
+        {/* A real space between the two words (ESCSUITE-334): the visible text must read "ESCAPE Suite"
+            so the link's name contains it (WCAG 2.5.3 Label in Name). It replaces the CSS margin. */}
+        <span className={styles.logoText}>ESCAPE</span>{' '}
         <span className={styles.logoSuite}>Suite</span>
       </Link>
 

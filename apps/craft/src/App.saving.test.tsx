@@ -263,7 +263,7 @@ describe('App saving a recording', () => {
     expect(meta.hasAudio).toBe(false);
     // ...and the row's M4A button says why, rather than starting a conversion
     // that can only fail.
-    const m4a = screen.getByRole('button', { name: /as audio \(M4A\)$/ });
+    const m4a = screen.getByRole('button', { name: /as M4A audio$/ });
     expect(m4a).toBeDisabled();
     expect(m4a).toHaveAttribute('title', 'This recording has no audio');
   });
@@ -274,7 +274,7 @@ describe('App saving a recording', () => {
 
     expect(permissionsOverrides.requestMicrophone).toHaveBeenCalledTimes(1);
     expect(useRecorderStore.getState().recordings[0]).toMatchObject({ hasAudio: true });
-    expect(screen.getByRole('button', { name: /as audio \(M4A\)$/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /as M4A audio$/ })).toBeEnabled();
   });
 
   it('ignores a recorder stop that arrives after the take was cancelled', async () => {

@@ -61,6 +61,17 @@ describe('Header', () => {
     expect(logoLink).toHaveAttribute('href', '/')
   })
 
+  // WCAG 2.5.3 Label in Name (ESCSUITE-334): the visible text must read "ESCAPE Suite", with a
+  // real space, so the accessible name "ESCAPE Suite Home" contains it word for word. Two adjacent
+  // spans with no text node between them read "ESCAPESuite", which axe 4.14 flags.
+  it('logo link name contains its visible text', () => {
+    renderHeader()
+    const logoLink = screen.getByRole('link', { name: /ESCAPE Suite Home/i })
+    const visible = (logoLink.textContent ?? '').replace(/\s+/g, ' ').trim()
+    expect(visible).toBe('ESCAPE Suite')
+    expect(logoLink.getAttribute('aria-label')).toContain(visible)
+  })
+
   it('has link to GitHub', () => {
     renderHeader()
     const githubLink = screen.getByRole('link', { name: /GitHub/i })

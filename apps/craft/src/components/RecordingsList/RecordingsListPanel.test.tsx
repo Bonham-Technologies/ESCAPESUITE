@@ -105,7 +105,7 @@ describe('RecordingsListPanel downloads', () => {
     const user = userEvent.setup()
     renderPanel()
 
-    await user.click(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' }))
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as M4A audio' }))
 
     expect(convertToM4A).toHaveBeenCalledTimes(1)
     expect(convertToMP4).not.toHaveBeenCalled()
@@ -115,7 +115,7 @@ describe('RecordingsListPanel downloads', () => {
     renderPanel()
 
     expect(screen.getByRole('button', { name: 'Download Take Seven as MP4' })).toBeEnabled()
-    expect(screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Download Take Seven as M4A audio' })).toBeEnabled()
   })
 
   it('hands the M4A gate down, so a browser with no AAC encoder cannot start one', () => {
@@ -129,7 +129,7 @@ describe('RecordingsListPanel downloads', () => {
     })
     renderPanel()
 
-    const m4a = screen.getByRole('button', { name: 'Download Take Seven as audio (M4A)' })
+    const m4a = screen.getByRole('button', { name: 'Download Take Seven as M4A audio' })
     expect(m4a).toBeDisabled()
     expect(m4a).toHaveAttribute(
       'title',

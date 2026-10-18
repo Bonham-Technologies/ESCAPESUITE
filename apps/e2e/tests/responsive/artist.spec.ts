@@ -42,7 +42,7 @@ test.describe('ESCAPEARTIST Tablet Layout', () => {
   })
 
   test('timeline visible on tablet', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'Add new track' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add Track' })).toBeVisible()
   })
 
   test('panels fit within tablet width', async ({ page }) => {

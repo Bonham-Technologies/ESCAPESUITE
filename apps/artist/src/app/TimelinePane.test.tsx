@@ -50,7 +50,9 @@ describe('TimelinePane', () => {
     const user = userEvent.setup();
     const { onAddTrack } = renderPane();
 
-    await user.click(screen.getByRole('button', { name: 'Add new track' }));
+    // WCAG 2.5.3 Label in Name (ESCSUITE-334): the name is the visible "Add Track", not a
+    // different "Add new track" a speech-input user cannot say.
+    await user.click(screen.getByRole('button', { name: 'Add Track' }));
 
     expect(onAddTrack).toHaveBeenCalledTimes(1);
     expect(onAddTrack).toHaveBeenCalledWith();

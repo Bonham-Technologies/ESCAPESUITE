@@ -83,7 +83,7 @@ test.describe('ESCAPECRAFT M4A download', () => {
     )
     test.setTimeout(180_000)
 
-    const m4aButton = page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })
+    const m4aButton = page.getByRole('button', { name: /Download .+ as M4A audio/ })
     await expect(m4aButton).toBeEnabled()
 
     const downloadPromise = page.waitForEvent('download', { timeout: 150_000 })
@@ -134,7 +134,7 @@ test.describe('ESCAPECRAFT M4A download', () => {
       'The per-recording reason is only visible when nothing app-wide is blocking'
     )
 
-    const m4aButton = page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })
+    const m4aButton = page.getByRole('button', { name: /Download .+ as M4A audio/ })
     await expect(m4aButton).toBeVisible()
     await expect(m4aButton).toBeDisabled()
     await expect(m4aButton).toHaveAttribute('title', 'This recording has no audio')
@@ -192,7 +192,7 @@ test.describe('ESCAPECRAFT M4A download', () => {
       'This browser can convert — the enabled path is above'
     )
 
-    const m4aButton = page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })
+    const m4aButton = page.getByRole('button', { name: /Download .+ as M4A audio/ })
     await expect(m4aButton).toBeVisible()
     await expect(m4aButton).toBeDisabled()
     // Whichever way the probe refused names itself in the reason.

@@ -36,7 +36,7 @@ test.describe('ESCAPEARTIST Video Import', () => {
   })
 
   test('has timeline component', async ({ page }) => {
-    await expect(page.getByRole('button', { name: 'Add new track' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add Track' })).toBeVisible()
     // Even an empty project has a track to hold whatever lands on it.
     await expect(page.locator('[data-track-id]')).toHaveCount(1)
 
