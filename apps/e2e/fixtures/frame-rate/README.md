@@ -18,4 +18,4 @@ Every file is 2 s of ffmpeg's `testsrc` at 160x120, no audio. `node make-fixture
 | `testsrc-60fps.webm` | VP9, 60 fps | the same with `r=60`, `-r 60` | `60/1,120` |
 | `testsrc-120fps.webm` | VP9, 120 fps | the same with `r=120`, `-r 120` | `120/1,240` |
 
-A WebM stamps frames in whole milliseconds, so the probe cannot tell a rate from its NTSC neighbour (30 from 29.97, and so on) over eight frames; the spec accepts either for the WebMs and only the exact rate for the MP4s.
+A WebM stamps frames in whole milliseconds, so the probe cannot tell a rate from its NTSC neighbour (30 from 29.97, and so on) over eight frames; the spec accepts either for the WebMs and only the exact rate for the MP4s. The 120 fps WebM may also come back refused as 30 `'assumed'` on a busy machine (ESCSUITE-333), which the spec accepts; any other rate is a failure.

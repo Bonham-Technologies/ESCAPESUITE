@@ -12,8 +12,9 @@ import { waitForAppReady } from '../../utils/ready'
  * shows what Chromium presents at half speed, and a real run once read a 60 fps
  * WebM as 20. Each fixture (fixtures/frame-rate/README.md) is imported through
  * the uploader's file input and the stored source read back through the
- * documented `GET_STATE`: it must be `'measured'` at the file's rate. MP4s are
- * exact. A WebM stamps frames in whole milliseconds, so over eight frames it
+ * documented `GET_STATE`: it must be `'measured'` at the file's rate, except
+ * that the 120 fps WebM may instead be refused as 30 `'assumed'` on a busy
+ * machine (ESCSUITE-333; see `mayRefuse`). MP4s are exact. A WebM stamps frames in whole milliseconds, so over eight frames it
  * cannot separate a rate from its NTSC neighbour and either is accepted.
  *
  * Chromium only: `presentedFrames` and the half-speed sampling were measured
@@ -26,6 +27,17 @@ interface Case {
   file: string
   /** Accepted stored rates. */
   rates: number[]
+  /**
+   * The probe may refuse this file on a busy machine, storing the 30 'assumed'
+   * placeholder instead of a measurement (ESCSUITE-333). True only for the
+   * 120 fps WebM: its frames are stamped in whole milliseconds, and a page that
+   * misses about eleven callbacks in a row can round the run to one interval
+   * more than the compositor's counter, which ESCSUITE-278's spacing check
+   * refuses on purpose. A loaded CI runner did exactly that on 2026-10-18 (run
+   * 39096461073). The refusal is the safe side; a wrong 'measured' rate is
+   * still a failure.
+   */
+  mayRefuse?: boolean
 }
 
 const CASES: Case[] = [
@@ -37,7 +49,7 @@ const CASES: Case[] = [
   { file: 'testsrc-24fps.webm', rates: [24, 23.976] },
   { file: 'testsrc-30fps.webm', rates: [30, 29.97] },
   { file: 'testsrc-60fps.webm', rates: [60, 59.94] },
-  { file: 'testsrc-120fps.webm', rates: [120, 119.88] },
+  { file: 'testsrc-120fps.webm', rates: [120, 119.88], mayRefuse: true },
 ]
 
 interface StoredSource {
@@ -70,8 +82,11 @@ test.describe('import-time frame-rate probe', () => {
     test.skip(browserName !== 'chromium', 'rVFC presentedFrames measured on Chromium only; Firefox/WebKit admission is a follow-up')
   })
 
-  for (const { file, rates } of CASES) {
-    test(`${file} is measured at ${rates.join(' or ')} fps`, async ({ page }) => {
+  for (const { file, rates, mayRefuse } of CASES) {
+    const title = mayRefuse
+      ? `${file} is measured at ${rates.join(' or ')} fps, or refused as 30 assumed`
+      : `${file} is measured at ${rates.join(' or ')} fps`
+    test(title, async ({ page }) => {
       await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
       await waitForAppReady(page, 'artist')
       await page.locator('input[type="file"]').setInputFiles(resolvePath(FIXTURES, file))
@@ -83,6 +98,11 @@ test.describe('import-time frame-rate probe', () => {
         type: 'frame-rate',
         description: `${sources[0].frameRate} (${sources[0].frameRateSource})`,
       })
+      if (mayRefuse && sources[0].frameRateSource === 'assumed') {
+        // The refusal: the placeholder, never another number (ESCSUITE-333).
+        expect(sources[0].frameRate).toBe(30)
+        return
+      }
       expect(sources[0].frameRateSource).toBe('measured')
       expect(rates).toContain(sources[0].frameRate)
     })
