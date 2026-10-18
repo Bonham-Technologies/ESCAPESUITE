@@ -279,7 +279,7 @@ test.describe('ESCAPECRAFT separate-tracks recording', () => {
     // Conversions on the primary row only — one MP4 and one M4A in the whole
     // library, however many parts the take has.
     await expect(page.getByRole('button', { name: /Download .+ as MP4/ })).toHaveCount(1)
-    await expect(page.getByRole('button', { name: /Download .+ as audio \(M4A\)/ })).toHaveCount(1)
+    await expect(page.getByRole('button', { name: /Download .+ as M4A audio/ })).toHaveCount(1)
     // One WebM download per row, so every part is reachable on its own.
     await expect(page.getByRole('button', { name: /^Download (?!.*as ).+/ })).toHaveCount(4)
   })
