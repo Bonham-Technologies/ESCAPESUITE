@@ -256,6 +256,9 @@ pnpm lint                # Run ESLint
   2 s `testsrc` fixtures in `apps/e2e/fixtures/frame-rate/` (H.264 at 24, 30, 60, 120 and 29.97 fps; VP9 WebM at
   24, 30, 60 and 120) imported through the uploader on Chromium, each required to be stored `'measured'` at its own
   rate (exact for the MP4s, the NTSC neighbour also accepted for a WebM). Run 5 times each in one sitting, 45 of 45 passed.
+  The 120 fps WebM may instead come back refused as 30 `'assumed'` and the pin accepts that, never another rate: on a
+  busy runner its millisecond stamps can round a run to one interval more than the counter, which the spacing check
+  refuses on purpose (ESCSUITE-333, seen once in CI on 2026-10-18).
   **The probe runs only on an engine it was measured on — Chromium (ESCSUITE-327).** The same nine
   fixtures on Playwright's Firefox 157 (ESCSUITE-316 U-3, 2026-10-17, the Chromium-only skip lifted) stored
   five as 30 `'assumed'` (the safe side: 24 / 30 / 60 / 29.97 MP4 and 24 WebM), two right (60 and 120
