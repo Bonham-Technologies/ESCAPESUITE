@@ -5,7 +5,7 @@
 // WebKit included (4.46-17.45/255 apart), stays on <video>, and so does the
 // next engine nobody has measured: admitting one is ESCSUITE-262.
 import { describe, it, expect } from 'vitest'
-import { isFirefoxEngine, isMeasuredWorkerDecodeEngine } from './workerDecodeEngine'
+import { isFirefoxEngine, isMeasuredFrameRateEngine, isMeasuredWorkerDecodeEngine } from './workerDecodeEngine'
 
 const UA = {
   chromium:
@@ -69,5 +69,37 @@ describe('isFirefoxEngine', () => {
     ).toBe(false)
     expect(isFirefoxEngine({ userAgent: UA.safari })).toBe(false)
     expect(isFirefoxEngine({ userAgent: UA.jsdom })).toBe(false)
+  })
+})
+
+// ESCSUITE-327: the frame-rate probe's allow-list is narrower than the worker's.
+// The worker's Firefox parity was measured against Firefox's own <video>; the
+// probe's rVFC metadata was never characterised there (a 120 fps MP4 read
+// 124.62, a 30 fps WebM 34.33, both stored 'measured').
+describe('isMeasuredFrameRateEngine', () => {
+  const chromium = {
+    userAgent: UA.chromium,
+    userAgentData: { brands: [{ brand: 'Not=A?Brand' }, { brand: 'Chromium' }] },
+  }
+
+  it('admits a Chromium engine, by its userAgentData brand', () => {
+    expect(isMeasuredFrameRateEngine(chromium)).toBe(true)
+  })
+
+  it('refuses Firefox, which the worker predicate admits', () => {
+    const firefox = { userAgent: UA.firefox }
+    expect(isMeasuredWorkerDecodeEngine(firefox)).toBe(true)
+    expect(isMeasuredFrameRateEngine(firefox)).toBe(false)
+    expect(isMeasuredWorkerDecodeEngine(chromium)).toBe(isMeasuredFrameRateEngine(chromium))
+  })
+
+  it('refuses WebKit, an unmeasured engine and a Chromium-looking user agent string', () => {
+    expect(isMeasuredFrameRateEngine({ userAgent: UA.safari })).toBe(false)
+    expect(isMeasuredFrameRateEngine({ userAgent: UA.jsdom })).toBe(false)
+    expect(isMeasuredFrameRateEngine({ userAgent: UA.chromium })).toBe(false)
+  })
+
+  it('refuses when there is no navigator at all', () => {
+    expect(isMeasuredFrameRateEngine(undefined)).toBe(false)
   })
 })

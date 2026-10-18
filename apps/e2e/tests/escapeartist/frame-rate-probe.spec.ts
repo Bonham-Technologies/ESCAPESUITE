@@ -88,3 +88,24 @@ test.describe('import-time frame-rate probe', () => {
     })
   }
 })
+
+// ESCSUITE-327: the probe is gated to Chromium, so Firefox stores the placeholder
+// instead of a reading it cannot vouch for (measured 2026-10-17 on Firefox 157,
+// the 120 fps MP4 read 124.62 and the 30 fps WebM 34.33, both 'measured').
+test.describe('import-time frame-rate probe, engine gate', () => {
+  test.beforeEach(({ browserName }) => {
+    test.skip(browserName !== 'firefox', 'the gate pin runs on Firefox; WebKit is refused by the probe too but Playwright\'s WebKit cannot import media (ESCSUITE-258)')
+  })
+
+  test('testsrc-120fps.mp4 is stored as 30 assumed, not a Firefox reading', async ({ page }) => {
+    await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
+    await waitForAppReady(page, 'artist')
+    await page.locator('input[type="file"]').setInputFiles(resolvePath(FIXTURES, 'testsrc-120fps.mp4'))
+    await expect(page.getByRole('button', { name: 'Add to timeline' })).toBeVisible({ timeout: 30_000 })
+
+    const sources = await getSources(page)
+    expect(sources).toHaveLength(1)
+    expect(sources[0].frameRate).toBe(30)
+    expect(sources[0].frameRateSource).toBe('assumed')
+  })
+})

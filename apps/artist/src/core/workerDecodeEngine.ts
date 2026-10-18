@@ -38,6 +38,9 @@
  * Firefox and WebKit do not ship) rather than from the user-agent string,
  * which every Chromium fork and WebKit browser imitates; Firefox from its
  * `Gecko/` and `Firefox/` tokens.
+ *
+ * A second, narrower list lives below: `isMeasuredFrameRateEngine`, the
+ * frame-rate probe's (Chromium only, ESCSUITE-327).
  */
 
 /** The parts of `navigator` this reads; `userAgentData` is not in TypeScript's DOM lib. */
@@ -48,8 +51,25 @@ export interface EngineNavigator {
 
 export function isMeasuredWorkerDecodeEngine(nav: EngineNavigator | undefined): boolean {
   if (!nav) return false;
-  if (nav.userAgentData?.brands?.some(({ brand }) => brand === 'Chromium')) return true;
+  if (isMeasuredFrameRateEngine(nav)) return true;
   return isFirefoxEngine(nav);
+}
+
+/**
+ * Which engines the import-time frame-rate probe (`frameRateProbe.ts`,
+ * ESCSUITE-276) may measure on (ESCSUITE-327): **Chromium only**, narrower than
+ * the worker's list above on purpose. The worker's Firefox parity was measured
+ * against Firefox's own `<video>`; the probe's was not — Firefox's
+ * `requestVideoFrameCallback` metadata (`presentedFrames`, `mediaTime` stamps)
+ * was never characterised per rate and container, and the 2026-10-17 run of the
+ * nine `testsrc` fixtures on Firefox 157 stored two wrong `'measured'` claims
+ * (120 fps MP4 as 124.62, 30 fps WebM as 34.33). On an engine this refuses the
+ * probe answers `undefined` and the source is stored 30 `'assumed'`. Admitting
+ * Firefox is a measurement task, not a code change here.
+ */
+export function isMeasuredFrameRateEngine(nav: EngineNavigator | undefined): boolean {
+  if (!nav) return false;
+  return nav.userAgentData?.brands?.some(({ brand }) => brand === 'Chromium') === true;
 }
 
 /**
