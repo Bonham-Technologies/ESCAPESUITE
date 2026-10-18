@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.18.24
+
+### Patch Changes
+
+- c45a7df: Cancelling an MP4 export now stops it at once, even while it is loading your videos
+  
+  Cancelling an MP4 export while it was loading your videos, or waiting on a slow frame, used to close the dialog but keep loading every remaining video and keep the background decoder (up to 512 MB of memory) busy until it finished on its own; the export now stops and frees the decoder's memory at once; a video already loading in the page finishes or gives up within 15 s, and then the cancel settles.
+- c45a7df: An MP4 export that fails while it is setting up no longer leaves its decoder holding memory
+  
+  If an MP4 export failed after your videos had loaded but before the first frame was encoded — the encoder refusing its settings, say — the background decoder it had started kept up to 512 MB of memory until you closed the tab; it is now released with the rest of the export, as WebM and GIF exports already were.
+
 ## 2.18.23
 
 ### Patch Changes
