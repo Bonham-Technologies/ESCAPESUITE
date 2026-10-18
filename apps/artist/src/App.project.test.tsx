@@ -498,7 +498,7 @@ describe('App project lifecycle', () => {
       const user = userEvent.setup()
       await renderApp()
 
-      await user.click(screen.getByRole('button', { name: 'Add new track' }))
+      await user.click(screen.getByRole('button', { name: 'Add Track' }))
 
       expect(store().project.timeline.tracks).toHaveLength(2)
     })

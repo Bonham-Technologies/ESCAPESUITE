@@ -30,7 +30,8 @@ export function TimelinePane({ height, zoom, onAddTrack, onZoomIn, onZoomOut, on
     <footer className={styles.footer} style={{ height }}>
       <div className={styles.timelineControls}>
         {/* Wrapped on purpose: addTrack takes an optional argument, and the click event must not become it. */}
-        <button className={styles.addTrackButton} onClick={() => onAddTrack()} title="Add new track" aria-label="Add new track">
+        {/* No aria-label (ESCSUITE-334): the name is the visible "Add Track", so a speech-input user can say what they see (WCAG 2.5.3). */}
+        <button className={styles.addTrackButton} onClick={() => onAddTrack()} title="Add new track">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />

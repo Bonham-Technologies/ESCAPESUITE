@@ -5758,14 +5758,34 @@ case; the re-review's one (the dialog operand dropped) reds exactly the two dial
 source at load, nothing per frame. **No floor crossed**; artist's floors stay 99 / 99 / 96 / 99 and the kit's
 99 / 99 / 98 / 98.
 
+`@escapesuite/plan`, `@escapesuite/craft` and `@escapesuite/artist` were re-measured 2026-10-18 for ESCSUITE-334
+(three controls carry their visible text in their accessible name, WCAG 2.5.3 Label in Name, which
+`@axe-core/playwright` 4.14 checks by default and Dependabot #913 brought in, turning `main`'s e2e red: PLAN's logo
+link reads "ESCAPE Suite" with a real space where two adjacent spans read "ESCAPESuite", CRAFT's M4A button is named
+`Download <name> as M4A audio` where a parenthesised "(M4A)" was not the word the button shows, and ARTIST's Add
+Track button is named by its visible text where it carried a different "Add new track"), each on this branch over
+`main` at `1a6e4ea3` (the #913 squash). The change is three attribute strings and one JSX space, and adds no
+statement, branch or function. **Plan**: 100.00 / 100.00 / 100.00 / 100.00, lines 82, statements 83, branches 21,
+functions 27, every one covered — the counts ESCSUITE-219's paragraph recorded. **Craft**: 100.00 / 99.59 / 98.02 /
+100.00 — lines 2,779, statements 2,985 / 2,997, branches 1,537 / 1,568, functions 513, the same 12 statements and 31
+branches uncovered as every craft paragraph since ESCSUITE-143. **Artist**: 99.85 / 99.47 / 96.91 / 99.78 — lines
+9,977 / 9,991, statements 11,342 / 11,402, branches 6,387 / 6,590, functions 2,370 / 2,375, the same 14 / 60 / 203 / 5
+uncovered. The craft and artist rows read a hundredth or four above the table because ESCSUITE-318, 319, 323, 324,
+314 / 315, 328 and 330 landed after the rows were last written, the drift ESCSUITE-91 and 113 recorded; the rows
+are corrected to these measurements. Red first: PLAN's new pin `expected 'ESCAPESuite' to be 'ESCAPE Suite'`, ARTIST's
+two Add Track cases and CRAFT's twelve M4A cases unable to find the new name. Outside vitest's measurement,
+`accessibility/core.spec.ts` with the three specs whose locators named the old label ran on Chromium: 69 / 69. Every
+`*.perf.test.ts` and rerender pin is byte-identical. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100,
+craft's 100 / 99 / 98 / 100 and artist's 99 / 99 / 96 / 99.
+
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
 never above what the suite actually achieves:
 
 | Package | Lines | Statements | Branches | Functions |
 |---------|-------|------------|----------|-----------|
 | `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.59 | 98.01 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.46 | 96.87 | 99.78 |
+| `@escapesuite/craft` | 100.00 | 99.59 | 98.02 | 100.00 |
+| `@escapesuite/artist` | 99.85 | 99.47 | 96.91 | 99.78 |
 | `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
 | `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
 
