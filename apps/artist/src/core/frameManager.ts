@@ -8,6 +8,7 @@ import {
   type IFrameSource,
 } from './frameSource';
 import { SourceNotSeekableError } from './seekWedge';
+import { ExportAbortedError } from './exportTypes';
 
 /**
  * Frame manager for WebCodecs-based export
@@ -107,8 +108,10 @@ export async function getFrameAtTime(
     return frame;
   } catch (error) {
     // A source whose seeks never complete is not a frame to skip: skipping it
-    // every frame is how a WebM exported black on Firefox (ESCSUITE-305).
-    if (error instanceof SourceNotSeekableError) throw error;
+    // every frame is how a WebM exported black on Firefox (ESCSUITE-305). Nor
+    // is the export's own Cancel arriving through the decode worker
+    // (ESCSUITE-314): a skipped frame would still be drawn and encoded.
+    if (error instanceof SourceNotSeekableError || error instanceof ExportAbortedError) throw error;
     console.warn(`Failed to get frame for ${sourceId} at ${timestamp}:`, error);
     return null;
   }
