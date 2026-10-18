@@ -1,5 +1,11 @@
 # @escapesuite/headless-artist
 
+## 0.7.4
+
+### Patch Changes
+
+- 3097e54: A headless mp4 job whose video source fails to load now fails by name instead of silently rendering without that clip.
+
 ## 0.7.3
 
 ### Patch Changes
