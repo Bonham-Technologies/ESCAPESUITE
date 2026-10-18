@@ -1,5 +1,11 @@
 # @escapesuite/headless-artist
 
+## 0.7.5
+
+### Patch Changes
+
+- 609a627: A render refused because a clip's source has no stored bytes now reports `code: "SOURCE_MISSING"` and is treated as a permanent failure: exit 2, or 400 under `serve`.
+
 ## 0.7.4
 
 ### Patch Changes
