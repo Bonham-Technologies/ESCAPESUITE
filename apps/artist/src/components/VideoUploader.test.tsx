@@ -881,7 +881,7 @@ describe('VideoUploader', () => {
 
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
       expect(globalThis.confirm).toHaveBeenCalledWith(
-        'Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. This cannot be undone.'
+        'Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. Another open editor tab could still be using them. This cannot be undone.'
       )
       // Not `toHaveLength(0)`: this describe's rows accumulate in the real
       // fake-indexeddb across its tests (no per-test reset — see the
@@ -1972,7 +1972,10 @@ describe('VideoLibrary', () => {
   })
 
   // ESCSUITE-154: the confirm copy says how many clips go with it, so the
-  // single-item Remove reads the same way Clear All's own clause does.
+  // single-item Remove reads the same way Clear All's own clause does. And —
+  // ESCSUITE-330 — it says another tab may still be using the file: the bytes
+  // are shared by every editor tab, and one whose clip loses them used to export
+  // black frames and call it complete.
   //
   // Each case awaits the removal through to completion (`handleRemoveVideo`
   // is async, and confirm defaults to true) rather than leaving the click's
@@ -1983,7 +1986,7 @@ describe('VideoLibrary', () => {
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
-    expect(globalThis.confirm).toHaveBeenCalledWith('Remove this video?')
+    expect(globalThis.confirm).toHaveBeenCalledWith('Remove this video? Another open editor tab could still be using it.')
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
@@ -2035,7 +2038,7 @@ describe('VideoLibrary', () => {
     fireEvent.click(screen.getByTitle('Remove media'))
 
     expect(globalThis.confirm).toHaveBeenCalledWith(
-      'Remove this video? This will also remove 1 clip that uses it.'
+      'Remove this video? This will also remove 1 clip that uses it. Another open editor tab could still be using it.'
     )
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
@@ -2049,7 +2052,7 @@ describe('VideoLibrary', () => {
     fireEvent.click(screen.getByTitle('Remove media'))
 
     expect(globalThis.confirm).toHaveBeenCalledWith(
-      'Remove this video? This will also remove 2 clips that use it.'
+      'Remove this video? This will also remove 2 clips that use it. Another open editor tab could still be using it.'
     )
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })

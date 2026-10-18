@@ -230,8 +230,37 @@ export class ExportError extends Error {
  * - `SOURCE_NOT_SEEKABLE`: a `<video>` source whose seeks never complete in this
  *   browser — Firefox on a WebM with no Cues index (ESCSUITE-305). Every frame
  *   would be drawn black; the export fails by name instead.
+ * - `SOURCE_MISSING`: a clip's source has no bytes in storage — another tab's
+ *   Clear All or Remove deleted them (ESCSUITE-330). Every exporter refuses by
+ *   name ({@link sourceMissingError}) rather than drawing nothing for the clip.
+ *   The loaders read every clip on the timeline — in or out of the exported
+ *   range, hidden tracks included — so a byteless source used only by such a
+ *   clip refuses the whole export.
  */
-export type ExportErrorCode = 'OUTPUT_SIZE_UNSUPPORTED' | 'AUDIO_CODEC_UNAVAILABLE' | 'SOURCE_NOT_SEEKABLE';
+export type ExportErrorCode =
+  | 'OUTPUT_SIZE_UNSUPPORTED'
+  | 'AUDIO_CODEC_UNAVAILABLE'
+  | 'SOURCE_NOT_SEEKABLE'
+  | 'SOURCE_MISSING';
+
+/**
+ * The refusal of a clip whose source has no stored bytes (ESCSUITE-330),
+ * written to the export's trail and returned for the caller to throw.
+ *
+ * The storage row is gone, or holds no blob: the bytes are shared by every
+ * editor tab, and another tab's Clear All or Remove deleted them under this
+ * one. This is not a load failure (ESCSUITE-325 / 328) — there the bytes exist
+ * and the browser cannot read them — so it refuses in all three exporters,
+ * where WebM and GIF still warn and skip a load failure: there is nothing here
+ * to try, and an export that drew nothing for the clip used to report
+ * "Export complete!" over black frames. `name` is the source's
+ * `SourceVideo.name`, or its id when the exporter was not handed the record.
+ */
+export function sourceMissingError(name: string, exportLog: ExportLogEntry[]): ExportError {
+  const message = `The media for "${name}" is no longer in storage (it was removed in another window or by Clear All); remove the clip or re-import the file`;
+  exportLog.push({ phase: 'error', detail: message, timestamp: performance.now() });
+  return new ExportError(message, exportLog, undefined, undefined, 'SOURCE_MISSING');
+}
 
 /**
  * The {@link ExportErrorCode} a failure from inside an export carries, for the

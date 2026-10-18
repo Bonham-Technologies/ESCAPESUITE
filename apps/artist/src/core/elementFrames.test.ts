@@ -4,7 +4,7 @@
 // thing, so it was lifted here rather than copied. The exporters' own suites
 // (`exportWebM.test.ts`, and `exportGIF.test.ts` once it lands) still cover it
 // end to end; these cases cover the four exported functions directly, where a
-// specific question — "does a source with no bytes get skipped", "is a seek
+// specific question — "does a source with no bytes refuse by name", "is a seek
 // inside half a frame of the target skipped" — is cheaper to ask than through a
 // whole export.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -16,6 +16,7 @@ import {
 } from './elementFrames'
 import { elementSeekTarget } from './elementSeek'
 import { SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
+import { ExportError, type ExportLogEntry } from './exportTypes'
 import { getVideoBlob, storeVideo } from './storage'
 import {
   getLastCanvasContext,
@@ -125,7 +126,8 @@ describe('loadElementSources', () => {
     await store('v1')
     const sources = await loadElementSources(
       [makeClip({ sourceVideoId: 'v1' })],
-      sourceMapOf([makeSourceVideo({ id: 'v1' })])
+      sourceMapOf([makeSourceVideo({ id: 'v1' })]),
+      []
     )
 
     expect([...sources.videoElements.keys()]).toEqual(['v1'])
@@ -136,7 +138,8 @@ describe('loadElementSources', () => {
     await store('i1', 'image/png', 'image')
     const sources = await loadElementSources(
       [makeClip({ sourceVideoId: 'i1' })],
-      sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })])
+      sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })]),
+      []
     )
 
     expect([...sources.imageElements.keys()]).toEqual(['i1'])
@@ -147,24 +150,41 @@ describe('loadElementSources', () => {
     await store('a1', 'audio/webm', 'audio')
     const sources = await loadElementSources(
       [makeClip({ sourceVideoId: 'a1' })],
-      sourceMapOf([makeSourceVideo({ id: 'a1', mediaType: 'audio' })])
+      sourceMapOf([makeSourceVideo({ id: 'a1', mediaType: 'audio' })]),
+      []
     )
 
     expect(sources.videoElements.size).toBe(0)
     expect(sources.imageElements.size).toBe(0)
   })
 
-  it('skips a source with no bytes in storage rather than failing the export', async () => {
-    const sources = await loadElementSources(
-      [makeClip({ sourceVideoId: 'ghost' })],
-      sourceMapOf([makeSourceVideo({ id: 'ghost' })])
-    )
+  // ESCSUITE-330: a source with no bytes in storage — another tab's Clear All
+  // deleted them — used to be skipped here without a word, and the export drew
+  // nothing for its clip and reported "Export complete!". It refuses by name now,
+  // and the loader frees what it had loaded before it, by the same ownership rule
+  // a failed read follows below. (A load *failure* — bytes the browser cannot
+  // read — still warns and skips; there is nothing to try here.)
+  it('refuses a source with no bytes in storage by name, releasing what it loaded before it', async () => {
+    await store('v1')
+    vi.mocked(URL.revokeObjectURL).mockClear()
+    const exportLog: ExportLogEntry[] = []
 
-    expect(sources.videoElements.size).toBe(0)
+    const error = await loadElementSources(
+      [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'ghost' })],
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'ghost', name: 'Ghost take' })]),
+      exportLog
+    ).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).code).toBe('SOURCE_MISSING')
+    expect((error as ExportError).message).toContain('"Ghost take" is no longer in storage')
+    expect((error as ExportError).exportLog).toBe(exportLog)
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(media.videos[0].src)
   })
 
   it('ignores an overlay clip, which has no source id at all', async () => {
-    const sources = await loadElementSources([makeClip({ sourceVideoId: '' })], new Map())
+    const sources = await loadElementSources([makeClip({ sourceVideoId: '' })], new Map(), [])
 
     expect(sources.videoElements.size).toBe(0)
   })
@@ -175,7 +195,7 @@ describe('loadElementSources', () => {
       makeClip({ id: 'c1', sourceVideoId: 'v1' }),
       makeClip({ id: 'c2', sourceVideoId: 'v1' }),
     ]
-    await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
 
     expect(media.videos).toHaveLength(1)
   })
@@ -186,7 +206,8 @@ describe('loadElementSources', () => {
 
     const sources = await loadElementSources(
       [makeClip({ sourceVideoId: 'v1' })],
-      sourceMapOf([makeSourceVideo({ id: 'v1' })])
+      sourceMapOf([makeSourceVideo({ id: 'v1' })]),
+      []
     )
 
     expect(sources.videoElements.size).toBe(0)
@@ -200,7 +221,8 @@ describe('loadElementSources', () => {
 
     const sources = await loadElementSources(
       [makeClip({ sourceVideoId: 'v1' })],
-      sourceMapOf([makeSourceVideo({ id: 'v1' })])
+      sourceMapOf([makeSourceVideo({ id: 'v1' })]),
+      []
     )
 
     expect(sources.videoElements.size).toBe(0)
@@ -218,7 +240,8 @@ describe('loadElementSources', () => {
 
     const sources = await loadElementSources(
       [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'i1' })],
-      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'i1', mediaType: 'image' })])
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'i1', mediaType: 'image' })]),
+      []
     )
 
     expect([...sources.videoElements.keys()]).toEqual(['v1'])
@@ -242,7 +265,8 @@ describe('loadElementSources', () => {
     await expect(
       loadElementSources(
         [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'v2' })],
-        sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2' })])
+        sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2' })]),
+        []
       )
     ).rejects.toThrow('IndexedDB read failed')
 
@@ -257,7 +281,8 @@ describe('rewindElementSources', () => {
     await store('v1')
     const sources = await loadElementSources(
       [makeClip({ sourceVideoId: 'v1' })],
-      sourceMapOf([makeSourceVideo({ id: 'v1' })])
+      sourceMapOf([makeSourceVideo({ id: 'v1' })]),
+      []
     )
 
     const state = rewindElementSources(sources)
@@ -274,7 +299,8 @@ describe('releaseElementSources', () => {
     await store('i1', 'image/png', 'image')
     const sources = await loadElementSources(
       [makeClip({ id: 'c1', sourceVideoId: 'v1' }), makeClip({ id: 'c2', sourceVideoId: 'i1' })],
-      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'i1', mediaType: 'image' })])
+      sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'i1', mediaType: 'image' })]),
+      []
     )
     vi.mocked(URL.revokeObjectURL).mockClear()
 
@@ -288,7 +314,7 @@ describe('createFrameComposer', () => {
   it('opens the frame by clearing the whole raster to black', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
 
@@ -327,7 +353,7 @@ describe('createFrameComposer', () => {
   it('skips a seek that is already within half an output frame of the target', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -360,7 +386,7 @@ describe('createFrameComposer', () => {
   it('seeks to just past the requested time, so a frame start shows its own frame', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', startTime: 0.5, duration: 1, endTime: 1.5 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -387,7 +413,7 @@ describe('createFrameComposer', () => {
     await store('v1')
     media.script({ video: { readyState: 1 } })
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -416,7 +442,8 @@ describe('createFrameComposer', () => {
     const clips = [makeClip({ sourceVideoId: 'i1', duration: 1, endTime: 1 })]
     const sources = await loadElementSources(
       clips,
-      sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })])
+      sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })]),
+      []
     )
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
@@ -461,7 +488,7 @@ describe('createFrameComposer', () => {
         },
       }),
     ]
-    const sources = await loadElementSources(clips, new Map())
+    const sources = await loadElementSources(clips, new Map(), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -486,7 +513,7 @@ describe('createFrameComposer', () => {
   it('pauses a video whose clip has gone out of range', async () => {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     // A video the composer believes is playing: the one state the pause loop
     // acts on, and the only way to reach it from outside the loop.
@@ -529,7 +556,7 @@ describe('createFrameComposer readiness wait', () => {
     await store('v1')
     media.script({ video: { readyState: 1 } })
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -611,7 +638,7 @@ describe('createFrameComposer seek wait', () => {
   async function composerOverReadyVideo() {
     await store('v1')
     const clips = [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -686,7 +713,8 @@ describe('loadElementSources with a <video> that never loads (ESCSUITE-316, 325)
   function load(sources: SourceVideo[], ids: string[]) {
     return loadElementSources(
       ids.map((id) => makeClip({ sourceVideoId: id })),
-      sourceMapOf(sources)
+      sourceMapOf(sources),
+      []
     )
   }
 
@@ -795,7 +823,7 @@ describe('createFrameComposer with two live clips of one source', () => {
   }
 
   async function composerFor(clips: Clip[], tracks = TWO_TRACKS) {
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', duration: 20 })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', duration: 20 })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -979,7 +1007,7 @@ describe('createFrameComposer with two live clips of one source', () => {
   it('draws two clips of one image from the one image', async () => {
     await store('i1', 'image/png', 'image')
     const clips = zoomedPair().map((c) => ({ ...c, sourceVideoId: 'i1' }))
-    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })]))
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'i1', mediaType: 'image' })]), [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({
@@ -1013,7 +1041,7 @@ describe('createFrameComposer with two live clips of one source', () => {
 describe('createFrameComposer seek wedge', () => {
   /** A composer over `clips`, drawing from the sources named in `sources`. */
   async function composerOver(clips: Clip[], sourceMap: Map<string, SourceVideo>) {
-    const sources = await loadElementSources(clips, sourceMap)
+    const sources = await loadElementSources(clips, sourceMap, [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
     const composeFrame = createFrameComposer({

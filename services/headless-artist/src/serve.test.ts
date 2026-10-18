@@ -481,6 +481,24 @@ describe('POST /render', () => {
     expect(await res.json()).toEqual(refused)
   })
 
+  // ESCSUITE-330: the same 400 for a clip whose source has no stored bytes.
+  it('returns 400 when a render was refused because a clip\'s source has no stored bytes', async () => {
+    const refused = {
+      jobId: 'job-1',
+      ok: false,
+      error: 'The media for "Probe 311 take" is no longer in storage (it was removed in another window or by Clear All); remove the clip or re-import the file',
+      code: 'SOURCE_MISSING',
+      durationMs: 3,
+    }
+    vi.mocked(runJob).mockResolvedValue(refused)
+    await start()
+
+    const res = await postSpec(validSpec('job-1'))
+
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual(refused)
+  })
+
   it('reports unknown job-spec fields as warnings alongside the outcome', async () => {
     await start()
 

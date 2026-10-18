@@ -31,6 +31,8 @@ import {
   loadVideoElement,
   loadVideoElementFromUrl,
   loadImageElement,
+  sourceMissingError,
+  type ExportLogEntry,
   type MediaDrawOptions,
 } from './exportTypes';
 import { assignElementSlots, videoForSlot } from './elementSlots';
@@ -83,20 +85,29 @@ function forEachVideoElement(sources: ElementSources, visit: (video: HTMLVideoEl
 /**
  * Load every unique media source the clips reference into an element.
  *
- * A source with no bytes in storage, an audio-only source, a clip with no
- * source id at all (every overlay) and — since ESCSUITE-156 — a file that will
- * not decode as either a video or an image are all skipped rather than failing
- * the export: a timeline that references something missing renders without it,
- * the way the editor's own preview does.
+ * An audio-only source, a clip with no source id at all (every overlay) and —
+ * since ESCSUITE-156 — a file that will not decode as either a video or an
+ * image are all skipped rather than failing the export: a timeline that
+ * references something unreadable renders without it, the way the editor's own
+ * preview does.
+ *
+ * A source with **no bytes in storage** is not skipped (ESCSUITE-330): another
+ * tab's Clear All deleted them, there is nothing to try, and a clip drawn as
+ * nothing made an export of black frames that reported "Export complete!". It
+ * refuses with {@link sourceMissingError} — written to `exportLog`, the
+ * export's own trail — whatever the source's `mediaType`. A source no clip uses
+ * is never read.
  *
  * The loader owns every element it has created until it returns, and nothing
  * else can: a caller only ever gets the map, so a rejection partway through —
- * a storage read that fails on the fourth source, say — would strand the three
- * before it with no handle left to free them by (ESCSUITE-156).
+ * a storage read that fails on the fourth source, or a third source with no
+ * bytes — would strand the elements before it with no handle left to free them
+ * by (ESCSUITE-156).
  */
 export async function loadElementSources(
   clips: Clip[],
-  sourceMap: Map<string, SourceVideo>
+  sourceMap: Map<string, SourceVideo>,
+  exportLog: ExportLogEntry[]
 ): Promise<ElementSources> {
   const videoElements: Map<string, HTMLVideoElement> = new Map();
   const imageElements: Map<string, HTMLImageElement> = new Map();
@@ -109,44 +120,47 @@ export async function loadElementSources(
   try {
     for (const sourceId of uniqueSourceIds) {
       const source = sourceMap.get(sourceId);
+      const mediaName = source?.name ?? sourceId;
       const blob = await getVideoBlob(sourceId);
 
-      if (blob) {
-        if (source?.mediaType === 'image') {
-          // Load as image. A corrupt or unsupported image is warned about and
-          // skipped, exactly as a video that loads as neither is below
-          // (ESCSUITE-156): one bad file in the library degrades the export
-          // rather than failing it.
+      // No bytes to load at all (ESCSUITE-330): refuse by name, before the
+      // media-type branches — an audio or image source is a source too.
+      if (!blob) throw sourceMissingError(mediaName, exportLog);
+
+      if (source?.mediaType === 'image') {
+        // Load as image. A corrupt or unsupported image is warned about and
+        // skipped, exactly as a video that loads as neither is below
+        // (ESCSUITE-156): one bad file in the library degrades the export
+        // rather than failing it.
+        try {
+          const img = await loadImageElement(blob, mediaName);
+          imageElements.set(sourceId, img);
+        } catch {
+          console.warn(`Failed to load media ${sourceId}`);
+        }
+      } else if (source?.mediaType !== 'audio') {
+        // Load as video (skip audio-only files for visual rendering)
+        try {
+          const video = await loadVideoElement(blob, mediaName);
+          videoElements.set(sourceId, video);
+          extraVideoElements.set(sourceId, []);
+          sourceNames.set(sourceId, mediaName);
+        } catch (e) {
+          console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
+          // Try loading as image as fallback
           try {
-            const img = await loadImageElement(blob, source.name);
+            const img = await loadImageElement(blob, mediaName);
             imageElements.set(sourceId, img);
           } catch {
             console.warn(`Failed to load media ${sourceId}`);
-          }
-        } else if (source?.mediaType !== 'audio') {
-          // Load as video (skip audio-only files for visual rendering)
-          try {
-            const video = await loadVideoElement(blob, source?.name ?? sourceId);
-            videoElements.set(sourceId, video);
-            extraVideoElements.set(sourceId, []);
-            sourceNames.set(sourceId, source?.name ?? sourceId);
-          } catch (e) {
-            console.warn(`Failed to load video ${sourceId}, trying as image:`, e);
-            // Try loading as image as fallback
-            try {
-              const img = await loadImageElement(blob, source?.name ?? sourceId);
-              imageElements.set(sourceId, img);
-            } catch {
-              console.warn(`Failed to load media ${sourceId}`);
-            }
           }
         }
       }
     }
   } catch (e) {
     // Nothing reaches a caller, so nothing else could free what is already
-    // loaded. Both media branches warn and skip, so the only way here is a
-    // failed storage read.
+    // loaded. Both media branches warn and skip, so the only ways here are a
+    // failed storage read and a source with no bytes (ESCSUITE-330).
     releaseElementSources({ videoElements, imageElements, extraVideoElements, sourceNames });
     throw e;
   }

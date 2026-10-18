@@ -317,7 +317,7 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
   // from handing back a source whose bytes this already deleted.
   const handleClearAllStorage = useCallback(async () => {
     if (clearableVideos.length === 0) return;
-    if (confirm('Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. This cannot be undone.')) {
+    if (confirm('Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. Another open editor tab could still be using them. This cannot be undone.')) {
       let failed = 0;
       const removedIds: string[] = [];
       try {
@@ -845,8 +845,8 @@ export function VideoLibrary({ showNotification, clearSession }: VideoLibraryPro
       // clips" whether or not there are actually any.
       const affectedClips = clips.filter((c) => c.sourceVideoId === id).length;
       const message = affectedClips > 0
-        ? `Remove this video? This will also remove ${affectedClips} clip${affectedClips !== 1 ? 's' : ''} that use${affectedClips === 1 ? 's' : ''} it.`
-        : 'Remove this video?';
+        ? `Remove this video? This will also remove ${affectedClips} clip${affectedClips !== 1 ? 's' : ''} that use${affectedClips === 1 ? 's' : ''} it. Another open editor tab could still be using it.`
+        : 'Remove this video? Another open editor tab could still be using it.';
       if (confirm(message)) {
         // ESCSUITE-154: `deleteVideo` deletes the source's bytes from
         // IndexedDB itself, exactly like Clear Unused and Clear All

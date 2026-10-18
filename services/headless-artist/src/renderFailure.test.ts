@@ -68,6 +68,12 @@ describe('isPermanentFailure', () => {
     expect(isPermanentFailure(failed({ code: SOURCE_NOT_SEEKABLE }))).toBe(true)
   })
 
+  // ESCSUITE-330: a clip whose source has no stored bytes is refused identically on every
+  // retry; the job's project has to drop the clip or carry the file.
+  it('is true for a clip whose source has no stored bytes', () => {
+    expect(isPermanentFailure(failed({ code: 'SOURCE_MISSING' }))).toBe(true)
+  })
+
   it('is false for a code it does not know', () => {
     expect(isPermanentFailure(failed({ code: 'SOMETHING_ELSE' }))).toBe(false)
   })

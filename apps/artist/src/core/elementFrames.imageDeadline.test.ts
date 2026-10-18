@@ -25,7 +25,8 @@ afterEach(() => {
 const load = () =>
   loadElementSources(
     [makeClip({ sourceVideoId: 'img1' })],
-    new Map([['img1', makeSourceVideo({ id: 'img1', name: 'logo.png', mediaType: 'image' })]])
+    new Map([['img1', makeSourceVideo({ id: 'img1', name: 'logo.png', mediaType: 'image' })]]),
+    []
   )
 
 describe('an image that never settles in the element exporters (ESCSUITE-328)', () => {
