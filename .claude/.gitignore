@@ -1,0 +1,11 @@
+# Track only the setup vendored from bonham-ops (bin/vendor-claude-setup).
+# Everything else here (settings.local.json, worktrees, local notes) stays local.
+*
+!.gitignore
+!settings.json
+!agents/
+!agents/**
+!rules/
+!rules/**
+!hooks/
+!hooks/**
