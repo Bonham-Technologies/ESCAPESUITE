@@ -87,7 +87,7 @@ function absoluteAssetRefs(html) {
  * string — the hosted ESCAPEARTIST build's background-tab MP4 export
  * worker, the one file `apps/artist/singleFileBuild.js` leaves as an
  * ordinary fetchable chunk beside `index.html` rather than inlining (see the
- * root CLAUDE.md's "Single-file Builds" note). Resolved against the HTML
+ * "Single-file Builds" in docs/reference/shared-infrastructure.md). Resolved against the HTML
  * file's own directory, since that is where Vite emits it.
  */
 function workerChunkRefs(html) {
