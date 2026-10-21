@@ -177,15 +177,17 @@ describe('PeakReducer', () => {
   });
 
   it('holds a bounded number of samples however long the stream runs', () => {
-    // Ten minutes at 48 kHz stereo is 28.8 M frames; the old extractor held
-    // all of them (and a mono copy). The reducer holds at most the threshold.
+    // Two minutes at 48 kHz stereo is 5.76 M frames, 25 times the threshold;
+    // the old extractor held all of them (and a mono copy). The reducer holds
+    // at most the threshold. Kept to two minutes so the instrumented coverage
+    // run stays well inside the 5 s test timeout on a CI runner.
     const sampleRate = 48000;
     const chunk = [new Float32Array(4800), new Float32Array(4800)];
     chunk[0][17] = 0.75;
     chunk[1][4000] = -0.5;
     const reducer = new PeakReducer(sampleRate, 100);
     let maxHeld = 0;
-    for (let pushed = 0; pushed < sampleRate * 600; pushed += 4800) {
+    for (let pushed = 0; pushed < sampleRate * 120; pushed += 4800) {
       reducer.push(chunk);
       maxHeld = Math.max(maxHeld, reducer.heldSamples);
     }
@@ -193,7 +195,7 @@ describe('PeakReducer', () => {
     expect(reducer.heldSamples).toBe(0);
 
     const peaks = reducer.finish();
-    expect(peaks).toHaveLength(60_000);
+    expect(peaks).toHaveLength(12_000);
     expect(peaks[0]).toEqual({ min: 0, max: 0.375 });
     expect(peaks[8]).toEqual({ min: -0.25, max: 0 });
   });
