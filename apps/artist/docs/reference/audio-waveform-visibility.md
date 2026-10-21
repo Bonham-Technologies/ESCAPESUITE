@@ -33,14 +33,29 @@ is **MP3**, which mediabunny decodes without trimming the LAME/Xing encoder dela
 `decodeAudioData` trims (streamed peaks would sit ~25 ms late). A container mediabunny reads and
 finds no audio track in answers `hasAudio: false` with no decode at all.
 
-What still differs from the old peaks, measured in Chromium 141: the streamed path works at the
-track's own sample rate, where `decodeAudioData` resampled to the AudioContext's — the output
-device's rate, so the old peaks were never the same on a 44.1 kHz and a 48 kHz machine. At equal
-rates the peaks match to 3e-5 (a CRAFT MediaRecorder Opus take, a 16-bit WAV) or exactly (Vorbis).
-Two edge cases: an ffmpeg-muxed WebM whose last Opus block carries `DiscardPadding` (MediaRecorder
-writes none) streams up to one frame longer, which can move the old bucketing's
-`floor(length / buckets)` from 480 to 479 samples; and Opus louder than full scale, which
-`decodeAudioData` soft-clips and the streamed decode does not.
+What still differs from the old peaks, measured in Chromium 141:
+
+- **Sample rate.** Peaks are computed at the file's own sample rate. `decodeAudioData` resampled to
+  the AudioContext's, which is the output device's rate, so the old peaks were never the same on a
+  44.1 kHz and a 48 kHz machine. At equal rates the peaks match to 3e-5 (a CRAFT WebCodecs-recorder
+  Opus WebM muxed by mediabunny, with and without a video track; a MediaRecorder Opus take; a 16-bit
+  WAV) or exactly (Vorbis).
+- **Opus pre-skip.** mediabunny's Matroska demuxer ignores the OpusHead pre-skip (CRAFT's files
+  carry 312 samples and no CodecDelay), but Chromium's `AudioDecoder` trims it itself: the first
+  decoded chunk of a 960-sample frame is 648 samples and the stream is exactly as long as
+  `decodeAudioData`'s. So nothing here skips it, and skipping it again would put the peaks 6.5 ms
+  early. An engine whose `AudioDecoder` did not trim it would show peaks 6.5 ms late.
+- **`DiscardPadding`.** An ffmpeg-muxed WebM whose last Opus block carries `DiscardPadding`
+  (mediabunny's muxer and MediaRecorder write none) streams up to one frame longer, because
+  mediabunny does not apply it. The old bucketing's `floor(length / buckets)` can then move from
+  480 to 479 samples (or back), and the peaks drift by one sample per bucket against the old ones.
+- **AAC priming** in an MP4 is dropped only because mediabunny hands the edit list's priming frames
+  over with negative timestamps, which the streamed path skips; a file whose priming is not
+  expressed that way keeps it (~21 ms of leading frames). Unmeasured here: this Chromium build
+  decodes no AAC.
+- **Over full scale.** Opus mixed louder than full scale is soft-clipped by `decodeAudioData`'s
+  decoder and not by `AudioDecoder`; `PeakReducer` clamps its peaks to [-1, 1], so they stay in
+  range, though a clamped peak is not the soft-clipped value. In-range PCM is unaffected.
 
 The audio **library thumbnail** is drawn from the same peaks (`generateAudioThumbnail(peaks)`,
 resampled to one column per pixel), so an audio import decodes its audio once; it used to run its

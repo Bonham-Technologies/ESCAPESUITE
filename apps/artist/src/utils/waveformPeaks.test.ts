@@ -198,6 +198,17 @@ describe('PeakReducer', () => {
     expect(peaks[8]).toEqual({ min: -0.25, max: 0 });
   });
 
+  it('clamps peaks past full scale to [-1, 1], held or streamed', () => {
+    for (const length of [4800, streamingThreshold(48000, 100) + 4800]) {
+      const hot = new Float32Array(length);
+      hot[10] = 1.5;
+      hot[20] = -2;
+      const reducer = new PeakReducer(48000, 100);
+      reducer.push([hot]);
+      expect(reducer.finish()[0], `length ${length}`).toEqual({ min: -1, max: 1 });
+    }
+  });
+
   it('refuses a chunk after finish', () => {
     const reducer = new PeakReducer(48000, 100);
     reducer.finish();

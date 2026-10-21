@@ -235,7 +235,7 @@ export class PeakReducer {
     if (!this.sets) {
       const held = this.held!.subarray(0, this.heldLength);
       this.held = null;
-      return held.length === 0 ? [] : peaksFromPcm(held, this.sampleRate, this.samplesPerSecond);
+      return clampToFullScale(peaksFromPcm(held, this.sampleRate, this.samplesPerSecond));
     }
     const duration = this.length / this.sampleRate;
     const totalSamples = Math.ceil(duration * this.samplesPerSecond);
@@ -246,6 +246,21 @@ export class PeakReducer {
     // here with its whole-file decode rather than a guessed bucketing.
     const set = this.sets.find((candidate) => candidate.size === samplesPerPeak)!;
     this.sets = null;
-    return set.peaks(totalSamples);
+    return clampToFullScale(set.peaks(totalSamples));
   }
+}
+
+/**
+ * Peaks limited to full scale, in place. A decode through WebCodecs can hand
+ * back samples past ±1 (an Opus stream mixed hot), which decodeAudioData's
+ * Opus decoder soft-clips; the old peaks never left [-1, 1] there, so neither
+ * do these. Peaks already in range — every sample in range — are untouched,
+ * so in-range PCM still gives exactly `peaksFromPcm`'s peaks.
+ */
+function clampToFullScale(peaks: WaveformPeak[]): WaveformPeak[] {
+  for (const peak of peaks) {
+    peak.min = Math.max(-1, peak.min);
+    peak.max = Math.min(1, peak.max);
+  }
+  return peaks;
 }

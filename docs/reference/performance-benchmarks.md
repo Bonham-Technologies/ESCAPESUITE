@@ -210,8 +210,9 @@ so the old path also resampled. Ranges are over the three runs (2026-10-21).
 | 30 min Opus WebM (20.6 MB) | +1410.3 MB | +142.2 MB | 10.8 s / 10.9 s |
 
 Before grows linearly, ~47 MB per minute of audio (the decoded channels, a mono copy and the
-file's bytes); after is the peaks plus collectable decoder garbage, and stops growing with length
-(31 → 101 → 142 MB over 2 → 10 → 30 min, single runs at 2 and 30 min). The old path also grew the
+file's bytes); after grows sublinearly — 31 → 101 → 142 MB over 2 → 10 → 30 min (single runs at
+2 and 30 min) — because only the peaks (and the reducer's per-peak buckets) grow with length, on
+top of collectable decoder garbage, while the decoded audio is never held. The old path also grew the
 audio-service utility process by ~53 MB for its AudioContext, which the streamed path never
 creates. An audio import used to decode twice — its library thumbnail ran its own whole-file
 `decodeAudioData` before the waveform's — so it paid the "before" cost twice in a row; the

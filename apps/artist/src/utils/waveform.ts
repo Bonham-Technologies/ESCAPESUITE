@@ -85,7 +85,10 @@ async function streamWaveformPeaks(
     for await (const sample of new AudioSampleSink(track).samples()) {
       try {
         // Frames before zero are codec priming (an MP4 edit list's, say),
-        // which decodeAudioData drops too.
+        // which decodeAudioData drops too. Opus pre-skip in a WebM is not
+        // skipped here: mediabunny's Matroska demuxer ignores it, but
+        // Chromium's AudioDecoder trims it itself (a CRAFT take's first chunk
+        // is 960 - 312 frames), so skipping it again would put peaks early.
         const skip = Math.min(
           sample.numberOfFrames,
           Math.max(0, Math.round(-sample.timestamp * sample.sampleRate))
