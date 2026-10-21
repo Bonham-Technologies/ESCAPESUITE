@@ -6,16 +6,77 @@
 // the next take starts — see `useRecordingController.handleStartRecording`.
 // Anything that needs a second channel needs a design discussion first, not a
 // second store field.
+import type { CaptureSource } from '../core/permissions'
+
 export const SAVE_FAILED =
   'The recording could not be saved — it is not in your library.'
 
 export const NOT_SEEKABLE =
   'Saved, but the recording may not be seekable — the container repair failed.'
 
+/**
+ * Said when a start failed with a refusal (`NotAllowedError`) that no capture
+ * request tagged with a source. Every refusal from `core/permissions.ts`'s
+ * requests now names its source through `captureFailed` below (ESCSUITE-341),
+ * so this is the fallback for one that did not come through them.
+ */
 export const CAPTURE_REFUSED =
   'The browser refused the capture — nothing was recorded.'
 
 export const START_FAILED = 'The recording could not be started.'
+
+/** How a capture request failed, as far as the user can act on it. */
+export type CaptureFailureReason = 'refused' | 'unavailable' | 'failed'
+
+const CAPTURE_FAILED: Record<CaptureSource, Record<CaptureFailureReason, string>> = {
+  screen: {
+    refused:
+      'The screen was not shared (the picker was cancelled or screen sharing is blocked) — nothing was recorded.',
+    unavailable:
+      'The screen could not be captured (none is available, or the system blocked it) — nothing was recorded.',
+    failed: 'The screen could not be captured — nothing was recorded.',
+  },
+  webcam: {
+    refused:
+      'The camera could not be opened (permission refused or blocked in site settings) — nothing was recorded.',
+    unavailable:
+      'The camera could not be opened (not found, or in use by another app) — nothing was recorded.',
+    failed: 'The camera could not be opened — nothing was recorded.',
+  },
+  microphone: {
+    refused:
+      'The microphone could not be opened (permission refused or blocked in site settings) — nothing was recorded.',
+    unavailable:
+      'The microphone could not be opened (not found, or in use by another app) — nothing was recorded.',
+    failed: 'The microphone could not be opened — nothing was recorded.',
+  },
+}
+
+/**
+ * Said when a take never started because one of its capture requests failed,
+ * naming the source and the kind of failure (ESCSUITE-341).
+ *
+ * The requests run screen, then camera, then microphone, so a camera refused
+ * at Start fails *after* the user has answered the share picker — and the old
+ * single sentence, "The browser refused the capture", read as if the share
+ * they had just made was the thing that failed. A camera that was missing or
+ * in use by another app was vaguer still: the generic `START_FAILED`. Naming
+ * the source says which prompt or device to go and fix; the parenthetical
+ * says whether that is a permission (`refused` — `NotAllowedError`: the
+ * prompt was dismissed, the site setting blocks it, or for the screen the
+ * picker was cancelled) or the device itself (`unavailable` —
+ * `NotFoundError`, `NotReadableError`, `OverconstrainedError`: not there, held
+ * by another app, or unable to deliver). Anything else names only the source;
+ * the console carries the browser's own error.
+ *
+ * The microphone sentences are reached only by a microphone-only take: in any
+ * take with a screen or camera, a closed microphone does not cost the take and
+ * says `MIC_UNAVAILABLE` instead. A function over a table rather than nine
+ * exports, the way `mp4ConversionFailed` is a function — still one string
+ * through the same `setNotice`, and every sentence is readable above.
+ */
+export const captureFailed = (source: CaptureSource, reason: CaptureFailureReason): string =>
+  CAPTURE_FAILED[source][reason]
 
 /**
  * Said when a capture request was never answered: a share picker or a

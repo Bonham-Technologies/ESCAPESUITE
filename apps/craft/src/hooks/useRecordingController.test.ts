@@ -16,11 +16,13 @@ import { ErrorBoundary } from '@escapesuite/shared/components'
 import {
   CAPTURE_TIMEOUT_MS,
   disposeLiveRecordingSession,
+  startFailureNotice,
   useRecordingController,
   type RecordingController,
   type RecordingControllerDeps,
 } from './useRecordingController'
 import type { Compositor } from '../core/compositor'
+import { CaptureRequestError, type CaptureSource } from '../core/permissions'
 import { useRecorderStore } from '../store/recorderStore'
 import { defaultConfig, type RecordingConfig } from '../store/types'
 import {
@@ -298,10 +300,10 @@ describe('useRecordingController the click path', () => {
   })
 
   it('says the capture was refused when the wrapper reports it through cause (ESCSUITE-210)', async () => {
-    // core/permissions.ts's requestScreenCapture/requestWebcam/requestMicrophone
-    // catch the browser's DOMException and rethrow `new Error('…', { cause })`
-    // — this is that real shape, not a DOMException with its name copied onto
-    // it directly.
+    // A wrapped error with the browser's DOMException as `cause`, not a
+    // DOMException with its name copied onto it directly. core/permissions.ts's
+    // requests now throw the source-tagged `CaptureRequestError` (ESCSUITE-341,
+    // below); an untagged wrapper still reads its name through `cause`.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
     const { result } = mountController({ countdownSeconds: 0 })
     const refused = new Error('Screen capture permission denied', {
@@ -343,6 +345,80 @@ describe('useRecordingController the click path', () => {
 
     expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', undefined)
     expect(useRecorderStore.getState().notice).toBe('The recording could not be started.')
+  })
+})
+
+describe('startFailureNotice names the source that failed (ESCSUITE-341)', () => {
+  // The real shape `core/permissions.ts` throws: the request's own wrapper,
+  // tagged with its source, carrying the browser's DOMException as `cause`.
+  const failure = (source: CaptureSource, name: string) =>
+    new CaptureRequestError(source, `${source} failed`, {
+      cause: new DOMException('browser said no', name),
+    })
+
+  const expected: Record<CaptureSource, Record<'refused' | 'unavailable' | 'failed', string>> = {
+    screen: {
+      refused:
+        'The screen was not shared (the picker was cancelled or screen sharing is blocked) — nothing was recorded.',
+      unavailable:
+        'The screen could not be captured (none is available, or the system blocked it) — nothing was recorded.',
+      failed: 'The screen could not be captured — nothing was recorded.',
+    },
+    webcam: {
+      refused:
+        'The camera could not be opened (permission refused or blocked in site settings) — nothing was recorded.',
+      unavailable:
+        'The camera could not be opened (not found, or in use by another app) — nothing was recorded.',
+      failed: 'The camera could not be opened — nothing was recorded.',
+    },
+    microphone: {
+      refused:
+        'The microphone could not be opened (permission refused or blocked in site settings) — nothing was recorded.',
+      unavailable:
+        'The microphone could not be opened (not found, or in use by another app) — nothing was recorded.',
+      failed: 'The microphone could not be opened — nothing was recorded.',
+    },
+  }
+
+  const cases: Array<[string, 'refused' | 'unavailable' | 'failed']> = [
+    ['NotAllowedError', 'refused'],
+    ['NotFoundError', 'unavailable'],
+    ['NotReadableError', 'unavailable'],
+    ['OverconstrainedError', 'unavailable'],
+    ['AbortError', 'failed'],
+  ]
+
+  for (const source of ['screen', 'webcam', 'microphone'] as const) {
+    it.each(cases)(`${source} × %s → the ${source} sentence for "%s"`, (name, reason) => {
+      expect(startFailureNotice(failure(source, name))).toBe(expected[source][reason])
+    })
+  }
+
+  it('names the source even when the rejection carried no DOMException at all', () => {
+    const error = new CaptureRequestError('webcam', 'webcam failed', { cause: 'not-an-error' })
+    expect(startFailureNotice(error)).toBe(expected.webcam.failed)
+  })
+
+  it('keeps the unnamed sentences for a failure no capture request tagged', () => {
+    const refused = new Error('Permission denied', {
+      cause: new DOMException('Permission denied', 'NotAllowedError'),
+    })
+    expect(startFailureNotice(refused)).toBe('The browser refused the capture — nothing was recorded.')
+    expect(startFailureNotice(new Error('recorder setup failed'))).toBe(
+      'The recording could not be started.'
+    )
+  })
+
+  it('raises the camera sentence through the start path, and nothing is recorded', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { result } = mountController({ countdownSeconds: 0, webcamEnabled: true })
+    harness.acquireStreams.mockRejectedValue(failure('webcam', 'NotReadableError'))
+
+    await startTake(result)
+
+    expect(consoleError).toHaveBeenCalled()
+    expect(state()).toBe('idle')
+    expect(useRecorderStore.getState().notice).toBe(expected.webcam.unavailable)
   })
 })
 

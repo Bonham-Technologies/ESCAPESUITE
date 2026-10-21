@@ -10,8 +10,8 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `NO_SYSTEM_AUDIO`, `MIC_UNAVAILABLE`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
 `UPLOAD_NO_HOST_ORIGIN`,
 `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED`,
-`RECORDING_UNAVAILABLE` and
-`mp4ConversionFailed()` —
+`RECORDING_UNAVAILABLE`,
+`captureFailed()` and `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
 is still one string through the same `setNotice`, and it says "Conversion failed: …" rather
@@ -41,23 +41,33 @@ Two related rules follow from it:
   a lost companion already had (ESCSUITE-107) — the alternative was a take that *was*
   stored being reported as "not in your library", invisible until reload, and, for a
   separate-tracks take, its companions never written at all;
-  `loadRecordings()` is caught in the bootstrap; a start that throws raises
-  `CAPTURE_REFUSED` (the browser said no — a cancelled picker, a denied permission, an
-  expired user activation) or `START_FAILED`. `startFailureNotice`
-  (`hooks/useRecordingController.ts`) tells the two apart by name, but the name is not
-  always on the error itself: `core/permissions.ts`'s `requestScreenCapture`/
-  `requestWebcam`/`requestMicrophone` each catch the browser's `DOMException` and rethrow
-  `new Error('…', { cause })`, so the wrapper's own `.name` is just `'Error'` and the
-  browser's real name — `NotAllowedError` for a refusal — is carried as `cause`.
-  `startFailureNotice` reads it through one helper, `failureName(error)`, which answers
-  `(error.cause ?? error).name` — the cause when the error was wrapped, the error's own
-  name otherwise (a bare `DOMException`, as the capture-deadline release path can still
-  produce, is unaffected). Reading `.name` straight off the error instead (as it did
-  before ESCSUITE-210) made `CAPTURE_REFUSED` dead code: every wrapped refusal fell
-  through to the generic sentence. A `NotFoundError` (no screen/camera/microphone to
-  capture) is left under `START_FAILED` too — a dedicated sentence for it is a product
-  call nobody has made — and a start whose capture request is never
-  answered at all raises `CAPTURE_UNANSWERED` when its deadline expires (ESCSUITE-109) —
+  `loadRecordings()` is caught in the bootstrap; a start whose capture request
+  fails raises `captureFailed(source, reason)` — a sentence that **names the
+  source** (screen, camera, or microphone) and the kind of failure (ESCSUITE-341).
+  The requests run screen, then camera, then microphone, so a camera refused at
+  Start fails after the user has already answered the share picker; the single
+  sentence it used to get, `CAPTURE_REFUSED` ("The browser refused the
+  capture"), read as if that share had failed, and a camera missing or in use
+  by another app got the vaguer `START_FAILED`. `core/permissions.ts`'s
+  `requestScreenCapture`/`requestWebcam`/`requestMicrophone` now rethrow every
+  rejection as a `CaptureRequestError` carrying `source`, with the browser's own
+  `DOMException` as `cause`. `startFailureNotice` (`hooks/useRecordingController.ts`)
+  reads the source off the error and the browser's name through one helper,
+  `failureName(error)` — `(error.cause ?? error).name` — and sorts that name
+  into `refused` (`NotAllowedError`: a dismissed prompt, a blocking site
+  setting, a cancelled picker, an expired user activation), `unavailable`
+  (`NotFoundError`, `NotReadableError`, `OverconstrainedError`) or `failed`
+  (anything else, which names only the source). Reading `.name` straight off
+  the wrapper instead (as it did before ESCSUITE-210) made every refusal fall
+  through to the generic sentence. The microphone sentences are reached only by
+  a microphone-only take — anywhere else a closed microphone does not cost the
+  take (`MIC_UNAVAILABLE`, below). A start that fails *without* a tagged
+  request — a recorder that would not initialise — keeps the two unnamed
+  sentences: `CAPTURE_REFUSED` for a `NotAllowedError`, `START_FAILED` for the
+  rest. Whether a camera failure costs the take is unchanged: it still does,
+  because the overlay is what the user asked for. A start whose capture
+  request is never answered at all raises `CAPTURE_UNANSWERED` when its
+  deadline expires (ESCSUITE-109) —
   a silence has to be reported too, because the alternative is a UI parked in
   `'preparing'` for good; `fixWebMMetadata()` failing still keeps the
   raw blob, but it now warns *and* raises `NOT_SEEKABLE` — an unrepaired MediaRecorder

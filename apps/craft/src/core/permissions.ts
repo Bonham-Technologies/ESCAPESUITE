@@ -212,9 +212,55 @@ export async function detectCapabilities(): Promise<CapabilityDetectionResult> {
   return { capabilities, detailed };
 }
 
+/** The three sources a take can ask the browser for. */
+export type CaptureSource = 'screen' | 'webcam' | 'microphone';
+
+/**
+ * A capture request that failed, tagged with the source it was for
+ * (ESCSUITE-341).
+ *
+ * Every rejection from `requestScreenCapture`/`requestWebcam`/
+ * `requestMicrophone` leaves as one of these — not only the two names each
+ * maps to a message of its own — with whatever the browser rejected with
+ * carried, untouched, as `cause`. The start path needs both halves: the
+ * `source` to say *which* request failed (a camera refused after the user has
+ * already answered the share picker must not read as the screen share
+ * failing), and the browser's own `DOMException` name, read through `cause`,
+ * to say *how* (refused, or not there / in use). Tagging here, where each
+ * request is already wrapped, is the one place that knows the source for
+ * certain; `acquireStreams` asks for three things in a row and its catch
+ * cannot tell them apart.
+ */
+export class CaptureRequestError extends Error {
+  readonly source: CaptureSource;
+
+  constructor(source: CaptureSource, message: string, options: { cause: unknown }) {
+    super(message, options);
+    this.name = 'CaptureRequestError';
+    this.source = source;
+  }
+}
+
+/**
+ * Rethrow a capture request's rejection as a `CaptureRequestError` for
+ * `source`. The two names worth a message of their own keep the messages they
+ * always had; anything else — `NotReadableError`, `OverconstrainedError`, a
+ * non-`Error` rejection — gets the source's generic one.
+ */
+function captureRequestFailed(
+  source: CaptureSource,
+  error: unknown,
+  messages: { NotAllowedError: string; NotFoundError: string; other: string }
+): never {
+  const name = error instanceof Error ? error.name : undefined;
+  const message =
+    name === 'NotAllowedError' || name === 'NotFoundError' ? messages[name] : messages.other;
+  throw new CaptureRequestError(source, message, { cause: error });
+}
+
 /**
  * Request screen capture with optional system audio.
- * Returns the MediaStream or throws an error.
+ * Returns the MediaStream or throws a `CaptureRequestError` tagged `'screen'`.
  *
  * Note: Uses constraints to improve capture experience:
  * - selfBrowserSurface: "exclude" prevents selecting the CRAFT tab
@@ -257,15 +303,11 @@ export async function requestScreenCapture(
   try {
     return await navigator.mediaDevices.getDisplayMedia(extendedConstraints);
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === 'NotAllowedError') {
-        throw new Error('Screen capture permission denied', { cause: error });
-      }
-      if (error.name === 'NotFoundError') {
-        throw new Error('No screen available for capture', { cause: error });
-      }
-    }
-    throw error;
+    captureRequestFailed('screen', error, {
+      NotAllowedError: 'Screen capture permission denied',
+      NotFoundError: 'No screen available for capture',
+      other: 'Screen capture failed',
+    });
   }
 }
 
@@ -285,15 +327,11 @@ export async function requestWebcam(): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia(constraints);
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === 'NotAllowedError') {
-        throw new Error('Webcam permission denied', { cause: error });
-      }
-      if (error.name === 'NotFoundError') {
-        throw new Error('No webcam found', { cause: error });
-      }
-    }
-    throw error;
+    captureRequestFailed('webcam', error, {
+      NotAllowedError: 'Webcam permission denied',
+      NotFoundError: 'No webcam found',
+      other: 'Webcam could not be opened',
+    });
   }
 }
 
@@ -313,15 +351,11 @@ export async function requestMicrophone(): Promise<MediaStream> {
   try {
     return await navigator.mediaDevices.getUserMedia(constraints);
   } catch (error) {
-    if (error instanceof Error) {
-      if (error.name === 'NotAllowedError') {
-        throw new Error('Microphone permission denied', { cause: error });
-      }
-      if (error.name === 'NotFoundError') {
-        throw new Error('No microphone found', { cause: error });
-      }
-    }
-    throw error;
+    captureRequestFailed('microphone', error, {
+      NotAllowedError: 'Microphone permission denied',
+      NotFoundError: 'No microphone found',
+      other: 'Microphone could not be opened',
+    });
   }
 }
 
