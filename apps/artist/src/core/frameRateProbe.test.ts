@@ -968,8 +968,8 @@ describe('measureFrameRate refusal log (ESCSUITE-336)', () => {
 // ESCSUITE-336: a real run, the 120 fps WebM fixture under 4x CDP CPU
 // throttling in headless Chromium 141. From 0 to 92 ms of media the spacings
 // count eleven 1/120 s intervals; the compositor's counter moved ten. One frame
-// was decoded and dropped unpresented, the ESCSUITE-278 case, and an MP4's
-// exact timestamps would not have hidden it either.
+// was skipped without being presented, the case ESCSUITE-278's check refuses,
+// and an MP4's exact timestamps would not have hidden it either.
 describe('a loaded 120 fps run with one frame dropped unpresented (ESCSUITE-336)', () => {
   const run = {
     times: [0, 17, 33, 50, 58, 67, 83, 92].map((t) => t / 1000),

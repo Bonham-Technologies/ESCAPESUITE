@@ -44,17 +44,21 @@ interface Case {
   /**
    * The probe may refuse this file on a busy machine, storing the 30 'assumed'
    * placeholder instead of a measurement. True for the two 120 fps files: at
-   * half speed they present a frame every 16.7 ms, and a loaded page drops
-   * some of them decoded but unpresented. The next presented frame's media
-   * time steps over the dropped one while the compositor's counter does not,
-   * and ESCSUITE-278's check refuses that run on purpose
-   * (`frames-skipped-unpresented`). Exact MP4 timestamps do not prevent it;
-   * the WebM can also get there by millisecond rounding over a long callback
-   * stall. Loaded CI runners refused the WebM on 2026-10-18 (run 39096461073,
-   * ESCSUITE-333) and the MP4 on 2026-10-20 (run 39369091051, ESCSUITE-336);
-   * under 4x CDP CPU throttling the WebM was refused 2 runs in 10, both
-   * `frames-skipped-unpresented`, each with one frame the counter never
-   * presented. The refusal is the safe side; a wrong 'measured' rate is still
+   * half speed they present a frame every 16.7 ms, and a loaded page can skip
+   * one without presenting it. The next presented frame's media time steps
+   * over it while the compositor's counter does not, and ESCSUITE-278's check
+   * refuses that run on purpose (`frames-skipped-unpresented`); exact MP4
+   * timestamps would not prevent it. The WebM can also get there by
+   * millisecond rounding over a long callback stall. Loaded CI runners refused
+   * the WebM on 2026-10-18 (run 39096461073, ESCSUITE-333) and the MP4 on
+   * 2026-10-20 (run 39369091051, ESCSUITE-336). Under 4x CDP CPU throttling
+   * the WebM was refused 2 runs in 10, both `frames-skipped-unpresented`. The
+   * MP4's own reason was not observed (the run predates the refusal log, and
+   * the container that investigated it had no H.264 decoder); it most likely
+   * hit the same check, and every other check that can refuse it
+   * (`too-few-frames` from a slow decoder start, `decoder-queue-grew`) is a
+   * designed safe side too. The `frame-rate refusal` annotation will say which
+   * next time. The refusal is the safe side; a wrong 'measured' rate is still
    * a failure.
    */
   mayRefuse?: boolean

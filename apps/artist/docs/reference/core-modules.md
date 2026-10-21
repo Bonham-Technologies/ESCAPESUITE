@@ -188,9 +188,10 @@
   24, 30, 60 and 120) imported through the uploader on Chromium, each required to be stored `'measured'` at its own
   rate (exact for the MP4s, the NTSC neighbour also accepted for a WebM). Run 5 times each in one sitting, 45 of 45 passed.
   Either 120 fps file may instead come back refused as 30 `'assumed'` and the pin accepts that, never another rate: on a
-  busy runner the page drops a frame decoded but unpresented, the media times step over it while the counter does not,
-  and the spacing check refuses on purpose (ESCSUITE-333 for the WebM, seen in CI on 2026-10-18; ESCSUITE-336 for the
-  MP4, seen on 2026-10-20; 2 of 10 WebM runs under 4x CPU throttling). A refusal logs its reason
+  busy runner the page can skip a frame without presenting it, the media times step over it while the counter does not,
+  and the spacing check refuses on purpose (ESCSUITE-333 for the WebM, seen in CI on 2026-10-18, and 2 of 10 WebM runs
+  under 4x CPU throttling). ESCSUITE-336 saw the MP4 refused in CI on 2026-10-20 before the reason was logged; it most
+  likely hit the same check, and every other check that can refuse it is a designed safe side too. A refusal logs its reason
   (`[frame-rate probe] refused: <reason> …` via `console.info`, reasons from `frameRateRefusal`), and the spec copies it
   into a `frame-rate refusal` annotation; `FRAME_RATE_CPU_THROTTLE=4` runs the spec under CDP CPU throttling.
   **The probe runs only on an engine it was measured on — Chromium (ESCSUITE-327).** The same nine
