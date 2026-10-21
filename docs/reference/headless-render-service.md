@@ -29,7 +29,7 @@
 - The benchmark is `*.bench.test.ts`, NOT `*.chromium.test.ts`, precisely so `test:e2e`'s
   `chromium.test` substring filter does not sweep it into CI's gating `e2e` job;
   `test:run` and `test:coverage` exclude the suffix explicitly. Only `test:perf` names it.
-- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.64.0 as
+- CI runs the Chromium tests in the `e2e` job (pinned to the same Playwright 1.64.1 as
   `apps/e2e`, sharing its browser cache) and packs + uploads the kit as the
   `headless-artist-kit` artifact in the `build` job; `standalone-release.yml` attaches the
   tarball to GitHub Releases alongside the standalone HTML builds.
