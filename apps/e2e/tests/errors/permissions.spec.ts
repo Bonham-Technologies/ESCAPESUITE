@@ -13,6 +13,8 @@ import { waitForAppReady } from '../../utils/ready'
 // `captureFailed` in apps/craft/src/utils/notices.ts (ESCSUITE-341).
 const SCREEN_REFUSED =
   'The screen was not shared (the picker was cancelled or screen sharing is blocked) — nothing was recorded.'
+const CAMERA_REFUSED =
+  'The camera could not be opened (permission refused or blocked in site settings) — nothing was recorded.'
 const CAMERA_UNAVAILABLE =
   'The camera could not be opened (not found, or in use by another app) — nothing was recorded.'
 
@@ -92,11 +94,7 @@ test.describe('Camera Refused At Start', () => {
 
     await page.getByRole('button', { name: 'Start recording' }).click()
 
-    await expect(
-      page.getByText(
-        'The camera could not be opened (permission refused or blocked in site settings) — nothing was recorded.'
-      )
-    ).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText(CAMERA_REFUSED)).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 })
