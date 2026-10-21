@@ -31,7 +31,7 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
 - Playwright browsers are cached across runs (~1min savings); `e2e` also runs on
   pushes to `main`, so the cache is written from the base branch and fresh PR
   branches can restore it. `services/headless-artist` pins the same Playwright
-  version (1.64.0) as `apps/e2e`, so its Chromium tests share that cache
+  version (1.64.1) as `apps/e2e`, so its Chromium tests share that cache
 - Playwright browser download and apt system-deps are separate steps, each with
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
