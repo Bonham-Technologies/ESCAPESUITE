@@ -382,7 +382,8 @@ because a machine with no microphone has produced exactly that since ESCSUITE-70
 **webcam** in a PiP take, because the overlay is what the user explicitly asked for. The one
 exception to the exception: a **microphone-only** take whose microphone could not be opened has
 nothing left either, so `!screen && !webcam` rethrows and that take fails exactly as it did
-before.
+before — with a notice that names the microphone (`captureFailed`, ESCSUITE-341; see "Errors
+and notices").
 
 Three details follow from the shape:
 

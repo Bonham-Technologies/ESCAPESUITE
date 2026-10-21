@@ -5,6 +5,7 @@ import {
   requestWebcam,
   requestMicrophone,
   stopStream,
+  CaptureRequestError,
   hasSystemAudio,
   getSupportedMimeType,
 } from './permissions'
@@ -319,17 +320,30 @@ describe('permissions', () => {
       await expect(requestScreenCapture(false)).rejects.toThrow('No screen available for capture')
     })
 
-    it('rethrows other Error instances unchanged', async () => {
-      const original = new Error('boom')
-      vi.mocked(navigator.mediaDevices.getDisplayMedia).mockRejectedValue(original)
+    // ESCSUITE-341: every failure leaves tagged with the source that failed,
+    // so the start path can name it — not only the two names mapped above.
+    it.each(['NotAllowedError', 'NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError'])(
+      'tags a %s with source "screen" and keeps the browser error as cause',
+      async (name) => {
+        const original = new DOMException('browser said no', name)
+        vi.mocked(navigator.mediaDevices.getDisplayMedia).mockRejectedValue(original)
 
-      await expect(requestScreenCapture(false)).rejects.toBe(original)
-    })
+        const error = await requestScreenCapture(false).catch((e: unknown) => e)
 
-    it('rethrows non-Error rejections unchanged', async () => {
+        expect(error).toBeInstanceOf(CaptureRequestError)
+        expect((error as CaptureRequestError).source).toBe('screen')
+        expect((error as CaptureRequestError).cause).toBe(original)
+      }
+    )
+
+    it('wraps a non-Error rejection the same way, carrying it as cause', async () => {
       vi.mocked(navigator.mediaDevices.getDisplayMedia).mockRejectedValue('not-an-error')
 
-      await expect(requestScreenCapture(false)).rejects.toBe('not-an-error')
+      const error = await requestScreenCapture(false).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(CaptureRequestError)
+      expect((error as CaptureRequestError).source).toBe('screen')
+      expect((error as CaptureRequestError).cause).toBe('not-an-error')
     })
   })
 
@@ -362,17 +376,30 @@ describe('permissions', () => {
       await expect(requestWebcam()).rejects.toThrow('No webcam found')
     })
 
-    it('rethrows other errors unchanged', async () => {
-      const original = new Error('boom')
-      vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(original)
+    // ESCSUITE-341: every failure leaves tagged with the source that failed,
+    // so the start path can name it — not only the two names mapped above.
+    it.each(['NotAllowedError', 'NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError'])(
+      'tags a %s with source "webcam" and keeps the browser error as cause',
+      async (name) => {
+        const original = new DOMException('browser said no', name)
+        vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(original)
 
-      await expect(requestWebcam()).rejects.toBe(original)
-    })
+        const error = await requestWebcam().catch((e: unknown) => e)
 
-    it('rethrows non-Error rejections unchanged', async () => {
+        expect(error).toBeInstanceOf(CaptureRequestError)
+        expect((error as CaptureRequestError).source).toBe('webcam')
+        expect((error as CaptureRequestError).cause).toBe(original)
+      }
+    )
+
+    it('wraps a non-Error rejection the same way, carrying it as cause', async () => {
       vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue('not-an-error')
 
-      await expect(requestWebcam()).rejects.toBe('not-an-error')
+      const error = await requestWebcam().catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(CaptureRequestError)
+      expect((error as CaptureRequestError).source).toBe('webcam')
+      expect((error as CaptureRequestError).cause).toBe('not-an-error')
     })
   })
 
@@ -405,17 +432,30 @@ describe('permissions', () => {
       await expect(requestMicrophone()).rejects.toThrow('No microphone found')
     })
 
-    it('rethrows other errors unchanged', async () => {
-      const original = new Error('boom')
-      vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(original)
+    // ESCSUITE-341: every failure leaves tagged with the source that failed,
+    // so the start path can name it — not only the two names mapped above.
+    it.each(['NotAllowedError', 'NotFoundError', 'NotReadableError', 'OverconstrainedError', 'AbortError'])(
+      'tags a %s with source "microphone" and keeps the browser error as cause',
+      async (name) => {
+        const original = new DOMException('browser said no', name)
+        vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue(original)
 
-      await expect(requestMicrophone()).rejects.toBe(original)
-    })
+        const error = await requestMicrophone().catch((e: unknown) => e)
 
-    it('rethrows non-Error rejections unchanged', async () => {
+        expect(error).toBeInstanceOf(CaptureRequestError)
+        expect((error as CaptureRequestError).source).toBe('microphone')
+        expect((error as CaptureRequestError).cause).toBe(original)
+      }
+    )
+
+    it('wraps a non-Error rejection the same way, carrying it as cause', async () => {
       vi.mocked(navigator.mediaDevices.getUserMedia).mockRejectedValue('not-an-error')
 
-      await expect(requestMicrophone()).rejects.toBe('not-an-error')
+      const error = await requestMicrophone().catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(CaptureRequestError)
+      expect((error as CaptureRequestError).source).toBe('microphone')
+      expect((error as CaptureRequestError).cause).toBe('not-an-error')
     })
   })
 
