@@ -10,6 +10,44 @@ computed once, when the media arrives, so a source that arrived without them nev
 non-empty `waveformData`, so a source with peaks and no flag shows nothing — which is why the
 take import fills the flag in for a recording stored before ESCAPECRAFT wrote one.
 
+**How the peaks are decoded** (ESCSUITE-338). `extractWaveformData` streams: mediabunny demuxes
+the file's primary audio track and decodes it a chunk at a time (WebCodecs `AudioDecoder`, or
+mediabunny's own PCM reader for a WAV), and `utils/waveformPeaks.ts`'s `PeakReducer` folds each
+chunk into min/max peaks and drops it. Peak memory is the peaks plus one decoder chunk instead of
+the whole track as Float32 (a ten-minute 48 kHz stereo Opus file: renderer peak RSS +101 MB
+streamed against +473 MB through `decodeAudioData`; numbers in
+[`performance-benchmarks.md`](../../../../docs/reference/performance-benchmarks.md)). The reducer
+buckets exactly as the old whole-buffer code (`peaksFromPcm`, kept verbatim) — mono is
+`(L+R)/2` in Float32, `ceil(duration × 100)` buckets of `floor(length / buckets)` samples by
+absolute index, min/max from 0, `hasAudio` = any peak past 0.001 — so for the same PCM the peaks
+are identical whatever the chunking (`waveformPeaks.test.ts`). It holds samples only for the first
+`streamingThreshold` (~4.8 s at 48 kHz), because the bucket size depends on the final length;
+after that it runs the four bucket sizes that length can still pick and keeps the right one.
+Frames before timestamp zero (codec priming an MP4 edit list declares) are dropped, as
+`decodeAudioData` drops them.
+
+The old whole-file `decodeAudioData` path is the **fallback**, taken when the streamed one cannot
+read the file: no demuxer recognises the container, the codec has no `AudioDecoder` here (or there
+is no `AudioDecoder` at all), the decode throws part-way (warned), or the codec
+is **MP3**, which mediabunny decodes without trimming the LAME/Xing encoder delay and padding that
+`decodeAudioData` trims (streamed peaks would sit ~25 ms late). A container mediabunny reads and
+finds no audio track in answers `hasAudio: false` with no decode at all.
+
+What still differs from the old peaks, measured in Chromium 141: the streamed path works at the
+track's own sample rate, where `decodeAudioData` resampled to the AudioContext's — the output
+device's rate, so the old peaks were never the same on a 44.1 kHz and a 48 kHz machine. At equal
+rates the peaks match to 3e-5 (a CRAFT MediaRecorder Opus take, a 16-bit WAV) or exactly (Vorbis).
+Two edge cases: an ffmpeg-muxed WebM whose last Opus block carries `DiscardPadding` (MediaRecorder
+writes none) streams up to one frame longer, which can move the old bucketing's
+`floor(length / buckets)` from 480 to 479 samples; and Opus louder than full scale, which
+`decodeAudioData` soft-clips and the streamed decode does not.
+
+The audio **library thumbnail** is drawn from the same peaks (`generateAudioThumbnail(peaks)`,
+resampled to one column per pixel), so an audio import decodes its audio once; it used to run its
+own `decodeAudioData` of the first channel first. Decoding stays on the main thread's event loop
+(the `AudioDecoder` itself decodes off it; the reduce is a min/max pass per chunk) — a worker
+would need the decode worker's file:// inlining for the headless and standalone builds.
+
 **Resolution follows the visible window, not the clip box** (ESCSUITE-13). Before this, the
 component always resampled the clip's *whole* trimmed range to at most 2000 samples and drew
 it across a canvas capped at `MAX_CANVAS_WIDTH` (4000 CSS px), with `canvas.style.width`

@@ -1,10 +1,10 @@
 // Video processing utilities using native browser APIs
 
 import { v4 as uuidv4 } from 'uuid';
-import type { SourceVideo } from '../store/types';
+import type { SourceVideo, WaveformPeak } from '../store/types';
 import { DEFAULT_IMAGE_DURATION } from '../store/types';
 import { storeVideo, storeThumbnail } from './storage';
-import { extractWaveformData } from '../utils/waveform';
+import { extractWaveformData, resamplePeaks } from '../utils/waveform';
 import { FRAME_RATE_PROBE, measureFrameRate } from './frameRateProbe';
 import { withSeekIndex } from './webmSeekIndex';
 
@@ -544,90 +544,70 @@ export async function extractAudioMetadata(file: File): Promise<SourceVideo> {
 /**
  * Generate a waveform thumbnail for an audio file
  * Creates a visual representation of the audio waveform
+ *
+ * Drawn from the peaks `extractWaveformData` already made for the timeline
+ * (ESCSUITE-338), so an audio import decodes its audio once: this used to run
+ * its own whole-file `decodeAudioData` first, holding the decoded track twice
+ * over. One column per pixel, each the min/max of the peaks under it. No peaks
+ * (nothing decodable) draws the empty strip with its note glyph.
  */
 export async function generateAudioThumbnail(
-  file: File,
+  peaks: WaveformPeak[],
   width: number = 160,
   height: number = 90
 ): Promise<Blob> {
-  return new Promise(async (resolve, reject) => {
-    try {
-      // Decode audio to get waveform data
-      const arrayBuffer = await file.arrayBuffer();
-      const audioContext = new AudioContext();
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+  // Create canvas for waveform
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
 
-      // Get audio data from first channel
-      const channelData = audioBuffer.getChannelData(0);
+  if (!ctx) {
+    throw new Error('Failed to get canvas context');
+  }
 
-      // Create canvas for waveform
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
+  // Background
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(0, 0, width, height);
 
-      if (!ctx) {
-        reject(new Error('Failed to get canvas context'));
-        return;
-      }
+  // Draw waveform
+  const columns = resamplePeaks(peaks, width);
+  const centerY = height / 2;
 
-      // Background
-      ctx.fillStyle = '#2a2a2a';
-      ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = '#4a9eff';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
 
-      // Draw waveform
-      const samplesPerPixel = Math.floor(channelData.length / width);
-      const centerY = height / 2;
+  columns.forEach(({ min, max }, x) => {
+    // Draw vertical line for this segment
+    const minY = centerY + (min * centerY * 0.9);
+    const maxY = centerY + (max * centerY * 0.9);
 
-      ctx.strokeStyle = '#4a9eff';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
+    ctx.moveTo(x, minY);
+    ctx.lineTo(x, maxY);
+  });
 
-      for (let x = 0; x < width; x++) {
-        const startSample = x * samplesPerPixel;
-        const endSample = startSample + samplesPerPixel;
+  ctx.stroke();
 
-        // Find min and max in this segment
-        let min = 0;
-        let max = 0;
-        for (let i = startSample; i < endSample && i < channelData.length; i++) {
-          if (channelData[i] < min) min = channelData[i];
-          if (channelData[i] > max) max = channelData[i];
+  // Add audio icon overlay
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.font = 'bold 24px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('♪', width / 2, height / 2);
+
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) {
+          resolve(blob);
+        } else {
+          reject(new Error('Failed to generate audio thumbnail'));
         }
-
-        // Draw vertical line for this segment
-        const minY = centerY + (min * centerY * 0.9);
-        const maxY = centerY + (max * centerY * 0.9);
-
-        ctx.moveTo(x, minY);
-        ctx.lineTo(x, maxY);
-      }
-
-      ctx.stroke();
-
-      // Add audio icon overlay
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-      ctx.font = 'bold 24px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('♪', width / 2, height / 2);
-
-      await audioContext.close();
-
-      canvas.toBlob(
-        (blob) => {
-          if (blob) {
-            resolve(blob);
-          } else {
-            reject(new Error('Failed to generate audio thumbnail'));
-          }
-        },
-        'image/jpeg',
-        0.8
-      );
-    } catch (error) {
-      reject(error);
-    }
+      },
+      'image/jpeg',
+      0.8
+    );
   });
 }
 
@@ -643,16 +623,8 @@ async function finishAudioFile({ bytes, file }: IndexedImport): Promise<SourceVi
   // Extract metadata
   const metadata = await extractAudioMetadata(file);
 
-  // Generate waveform thumbnail
-  try {
-    const thumbnail = await generateAudioThumbnail(file);
-    await storeThumbnail(metadata.id, thumbnail);
-    metadata.thumbnailUrl = URL.createObjectURL(thumbnail);
-  } catch (error) {
-    console.warn('Failed to generate audio thumbnail:', error);
-  }
-
-  // Extract waveform data for timeline visualization
+  // Extract waveform data for timeline visualization. The one decode of the
+  // file's audio: the thumbnail below is drawn from these peaks (ESCSUITE-338).
   try {
     const { peaks, hasAudio } = await extractWaveformData(file);
     metadata.waveformData = peaks;
@@ -660,6 +632,15 @@ async function finishAudioFile({ bytes, file }: IndexedImport): Promise<SourceVi
   } catch (error) {
     console.warn('Failed to extract waveform data:', error);
     metadata.hasAudio = true; // Assume audio file has audio
+  }
+
+  // Generate waveform thumbnail
+  try {
+    const thumbnail = await generateAudioThumbnail(metadata.waveformData ?? []);
+    await storeThumbnail(metadata.id, thumbnail);
+    metadata.thumbnailUrl = URL.createObjectURL(thumbnail);
+  } catch (error) {
+    console.warn('Failed to generate audio thumbnail:', error);
   }
 
   // Store the audio blob

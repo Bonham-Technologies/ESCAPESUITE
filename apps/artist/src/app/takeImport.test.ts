@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { importTake } from './takeImport'
 import { getAllVideoMetadata, getThumbnail, getVideo, storeVideo } from '../core/storage'
 import { buildWebm, hasNonEmptyCues } from '../test/fixtures/webmFixture'
+import { floatWav } from '../test/fixtures/wavFixture'
 import { resolveStoredDuration } from '../core/videoProcessor'
 import { extractWaveformData } from '../utils/waveform'
 import { sampleVideo } from '../test/appDoubles'
@@ -482,6 +483,26 @@ describe('importTake', () => {
       expect(audio.decodeCalls).toHaveLength(2)
       expect(added[1].waveformData).toBeUndefined()
       expect(added[1].hasAudio).toBe(false)
+    })
+
+    // ESCSUITE-338: a part mediabunny can read is decoded a chunk at a time and
+    // never through decodeAudioData; its peaks are the ones that path gives.
+    it('streams a part the demuxer can read, with the same peaks', async () => {
+      const wavMic = new Blob([floatWav([samples(0.5)], 48000)], { type: 'audio/wav' })
+      vi.mocked(getVideo).mockImplementation((id: string) =>
+        Promise.resolve(
+          id === 'take-1-mic'
+            ? { blob: wavMic, metadata: micMetadata }
+            : { blob: storedBlobs[id], metadata: webcamMetadata }
+        )
+      )
+
+      await importTake(primary, addSourceVideo)
+
+      // Only the primary (bytes no demuxer recognises) went to decodeAudioData.
+      expect(audio.decodeCalls).toHaveLength(1)
+      expect(added[2].waveformData).toHaveLength(PEAKS_PER_TENTH)
+      expect(added[2].waveformData).toEqual(added[0].waveformData)
     })
 
     it('fills in hasAudio for a part stored before ESCAPECRAFT wrote it', async () => {

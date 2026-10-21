@@ -18,6 +18,14 @@ import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/m
 import { installCanvasDouble, uninstallCanvasDouble } from '../test/doubles/canvas'
 import { mediaFile } from '../test/doubles/files'
 
+// The waveform reads the file too — through mediabunny's BlobSource, which
+// slices it — since ESCSUITE-338. That read is not the seek index's, and the
+// "never reads its head" cases below count the seek index's alone.
+vi.mock('../utils/waveform', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../utils/waveform')>()),
+  extractWaveformData: vi.fn(async () => ({ peaks: [], hasAudio: false })),
+}))
+
 vi.mock('./webmSeekIndex', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./webmSeekIndex')>()
   return { ...actual, withSeekIndex: vi.fn(actual.withSeekIndex) }
