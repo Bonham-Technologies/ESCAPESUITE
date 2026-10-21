@@ -112,7 +112,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   because Chromium serialises a `file:` URL's origin as the non-opaque string `'file://'`) is
   ignored, with one console warning. The hosted deployment (escapesuite.io) sends `frame-ancestors 'self'` plus
   `X-Frame-Options: SAMEORIGIN` from `vercel.json`, so it cannot be framed by other origins; a
-  self-hosted or standalone build must set its own.
+  self-hosted or standalone build must set its own. Its `Permissions-Policy` keeps camera,
+  microphone and screen capture to the same origin, which a same-origin host frame already is
+  (see `vercel-deployment.md`, "Security headers").
 - **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
   one host page keep a saved session each (ESCSUITE-332). **Every host should pass one — a page that
   frames a single editor included — and a different one to each frame** when it frames several: every same-origin frame of a page shares the top-level

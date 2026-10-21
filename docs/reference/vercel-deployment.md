@@ -37,6 +37,6 @@ and `apps/e2e/scripts/serve-dist.mjs` serves the same block to `pnpm test:e2e:pr
 
 **Embedding.** The integration API's hosts frame CRAFT and ARTIST from the same origin (cross-origin
 framing of the hosted site is already refused by `frame-ancestors 'self'`). A same-origin iframe
-counts as `self`, so its camera, microphone and screen capture keep working, given the usual
-`<iframe allow="camera; microphone; display-capture">`. A self-hosted build served without these
-headers is unaffected.
+counts as `self`, so its camera, microphone and screen capture keep working with no `allow`
+attribute needed (`apps/e2e/tests/integration/host-embedding.spec.ts` sets none). A self-hosted
+build served without these headers is unaffected.
