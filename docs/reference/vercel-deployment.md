@@ -32,7 +32,7 @@ and `apps/e2e/scripts/serve-dist.mjs` serves the same block to `pnpm test:e2e:pr
 | `Content-Security-Policy` | see `vercel.json` | Only the suite's own origin may load code, media or workers; `frame-ancestors 'self'` refuses framing by other origins. `script-src` keeps `'unsafe-inline'` because the CRAFT and ARTIST deploy builds are single files with their code inlined. |
 | `X-Frame-Options` | `SAMEORIGIN` | The same framing rule for browsers that ignore `frame-ancestors`. |
 | `X-Content-Type-Options` | `nosniff` | Browsers use the declared MIME type and never sniff a file into a script or stylesheet. |
-| `Referrer-Policy` | `same-origin` | Requests within the suite keep their full referrer; a request or link to any other origin, such as GitHub, sends none (the outbound links already carry `rel="noreferrer"`). Stricter than the browser default `strict-origin-when-cross-origin`. |
+| `Referrer-Policy` | `same-origin` | Requests within the suite keep their full referrer; a request or link to any other origin, such as GitHub, sends none (the in-app outbound links already carry `rel="noreferrer"`). Stricter than the browser default `strict-origin-when-cross-origin`. |
 | `Permissions-Policy` | `camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=(), browsing-topics=()` | CRAFT's capture devices are allowed for the suite's own origin only, never for a frame from another origin. Features the suite never uses are turned off. |
 
 **Embedding.** The integration API's hosts frame CRAFT and ARTIST from the same origin (cross-origin
