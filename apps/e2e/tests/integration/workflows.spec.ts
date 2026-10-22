@@ -15,6 +15,7 @@ import {
   installMediaHealthProbe,
   waveformCanvas,
 } from '../../utils/mediaHealth'
+import { reopenProject, saveProject } from '../../utils/timeline'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
@@ -106,28 +107,13 @@ test.describe('Project Save and Reload', () => {
     await importMediaAndAddToTimeline(page, AV_FIXTURE_WEBM)
     await expectWaveformDrawn(waveformCanvas(page), { silence: AV_FIXTURE_SILENCE })
 
-    const downloadPromise = page.waitForEvent('download')
-    await page.getByRole('button', { name: 'Save project' }).click()
-    const download = await downloadPromise
-    expect(download.suggestedFilename()).toMatch(/\.veditor$/)
-    const savedPath = await download.path()
-    expect(savedPath).toBeTruthy()
-    const bytes = await readFile(savedPath!)
+    const bytes = await saveProject(page)
     expect([...bytes.subarray(0, 8)]).toEqual([0x89, 0x56, 0x45, 0x44, 0x0d, 0x0a, 0x1a, 0x0a])
 
     // Open the file the way a user drops one in, in a context with no stored media.
-    const context = await browser.newContext()
-    await installMediaHealthProbe(context)
+    const { page: fresh, context } = await reopenProject(browser, bytes, installMediaHealthProbe)
     // Closed in a `finally`, so a failed expectation does not leak the context.
     try {
-      const fresh = await context.newPage()
-      await fresh.goto('http://localhost:5175')
-      await waitForAppReady(fresh, 'artist')
-      await fresh
-        .locator('input[type="file"]')
-        .setInputFiles({ name: 'reopened.veditor', mimeType: 'application/octet-stream', buffer: bytes })
-
-      await expect(fresh.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
       await expect(fresh.getByText(/^1 clip · 1 track$/)).toBeVisible()
       // The source's tile is in the media library...
       await expect(fresh.getByTitle('tone-gap.webm', { exact: true })).toBeVisible()
