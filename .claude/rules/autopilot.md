@@ -78,6 +78,14 @@ exception.
 It also applies if the diff exceeds about 800 changed lines, or the reviewer or QC
 raises a concern it can't resolve.
 
+**Protected editor paths (temporary).** Until ESCSUITE-348, -349, -350 and -351 are all
+Done and green on `main`, a diff touching any of these in `apps/artist/src/` is also
+`ap-owner-merge`: `components/Preview/**`, `components/Timeline/**`,
+`store/clipSlice.ts`, `store/historySlice.ts`, `store/projectMigration.ts`,
+`core/projectFileFormat.ts`, `core/projectManager.ts`, `utils/waveform.ts` and
+`core/audioMixer.ts`. Once all four tickets are Done, the rule lapses: the steward says
+so in the next digest and files an `ap-owner-merge` ticket to delete this paragraph.
+
 **`ap-decision`** if the ticket asks for:
 - a new capability outside the product's current scope;
 - a pricing or plan change;
@@ -154,6 +162,9 @@ coverage report. Where the environment allows, run the app and look at it.
   - a priority: P1 (broken or risky), P2 (clear user value), P3 (polish),
     P4 (nice to have);
   - one class label.
+- **Regression specs.** List bug tickets closed since the last sweep whose symptom is
+  visible in the UI but which landed no `apps/e2e/tests/regressions/<KEY>.spec.ts`, and
+  file a P2 `ap-auto` ticket for each one to add it.
 - Score each dimension 1–5 with one line of evidence.
 
 ### Watch tickets
@@ -217,6 +228,12 @@ budget, or after two failures in a row. For each ticket:
 2. **Write a failing test first**, one that fails for the reason the ticket describes.
    Pure visual polish may assert on the DOM or styles instead. Then make the smallest
    change that meets every acceptance criterion.
+   **A bug whose symptom shows in the UI** (playback, preview, waveform, timeline
+   editing, save/load, export) also needs a Playwright test at
+   `apps/e2e/tests/regressions/<KEY>.spec.ts` that fails before the fix. A unit test
+   alone doesn't meet this step. Use the media-health helpers in `apps/e2e/utils/` where
+   they exist. Where the container can't run it (e.g. H.264/AAC media), let CI prove it
+   and say so in the PR.
 3. Run the full verify command. Coverage floors never drop, and no test is skipped
    or deleted to get green.
 4. **Independent review.** Hand the `reviewer` subagent (opus) the diff and the ticket.
@@ -281,7 +298,8 @@ For each untriaged PR:
 
 At the start of every run:
 1. Check `ci-status` on `main`'s head, and the production health check if `CLAUDE.md`
-   names one.
+   names one. Once a nightly workflow exists (ESCSUITE-353), also check its latest run
+   on `main`: a red nightly counts as a red `main` for the steps below.
 2. If `main` is red and an autopilot merge caused it, **revert that PR**. A revert PR
    needs green CI but no review, and reverts are always allowed. Then reopen the ticket
    with the failure.
