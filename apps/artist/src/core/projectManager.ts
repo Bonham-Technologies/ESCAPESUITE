@@ -294,7 +294,9 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
   });
   if (peaks.length === 0) return;
   metadata.waveformData = peaks;
-  metadata.hasAudio = hasAudio;
+  // `hasAudio` from a decode is only a silence check, so it never downgrades a
+  // `true` already recorded (a quiet take still has audio; see takeImport.ts).
+  metadata.hasAudio = metadata.hasAudio === true || hasAudio;
 }
 
 /**

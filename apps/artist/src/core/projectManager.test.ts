@@ -2651,6 +2651,24 @@ describe('loadProject regenerates a missing waveform (ESCSUITE-347)', () => {
     await deleteVideo(id)
   })
 
+  it("never lets the decode's silence check downgrade a hasAudio the file recorded", async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: false })
+    const id = uniqueId('quiet-take')
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'video/webm',
+        meta: { duration: 8, width: 640, height: 360, frameRate: 30, hasAudio: true },
+        bytes: [4, 5, 6],
+      },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    await deleteVideo(id)
+  })
+
   it("never decodes when the file's meta carries a waveform", async () => {
     const id = uniqueId('v2-has-wave')
     const file = v2File(createTestProject(id), [
