@@ -35,82 +35,20 @@ import {
   type StreamTargetChunk,
   type VideoCodec,
 } from 'mediabunny';
+import {
+  CLUSTER_ID,
+  CUES_ID,
+  EBML_ID,
+  HEAD_BYTES,
+  SEEK_HEAD_ID,
+  SEGMENT_ID,
+  cuesPositionIn,
+  dropDeltaFrameCues,
+  isWebmType,
+  readHeader,
+} from './webmDeltaFrameCues';
 
-/** `video/webm` or `audio/webm`, with or without parameters (`;codecs=vp9,opus`). */
-export function isWebmType(type: string): boolean {
-  return /^(video|audio)\/webm\s*(;|$)/i.test(type);
-}
-
-/**
- * How much of the file the probe reads to find the SeekHead or the first
- * Cluster. Everything before the first Cluster of a recorder's file — the EBML
- * header, the SeekHead, Info, Tracks and an index written up front — is a few
- * hundred bytes; 64 KiB leaves room for a large CodecPrivate.
- */
-const HEAD_BYTES = 64 * 1024;
-
-const EBML_ID = 0x1a45dfa3;
-const SEGMENT_ID = 0x18538067;
-const SEEK_HEAD_ID = 0x114d9b74;
-const SEEK_ID = 0x4dbb;
-const SEEK_ID_ID = 0x53ab;
-const SEEK_POSITION_ID = 0x53ac;
-const CUES_ID = 0x1c53bb6b;
-const CLUSTER_ID = 0x1f43b675;
-
-interface ElementHeader {
-  id: number;
-  /** `Infinity` for the "unknown size" a live recorder writes. */
-  size: number;
-  dataStart: number;
-}
-
-/** One EBML variable-length integer, or null where none can be read. */
-function readVint(bytes: Uint8Array, pos: number, keepMarker: boolean): { value: number; length: number } | null {
-  // A zero first byte, or a position past the end (`undefined`), both count as
-  // nine leading zeros, which no EBML vint has.
-  const length = Math.clz32(bytes[pos]) - 23;
-  if (length > 8 || pos + length > bytes.length) return null;
-  let value = keepMarker ? bytes[pos] : bytes[pos] & (0xff >> length);
-  for (let i = 1; i < length; i++) value = value * 256 + bytes[pos + i];
-  return { value, length };
-}
-
-function readHeader(bytes: Uint8Array, pos: number): ElementHeader | null {
-  const id = readVint(bytes, pos, true);
-  const size = id && readVint(bytes, pos + id.length, false);
-  if (!id || !size) return null;
-  const unknown = size.value === 2 ** (7 * size.length) - 1;
-  return { id: id.value, size: unknown ? Infinity : size.value, dataStart: pos + id.length + size.length };
-}
-
-function readUint(bytes: Uint8Array, element: ElementHeader): number {
-  let value = 0;
-  for (let i = element.dataStart; i < element.dataStart + element.size; i++) value = value * 256 + bytes[i];
-  return value;
-}
-
-/**
- * Where a SeekHead says the Cues element is, relative to the Segment's data, or
- * null when it names none. Steps into each Seek entry and reads its SeekID and
- * SeekPosition in the order every muxer writes them, SeekID first.
- */
-function cuesPositionIn(head: Uint8Array, seekHead: ElementHeader): number | null {
-  const end = seekHead.dataStart + seekHead.size;
-  let namesCues = false;
-  for (let pos = seekHead.dataStart; pos < end; ) {
-    const child = readHeader(head, pos);
-    if (!child) return null;
-    if (child.id === SEEK_ID) {
-      pos = child.dataStart;
-      continue;
-    }
-    if (child.id === SEEK_ID_ID) namesCues = readUint(head, child) === CUES_ID;
-    else if (child.id === SEEK_POSITION_ID && namesCues) return readUint(head, child);
-    pos = child.dataStart + child.size;
-  }
-  return null;
-}
+export { isWebmType };
 
 /**
  * Whether this WebM has no usable seek index: its Cues element is empty, or it
@@ -214,7 +152,9 @@ export function createChunkCollector(): {
  * The same packets in a new WebM with a Cues index: every track's encoded
  * packets — timestamps, key flags, bytes and side data (a VP9 alpha plane
  * among them) — copied through Mediabunny's muxer with no decoder and no
- * encoder. The result keeps the original's MIME type.
+ * encoder. The result keeps the original's MIME type, and carries no video
+ * cue on a Cluster that starts with a delta frame (`dropDeltaFrameCues`,
+ * ESCSUITE-359).
  *
  * Throws on anything it cannot copy — a track with a codec Mediabunny cannot
  * name, a track that is neither video nor audio (its audio source refuses the
@@ -251,7 +191,8 @@ export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
     await output.start();
     await Promise.all(pumps.map((pump) => pump()));
     await output.finalize();
-    return collector.toBlob(blob.type);
+    const remuxed = collector.toBlob(blob.type);
+    return (await dropDeltaFrameCues(remuxed)) ?? remuxed;
   } finally {
     input.dispose();
   }
@@ -259,7 +200,8 @@ export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
 
 /**
  * The bytes to store for an imported file: a WebM with no usable seek index
- * remuxed with one, anything else exactly as it came. A probe or a remux that
+ * remuxed with one, a WebM whose index points video at delta frames with those
+ * cues dropped, anything else exactly as it came. A probe or a remux that
  * throws leaves the original and says so once — the import goes on, and a
  * browser that can seek the file (Chromium) is no worse off than before.
  */
@@ -268,7 +210,10 @@ export async function withSeekIndex(blob: Blob, name: string): Promise<Blob> {
     // Inside the try: a record with no bytes at all is kept as it came, for the
     // caller's own checks to decide about, rather than thrown on here.
     if (!isWebmType(blob.type)) return blob;
-    return (await needsSeekIndexRepair(blob)) ? await remuxWithSeekIndex(blob) : blob;
+    if (await needsSeekIndexRepair(blob)) return await remuxWithSeekIndex(blob);
+    // An index this module wrote before ESCSUITE-359 can carry cues on delta
+    // frames; a take re-imported from ESCAPECRAFT's row is repaired here too.
+    return (await dropDeltaFrameCues(blob)) ?? blob;
   } catch (error) {
     console.warn(`Could not add a seek index to "${name}"; keeping it as recorded:`, error);
     return blob;

@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import 'fake-indexeddb/auto'
 import { IDBFactory } from 'fake-indexeddb'
 import type { SourceVideo, Project } from '../store/types'
+import { dropDeltaFrameCues } from './webmDeltaFrameCues'
+import { webmBlob } from '../test/fixtures/webmFixture'
 
 // Reset IndexedDB before importing storage module
 beforeEach(() => {
@@ -69,6 +71,104 @@ describe('storage', () => {
       const resultBlob = await storage.getVideoBlob('video1')
 
       expect(resultBlob).toBeDefined()
+    })
+
+    // ESCSUITE-359: a WebM re-indexed at import before the fix carries video
+    // cues on delta frames, and Chromium's preview freezes on a far seek into
+    // one. Reading it repairs it, and writes the repair back.
+    describe('getVideoBlob repairing a stored seek index (ESCSUITE-359)', () => {
+      afterEach(() => {
+        vi.restoreAllMocks()
+      })
+
+      const metadata: SourceVideo = {
+        id: 'take',
+        name: 'take.webm',
+        duration: 100,
+        width: 16,
+        height: 16,
+        frameRate: 1,
+        mimeType: 'video/webm',
+        size: 0,
+      }
+      /** A Cluster every 33 s with a video cue on each, and a key frame at 0 only. */
+      const storedTake = () =>
+        webmBlob({
+          cues: 'indexed',
+          clusterMs: 33_000,
+          frames: Array.from({ length: 100 }, (_, i) => ({ timeMs: i * 1000, key: i === 0 })),
+        })
+
+      it('hands back the repaired bytes and writes them back under the same id and metadata', async () => {
+        const storage = await getStorageModule()
+        const original = storedTake()
+        await storage.storeVideo('take', original, metadata)
+
+        const read = await storage.getVideoBlob('take', { persistRepair: true })
+
+        const repaired = await dropDeltaFrameCues(original)
+        expect(new Uint8Array(await read!.arrayBuffer())).toEqual(new Uint8Array(await repaired!.arrayBuffer()))
+        const stored = await storage.getVideo('take')
+        expect(stored?.metadata).toEqual(metadata)
+        expect(await dropDeltaFrameCues(stored!.blob)).toBeNull()
+      })
+
+      it('hands back a sound WebM exactly as stored, and writes nothing', async () => {
+        const storage = await getStorageModule()
+        await storage.storeVideo('take', webmBlob({ cues: 'indexed' }), metadata)
+        const shared = await import('@escapesuite/shared/storage')
+        const store = vi.spyOn(shared, 'storeVideo')
+
+        const read = await storage.getVideoBlob('take')
+
+        expect(read?.size).toBe(webmBlob({ cues: 'indexed' }).size)
+        expect(store).not.toHaveBeenCalled()
+      })
+
+      it('still hands back the repaired bytes when the write-back fails', async () => {
+        const storage = await getStorageModule()
+        const original = storedTake()
+        await storage.storeVideo('take', original, metadata)
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const shared = await import('@escapesuite/shared/storage')
+        vi.spyOn(shared, 'storeVideo').mockRejectedValue(new Error('QuotaExceededError'))
+
+        const read = await storage.getVideoBlob('take', { persistRepair: true })
+
+        expect(await dropDeltaFrameCues(read!)).toBeNull()
+        expect(warn).toHaveBeenCalledWith('Could not store the repaired seek index of "take.webm":', expect.any(Error))
+      })
+
+      it('repairs in memory only unless asked to persist (export must not rewrite the database)', async () => {
+        const storage = await getStorageModule()
+        await storage.storeVideo('take', storedTake(), metadata)
+        const shared = await import('@escapesuite/shared/storage')
+        const store = vi.spyOn(shared, 'storeVideo')
+
+        const read = await storage.getVideoBlob('take')
+
+        expect(await dropDeltaFrameCues(read!)).toBeNull()
+        expect(store).not.toHaveBeenCalled()
+        expect(await dropDeltaFrameCues((await storage.getVideo('take'))!.blob)).not.toBeNull()
+      })
+
+      it('hands back the stored bytes, and says so once, when the check throws', async () => {
+        const storage = await getStorageModule()
+        await storage.storeVideo('take', storedTake(), metadata)
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+        const cues = await import('./webmDeltaFrameCues')
+        vi.spyOn(cues, 'dropDeltaFrameCues').mockRejectedValue(new Error('NotReadableError'))
+
+        const read = await storage.getVideoBlob('take', { persistRepair: true })
+
+        expect(read?.size).toBe(storedTake().size)
+        expect(warn).toHaveBeenCalledTimes(1)
+      })
+
+      it('returns undefined for a row that is gone', async () => {
+        const storage = await getStorageModule()
+        expect(await storage.getVideoBlob('gone')).toBeUndefined()
+      })
     })
 
     it('gets all video metadata', async () => {
