@@ -3,7 +3,7 @@
 
 - **Unit tests**: Vitest with Testing Library, fake-indexeddb for storage mocking
 - **E2E tests**: Playwright with Chromium; CI runs the whole suite on every PR and push
-- **Journey test**: one end-to-end journey covering record → edit → export across ESCAPECRAFT and ESCAPEARTIST
+- **Journey tests** (`apps/e2e/tests/journeys/`, also in the normal `e2e` job): `01-record-edit-export` covers record → edit → export across ESCAPECRAFT and ESCAPEARTIST; `02-cut-pauses` (ESCSUITE-351) cuts the pause out of the A/V fixture through the UI (razor, Delete, drag to close the gap), saves, reopens in a fresh context, exports WebM and decodes the export's audio: its length must be the original minus the cut (±1 frame), with no silence over 100 ms and tone on both sides of the join. It runs on the WebM fixture and on its MP4 twin. The timeline, save/reopen, export and audio-analysis helpers it uses live in `apps/e2e/utils/timeline.ts`.
 - **Production-layout tests**: `apps/e2e/tests/production/` runs against the combined
   `dist/` from `pnpm build:deploy`, served on ONE port by `apps/e2e/scripts/serve-dist.mjs`
   (which mirrors `vercel.json`'s rewrites, and — since ESCSUITE-121 part 2 — reads and sends
