@@ -30,6 +30,9 @@
   the one document too (temporary, 307, so no browser caches it and a future real sub-route stays reachable), since neither app has client-side routes. Paths ending in a file extension
   are excluded so `/artist/decodeWorker-<hash>.js` is still served as itself
   (`tests/production/slashless-redirect.spec.ts`).
+- **Property-based tests**: ESCAPEARTIST's timeline edit logic has a model-based fast-check suite
+  (ESCSUITE-349): random edit sequences with invariants checked after every step. What it checks
+  and how to add an operation: `apps/artist/docs/reference/testing.md`.
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.

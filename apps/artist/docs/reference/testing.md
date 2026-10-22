@@ -71,3 +71,57 @@ outcome, not on the double.
   and for a null `tracks` entry (through the host channel, an unhandled rejection with no reply);
   both are refused by name now (see `projectMigration.ts` above), and each input that found them
   is kept as a regression test beside its fuzz case.
+- **Property-based timeline tests** (ESCSUITE-349) — `store/__tests__/timelineInvariants.property.test.ts`
+  uses [fast-check](https://fast-check.dev) to generate sequences of 1–30 edits and runs each
+  through the model in `src/test/timelineModel.ts`, which drives the store the way the editor's
+  own gesture does: **add** a clip (the media library's add, at a playhead), **split** (the razor,
+  through `getSplitOffset`), **delete**, **ripple delete**, **move** (to a time on a row, or onto /
+  before / after another clip, snapped and vetoed as `useClipDrag`'s mouseup does), **trim** (either
+  edge, one to three pointer moves through `clampTrimToNeighbours` → `computeTrimUpdate` →
+  `trimClip` with a gesture history, and with the ripple tool the `shiftClipsAfter` on release),
+  **duplicate**, **undo**, **redo**, and **save → load** (the real `saveProject` writer, the download
+  captured from `URL.createObjectURL`, `loadProject`, `parseProject`, then `useProjectActions`'
+  reset / `setProject` / `addSourceVideo` / `clearHistory` sequence). The media pool is two videos
+  with embedded audio, an audio-only file (all with waveform peaks) and an image.
+
+  **The invariants**, checked after every step:
+  1. *Audio counterparts.* Every audio stream a clip plays (`audioCounterparts`) covers exactly
+     the clip's picture span (`pictureSpan`): the same timeline range and the same source range.
+     On `main` the only counterpart is a clip's **embedded** audio, which `core/audioMixer.ts`
+     mixes from `startTime` for `duration` seconds while the picture and the waveform read
+     `startTime`/`endTime`. There is no clip linking yet; when linked separate-track clips land,
+     `audioCounterparts` returns one more span per linked partner and the invariant covers them
+     unchanged.
+  2. *Lengths and ranges.* Every number is finite, `duration > 0` and equals `endTime - startTime`,
+     `timelinePosition >= 0`, `0 <= startTime < endTime <= source duration` (an extendable clip's
+     pair is `0` / `duration` instead), and the clip's source and track exist.
+  3. *No overlap.* No two clips on one row overlap by more than `OVERLAP_EPSILON` (the model never
+     imports captions, the one importer allowed to keep overlaps).
+  4. *Waveforms.* A clip whose source has audio resolves, after any load too, to that source's own
+     peaks, and `getPeaksForRange` gives it a non-empty window of them.
+  5. *Round trip.* save → load hands back the saved project and library (only the sources a clip
+     uses, as `saveProject` writes), and a second save writes the same index and the same media
+     bytes. **Exception:** `project.modified`, which a load stamps with the time, is blanked in both
+     before comparing. (JSON writes `-0` as `0`; the fixture peaks avoid `0` so they survive exactly.)
+  6. *Undo / redo.* Undo then redo (and redo then undo) returns the identical state, byte for byte
+     as JSON, with the same stack depths; and every `undo` lands on exactly the project the model
+     recorded before the edit it undoes (`redo` likewise).
+  7. *Per-op postconditions* (`checkPostcondition`): every clip an edit does not name is unchanged
+     (a ripple's downstream clips may change `timelinePosition` only); split halves tile the whole and
+     keep playing the same source at every instant; a move changes only row and position; an end
+     trim never moves the start or in point, a start trim never moves the end or the source under
+     the clip.
+
+  **Running it.** CI runs 200 sequences on the fixed seed `0x5eed0349` (about 2 s). A failure prints
+  fast-check's shrunk counterexample — the op list — with the seed and path; paste the list into
+  `runSequence([...])` in `timelineInvariants.counterexamples.test.ts` to keep it. Locally,
+  `pnpm --filter=@escapesuite/artist test:fuzz` runs 5,000 (`ARTIST_FUZZ_RUNS`, about a minute), and
+  `ARTIST_FUZZ_SEED=<n>` picks another seed.
+
+  **Adding an operation.** Add a member to `Op` and a `case` to `applyOp` in `src/test/timelineModel.ts`
+  that calls what the editor's gesture calls (its hook's helpers and store actions, never
+  `useEditorStore.setState`), say in `checkPostcondition` what the op may change, and give it an
+  arbitrary (with a weight) in the property test's `opArbitrary`. Indices into clips, tracks and
+  sources are taken modulo the list at the moment the op runs, so every generated sequence is valid
+  and shrinks to a smaller valid one. The per-step invariants apply to the new op with no further
+  work.
