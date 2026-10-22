@@ -356,6 +356,14 @@ export interface Clip {
    * means the whole frame.
    */
   crop?: ClipCrop;
+  /**
+   * The clips edited as one with this one (ESCSUITE-355): every clip carrying
+   * the same id. A take's parts get one when they are placed, so a split, a
+   * delete, a ripple delete or a drag of one acts on all of them. Absent means
+   * linked to nothing, which is every clip that is not part of a take. See
+   * `store/linkedClips.ts`.
+   */
+  linkGroupId?: string;
 }
 
 /**
@@ -713,7 +721,12 @@ export interface EditorState {
    * rather than lands on top. An empty list places nothing and records nothing.
    */
   placeTakeOnTimeline: (parts: TakeClipPart[]) => void;
-  rippleDeleteClip: (clipId: string) => void;
+  /**
+   * `alone` (ESCSUITE-355) acts on `clipId` only. Without it every clip linked
+   * to `clipId` is ripple deleted with it, each closing the gap on its own row.
+   * A linked clip on a locked track is left where it is.
+   */
+  rippleDeleteClip: (clipId: string, alone?: boolean) => void;
   /**
    * **A refused write says so** (ESCSUITE-87).
    *
@@ -768,7 +781,8 @@ export interface EditorState {
    * `hooks/useGestureHistory.ts` is the one mechanism that gets this right; the
    * gesture hooks go through its `commit`.
    */
-  removeClipFromTimeline: (clipId: string) => boolean;
+  /** `alone` as on `rippleDeleteClip` (ESCSUITE-355). */
+  removeClipFromTimeline: (clipId: string, alone?: boolean) => boolean;
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => boolean;
   updateClip: (clipId: string, updates: Partial<Clip>, skipHistory?: boolean) => boolean;
   /**
@@ -795,7 +809,19 @@ export interface EditorState {
     origin: TrimOrigin,
     skipHistory?: boolean
   ) => boolean;
-  splitClip: (clipId: string, splitTime: number) => void;
+  /**
+   * Split at `splitTime` seconds into the clip. Every clip linked to it that
+   * spans the same timeline time is split there too, in the same undo step,
+   * unless `alone` (ESCSUITE-355). A linked clip on a locked track is left
+   * whole.
+   */
+  splitClip: (clipId: string, splitTime: number, alone?: boolean) => void;
+  /**
+   * Take `clipId` out of its link group (ESCSUITE-355). The last clip left in
+   * a group is unlinked too. `false` for a clip that is not linked, or not on
+   * the timeline; one undo step otherwise.
+   */
+  unlinkClip: (clipId: string) => boolean;
   moveClipToTrack: (clipId: string, trackId: string) => boolean;
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => boolean;
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => boolean;
@@ -851,6 +877,13 @@ export interface EditorState {
   clearMultiSelection: () => void;
   moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
   /**
+   * `moveSelectedClips` over the clips `clipIds` names rather than the
+   * selection (ESCSUITE-355): the clip drag passes a clip and the clips linked
+   * to it. Refuses (writes nothing) when any of them sits on, or would land
+   * on, a locked track.
+   */
+  moveClips: (clipIds: ReadonlySet<string>, deltaTime: number, deltaTrack: number) => void;
+  /**
    * `boolean` since ESCSUITE-101, the same contract as `pasteClips` below:
    * `false` when the selection names no clip actually on the timeline (every
    * id a ghost — ESCSUITE-100's belt-and-braces shape, applied to the
@@ -859,7 +892,11 @@ export interface EditorState {
    * all-or-nothing, the same as `pasteClips`'s lock check below) — no state
    * changed, no undo entry pushed.
    */
-  deleteSelectedClips: () => boolean;
+  /**
+   * Deletes the clips linked to each selected one too, unless `alone`
+   * (ESCSUITE-355); a linked clip on a locked track is left in place.
+   */
+  deleteSelectedClips: (alone?: boolean) => boolean;
   copySelectedClips: () => void;
   /**
    * `boolean` for the same reason as the clip actions above (ESCSUITE-87):

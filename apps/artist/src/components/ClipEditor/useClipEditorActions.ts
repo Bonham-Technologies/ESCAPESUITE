@@ -141,6 +141,8 @@ export interface ClipEditorActions {
   burstGesture: BurstGestureHandlers;
   handleSplitAtPlayhead: () => void;
   handleDeleteClip: () => void;
+  /** Unlink the selected clip, or `undefined` when it is linked to nothing (ESCSUITE-355). */
+  handleUnlinkClip: (() => void) | undefined;
   handleGoToClip: () => void;
   handleTransformChange: (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => void;
   handleDuplicate: () => void;
@@ -278,6 +280,16 @@ export function useClipEditorActions(): ClipEditorActions {
       removeClipFromTimeline(selectedClip.id);
     }
   }, [selectedClip, removeClipFromTimeline]);
+
+  const isLinked = useEditorStore((state) =>
+    selectedClip?.linkGroupId !== undefined &&
+    state.project.timeline.clips.some((c) => c.id !== selectedClip.id && c.linkGroupId === selectedClip.linkGroupId)
+  );
+  const unlinkClip = useEditorStore((state) => state.unlinkClip);
+  const unlinkSelected = useCallback(() => {
+    if (selectedClip) unlinkClip(selectedClip.id);
+  }, [selectedClip, unlinkClip]);
+  const handleUnlinkClip = isLinked ? unlinkSelected : undefined;
 
   const handleGoToClip = useCallback(() => {
     if (!selectedClip) return;
@@ -645,6 +657,7 @@ export function useClipEditorActions(): ClipEditorActions {
     burstGesture,
     handleSplitAtPlayhead,
     handleDeleteClip,
+    handleUnlinkClip,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,

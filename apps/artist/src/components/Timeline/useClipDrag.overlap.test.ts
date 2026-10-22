@@ -31,6 +31,7 @@ let actions: Pick<
   | 'setSelectedClipId'
   | 'toggleClipSelection'
   | 'moveSelectedClips'
+  | 'moveClips'
   | 'setClipTimelinePosition'
   | 'moveClipToTrack'
   | 'splitClip'
@@ -65,6 +66,7 @@ beforeEach(() => {
     setSelectedClipId: vi.fn(state.setSelectedClipId),
     toggleClipSelection: vi.fn(state.toggleClipSelection),
     moveSelectedClips: vi.fn(state.moveSelectedClips),
+    moveClips: vi.fn(state.moveClips),
     setClipTimelinePosition: vi.fn(state.setClipTimelinePosition),
     moveClipToTrack: vi.fn(state.moveClipToTrack),
     splitClip: vi.fn(state.splitClip),

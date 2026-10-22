@@ -60,6 +60,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
   const setSelectedClipId = useEditorStore((state) => state.setSelectedClipId);
   const toggleClipSelection = useEditorStore((state) => state.toggleClipSelection);
   const moveSelectedClips = useEditorStore((state) => state.moveSelectedClips);
+  const moveClips = useEditorStore((state) => state.moveClips);
   const setClipTimelinePosition = useEditorStore((state) => state.setClipTimelinePosition);
   const moveClipToTrack = useEditorStore((state) => state.moveClipToTrack);
   const updateTrack = useEditorStore((state) => state.updateTrack);
@@ -190,6 +191,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     setSelectedClipId,
     toggleClipSelection,
     moveSelectedClips,
+    moveClips,
     setClipTimelinePosition,
     moveClipToTrack,
     splitClip,

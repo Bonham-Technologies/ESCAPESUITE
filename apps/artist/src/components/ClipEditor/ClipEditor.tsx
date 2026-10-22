@@ -34,6 +34,7 @@ export function ClipEditor() {
     burstGesture,
     handleSplitAtPlayhead,
     handleDeleteClip,
+    handleUnlinkClip,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,
@@ -221,6 +222,7 @@ export function ClipEditor() {
         onGoToClip={handleGoToClip}
         onDuplicate={handleDuplicate}
         onSplit={handleSplitAtPlayhead}
+        onUnlink={handleUnlinkClip}
         disabled={trackLocked}
       />
     </div>

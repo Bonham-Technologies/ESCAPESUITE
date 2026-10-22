@@ -221,7 +221,11 @@ export const TimelineTrack = React.memo(function TimelineTrack({
       {clips.map((clip) => {
         const isDragging = dragState?.clipId === clip.id;
         // During bulk drag, show all multi-selected clips moving together
-        const isBulkDragging = !isDragging && dragState && selectedClipIds.has(clip.id) && selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1;
+        // ...and the clips linked to the dragged one (ESCSUITE-355).
+        const isBulkDragging = !isDragging && dragState && (
+          (selectedClipIds.has(clip.id) && selectedClipIds.has(dragState.clipId) && selectedClipIds.size > 1) ||
+          dragState.companions?.has(clip.id) === true
+        );
         const bulkDragDelta = isBulkDragging ? dragState.currentPosition - dragState.originalPosition : 0;
         const displayPosition = isDragging ? dragState.currentPosition : clip.timelinePosition + bulkDragDelta;
         const displayTrackId = isDragging ? dragState.currentTrackId : clip.trackId;

@@ -258,7 +258,7 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
               </button>
               <button
                 className={`${styles.toolButton} ${styles.deleteButton}`}
-                onClick={deleteSelectedClips}
+                onClick={() => deleteSelectedClips()}
                 disabled={selectionTouchesLockedTrack}
                 title={selectionTouchesLockedTrack ? 'Track is locked' : 'Delete selected clips (Delete)'}
               >

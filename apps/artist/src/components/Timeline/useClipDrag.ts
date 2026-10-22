@@ -82,11 +82,35 @@ import {
   trackRefusesDrop,
   wouldOverlap,
 } from '../../store/timelineSnapping';
+import { withLinkedClips } from '../../store/linkedClips';
 import type { Clip, ToolType, Track } from '../../store/types';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
 import { getSplitOffset, pointerTime, snapDragPosition } from './timelineGeometry';
 import type { DragState } from './types';
 import { useTrackAreaCache } from './useTrackAreaCache';
+
+/**
+ * Every clip a drop of `clipId` moves (ESCSUITE-355): the selection when the
+ * clip is in it, else the clip — plus, unless `alone`, the clips linked to
+ * any of those. The preview's companions and the commit both read this, so
+ * the boxes that follow the ghost are the boxes the drop moves.
+ */
+function movingClipIds(
+  clips: Clip[],
+  selectedClipIds: Set<string>,
+  clipId: string,
+  alone: boolean
+): Set<string> {
+  const base = selectedClipIds.has(clipId) ? selectedClipIds : new Set([clipId]);
+  return alone ? new Set(base) : withLinkedClips(clips, base);
+}
+
+/** `moving` without `clipId`, or nothing when that leaves none. */
+function companionsOf(moving: ReadonlySet<string>, clipId: string): ReadonlySet<string> | undefined {
+  const others = new Set(moving);
+  others.delete(clipId);
+  return others.size > 0 ? others : undefined;
+}
 
 /** What a clip drag needs that it cannot reach on its own. */
 export interface ClipDragDeps {
@@ -116,6 +140,11 @@ export interface ClipDragDeps {
    */
   moveSelectedClips: (deltaTime: number, deltaTrack: number) => void;
   /**
+   * The store's `moveClips`: a drag of a linked clip moves the clips linked to
+   * it too, in one write (ESCSUITE-355).
+   */
+  moveClips: (clipIds: ReadonlySet<string>, deltaTime: number, deltaTrack: number) => void;
+  /**
    * The store's `setClipTimelinePosition`. The trailing `skipHistory` is
    * ESCSUITE-79's: a drop that changed the clip's row as well as its time has
    * already pushed the gesture's undo entry through `moveClipToTrack`, so this
@@ -128,7 +157,8 @@ export interface ClipDragDeps {
    * for the position write to join, so the drop commits nothing at all.
    */
   moveClipToTrack: (clipId: string, trackId: string) => boolean;
-  splitClip: (clipId: string, splitTime: number) => void;
+  /** `alone` is the Alt key: split this clip and none it is linked to (ESCSUITE-355). */
+  splitClip: (clipId: string, splitTime: number, alone?: boolean) => void;
 }
 
 /** The drag in progress, and the way to start one. */
@@ -151,6 +181,7 @@ export function useClipDrag({
   setSelectedClipId,
   toggleClipSelection,
   moveSelectedClips,
+  moveClips,
   setClipTimelinePosition,
   moveClipToTrack,
   splitClip,
@@ -184,6 +215,12 @@ export function useClipDrag({
    * deleted outright rather than kept as an unread field (ESCSUITE-181).
    */
   const offsetSecondsRef = useRef(0);
+  /**
+   * Whether Alt is held (ESCSUITE-355): the drop then moves the dragged clip,
+   * or the selection, without the clips linked to it. Read at the mousedown and
+   * at every move, so pressing or letting go of Alt mid-drag counts.
+   */
+  const aloneRef = useRef(false);
   const trackArea = useTrackAreaCache();
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -196,6 +233,7 @@ export function useClipDrag({
     // than a resurrection of the finished drag.
     const drag = dragRef.current;
     if (!drag) return;
+    aloneRef.current = e.altKey;
 
     const area = trackArea.read(container);
 
@@ -209,6 +247,17 @@ export function useClipDrag({
     const x = e.clientX - area.left + container.scrollLeft - offsetXNow;
     let newPosition = pixelsToTime(x, pixelsPerSecond);
     newPosition = Math.max(0, newPosition);
+
+    // A clip moving with others stops where the earliest of them reaches 0
+    // (ESCSUITE-355): each one clamped at 0 on its own would land out of step
+    // with the rest. Unchanged for a clip moving alone, whose own floor is 0.
+    const moving = movingClipIds(clips, selectedClipIds, drag.clipId, e.altKey);
+    let earliest = drag.originalPosition;
+    for (const clip of clips) {
+      if (moving.has(clip.id)) earliest = Math.min(earliest, clip.timelinePosition);
+    }
+    const floor = drag.originalPosition - earliest;
+    newPosition = Math.max(floor, newPosition);
 
     // Apply snapping if enabled
     let snappedPosition: number | null = null;
@@ -228,6 +277,12 @@ export function useClipDrag({
       }
     }
 
+    // A snap point below the floor is out of reach too.
+    if (newPosition < floor) {
+      newPosition = floor;
+      snappedPosition = null;
+    }
+
     // Determine target track based on mouse Y position, against the rows this
     // gesture measured when it began. Only the scroll offset is read per move.
     const pointerY = e.clientY - area.top + container.scrollTop;
@@ -243,6 +298,7 @@ export function useClipDrag({
       currentTrackId: targetTrackId,
       currentPosition: newPosition,
       snappedPosition,
+      companions: companionsOf(moving, drag.clipId),
     };
     dragRef.current = next;
     setDragState(next);
@@ -257,7 +313,13 @@ export function useClipDrag({
 
         // Bulk drag: the dragged clip is part of a multi-selection, so the
         // whole selection moves — in time, across rows, or both (ESCSUITE-80).
-        if (selectedClipIds.has(drag.clipId) && selectedClipIds.size > 1) {
+        // A clip linked to others moves them with it (ESCSUITE-355): its
+        // drop is the bulk drop below, over the clip and its partners, and
+        // so is refused whole when any of them cannot land.
+        const moving = movingClipIds(clips, selectedClipIds, drag.clipId, aloneRef.current);
+        const linkedMove = moving.size > (selectedClipIds.has(drag.clipId) ? selectedClipIds.size : 1);
+
+        if ((selectedClipIds.has(drag.clipId) && selectedClipIds.size > 1) || linkedMove) {
           const deltaTrack = trackIndexDelta(
             tracks,
             drag.originalTrackId,
@@ -276,9 +338,10 @@ export function useClipDrag({
             // All or nothing. One member off the stack or onto another clip
             // vetoes the drop entire, rather than the group arriving with some
             // of its clips stacked up against the edge.
-            canMoveSelectedClips({ clips, tracks, selectedClipIds, deltaTime, deltaTrack })
+            canMoveSelectedClips({ clips, tracks, selectedClipIds: moving, deltaTime, deltaTrack })
           ) {
-            moveSelectedClips(deltaTime, deltaTrack);
+            if (linkedMove) moveClips(moving, deltaTime, deltaTrack);
+            else moveSelectedClips(deltaTime, deltaTrack);
           }
         } else {
           // Single clip move
@@ -351,7 +414,7 @@ export function useClipDrag({
       const splitTimeRelative = getSplitOffset(clickTime, clip.timelinePosition, clip.duration);
 
       if (splitTimeRelative !== null) {
-        splitClip(clip.id, splitTimeRelative);
+        splitClip(clip.id, splitTimeRelative, e.altKey);
       }
     },
     [tracks, pixelsPerSecond, splitClip, trackContainerRef]
@@ -383,6 +446,7 @@ export function useClipDrag({
       const track = tracks.find(t => t.id === clip.trackId);
       if (!track || track.locked) return;
 
+      aloneRef.current = e.altKey;
       const clipElement = e.currentTarget as HTMLElement;
       const clipRect = clipElement.getBoundingClientRect();
       const offsetX = e.clientX - clipRect.left;
@@ -405,6 +469,7 @@ export function useClipDrag({
         currentTrackId: clip.trackId,
         currentPosition: clip.timelinePosition,
         snappedPosition: null,
+        companions: companionsOf(movingClipIds(clips, selectedClipIds, clip.id, e.altKey), clip.id),
       };
       dragRef.current = initial;
       setDragState(initial);

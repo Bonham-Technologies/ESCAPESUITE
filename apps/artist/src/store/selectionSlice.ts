@@ -12,8 +12,9 @@ import { calculateTimelineDuration } from './projectFactory';
 import { anyClipOnLockedTrack, lockedTrackIds } from './trackLock';
 import { pruneSelection } from './selectionPrune';
 import { firstFreeGroupStart } from './timelineSnapping';
+import { relinkCopies, withLinkedClips } from './linkedClips';
 
-export type SelectionSlice = Pick<EditorState, 'selectedClipId' | 'selectedClipIds' | 'selectedTrackId' | 'clipboard' | 'setSelectedClipId' | 'setSelectedTrackId' | 'toggleClipSelection' | 'selectClipsInRange' | 'clearMultiSelection' | 'moveSelectedClips' | 'deleteSelectedClips' | 'copySelectedClips' | 'pasteClips' | 'muteSelectedClips' | 'unmuteSelectedClips'>;
+export type SelectionSlice = Pick<EditorState, 'selectedClipId' | 'selectedClipIds' | 'selectedTrackId' | 'clipboard' | 'setSelectedClipId' | 'setSelectedTrackId' | 'toggleClipSelection' | 'selectClipsInRange' | 'clearMultiSelection' | 'moveSelectedClips' | 'moveClips' | 'deleteSelectedClips' | 'copySelectedClips' | 'pasteClips' | 'muteSelectedClips' | 'unmuteSelectedClips'>;
 
 export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSlice> = (set, get) => ({
   selectedClipId: null,
@@ -54,15 +55,20 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     selectedClipId: null,
   }),
 
-  moveSelectedClips: (deltaTime: number, deltaTrack: number) => set((state) => {
-    if (state.selectedClipIds.size === 0) return state;
+  moveSelectedClips: (deltaTime: number, deltaTrack: number) => get().moveClips(get().selectedClipIds, deltaTime, deltaTrack),
+
+  // ESCSUITE-355: the selection's move over any set of ids, so the clip drag
+  // can move a clip and the clips linked to it as one, through the same lock
+  // checks and the same single undo entry.
+  moveClips: (clipIds: ReadonlySet<string>, deltaTime: number, deltaTrack: number) => set((state) => {
+    if (clipIds.size === 0) return state;
 
     const tracks = state.project.timeline.tracks;
     const sortedTracks = [...tracks].sort((a, b) => a.index - b.index);
     const trackIndexMap = new Map(sortedTracks.map((t, i) => [t.id, i]));
 
     const newClips = state.project.timeline.clips.map(clip => {
-      if (!state.selectedClipIds.has(clip.id)) return clip;
+      if (!clipIds.has(clip.id)) return clip;
 
       const updatedClip = { ...clip };
 
@@ -92,11 +98,11 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     // clip: an unselected clip's origin and landing trackId are identical
     // (moveSelectedClips leaves it untouched), so testing it too would refuse
     // the whole move whenever ANY clip anywhere sits on a locked track,
-    // selected or not.
+    // moved or not.
     const locked = lockedTrackIds(tracks);
     const original = state.project.timeline.clips;
     for (let i = 0; i < original.length; i++) {
-      if (!state.selectedClipIds.has(original[i].id)) continue;
+      if (!clipIds.has(original[i].id)) continue;
       if (locked.has(original[i].trackId) || locked.has(newClips[i].trackId)) return state;
     }
 
@@ -123,7 +129,7 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
   // undo/redo means a ghost should rarely reach here at all, the same way
   // `pasteClips`'s "track no longer on the timeline" check rarely fires now
   // that `removeTrack`/`removeSourceVideosPermanently` prune the clipboard themselves.
-  deleteSelectedClips: () => {
+  deleteSelectedClips: (alone?: boolean) => {
     const state = get();
     if (state.selectedClipIds.size === 0) return false;
 
@@ -131,10 +137,21 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
     // Reuses pruneSelection's own existing-ids Set rather than an O(n*m)
     // `filter(id => clips.some(...))` — passing `null` for selectedClipId
     // asks only about the ids Set, which is all this needs.
-    const toDelete = pruneSelection(clips, null, state.selectedClipIds).selectedClipIds;
-    if (toDelete.size === 0) return false; // every selected id is a ghost
+    const selected = pruneSelection(clips, null, state.selectedClipIds).selectedClipIds;
+    if (selected.size === 0) return false; // every selected id is a ghost
 
-    if (anyClipOnLockedTrack(clips, state.project.timeline.tracks, toDelete)) return false; // ESCSUITE-84
+    if (anyClipOnLockedTrack(clips, state.project.timeline.tracks, selected)) return false; // ESCSUITE-84
+
+    // ESCSUITE-355: the clips linked to the selection go with it, except the
+    // ones a lock holds — the selection's own lock refused above.
+    const toDelete = new Set(selected);
+    if (!alone) {
+      const locked = lockedTrackIds(state.project.timeline.tracks);
+      for (const id of withLinkedClips(clips, selected)) {
+        const clip = clips.find((c) => c.id === id);
+        if (clip && !locked.has(clip.trackId)) toDelete.add(id);
+      }
+    }
 
     set((s) => {
       const newClips = s.project.timeline.clips.filter((clip) => !toDelete.has(clip.id));
@@ -205,11 +222,13 @@ export const createSelectionSlice: StateCreator<EditorState, [], [], SelectionSl
       state.currentTime
     );
 
-    const newClips = state.clipboard.map(clip => ({
+    // ESCSUITE-355: copies of linked clips are linked to each other, never to
+    // the clips they were copied from.
+    const newClips = relinkCopies(state.clipboard.map(clip => ({
       ...cloneClip(clip),
       id: uuidv4(),
       timelinePosition: clip.timelinePosition - minPosition + start,
-    }));
+    })));
 
     // A clone keeps its clipboard trackId, and that track can be gone by the
     // time paste runs — `removeTrack`/`removeSourceVideosPermanently` prune

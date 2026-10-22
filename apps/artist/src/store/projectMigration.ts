@@ -575,6 +575,15 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     if (candidate?.crop !== undefined && !isValidCrop(candidate?.crop)) {
       return { ok: false, reason: `Clip "${id}" has an invalid crop` };
     }
+    // ESCSUITE-355. Absent is every clip that is not part of a take, and every
+    // clip of a project written before links existed; anything else must be
+    // an id the store can compare.
+    if (
+      candidate?.linkGroupId !== undefined &&
+      (typeof candidate.linkGroupId !== 'string' || candidate.linkGroupId === '')
+    ) {
+      return { ok: false, reason: `Clip "${id}" has an invalid linkGroupId` };
+    }
 
     // ESCSUITE-304 (review round 1): an overlay a pre-fix trim drove to a
     // length at or below zero is repaired by the migration to the length the

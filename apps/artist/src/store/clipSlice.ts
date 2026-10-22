@@ -6,13 +6,14 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { StateCreator } from 'zustand';
-import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart, TrimOrigin } from './types';
+import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart, TrimOrigin, SourceVideo } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
 import { cloneClip } from '../utils/deepClone';
 import { splitAnimation, trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
-import { clipOnLockedTrack, isTrackLocked } from './trackLock';
+import { clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock';
+import { deletableWithLinks, linkedPartners, withoutLink } from './linkedClips';
 import { pruneSelection } from './selectionPrune';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
@@ -22,7 +23,82 @@ import {
   strokeForPlacement,
 } from '../utils/overlayPlacement';
 
-export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'unlinkClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+
+/**
+ * How near a linked clip's edge a cut may fall and still count as falling on
+ * it (ESCSUITE-355): the keyframe tolerance, a millisecond.
+ */
+const LINK_EDGE_EPSILON = KEYFRAME_TIME_EPSILON;
+
+/**
+ * The two halves of `clip` split `splitTime` seconds in, or `null` when that
+ * is not strictly inside it. Both halves are new clips with new ids; neither
+ * is written anywhere.
+ */
+function splitHalves(clip: Clip, splitTime: number, sourceVideos: SourceVideo[]): [Clip, Clip] | null {
+  // splitTime is relative to the clip's start on the timeline, which is
+  // also the unit keyframes are stored in (0 = clip start) — so it doubles
+  // as the split offset splitAnimation needs.
+  const sourceTime = clip.startTime + splitTime;
+
+  // Validate split point is within clip bounds
+  if (sourceTime <= clip.startTime || sourceTime >= clip.endTime) {
+    return null;
+  }
+
+  const firstDuration = sourceTime - clip.startTime;
+  const secondDuration = clip.endTime - sourceTime;
+
+  // ESCSUITE-95: `{ ...clip }` alone would hand both halves the same
+  // `animation` and `transform` (and effects/transition/mask/stroke/
+  // textData/shapeData) references. `cloneClip` (structuredClone, already
+  // used by duplicateClip) gives each half its own deep copy of the whole
+  // clip up front; `splitAnimation` then rebases the keyframes and
+  // reassigns the in/out presets instead of leaving the cloned `animation`
+  // duplicated on both halves. A clip with no animation has nothing to
+  // split, so both halves keep `undefined` exactly as before.
+  let firstAnimation = clip.animation;
+  let secondAnimation = clip.animation;
+  if (clip.animation) {
+    const split = splitAnimation(clip.animation, splitTime);
+    firstAnimation = split.first;
+    secondAnimation = split.second;
+  }
+
+  // ESCSUITE-304: a media clip's halves are two windows on its source, so
+  // the second starts where the first ends. An overlay or an image has no
+  // source timeline — its pair is always 0 / duration — and a second half
+  // that inherited the split offset as its `startTime` had that offset taken
+  // off its length by the next trim's `endTime - startTime` recompute.
+  const extendable = isExtendableClip(
+    clip,
+    sourceVideos.find((v) => v.id === clip.sourceVideoId)
+  );
+  const firstPair = extendable ? { startTime: 0, endTime: firstDuration } : { endTime: sourceTime };
+  const secondPair = extendable ? { startTime: 0, endTime: secondDuration } : { startTime: sourceTime };
+
+  const firstClip: Clip = {
+    ...cloneClip(clip),
+    id: uuidv4(),
+    ...firstPair,
+    duration: firstDuration,
+    name: `${clip.name} (1)`,
+    animation: firstAnimation,
+  };
+
+  const secondClip: Clip = {
+    ...cloneClip(clip),
+    id: uuidv4(),
+    ...secondPair,
+    duration: secondDuration,
+    timelinePosition: clip.timelinePosition + firstDuration,
+    name: `${clip.name} (2)`,
+    animation: secondAnimation,
+  };
+
+  return [firstClip, secondClip];
+}
 
 export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (set, get) => ({
   // Clip actions
@@ -141,6 +217,12 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           }
         : undefined;
 
+    // One recording, edited as one (ESCSUITE-355): every part of a take of
+    // more than one shares a link, so a split, a delete or a drag of the
+    // picture takes the microphone with it. A take of one part has nothing to
+    // link.
+    const linkGroupId = parts.length > 1 ? uuidv4() : undefined;
+
     parts.forEach((part, index) => {
       let trackId: string;
       if (index === 0 && primaryTrack) {
@@ -196,6 +278,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
           : {}),
         effects: { ...DEFAULT_EFFECTS },
         transition: { ...DEFAULT_TRANSITION },
+        ...(linkGroupId ? { linkGroupId } : {}),
       });
     });
 
@@ -214,7 +297,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     };
   }),
 
-  removeClipFromTimeline: (clipId: string) => {
+  removeClipFromTimeline: (clipId: string, alone?: boolean) => {
     const { clips, tracks } = get().project.timeline;
     if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
     // ESCSUITE-115: an id that names no clip is nothing to do — the same
@@ -222,8 +305,11 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     // state`), generalised here to report it too (ESCSUITE-87).
     if (!clips.some((c) => c.id === clipId)) return false;
 
+    // ESCSUITE-355: the clips linked to it go too, except one a lock holds.
+    const doomed = alone ? new Set([clipId]) : deletableWithLinks(clips, tracks, clipId);
+
     set((state) => {
-      const newClips = state.project.timeline.clips.filter((c) => c.id !== clipId);
+      const newClips = state.project.timeline.clips.filter((c) => !doomed.has(c.id));
       // ESCSUITE-101: pruneSelection generalises the old `selectedClipId ===
       // clipId ? null : ...` ternary to the whole selection — dropping clipId
       // from selectedClipIds too, which nothing here used to do.
@@ -248,26 +334,38 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   },
 
   // Ripple delete: remove clip and shift all subsequent clips on the same track
-  rippleDeleteClip: (clipId: string) => set((state) => {
+  rippleDeleteClip: (clipId: string, alone?: boolean) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const clipToDelete = state.project.timeline.clips.find((c) => c.id === clipId);
     if (!clipToDelete) return state;
 
-    const clipEnd = clipToDelete.timelinePosition + (clipToDelete.endTime - clipToDelete.startTime);
-    const clipDuration = clipToDelete.endTime - clipToDelete.startTime;
-    const trackId = clipToDelete.trackId;
+    // ESCSUITE-355: every linked clip is deleted with it, and each closes the
+    // gap on its own row — so the pieces after the cut move left together and
+    // stay in sync. A partner a lock holds refuses the whole ripple: the
+    // locked row could not close its gap, and every later piece on it would
+    // fall out of step with the rows that did.
+    const partners = linkedPartners(state.project.timeline.clips, clipToDelete);
+    if (!alone && partners.some((p) => isTrackLocked(state.project.timeline.tracks, p.trackId))) return state;
+    const doomedIds = new Set([clipId, ...(alone ? [] : partners.map((p) => p.id))]);
+    const doomed = state.project.timeline.clips.filter((c) => doomedIds.has(c.id));
 
     const newClips = state.project.timeline.clips
-      .filter((c) => c.id !== clipId)
+      .filter((c) => !doomedIds.has(c.id))
       .map((clip) => {
-        // Shift clips on the same track that come after the deleted clip
-        if (clip.trackId === trackId && clip.timelinePosition >= clipEnd) {
-          return {
-            ...clip,
-            timelinePosition: Math.max(0, clip.timelinePosition - clipDuration),
-          };
+        // Shift clips on the same track that come after a deleted clip, by
+        // the length of every deleted clip before them on that row.
+        let shift = 0;
+        for (const gone of doomed) {
+          const goneDuration = gone.endTime - gone.startTime;
+          if (gone.trackId === clip.trackId && clip.timelinePosition >= gone.timelinePosition + goneDuration) {
+            shift += goneDuration;
+          }
         }
-        return clip;
+        if (shift === 0) return clip;
+        return {
+          ...clip,
+          timelinePosition: Math.max(0, clip.timelinePosition - shift),
+        };
       });
 
     // ESCSUITE-101: see removeClipFromTimeline above — the same generalisation
@@ -490,74 +588,58 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     return true;
   },
 
-  splitClip: (clipId: string, splitTime: number) => set((state) => {
+  splitClip: (clipId: string, splitTime: number, alone?: boolean) => set((state) => {
     if (clipOnLockedTrack(state.project.timeline.clips, state.project.timeline.tracks, clipId)) return state; // ESCSUITE-84
     const clip = state.project.timeline.clips.find((c) => c.id === clipId);
     if (!clip) return state;
 
-    // splitTime is relative to the clip's start on the timeline, which is
-    // also the unit keyframes are stored in (0 = clip start) — so it doubles
-    // as the split offset splitAnimation needs.
-    const sourceTime = clip.startTime + splitTime;
+    const halves = splitHalves(clip, splitTime, state.sourceVideos);
+    if (!halves) return state;
+    const [firstClip] = halves;
 
-    // Validate split point is within clip bounds
-    if (sourceTime <= clip.startTime || sourceTime >= clip.endTime) {
-      return state;
+    // ESCSUITE-355: every linked clip the cut crosses is cut at the same
+    // timeline time, at its own offset into itself — a microphone captured
+    // half a second after the screen is split half a second earlier into its
+    // own clip. A link group is a segment, so the right halves, and any linked
+    // clip that lies wholly after the cut, join a new group; the left halves
+    // keep the old one. A linked clip on a locked track is left whole.
+    const cutAt = clip.timelinePosition + splitTime;
+    const locked = lockedTrackIds(state.project.timeline.tracks);
+    const replaced = new Map<string, [Clip, Clip]>([[clip.id, halves]]);
+    let rightGroup: string | undefined;
+    if (!alone && clip.linkGroupId) {
+      rightGroup = uuidv4();
+      for (const partner of linkedPartners(state.project.timeline.clips, clip)) {
+        if (locked.has(partner.trackId)) continue;
+        // A cut within a hair of a partner's edge is no cut of it: it would
+        // leave a sliver of a clip (ripple arithmetic leaves edges a float
+        // bit off).
+        const offset = cutAt - partner.timelinePosition;
+        if (offset < LINK_EDGE_EPSILON || partner.duration - offset < LINK_EDGE_EPSILON) continue;
+        const pair = splitHalves(partner, offset, state.sourceVideos);
+        if (pair) replaced.set(partner.id, pair);
+      }
     }
+    const regroup = (c: Clip): Clip => (rightGroup ? { ...c, linkGroupId: rightGroup } : c);
 
-    const firstDuration = sourceTime - clip.startTime;
-    const secondDuration = clip.endTime - sourceTime;
-
-    // ESCSUITE-95: `{ ...clip }` alone would hand both halves the same
-    // `animation` and `transform` (and effects/transition/mask/stroke/
-    // textData/shapeData) references. `cloneClip` (structuredClone, already
-    // used by duplicateClip) gives each half its own deep copy of the whole
-    // clip up front; `splitAnimation` then rebases the keyframes and
-    // reassigns the in/out presets instead of leaving the cloned `animation`
-    // duplicated on both halves. A clip with no animation has nothing to
-    // split, so both halves keep `undefined` exactly as before.
-    let firstAnimation = clip.animation;
-    let secondAnimation = clip.animation;
-    if (clip.animation) {
-      const split = splitAnimation(clip.animation, splitTime);
-      firstAnimation = split.first;
-      secondAnimation = split.second;
+    const newClips: Clip[] = [];
+    const added: Clip[] = [];
+    for (const c of state.project.timeline.clips) {
+      const pair = replaced.get(c.id);
+      if (pair) {
+        added.push(pair[0], regroup(pair[1]));
+      } else if (
+        rightGroup &&
+        c.linkGroupId === clip.linkGroupId &&
+        !locked.has(c.trackId) &&
+        c.timelinePosition >= cutAt - LINK_EDGE_EPSILON
+      ) {
+        newClips.push(regroup(c));
+      } else {
+        newClips.push(c);
+      }
     }
-
-    // ESCSUITE-304: a media clip's halves are two windows on its source, so
-    // the second starts where the first ends. An overlay or an image has no
-    // source timeline — its pair is always 0 / duration — and a second half
-    // that inherited the split offset as its `startTime` had that offset taken
-    // off its length by the next trim's `endTime - startTime` recompute.
-    const extendable = isExtendableClip(
-      clip,
-      state.sourceVideos.find((v) => v.id === clip.sourceVideoId)
-    );
-    const firstPair = extendable ? { startTime: 0, endTime: firstDuration } : { endTime: sourceTime };
-    const secondPair = extendable ? { startTime: 0, endTime: secondDuration } : { startTime: sourceTime };
-
-    const firstClip: Clip = {
-      ...cloneClip(clip),
-      id: uuidv4(),
-      ...firstPair,
-      duration: firstDuration,
-      name: `${clip.name} (1)`,
-      animation: firstAnimation,
-    };
-
-    const secondClip: Clip = {
-      ...cloneClip(clip),
-      id: uuidv4(),
-      ...secondPair,
-      duration: secondDuration,
-      timelinePosition: clip.timelinePosition + firstDuration,
-      name: `${clip.name} (2)`,
-      animation: secondAnimation,
-    };
-
-    const newClips = state.project.timeline.clips
-      .filter(c => c.id !== clipId)
-      .concat([firstClip, secondClip]);
+    newClips.push(...added);
 
     // ESCSUITE-101: the original clip is gone — replaced by the two halves —
     // so it has to leave selectedClipIds too if a multi-selection held it;
@@ -584,6 +666,34 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       history: pushToHistory(state),
     };
   }),
+
+  unlinkClip: (clipId: string) => {
+    const { clips, tracks } = get().project.timeline;
+    const clip = clips.find((c) => c.id === clipId);
+    if (!clip?.linkGroupId) return false;
+    if (clipOnLockedTrack(clips, tracks, clipId)) return false; // ESCSUITE-84
+
+    // A group of one links nothing, so the last partner left goes too —
+    // unless a lock holds it (ESCSUITE-84), when its now-lonely link is left
+    // as it is: harmless, since it names no other clip.
+    const partners = linkedPartners(clips, clip);
+    const last = partners.length === 1 && !isTrackLocked(tracks, partners[0].trackId) ? [partners[0].id] : [];
+    const unlink = new Set([clipId, ...last]);
+
+    set((state) => {
+      const newClips = state.project.timeline.clips.map((c) => (unlink.has(c.id) ? withoutLink(c) : c));
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: { ...state.project.timeline, clips: newClips },
+        },
+        history: pushToHistory(state),
+      };
+    });
+
+    return true;
+  },
 
   moveClipToTrack: (clipId: string, trackId: string) => {
     const { clips, tracks } = get().project.timeline;
@@ -843,8 +953,10 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       }
     }
 
+    // A copy is a new clip, linked to nothing (ESCSUITE-355): linked to the
+    // original's partners, a split of the copy would cut them too.
     const duplicatedClip: Clip = {
-      ...cloneClip(clip),
+      ...withoutLink(cloneClip(clip)),
       id: uuidv4(),
       timelinePosition: position,
       name: `${clip.name} (copy)`,
