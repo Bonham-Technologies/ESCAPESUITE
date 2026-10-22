@@ -2,7 +2,11 @@
  * Tests for waveform extraction utilities
  */
 
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { AudioSample, AudioSampleSink } from 'mediabunny';
 import { extractWaveformData, resamplePeaks, getPeaksForRange } from './waveform';
 import type { WaveformPeak } from '../store/types';
 import {
@@ -11,6 +15,20 @@ import {
   type AudioContextDoubles,
 } from '../test/doubles/audio';
 import { removeGlobal } from '../test/doubles/globals';
+import { floatWav } from '../test/fixtures/wavFixture';
+
+const MEDIA = resolve(dirname(fileURLToPath(import.meta.url)), '../test/fixtures/media');
+/** A committed media fixture, as a Blob (src/test/fixtures/media/README.md). */
+const mediaBlob = (name: string): Blob => new Blob([new Uint8Array(readFileSync(resolve(MEDIA, name)))]);
+
+/** `length` frames of a tone with a click every 997 frames, so bucket edges matter. */
+function signal(length: number, phase: number): Float32Array {
+  const out = new Float32Array(length);
+  for (let i = 0; i < length; i++) {
+    out[i] = Math.sin(i * 0.013 + phase) * 0.4 + (i % 997 === 0 ? 0.5 : 0);
+  }
+  return out;
+}
 
 describe('waveform utilities', () => {
   describe('resamplePeaks', () => {
@@ -342,5 +360,140 @@ describe('extractWaveformData', () => {
     } finally {
       restore();
     }
+  });
+});
+
+describe('extractWaveformData, streamed (ESCSUITE-338)', () => {
+  let audio: AudioContextDoubles | undefined;
+
+  afterEach(() => {
+    audio?.uninstall();
+    audio = undefined;
+    vi.restoreAllMocks();
+  });
+
+  it('gives exactly the whole-file decode\'s peaks for the same PCM, without decodeAudioData', async () => {
+    // Six seconds of 48 kHz stereo: past the point where the reducer stops
+    // holding samples, so the bucketing is the streamed one.
+    const left = signal(48000 * 6 + 123, 0);
+    const right = signal(48000 * 6 + 123, 1.7);
+
+    audio = installAudioContextDouble(createAudioBufferDouble([left, right], 48000));
+    const whole = await extractWaveformData(new Blob(['not a container']));
+    expect(audio.decodeCalls).toHaveLength(1);
+
+    const streamed = await extractWaveformData(new Blob([floatWav([left, right], 48000)]));
+
+    expect(audio.decodeCalls).toHaveLength(1);
+    expect(audio.created).toBe(1);
+    expect(streamed.peaks).toHaveLength(601);
+    expect(streamed).toEqual(whole);
+    expect(streamed.hasAudio).toBe(true);
+  });
+
+  it('reads a mono track, and one too short to stream, the same way', async () => {
+    const mono = signal(4410, 0.3);
+    audio = installAudioContextDouble(createAudioBufferDouble([mono], 44100));
+    const whole = await extractWaveformData(new Blob(['not a container']));
+
+    const streamed = await extractWaveformData(new Blob([floatWav([mono], 44100)]));
+
+    expect(streamed.peaks).toHaveLength(10);
+    expect(streamed).toEqual(whole);
+    expect(audio.decodeCalls).toHaveLength(1);
+  });
+
+  it('reports hasAudio false for a silent track, while still returning peaks', async () => {
+    const result = await extractWaveformData(new Blob([floatWav([new Float32Array(4800)])]));
+
+    expect(result.peaks).toHaveLength(10);
+    expect(result.hasAudio).toBe(false);
+  });
+
+  it('answers a container with no audio track with no peaks and no decode', async () => {
+    audio = installAudioContextDouble(createAudioBufferDouble([signal(4800, 0)], 48000));
+
+    const result = await extractWaveformData(mediaBlob('h264-faststart.mp4'));
+
+    expect(result).toEqual({ peaks: [], hasAudio: false });
+    expect(audio.created).toBe(0);
+  });
+
+  it('answers an audio track with no samples with no peaks', async () => {
+    audio = installAudioContextDouble(null);
+
+    const result = await extractWaveformData(new Blob([floatWav([new Float32Array(0)])]));
+
+    expect(result).toEqual({ peaks: [], hasAudio: false });
+    expect(audio.created).toBe(0);
+  });
+
+  it('falls back to the whole-file decode for a codec this browser cannot decode', async () => {
+    // jsdom has no AudioDecoder, so the AAC track cannot be streamed.
+    audio = installAudioContextDouble(createAudioBufferDouble([signal(4800, 0)], 48000));
+
+    const result = await extractWaveformData(mediaBlob('video-with-aac.mp4'));
+
+    expect(audio.decodeCalls).toHaveLength(1);
+    expect(result.peaks).toHaveLength(10);
+  });
+
+  it('warns and falls back to the whole-file decode when the streamed decode fails part-way', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.spyOn(AudioSampleSink.prototype, 'samples').mockImplementation(async function* () {
+      yield* [];
+      throw new Error('decoder error');
+    });
+    const channel = signal(4800, 0);
+    audio = installAudioContextDouble(createAudioBufferDouble([channel], 48000));
+
+    const result = await extractWaveformData(new Blob([floatWav([channel])]));
+
+    expect(warn).toHaveBeenCalledWith(
+      'Streamed waveform decode failed; decoding the whole file instead:',
+      expect.any(Error)
+    );
+    expect(audio.decodeCalls).toHaveLength(1);
+    expect(result.peaks).toHaveLength(10);
+  });
+
+  it('drops the priming frames a track places before zero, as decodeAudioData does', async () => {
+    // An MP4 edit list's AAC priming arrives as frames with negative
+    // timestamps: here a whole sample before zero and half of the next one.
+    const planar = (values: number[], timestamp: number) =>
+      new AudioSample({
+        data: Float32Array.from(values),
+        format: 'f32-planar',
+        numberOfChannels: 1,
+        sampleRate: 4,
+        timestamp,
+      });
+    vi.spyOn(AudioSampleSink.prototype, 'samples').mockImplementation(async function* () {
+      yield planar([0.9, 0.9], -1);
+      yield planar([0.9, 0.5, -0.25], -0.25);
+      yield planar([0.125, -0.875], 0.5);
+    });
+    audio = installAudioContextDouble(null);
+
+    const result = await extractWaveformData(new Blob([floatWav([new Float32Array(4)], 4)]), 2);
+
+    expect(audio.created).toBe(0);
+    expect(result.peaks).toEqual([
+      { min: -0.25, max: 0.5 },
+      { min: -0.875, max: 0.125 },
+    ]);
+  });
+
+  it('leaves MP3 to the whole-file decode, which trims its encoder delay', async () => {
+    // Three MPEG-1 Layer III frames (128 kb/s, 44.1 kHz, 417 bytes each).
+    const frame = new Uint8Array(417);
+    frame.set([0xff, 0xfb, 0x90, 0x64]);
+    const mp3 = new Blob([frame, frame, frame]);
+    audio = installAudioContextDouble(createAudioBufferDouble([signal(4410, 0)], 44100));
+
+    const result = await extractWaveformData(mp3);
+
+    expect(audio.decodeCalls).toHaveLength(1);
+    expect(result.peaks).toHaveLength(10);
   });
 });

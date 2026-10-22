@@ -17,6 +17,7 @@ import {
   THUMBNAIL_SEEK_TIMEOUT_MS,
 } from './videoProcessor'
 import { buildWebm, hasNonEmptyCues } from '../test/fixtures/webmFixture'
+import { floatWav } from '../test/fixtures/wavFixture'
 import { getThumbnail, getVideo, storeVideo } from './storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
@@ -969,18 +970,11 @@ describe('videoProcessor', () => {
   })
 
   describe('generateAudioThumbnail', () => {
-    let audio: AudioContextDoubles
+    /** 320 peaks of a swelling envelope: two per pixel column of the default strip. */
+    const swell = Array.from({ length: 320 }, (_, i) => ({ min: -i / 400, max: i / 400 }))
 
-    beforeEach(() => {
-      audio = installAudioContextDouble(createAudioBufferDouble([tone(1600)]))
-    })
-
-    afterEach(() => {
-      audio.uninstall()
-    })
-
-    it('paints a waveform strip, closes the AudioContext and encodes JPEG', async () => {
-      const blob = await generateAudioThumbnail(new File(['a'], 'song.mp3', { type: 'audio/mp3' }))
+    it('paints a waveform strip from the peaks and encodes JPEG', async () => {
+      const blob = await generateAudioThumbnail(swell)
 
       const ctx = getLastCanvasContext()!
       expect(ctx.canvas.width).toBe(160)
@@ -989,38 +983,50 @@ describe('videoProcessor', () => {
       expect(ctx.argsFor('fillRect')).toEqual([[0, 0, 160, 90]])
       expect(ctx.argsFor('moveTo')).toHaveLength(160)
       expect(ctx.argsFor('lineTo')).toHaveLength(160)
+      // Each column spans the loudest of the peaks under it: the last column
+      // covers peaks 318 and 319, so it reaches 319/400 of the 0.9 half-height.
+      expect(ctx.argsFor('moveTo')[159]).toEqual([159, 45 - (319 / 400) * 45 * 0.9])
+      expect(ctx.argsFor('lineTo')[159]).toEqual([159, 45 + (319 / 400) * 45 * 0.9])
       expect(ctx.argsFor('stroke')).toHaveLength(1)
       // The note glyph is centred in the strip.
       expect(ctx.argsFor('fillText')).toEqual([['♪', 80, 45]])
-      expect(audio.closed).toBe(1)
       expect(ctx.toBlobCalls).toEqual([{ type: 'image/jpeg', quality: 0.8 }])
       expect(blob.type).toBe('image/jpeg')
     })
 
+    it('decodes nothing: the strip is drawn from peaks already made', async () => {
+      const audio = installAudioContextDouble(createAudioBufferDouble([tone()]))
+      try {
+        await generateAudioThumbnail(swell)
+        expect(audio.created).toBe(0)
+      } finally {
+        audio.uninstall()
+      }
+    })
+
     it('honours a custom strip size', async () => {
-      await generateAudioThumbnail(new File(['a'], 'song.mp3', { type: 'audio/mp3' }), 40, 20)
+      await generateAudioThumbnail(swell, 40, 20)
       const ctx = getLastCanvasContext()!
       expect(ctx.canvas.width).toBe(40)
       expect(ctx.canvas.height).toBe(20)
       expect(ctx.argsFor('moveTo')).toHaveLength(40)
     })
 
+    it('draws the bare strip and its glyph for no peaks', async () => {
+      await generateAudioThumbnail([])
+      const ctx = getLastCanvasContext()!
+      expect(ctx.argsFor('moveTo')).toHaveLength(0)
+      expect(ctx.argsFor('fillText')).toEqual([['♪', 80, 45]])
+    })
+
     it('rejects when the canvas hands back no 2D context', async () => {
       failNextGetContext()
-      await expect(generateAudioThumbnail(new File(['a'], 'song.mp3', { type: 'audio/mp3' })))
-        .rejects.toThrow('Failed to get canvas context')
+      await expect(generateAudioThumbnail(swell)).rejects.toThrow('Failed to get canvas context')
     })
 
     it('rejects when the canvas produces no blob', async () => {
       setDefaultToBlobResult(null)
-      await expect(generateAudioThumbnail(new File(['a'], 'song.mp3', { type: 'audio/mp3' })))
-        .rejects.toThrow('Failed to generate audio thumbnail')
-    })
-
-    it('rejects when the audio cannot be decoded', async () => {
-      audio.buffer = null
-      await expect(generateAudioThumbnail(new File(['a'], 'song.mp3', { type: 'audio/mp3' })))
-        .rejects.toThrow('Unable to decode audio data')
+      await expect(generateAudioThumbnail(swell)).rejects.toThrow('Failed to generate audio thumbnail')
     })
   })
 
@@ -1045,6 +1051,25 @@ describe('videoProcessor', () => {
       expect(metadata.waveformData!.length).toBeGreaterThan(0)
       expect(await getThumbnail(metadata.id)).toBeDefined()
       expect(await (await getVideo(metadata.id))!.blob.text()).toBe('mp3 bytes')
+    })
+
+    // ESCSUITE-338: the strip and the timeline's peaks come from one decode.
+    it('decodes the audio once, for the peaks and the strip together', async () => {
+      await processAudioFile(mediaFile(['mp3 bytes'], 'song.mp3', 'audio/mp3'))
+
+      expect(audio.decodeCalls).toHaveLength(1)
+      expect(getLastCanvasContext()!.argsFor('moveTo')).toHaveLength(160)
+    })
+
+    it('decodes a WAV once, streamed, with no decodeAudioData at all', async () => {
+      const wav = floatWav([tone(48000), tone(48000)])
+
+      const metadata = await processAudioFile(mediaFile([wav], 'take.wav', 'audio/wav'))
+
+      expect(audio.decodeCalls).toHaveLength(0)
+      expect(metadata.waveformData).toHaveLength(100)
+      expect(metadata.hasAudio).toBe(true)
+      expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
     })
 
     it('assumes an audio file has audio when peak extraction throws', async () => {

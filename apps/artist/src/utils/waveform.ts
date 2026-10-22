@@ -3,11 +3,32 @@
  * Extracts peak envelope data from audio and video files for timeline visualization
  */
 
+import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, type InputAudioTrack } from 'mediabunny';
 import type { WaveformPeak } from '../store/types';
+import { PeakReducer, mixToMono, peaksFromPcm } from './waveformPeaks';
 
 /**
  * Extract waveform peak data from a media file (audio or video)
  * Returns an array of min/max peak values suitable for visualization
+ *
+ * Two ways in, one result (ESCSUITE-338). The file's audio track is decoded a
+ * chunk at a time through mediabunny (WebCodecs `AudioDecoder`, or mediabunny's
+ * own PCM reader for a WAV) and reduced to peaks as it arrives, so the decoded
+ * track is never held: memory stays at the peaks plus one decoder chunk, where
+ * a whole-file `decodeAudioData` held every sample as Float32 (~23 MB a minute
+ * of 48 kHz stereo). `PeakReducer` buckets exactly as the whole-buffer
+ * algorithm does, so the peaks are the ones that path gives for the same PCM.
+ *
+ * The whole-file `decodeAudioData` is kept as the fallback for what the
+ * streamed path cannot read: a container no mediabunny demuxer recognises, a
+ * codec this browser has no `AudioDecoder` for (or no `AudioDecoder` at all),
+ * MP3 (below), or a decode that fails part-way. A container mediabunny reads
+ * and finds no audio track in answers `hasAudio: false` with no decode.
+ *
+ * Peaks come out at the track's own sample rate, where `decodeAudioData`
+ * resampled to the AudioContext's (the output device's) rate; both bucket the
+ * same hundredth of a second. Measured differences are in the "Audio Waveform
+ * Visibility" reference doc.
  *
  * @param blob - The media file blob
  * @param samplesPerSecond - Number of peaks per second of audio (default: 100)
@@ -16,6 +37,91 @@ import type { WaveformPeak } from '../store/types';
 export async function extractWaveformData(
   blob: Blob,
   samplesPerSecond: number = 100
+): Promise<{ peaks: WaveformPeak[]; hasAudio: boolean }> {
+  let streamed: WaveformPeak[] | null = null;
+  try {
+    streamed = await streamWaveformPeaks(blob, samplesPerSecond);
+  } catch (error) {
+    console.warn('Streamed waveform decode failed; decoding the whole file instead:', error);
+  }
+  if (streamed) return { peaks: streamed, hasAudio: hasAudibleContent(streamed) };
+  return decodeWholeFileWaveform(blob, samplesPerSecond);
+}
+
+/** Whether any peak rises above silence (a heuristic `hasAudio` has always used). */
+function hasAudibleContent(peaks: WaveformPeak[]): boolean {
+  return peaks.some((peak) => Math.abs(peak.min) > 0.001 || Math.abs(peak.max) > 0.001);
+}
+
+/**
+ * The streamed path: the peaks of the file's primary audio track, decoded and
+ * reduced a chunk at a time. `[]` for a container with no audio track (or one
+ * with no samples); `null` when this path cannot read the file at all, so the
+ * caller falls back to the whole-file decode.
+ */
+async function streamWaveformPeaks(
+  blob: Blob,
+  samplesPerSecond: number
+): Promise<WaveformPeak[] | null> {
+  const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
+  try {
+    let track: InputAudioTrack | null;
+    try {
+      track = await input.getPrimaryAudioTrack();
+    } catch {
+      // No demuxer recognises the bytes; decodeAudioData may still.
+      return null;
+    }
+    if (!track) return [];
+    // MP3 is left to decodeAudioData: mediabunny does not apply the encoder
+    // delay and padding a LAME/Xing header declares, which decodeAudioData
+    // trims, so streamed peaks would sit ~25 ms late against the old ones.
+    if ((await track.getCodec()) === 'mp3') return null;
+    if (!(await track.canDecode())) return null;
+
+    let reducer: PeakReducer | null = null;
+    // Reused across chunks: one plane per channel the mix reads (at most two).
+    const planes: Float32Array[] = [];
+    for await (const sample of new AudioSampleSink(track).samples()) {
+      try {
+        // Frames before zero are codec priming (an MP4 edit list's, say),
+        // which decodeAudioData drops too. Opus pre-skip in a WebM is not
+        // skipped here: mediabunny's Matroska demuxer ignores it, but
+        // Chromium's AudioDecoder trims it itself (a CRAFT take's first chunk
+        // is 960 - 312 frames), so skipping it again would put peaks early.
+        const skip = Math.min(
+          sample.numberOfFrames,
+          Math.max(0, Math.round(-sample.timestamp * sample.sampleRate))
+        );
+        const frames = sample.numberOfFrames - skip;
+        if (frames === 0) continue;
+        reducer ??= new PeakReducer(sample.sampleRate, samplesPerSecond);
+        const channels = Math.min(2, sample.numberOfChannels);
+        const chunk: Float32Array[] = [];
+        for (let c = 0; c < channels; c++) {
+          if (!planes[c] || planes[c].length < frames) planes[c] = new Float32Array(frames);
+          const plane = planes[c].subarray(0, frames);
+          sample.copyTo(plane, { planeIndex: c, format: 'f32-planar', frameOffset: skip, frameCount: frames });
+          chunk.push(plane);
+        }
+        reducer.push(chunk);
+      } finally {
+        sample.close();
+      }
+    }
+    return reducer ? reducer.finish() : [];
+  } finally {
+    input.dispose();
+  }
+}
+
+/**
+ * The fallback: the whole file through `decodeAudioData`, every sample in
+ * memory at once. Never throws; a file with no decodable audio has no peaks.
+ */
+async function decodeWholeFileWaveform(
+  blob: Blob,
+  samplesPerSecond: number
 ): Promise<{ peaks: WaveformPeak[]; hasAudio: boolean }> {
   try {
     const arrayBuffer = await blob.arrayBuffer();
@@ -30,50 +136,15 @@ export async function extractWaveformData(
       return { peaks: [], hasAudio: false };
     }
 
-    // Get audio data from first channel (mono or left channel of stereo)
-    const channelData = audioBuffer.getChannelData(0);
-
-    // If stereo, average both channels for better representation
-    let audioData = channelData;
-    if (audioBuffer.numberOfChannels > 1) {
-      const rightChannel = audioBuffer.getChannelData(1);
-      audioData = new Float32Array(channelData.length);
-      for (let i = 0; i < channelData.length; i++) {
-        audioData[i] = (channelData[i] + rightChannel[i]) / 2;
-      }
-    }
-
-    // Calculate number of samples to output
-    const totalSamples = Math.ceil(audioBuffer.duration * samplesPerSecond);
-    const samplesPerPeak = Math.floor(audioData.length / totalSamples);
-
-    const peaks: WaveformPeak[] = [];
-
-    for (let i = 0; i < totalSamples; i++) {
-      const startSample = i * samplesPerPeak;
-      const endSample = Math.min(startSample + samplesPerPeak, audioData.length);
-
-      // Find min and max in this segment
-      let min = 0;
-      let max = 0;
-
-      for (let j = startSample; j < endSample; j++) {
-        const sample = audioData[j];
-        if (sample < min) min = sample;
-        if (sample > max) max = sample;
-      }
-
-      peaks.push({ min, max });
-    }
+    // The first channel, or the average of the first two for stereo and wider
+    const channels = [audioBuffer.getChannelData(0)];
+    if (audioBuffer.numberOfChannels > 1) channels.push(audioBuffer.getChannelData(1));
+    const audioData = mixToMono(channels, audioBuffer.length);
+    const peaks = peaksFromPcm(audioData, audioBuffer.sampleRate, samplesPerSecond);
 
     await audioContext.close();
 
-    // Check if there's actual audio content (not just silence)
-    const hasAudioContent = peaks.some(
-      (peak) => Math.abs(peak.min) > 0.001 || Math.abs(peak.max) > 0.001
-    );
-
-    return { peaks, hasAudio: hasAudioContent };
+    return { peaks, hasAudio: hasAudibleContent(peaks) };
   } catch (error) {
     console.warn('Failed to extract waveform data:', error);
     return { peaks: [], hasAudio: false };

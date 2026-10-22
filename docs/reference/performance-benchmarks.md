@@ -192,6 +192,32 @@ and round 2's before/after — what each fix moved, what is a dev-build artefact
 candidates with their status and the open follow-ups — in
 [docs/performance/2026-09-13-timeline-profile.md](docs/performance/2026-09-13-timeline-profile.md).
 
+**Waveform extraction memory** (ESCSUITE-338) is a one-off measurement, not a benchmark in
+`pnpm perf`: ESCAPEARTIST's `extractWaveformData` over a local fixture (not committed),
+before (the whole-file `decodeAudioData` code, verbatim) and after (the streamed mediabunny decode
+into `PeakReducer`), each in a fresh Chromium 141 headless shell against the artist dev server,
+three runs per arm. The figure is the renderer's peak RSS rise during the waveform step alone:
+`VmHWM` reset through `/proc/<pid>/clear_refs` after the file was fetched into a Blob, read again
+when the call returned. The fixtures are ffmpeg-generated stereo 48 kHz (a sine plus pink noise),
+Opus 96 kb/s in WebM and the same audio as 16-bit WAV; the page's AudioContext ran at 44.1 kHz,
+so the old path also resampled. Ranges are over the three runs (2026-10-21).
+
+| Fixture | Before: renderer peak RSS rise | After | Wall time before / after |
+|---|---|---|---|
+| 2 min Opus WebM (1.4 MB) | +96.7 MB | +31.1 MB | 0.80 s / 0.82 s |
+| 10 min Opus WebM (6.9 MB) | +473.0–473.4 MB | +101.4–101.7 MB | 3.4–3.7 s / 3.6–3.7 s |
+| 10 min 16-bit WAV (115 MB) | +620.9–621.8 MB | +99.7–101.0 MB | 2.1–2.2 s / 1.7–2.0 s |
+| 30 min Opus WebM (20.6 MB) | +1410.3 MB | +142.2 MB | 10.8 s / 10.9 s |
+
+Before grows linearly, ~47 MB per minute of audio (the decoded channels, a mono copy and the
+file's bytes); after grows sublinearly — 31 → 101 → 142 MB over 2 → 10 → 30 min (single runs at
+2 and 30 min) — because only the peaks (and the reducer's per-peak buckets) grow with length, on
+top of collectable decoder garbage, while the decoded audio is never held. The old path also grew the
+audio-service utility process by ~53 MB for its AudioContext, which the streamed path never
+creates. An audio import used to decode twice — its library thumbnail ran its own whole-file
+`decodeAudioData` before the waveform's — so it paid the "before" cost twice in a row; the
+thumbnail is now drawn from the same peaks.
+
 **Per-frame ceilings** are the other half, and unlike the benchmarks they *do* assert.
 Eight ordinary vitest files — `apps/artist/src/components/Preview/drawFrame.perf.test.ts`,
 `apps/artist/src/core/exportMP4.perf.test.ts` and its twin
