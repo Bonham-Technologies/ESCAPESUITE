@@ -12,9 +12,33 @@ import { waitForAppReady } from './ready'
  * length, and every later position is that clip's pixels over that scale.
  */
 
-/** Every clip on the timeline, left to right. */
+/** Every clip on the timeline, in DOM order (the project's clip order, not position). */
 export function timelineClips(page: Page): Locator {
   return page.locator('[data-clip-id]')
+}
+
+/**
+ * The `index`-th clip from the left, by where it sits on screen. A split
+ * may keep the original clip's id on either piece, so DOM order says nothing
+ * about which is which.
+ */
+export async function clipFromLeft(page: Page, index: number): Promise<Locator> {
+  const ids = await timelineClips(page).evaluateAll((els) =>
+    els
+      .map((el) => ({ id: el.getAttribute('data-clip-id')!, left: el.getBoundingClientRect().left }))
+      .sort((a, b) => a.left - b.left)
+      .map(({ id }) => id)
+  )
+  expect(ids.length, `no clip ${index} from the left`).toBeGreaterThan(index)
+  return page.locator(`[data-clip-id="${ids[index]}"]`)
+}
+
+/** The preview's playhead time, in seconds, read off its timecode (`MM:SS.mmm`). */
+export async function playheadSeconds(page: Page): Promise<number> {
+  const text = (await page.locator('[class*="timecode"]').first().textContent()) ?? ''
+  const match = /(\d+):(\d+(?:\.\d+)?)/.exec(text)
+  expect(match, `no timecode in "${text}"`).not.toBeNull()
+  return Number(match![1]) * 60 + Number(match![2])
 }
 
 /** A clip's start and end on the timeline, in seconds. */
@@ -125,10 +149,10 @@ export async function reopenProject(
 /** Export the timeline as WebM through the export dialog and return the file's bytes. */
 export async function exportWebM(page: Page): Promise<Buffer> {
   await page.getByRole('button', { name: 'Export video' }).click()
-  const downloadWebM = page.getByRole('button', { name: /download webm/i })
+  const downloadWebM = page.getByRole('button', { name: /download webm/i }).first()
   await expect(downloadWebM).toBeVisible({ timeout: 15_000 })
   const downloadPromise = page.waitForEvent('download', { timeout: 120_000 })
-  await downloadWebM.first().click()
+  await downloadWebM.click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toMatch(/\.webm$/)
   const path = await download.path()

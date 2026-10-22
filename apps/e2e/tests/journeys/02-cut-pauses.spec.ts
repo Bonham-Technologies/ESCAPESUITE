@@ -13,6 +13,7 @@ import {
 import { waitForAppReady } from '../../utils/ready'
 import {
   analyseAudio,
+  clipFromLeft,
   clipSpans,
   deleteClip,
   dragClipBy,
@@ -20,6 +21,7 @@ import {
   levelBetween,
   longestSilence,
   pixelsPerSecond,
+  playheadSeconds,
   razorSplit,
   reopenProject,
   saveProject,
@@ -39,8 +41,7 @@ import {
  * a clip moves, fails here even when an export file appears.
  *
  * The source is the A/V fixture (tone 0–2 s, silence 2–3 s, tone 3–5 s), as
- * WebM and as its MP4 twin. The cloud container's Chromium can't decode the
- * MP4, so CI proves that case.
+ * WebM and as its MP4 twin.
  *
  * Chromium only: export goes through WebCodecs.
  */
@@ -58,16 +59,31 @@ async function expectCutTimeline(page: Page, pxPerSec: number): Promise<ClipSpan
   return spans
 }
 
-/** Both clips draw their waveform, and the preview plays across the join with sound. */
-async function expectCutPlaysThroughJoin(page: Page): Promise<void> {
+/**
+ * Both clips draw their waveform, and the preview plays across the join with
+ * sound: playback from the start has to carry the playhead past `join`, and
+ * the preview has to still be alive there. Watched only after the join, so a
+ * first clip that played fine cannot stand in for a second that froze.
+ */
+async function expectCutPlaysThroughJoin(page: Page, join: number): Promise<void> {
   for (const clip of await timelineClips(page).all()) {
     await expectWaveformDrawn(waveformCanvas(page, clip))
   }
   await page.getByTitle('Go to start (Home)').click()
   await page.getByTitle('Play (Space)').click()
-  // 0 s to past the join at ~2 s.
-  await expectPreviewAlive(page, { forMs: 2500 })
-  await page.getByTitle('Pause (Space)').click()
+  // Polled tightly: the clip after the join is only ~2 s long, and the watch
+  // below has to finish inside it, before playback reaches the end.
+  await expect
+    .poll(() => playheadSeconds(page), {
+      message: 'playback stalled before the join',
+      timeout: 10_000,
+      intervals: [50],
+    })
+    .toBeGreaterThan(join + 0.1)
+  await expectPreviewAlive(page, { forMs: 800 })
+  // Playback may have reached the end of the 4 s timeline and stopped itself.
+  const pause = page.getByTitle('Pause (Space)')
+  if (await pause.isVisible()) await pause.click()
 }
 
 test.describe('Journey: cut the pauses out of a recording', () => {
@@ -88,6 +104,7 @@ test.describe('Journey: cut the pauses out of a recording', () => {
       const { duration, silence } = AV_FIXTURE_TIMING
       let pxPerSec = 0
       let cut = 0
+      let firstClip = 0
 
       await test.step('import the recording and put it on the timeline', async () => {
         await installMediaHealthProbe(page)
@@ -105,7 +122,7 @@ test.describe('Journey: cut the pauses out of a recording', () => {
         await razorSplit(page, recording, silence.start, pxPerSec)
         await expect(timelineClips(page)).toHaveCount(2)
         // The right-hand piece now starts at the pause.
-        await razorSplit(page, timelineClips(page).nth(1), silence.end - silence.start, pxPerSec)
+        await razorSplit(page, await clipFromLeft(page, 1), silence.end - silence.start, pxPerSec)
         await expect(timelineClips(page)).toHaveCount(3)
         const spans = await clipSpans(page, pxPerSec)
         expect(spans[1].start).toBeCloseTo(silence.start, 1)
@@ -114,11 +131,12 @@ test.describe('Journey: cut the pauses out of a recording', () => {
       })
 
       await test.step('delete the pause and drag the rest left to close the gap', async () => {
-        await deleteClip(page, timelineClips(page).nth(1))
+        await deleteClip(page, await clipFromLeft(page, 1))
         await expect(timelineClips(page)).toHaveCount(2)
-        await dragClipBy(page, timelineClips(page).nth(1), -cut, pxPerSec)
-        await expectCutTimeline(page, pxPerSec)
-        await expectCutPlaysThroughJoin(page)
+        await dragClipBy(page, await clipFromLeft(page, 1), -cut, pxPerSec)
+        const spans = await expectCutTimeline(page, pxPerSec)
+        firstClip = spans[0].end - spans[0].start
+        await expectCutPlaysThroughJoin(page, spans[0].end)
       })
 
       const saved = await test.step('save the project', () => saveProject(page))
@@ -127,8 +145,10 @@ test.describe('Journey: cut the pauses out of a recording', () => {
         const { page: reopened, context } = await reopenProject(browser, saved, installMediaHealthProbe)
         try {
           for (let i = 0; i < 6; i++) await reopened.getByRole('button', { name: 'Zoom in timeline' }).click()
-          const spans = await expectCutTimeline(reopened, pxPerSec)
-          await expectCutPlaysThroughJoin(reopened)
+          // Re-measured, not carried over: nothing says the reopen keeps the zoom.
+          const reopenedPxPerSec = await pixelsPerSecond(await clipFromLeft(reopened, 0), firstClip)
+          const spans = await expectCutTimeline(reopened, reopenedPxPerSec)
+          await expectCutPlaysThroughJoin(reopened, spans[0].end)
 
           const audio = await analyseAudio(reopened, await exportWebM(reopened))
           const join = spans[0].end
