@@ -19,7 +19,7 @@ import { BrowserContext, Locator, Page, expect } from '@playwright/test'
 const fixturesDir = resolvePath(dirname(fileURLToPath(import.meta.url)), '../fixtures/av')
 
 /**
- * 5 s, 160×90 testsrc2 at 30 fps (every frame differs) with a 440 Hz tone at
+ * 5 s, 640×360 testsrc2 at 30 fps (every frame differs) with a 440 Hz tone at
  * 0–2 s, digital silence at 2–3 s and the tone again at 3–5 s. VP9/Opus, so
  * every Playwright Chromium decodes it, the container's included.
  * `fixtures/av/make-fixture.sh` regenerates it.
@@ -161,7 +161,8 @@ function snapshot(page: Page): Promise<MediaSnapshot> {
  * colour channel moved by more than 24 of 255, above scaling noise.
  */
 function canvasDistance(a: number[] | null, b: number[] | null): number {
-  if (!a || !b || a.length !== b.length) return a === b ? 0 : 1
+  // A missing canvas on either side is no evidence of a new frame.
+  if (!a || !b || a.length !== b.length) return 0
   let changed = 0
   for (let i = 0; i < a.length; i += 4) {
     if (
@@ -205,6 +206,8 @@ export async function expectPreviewAlive(
   expect(before.probeInstalled, 'installMediaHealthProbe must run before the page loads').toBe(true)
   await page.waitForTimeout(forMs) // the observation window itself, not a wait for something
   const after = await snapshot(page)
+  expect(before.canvas, 'the preview canvas is not on the page').not.toBeNull()
+  expect(after.canvas, 'the preview canvas left the page while playing').not.toBeNull()
 
   const pairs = after.elements.map((el, i) => ({ before: before.elements[i], after: el }))
   const playing = pairs.filter((p) => p.before && p.after.hasSource && !p.after.paused)
@@ -217,8 +220,13 @@ export async function expectPreviewAlive(
     `no playing element's currentTime advanced by ${minAdvance.toFixed(2)} s in ${forMs} ms`
   ).toBeGreaterThan(0)
 
-  const videoFrames = Math.max(...pairs.map((p) => p.after.presentedFrames - (p.before?.presentedFrames ?? 0)))
-  expect(videoFrames, `the preview <video> presented no new frames in ${forMs} ms`).toBeGreaterThanOrEqual(2)
+  // On the same element whose clock advanced: a paused element's seek also
+  // presents a frame, so frames from any other element prove nothing.
+  const presenting = advancing.filter((p) => p.after.presentedFrames - p.before.presentedFrames >= 2)
+  expect(
+    presenting.length,
+    `the playing preview <video> presented no new frames in ${forMs} ms`
+  ).toBeGreaterThan(0)
 
   expect(
     canvasDistance(before.canvas, after.canvas),
@@ -226,7 +234,7 @@ export async function expectPreviewAlive(
   ).toBeGreaterThan(SAME_FRAME_DISTANCE)
 
   if (audio) {
-    const audible = playing.filter((p) => !p.after.muted && p.after.volume > 0)
+    const audible = advancing.filter((p) => !p.after.muted && p.after.volume > 0)
     expect(audible.length, 'no playing element is unmuted: the preview is silent').toBeGreaterThan(0)
     const decoding = audible.filter(
       (p) => p.after.audioBytes === null || p.after.audioBytes > (p.before.audioBytes ?? 0)

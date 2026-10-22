@@ -79,13 +79,12 @@ const WAVEFORM_PAGE = `<!doctype html>
   }
 </script>`
 
-const fixture = readFile(AV_FIXTURE_WEBM)
 
 test.beforeEach(async ({ page }) => {
   await page.route(`${ORIGIN}/**`, async (route) => {
     const { pathname } = new URL(route.request().url())
     if (pathname === '/av.webm') {
-      await route.fulfill({ body: await fixture, contentType: 'video/webm' })
+      await route.fulfill({ body: await readFile(AV_FIXTURE_WEBM), contentType: 'video/webm' })
     } else if (pathname === '/waveform') {
       await route.fulfill({ body: WAVEFORM_PAGE, contentType: 'text/html' })
     } else {
