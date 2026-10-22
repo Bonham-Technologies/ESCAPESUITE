@@ -42,6 +42,16 @@ import { BrowserContext, Page } from '@playwright/test'
  * dropped-but-unreleased element stays reachable and keeps counting. That
  * errs towards reporting a leak, never towards hiding one.
  *
+ * Blind spots: the probe sees the window's own globals only.
+ * - Anything made inside a worker is invisible: the app's only
+ *   `VideoDecoder` is made in `workers/decodeWorker.ts` (line 130), so it,
+ *   and any blob URL or decoder a worker makes, shows up only as that
+ *   worker's own `worker` count.
+ * - Media elements made by `cloneNode`, `innerHTML` or parsed markup are not
+ *   tracked; only `document.createElement` and `new Audio()` are.
+ * - A worker that ends itself with `self.close()` is still counted live:
+ *   only `terminate()` from the page is seen.
+ *
  * It composes with `installMediaHealthProbe`: both wrap whatever
  * `Document.prototype.createElement` is when their init script runs, so
  * either order keeps both. Install it before the page loads: on the

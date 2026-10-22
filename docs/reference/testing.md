@@ -99,11 +99,23 @@ snapshot, allowed)` names each kind past its allowance with its creation sites.
 `tests/media-health/resource-probe.spec.ts` pins the probe: every kind counted live, then gone once
 released, and a dropped decoder gone once collected.
 
-**Soak.** `tests/escapeartist/soak.spec.ts` (Chromium) imports the A/V WebM and runs 25 cycles of
-{scrub the playhead across the clip, click the ruler at a seeded random point (`SEED`), play 1 s,
-pause, step back}. Every 5 cycles it checks `expectPreviewAlive` and that each live count is at
-most its value after cycle 1 plus `ALLOWED_GROWTH` (1 per kind; measured growth was 0). A second
-test reloads 10 times, restores the session from the "Resume Previous Session?" prompt each time,
-and checks the waveform is drawn and the preview plays. Both run in the normal e2e job, about 1.5
-minutes together. A failure message lists every live count since cycle 1 and where the leaked
+**Blind spots.** The probe sees the window's globals only. Decoders and blob URLs made inside a
+worker are invisible except as that worker's own count, and the app's only `VideoDecoder` is made
+in `workers/decodeWorker.ts`. Media elements made by `cloneNode`, `innerHTML` or parsed markup are
+not tracked. A worker that ends itself with `self.close()` stays counted live.
+
+**Soak.** `tests/escapeartist/soak.spec.ts` (Chromium) puts the A/V WebM on the timeline twice, on
+two tracks at 0 s, so the preview needs the source's own `<video>` and a second-slot one
+(ESCSUITE-313). It then runs 25 cycles of {scrub the playhead across the clip, click the ruler at a
+seeded random point (`SEED`), play 1 s, pause, Go to start, Undo ×2 and Redo ×2}. The scrub, click
+and seek each assert the playhead landed where aimed and no clip moved. The undo/redo takes every
+clip off the source, so `usePreviewMedia.ts` revokes its blob URL and empties both elements, and the
+redo makes them again: each cycle makes one blob URL and two `<video>`s and releases as many.
+After cycle 1 and every 5th cycle it checks `expectPreviewAlive`, then that each live count is at
+most its cycle-1 value plus `ALLOWED_GROWTH` (1 per kind; measured growth was 0). Dropping
+`video.src = ''` from `releaseExtraVideos` fails it at cycle 5 naming `createPreviewVideoElement`.
+A second test reloads 10 times, restores the session from the "Resume Previous Session?" prompt
+each time, checks the waveform is drawn and the preview plays, and asserts live counts and every
+IndexedDB store's record count stay flat across the reloads. The two run in the normal e2e job,
+under 2 minutes together. A failure message lists every count since cycle 1 and where the leaked
 resources were made; rerunning replays the same clicks.
