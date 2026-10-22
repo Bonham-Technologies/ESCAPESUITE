@@ -117,12 +117,13 @@ describe('storage', () => {
         const storage = await getStorageModule()
         await storage.storeVideo('take', webmBlob({ cues: 'indexed' }), metadata)
         const shared = await import('@escapesuite/shared/storage')
-        const store = vi.spyOn(shared, 'storeVideo')
+        const getDB = vi.spyOn(shared, 'getDB')
 
-        const read = await storage.getVideoBlob('take')
+        const read = await storage.getVideoBlob('take', { persistRepair: true })
 
         expect(read?.size).toBe(webmBlob({ cues: 'indexed' }).size)
-        expect(store).not.toHaveBeenCalled()
+        // The write-back is the only caller of getDB from this module.
+        expect(getDB).not.toHaveBeenCalled()
       })
 
       it('still hands back the repaired bytes when the write-back fails', async () => {
@@ -131,7 +132,13 @@ describe('storage', () => {
         await storage.storeVideo('take', original, metadata)
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
         const shared = await import('@escapesuite/shared/storage')
-        vi.spyOn(shared, 'storeVideo').mockRejectedValue(new Error('QuotaExceededError'))
+        const db = await shared.getDB()
+        vi.spyOn(shared, 'getDB').mockResolvedValue({
+          transaction: () => {
+            throw new Error('QuotaExceededError')
+          },
+        } as unknown as Awaited<ReturnType<typeof shared.getDB>>)
+        void db
 
         const read = await storage.getVideoBlob('take', { persistRepair: true })
 
@@ -142,13 +149,10 @@ describe('storage', () => {
       it('repairs in memory only unless asked to persist (export must not rewrite the database)', async () => {
         const storage = await getStorageModule()
         await storage.storeVideo('take', storedTake(), metadata)
-        const shared = await import('@escapesuite/shared/storage')
-        const store = vi.spyOn(shared, 'storeVideo')
 
         const read = await storage.getVideoBlob('take')
 
         expect(await dropDeltaFrameCues(read!)).toBeNull()
-        expect(store).not.toHaveBeenCalled()
         expect(await dropDeltaFrameCues((await storage.getVideo('take'))!.blob)).not.toBeNull()
       })
 
@@ -163,6 +167,43 @@ describe('storage', () => {
 
         expect(read?.size).toBe(storedTake().size)
         expect(warn).toHaveBeenCalledTimes(1)
+      })
+
+      // Review round 1: the repair reads the file between the row's read and
+      // its write, so a row replaced meanwhile must not be overwritten.
+      it('does not write over a row replaced while the repair read the file', async () => {
+        const storage = await getStorageModule()
+        await storage.storeVideo('take', storedTake(), metadata)
+        const replacement = new Blob(['other bytes'], { type: 'video/webm' })
+        const cues = await import('./webmDeltaFrameCues')
+        const real = cues.dropDeltaFrameCues
+        vi.spyOn(cues, 'dropDeltaFrameCues').mockImplementation(async (blob) => {
+          const repaired = await real(blob)
+          await storage.storeVideo('take', replacement, { ...metadata, name: 'replaced.webm' })
+          return repaired
+        })
+
+        await storage.getVideoBlob('take', { persistRepair: true })
+
+        const stored = await storage.getVideo('take')
+        expect(stored?.blob.size).toBe(replacement.size)
+        expect(stored?.metadata.name).toBe('replaced.webm')
+      })
+
+      it('does not bring back a row deleted while the repair read the file', async () => {
+        const storage = await getStorageModule()
+        await storage.storeVideo('take', storedTake(), metadata)
+        const cues = await import('./webmDeltaFrameCues')
+        const real = cues.dropDeltaFrameCues
+        vi.spyOn(cues, 'dropDeltaFrameCues').mockImplementation(async (blob) => {
+          const repaired = await real(blob)
+          await storage.deleteVideo('take')
+          return repaired
+        })
+
+        await storage.getVideoBlob('take', { persistRepair: true })
+
+        expect(await storage.getVideo('take')).toBeUndefined()
       })
 
       it('returns undefined for a row that is gone', async () => {

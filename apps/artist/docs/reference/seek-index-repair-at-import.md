@@ -77,8 +77,12 @@ from, the element plays on (audio, `currentTime`) and never presents another pic
 seek lands on another bad cue, so the preview froze for good until a reload (user-reported).
 
 - **The cure** (`core/webmDeltaFrameCues.ts`'s `dropDeltaFrameCues`): drop each video
-  CueTrackPositions whose Cluster's first block of that track is not a key frame (a SimpleBlock
-  without the key flag, or a BlockGroup with a ReferenceBlock), and a CuePoint left with none.
+  CueTrackPositions that names its Cluster's first block of that track (its CueTime is that
+  block's time) when that block is not a key frame (a SimpleBlock without the key flag, or a
+  BlockGroup with a ReferenceBlock), and a CuePoint left with none. A cue with a
+  `CueRelativePosition`, or whose time is a later block's, is never dropped: that is a muxer
+  indexing key frames itself (ESCAPECRAFT's `writeKeyframeCues`, ffmpeg), and its cue can rightly
+  name a key frame inside a Cluster that opens on a delta frame (review round 1).
   Audio cues stay. A player then seeks to the last real key frame and decodes forward, as on the
   un-indexed file. The Cues element is rewritten **where it lies at the same length**, an EBML
   Void filling the room, so every other byte and every SeekHead position is unchanged and the
@@ -93,8 +97,9 @@ seek lands on another bad cue, so the preview froze for good until a reload (use
   that already has an index, so a `?loadVideo=` take whose CRAFT row was rewritten before the
   fix is repaired, and rewritten again, on its next handoff. **Already-stored rows** are repaired
   on read by ARTIST's `getVideoBlob` (`core/storage.ts`): every reader gets the repaired bytes, and
-  the preview's read (`persistRepair: true`) writes them back under the same id and metadata, so
-  a row is read wrong once. Export and the audio mix repair in memory only (an export must not
+  the preview's read (`persistRepair: true`) writes them back, in one transaction and only over
+  a row that still holds bytes of the size it read (a row deleted or replaced meanwhile is left as
+  it is), keeping its metadata, so a row is read wrong once. Export and the audio mix repair in memory only (an export must not
   rewrite the shared database). A project file saved before the fix carries the bad bytes; loading
   it stores them, and the preview's first read repairs the row.
 - **Pinned by** `webmDeltaFrameCues.test.ts` (every video cue of a remux checked against the key

@@ -29,7 +29,6 @@ import {
   getDB,
   getSetting,
   getVideo,
-  storeVideo,
   getStorageEstimate,
   getThumbnail,
   listSettings,
@@ -78,11 +77,24 @@ export async function getVideoBlob(
   }
   if (!repaired) return blob
   if (persistRepair) {
-    await storeVideo(id, repaired, metadata).catch((error) => {
+    await storeRepair(id, blob.size, repaired).catch((error) => {
       console.warn(`Could not store the repaired seek index of "${metadata.name}":`, error)
     })
   }
   return repaired
+}
+
+/**
+ * Write a repaired blob back, in one transaction, only over the row it was
+ * read from: a row deleted, or replaced by other bytes, while the repair read
+ * the file is left as it now is. The row's metadata is kept as it now stands.
+ */
+async function storeRepair(id: string, size: number, repaired: Blob): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction('videos', 'readwrite')
+  const current = await tx.store.get(id)
+  if (current && current.blob.size === size) await tx.store.put({ ...current, blob: repaired })
+  await tx.done
 }
 
 // Session state for auto-save/restore

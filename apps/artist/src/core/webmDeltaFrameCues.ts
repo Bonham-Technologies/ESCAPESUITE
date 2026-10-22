@@ -35,6 +35,8 @@ const CUE_TIME_ID = 0xb3;
 const CUE_TRACK_POSITIONS_ID = 0xb7;
 const CUE_TRACK_ID = 0xf7;
 const CUE_CLUSTER_POSITION_ID = 0xf1;
+const CUE_RELATIVE_POSITION_ID = 0xf0;
+const CLUSTER_TIMESTAMP_ID = 0xe7;
 const SIMPLE_BLOCK_ID = 0xa3;
 const BLOCK_GROUP_ID = 0xa0;
 const BLOCK_ID = 0xa1;
@@ -204,12 +206,18 @@ function blockTrack(bytes: Uint8Array, dataStart: number): { track: number; flag
 }
 
 /**
- * Whether a BlockGroup is a key frame of `track`: true or false for one of its
- * blocks (a delta frame carries a ReferenceBlock), `undefined` for another
- * track's, null where it cannot be read.
+ * A BlockGroup of `track`: whether it is a key frame (a delta frame carries a
+ * ReferenceBlock) and its relative timecode; `undefined` for another track's,
+ * null where it cannot be read.
  */
-async function blockGroupIsKey(blob: Blob, start: number, end: number, track: number): Promise<boolean | null | undefined> {
-  let found = false;
+async function blockGroupOf(
+  blob: Blob,
+  start: number,
+  end: number,
+  track: number
+): Promise<{ key: boolean; rel: number } | null | undefined> {
+  let rel: number | null = null;
+  let key = true;
   for (let pos = start, n = 0; pos < end; n++) {
     if (n >= MAX_CLUSTER_ELEMENTS) return null;
     const peek = await bytesAt(blob, pos, PEEK_BYTES);
@@ -219,29 +227,44 @@ async function blockGroupIsKey(blob: Blob, start: number, end: number, track: nu
       const block = blockTrack(peek, child.dataStart);
       if (!block) return null;
       if (block.track !== track) return undefined;
-      found = true;
-    } else if (child.id === REFERENCE_BLOCK_ID) return found ? false : null;
+      rel = blockTime(peek, block.flagsAt);
+    } else if (child.id === REFERENCE_BLOCK_ID) key = false;
     pos += child.dataStart + child.size;
   }
-  return found ? true : null;
+  return rel === null ? null : { key, rel };
 }
 
-/** Whether the first block of `track` in the Cluster at `clusterAt` is a key frame, or null where that cannot be read. */
-async function firstBlockIsKey(blob: Blob, clusterAt: number, track: number): Promise<boolean | null> {
+/** A Block or SimpleBlock's signed timecode, relative to its Cluster's. */
+function blockTime(bytes: Uint8Array, flagsAt: number): number {
+  const rel = (bytes[flagsAt - 2] << 8) | bytes[flagsAt - 1];
+  return rel >= 0x8000 ? rel - 0x10000 : rel;
+}
+
+/**
+ * The first block of `track` in the Cluster at `clusterAt`: whether it is a
+ * key frame, and its time (in the file's timestamp units, as a CueTime is), or
+ * null where that cannot be read.
+ */
+async function firstBlockOf(blob: Blob, clusterAt: number, track: number): Promise<{ key: boolean; time: number } | null> {
   const cluster = readHeader(await bytesAt(blob, clusterAt, PEEK_BYTES), 0);
   if (cluster?.id !== CLUSTER_ID) return null;
   const end = cluster.size === Infinity ? blob.size : clusterAt + cluster.dataStart + cluster.size;
+  let clusterTime: number | null = null;
   for (let pos = clusterAt + cluster.dataStart, n = 0; pos < end && n < MAX_CLUSTER_ELEMENTS; n++) {
     const peek = await bytesAt(blob, pos, PEEK_BYTES);
     const child = readHeader(peek, 0);
     if (!child || child.size === Infinity || child.id === CLUSTER_ID) return null;
-    if (child.id === SIMPLE_BLOCK_ID) {
+    if (child.id === CLUSTER_TIMESTAMP_ID) clusterTime = readUint(peek, child);
+    else if (child.id === SIMPLE_BLOCK_ID) {
       const block = blockTrack(peek, child.dataStart);
-      if (!block) return null;
-      if (block.track === track) return (peek[block.flagsAt] & 0x80) !== 0;
+      if (!block || clusterTime === null) return null;
+      if (block.track === track) {
+        return { key: (peek[block.flagsAt] & 0x80) !== 0, time: clusterTime + blockTime(peek, block.flagsAt) };
+      }
     } else if (child.id === BLOCK_GROUP_ID) {
-      const key = await blockGroupIsKey(blob, pos + child.dataStart, pos + child.dataStart + child.size, track);
-      if (key !== undefined) return key;
+      if (clusterTime === null) return null;
+      const group = await blockGroupOf(blob, pos + child.dataStart, pos + child.dataStart + child.size, track);
+      if (group !== undefined) return group && { key: group.key, time: clusterTime + group.rel };
     }
     pos += child.dataStart + child.size;
   }
@@ -285,8 +308,8 @@ function voidOf(total: number): Uint8Array {
 }
 
 /**
- * The same file with every video CuePoint dropped whose Cluster starts that
- * track on a delta frame, or null when there is none to drop — not a WebM this
+ * The same file with every video CuePoint dropped that names a Cluster's first
+ * block of that track when that block is a delta frame, or null when there is none to drop — not a WebM this
  * can read, no Cues, or every cue already on a key frame. A Cluster or a cue
  * this cannot read is left as it is: only a cue proven wrong is dropped.
  */
@@ -314,7 +337,10 @@ export async function dropDeltaFrameCues(blob: Blob): Promise<Blob | null> {
       const inner = childrenOf(cues, field.dataStart, field.end);
       const track = inner?.find((f) => f.id === CUE_TRACK_ID);
       const cluster = inner?.find((f) => f.id === CUE_CLUSTER_POSITION_ID);
-      return track && cluster ? [{ field, track: readUint(cues, track), cluster: readUint(cues, cluster) }] : [];
+      // A cue that names a block inside its Cluster (ESCAPECRAFT's
+      // `writeKeyframeCues`, ffmpeg) is not one Mediabunny wrote: left alone.
+      if (!track || !cluster || inner!.some((f) => f.id === CUE_RELATIVE_POSITION_ID)) return [];
+      return [{ field, track: readUint(cues, track), cluster: readUint(cues, cluster) }];
     });
     return { fields, time: readUint(cues, time), positions };
   });
@@ -335,7 +361,10 @@ export async function dropDeltaFrameCues(blob: Blob): Promise<Blob | null> {
   for (const point of parsed) {
     for (const { field, track, cluster } of point?.positions ?? []) {
       if (!videoTracks.has(track) || !suspect.has(cluster)) continue;
-      if ((await firstBlockIsKey(blob, segmentDataStart + cluster, track)) === false) dropped.add(field);
+      // Wrong only if it names that very block: a cue whose time is a later
+      // block's points at a key frame further into the Cluster.
+      const first = await firstBlockOf(blob, segmentDataStart + cluster, track);
+      if (first && !first.key && first.time === point!.time) dropped.add(field);
     }
   }
   if (dropped.size === 0) return null;

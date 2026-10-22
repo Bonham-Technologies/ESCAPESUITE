@@ -210,7 +210,7 @@ describe('dropDeltaFrameCues on an index already stored', () => {
   })
 
   it('fills a large room with one Void, the size field eight bytes long', async () => {
-    const original = webmBlob({ cues: 'indexed', clusterMs: 33_000, frames: sparseFrames(600, 0.1) })
+    const original = webmBlob({ cues: 'indexed', clusterMs: 33_000, frames: sparseFrames(600, 1) })
     const before = await bytesOf(original)
 
     const after = await bytesOf((await dropDeltaFrameCues(original))!)
@@ -250,6 +250,25 @@ describe('dropDeltaFrameCues on an index already stored', () => {
     }
 
     expect(await dropDeltaFrameCues(new Blob([bytes as BlobPart], { type: 'video/webm' }))).toBeNull()
+  })
+
+  // Review round 1: a muxer that indexes key frames itself (ESCAPECRAFT's
+  // `writeKeyframeCues`, ffmpeg) can name a key frame inside a Cluster that
+  // opens on a delta frame. Such a cue is right, and the repair must not
+  // drop it and write the drop back.
+  it('leaves a cue that carries a CueRelativePosition alone', async () => {
+    const blob = webmBlob({ cues: 'indexed', cueRelativePosition: true, clusterMs: 33_000, frames: sparseFrames(100, 1) })
+
+    expect(await dropDeltaFrameCues(blob)).toBeNull()
+  })
+
+  it('leaves a cue alone whose time is not its Cluster\'s first block', async () => {
+    // Frames every 10 s, Clusters every 33 s: the cue at 33 s names a Cluster
+    // whose first frame is at 40 s, and so on up to 297 s (no frame lands on a
+    // Cluster's start before 330 s).
+    const blob = webmBlob({ cues: 'indexed', clusterMs: 33_000, frames: sparseFrames(300, 0.1) })
+
+    expect(await dropDeltaFrameCues(blob)).toBeNull()
   })
 
   it('answers null for a file with no video track', async () => {
