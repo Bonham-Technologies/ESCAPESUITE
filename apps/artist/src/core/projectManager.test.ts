@@ -2712,6 +2712,35 @@ describe('loadProject regenerates a missing waveform (ESCSUITE-347)', () => {
     await deleteVideo(id)
   })
 
+  it("keeps the file's hasAudio: true when it takes a stored row's waveform that says otherwise", async () => {
+    const id = uniqueId('stored-wave-quiet')
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), {
+      id,
+      name: 'stored',
+      duration: 8,
+      width: 640,
+      height: 360,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 3,
+      waveformData: peaks,
+      hasAudio: false,
+    })
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'video/webm',
+        meta: { duration: 8, width: 640, height: 360, frameRate: 30, waveformData: [], hasAudio: true },
+        bytes: [1, 2, 3],
+      },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    await deleteVideo(id)
+  })
+
   it('never decodes an image', async () => {
     const id = uniqueId('still')
     const file = v2File(createTestProject(id), [

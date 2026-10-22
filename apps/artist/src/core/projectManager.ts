@@ -285,7 +285,7 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
   const stored = existing?.metadata;
   if (stored?.waveformData?.length) {
     metadata.waveformData = stored.waveformData;
-    metadata.hasAudio = stored.hasAudio;
+    metadata.hasAudio = metadata.hasAudio === true || stored.hasAudio;
     return;
   }
   const { peaks, hasAudio } = await extractWaveformData(blob).catch((error) => {
@@ -294,8 +294,8 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
   });
   if (peaks.length === 0) return;
   metadata.waveformData = peaks;
-  // `hasAudio` from a decode is only a silence check, so it never downgrades a
-  // `true` already recorded (a quiet take still has audio; see takeImport.ts).
+  // A rebuilt waveform never downgrades a `true` already recorded: a decode's
+  // `hasAudio` is only a silence check (a quiet take still has audio; see takeImport.ts).
   metadata.hasAudio = metadata.hasAudio === true || hasAudio;
 }
 
