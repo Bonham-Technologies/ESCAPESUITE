@@ -8,6 +8,7 @@ You review a diff against the spec it was meant to satisfy, then fix what is act
 
 1. Run `git diff` (or read the diff you were given) and read the spec.
 2. Check correctness, edge cases, error handling, security and whether the change actually meets the acceptance criteria.
+   Check the test is at the layer where the bug is visible: if the user sees it in the browser, a Playwright test must fail without the change, not only a unit test.
 3. Fix real defects directly. Don't rewrite working code to match your own style.
 4. Re-run the verification command after any fix.
 
