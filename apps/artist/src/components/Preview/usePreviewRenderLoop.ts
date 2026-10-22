@@ -213,7 +213,11 @@ export function usePreviewRenderLoop({
   // Handle scrubbing (when not playing): seek every video the frame draws to
   // the playhead, paint the best frame available at once, and paint again when
   // the last of those seeks reports back (ESCSUITE-275), with a 300 ms
-  // fallback for a seek that never does.
+  // fallback for a seek that never does. The fallback is provisional: a seek
+  // that lands after it still paints (ESCSUITE-358) — a far seek into a long
+  // recording with sparse key frames takes seconds, and the frame it lands on
+  // used to be dropped, leaving the paused preview on the frame from before
+  // the click.
   //
   // It also runs when the element set changes (`videoUrlsKey`), because a
   // <video> created while paused — a source restored by undo mid-clip, a
@@ -285,6 +289,9 @@ export function usePreviewRenderLoop({
     // earlier run sent that is still under way (`seeking`) — an earlier run's
     // listener went with its cleanup, and the element already reads the
     // target, so without this the paint after that seek would be lost.
+    //
+    // `settled`: the final paint has been asked for, or a newer cycle has
+    // superseded this one. The fallback below does not set it.
     let settled = false;
     let pendingSeeks = 0;
     let finalPaintFrame = 0;
@@ -332,12 +339,11 @@ export function usePreviewRenderLoop({
       drawMultiSelectHandles(currentTime);
     };
 
-    // Fallback: if a seek has not reported back within 300 ms, paint anyway.
+    // Fallback: if a seek has not reported back within 300 ms, paint what the
+    // elements have now — and keep waiting, so the last 'seeked', however
+    // late, still paints the frame it landed on (ESCSUITE-358).
     const fallbackTimeout = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        paint();
-      }
+      if (!settled) paint();
     }, 300);
 
     // A newer playhead, element set or timeline supersedes this cycle: nothing
@@ -372,10 +378,9 @@ export function usePreviewRenderLoop({
   // throttle or skip for these elements, never inserted in the document. A seek is not
   // this effect's: the scrub effect above paints after the last 'seeked'. An
   // element both unready and off the playhead gets both paints, at the same
-  // playhead time, the seek asked for before either fired: if its 'seeked'
-  // lands within the scrub's 300 ms fallback, whichever of 'loadeddata' and
-  // 'seeked' comes last paints the frame at the target; past the fallback the
-  // late 'seeked' paints nothing and this readiness paint is the backstop. That
+  // playhead time, the seek asked for before either fired: whichever of
+  // 'loadeddata' and 'seeked' comes last paints the frame at the target, the
+  // scrub's 300 ms fallback having painted what there was in between. That
   // a browser applies a seek made at HAVE_NOTHING as the default playback start
   // position, after metadata and before the first frame's data, is the spec's
   // order and is not measured here in a real browser.

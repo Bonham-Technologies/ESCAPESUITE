@@ -1089,7 +1089,36 @@ describe('usePreviewRenderLoop seeks (ESCSUITE-275)', () => {
     expect(drawnTimes(deps)).toEqual([1.5, 1.5])
   })
 
-  it('paints once on the fallback when only one of two seeks reports back, and ignores the late one', async () => {
+  it('paints the frame a seek lands on after the fallback, not only the fallback (ESCSUITE-358)', async () => {
+    addClip('clip1', 0, 4)
+    const { deps, seek } = harness([])
+    const element = stalledVideo()
+    deps.videoElementsRef.current.set(video.id, element)
+
+    renderHook(() => usePreviewRenderLoop(deps))
+    await settle(1000)
+    vi.mocked(deps.drawFrame).mockClear()
+
+    // A far seek into a long recording: it takes seconds, not 300 ms.
+    seek(1)
+    await settle(FRAME_MS)
+    expect(drawnTimes(deps)).toEqual([1])
+
+    await settle(300)
+    // The fallback paints what the element has meanwhile...
+    expect(drawnTimes(deps)).toEqual([1, 1])
+
+    await settle(2000)
+    seeked(element)
+    await settle(FRAME_MS)
+    // ...and the seek, landing seconds later, still paints its frame.
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
+
+    await settle(1000)
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
+  })
+
+  it('paints on the fallback when only one of two seeks reports back, and again when the late one lands (ESCSUITE-358)', async () => {
     const loop = pausedOverTwoClips()
     const { deps, seek, a, b } = loop
 
@@ -1107,9 +1136,12 @@ describe('usePreviewRenderLoop seeks (ESCSUITE-275)', () => {
     await settle(300)
     expect(drawnTimes(deps)).toEqual([1, 1])
 
+    // The late seek is the frame the preview has to end on (before
+    // ESCSUITE-358 it painted nothing, and the paused preview kept `b`'s old
+    // frame until the next scrub).
     seeked(b)
     await settle(1000)
-    expect(drawnTimes(deps)).toEqual([1, 1])
+    expect(drawnTimes(deps)).toEqual([1, 1, 1])
   })
 
   it('a playhead move before the seeks land ends the old cycle: its listeners go and it paints nothing', async () => {
