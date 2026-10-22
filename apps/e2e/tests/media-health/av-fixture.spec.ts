@@ -17,8 +17,8 @@ import { waitForAppReady } from '../../utils/ready'
  * media-health helper — a drawn waveform with a quieter silent window, a
  * preview that plays with sound, and a seek that shows a new frame.
  *
- * The MP4 twin is H.264/AAC: CI's Chromium decodes it, the cloud container's
- * headless shell does not, so that case is proven in CI.
+ * The MP4 twin is H.264/AAC: the Chromium Playwright pins (and CI runs)
+ * decodes it; an older headless shell without H.264 (build 1194) fails it.
  */
 test.skip(
   ({ browserName }) => browserName !== 'chromium',

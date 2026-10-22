@@ -21,14 +21,15 @@ const fixturesDir = resolvePath(dirname(fileURLToPath(import.meta.url)), '../fix
 /**
  * 5 s, 640×360 testsrc2 at 30 fps (every frame differs) with a 440 Hz tone at
  * 0–2 s, digital silence at 2–3 s and the tone again at 3–5 s. VP9/Opus, so
- * every Playwright Chromium decodes it, the container's included.
+ * every Chromium build decodes it, headless shells included.
  * `fixtures/av/make-fixture.sh` regenerates it.
  */
 export const AV_FIXTURE_WEBM = resolvePath(fixturesDir, 'tone-gap.webm')
 
 /**
- * {@link AV_FIXTURE_WEBM}'s H.264/AAC twin: same picture, same audio. CI's
- * Chromium decodes it; the cloud container's headless shell does not.
+ * {@link AV_FIXTURE_WEBM}'s H.264/AAC twin: same picture, same audio. The
+ * Chromium Playwright pins decodes it; some older headless shells (build
+ * 1194, preinstalled in some cloud containers) have no H.264/AAC decoder.
  */
 export const AV_FIXTURE_MP4 = resolvePath(fixturesDir, 'tone-gap.mp4')
 
@@ -79,6 +80,9 @@ export async function installMediaHealthProbe(target: Page | BrowserContext): Pr
     type Probe = { elements: HTMLMediaElement[]; frames: WeakMap<HTMLMediaElement, number> }
     const w = window as unknown as { __mediaHealth?: Probe }
     if (w.__mediaHealth) return
+    // Append-only, and holding every element for the page's life:
+    // expectPreviewAlive pairs two snapshots by index, which stays right only
+    // while nothing is ever removed.
     const probe: Probe = { elements: [], frames: new WeakMap() }
     w.__mediaHealth = probe
 
@@ -193,7 +197,9 @@ const SAME_FRAME_DISTANCE = 0.002
  * preview plays sound by unmuting the playing `<video>` (or `<audio>`), with
  * no Web Audio graph in between. So the sound check is an element that is
  * playing, unmuted, at a volume above zero, and, on Chromium, whose decoded
- * audio byte count grows.
+ * audio byte count grows. Chromium decodes a muted element's audio too, so
+ * the byte count only proves audio is flowing; the unmuted, non-zero volume
+ * is what says it is heard, and nothing checks it is the right clip's.
  *
  * The caller starts playback; this only watches. Needs
  * {@link installMediaHealthProbe}.
