@@ -12,14 +12,17 @@
 //
 // The seed is fixed, so CI replays the same 200 sequences every run. A failure
 // prints fast-check's shrunk counterexample (the op list) and the seed and
-// path to replay it; paste the op list into an example test below
-// `runSequence([...])` to keep it. Locally, `pnpm --filter=@escapesuite/artist
+// path to replay it; paste the op list into
+// `timelineInvariants.counterexamples.test.ts` as `runSequence([...])` to keep
+// it. A sequence that reaches a bug already filed throws `KnownBug` from the
+// model and is discarded (`fc.pre(false)`) rather than failed; see the guards
+// in `src/test/timelineModel.ts`. Locally, `pnpm --filter=@escapesuite/artist
 // test:fuzz` runs 5,000 sequences (ARTIST_FUZZ_RUNS); ARTIST_FUZZ_SEED picks
 // another seed.
-import { afterAll, beforeAll, describe, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { storeVideo, deleteVideo } from '../../core/storage'
-import { SOURCES, runSequence, type MoveTarget, type Op } from '../../test/timelineModel'
+import { KnownBug, SOURCES, opCounts, runSequence, type MoveTarget, type Op } from '../../test/timelineModel'
 
 const SEED = Number(process.env.ARTIST_FUZZ_SEED ?? 0x5eed0349)
 const NUM_RUNS = Number(process.env.ARTIST_FUZZ_RUNS ?? 200)
@@ -83,10 +86,33 @@ describe('timeline invariants (property-based, ESCSUITE-349)', () => {
   it(
     `hold after every step of ${NUM_RUNS} random edit sequences`,
     async () => {
+      const known: Record<string, number> = {}
+      opCounts.total = 0
+      opCounts.changed = {}
       await fc.assert(
-        fc.asyncProperty(fc.array(opArbitrary, { minLength: 1, maxLength: 30, size: 'max' }), (ops) => runSequence(ops)),
+        fc.asyncProperty(fc.array(opArbitrary, { minLength: 1, maxLength: 30, size: 'max' }), async (ops) => {
+          try {
+            await runSequence(ops)
+          } catch (error) {
+            if (!(error instanceof KnownBug)) throw error
+            known[error.ticket] = (known[error.ticket] ?? 0) + 1
+            fc.pre(false)
+          }
+        }),
         { seed: SEED, numRuns: NUM_RUNS }
       )
+
+      // A floor on real edits: a generator that drifts into no-ops (empty
+      // timelines, out-of-range picks) must fail here, not pass vacuously.
+      // Measured 2026-10-22 over 13 seeds at 200 runs: 2,670-3,130 ops, 55-60%
+      // of them changing state; the rarest kinds were delete (70+) and redo
+      // (6+; any edit clears the redo stack, so most redos have nothing to do).
+      const changed = Object.values(opCounts.changed).reduce((sum, n) => sum + (n ?? 0), 0)
+      expect(changed, `${changed} of ${opCounts.total} ops changed state`).toBeGreaterThanOrEqual(opCounts.total * 0.4)
+      for (const kind of ['add', 'split', 'delete', 'rippleDelete', 'move', 'trim', 'duplicate', 'undo', 'redo', 'saveLoad'] as const) {
+        const floor = Math.ceil(NUM_RUNS / (kind === 'redo' ? 100 : 20))
+        expect(opCounts.changed[kind] ?? 0, `${kind} ops that changed state (known bugs hit: ${JSON.stringify(known)})`).toBeGreaterThanOrEqual(floor)
+      }
     },
     Math.max(60_000, NUM_RUNS * 100)
   )

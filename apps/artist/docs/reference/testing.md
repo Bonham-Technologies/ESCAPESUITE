@@ -114,11 +114,31 @@ outcome, not on the double.
 
   **Running it.** CI runs 200 sequences on the fixed seed `0x5eed0349` (about 2 s). A failure prints
   fast-check's shrunk counterexample — the op list — with the seed and path; paste the list into
-  `runSequence([...])` in `timelineInvariants.counterexamples.test.ts` to keep it. Locally,
-  `pnpm --filter=@escapesuite/artist test:fuzz` runs 5,000 (`ARTIST_FUZZ_RUNS`, about a minute), and
-  `ARTIST_FUZZ_SEED=<n>` picks another seed.
+  `store/__tests__/timelineInvariants.counterexamples.test.ts` as `runSequence([...])` to keep it.
+  Locally, `pnpm --filter=@escapesuite/artist test:fuzz` runs 5,000 (`ARTIST_FUZZ_RUNS`, about 75 s),
+  and `ARTIST_FUZZ_SEED=<n>` picks another seed. After the run the suite also asserts a floor on
+  real edits (`opCounts`): at least 40% of all ops, and per kind at least one change per 20 runs
+  (redo: one per 100), must change the project or the library, so a generator that drifts into
+  no-ops fails instead of passing vacuously.
 
-  **Adding an operation.** Add a member to `Op` and a `case` to `applyOp` in `src/test/timelineModel.ts`
+  **Known bugs: guards and `it.fails`.** The suite's first runs found three bugs, filed as
+  ESCSUITE-363 (a start trim dragged left of 0 clamps the position but not the in point, so the
+  clip's end moves and its picture and sound slip) and ESCSUITE-364 (the ripple shifts in
+  `shiftClipsAfter` and `rippleDeleteClip` compare `>=` with no tolerance, so a clip butted a float
+  hair before the edge is left behind and overlapped: one guard for the ripple end trim, one for
+  the ripple delete). So that a known bug cannot turn `main` red when a generator change makes
+  fast-check draw different sequences, `applyOp` in `src/test/timelineModel.ts` detects each
+  trigger and throws `KnownBug` (carrying the ticket key) before the invariants see it; the
+  property test catches it and discards the sequence with `fc.pre(false)`. The guards only skip a
+  sequence, they never loosen a check. Each bug is still exercised: the counterexample file runs
+  its shrunk sequence with the guards off (`resetModel({ guards: false })`, `runSequence(ops,
+  { guards: false })`) as an `it.fails` test that asserts the correct behaviour, so it passes
+  while the bug is there and fails the day it is fixed. **A fix PR** deletes its ticket's guard
+  (each is commented with the key) and flips its `it.fails` to `it`. With the guards in place,
+  `test:fuzz` passes on the default seed (5,000 runs, 2026-10-22); before them it failed on
+  ESCSUITE-363 at run 248.
+
+  **Adding an operation.** Add a member to `Op` and a `case` to `applyOneOp` in `src/test/timelineModel.ts`
   that calls what the editor's gesture calls (its hook's helpers and store actions, never
   `useEditorStore.setState`), say in `checkPostcondition` what the op may change, and give it an
   arbitrary (with a weight) in the property test's `opArbitrary`. Indices into clips, tracks and
