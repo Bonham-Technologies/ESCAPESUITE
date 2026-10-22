@@ -6,8 +6,15 @@ import {
   openExportDialog,
   openExportAdvancedOptions,
   importMediaAndAddToTimeline,
-  ARTIST_FIXTURE_MP4,
 } from '../../utils/artist'
+import {
+  AV_FIXTURE_SILENCE,
+  AV_FIXTURE_WEBM,
+  expectPreviewAlive,
+  expectWaveformDrawn,
+  installMediaHealthProbe,
+  waveformCanvas,
+} from '../../utils/mediaHealth'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('Record in CRAFT, Edit in ARTIST', () => {
@@ -85,6 +92,10 @@ test.describe('Project Save and Reload', () => {
   // The reopen is in a fresh browser context, whose IndexedDB is empty, so the
   // load cannot take the "row already present" path: it has to slice the
   // source out of the file and write it (`storeVideo`), quota check included.
+  //
+  // ESCSUITE-348: the source is the A/V fixture, so the reopen also has to
+  // bring the clip's waveform back and play it, picture and sound — the
+  // silent MP4 this used to import passed whether or not either came back.
   test('a saved project is a v2 container and reopens through the uploader', async ({
     page,
     browser,
@@ -92,7 +103,8 @@ test.describe('Project Save and Reload', () => {
     test.setTimeout(60_000)
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
-    await importMediaAndAddToTimeline(page)
+    await importMediaAndAddToTimeline(page, AV_FIXTURE_WEBM)
+    await expectWaveformDrawn(waveformCanvas(page), { silence: AV_FIXTURE_SILENCE })
 
     const downloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: 'Save project' }).click()
@@ -105,6 +117,7 @@ test.describe('Project Save and Reload', () => {
 
     // Open the file the way a user drops one in, in a context with no stored media.
     const context = await browser.newContext()
+    await installMediaHealthProbe(context)
     // Closed in a `finally`, so a failed expectation does not leak the context.
     try {
       const fresh = await context.newPage()
@@ -117,7 +130,7 @@ test.describe('Project Save and Reload', () => {
       await expect(fresh.getByText('Project loaded successfully')).toBeVisible({ timeout: 30_000 })
       await expect(fresh.getByText(/^1 clip · 1 track$/)).toBeVisible()
       // The source's tile is in the media library...
-      await expect(fresh.getByTitle('source.mp4', { exact: true })).toBeVisible()
+      await expect(fresh.getByTitle('tone-gap.webm', { exact: true })).toBeVisible()
       // ...and its bytes were written to this context's storage, whole.
       const storedSizes = await fresh.evaluate(
         () =>
@@ -135,8 +148,14 @@ test.describe('Project Save and Reload', () => {
             }
           })
       )
-      const fixtureSize = (await readFile(ARTIST_FIXTURE_MP4)).length
+      const fixtureSize = (await readFile(AV_FIXTURE_WEBM)).length
       expect(storedSizes).toEqual([fixtureSize])
+
+      // The reopened clip draws its waveform, quiet where the source is...
+      await expectWaveformDrawn(waveformCanvas(fresh), { silence: AV_FIXTURE_SILENCE })
+      // ...and plays, picture and sound.
+      await fresh.getByTitle('Play (Space)').click()
+      await expectPreviewAlive(fresh, { forMs: 1000 })
     } finally {
       await context.close()
     }
