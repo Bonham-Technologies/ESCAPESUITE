@@ -71,3 +71,51 @@ blank canvas, a paused video, a stalled frame callback, a frozen canvas, muted p
 that paints nothing) beside a healthy control. Change a helper, keep those passing. "Project Save
 and Reload" in `tests/integration/workflows.spec.ts` uses the fixture and the helpers on the
 reopened project.
+
+## Resource probe and the ARTIST soak (ESCSUITE-350)
+
+A preview that freezes after a while, and recovers on a reload a few times before it stops
+recovering, is an exhausted resource. `apps/e2e/utils/resourceProbe.ts` counts the page's scarce
+media resources so a test can assert they stay flat.
+
+**Probe.** `installResourceProbe(pageOrContext)` (before the page loads) wraps `AudioContext`,
+`OfflineAudioContext`, `VideoDecoder`, `AudioDecoder`, `Worker`, `URL.createObjectURL` /
+`revokeObjectURL`, and media elements made by `document.createElement` or `new Audio()`. It
+composes with `installMediaHealthProbe`: each wraps whatever `createElement` is when it runs.
+`readLiveCounts(page)` forces a full GC through the DevTools protocol (Chromium only) and returns
+`{ live, created, liveSites }`, each live resource with the first app stack frame that made it
+(line numbers are of the module Vite served, so read the function name). Live means:
+
+| Kind | Live while |
+|---|---|
+| audio contexts, decoders | reachable and `state !== 'closed'` |
+| `worker` | reachable and not `terminate()`d |
+| `objectUrl` | not yet revoked |
+| `mediaElement` | reachable, with a non-empty `src` attribute or a `srcObject`, and `networkState` not `NETWORK_EMPTY`. Attachment does not matter: ARTIST's preview `<video>`s are never in the DOM. `src = ''` or `removeAttribute('src')` + `load()` releases one |
+
+`installMediaHealthProbe` holds every media element strongly, so with both installed a dropped but
+unreleased element keeps counting; that errs towards reporting a leak. `describeGrowth(baseline,
+snapshot, allowed)` names each kind past its allowance with its creation sites.
+`tests/media-health/resource-probe.spec.ts` pins the probe: every kind counted live, then gone once
+released, and a dropped decoder gone once collected.
+
+**Blind spots.** The probe sees the window's globals only. Decoders and blob URLs made inside a
+worker are invisible except as that worker's own count, and the app's only `VideoDecoder` is made
+in `workers/decodeWorker.ts`. Media elements made by `cloneNode`, `innerHTML` or parsed markup are
+not tracked. A worker that ends itself with `self.close()` stays counted live.
+
+**Soak.** `tests/escapeartist/soak.spec.ts` (Chromium) puts the A/V WebM on the timeline twice, on
+two tracks at 0 s, so the preview needs the source's own `<video>` and a second-slot one
+(ESCSUITE-313). It then runs 25 cycles of {scrub the playhead across the clip, click the ruler at a
+seeded random point (`SEED`), play 1 s, pause, Go to start, Undo ×2 and Redo ×2}. The scrub, click
+and seek each assert the playhead landed where aimed and no clip moved. The undo/redo takes every
+clip off the source, so `usePreviewMedia.ts` revokes its blob URL and empties both elements, and the
+redo makes them again: each cycle makes one blob URL and two `<video>`s and releases as many.
+After cycle 1 and every 5th cycle it checks `expectPreviewAlive`, then that each live count is at
+most its cycle-1 value plus `ALLOWED_GROWTH` (1 per kind; measured growth was 0). Dropping
+`video.src = ''` from `releaseExtraVideos` fails it at cycle 5 naming `createPreviewVideoElement`.
+A second test reloads 10 times, restores the session from the "Resume Previous Session?" prompt
+each time, checks the waveform is drawn and the preview plays, and asserts live counts and every
+IndexedDB store's record count stay flat across the reloads. The two run in the normal e2e job,
+under 2 minutes together. A failure message lists every count since cycle 1 and where the leaked
+resources were made; rerunning replays the same clicks.
