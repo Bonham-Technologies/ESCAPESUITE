@@ -23,3 +23,5 @@ ffmpeg -hide_banner -loglevel error -y \
   -c:v libx264 -pix_fmt yuv420p -profile:v baseline -b:v 200k -g 15 \
   -c:a aac -b:a 64k -ac 1 -movflags +faststart \
   -shortest tone-gap.mp4
+
+# undecodable-opus.webm (ESCSUITE-365) is made by make-undecodable.mjs.
