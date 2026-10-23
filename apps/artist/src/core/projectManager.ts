@@ -14,6 +14,7 @@ import {
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
 import { STORAGE_QUOTA_MESSAGE, isQuotaExceeded } from './storageErrors';
 import { parseProject } from '../store/projectMigration';
+import { extractWaveformData } from '../utils/waveform';
 import {
   ProjectFileError,
   assertRangesTile,
@@ -269,6 +270,36 @@ async function probeMetadata(entry: SourceEntry, blob: Blob, existing: StoredSou
 }
 
 /**
+ * Give a restored source a waveform when neither the file nor the stored row
+ * carried one (ESCSUITE-347). Only the importers ever computed one, so a
+ * source from a file saved before ESCSUITE-97 (no `meta`), or one whose
+ * import-time decode failed (`waveformData: []`), reopened without a waveform
+ * for good, and was stored that way. A waveform already in hand is never
+ * decoded again: the file's own first, then the stored row's. An image has no
+ * audio to decode. A decode that rejects or finds no audio leaves `metadata`
+ * as it was: the source loads, as it always did, just without a waveform.
+ */
+async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: StoredSource): Promise<void> {
+  if (metadata.waveformData?.length) return;
+  if (metadata.mediaType === 'image' || metadata.mimeType.startsWith('image/')) return;
+  const stored = existing?.metadata;
+  if (stored?.waveformData?.length) {
+    metadata.waveformData = stored.waveformData;
+    metadata.hasAudio = metadata.hasAudio === true || stored.hasAudio;
+    return;
+  }
+  const { peaks, hasAudio } = await extractWaveformData(blob).catch((error) => {
+    console.warn(`Could not rebuild the waveform for "${metadata.name}":`, error);
+    return { peaks: [], hasAudio: false };
+  });
+  if (peaks.length === 0) return;
+  metadata.waveformData = peaks;
+  // A rebuilt waveform never downgrades a `true` already recorded: a decode's
+  // `hasAudio` is only a silence check (a quiet take still has audio; see takeImport.ts).
+  metadata.hasAudio = metadata.hasAudio === true || hasAudio;
+}
+
+/**
  * Restore one source from either file version (ESCSUITE-260): `blob` is the
  * source's bytes, decoded from v1 base64 or sliced out of a v2 payload, and
  * `thumbnail` likewise. One helper for both versions, so the metadata
@@ -325,6 +356,9 @@ async function restoreSource(
   } catch (error) {
     throw new ProjectFileError(`${at} could not be decoded`, { cause: error });
   }
+  // Before the row is written below, so a source new to this browser is stored
+  // with the rebuilt waveform and the next reopen does not decode it again.
+  await restoreWaveform(metadata, blob, existing);
 
   // A stored thumbnail (below) is the only legitimate source of a live
   // `thumbnailUrl`, never a value that arrived in the file itself. `meta` is

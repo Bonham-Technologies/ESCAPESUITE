@@ -33,6 +33,7 @@ import {
 } from './storage'
 import type { EditorBlock, Project, SourceVideo } from '../store/types'
 import { DEFAULT_TEXT_OVERLAY_DATA } from '../store/types'
+import { extractWaveformData } from '../utils/waveform'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { OBJECT_URL_PATTERN, lastObjectUrl } from '../test/objectUrls'
 
@@ -50,6 +51,12 @@ vi.mock('./storage', async (importOriginal) => {
     getStorageEstimate: vi.fn(actual.getStorageEstimate),
   }
 })
+
+// No AudioContext under jsdom, so the real decode would only ever answer no
+// peaks. Stubbed to that same answer by default; ESCSUITE-347's cases script it.
+vi.mock('../utils/waveform', () => ({
+  extractWaveformData: vi.fn(async () => ({ peaks: [], hasAudio: false })),
+}))
 
 // The real functions behind the spies, for a test that lets one call through
 // and fails the next.
@@ -2551,5 +2558,224 @@ describe('a load that fails after the file is read names the source and the caus
       expect(error.cause).toBe(ceiling)
       expect(storeVideo).not.toHaveBeenCalled()
     })
+  })
+})
+
+// ESCSUITE-347 (user-reported): a project reopened from a file that carries no
+// waveform (any file saved before ESCSUITE-97, or one whose import-time decode
+// failed) showed no waveform forever, because only the importers ever computed
+// one. The load now rebuilds a missing waveform from the restored bytes.
+describe('loadProject regenerates a missing waveform (ESCSUITE-347)', () => {
+  let media: MediaDoubles
+  const peaks = [
+    { min: -0.4, max: 0.6 },
+    { min: -0.1, max: 0.2 },
+  ]
+
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { duration: 8, videoWidth: 640, videoHeight: 360 } })
+    vi.mocked(extractWaveformData).mockClear()
+  })
+
+  afterEach(() => {
+    media.uninstall()
+    vi.mocked(extractWaveformData).mockReset()
+    vi.mocked(extractWaveformData).mockResolvedValue({ peaks: [], hasAudio: false })
+  })
+
+  function legacyFile(id: string, mimeType = 'video/webm'): File {
+    return new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(id),
+          videos: [{ id, name: 'legacy', mimeType, data: base64Of([1, 2, 3]) }],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+  }
+
+  it('decodes a waveform for a meta-less v1 source new to this browser, and stores it with the source', async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true })
+    const id = uniqueId('legacy-wave')
+
+    const { sourceVideos } = await loadProject(legacyFile(id))
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    expect(extractWaveformData).toHaveBeenCalledTimes(1)
+    const blob = vi.mocked(extractWaveformData).mock.calls[0][0]
+    expect(Array.from(new Uint8Array(await blob.arrayBuffer()))).toEqual([1, 2, 3])
+    // Stored with it, so the next reopen reads it rather than decoding again.
+    expect((await getVideo(id))?.metadata).toMatchObject({ waveformData: peaks, hasAudio: true })
+    await deleteVideo(id)
+  })
+
+  it('decodes a waveform for a v2 source whose meta carries an empty one', async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true })
+    const id = uniqueId('v2-empty-wave')
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'video/webm',
+        meta: { duration: 8, width: 640, height: 360, frameRate: 30, waveformData: [], hasAudio: false },
+        bytes: [4, 5, 6],
+      },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    expect(extractWaveformData).toHaveBeenCalledTimes(1)
+    await deleteVideo(id)
+  })
+
+  it('decodes a waveform for a meta-less file whose already-stored row has none', async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true })
+    const id = uniqueId('stored-no-wave')
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), {
+      id,
+      name: 'legacy',
+      duration: 8,
+      width: 640,
+      height: 360,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 3,
+    })
+
+    const { sourceVideos } = await loadProject(legacyFile(id))
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    await deleteVideo(id)
+  })
+
+  it("never lets the decode's silence check downgrade a hasAudio the file recorded", async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: false })
+    const id = uniqueId('quiet-take')
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'video/webm',
+        meta: { duration: 8, width: 640, height: 360, frameRate: 30, hasAudio: true },
+        bytes: [4, 5, 6],
+      },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    await deleteVideo(id)
+  })
+
+  it("never decodes when the file's meta carries a waveform", async () => {
+    const id = uniqueId('v2-has-wave')
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'video/webm',
+        meta: { duration: 8, width: 640, height: 360, frameRate: 30, waveformData: peaks, hasAudio: true },
+        bytes: [4, 5, 6],
+      },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    expect(extractWaveformData).not.toHaveBeenCalled()
+    await deleteVideo(id)
+  })
+
+  it("takes the stored row's waveform, without decoding, when the file's meta has none", async () => {
+    const id = uniqueId('stored-wave')
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), {
+      id,
+      name: 'stored',
+      duration: 8,
+      width: 640,
+      height: 360,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 3,
+      waveformData: peaks,
+      hasAudio: true,
+    })
+    const file = v2File(createTestProject(id), [
+      { id, mimeType: 'video/webm', meta: { duration: 8, width: 640, height: 360, frameRate: 30 }, bytes: [1, 2, 3] },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    expect(extractWaveformData).not.toHaveBeenCalled()
+    await deleteVideo(id)
+  })
+
+  it("keeps the file's hasAudio: true when it takes a stored row's waveform that says otherwise", async () => {
+    const id = uniqueId('stored-wave-quiet')
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), {
+      id,
+      name: 'stored',
+      duration: 8,
+      width: 640,
+      height: 360,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 3,
+      waveformData: peaks,
+      hasAudio: false,
+    })
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'video/webm',
+        meta: { duration: 8, width: 640, height: 360, frameRate: 30, waveformData: [], hasAudio: true },
+        bytes: [1, 2, 3],
+      },
+    ])
+
+    const { sourceVideos } = await loadProject(file)
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    await deleteVideo(id)
+  })
+
+  it('never decodes an image', async () => {
+    const id = uniqueId('still')
+    const file = v2File(createTestProject(id), [
+      {
+        id,
+        mimeType: 'image/png',
+        meta: { duration: 5, width: 10, height: 10, frameRate: 1, mediaType: 'image' },
+        bytes: [7, 8, 9],
+      },
+    ])
+
+    await loadProject(file)
+
+    expect(extractWaveformData).not.toHaveBeenCalled()
+    await deleteVideo(id)
+  })
+
+  it('still loads the source, without a waveform, when the decode rejects or finds no audio', async () => {
+    vi.mocked(extractWaveformData).mockRejectedValueOnce(new Error('decoder gone'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const id = uniqueId('wave-fails')
+
+    const { sourceVideos } = await loadProject(legacyFile(id))
+
+    expect(sourceVideos).toHaveLength(1)
+    expect(sourceVideos[0].waveformData).toBeUndefined()
+    expect(sourceVideos[0].hasAudio).toBeUndefined()
+    expect(warn).toHaveBeenCalledTimes(1)
+    warn.mockRestore()
+    await deleteVideo(id)
+
+    // No audio at all: nothing is added, as before the ticket.
+    const silent = uniqueId('wave-silent')
+    const reopened = await loadProject(legacyFile(silent))
+    expect(reopened.sourceVideos[0].waveformData).toBeUndefined()
+    await deleteVideo(silent)
   })
 })
