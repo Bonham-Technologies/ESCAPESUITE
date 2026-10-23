@@ -262,16 +262,20 @@ export function computeTrimUpdate({
       // in point run on while the clip stays put, moving its end and slipping
       // picture and sound against the timeline.
       const inPointAtTimelineZero = origin.startTime - origin.timelinePosition;
-      newStartTime = Math.max(
-        0,
-        inPointAtTimelineZero,
-        Math.min(newStartTime, origin.endTime - MIN_CLIP_DURATION)
+      // The floors go inside the MIN_CLIP_DURATION cap, so even a clip with a
+      // (migrated) negative position can never get an in point past its out
+      // point; for a valid clip the order makes no difference.
+      newStartTime = Math.min(
+        Math.max(0, inPointAtTimelineZero, newStartTime),
+        origin.endTime - MIN_CLIP_DURATION
       );
 
       const newTimelinePosition = origin.timelinePosition + (newStartTime - origin.startTime);
 
       return {
         startTime: newStartTime,
+        // The clamp above already keeps this at or past 0; the max is
+        // insurance against float noise in the sum.
         timelinePosition: Math.max(0, newTimelinePosition),
       };
     }

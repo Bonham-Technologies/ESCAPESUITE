@@ -294,6 +294,17 @@ describe('computeTrimUpdate', () => {
       expect(update).toEqual({ startTime: 3, timelinePosition: 0 })
     })
 
+    it('never puts the in point past the out point, even for a clip at a negative position', () => {
+      const update = computeTrimUpdate({
+        edge: 'start',
+        mouseTime: -10,
+        clip: makeClip({ timelinePosition: -5, startTime: 1 }),
+        sourceVideo: video,
+        origin: { startTime: 1, endTime: 2, timelinePosition: -5 },
+      })
+      expect(update!.startTime).toBeLessThanOrEqual(2 - MIN_CLIP_DURATION)
+    })
+
     it('leaves at least the minimum duration in the clip', () => {
       expect(
         computeTrimUpdate({ edge: 'start', mouseTime: 100, clip, sourceVideo: video, origin })
