@@ -24,7 +24,8 @@ what is already stored.
 - **What is remuxed** (`remuxWithSeekIndex`): every track's encoded packets, copied through
   Mediabunny (`Input` + `BlobSource` -> `EncodedPacketSink` -> `EncodedVideoPacketSource` /
   `EncodedAudioPacketSource` -> `Output` + `WebMOutputFormat` + `StreamTarget`) with no decoder
-  and no encoder. The `StreamTarget` writes into `createChunkCollector`, which keeps each chunk as
+  and no encoder. The `StreamTarget` writes into `createChunkCollector` (`core/chunkCollector.ts` since
+  ESCSUITE-367, which the MP4 and WebM exporters write through too), which keeps each chunk as
   a separate Blob part (overwriting in place where the muxer writes back a size, Duration or the
   SeekHead) and joins them into one Blob at the end, so the output is never one contiguous
   `ArrayBuffer` — a `BufferTarget` would have been gigabytes for a long take, and an allocation

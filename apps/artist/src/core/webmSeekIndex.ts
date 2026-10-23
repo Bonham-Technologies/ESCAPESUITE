@@ -32,9 +32,9 @@ import {
   type EncodedPacket,
   type InputAudioTrack,
   type InputTrack,
-  type StreamTargetChunk,
   type VideoCodec,
 } from 'mediabunny';
+import { createChunkCollector } from './chunkCollector';
 import {
   CLUSTER_ID,
   CUES_ID,
@@ -89,63 +89,6 @@ async function copyPackets(
 ): Promise<void> {
   for await (const packet of new EncodedPacketSink(track).packets()) await add(packet);
   close();
-}
-
-/**
- * Where the remux writes: a stream whose chunks are kept as separate Blob parts
- * and joined into one Blob at the end, so the output is never one contiguous
- * ArrayBuffer — for a long take that would be gigabytes, and an allocation that
- * fails is an out-of-memory crash nothing can catch (review round 1).
- *
- * Mediabunny's muxer appends, and then writes back into bytes it has already
- * written — a Cluster's size once the Cluster ends, the Segment's size, Duration
- * and SeekHead at the finish. A write that lands on collected bytes overwrites
- * them in the part (or parts) it covers, and whatever runs past the end is
- * appended. Mediabunny pads any gap itself, so no write starts past the end.
- *
- * The parts are kept in the order the writes arrive, which is file order only
- * because the `StreamTarget` is left in its default mode: there Mediabunny
- * emits each flush as merged chunks sorted by start. Do not pass it
- * `chunked: true`, which can deliver a chunk ahead of the bytes before it.
- */
-export function createChunkCollector(): {
-  writable: WritableStream<StreamTargetChunk>;
-  toBlob: (type: string) => Blob;
-} {
-  const parts: Uint8Array[] = [];
-  const starts: number[] = [];
-  let end = 0;
-
-  const write = ({ data, position }: StreamTargetChunk) => {
-    // The last part starting at or before `position`.
-    let lo = 0;
-    let hi = starts.length;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (starts[mid] <= position) lo = mid + 1;
-      else hi = mid;
-    }
-    let offset = 0;
-    for (let i = Math.max(0, lo - 1); i < parts.length && offset < data.byteLength; i++) {
-      const at = position + offset - starts[i];
-      const n = Math.min(parts[i].byteLength - at, data.byteLength - offset);
-      parts[i].set(data.subarray(offset, offset + n), at);
-      offset += n;
-    }
-    // Whatever is left lies past the end: append it. An append is all of it;
-    // a write-back that fit inside what was collected leaves nothing.
-    const rest = data.subarray(offset);
-    if (rest.byteLength > 0) {
-      parts.push(rest);
-      starts.push(end);
-      end += rest.byteLength;
-    }
-  };
-
-  return {
-    writable: new WritableStream<StreamTargetChunk>({ write }),
-    toBlob: (type) => new Blob(parts as BlobPart[], { type }),
-  };
 }
 
 /**

@@ -1,8 +1,10 @@
-// The audio mixer decodes each clip's source, mixes it into one stereo
-// interleaved timeline buffer, and normalises the result. Everything here runs
-// the real mixing loop against real IndexedDB (fake-indexeddb) and the real
-// keyframe interpolator; only the browser API jsdom lacks — OfflineAudioContext
-// — is a double.
+// The audio mixer decodes each clip's source, mixes it into planar stereo (one
+// array per channel) over the exported range, and normalises the result.
+// Everything here runs the real mixing loop against real IndexedDB
+// (fake-indexeddb) and the real keyframe interpolator; only the browser API
+// jsdom lacks — OfflineAudioContext — is a double. These sources are bytes no
+// demuxer recognises, so they take the whole-file `decodeAudioData` fallback;
+// the streamed path is covered by `audioMixer.streamed.test.ts`.
 //
 // This used to also cover `extractAndMixAudioWithWorker`, a Web Worker fast
 // path with a main-thread fallback. ESCSUITE-99 deleted it: the worker's own
@@ -13,7 +15,8 @@
 // export pipeline's only mixer, and the "applies volume keyframes per sample"
 // case below is the guarantee the worker used to threaten.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { extractAndMixAudio } from './audioMixer'
+import { Input } from 'mediabunny'
+import { extractAndMixAudio, SourceAudioError, WHOLE_FILE_DECODE_MAX_BYTES } from './audioMixer'
 import { storeVideo } from './storage'
 import {
   createAudioBufferDouble,
@@ -32,9 +35,6 @@ import type { Clip } from '../store/types'
 const SAMPLE_RATE = 48000
 /** 480 samples of timeline — small enough to assert on sample by sample. */
 const TOTAL_DURATION = 0.01
-
-/** Sample index n of the timeline, in the interleaved output buffer. */
-const at = (sample: number, channel: 0 | 1) => sample * 2 + channel
 
 function ramp(length: number, sign = 1): Float32Array {
   const data = new Float32Array(length)
@@ -79,16 +79,19 @@ describe('extractAndMixAudio', () => {
     warn.mockRestore()
   })
 
-  it('sizes the render context and the output buffer from the timeline duration', async () => {
+  it('sizes the output channels from the timeline duration, and the decode context to one frame', async () => {
     const clip = makeClip({ duration: 0.005, endTime: 0.005 })
 
     const mixed = await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn())
 
     expect(offline.constructions).toEqual([
-      { numberOfChannels: 2, length: 480, sampleRate: SAMPLE_RATE },
+      // Only decodeAudioData is used: a context the length of a long range
+      // could itself fail to allocate (ESCSUITE-367).
+      { numberOfChannels: 2, length: 1, sampleRate: SAMPLE_RATE },
     ])
     expect(mixed).not.toBeNull()
-    expect(mixed!.length).toBe(960)
+    // Planar stereo (ESCSUITE-367): one array per channel, one frame per sample.
+    expect(mixed!.map((channel) => channel.length)).toEqual([480, 480])
   })
 
   it('writes the clip at its timeline position, reading from its trim start', async () => {
@@ -103,12 +106,12 @@ describe('extractAndMixAudio', () => {
 
     const mixed = (await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn()))!
 
-    expect(mixed[at(95, 0)]).toBe(0) // before the clip: silence
-    expect(mixed[at(96, 0)]).toBeCloseTo(stereo.getChannelData(0)[48], 6)
-    expect(mixed[at(96, 1)]).toBeCloseTo(stereo.getChannelData(1)[48], 6)
-    expect(mixed[at(200, 0)]).toBeCloseTo(stereo.getChannelData(0)[152], 6)
-    expect(mixed[at(335, 0)]).toBeCloseTo(stereo.getChannelData(0)[287], 6)
-    expect(mixed[at(336, 0)]).toBe(0) // one past the last mixed sample
+    expect(mixed[0][95]).toBe(0) // before the clip: silence
+    expect(mixed[0][96]).toBeCloseTo(stereo.getChannelData(0)[48], 6)
+    expect(mixed[1][96]).toBeCloseTo(stereo.getChannelData(1)[48], 6)
+    expect(mixed[0][200]).toBeCloseTo(stereo.getChannelData(0)[152], 6)
+    expect(mixed[0][335]).toBeCloseTo(stereo.getChannelData(0)[287], 6)
+    expect(mixed[0][336]).toBe(0) // one past the last mixed sample
   })
 
   it('scales every sample by the track volume', async () => {
@@ -122,8 +125,8 @@ describe('extractAndMixAudio', () => {
       vi.fn()
     ))!
 
-    expect(half[at(10, 0)]).toBeCloseTo(full[at(10, 0)] * 0.5, 6)
-    expect(half[at(10, 1)]).toBeCloseTo(full[at(10, 1)] * 0.5, 6)
+    expect(half[0][10]).toBeCloseTo(full[0][10] * 0.5, 6)
+    expect(half[1][10]).toBeCloseTo(full[1][10] * 0.5, 6)
   })
 
   it('treats a track with no volume set as full volume', async () => {
@@ -133,7 +136,7 @@ describe('extractAndMixAudio', () => {
 
     const mixed = (await extractAndMixAudio([clip], [track], TOTAL_DURATION, vi.fn()))!
 
-    expect(mixed[at(10, 0)]).toBeCloseTo(stereo.getChannelData(0)[10], 6)
+    expect(mixed[0][10]).toBeCloseTo(stereo.getChannelData(0)[10], 6)
   })
 
   it('skips a muted track entirely, without decoding its source', async () => {
@@ -182,8 +185,8 @@ describe('extractAndMixAudio', () => {
 
     const mixed = (await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn()))!
 
-    expect(mixed[at(10, 0)]).toBeCloseTo(0.011, 6)
-    expect(mixed[at(10, 1)]).toBeCloseTo(mixed[at(10, 0)], 6)
+    expect(mixed[0][10]).toBeCloseTo(0.011, 6)
+    expect(mixed[1][10]).toBeCloseTo(mixed[0][10], 6)
   })
 
   it('applies volume keyframes per sample on top of the track volume', async () => {
@@ -208,11 +211,11 @@ describe('extractAndMixAudio', () => {
     ))!
 
     const source = stereo.getChannelData(0)
-    expect(mixed[at(0, 0)]).toBeCloseTo(0, 6) // ramp starts at volume 0
+    expect(mixed[0][0]).toBeCloseTo(0, 6) // ramp starts at volume 0
     // Half way through the clip (sample 120 of 240) the keyframe ramp is at 0.5,
     // and the track is at 0.5 on top of that.
-    expect(mixed[at(120, 0)]).toBeCloseTo(source[120] * 0.5 * 0.5, 5)
-    expect(mixed[at(239, 0)]).toBeCloseTo(source[239] * 0.5 * (239 / 240), 5)
+    expect(mixed[0][120]).toBeCloseTo(source[120] * 0.5 * 0.5, 5)
+    expect(mixed[0][239]).toBeCloseTo(source[239] * 0.5 * (239 / 240), 5)
   })
 
   it('sums overlapping clips and normalises the peak back under 1', async () => {
@@ -229,10 +232,10 @@ describe('extractAndMixAudio', () => {
 
     const mixed = (await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn()))!
 
-    const peak = Math.max(...Array.from(mixed, Math.abs))
+    const peak = Math.max(...mixed.flatMap((channel) => Array.from(channel, Math.abs)))
     expect(peak).toBeCloseTo(0.95, 5)
     // Normalisation is a single uniform scale, so the shape is preserved.
-    expect(mixed[at(10, 0)] / mixed[at(20, 0)]).toBeCloseTo(
+    expect(mixed[0][10] / mixed[0][20]).toBeCloseTo(
       loud.getChannelData(0)[10] / loud.getChannelData(0)[20],
       5
     )
@@ -243,7 +246,7 @@ describe('extractAndMixAudio', () => {
 
     const mixed = (await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn()))!
 
-    expect(mixed[at(239, 0)]).toBeCloseTo(stereo.getChannelData(0)[239], 6)
+    expect(mixed[0][239]).toBeCloseTo(stereo.getChannelData(0)[239], 6)
   })
 
   it('drops samples that fall outside the timeline buffer', async () => {
@@ -251,7 +254,7 @@ describe('extractAndMixAudio', () => {
 
     const mixed = (await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn()))!
 
-    expect(mixed.every((s) => s === 0)).toBe(true)
+    expect(mixed.every((channel) => channel.every((s) => s === 0))).toBe(true)
   })
 
   it('returns null when no clip yielded decodable audio', async () => {
@@ -273,36 +276,132 @@ describe('extractAndMixAudio', () => {
     expect(offline.decodeCalls).toHaveLength(0)
   })
 
-  it('warns and carries on when reading a clip blob fails', async () => {
-    patchedBlobRead = vi
-      .spyOn(Blob.prototype, 'arrayBuffer')
-      .mockRejectedValueOnce(new Error('read failed'))
+  it('warns and carries on when reading one source fails', async () => {
+    await storeSource('video2', 32)
+    // Every read of the 16-byte source fails, the streamed path's and the
+    // whole-file path's alike; the 32-byte one reads.
+    patchedBlobRead = vi.spyOn(Blob.prototype, 'arrayBuffer').mockImplementation(function (this: Blob) {
+      return this.size === 16 ? Promise.reject(new Error('read failed')) : Promise.resolve(new ArrayBuffer(this.size))
+    })
     const clips = [
       makeClip({ id: 'a', duration: 0.005, endTime: 0.005 }),
-      makeClip({ id: 'b', duration: 0.005, endTime: 0.005 }),
+      makeClip({ id: 'b', sourceVideoId: 'video2', duration: 0.005, endTime: 0.005 }),
     ]
 
     const mixed = await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn())
 
     expect(warn).toHaveBeenCalledWith(
-      'Failed to extract audio from clip:',
+      'Failed to extract audio from source:',
       expect.objectContaining({ message: 'read failed' })
     )
-    // The second clip still made it into the mix.
+    // The second source still made it into the mix.
     expect(mixed).not.toBeNull()
+    expect(mixed![0][10]).toBeCloseTo(stereo.getChannelData(0)[10], 6)
   })
 
-  it('reports progress once per clip, ending at 100', async () => {
+  it('reports progress once per source, ending at 100', async () => {
+    await storeSource('video2', 32)
     const onProgress = vi.fn()
     const clips = [
       makeClip({ id: 'a', duration: 0.005, endTime: 0.005 }),
-      makeClip({ id: 'b', duration: 0.005, endTime: 0.005 }),
+      makeClip({ id: 'b', sourceVideoId: 'video2', duration: 0.005, endTime: 0.005 }),
       makeClip({ id: 'c', duration: 0.005, endTime: 0.005 }),
     ]
 
     await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, onProgress)
 
-    expect(onProgress.mock.calls.map((c) => Math.round(c[0]))).toEqual([33, 67, 100])
+    expect(onProgress.mock.calls.map((c) => Math.round(c[0]))).toEqual([50, 100])
+  })
+
+  // ESCSUITE-367: a source cut into many clips was decoded once per clip, each
+  // time holding the whole file and its whole decoded track.
+  it('decodes a source once however many clips use it', async () => {
+    const clips = [
+      makeClip({ id: 'a', duration: 0.001, endTime: 0.001 }),
+      makeClip({ id: 'b', timelinePosition: 0.003, startTime: 0.002, duration: 0.001, endTime: 0.003 }),
+      makeClip({ id: 'c', timelinePosition: 0.006, startTime: 0.004, duration: 0.002, endTime: 0.006 }),
+    ]
+
+    const mixed = (await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn()))!
+
+    expect(offline.decodeCalls).toHaveLength(1)
+    const source = stereo.getChannelData(0)
+    expect(mixed[0][0]).toBeCloseTo(source[0], 6) // a
+    expect(mixed[0][144]).toBeCloseTo(source[96], 6) // b: timeline 0.003 reads source 0.002
+    expect(mixed[0][288 + 50]).toBeCloseTo(source[192 + 50], 6) // c
+  })
+
+  // ESCSUITE-367: the whole timeline used to be mixed and then sliced, so a
+  // few seconds of a two-hour recording asked for one 2.76 GB buffer.
+  describe('a range', () => {
+    const clips = [
+      makeClip({ id: 'a', timelinePosition: 0.002, startTime: 0.001, duration: 0.005, endTime: 0.006 }),
+      makeClip({ id: 'b', timelinePosition: 0.006, duration: 0.003, endTime: 0.003 }),
+    ]
+
+    it('mixes only the range, exactly the samples the whole mix sliced the old way gives', async () => {
+      const whole = (await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn()))!
+      const range = { start: 0.004, end: 0.0075 }
+
+      const part = (await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn(), range))!
+
+      const from = Math.floor(range.start * SAMPLE_RATE)
+      const to = Math.floor(range.end * SAMPLE_RATE)
+      expect(part.map((channel) => channel.length)).toEqual([to - from, to - from])
+      expect(part.map((channel) => Array.from(channel))).toEqual(
+        whole.map((channel) => Array.from(channel.slice(from, to)))
+      )
+    })
+
+    it('stops at the end of the timeline when the range runs past it', async () => {
+      const part = (await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn(), { start: 0.008, end: 0.02 }))!
+
+      expect(part[0].length).toBe(480 - 384)
+    })
+
+    it('is still not null when its clips lie outside it but the timeline has sound', async () => {
+      const part = await extractAndMixAudio(clips, [makeTrack()], TOTAL_DURATION, vi.fn(), { start: 0, end: 0.001 })
+
+      expect(part).not.toBeNull()
+      expect(part!.every((channel) => channel.every((s) => s === 0))).toBe(true)
+    })
+  })
+
+  // ESCSUITE-367: a source over 2 GiB cannot be read into one buffer, and the
+  // failed read used to be taken for "no audio" — the export went out silent.
+  it('refuses, by name, a source too large for the whole-file decode that the streamed path cannot read', async () => {
+    // No demuxer reads it (an MP3, or a container mediabunny does not know),
+    // and it is over the one-buffer limit.
+    const demux = vi.spyOn(Input.prototype, 'getPrimaryAudioTrack').mockRejectedValue(new Error('unknown format'))
+    const size = vi.spyOn(Blob.prototype, 'size', 'get').mockReturnValue(WHOLE_FILE_DECODE_MAX_BYTES + 1)
+    try {
+      const clip = makeClip({ name: 'Two hour take', duration: 0.005, endTime: 0.005 })
+
+      const error = await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn()).catch((e: unknown) => e)
+
+      expect(error).toBeInstanceOf(SourceAudioError)
+      expect((error as Error).message).toMatch(/^Could not read the sound of Two hour take: /)
+      expect(offline.decodeCalls).toHaveLength(0)
+    } finally {
+      size.mockRestore()
+      demux.mockRestore()
+    }
+  })
+
+  it('leaves unread a source too large for the whole-file decode whose clips all miss the range', async () => {
+    const demux = vi.spyOn(Input.prototype, 'getPrimaryAudioTrack').mockRejectedValue(new Error('unknown format'))
+    const size = vi.spyOn(Blob.prototype, 'size', 'get').mockReturnValue(WHOLE_FILE_DECODE_MAX_BYTES + 1)
+    try {
+      const clip = makeClip({ timelinePosition: 0.008, duration: 0.001, endTime: 0.001 })
+
+      const mixed = await extractAndMixAudio([clip], [makeTrack()], TOTAL_DURATION, vi.fn(), { start: 0, end: 0.002 })
+
+      expect(mixed).toBeNull()
+      expect(offline.decodeCalls).toHaveLength(0)
+    } finally {
+      size.mockRestore()
+      demux.mockRestore()
+    }
   })
 
   it('returns null for a timeline with no samples, without building a context or buffer (ESCSUITE-257)', async () => {

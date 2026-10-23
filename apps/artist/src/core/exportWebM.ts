@@ -4,7 +4,7 @@
 import {
   Output,
   WebMOutputFormat,
-  BufferTarget,
+  StreamTarget,
   EncodedVideoPacketSource,
   EncodedAudioPacketSource,
   EncodedPacket,
@@ -21,6 +21,7 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   assertExportableLength,
+  exportedLengthReason,
   findSupportedVideoConfig,
   webMVideoCodecConfigs,
   waitForEncoderBackpressure,
@@ -46,6 +47,7 @@ import {
   rewindElementSources,
 } from './elementFrames';
 import { extractAndMixAudio } from './audioMixer';
+import { createChunkCollector } from './chunkCollector';
 import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
 /**
@@ -114,10 +116,14 @@ export async function exportToWebM(
   // A timeline with no length cannot be mixed or encoded (ESCSUITE-257): refuse
   // it before anything below spends work on it.
   assertExportableLength(calculateTimelineDuration(clips), 'webm', exportLog);
-  // And the length that will actually be encoded: a selected range's own.
-  if (options.timeRange) {
-    assertExportableLength(options.timeRange.end - options.timeRange.start, 'webm', exportLog);
-  }
+  // And the length that will actually be encoded — a selected range's own — no
+  // longer than one channel's mix can hold (ESCSUITE-367).
+  assertExportableLength(
+    options.timeRange ? options.timeRange.end - options.timeRange.start : calculateTimelineDuration(clips),
+    'webm',
+    exportLog,
+    exportedLengthReason
+  );
 
   // Probe VP9, falling back to VP8, at the real output size and bitrate —
   // before loading any media or constructing any encoder (ESCSUITE-29
@@ -165,25 +171,20 @@ export async function exportToWebM(
   const totalDuration = rangeEnd - rangeStart;
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
-  // Extract and mix audio first, on the main thread
-  // Note: we extract the full timeline audio, then slice it later
+  // Extract and mix audio first, on the main thread. Only the exported range is
+  // mixed, one array per channel (ESCSUITE-367): a whole two-hour timeline
+  // interleaved was one 2.76 GB buffer, which Chromium refuses, even when a few
+  // seconds were exported.
   onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
-  const fullAudioData = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
+  let audioData = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
     onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
-  });
+  }, options.timeRange);
 
-  // Slice audio to the selected time range
-  // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
   const audioChannels = EXPORT_AUDIO_CHANNELS;
   // Set only by the Opus probe below, and read only by the result: the one
   // thing the caller cannot work out for itself (ESCSUITE-175 fix round).
   let audioDropped = false;
-  let audioData = fullAudioData && options.timeRange ? (() => {
-    const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
-    const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
-    return fullAudioData.slice(startSample, endSample);
-  })() : fullAudioData;
 
   // Create canvas for frame rendering
   const canvas = document.createElement('canvas');
@@ -224,10 +225,12 @@ export async function exportToWebM(
     onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
 
     // Create Mediabunny output with WebM format
-    const target = new BufferTarget();
+    // Streamed into Blob parts, never one ArrayBuffer, which Chromium refuses
+    // past 2 GiB (ESCSUITE-367).
+    const collector = createChunkCollector();
     const output = new Output({
       format: new WebMOutputFormat(),
-      target,
+      target: new StreamTarget(collector.writable),
     });
     muxerOutput = output;
 
@@ -317,6 +320,49 @@ export async function exportToWebM(
       openEncoders.push(audioEncoder);
 
       await audioEncoder.configure(opusConfig);
+    }
+
+    // Encode audio in chunks if available — before the frames, and flushed, so
+    // the muxer has both tracks' first packets from the start (ESCSUITE-367).
+    // The muxer interleaves by timestamp and holds every packet of a track
+    // until each track has one: audio after video kept the whole encoded video
+    // in page memory until the end, gigabytes for a long export. The audio
+    // waiting for the video instead is ~170 MB for two hours of AAC at 192 kbps.
+    if (audioEncoder && audioData) {
+      onProgress({ phase: 'encoding', progress: 18, message: 'Encoding audio...' });
+
+      const samplesPerChunk = sampleRate; // 1 second chunks
+      const [left, right] = audioData; // planar stereo (ESCSUITE-367)
+      const totalSamples = left.length;
+      const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
+
+      for (let i = 0; i < totalChunks; i++) {
+        // Check for abort during audio encoding
+        checkAborted(signal);
+
+        const startSample = i * samplesPerChunk;
+        const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
+        const chunkSamples = endSample - startSample;
+
+        // Create planar audio data (left channel first, then right channel)
+        const chunkData = new Float32Array(chunkSamples * 2);
+
+        chunkData.set(left.subarray(startSample, endSample), 0);
+        chunkData.set(right.subarray(startSample, endSample), chunkSamples);
+
+        const audioDataObj = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: chunkSamples,
+          numberOfChannels: 2,
+          timestamp: Math.round((startSample / sampleRate) * 1_000_000),
+          data: chunkData,
+        });
+
+        audioEncoder.encode(audioDataObj);
+        audioDataObj.close();
+      }
+      await audioEncoder.flush();
     }
 
     onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
@@ -409,48 +455,6 @@ export async function exportToWebM(
       }
     }
 
-    // Encode audio in chunks if available
-    if (audioEncoder && audioData) {
-      onProgress({ phase: 'encoding', progress: 89, message: 'Encoding audio...' });
-
-      const samplesPerChunk = sampleRate; // 1 second chunks
-      const totalSamples = audioData.length / 2; // audioData is interleaved stereo
-      const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
-
-      for (let i = 0; i < totalChunks; i++) {
-        // Check for abort during audio encoding
-        checkAborted(signal);
-
-        const startSample = i * samplesPerChunk;
-        const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
-        const chunkSamples = endSample - startSample;
-
-        // Create planar audio data (left channel first, then right channel)
-        const chunkData = new Float32Array(chunkSamples * 2);
-
-        // Left channel (first half)
-        for (let s = 0; s < chunkSamples; s++) {
-          chunkData[s] = audioData[(startSample + s) * 2]; // Left from interleaved
-        }
-        // Right channel (second half)
-        for (let s = 0; s < chunkSamples; s++) {
-          chunkData[chunkSamples + s] = audioData[(startSample + s) * 2 + 1]; // Right from interleaved
-        }
-
-        const audioDataObj = new AudioData({
-          format: 'f32-planar',
-          sampleRate,
-          numberOfFrames: chunkSamples,
-          numberOfChannels: 2,
-          timestamp: Math.round((startSample / sampleRate) * 1_000_000),
-          data: chunkData,
-        });
-
-        audioEncoder.encode(audioDataObj);
-        audioDataObj.close();
-      }
-    }
-
     log('frames', `Frame loop complete: ${frameCount} frames encoded`);
 
     // Check for any encoder errors before finalizing
@@ -469,8 +473,8 @@ export async function exportToWebM(
     await videoEncoder.flush();
     videoEncoder.close();
 
+    // Flushed already, before the frames (ESCSUITE-367).
     if (audioEncoder) {
-      await audioEncoder.flush();
       audioEncoder.close();
     }
 
@@ -486,15 +490,15 @@ export async function exportToWebM(
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-    // Get the final buffer
-    const buffer = target.buffer;
-    if (!buffer) {
+    // Get the final file
+    const blob = collector.toBlob('video/webm');
+    if (blob.size === 0) {
       throw new Error('Export failed: no data was written to buffer');
     }
     // `audio` is false exactly when the Opus probe above refused: this browser
     // cannot carry sound in a WebM. Whether this project *had* any is the
     // dialog's question, not the exporter's — see `ExportResult`.
-    return { blob: new Blob([buffer], { type: 'video/webm' }), audio: !audioDropped, framesEncoded: frameCount, loudness };
+    return { blob, audio: !audioDropped, framesEncoded: frameCount, loudness };
   } catch (error) {
     // Clean up resources on error. The release is the same one the success path
     // made and runs at most once: the two paths are not exclusive — the

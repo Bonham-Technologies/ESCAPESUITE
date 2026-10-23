@@ -380,9 +380,22 @@
   does **not** call it at all, not even with the result discarded: a GIF has no audio track,
   and mixing the whole timeline to throw it away is the most expensive no-op in the pipeline
   (`exportGIF.test.ts` asserts the mixer is never called). It decodes each
-  clip's source with `OfflineAudioContext`, applies `getAnimatedVolume` per sample (so a
+  source once, applies `getAnimatedVolume` per sample (so a
   clip's volume keyframes always reach the export, the same as the preview), sums the result
-  into one stereo interleaved timeline buffer and normalises the peak back under 1. A clip
+  into planar stereo (one `Float32Array` per channel) covering only the exported range, and
+  normalises the peak back under 1. Since ESCSUITE-367 a source is decoded streamed through
+  mediabunny's `AudioSampleSink`, a chunk at a time, straight into every clip that uses it and
+  only as far as the last frame any clip reads; the whole-file `decodeAudioData` is the fallback
+  for what that path cannot read (no demuxer, no `AudioDecoder`, MP3, a rate other than 48 kHz,
+  a decode that fails before anything was mixed), and only for a file under
+  `WHOLE_FILE_DECODE_MAX_BYTES` (1.9 GiB). A source past that, or one whose streamed decode
+  fails part-way, fails the export by name (`SourceAudioError`) instead of exporting silence:
+  the whole timeline interleaved, the whole source read twice and its decoded track used to be
+  three buffers that pass Chromium's 2 GiB single-allocation limit for a two-hour recording, and
+  a failed read was taken for "no audio". Measured on Chromium 141, the streamed path matches
+  `decodeAudioData` sample for sample at offset 0 on a 48 kHz Opus WebM (ffmpeg-made, and a real
+  MediaRecorder take) and on a float WAV; the one difference is a mix that goes past full scale,
+  which `decodeAudioData` clips at ±1 and the streamed path keeps for the peak normalisation. A clip
   whose track has been deleted is **skipped**, the same as a muted track (ESCSUITE-99;
   previously it was mixed in at full volume), and the same as a **hidden** track (ESCSUITE-127:
   the preview was already silent for one — `store/clipQueries.ts`'s `getClipsAtTime` filters on

@@ -32,6 +32,7 @@ import {
   TAB_VISIBLE_NOTE,
   calculateTimelineDuration,
   exportLengthReason,
+  exportedLengthReason,
   projectHasAudio as computeProjectHasAudio,
 } from '../../core/exportTypes';
 import { LOUDNESS_TARGETS, formatLoudnessSummary, loudnessTargetOrOff } from '../../core/loudness';
@@ -328,8 +329,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const blob = new Blob([serializeCaptions(captionCues, format)], { type: CAPTION_MIME_TYPES[format] });
     downloadBlob(blob, `${projectName || 'export'}.${format}`);
   };
-  const lengthReason =
-    wholeLengthReason ?? (timeRange ? exportLengthReason(timeRange.end - timeRange.start) : null);
+  // What the whole timeline exports as, and what the click exports: the
+  // section when one is selected. Only the stretch encoded is held to the
+  // three-hour limit (ESCSUITE-367), so a section of a longer timeline exports.
+  const fullLengthReason = wholeLengthReason ?? exportedLengthReason(calculateTimelineDuration(clips));
+  const lengthReason = timeRange
+    ? wholeLengthReason ?? exportedLengthReason(timeRange.end - timeRange.start)
+    : fullLengthReason;
 
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review
@@ -809,8 +815,8 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     <button
                       className={styles.primaryExportButton}
                       onClick={() => handleExport(undefined, false, true)}
-                      disabled={clips.length === 0 || !webmSupported || wholeLengthReason !== null}
-                      title={wholeLengthReason ?? webmBlockedReason ?? undefined}
+                      disabled={clips.length === 0 || !webmSupported || fullLengthReason !== null}
+                      title={fullLengthReason ?? webmBlockedReason ?? undefined}
                       style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)' }}
                     >
                       Export Full Video
