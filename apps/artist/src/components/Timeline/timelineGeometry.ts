@@ -257,7 +257,16 @@ export function computeTrimUpdate({
       // For video/audio: trim start point within source
       const deltaFromOriginalStart = mouseTime - origin.timelinePosition;
       let newStartTime = origin.startTime + deltaFromOriginalStart;
-      newStartTime = Math.max(0, Math.min(newStartTime, origin.endTime - MIN_CLIP_DURATION));
+      // ESCSUITE-363: the in point stops where the clip reaches timeline 0 as
+      // well as at source 0. Clamping only the position below would let the
+      // in point run on while the clip stays put, moving its end and slipping
+      // picture and sound against the timeline.
+      const inPointAtTimelineZero = origin.startTime - origin.timelinePosition;
+      newStartTime = Math.max(
+        0,
+        inPointAtTimelineZero,
+        Math.min(newStartTime, origin.endTime - MIN_CLIP_DURATION)
+      );
 
       const newTimelinePosition = origin.timelinePosition + (newStartTime - origin.startTime);
 
