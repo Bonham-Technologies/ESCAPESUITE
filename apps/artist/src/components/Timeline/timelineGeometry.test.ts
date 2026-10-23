@@ -280,6 +280,31 @@ describe('computeTrimUpdate', () => {
       ).toEqual({ startTime: 0, timelinePosition: 8 })
     })
 
+    // ESCSUITE-363: the pointer past timeline 0 (over the track headers) stops
+    // the in point where the clip reaches 0, so the end and the sync hold.
+    it('stops at timeline zero without moving the end or the source under the clip', () => {
+      const nearZero = { startTime: 4, endTime: 9, timelinePosition: 1 }
+      const update = computeTrimUpdate({
+        edge: 'start',
+        mouseTime: -3,
+        clip: makeClip({ timelinePosition: 1, startTime: 4 }),
+        sourceVideo: video,
+        origin: nearZero,
+      })
+      expect(update).toEqual({ startTime: 3, timelinePosition: 0 })
+    })
+
+    it('never puts the in point past the out point, even for a clip at a negative position', () => {
+      const update = computeTrimUpdate({
+        edge: 'start',
+        mouseTime: -10,
+        clip: makeClip({ timelinePosition: -5, startTime: 1 }),
+        sourceVideo: video,
+        origin: { startTime: 1, endTime: 2, timelinePosition: -5 },
+      })
+      expect(update!.startTime).toBeLessThanOrEqual(2 - MIN_CLIP_DURATION)
+    })
+
     it('leaves at least the minimum duration in the clip', () => {
       expect(
         computeTrimUpdate({ edge: 'start', mouseTime: 100, clip, sourceVideo: video, origin })

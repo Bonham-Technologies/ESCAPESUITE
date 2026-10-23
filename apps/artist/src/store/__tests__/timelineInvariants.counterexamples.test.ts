@@ -1,8 +1,9 @@
 // The counterexamples `timelineInvariants.property.test.ts` found (ESCSUITE-349),
-// each kept as an example test through the same gesture model. Every one is a
-// real bug in the app, filed rather than fixed here (the code each points at is
-// on the owner-protected editor paths), so each is an `it.fails`: it asserts the
-// correct behaviour, and passes only while the bug is still there.
+// each kept as an example test through the same gesture model. Each is a real
+// bug the suite found, filed as its own ticket and fixed in its own PR (the code
+// each points at is on the owner-protected editor paths). While a bug is open its
+// test is an `it.fails`: it asserts the correct behaviour, and passes only while
+// the bug is still there. Once fixed it is a plain `it` and stays as a regression.
 //
 // They run with the model's known-bug guards OFF (`resetModel({ guards: false })`,
 // `runSequence(ops, { guards: false })`), so they keep reaching the bug the
@@ -34,8 +35,9 @@ describe('timeline counterexamples (ESCSUITE-349)', () => {
   // the new `timelinePosition` to 0 but not the `startTime` it derived from
   // the same pointer, so the in point moves further than the clip does. The
   // picture and sound slip against the timeline, the clip's END moves, and it
-  // runs into the clip after it.
-  it.fails('ESCSUITE-363: a start trim dragged past 0 keeps the clip end and its sync', async () => {
+  // runs into the clip after it. Fixed by ESCSUITE-363: the in point now stops
+  // where the clip reaches timeline 0.
+  it('ESCSUITE-363: a start trim dragged past 0 keeps the clip end and its sync', async () => {
     const ops: Op[] = [
       { kind: 'add', source: 0, at: 0 },
       { kind: 'trim', clip: 0, edge: 'start', ripple: false, moves: [2] }, // in point 2, at 2

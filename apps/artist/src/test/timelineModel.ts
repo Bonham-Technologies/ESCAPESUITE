@@ -111,7 +111,12 @@ export class KnownBug extends Error {
 /** Whether the known-bug guards are on. The counterexample tests turn them off. */
 let guards = true
 
-function knownBug(ticket: string, detail: string): void {
+/**
+ * Throw `KnownBug` for `ticket` while the guards are on. Exported so the
+ * mechanism stays compiled while no bug is guarded: the next filed bug's
+ * guard calls it from `applyOneOp`.
+ */
+export function knownBug(ticket: string, detail: string): void {
   if (guards) throw new KnownBug(ticket, detail)
 }
 
@@ -238,18 +243,6 @@ function trim(op: Extract<Op, { kind: 'trim' }>): void {
       op.ripple && op.edge === 'end' ? mouseTime : clampTrimToNeighbours(clips, clip, op.edge, origin, mouseTime)
     const update = computeTrimUpdate({ edge: op.edge, mouseTime: limited, clip, sourceVideo, origin })
     const changes = update && (Object.keys(update) as (keyof Clip)[]).some((k) => clip[k] !== update[k])
-    // ESCSUITE-363 guard — the fix PR for ESCSUITE-363 deletes it.
-    // `computeTrimUpdate` clamps a start trim's position to 0 but not the
-    // in point it derived from the same pointer, so the clip's end moves.
-    if (
-      update &&
-      op.edge === 'start' &&
-      update.startTime !== undefined &&
-      !isExtendableClip(clip, sourceVideo) &&
-      origin.timelinePosition + (update.startTime - origin.startTime) < 0
-    ) {
-      knownBug('ESCSUITE-363', 'a start trim past timeline 0 moves the clip end')
-    }
     if (update && changes) {
       gesture.commit((skipHistory) => state().trimClip(clip.id, op.edge, update, origin, skipHistory))
     }

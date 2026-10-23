@@ -122,7 +122,7 @@ outcome, not on the double.
   no-ops fails instead of passing vacuously.
 
   **Known bugs: guards and `it.fails`.** The suite's first runs found three bugs, filed as
-  ESCSUITE-363 (a start trim dragged left of 0 clamps the position but not the in point, so the
+  ESCSUITE-363 (fixed, guard removed: a start trim dragged left of 0 clamps the position but not the in point, so the
   clip's end moves and its picture and sound slip) and ESCSUITE-364 (the ripple shifts in
   `shiftClipsAfter` and `rippleDeleteClip` compare `>=` with no tolerance, so a clip butted a float
   hair before the edge is left behind and overlapped: one guard for the ripple end trim, one for
