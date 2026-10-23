@@ -122,3 +122,14 @@ each time, checks the waveform is drawn and the preview plays, and asserts live 
 IndexedDB store's record count stay flat across the reloads. The two run in the normal e2e job,
 under 2 minutes together. A failure message lists every count since cycle 1 and where the leaked
 resources were made; rerunning replays the same clicks.
+
+**Import soak (ESCSUITE-365).** `tests/escapeartist/import-soak.spec.ts` (Chromium, ~35 s) covers
+the way in: 10 cycles of {import the A/V WebM and `fixtures/av/undecodable-opus.webm` as
+`audio/webm`, put both on the timeline, Delete both clips, Remove media both files}. The undecodable
+file is a sound 2 s WebM whose every Opus packet is invalid (`make-undecodable.mjs` regenerates it),
+so its import reads a duration, then the streamed waveform decode errors and the
+`decodeAudioData` fallback in `utils/waveform.ts` opens an `AudioContext` that must be closed on the
+failure (the ESCSUITE-339 class of leak); each cycle asserts that one was opened. Cycles 5 and 10
+also reload with both clips on the timeline and restore the session before deleting. After cycle 1
+and every 2nd cycle every live count must be at most its cycle-1 value plus 1 (measured: 0 at every
+check). Dropping that `close()` fails it at cycle 4 naming `decodeWholeFileWaveform`.
