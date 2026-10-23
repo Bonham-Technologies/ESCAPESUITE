@@ -1,8 +1,8 @@
 // The counterexamples `timelineInvariants.property.test.ts` found (ESCSUITE-349),
 // each kept as an example test through the same gesture model. Every one is a
 // real bug in the app, filed rather than fixed here (the code each points at is
-// on the owner-protected editor paths), so each is an `it.fails`: it asserts the
-// correct behaviour, and passes only while the bug is still there.
+// on the owner-protected editor paths), so each open one is an `it.fails`: it
+// asserts the correct behaviour, and passes only while the bug is still there.
 //
 // They run with the model's known-bug guards OFF (`resetModel({ guards: false })`,
 // `runSequence(ops, { guards: false })`), so they keep reaching the bug the
@@ -57,8 +57,9 @@ describe('timeline counterexamples (ESCSUITE-349)', () => {
   // (`useTrimDrag` skips the neighbour clamp for a ripple end trim) and then
   // shifts only the clips at or after the old end — strictly, with no
   // tolerance — so the butted neighbour is not moved and the trimmed clip now
-  // covers 2 s of it.
-  it.fails('ESCSUITE-364: a ripple end trim moves the clip butted against it', async () => {
+  // covers 2 s of it. Fixed by ESCSUITE-364: `shiftClipsAfter` counts a clip
+  // within the overlap tolerance of the old end as after it.
+  it('ESCSUITE-364: a ripple end trim moves the clip butted against it', async () => {
     const ops: Op[] = [
       { kind: 'add', source: 0, at: 0 },
       { kind: 'split', clip: 0, frac: 0.04944 }, // (1) [0, 0.4944), (2) after it
@@ -78,8 +79,9 @@ describe('timeline counterexamples (ESCSUITE-349)', () => {
   // endTime - startTime`) lands a float hair past the start of the clip
   // butted after it (16.117000000000004 vs 16.117). That clip is not shifted
   // (`>= clipEnd`, no tolerance), the ones after it are, and the next one
-  // slides into it.
-  it.fails('ESCSUITE-364: a ripple delete shifts the butted clip after it with the rest', async () => {
+  // slides into it. Fixed by ESCSUITE-364: `rippleDeleteClip` uses the same
+  // tolerance.
+  it('ESCSUITE-364: a ripple delete shifts the butted clip after it with the rest', async () => {
     const ops: Op[] = [
       { kind: 'add', source: 0, at: 9.25 },
       { kind: 'split', clip: 0, frac: 0.6867 },

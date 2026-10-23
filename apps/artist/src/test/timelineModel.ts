@@ -115,13 +115,6 @@ function knownBug(ticket: string, detail: string): void {
   if (guards) throw new KnownBug(ticket, detail)
 }
 
-/** The clip on `trackId` that starts a float hair before `edge`: a strict `>= edge` shift leaves it behind. */
-function buttedJustBefore(clips: Clip[], trackId: string, edge: number, except: string): Clip | undefined {
-  return clips.find(
-    (c) => c.id !== except && c.trackId === trackId && c.timelinePosition < edge && edge - c.timelinePosition <= EPS
-  )
-}
-
 /** A fresh editor: the empty project the app starts with, no history. */
 export function resetModel({ guards: on = true }: { guards?: boolean } = {}): void {
   guards = on
@@ -260,13 +253,6 @@ function trim(op: Extract<Op, { kind: 'trim' }>): void {
     const originalEnd = origin.timelinePosition + (origin.endTime - origin.startTime)
     const currentEnd = clip.timelinePosition + (clip.endTime - clip.startTime)
     const delta = currentEnd - originalEnd
-    // ESCSUITE-364 guard (ripple trim) — the fix PR for ESCSUITE-364 deletes it.
-    // `shiftClipsAfter` shifts `>= originalEnd` with no tolerance, so a clip
-    // butted a float hair before the old end stays put while the trim runs over it.
-    const left = buttedJustBefore(clipsNow(), clip.trackId, originalEnd, clip.id)
-    if (left && currentEnd > left.timelinePosition + EPS) {
-      knownBug('ESCSUITE-364', 'a ripple end trim overruns a butted clip it does not shift')
-    }
     if (delta !== 0) gesture.commit((skipHistory) => state().shiftClipsAfter(clip.trackId, originalEnd, delta, skipHistory))
   }
   gesture.end()
@@ -389,12 +375,6 @@ async function applyOneOp(op: Op): Promise<void> {
     }
     case 'rippleDelete': {
       const clip = pick(clipsNow(), op.clip)
-      // ESCSUITE-364 guard (ripple delete) — the fix PR for ESCSUITE-364 deletes it.
-      // `rippleDeleteClip` shifts `>= clipEnd` with no tolerance, so the clip
-      // butted a float hair before the computed end stays and the rest slide into it.
-      if (clip && buttedJustBefore(clipsNow(), clip.trackId, clip.timelinePosition + (clip.endTime - clip.startTime), clip.id)) {
-        knownBug('ESCSUITE-364', 'a ripple delete leaves a butted clip behind')
-      }
       if (clip) state().rippleDeleteClip(clip.id)
       break
     }
@@ -495,9 +475,9 @@ function checkPostcondition(op: Op, before: Before, after: Clip[]): void {
       if (!gone) return othersUnchanged(before.clips, after, new Set())
       const end = gone.timelinePosition + (gone.endTime - gone.startTime)
       const length = gone.endTime - gone.startTime
-      // Mirrors the store's own strict `>=` rule, so this cannot see ESCSUITE-364; the overlap invariant catches it.
+      // A clip within EPS of the gap's end is after it too (ESCSUITE-364).
       othersUnchanged(before.clips, after, new Set([gone.id]), (c) =>
-        c.trackId === gone.trackId && c.timelinePosition >= end
+        c.trackId === gone.trackId && c.timelinePosition >= end - EPS
           ? { timelinePosition: Math.max(0, c.timelinePosition - length) }
           : {}
       )
@@ -552,9 +532,9 @@ function checkPostcondition(op: Op, before: Before, after: Clip[]): void {
       const originalEnd = target.timelinePosition + (target.endTime - target.startTime)
       const currentEnd = now.timelinePosition + (now.endTime - now.startTime)
       const delta = currentEnd - originalEnd
-      // Mirrors the store's own strict `>=` rule, so this cannot see ESCSUITE-364; the overlap invariant catches it.
+      // A clip within EPS of the old end is after it too (ESCSUITE-364).
       othersUnchanged(before.clips, after, new Set([target.id]), (c) =>
-        op.ripple && delta !== 0 && c.trackId === target.trackId && c.timelinePosition >= originalEnd
+        op.ripple && delta !== 0 && c.trackId === target.trackId && c.timelinePosition >= originalEnd - EPS
           ? { timelinePosition: Math.max(0, c.timelinePosition + delta) }
           : {}
       )
