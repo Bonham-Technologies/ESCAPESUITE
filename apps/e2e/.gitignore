@@ -7,3 +7,5 @@ playwright-report-journeys/
 playwright/.cache/
 .env
 .env.local
+playwright-results.json
+flaky.json
