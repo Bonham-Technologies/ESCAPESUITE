@@ -17,7 +17,7 @@
     "test:standalone:headed": "playwright test --config=playwright.standalone.config.ts --headed",
     "test:production": "playwright test --config=playwright.production.config.ts",
     "test:production:headed": "playwright test --config=playwright.production.config.ts --headed",
-    "test:browsers": "playwright test --project=chromium --project=firefox --project=webkit",
+    "test:browsers": "playwright test --project=chromium --project=chromium-strict --project=firefox --project=webkit",
     "test:browsers:all": "playwright test",
     "test:journeys": "playwright test --config=playwright.journeys.config.ts",
     "test:perf": "playwright test --config=playwright.perf.config.ts",

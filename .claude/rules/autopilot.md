@@ -165,6 +165,8 @@ coverage report. Where the environment allows, run the app and look at it.
 - **Regression specs.** List bug tickets closed since the last sweep whose symptom is
   visible in the UI but which landed no `apps/e2e/tests/regressions/<KEY>.spec.ts`, and
   file a P2 `ap-auto` ticket for each one to add it.
+- **Flaky e2e tests.** Read the `e2e-flaky` lists from the last 7 days of `main` runs (recipe in
+  `docs/reference/ci-cd-pipeline.md`) and file a ticket for any test flaky more than once.
 - Score each dimension 1–5 with one line of evidence.
 
 ### Watch tickets

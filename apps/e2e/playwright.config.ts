@@ -2,6 +2,23 @@ import { defineConfig, devices } from '@playwright/test'
 
 const isCI = !!process.env.CI
 
+// Standalone, production-layout and perf tests use separate configs. The perf
+// benchmarks in particular must never run here: they assert nothing, they take
+// minutes of real encoding, and a run under this config's parallel workers
+// would publish numbers measured while other browsers fought it for the CPU.
+const baseIgnore = ['**/standalone/**', '**/production/**', '**/perf/**']
+
+// ESCSUITE-352: specs whose whole point is catching intermittent breakage run in
+// their own `chromium-strict` project with zero retries, so a pass-on-retry there
+// fails CI instead of going green. The `chromium` project ignores them, so every
+// spec still runs exactly once. Everything else keeps the CI retries below, and
+// any pass-on-retry is surfaced by scripts/report-flaky.mjs.
+export const strictSpecs = [
+  '**/journeys/**',
+  '**/escapeartist/soak.spec.ts',
+  '**/regressions/**',
+]
+
 const crossBrowserProjects = [
   {
     name: 'firefox',
@@ -49,18 +66,19 @@ const crossBrowserResponsiveProjects = [
 
 export default defineConfig({
   testDir: './tests',
-  // Standalone, production-layout and perf tests use separate configs. The perf
-  // benchmarks in particular must never run here: they assert nothing, they take
-  // minutes of real encoding, and a run under this config's parallel workers
-  // would publish numbers measured while other browsers fought it for the CPU.
-  testIgnore: ['**/standalone/**', '**/production/**', '**/perf/**'],
+  testIgnore: baseIgnore,
   fullyParallel: true,
   forbidOnly: isCI,
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
   // CI adds the list reporter so the job log carries one line per test — a run that hits the
   // job's timeout otherwise leaves no record of which test was running (ESCSUITE-292's #850).
-  reporter: isCI ? [['html'], ['list']] : 'html',
+  // The JSON report feeds scripts/report-flaky.mjs, which lists every pass-on-retry in the
+  // job summary and as annotations (ESCSUITE-352). It sits outside playwright-report/ because
+  // the html reporter empties that folder.
+  reporter: isCI
+    ? [['html'], ['list'], ['json', { outputFile: 'playwright-results.json' }]]
+    : 'html',
 
   use: {
     trace: 'on-first-retry',
@@ -72,6 +90,15 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      // A project's testIgnore replaces the top-level one, so repeat it.
+      testIgnore: [...baseIgnore, ...strictSpecs],
+    },
+    {
+      name: 'chromium-strict',
+      use: { ...devices['Desktop Chrome'] },
+      testMatch: strictSpecs,
+      testIgnore: baseIgnore,
+      retries: 0,
     },
     // Cross-browser projects only run locally (not in CI)
     ...(isCI ? [] : crossBrowserProjects),
