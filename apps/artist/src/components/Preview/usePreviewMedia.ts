@@ -167,7 +167,8 @@ export function usePreviewMedia(): PreviewMedia {
         }
 
         try {
-          const blob = await getVideoBlob(sourceId);
+          // Repairs and rewrites a row re-indexed with cues on delta frames (ESCSUITE-359).
+          const blob = await getVideoBlob(sourceId, { persistRepair: true });
           if (blob) {
             const url = URL.createObjectURL(blob);
             if (isImage) {

@@ -9,7 +9,6 @@ export {
   getDB,
   storeVideo,
   getVideo,
-  getVideoBlob,
   getAllVideoMetadata,
   deleteVideo,
   storeThumbnail,
@@ -29,6 +28,7 @@ export type { SourceVideo } from '@escapesuite/shared/types'
 import {
   getDB,
   getSetting,
+  getVideo,
   getStorageEstimate,
   getThumbnail,
   listSettings,
@@ -39,6 +39,63 @@ import {
 } from '@escapesuite/shared/storage'
 import type { IDBPDatabase } from 'idb'
 import type { SourceVideo } from '@escapesuite/shared/types'
+import { dropDeltaFrameCues, isWebmType } from './webmDeltaFrameCues'
+
+/**
+ * A stored source's bytes, for everything that plays or reads one (the
+ * preview, the audio mix, export).
+ *
+ * A WebM that ESCAPEARTIST re-indexed at import between ESCSUITE-305 and
+ * ESCSUITE-359 carries video cues on delta frames, and Chromium freezes on the
+ * first far seek into one: the preview for good, an element-based export on
+ * that frame. Such bytes are repaired here, on read, by dropping the bad cues
+ * (`dropDeltaFrameCues`, which keeps the size). Every other row costs a few
+ * small reads and comes back as the very same Blob. A repair that throws hands
+ * back the stored bytes.
+ *
+ * Only `persistRepair` writes the repair back, under the same id and metadata,
+ * so a row is read wrong once at most: the preview asks for it, as the import
+ * already rewrites rows it repairs. Export and the audio mix repair in memory
+ * only, because an export must not rewrite the shared database (ESCSUITE-305).
+ * A write-back that fails leaves the row as it was, and the repaired bytes are
+ * still handed back.
+ */
+export async function getVideoBlob(
+  id: string,
+  { persistRepair = false }: { persistRepair?: boolean } = {}
+): Promise<Blob | undefined> {
+  const record = await getVideo(id)
+  if (!record) return undefined
+  const { blob, metadata } = record
+  if (!blob || !isWebmType(blob.type)) return blob
+  let repaired: Blob | null
+  try {
+    repaired = await dropDeltaFrameCues(blob)
+  } catch (error) {
+    console.warn(`Could not check the seek index of "${metadata.name}":`, error)
+    return blob
+  }
+  if (!repaired) return blob
+  if (persistRepair) {
+    await storeRepair(id, blob.size, repaired).catch((error) => {
+      console.warn(`Could not store the repaired seek index of "${metadata.name}":`, error)
+    })
+  }
+  return repaired
+}
+
+/**
+ * Write a repaired blob back, in one transaction, only over the row it was
+ * read from: a row deleted, or replaced by other bytes, while the repair read
+ * the file is left as it now is. The row's metadata is kept as it now stands.
+ */
+async function storeRepair(id: string, size: number, repaired: Blob): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction('videos', 'readwrite')
+  const current = await tx.store.get(id)
+  if (current && current.blob.size === size) await tx.store.put({ ...current, blob: repaired })
+  await tx.done
+}
 
 // Session state for auto-save/restore
 export interface SessionState {

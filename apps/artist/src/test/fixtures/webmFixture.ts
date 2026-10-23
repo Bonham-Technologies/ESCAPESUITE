@@ -52,6 +52,7 @@ const ID = {
   CueTrackPositions: [0xb7],
   CueTrack: [0xf7],
   CueClusterPosition: [0xf1],
+  CueRelativePosition: [0xf0],
   Cluster: [0x1f, 0x43, 0xb6, 0x75],
   Timecode: [0xe7],
   SimpleBlock: [0xa3],
@@ -162,6 +163,10 @@ export interface WebmFixtureOptions {
   cuesSeekPosition?: number
   /** The video track's CodecID. Default `V_VP9`. */
   videoCodecId?: string
+  /** With `cues: 'indexed'` and `audio`, give each CuePoint a second CueTrackPositions, for the audio track. Default false. */
+  cueAudio?: boolean
+  /** With `cues: 'indexed'`, give each CueTrackPositions a CueRelativePosition, as ESCAPECRAFT's `writeKeyframeCues` and ffmpeg do. Default false. */
+  cueRelativePosition?: boolean
 }
 
 /** Ten frames at 30 fps, key frames at frame 0 and frame 5. */
@@ -199,6 +204,8 @@ export function buildWebm(options: WebmFixtureOptions = {}): Uint8Array {
     seekHeadVoid = false,
     cuesSeekPosition,
     videoCodecId = 'V_VP9',
+    cueAudio = false,
+    cueRelativePosition = false,
   } = options
 
   const header = el(ID.EBML, [
@@ -295,11 +302,14 @@ export function buildWebm(options: WebmFixtureOptions = {}): Uint8Array {
       points.push(
         ...el(ID.CuePoint, [
           ...uint(ID.CueTime, cluster.startMs),
-          ...el(ID.CueTrackPositions, [
-            ...uint(ID.CueTrack, 1),
-            // Four bytes always, so the Cues element's length does not depend on the positions.
-            ...el(ID.CueClusterPosition, [offset >>> 24, (offset >>> 16) & 0xff, (offset >>> 8) & 0xff, offset & 0xff]),
-          ]),
+          ...[1, ...(audio && cueAudio ? [2] : [])].flatMap((track) =>
+            el(ID.CueTrackPositions, [
+              ...uint(ID.CueTrack, track),
+              // Four bytes always, so the Cues element's length does not depend on the positions.
+              ...el(ID.CueClusterPosition, [offset >>> 24, (offset >>> 16) & 0xff, (offset >>> 8) & 0xff, offset & 0xff]),
+              ...(cueRelativePosition ? uint(ID.CueRelativePosition, 0) : []),
+            ])
+          ),
         ])
       )
       offset += clusterElements[index].length

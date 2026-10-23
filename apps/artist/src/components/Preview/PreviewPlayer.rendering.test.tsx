@@ -282,6 +282,15 @@ describe('PreviewPlayer media loading', () => {
     expect(screen.queryByText('Loading videos...')).not.toBeInTheDocument()
   })
 
+  // ESCSUITE-359: the preview's read is the one that writes a cue repair back.
+  it('reads each source asking for a seek-index repair to be persisted', async () => {
+    addClip('clip1', 0, 2)
+
+    await renderPreview()
+
+    expect(getVideoBlob).toHaveBeenCalledWith(video.id, { persistRepair: true })
+  })
+
   it('keeps going when a source blob is missing', async () => {
     addClip('clip1', 0, 2)
     vi.mocked(getVideoBlob).mockResolvedValueOnce(undefined)
