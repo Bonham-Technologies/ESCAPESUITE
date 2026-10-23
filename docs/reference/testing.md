@@ -130,6 +130,8 @@ file is a sound 2 s WebM whose every Opus packet is invalid (`make-undecodable.m
 so its import reads a duration, then the streamed waveform decode errors and the
 `decodeAudioData` fallback in `utils/waveform.ts` opens an `AudioContext` that must be closed on the
 failure (the ESCSUITE-339 class of leak); each cycle asserts that one was opened. Cycles 5 and 10
-also reload with both clips on the timeline and restore the session before deleting. After cycle 1
-and every 2nd cycle every live count must be at most its cycle-1 value plus 1 (measured: 0 at every
-check). Dropping that `close()` fails it at cycle 4 naming `decodeWholeFileWaveform`.
+also wait for this cycle's autosave (newer than the import), reload with both clips on the timeline
+and restore the session before deleting. After cycle 1 and every 2nd cycle every live count must be
+at most its cycle-1 value plus 1 (measured: 0 at every check); after a restore cycle it must equal
+its cycle-1 value exactly, polled for up to 5 s, since a reload restarts the counts and a
+once-per-restore leak would otherwise sit inside the +1. Dropping that `close()` fails it at cycle 4 naming `decodeWholeFileWaveform`.

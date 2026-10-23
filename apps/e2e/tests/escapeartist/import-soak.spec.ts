@@ -42,10 +42,14 @@ import { waitForAppReady } from '../../utils/ready'
  * preview release its `<video>`. Every {@link RESTORE_EVERY}th cycle also
  * reloads with both on the timeline and restores the autosaved session from
  * the "Resume Previous Session?" prompt before deleting them, so the restore
- * path's blob URLs and elements must be released by the same delete. (A
+ * path's blob URLs and elements must be released by the same delete. A
  * restore reads the stored waveform, so it decodes nothing and opens no
- * AudioContext; and the reload restarts the page's counts, so the checks after
- * cycles 6 and 10 compare a reloaded page with cycle 1's.)
+ * AudioContext. The reload restarts the page's counts, so the checks after
+ * cycles 6, 8 and 10 compare a reloaded page with cycle 1's; and since a
+ * restore happens once per page, a resource it leaked would be only 1 over
+ * the baseline, inside {@link ALLOWED_GROWTH}. So on a restore cycle the check
+ * allows no growth at all ({@link NO_GROWTH}), polled for up to 5 s so an
+ * asynchronous release can land.
  */
 test.skip(
   ({ browserName }) => browserName !== 'chromium',
@@ -89,6 +93,17 @@ const ALLOWED_GROWTH: ResourceCounts = {
   mediaElement: 1,
 }
 
+/** A restore cycle's allowance: none (see the header). */
+const NO_GROWTH: ResourceCounts = {
+  audioContext: 0,
+  offlineAudioContext: 0,
+  videoDecoder: 0,
+  audioDecoder: 0,
+  worker: 0,
+  objectUrl: 0,
+  mediaElement: 0,
+}
+
 const fileInput = (page: Page) => page.locator('input[type="file"]')
 const addButtons = (page: Page) => page.getByRole('button', { name: 'Add to timeline' })
 
@@ -119,8 +134,8 @@ async function importBoth(page: Page, n: number): Promise<void> {
 }
 
 /** Reload and take the "Resume Previous Session?" offer: both clips come back. */
-async function reloadAndRestore(page: Page, n: number): Promise<void> {
-  await waitForSavedSession(page, 2)
+async function reloadAndRestore(page: Page, n: number, importedAt: number): Promise<void> {
+  await waitForSavedSession(page, 2, importedAt)
   await page.reload()
   await waitForAppReady(page, 'artist')
   const prompt = page.getByRole('dialog', { name: 'Resume Previous Session?' })
@@ -172,21 +187,37 @@ test.describe('ESCAPEARTIST import soak (ESCSUITE-365)', () => {
     const history: string[] = []
     for (let n = 1; n <= CYCLES; n++) {
       const opened = await audioContextsMade(page)
+      const importedAt = Date.now()
       await importBoth(page, n)
       // The failed decode opened its AudioContext: the path this soak is for
       // really ran, every cycle.
       expect(
         (await audioContextsMade(page)) - opened,
-        `cycle ${n}: the undecodable file's import opened no AudioContext`
+        `cycle ${n}: the undecodable file's import opened no AudioContext — the fallback decode did not run, ` +
+          'or the streamed AudioDecoder accepted the invalid Opus packets (Chromium change after a Playwright bump?)'
       ).toBe(1)
-      if (n % RESTORE_EVERY === 0) await reloadAndRestore(page, n)
+      const restored = n % RESTORE_EVERY === 0
+      if (restored) await reloadAndRestore(page, n, importedAt)
       await deleteBoth(page, n)
-      if (n !== 1 && n % CHECK_EVERY !== 0) continue
+      if (n !== 1 && n % CHECK_EVERY !== 0 && !restored) continue
 
-      const now = await readLiveCounts(page)
-      history.push(line(n, now))
+      let now = await readLiveCounts(page)
       baseline ??= now.live
-      const growth = describeGrowth(baseline, now, ALLOWED_GROWTH)
+      const base = baseline
+      if (restored) {
+        // No growth at all after a restore: poll so an asynchronous release lands.
+        await expect
+          .poll(
+            async () => {
+              now = await readLiveCounts(page)
+              return describeGrowth(base, now, NO_GROWTH)
+            },
+            { message: `cycle ${n}: live resources left after the restore and delete`, timeout: 5_000 }
+          )
+          .toEqual([])
+      }
+      history.push(line(n, now))
+      const growth = describeGrowth(base, now, restored ? NO_GROWTH : ALLOWED_GROWTH)
       expect(growth, `live resources grew over ${n} cycles:\n${growth.join('\n')}\n${history.join('\n')}`).toEqual([])
     }
     // On the report, so a passing run still shows what it measured.
@@ -197,14 +228,17 @@ test.describe('ESCAPEARTIST import soak (ESCSUITE-365)', () => {
 
 /**
  * Wait for the autosave (`app/useSessionAutosave.ts`, 2 s after the last
- * edit) to write a session holding `clips` clips, so the reload has one to offer.
+ * edit) to write a session holding `clips` clips, saved after `since`, so the
+ * reload has this cycle's session to offer. The autosave never overwrites the
+ * slot with an empty project, so an earlier cycle's 2-clip session is still
+ * there until it does: the timestamp tells them apart.
  */
-async function waitForSavedSession(page: Page, clips: number): Promise<void> {
+async function waitForSavedSession(page: Page, clips: number, since: number): Promise<void> {
   await expect
     .poll(
       () =>
         page.evaluate(
-          () =>
+          (since) =>
             new Promise<number>((resolve, reject) => {
               const request = indexedDB.open('video-editor-db')
               request.onerror = () => reject(new Error('open failed'))
@@ -213,12 +247,17 @@ async function waitForSavedSession(page: Page, clips: number): Promise<void> {
                 const all = db.transaction('settings', 'readonly').objectStore('settings').getAll()
                 all.onerror = () => reject(new Error('read failed'))
                 all.onsuccess = () => {
-                  const sessions = all.result as Array<{ project?: { timeline?: { clips?: unknown[] } } }>
-                  resolve(Math.max(0, ...sessions.map((s) => s?.project?.timeline?.clips?.length ?? 0)))
+                  const sessions = all.result as Array<{
+                    timestamp?: number
+                    project?: { timeline?: { clips?: unknown[] } }
+                  }>
+                  const fresh = sessions.filter((s) => (s?.timestamp ?? 0) > since)
+                  resolve(Math.max(0, ...fresh.map((s) => s?.project?.timeline?.clips?.length ?? 0)))
                   db.close()
                 }
               }
-            })
+            }),
+          since
         ),
       { message: `the autosave never wrote a session holding ${clips} clips`, timeout: 15_000 }
     )
