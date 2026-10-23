@@ -41,8 +41,10 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
   passes counts as passed and `ci-status` stays green, so an intermittent regression could pass
   silently. Two things now stop that:
   - **Zero retries where flakiness is the bug.** The `chromium-strict` project runs
-    `tests/journeys/**`, `tests/escapeartist/soak.spec.ts` and `tests/regressions/**` with
-    `retries: 0`; the `chromium` project ignores those paths, so every spec still runs exactly once.
+    `tests/journeys/**/*.spec.ts`, the ARTIST soaks (`tests/escapeartist/*soak.spec.ts`) and
+    `tests/regressions/**/*.spec.ts` with `retries: 0` (and `trace`/`video: 'retain-on-failure'`,
+    since `on-first-retry` never fires without a retry); the `chromium` project ignores those
+    paths, so every spec still runs exactly once.
     These specs exist to catch intermittent breakage (a pass-on-retry in a regression spec *is* the
     regression), so a first-attempt failure there fails the job. Everything else keeps `retries: 2`.
     The step runs `playwright test` with no `--project`, so both projects (and the responsive ones)
@@ -55,18 +57,24 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
     as the **`e2e-flaky`** artifact (30 days). A clean run uploads an empty list, so a missing
     artifact means the step did not run. Tests: `apps/e2e/scripts/report-flaky.test.mjs`
     (`pnpm test:scripts`).
-- **Reading the flaky list from the last 7 days of `main`** (the steward does this every sweep):
+- **Reading the flaky list from the last 7 days of `main`** (the steward does this every sweep).
+  Run it from inside the repo checkout: `gh api` fills `{owner}/{repo}` from the current
+  repository. `--paginate` matters: `main` can have well over 100 CI push runs in a week.
 
   ```bash
   since=$(date -u -d '7 days ago' +%Y-%m-%d)
-  for run in $(gh api "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&created=>=$since&per_page=100" \
+  for run in $(gh api --paginate "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&created=>=$since&per_page=100" \
                  --jq '.workflow_runs[].id'); do
     url=$(gh api "repos/{owner}/{repo}/actions/runs/$run/artifacts?name=e2e-flaky" --jq '.artifacts[0].archive_download_url // empty')
-    [ -n "$url" ] && gh api "$url" > "flaky-$run.zip" && unzip -p "flaky-$run.zip" flaky.json | jq -c '.flaky[]'
-  done | jq -s 'group_by(.file + " › " + .title) | map({test: (.[0].file + " › " + .[0].title), count: length}) | sort_by(-.count)'
+    [ -n "$url" ] && gh api "$url" > "flaky-$run.zip" &&
+      unzip -p "flaky-$run.zip" flaky.json | jq -c --arg run "$run" '.flaky[] + {run: $run}'
+  done | jq -s 'group_by(.file + " › " + .title)
+    | map({test: (.[0].file + " › " + .[0].title), runs: (map(.run) | unique | length)})
+    | sort_by(-.runs)'
   ```
 
-  Any test with `count` above 1 gets a ticket. Without downloading, one run's annotations show the
+  `runs` counts distinct CI runs, not entries (one run can list a test once per project). Any
+  test with `runs` above 1 is "flaky more than once" and gets a ticket. Without downloading, one run's annotations show the
   same thing: `gh api repos/{owner}/{repo}/check-runs/<e2e job id>/annotations --jq '.[] |
   select(.title == "Flaky e2e test") | .message'` (GitHub caps annotations per step, so the
   artifact is the complete list).

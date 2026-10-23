@@ -599,7 +599,7 @@ jobs:
         run: pnpm --filter=@escapesuite/headless-artist run test:e2e
 
       # Runs every CI project: `chromium` (retries 2) plus `chromium-strict` (journeys,
-      # the ARTIST soak and tests/regressions, retries 0), and the responsive ones.
+      # the ARTIST soaks and tests/regressions, retries 0), and the responsive ones.
       - name: Run E2E tests
         run: pnpm --filter=@escapesuite/e2e exec playwright test
         env:

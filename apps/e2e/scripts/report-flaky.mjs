@@ -105,15 +105,26 @@ function main(argv) {
   const summaryPath = process.env.GITHUB_STEP_SUMMARY
   const repoRoot = process.env.GITHUB_WORKSPACE
 
-  if (!existsSync(reportPath)) {
-    const note = `No Playwright JSON report at ${reportPath}; the e2e run ended before writing it, so flaky tests could not be listed.`
+  // A missing or unreadable report (the run died before or while writing it) is
+  // noted, never fatal: this step must not turn a green job red.
+  const giveUp = (note) => {
     console.log(`::warning title=Flaky e2e report missing::${escapeData(note)}`)
     if (summaryPath) appendFileSync(summaryPath, `### E2E flaky tests\n\n${note}\n`)
     writeFileSync(outPath, JSON.stringify({ reportMissing: true, flaky: [] }, null, 2) + '\n')
+  }
+
+  if (!existsSync(reportPath)) {
+    giveUp(`No Playwright JSON report at ${reportPath}; the e2e run ended before writing it, so flaky tests could not be listed.`)
     return
   }
 
-  const report = JSON.parse(readFileSync(reportPath, 'utf8'))
+  let report
+  try {
+    report = JSON.parse(readFileSync(reportPath, 'utf8'))
+  } catch (error) {
+    giveUp(`The Playwright JSON report at ${reportPath} could not be parsed (${error.message}), so flaky tests could not be listed.`)
+    return
+  }
   const flaky = findFlakyTests(report, { repoRoot })
   for (const line of toAnnotations(flaky)) console.log(line)
   if (summaryPath) appendFileSync(summaryPath, toSummary(flaky))

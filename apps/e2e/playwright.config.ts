@@ -14,9 +14,9 @@ const baseIgnore = ['**/standalone/**', '**/production/**', '**/perf/**']
 // spec still runs exactly once. Everything else keeps the CI retries below, and
 // any pass-on-retry is surfaced by scripts/report-flaky.mjs.
 export const strictSpecs = [
-  '**/journeys/**',
-  '**/escapeartist/soak.spec.ts',
-  '**/regressions/**',
+  '**/journeys/**/*.spec.ts',
+  '**/escapeartist/*soak.spec.ts',
+  '**/regressions/**/*.spec.ts',
 ]
 
 const crossBrowserProjects = [
@@ -95,10 +95,12 @@ export default defineConfig({
     },
     {
       name: 'chromium-strict',
-      use: { ...devices['Desktop Chrome'] },
       testMatch: strictSpecs,
       testIgnore: baseIgnore,
       retries: 0,
+      // No retry means 'on-first-retry' would never record anything: keep the
+      // trace and video of a failed attempt instead.
+      use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure', video: 'retain-on-failure' },
     },
     // Cross-browser projects only run locally (not in CI)
     ...(isCI ? [] : crossBrowserProjects),

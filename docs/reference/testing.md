@@ -5,9 +5,10 @@
 - **E2E tests**: Playwright with Chromium; CI runs the whole suite on every PR and push
 - **Journey tests** (`apps/e2e/tests/journeys/`, also in the normal `e2e` job): `01-record-edit-export` covers record → edit → export across ESCAPECRAFT and ESCAPEARTIST; `02-cut-pauses` (ESCSUITE-351) cuts the pause out of the A/V fixture through the UI (razor, Delete, drag to close the gap), saves, reopens in a fresh context, exports WebM and decodes the export's audio: its length must be the original minus the cut (±1 frame), with no silence over 100 ms and tone on both sides of the join. It runs on the WebM fixture and on its MP4 twin. The timeline, save/reopen, export and audio-analysis helpers it uses live in `apps/e2e/utils/timeline.ts`.
 - **E2E retries** (ESCSUITE-352): CI retries a failing test twice, except in the `chromium-strict`
-  project, which runs `tests/journeys/**`, `tests/escapeartist/soak.spec.ts` and
-  `tests/regressions/**` once with `retries: 0` (the `chromium` project ignores those paths, so
-  each spec runs exactly once). Those specs exist to catch intermittent failures, so a
+  project, which runs `tests/journeys/**/*.spec.ts`, the ARTIST soaks
+  (`tests/escapeartist/*soak.spec.ts`: `soak` and `import-soak`) and
+  `tests/regressions/**/*.spec.ts` once with `retries: 0`, keeping the trace and video of a
+  failure (the `chromium` project ignores those paths, so each spec runs exactly once). Those specs exist to catch intermittent failures, so a
   pass-on-retry there must fail CI rather than hide. Anything that passes only on retry elsewhere
   is listed in the job summary, as a `::warning` annotation and in the `e2e-flaky` artifact
   (`apps/e2e/scripts/report-flaky.mjs`; details in `ci-cd-pipeline.md`). Running one of those

@@ -150,3 +150,20 @@ test('the CLI notes a missing report without failing', () => {
   assert.match(stdout, /::warning title=Flaky e2e report missing::/)
   assert.deepEqual(JSON.parse(readFileSync(outPath, 'utf8')), { reportMissing: true, flaky: [] })
 })
+
+test('the CLI treats a truncated report like a missing one and exits 0', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'report-flaky-'))
+  const reportPath = path.join(dir, 'results.json')
+  const outPath = path.join(dir, 'flaky.json')
+  const summaryPath = path.join(dir, 'summary.md')
+  writeFileSync(reportPath, JSON.stringify(report).slice(0, 100))
+  writeFileSync(summaryPath, '')
+  // execFileSync throws on a non-zero exit, so returning at all proves exit 0.
+  const stdout = execFileSync(process.execPath, [script, reportPath, outPath], {
+    env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath },
+    encoding: 'utf8',
+  })
+  assert.match(stdout, /::warning title=Flaky e2e report missing::.*could not be parsed/)
+  assert.match(readFileSync(summaryPath, 'utf8'), /could not be parsed/)
+  assert.deepEqual(JSON.parse(readFileSync(outPath, 'utf8')), { reportMissing: true, flaky: [] })
+})
