@@ -322,10 +322,15 @@ paint per frame — `drawFrame.perf.test.ts` and `preview-playback`'s rAF count 
 **A step or scrub ends on a paint after the last `seeked`** (ESCSUITE-264, ESCSUITE-275): the
 scrub effect paints once at once (over whatever frame the elements show) and again, through one
 `requestAnimationFrame`, when the **last** element it is waiting for reports `seeked`, with the
-300 ms fallback painting once if any of them has not by then; a `seeked` after the fallback, or
-after a newer cycle replaced this one, paints nothing, and the cleanup cancels a final paint
-already asked for. It waits per *element*, with a counter rather than a list: every element it
-seeked this run, plus any still `seeking` from a run the new one replaced (that run's listener went
+300 ms fallback painting once, provisionally, if any of them has not by then. **The fallback does
+not end the wait** (ESCSUITE-358): the last `seeked`, however late, still paints the frame it
+landed on. A far seek into a long recording whose key frames are sparse (a MediaRecorder take)
+decodes forward from the last key frame and was measured at 2.4 s for 109 s into a 15-minute
+VP8 WebM. Before ESCSUITE-358 the fallback ended the cycle, so such a seek's frame was never
+painted and the paused preview stayed on the frame from before the click, which read as a frozen
+viewer. A `seeked` after a newer cycle replaced this one paints nothing, and the cleanup cancels a
+final paint already asked for. It waits per *element*, with a counter rather than a list: every
+element it seeked this run, plus any still `seeking` from a run the new one replaced (that run's listener went
 with its cleanup, and the element already reads the target, so the paint after its seek would
 otherwise be lost). Before ESCSUITE-275 "the first `seeked`" was literal — with two elements
 seeking at once (picture-in-picture, a transition's two sides, the incoming one of which was not
@@ -347,8 +352,8 @@ the playhead moved in the same render as the set changed gets its first paint 50
 trade for that. An element both unready and off the playhead gets the readiness paint and the
 seek paint, both at the same playhead time and the seek asked for before either event fires: if
 its `seeked` lands within the 300 ms fallback, whichever of `loadeddata` and `seeked` comes last
-paints the frame at the target (`usePreviewRenderLoop.test.ts` pins both orders); past the
-fallback the late `seeked` paints nothing, and the `loadeddata` paint is the backstop. That a
+paints the frame at the target (`usePreviewRenderLoop.test.ts` pins both orders), and past the
+fallback the same holds, the fallback having painted what there was in between. That a
 browser applies a seek made at `HAVE_NOTHING` as the default playback start position — after
 metadata, before the first frame's data — is the spec's order, not measured in a real browser.
 
