@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { restoreEngine, setEngine } from '../test/engine'
-import { FRAME_RATE_PROBE, measureFrameRate, rateFromMediaTimes } from './frameRateProbe'
+import { FRAME_RATE_PROBE, frameRateRefusal, measureFrameRate, rateFromMediaTimes } from './frameRateProbe'
 
 /**
  * ESCSUITE-276: a source's frame rate is measured from the frames its own
@@ -909,5 +909,76 @@ describe('setup stubs', () => {
   it('leaves the URL stubs from src/test/setup.ts as mock functions', () => {
     expect(vi.isMockFunction(URL.createObjectURL)).toBe(true)
     expect(vi.isMockFunction(URL.revokeObjectURL)).toBe(true)
+  })
+})
+
+// ESCSUITE-336: a refusal names its reason, so a CI run that stores 30
+// 'assumed' says which of the safe-side checks fired instead of leaving it to
+// a guess.
+describe('frameRateRefusal', () => {
+  it('answers undefined for a run rateFromMediaTimes measures', () => {
+    expect(frameRateRefusal(spaced(1 / 120, 8), [1, 2, 3, 4, 5, 6, 7, 8], [4, 5, 6, 7, 8, 9, 10, 11])).toBeUndefined()
+    expect(frameRateRefusal(spaced(1 / 30, 8))).toBeUndefined()
+  })
+
+  it.each([
+    ['too-few-frames', [0, 1 / 30], undefined, undefined],
+    ['no-span', [0.1, 0.1, 0.1], undefined, undefined],
+    ['backwards', [0, 0.1, 0.02, 0.2], [1, 2, 3, 4], undefined],
+    ['counter-behind-callbacks', spaced(1 / 60, 3), [4, 5, 5], undefined],
+    // A 120 fps MP4 whose fourth frame was decoded and never presented: the
+    // media times step over it, the counter does not.
+    ['frames-skipped-unpresented', [0, 1, 2, 3, 5, 6, 7].map((f) => f / 120), [1, 2, 3, 4, 5, 6, 7], undefined],
+    ['decoder-queue-grew', spaced(1 / 60, 8), [1, 2, 3, 4, 5, 6, 7, 8], [5, 6, 7, 8, 9, 10, 11, 15]],
+  ] as const)('names %s', (reason, times, presented, totals) => {
+    const t = [...times]
+    const p = presented ? [...presented] : undefined
+    const q = totals ? [...totals] : undefined
+    expect(frameRateRefusal(t, p, q)).toBe(reason)
+    expect(rateFromMediaTimes(t, p, q)).toBeUndefined()
+  })
+})
+
+describe('measureFrameRate refusal log (ESCSUITE-336)', () => {
+  it('logs the refusal reason and what the probe saw when it answers nothing', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const times = [0, 1, 2, 3, 5, 6, 7, 8].map((f) => f / 120)
+    const v = probeVideo(times, { presentedFrames: [1, 2, 3, 4, 5, 6, 7, 8] })
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBeUndefined()
+
+    expect(info).toHaveBeenCalledTimes(1)
+    const [message] = info.mock.calls[0]
+    expect(message).toMatch(/^\[frame-rate probe\] refused: frames-skipped-unpresented/)
+    expect(message).toContain('8 callbacks')
+    info.mockRestore()
+  })
+
+  it('logs nothing when it measures', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const v = probeVideo(spaced(1 / 60, 8), { presentedFrames: [1, 2, 3, 4, 5, 6, 7, 8] })
+
+    await expect(measureFrameRate(v.el, FRAME_RATE_PROBE)).resolves.toBe(60)
+
+    expect(info).not.toHaveBeenCalled()
+    info.mockRestore()
+  })
+})
+
+// ESCSUITE-336: a real run, the 120 fps WebM fixture under 4x CDP CPU
+// throttling in headless Chromium 141. From 0 to 92 ms of media the spacings
+// count eleven 1/120 s intervals; the compositor's counter moved ten. One frame
+// was skipped without being presented, the case ESCSUITE-278's check refuses,
+// and an MP4's exact timestamps would not have hidden it either.
+describe('a loaded 120 fps run with one frame dropped unpresented (ESCSUITE-336)', () => {
+  const run = {
+    times: [0, 17, 33, 50, 58, 67, 83, 92].map((t) => t / 1000),
+    presented: [1, 2, 4, 6, 7, 8, 10, 11],
+    totals: [5, 6, 8, 10, 10, 12, 14, 15],
+  }
+
+  it('is refused as frames-skipped-unpresented rather than read low', () => {
+    expect(frameRateRefusal(run.times, run.presented, run.totals)).toBe('frames-skipped-unpresented')
+    expect(rateFromMediaTimes(run.times, run.presented, run.totals)).toBeUndefined()
   })
 })

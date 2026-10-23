@@ -13,13 +13,27 @@ import { waitForAppReady } from '../../utils/ready'
  * WebM as 20. Each fixture (fixtures/frame-rate/README.md) is imported through
  * the uploader's file input and the stored source read back through the
  * documented `GET_STATE`: it must be `'measured'` at the file's rate, except
- * that the 120 fps WebM may instead be refused as 30 `'assumed'` on a busy
- * machine (ESCSUITE-333; see `mayRefuse`). MP4s are exact. A WebM stamps frames in whole milliseconds, so over eight frames it
- * cannot separate a rate from its NTSC neighbour and either is accepted.
+ * that a 120 fps file, MP4 or WebM, may instead be refused as 30 `'assumed'`
+ * on a busy machine (ESCSUITE-333, ESCSUITE-336; see `mayRefuse`). A WebM
+ * stamps frames in whole milliseconds, so over eight frames it cannot separate
+ * a rate from its NTSC neighbour and either is accepted; an MP4's rate is
+ * exact.
+ *
+ * A refusal logs its reason (`[frame-rate probe] refused: …`, ESCSUITE-336)
+ * and the test copies it into a `frame-rate refusal` annotation, so a CI run
+ * that stored 30 `'assumed'` says which check fired and on what callbacks.
  *
  * Chromium only: `presentedFrames` and the half-speed sampling were measured
  * there; Firefox/WebKit admission is a follow-up.
  */
+
+/**
+ * `FRAME_RATE_CPU_THROTTLE=4` runs every case under CDP CPU throttling, the
+ * loaded-runner reproduction ESCSUITE-336 asks for:
+ *
+ *   FRAME_RATE_CPU_THROTTLE=4 pnpm exec playwright test frame-rate-probe --project=chromium --repeat-each=10
+ */
+const CPU_THROTTLE = Number(process.env.FRAME_RATE_CPU_THROTTLE ?? 1)
 
 const FIXTURES = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../fixtures/frame-rate')
 
@@ -29,13 +43,23 @@ interface Case {
   rates: number[]
   /**
    * The probe may refuse this file on a busy machine, storing the 30 'assumed'
-   * placeholder instead of a measurement (ESCSUITE-333). True only for the
-   * 120 fps WebM: its frames are stamped in whole milliseconds, and a page that
-   * misses about eleven callbacks in a row can round the run to one interval
-   * more than the compositor's counter, which ESCSUITE-278's spacing check
-   * refuses on purpose. A loaded CI runner did exactly that on 2026-10-18 (run
-   * 39096461073). The refusal is the safe side; a wrong 'measured' rate is
-   * still a failure.
+   * placeholder instead of a measurement. True for the two 120 fps files: at
+   * half speed they present a frame every 16.7 ms, and a loaded page can skip
+   * one without presenting it. The next presented frame's media time steps
+   * over it while the compositor's counter does not, and ESCSUITE-278's check
+   * refuses that run on purpose (`frames-skipped-unpresented`); exact MP4
+   * timestamps would not prevent it. The WebM can also get there by
+   * millisecond rounding over a long callback stall. Loaded CI runners refused
+   * the WebM on 2026-10-18 (run 39096461073, ESCSUITE-333) and the MP4 on
+   * 2026-10-20 (run 39369091051, ESCSUITE-336). Under 4x CDP CPU throttling
+   * the WebM was refused 2 runs in 10, both `frames-skipped-unpresented`. The
+   * MP4's own reason was not observed (the run predates the refusal log, and
+   * the container that investigated it had no H.264 decoder); it most likely
+   * hit the same check, and every other check that can refuse it
+   * (`too-few-frames` from a slow decoder start, `decoder-queue-grew`) is a
+   * designed safe side too. The `frame-rate refusal` annotation will say which
+   * next time. The refusal is the safe side; a wrong 'measured' rate is still
+   * a failure.
    */
   mayRefuse?: boolean
 }
@@ -44,7 +68,7 @@ const CASES: Case[] = [
   { file: 'testsrc-24fps.mp4', rates: [24] },
   { file: 'testsrc-30fps.mp4', rates: [30] },
   { file: 'testsrc-60fps.mp4', rates: [60] },
-  { file: 'testsrc-120fps.mp4', rates: [120] },
+  { file: 'testsrc-120fps.mp4', rates: [120], mayRefuse: true },
   { file: 'testsrc-29.97fps.mp4', rates: [29.97] },
   { file: 'testsrc-24fps.webm', rates: [24, 23.976] },
   { file: 'testsrc-30fps.webm', rates: [30, 29.97] },
@@ -87,6 +111,15 @@ test.describe('import-time frame-rate probe', () => {
       ? `${file} is measured at ${rates.join(' or ')} fps, or refused as 30 assumed`
       : `${file} is measured at ${rates.join(' or ')} fps`
     test(title, async ({ page }) => {
+      // The probe names why it refused a run (ESCSUITE-336); keep it with the result.
+      const refusals: string[] = []
+      page.on('console', (message) => {
+        if (message.text().startsWith('[frame-rate probe]')) refusals.push(message.text())
+      })
+      if (CPU_THROTTLE > 1) {
+        const cdp = await page.context().newCDPSession(page)
+        await cdp.send('Emulation.setCPUThrottlingRate', { rate: CPU_THROTTLE })
+      }
       await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
       await waitForAppReady(page, 'artist')
       await page.locator('input[type="file"]').setInputFiles(resolvePath(FIXTURES, file))
@@ -98,6 +131,7 @@ test.describe('import-time frame-rate probe', () => {
         type: 'frame-rate',
         description: `${sources[0].frameRate} (${sources[0].frameRateSource})`,
       })
+      for (const refusal of refusals) test.info().annotations.push({ type: 'frame-rate refusal', description: refusal })
       if (mayRefuse && sources[0].frameRateSource === 'assumed') {
         // The refusal: the placeholder, never another number (ESCSUITE-333).
         expect(sources[0].frameRate).toBe(30)

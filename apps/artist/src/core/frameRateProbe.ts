@@ -192,14 +192,56 @@ export function rateFromMediaTimes(
   presentedFrames?: readonly (number | undefined)[],
   totalVideoFrames?: readonly (number | undefined)[]
 ): number | undefined {
-  if (mediaTimes.length < 3) return undefined;
+  const verdict = judgeRun(mediaTimes, presentedFrames, totalVideoFrames);
+  return 'rate' in verdict ? verdict.rate : undefined;
+}
+
+/**
+ * Why `rateFromMediaTimes` refuses a run, one name per check, so a stored
+ * 30 `'assumed'` can say which of them fired (ESCSUITE-336).
+ *
+ * - `too-few-frames`: fewer than three callbacks before the probe ended.
+ * - `no-span`: the last presentation time is no later than the first.
+ * - `backwards`: a presentation time earlier than the one before it.
+ * - `counter-behind-callbacks`: the presented-frame counter advanced fewer
+ *   times than there were callbacks after the first.
+ * - `frames-skipped-unpresented`: the media times count more intervals than
+ *   the counter — a frame decoded and discarded unpresented, a variable-rate
+ *   source, or (WebM only) a long callback stall rounding up (ESCSUITE-278).
+ * - `decoder-queue-grew`: `totalVideoFrames − presentedFrames` rose by more
+ *   than `DECODER_QUEUE_SWING`.
+ */
+export type FrameRateRefusal =
+  | 'too-few-frames'
+  | 'no-span'
+  | 'backwards'
+  | 'counter-behind-callbacks'
+  | 'frames-skipped-unpresented'
+  | 'decoder-queue-grew';
+
+/** The check that refuses this run, or `undefined` when `rateFromMediaTimes` measures it. */
+export function frameRateRefusal(
+  mediaTimes: readonly number[],
+  presentedFrames?: readonly (number | undefined)[],
+  totalVideoFrames?: readonly (number | undefined)[]
+): FrameRateRefusal | undefined {
+  const verdict = judgeRun(mediaTimes, presentedFrames, totalVideoFrames);
+  return 'refused' in verdict ? verdict.refused : undefined;
+}
+
+function judgeRun(
+  mediaTimes: readonly number[],
+  presentedFrames?: readonly (number | undefined)[],
+  totalVideoFrames?: readonly (number | undefined)[]
+): { rate: number } | { refused: FrameRateRefusal } {
+  if (mediaTimes.length < 3) return { refused: 'too-few-frames' };
   const last = mediaTimes.length - 1;
   const span = mediaTimes[last] - mediaTimes[0];
-  if (!(span > 0)) return undefined;
+  if (!(span > 0)) return { refused: 'no-span' };
   let smallest = Infinity;
   for (let i = 1; i < mediaTimes.length; i++) {
     const spacing = mediaTimes[i] - mediaTimes[i - 1];
-    if (spacing < 0) return undefined;
+    if (spacing < 0) return { refused: 'backwards' };
     if (spacing > 0 && spacing < smallest) smallest = spacing;
   }
 
@@ -216,17 +258,36 @@ export function rateFromMediaTimes(
   if (Number.isFinite(presented)) {
     // One presented frame per callback is the least a real run can show; with
     // three or more callbacks this also refuses a count below two.
-    if (presented < last) return undefined;
+    if (presented < last) return { refused: 'counter-behind-callbacks' };
     // Frames the media times step over that the counter never counted.
-    if (intervals > presented) return undefined;
+    if (intervals > presented) return { refused: 'frames-skipped-unpresented' };
     // Δtotal − Δpresented: NaN — so nothing is refused here — unless both ends
     // carry a total.
     const unpresented = (totalVideoFrames?.[last] ?? NaN) - (totalVideoFrames?.[0] ?? NaN) - presented;
-    if (unpresented > DECODER_QUEUE_SWING) return undefined;
-    return snapFrameRate(presented / span);
+    if (unpresented > DECODER_QUEUE_SWING) return { refused: 'decoder-queue-grew' };
+    return { rate: snapFrameRate(presented / span) };
   }
 
-  return snapFrameRate(intervals / span);
+  return { rate: snapFrameRate(intervals / span) };
+}
+
+/**
+ * One `console.info` line for a refused run: the check that fired and the
+ * raw callbacks behind it (ESCSUITE-336). The e2e frame-rate spec copies it
+ * into its test annotation, so a CI run that stored 30 `'assumed'` shows why.
+ */
+function logRefusal(
+  reason: FrameRateRefusal,
+  mediaTimes: readonly number[],
+  presentedFrames: readonly (number | undefined)[],
+  totalVideoFrames: readonly (number | undefined)[]
+): void {
+  const ms = mediaTimes.map((t) => Math.round(t * 100_000) / 100);
+  console.info(
+    `[frame-rate probe] refused: ${reason} after ${mediaTimes.length} callbacks; ` +
+      `mediaTime ms ${JSON.stringify(ms)}, presentedFrames ${JSON.stringify(presentedFrames)}, ` +
+      `totalVideoFrames ${JSON.stringify(totalVideoFrames)}`
+  );
 }
 
 /**
@@ -282,7 +343,9 @@ export function measureFrameRate(
       video.pause();
       video.playbackRate = previousPlaybackRate;
       video.currentTime = 0;
-      resolve(rateFromMediaTimes(mediaTimes, presentedFrames, totalVideoFrames));
+      const verdict = judgeRun(mediaTimes, presentedFrames, totalVideoFrames);
+      if ('refused' in verdict) logRefusal(verdict.refused, mediaTimes, presentedFrames, totalVideoFrames);
+      resolve('rate' in verdict ? verdict.rate : undefined);
     };
 
     const onFrame: VideoFrameRequestCallback = (_now, metadata) => {
