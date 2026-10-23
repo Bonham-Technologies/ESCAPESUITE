@@ -111,7 +111,12 @@ export class KnownBug extends Error {
 /** Whether the known-bug guards are on. The counterexample tests turn them off. */
 let guards = true
 
-function knownBug(ticket: string, detail: string): void {
+/**
+ * Throw `KnownBug` for `ticket` while the guards are on. Exported so the
+ * mechanism stays compiled while no bug is guarded: the next filed bug's
+ * guard calls it from `applyOneOp`.
+ */
+export function knownBug(ticket: string, detail: string): void {
   if (guards) throw new KnownBug(ticket, detail)
 }
 

@@ -25,6 +25,13 @@ import { clipFromLeft, clipSpans, pixelsPerSecond, timelineClips } from '../../u
 
 const CLIP_SECONDS = 10
 
+/**
+ * The app's `pixelsPerSecond`: `PIXELS_PER_SECOND_BASE * zoom`, 50 px at the
+ * zoom of 1 a fresh editor opens at. The page does not expose the zoom, so the
+ * test asserts the clip is drawn at exactly this scale before it relies on it.
+ */
+const PPS = 50
+
 /** The track area's left edge and scroll: the origin `pointerTime` measures from. */
 async function trackOrigin(page: Page): Promise<{ left: number; scrollLeft: number }> {
   return page.evaluate(() => {
@@ -65,12 +72,18 @@ test.describe('ESCSUITE-364: a ripple trim moves the clip butted against it', ()
     })
     const clip = timelineClips(page).first()
     await expect(clip).toBeVisible()
-    const pps = await pixelsPerSecond(clip, CLIP_SECONDS)
+    const pps = PPS
+    // A layout or zoom change must fail here, not leave the search below
+    // computing times the app does not.
+    expect(await pixelsPerSecond(clip, CLIP_SECONDS), 'the timeline is at zoom 1 (50 px per second)').toBe(PPS)
     const { left, scrollLeft } = await trackOrigin(page)
     const box = (await clip.boundingBox())!
+    expect(box.x, 'the clip sits at 0 s, on the track area\'s left edge').toBe(left - scrollLeft)
 
     // `pointerTime`, as the app computes it for a pointer at `x`.
     const timeAt = (x: number) => (x - left + scrollLeft) / pps
+    // The search assumes the clip sits at 0 s (asserted above): its split
+    // offset is then the pointer time itself.
     // A split pixel (2-6 s in) and a trim pixel (at least 0.5 s, well short of
     // the split) where the ripple's shift lands the second half short of the end.
     let pick: { splitX: number; trimX: number } | undefined
