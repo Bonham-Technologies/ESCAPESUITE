@@ -1386,15 +1386,40 @@ export function exportLengthReason(seconds: number): string | null {
 }
 
 /**
+ * The longest stretch one MP4 or WebM export takes (ESCSUITE-367). Its audio is
+ * mixed as one Float32Array per channel at 48 kHz, 192,000 bytes a second, and
+ * Chromium refuses any single buffer of 2 GiB or more: three hours is 1.93 GiB.
+ */
+export const EXPORT_MAX_SECONDS = 3 * 60 * 60;
+
+/**
+ * Why the stretch an export will actually encode — a selected section, or the
+ * whole timeline when none is selected — cannot be exported, or `null`: every
+ * {@link exportLengthReason}, and longer than {@link EXPORT_MAX_SECONDS}. Not
+ * for the whole timeline when a section is selected, which may be longer: only
+ * the section is mixed.
+ */
+export function exportedLengthReason(seconds: number): string | null {
+  const reason = exportLengthReason(seconds);
+  if (reason !== null) return reason;
+  if (seconds > EXPORT_MAX_SECONDS) {
+    return 'Cannot export more than 3 hours at once: set in and out points and export it in sections';
+  }
+  return null;
+}
+
+/**
  * Refuse a timeline with no exportable length before any work is spent on it:
  * before the codec probe, the audio mix, the media load and the muxer.
+ * `reasonFor` is {@link exportedLengthReason} for the stretch to be encoded.
  */
 export function assertExportableLength(
   seconds: number,
   format: 'mp4' | 'webm',
-  exportLog: ExportLogEntry[]
+  exportLog: ExportLogEntry[],
+  reasonFor: (seconds: number) => string | null = exportLengthReason
 ): void {
-  const reason = exportLengthReason(seconds);
+  const reason = reasonFor(seconds);
   if (reason === null) return;
   exportLog.push({ phase: 'init', detail: `${format} refused: length ${seconds}s`, timestamp: performance.now() });
   throw new ExportError(reason, exportLog);

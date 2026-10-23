@@ -7,8 +7,9 @@ target, normalises it onto that target under a **−1 dBTP** true-peak limiter. 
 and measures nothing.
 
 - **Where it runs.** One awaited call, `exportLoudness(audioData, channels, sampleRate, target, { signal, onProgress })`, after
-  `extractAndMixAudio` has mixed and the exporter has sliced the mix to the exported range, and
-  before the encoder is fed: in `exportMP4.ts` right after the slice (the AAC probe has already
+  `extractAndMixAudio` has mixed the exported range (ESCSUITE-367: it mixes only the range, where
+  the exporters used to slice a whole-timeline mix), and
+  before the encoder is fed: in `exportMP4.ts` right after the mix (the AAC probe has already
   run, so a browser with no AAC encoder has no mix and measures nothing); in `exportWebM.ts`
   right after the Opus probe (so a WebM that cannot carry sound is not measured either). It
   measures the **exported range**, not the whole timeline. One pass over the mix — nothing per
@@ -53,8 +54,8 @@ and measures nothing.
   reference there, so content right at Nyquist can pass the ceiling by that much). The 72
   multiply-adds per sample are skipped wherever a cheap window bound proves they cannot change
   the answer, which brings a minute of speech-like stereo to ~0.2 s (a steady tone, where nothing
-  can be skipped, ~0.5 s). The mix is read in place through a stride (it is interleaved), never
-  copied apart; the only allocations are one number per 100 ms of programme and the limiter's
+  can be skipped, ~0.5 s). The mix is read in place (planar from the exporters since ESCSUITE-367; an interleaved
+  one through a stride), never copied apart; the only allocations are one number per 100 ms of programme and the limiter's
   fourteen-slot gain delay line. Filter state is kept out of subnormal numbers by a −400 dB offset,
   which an x86 CPU otherwise processes an order of magnitude slower through every silent gap.
 - **Normalising.** `gainForTarget` is `target − measured`, **capped at `MAX_GAIN_DB` = +20 dB of

@@ -10,7 +10,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BlobSource, EncodedPacketSink, Input, WEBM } from 'mediabunny'
 import {
-  createChunkCollector,
   isWebmType,
   needsSeekIndexRepair,
   remuxWithSeekIndex,
@@ -207,38 +206,6 @@ describe('remuxWithSeekIndex', () => {
 
   it('throws on a track it cannot name a codec for', async () => {
     await expect(remuxWithSeekIndex(webmBlob({ cues: 'empty', videoCodecId: 'V_NOT_A_CODEC' }))).rejects.toThrow()
-  })
-})
-
-describe('createChunkCollector', () => {
-  /** Write each chunk in order through the collector's stream, then read the bytes back. */
-  async function collect(chunks: Array<[number[], number]>): Promise<number[]> {
-    const collector = createChunkCollector()
-    const writer = collector.writable.getWriter()
-    for (const [data, position] of chunks) await writer.write({ type: 'write', data: new Uint8Array(data), position })
-    await writer.close()
-    return [...new Uint8Array(await collector.toBlob('video/webm').arrayBuffer())]
-  }
-
-  it('joins appended chunks in order', async () => {
-    expect(await collect([[[1, 2, 3], 0], [[4, 5], 3]])).toEqual([1, 2, 3, 4, 5])
-  })
-
-  it('overwrites bytes already collected when the muxer writes back into them', async () => {
-    // A size or a SeekHead patched after the bytes after it were written.
-    expect(await collect([[[1, 2, 3, 4], 0], [[5, 6, 7, 8], 4], [[9, 9], 1]])).toEqual([1, 9, 9, 4, 5, 6, 7, 8])
-  })
-
-  it('carries a write back across the boundary between two chunks', async () => {
-    expect(await collect([[[1, 2, 3, 4], 0], [[5, 6, 7, 8], 4], [[9, 9], 3]])).toEqual([1, 2, 3, 9, 9, 6, 7, 8])
-  })
-
-  it('overwrites the tail and appends the rest of a write that runs past the end', async () => {
-    expect(await collect([[[1, 2, 3, 4], 0], [[9, 9, 9], 2]])).toEqual([1, 2, 9, 9, 9])
-  })
-
-  it('makes an empty file of no writes', async () => {
-    expect(await collect([])).toEqual([])
   })
 })
 

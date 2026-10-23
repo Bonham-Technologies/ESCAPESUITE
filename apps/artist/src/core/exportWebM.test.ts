@@ -16,6 +16,7 @@ import {
   getMediabunnyState,
   lastMediabunnyOutput,
   resetMediabunnyDouble,
+  StreamTargetDouble,
 } from '../test/doubles/mediabunny'
 import {
   destBox,
@@ -67,7 +68,8 @@ let offscreen: OffscreenCanvasDouble
 let warns: ReturnType<typeof vi.spyOn>
 let errors: ReturnType<typeof vi.spyOn>
 
-const audioFor = (seconds: number) => new Float32Array(Math.round(seconds * SAMPLE_RATE) * 2)
+/** Planar stereo audio (`[left, right]`) covering `seconds` of timeline, as the mixer returns it. */
+const audioFor = (seconds: number) => [0, 1].map(() => new Float32Array(Math.round(seconds * SAMPLE_RATE)))
 
 async function storeSource(id: string, type = 'video/webm'): Promise<void> {
   await storeVideo(id, new Blob([new Uint8Array(8)], { type }), makeSourceVideo({ id }))
@@ -204,6 +206,21 @@ describe('exportToWebM timeline length (ESCSUITE-257)', () => {
     expect(getMediabunnyState().outputs).toHaveLength(0)
   })
 
+  // ESCSUITE-367: only the stretch encoded is mixed, one array per channel at
+  // 48 kHz, and three hours is as long as one array Chromium allocates holds.
+  it('refuses more than three hours before any work, and a section of a longer timeline exports', async () => {
+    const long = [makeClip({ duration: 3 * 3600 + 1, endTime: 3 * 3600 + 1 })]
+
+    const error = await run({ clips: long }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toBe('Cannot export more than 3 hours at once: set in and out points and export it in sections')
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(getMediabunnyState().outputs).toHaveLength(0)
+
+    await expect(run({ clips: long, options: { timeRange: { start: 7200, end: 7200.1 } } })).resolves.toBeDefined()
+  })
+
   it.each([
     ['an empty range', { start: 2, end: 2 }],
     ['a reversed range', { start: 3, end: 1 }],
@@ -247,11 +264,13 @@ describe('exportToWebM muxing', () => {
     expect(audio).toBe(true)
   })
 
-  it('muxes a WebM with one VP9 video track', async () => {
+  it('muxes a WebM with one VP9 video track, streamed', async () => {
     await run()
 
     const output = lastMediabunnyOutput()
     expect(output.format).toMatchObject({ name: 'webm' })
+    // ESCSUITE-367: streamed into Blob parts, never one ArrayBuffer.
+    expect(output.target).toBeInstanceOf(StreamTargetDouble)
     expect(output.tracks).toHaveLength(1)
     expect(output.tracks[0]).toMatchObject({ kind: 'video', options: { frameRate: 30 } })
     expect(getMediabunnyState().videoSources[0].codec).toBe('vp9')
@@ -369,11 +388,11 @@ describe('exportToWebM audio', () => {
     expect(getMediabunnyState().audioSources[0].packets).toHaveLength(2)
   })
 
-  it('deinterleaves each chunk into planar float data and closes it', async () => {
+  it('hands each chunk to the encoder as planar float data and closes it', async () => {
     const mix = audioFor(0.5)
-    mix[0] = 0.25
-    mix[1] = -0.25
-    mix[2] = 0.5
+    mix[0][0] = 0.25 // left, sample 0
+    mix[1][0] = -0.25 // right, sample 0
+    mix[0][1] = 0.5 // left, sample 1
     mixAudio.mockResolvedValue(mix)
 
     await run()
@@ -386,16 +405,17 @@ describe('exportToWebM audio', () => {
     expect(webcodecs.audioData.every((d) => d.closed)).toBe(true)
   })
 
-  it('slices the mixed audio down to the selected range', async () => {
-    const mix = audioFor(1)
-    mix[Math.floor(0.5 * SAMPLE_RATE) * 2] = 0.75
+  // ESCSUITE-367: the whole timeline used to be mixed and then sliced, so a
+  // few seconds of a two-hour recording asked for one 2.76 GB buffer and failed.
+  it('asks the mixer for the selected range only, and encodes what it returns', async () => {
+    const mix = audioFor(0.5)
+    mix[0][0] = 0.75
     mixAudio.mockResolvedValue(mix)
+    const clips = [makeClip({ duration: 1, endTime: 1 })]
 
-    await run({
-      clips: [makeClip({ duration: 1, endTime: 1 })],
-      options: { timeRange: { start: 0.5, end: 1 } },
-    })
+    await run({ clips, options: { timeRange: { start: 0.5, end: 1 } } })
 
+    expect(mixAudio).toHaveBeenCalledWith(clips, expect.any(Array), 1, expect.any(Function), { start: 0.5, end: 1 })
     expect(webcodecs.audioData[0].numberOfFrames).toBe(SAMPLE_RATE / 2)
     expect(webcodecs.audioData[0].data[0]).toBeCloseTo(0.75, 6)
   })
@@ -1298,14 +1318,14 @@ describe('exportToWebM colour label (ESCSUITE-284)', () => {
 })
 
 describe('exportToWebM loudness (ESCSUITE-292)', () => {
-  /** Stereo interleaved 1 kHz sine at `peakDbfs`, `seconds` long — a stereo sine reads at its peak level in LUFS. */
+  /** Planar stereo 1 kHz sine at `peakDbfs`, `seconds` long — a stereo sine reads at its peak level in LUFS. */
   const toneMix = (seconds: number, peakDbfs: number) => {
     const mix = audioFor(seconds)
     const a = 10 ** (peakDbfs / 20)
-    for (let i = 0; i < mix.length / 2; i++) {
+    for (let i = 0; i < mix[0].length; i++) {
       const v = a * Math.sin((2 * Math.PI * 1000 * i) / SAMPLE_RATE)
-      mix[2 * i] = v
-      mix[2 * i + 1] = v
+      mix[0][i] = v
+      mix[1][i] = v
     }
     return mix
   }
@@ -1344,9 +1364,12 @@ describe('exportToWebM loudness (ESCSUITE-292)', () => {
     // The first half second 4 dB quieter than the second: both halves pass the
     // gates, so the whole mix reads ≈ −21.8 LUFS, the exported second half the
     // tone's own −20.
-    const mix = toneMix(1, -20)
-    for (let i = 0; i < SAMPLE_RATE; i++) mix[i] *= 10 ** (-4 / 20)
-    mixAudio.mockResolvedValue(mix)
+    const whole = toneMix(1, -20)
+    for (let i = 0; i < SAMPLE_RATE / 2; i++) for (const ch of whole) ch[i] *= 10 ** (-4 / 20)
+    // The mixer returns only the range it was asked for (ESCSUITE-367).
+    mixAudio.mockImplementation(async (_clips, _tracks, _duration, _progress, range) =>
+      range ? whole.map((ch) => ch.slice(range.start * SAMPLE_RATE, range.end * SAMPLE_RATE)) : whole
+    )
 
     const { loudness } = await run({ clips, options: { timeRange: { start: 0.5, end: 1 } } })
 
@@ -1403,7 +1426,8 @@ describe('exportToWebM loudness (ESCSUITE-292)', () => {
     const first = progress.indexOf(measuring[0])
     const last = progress.indexOf(measuring[measuring.length - 1])
     expect(progress[first - 1].message).toBe('Initializing encoder...')
-    expect(progress[last + 1].message).toBe('Encoding frames...')
+    // Audio is encoded before the frames since ESCSUITE-367.
+    expect(progress[last + 1].message).toBe('Encoding audio...')
     const upToNext = progress.slice(0, last + 2).map((p) => p.progress)
     expect(upToNext).toEqual([...upToNext].sort((a, b) => a - b))
   })
