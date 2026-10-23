@@ -17,6 +17,7 @@ import { deletableWithLinks, linkedPartners, withoutLink } from './linkedClips';
 import { pruneSelection } from './selectionPrune';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
+import { startsAtOrAfter } from './timelineSnapping';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
@@ -357,7 +358,8 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         let shift = 0;
         for (const gone of doomed) {
           const goneDuration = gone.endTime - gone.startTime;
-          if (gone.trackId === clip.trackId && clip.timelinePosition >= gone.timelinePosition + goneDuration) {
+          // ESCSUITE-364: within the overlap tolerance counts as after.
+          if (gone.trackId === clip.trackId && startsAtOrAfter(clip, gone.timelinePosition + goneDuration)) {
             shift += goneDuration;
           }
         }
@@ -412,8 +414,9 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
 
     set((state) => {
       const newClips = state.project.timeline.clips.map((clip) => {
-        // Shift clips on the same track that start at or after the given time
-        if (clip.trackId === trackId && clip.timelinePosition >= afterTime) {
+        // Shift clips on the same track that start at or after the given time,
+        // a clip within the overlap tolerance of it included (ESCSUITE-364).
+        if (clip.trackId === trackId && startsAtOrAfter(clip, afterTime)) {
           return {
             ...clip,
             timelinePosition: Math.max(0, clip.timelinePosition + delta),
