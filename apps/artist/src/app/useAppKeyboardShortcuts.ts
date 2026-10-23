@@ -95,8 +95,9 @@ export interface AppKeyboardShortcutsDeps {
   undo: () => void;
   redo: () => void;
   selectedClipId: string | null;
-  removeClipFromTimeline: (clipId: string) => boolean;
-  rippleDeleteClip: (clipId: string) => void;
+  /** `alone` (Alt held) acts on the clip only, not its linked clips (ESCSUITE-355). */
+  removeClipFromTimeline: (clipId: string, alone?: boolean) => boolean;
+  rippleDeleteClip: (clipId: string, alone?: boolean) => void;
   activeTool: ToolType;
   duplicateClip: (clipId: string) => void;
   /**
@@ -134,9 +135,9 @@ export interface AppKeyboardShortcutsDeps {
   showShortcuts: boolean;
   setShowShortcuts: (open: boolean) => void;
   setShowExport: (open: boolean) => void;
-  splitClip: (clipId: string, splitTime: number) => void;
+  splitClip: (clipId: string, splitTime: number, alone?: boolean) => void;
   selectedClipIds: Set<string>;
-  deleteSelectedClips: () => boolean;
+  deleteSelectedClips: (alone?: boolean) => boolean;
   copySelectedClips: () => void;
   pasteClips: () => boolean;
   clipboard: Clip[] | null;
@@ -251,7 +252,7 @@ export function useAppKeyboardShortcuts({
           // (an id left stale by something other than this Delete) refuses
           // silently — there is nothing to announce, the same way a pointer
           // veto is silent elsewhere in this file.
-          if (deleteSelectedClips()) {
+          if (deleteSelectedClips(e.altKey)) {
             showNotification(clipCountMessage(selectedClipIds.size, 'deleted'), 'info');
           }
           return;
@@ -262,9 +263,9 @@ export function useAppKeyboardShortcuts({
             return;
           }
           if (activeTool === 'ripple') {
-            rippleDeleteClip(selectedClipId);
+            rippleDeleteClip(selectedClipId, e.altKey);
             showNotification('Clip deleted (ripple)', 'info');
-          } else if (removeClipFromTimeline(selectedClipId)) {
+          } else if (removeClipFromTimeline(selectedClipId, e.altKey)) {
             // ESCSUITE-115: an id that names no clip (a stale selection, the
             // same way deleteSelectedClips's above can be) refuses silently —
             // nothing to announce; the toast is for a clip that actually went.
@@ -400,8 +401,11 @@ export function useAppKeyboardShortcuts({
         return;
       }
 
-      // Ctrl+B = Split clip at playhead
-      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'b' && selectedClipId) {
+      // Ctrl+B = Split clip at playhead; Ctrl+Alt+B splits it alone, leaving
+      // its linked clips whole (ESCSUITE-355). Alt changes what `e.key`
+      // reports for a letter on macOS (Option+B is '∫'), so the Alt chord is
+      // matched on the physical key.
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && (e.key.toLowerCase() === 'b' || (e.altKey && e.code === 'KeyB')) && selectedClipId) {
         e.preventDefault();
         if (lockedIn([selectedClipId])) {
           showNotification('Track is locked', 'info');
@@ -411,7 +415,7 @@ export function useAppKeyboardShortcuts({
         if (clip) {
           const splitTime = useEditorStore.getState().currentTime - clip.timelinePosition;
           if (splitTime > 0 && splitTime < clip.duration) {
-            splitClip(selectedClipId, splitTime);
+            splitClip(selectedClipId, splitTime, e.altKey);
             showNotification('Clip split', 'info');
           }
         }

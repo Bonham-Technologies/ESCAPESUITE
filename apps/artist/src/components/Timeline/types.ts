@@ -13,6 +13,12 @@ export interface DragState {
   currentTrackId: string;
   currentPosition: number;
   snappedPosition: number | null;
+  /**
+   * The other clips the drop will move by the same time — the clips linked to
+   * the dragged one, unless Alt is held (ESCSUITE-355) — so their boxes follow
+   * the ghost. Absent when there are none.
+   */
+  companions?: ReadonlySet<string>;
 }
 
 /** A clip edge being dragged, with the trim it started from so it can be re-derived. */

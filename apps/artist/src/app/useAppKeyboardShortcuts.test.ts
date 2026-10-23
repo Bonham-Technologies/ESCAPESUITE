@@ -27,6 +27,8 @@ interface Chord {
   ctrlKey?: boolean
   metaKey?: boolean
   shiftKey?: boolean
+  altKey?: boolean
+  code?: string
 }
 
 /** Send a key to the window the way a browser would while nothing is focused. */
@@ -387,8 +389,24 @@ describe('deleting', () => {
 
     press('Delete')
 
-    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1')
+    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1', false)
     expect(deps.showNotification).toHaveBeenCalledWith('Clip deleted', 'info')
+  })
+
+  it('Alt+Delete removes the clip alone, leaving its linked clips (ESCSUITE-355)', () => {
+    mountShortcuts({ selectedClipId: 'clip-1' })
+
+    press('Delete', { altKey: true })
+
+    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1', true)
+  })
+
+  it('Alt+Backspace ripple-deletes the clip alone while the ripple tool is active (ESCSUITE-355)', () => {
+    mountShortcuts({ selectedClipId: 'clip-1', activeTool: 'ripple' })
+
+    press('Backspace', { altKey: true })
+
+    expect(deps.rippleDeleteClip).toHaveBeenCalledWith('clip-1', true)
   })
 
   it('Backspace ripple-deletes while the ripple tool is active', () => {
@@ -396,7 +414,7 @@ describe('deleting', () => {
 
     press('Backspace')
 
-    expect(deps.rippleDeleteClip).toHaveBeenCalledWith('clip-1')
+    expect(deps.rippleDeleteClip).toHaveBeenCalledWith('clip-1', false)
     expect(deps.removeClipFromTimeline).not.toHaveBeenCalled()
     expect(deps.showNotification).toHaveBeenCalledWith('Clip deleted (ripple)', 'info')
   })
@@ -427,7 +445,7 @@ describe('deleting', () => {
     mountShortcuts({ selectedClipId: 'clip-1', removeClipFromTimeline: vi.fn(() => false) })
 
     expect(press('Delete')).toBe(false)
-    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1')
+    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1', false)
     expect(deps.showNotification).not.toHaveBeenCalled()
   })
 })
@@ -640,8 +658,18 @@ describe('Ctrl+B, splitting at the playhead', () => {
 
     press('b', { ctrlKey: true })
 
-    expect(deps.splitClip).toHaveBeenCalledWith('clip-1', 2)
+    expect(deps.splitClip).toHaveBeenCalledWith('clip-1', 2, false)
     expect(deps.showNotification).toHaveBeenCalledWith('Clip split', 'info')
+  })
+
+  it('Ctrl+Alt+B splits the clip alone, matched on the physical key (ESCSUITE-355)', () => {
+    mountShortcuts({ selectedClipId: 'clip-1' })
+    movePlayhead(2)
+
+    // macOS reports Option+B as '∫'.
+    press('∫', { ctrlKey: true, altKey: true, code: 'KeyB' })
+
+    expect(deps.splitClip).toHaveBeenCalledWith('clip-1', 2, true)
   })
 
   it('does nothing with the playhead outside the clip', () => {
@@ -916,7 +944,7 @@ describe('the listener itself', () => {
     expect(remove.mock.calls.filter(([type]) => type === 'keydown')).toHaveLength(1)
     // And the new handler is the live one.
     press('Delete')
-    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1')
+    expect(deps.removeClipFromTimeline).toHaveBeenCalledWith('clip-1', false)
   })
 
   it('stops listening on unmount', () => {

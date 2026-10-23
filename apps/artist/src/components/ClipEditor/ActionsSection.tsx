@@ -18,6 +18,11 @@ interface ActionsSectionProps {
   /** Split the clip at the playhead. */
   onSplit: () => void;
   /**
+   * Take the clip out of its link group (ESCSUITE-355). The Unlink button
+   * shows only when this is given — the clip is linked to others.
+   */
+  onUnlink?: () => void;
+  /**
    * Freeze the two editing actions — the clip's track is locked
    * (ESCSUITE-84). "Go to" only moves the playhead, so it stays live; that
    * is why this section carries the flag on its own buttons instead of
@@ -27,15 +32,15 @@ interface ActionsSectionProps {
 }
 
 /**
- * The "Actions" section of the clip inspector: go to, duplicate, and — only
- * for video and audio clips — split.
+ * The "Actions" section of the clip inspector: go to, duplicate, — only for
+ * video and audio clips — split, and — only for a linked clip — unlink.
  *
  * Split is the one control here that depends on the playhead, so it is its own
  * component and subscribes for itself — see `SplitButton`. This section takes
  * the clip's position and duration rather than a `timeInClip` its parent would
  * have had to recompute on every playback tick.
  */
-export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, disabled }: ActionsSectionProps) {
+export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, onUnlink, disabled }: ActionsSectionProps) {
   return (
     <CollapsibleSection title="Actions">
       <div className={styles.actions}>
@@ -71,6 +76,22 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
             onSplit={onSplit}
             disabled={disabled}
           />
+        )}
+
+        {onUnlink && (
+          <button
+            className={styles.actionButton}
+            onClick={onUnlink}
+            disabled={disabled}
+            title="Edit this clip on its own from now on. Hold Alt to split, delete or move it alone once."
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M10 13a5 5 0 007.07 0l2.83-2.83a5 5 0 00-7.07-7.07L11.5 4.5" />
+              <path d="M14 11a5 5 0 00-7.07 0L4.1 13.83a5 5 0 007.07 7.07l1.33-1.33" />
+              <line x1="3" y1="3" x2="21" y2="21" />
+            </svg>
+            Unlink
+          </button>
         )}
       </div>
     </CollapsibleSection>

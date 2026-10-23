@@ -40,6 +40,7 @@ let actions: Pick<
   | 'setSelectedClipId'
   | 'toggleClipSelection'
   | 'moveSelectedClips'
+  | 'moveClips'
   | 'setClipTimelinePosition'
   | 'moveClipToTrack'
   | 'splitClip'
@@ -72,6 +73,7 @@ beforeEach(() => {
     setSelectedClipId: vi.fn(state.setSelectedClipId),
     toggleClipSelection: vi.fn(state.toggleClipSelection),
     moveSelectedClips: vi.fn(state.moveSelectedClips),
+    moveClips: vi.fn(state.moveClips),
     setClipTimelinePosition: vi.fn(state.setClipTimelinePosition),
     moveClipToTrack: vi.fn(state.moveClipToTrack),
     splitClip: vi.fn(state.splitClip),
@@ -136,6 +138,7 @@ function press(el: HTMLElement, clientX: number, init: object = {}): React.Mouse
     clientY: 10,
     ctrlKey: false,
     metaKey: false,
+    altKey: false,
     currentTarget: el,
     target: el,
     stopPropagation: vi.fn(),
@@ -264,7 +267,7 @@ describe('useClipDrag razor tool', () => {
       result.current.handleClipMouseDown(press(el, LEFT + 3 * PPS), theClip('clip1'))
     })
 
-    expect(actions.splitClip).toHaveBeenCalledWith('clip1', 1)
+    expect(actions.splitClip).toHaveBeenCalledWith('clip1', 1, false)
     expect(useEditorStore.getState().project.timeline.clips).toHaveLength(3)
     expect(result.current.dragState).toBeNull()
     expect(bound()).toBe(0)
@@ -885,5 +888,125 @@ describe('useClipDrag committing a multi-selection across rows', () => {
     expect(actions.moveSelectedClips).not.toHaveBeenCalled()
     expect(actions.moveClipToTrack).not.toHaveBeenCalled()
     expect(actions.setClipTimelinePosition).not.toHaveBeenCalled()
+  })
+})
+
+describe('useClipDrag and linked clips (ESCSUITE-355)', () => {
+  /** clip1 on track A and `mic` on track B, both 2-4 s, linked as one take. */
+  function linkMic() {
+    addClip('mic', 2, 2, trackB)
+    store().updateClip('clip1', { linkGroupId: 'take' })
+    store().updateClip('mic', { linkGroupId: 'take' })
+  }
+
+  const moveAlt = (clientX: number) =>
+    act(() => {
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX, clientY: 10, altKey: true }))
+    })
+
+  it('moves the clips linked to the dragged one by the same time, in one write', () => {
+    store().setSnapEnabled(false)
+    linkMic()
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(4))
+
+    expect(result.current.dragState?.companions).toEqual(new Set(['mic']))
+
+    release()
+
+    expect(actions.moveClips).toHaveBeenCalledWith(new Set(['clip1', 'mic']), 2, 0)
+    expect(theClip('clip1').timelinePosition).toBe(4)
+    expect(theClip('mic').timelinePosition).toBe(4)
+  })
+
+  it('with Alt held, moves the dragged clip alone', () => {
+    store().setSnapEnabled(false)
+    linkMic()
+    const { result } = mountDrag()
+    grabClip1(result, { altKey: true })
+    moveAlt(pointerFor(4))
+
+    expect(result.current.dragState?.companions).toBeUndefined()
+
+    release()
+
+    expect(actions.moveClips).not.toHaveBeenCalled()
+    expect(theClip('clip1').timelinePosition).toBe(4)
+    expect(theClip('mic').timelinePosition).toBe(2)
+  })
+
+  it('refuses the drop whole when a linked clip would land on another clip', () => {
+    store().setSnapEnabled(false)
+    linkMic()
+    addClip('blocker', 5, 2, trackB)
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(4))
+
+    release()
+
+    expect(actions.moveClips).not.toHaveBeenCalled()
+    expect(theClip('clip1').timelinePosition).toBe(2)
+    expect(theClip('mic').timelinePosition).toBe(2)
+  })
+
+  it('refuses the drop whole when a linked clip sits on a locked row', () => {
+    store().setSnapEnabled(false)
+    linkMic()
+    store().updateTrack(trackB, { locked: true })
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(4))
+
+    release()
+
+    expect(theClip('clip1').timelinePosition).toBe(2)
+    expect(theClip('mic').timelinePosition).toBe(2)
+  })
+
+  it('stops at the left edge where a linked clip reaches 0, keeping both in step', () => {
+    store().setSnapEnabled(false)
+    addClip('mic', 0.5, 2, trackB)
+    store().updateClip('clip1', { linkGroupId: 'take' })
+    store().updateClip('mic', { linkGroupId: 'take' })
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(-1))
+
+    release()
+
+    expect(theClip('clip1').timelinePosition).toBeCloseTo(1.5)
+    expect(theClip('mic').timelinePosition).toBeCloseTo(0)
+  })
+
+  it('shows the clips linked to every selected clip as moving with the drag', () => {
+    store().setSnapEnabled(false)
+    linkMic()
+    addClip('mic2', 6, 2, trackB)
+    store().updateClip('clip2', { linkGroupId: 'take2' })
+    store().updateClip('mic2', { linkGroupId: 'take2' })
+    store().selectClipsInRange(['clip1', 'clip2'])
+    const { result } = mountDrag()
+    grabClip1(result)
+    move(pointerFor(3))
+
+    expect(result.current.dragState?.companions).toEqual(new Set(['clip2', 'mic', 'mic2']))
+
+    release()
+
+    expect(actions.moveClips).toHaveBeenCalledWith(new Set(['clip1', 'clip2', 'mic', 'mic2']), 1, 0)
+  })
+
+  it('the razor with Alt held splits the clip alone', () => {
+    linkMic()
+    store().setActiveTool('razor')
+    const { result } = mountDrag()
+    const el = clipElement(2, 2)
+    act(() => {
+      result.current.handleClipMouseDown(press(el, LEFT + 3 * PPS, { altKey: true }), theClip('clip1'))
+    })
+
+    expect(actions.splitClip).toHaveBeenCalledWith('clip1', 1, true)
   })
 })

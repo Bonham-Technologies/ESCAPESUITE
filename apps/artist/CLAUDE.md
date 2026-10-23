@@ -58,6 +58,7 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Core Modules (`src/core/`) | [`core-modules.md`](docs/reference/core-modules.md) |
 | Video Decode Worker (`src/workers/decodeWorker.ts`) | [`video-decode-worker.md`](docs/reference/video-decode-worker.md) |
 | Integration API (`src/utils/integration.ts`) | [`integration-api.md`](docs/reference/integration-api.md) |
+| Linked clips (`src/store/linkedClips.ts`) | [`linked-clips.md`](docs/reference/linked-clips.md) |
 | Build Configuration | [`build-configuration.md`](docs/reference/build-configuration.md) |
 | Overlay System | [`overlay-system.md`](docs/reference/overlay-system.md) |
 | Captions (`src/core/captions.ts`, ESCSUITE-293) | [`captions.md`](docs/reference/captions.md) |

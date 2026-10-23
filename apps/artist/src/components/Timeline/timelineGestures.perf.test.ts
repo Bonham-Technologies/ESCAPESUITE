@@ -290,6 +290,7 @@ describe('useClipDrag per-move work', () => {
       setSelectedClipId: state.setSelectedClipId,
       toggleClipSelection: state.toggleClipSelection,
       moveSelectedClips: state.moveSelectedClips,
+      moveClips: state.moveClips,
       setClipTimelinePosition: state.setClipTimelinePosition,
       moveClipToTrack: state.moveClipToTrack,
       splitClip: state.splitClip,
