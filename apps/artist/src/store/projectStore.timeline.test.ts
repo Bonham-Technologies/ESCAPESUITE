@@ -617,6 +617,22 @@ describe('projectStore remaining behaviours', () => {
       expect(store().project).toBe(before)
     })
 
+    // ESCSUITE-364: the deleted clip's computed end can land a float hair
+    // past the start of the clip butted after it. That clip is "after" the
+    // gap too, or the ones behind it slide into it.
+    it('pulls back a clip butted a float hair before the deleted clip ends', () => {
+      const first = addClip('clip1', 0, 4)
+      const butted = addClip('clip2', 4 - 4e-16, 2, first.trackId)
+      addClip('clip3', 6, 2, first.trackId)
+      expect(butted.timelinePosition).toBeLessThan(4)
+
+      store().rippleDeleteClip('clip1')
+
+      const byId = Object.fromEntries(store().project.timeline.clips.map((c) => [c.id, c]))
+      expect(byId.clip2.timelinePosition).toBe(0)
+      expect(byId.clip3.timelinePosition).toBe(2)
+    })
+
     it('keeps the selection when a different clip is deleted', () => {
       const first = addClip('clip1', 0, 4)
       addClip('clip2', 4, 2, first.trackId)
@@ -641,6 +657,22 @@ describe('projectStore remaining behaviours', () => {
       expect(byId.clip2.timelinePosition).toBe(8)
       expect(byId.clip3.timelinePosition).toBe(13)
       expect(store().project.timeline.duration).toBe(15)
+    })
+
+    // ESCSUITE-364: after a split and a ripple trim, the next clip can sit a
+    // rounding error before the edit point (0.09999999999999998 vs 0.1). It is
+    // still the clip after the edit, so it moves with the rest.
+    it('moves a clip a float hair before the given time with the rest', () => {
+      const first = addClip('clip1', 0, 2)
+      addClip('clip2', 4 - 4e-16, 2, first.trackId)
+      addClip('clip3', 8, 2, first.trackId)
+
+      store().shiftClipsAfter(first.trackId, 4, 3)
+
+      const byId = Object.fromEntries(store().project.timeline.clips.map((c) => [c.id, c]))
+      expect(byId.clip1.timelinePosition).toBe(0)
+      expect(byId.clip2.timelinePosition).toBeCloseTo(7, 12)
+      expect(byId.clip3.timelinePosition).toBe(11)
     })
 
     it('clamps a negative shift at zero', () => {

@@ -126,7 +126,7 @@ outcome, not on the double.
   clip's end moves and its picture and sound slip) and ESCSUITE-364 (the ripple shifts in
   `shiftClipsAfter` and `rippleDeleteClip` compare `>=` with no tolerance, so a clip butted a float
   hair before the edge is left behind and overlapped: one guard for the ripple end trim, one for
-  the ripple delete). So that a known bug cannot turn `main` red when a generator change makes
+  the ripple delete; both fixed, guards removed). So that a known bug cannot turn `main` red when a generator change makes
   fast-check draw different sequences, `applyOp` in `src/test/timelineModel.ts` detects each
   trigger and throws `KnownBug` (carrying the ticket key) before the invariants see it; the
   property test catches it and discards the sequence with `fc.pre(false)`. The guards only skip a

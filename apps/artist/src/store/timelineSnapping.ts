@@ -121,6 +121,20 @@ export function overlapsSpan(
   );
 }
 
+/**
+ * Whether `clip` starts at or after `time`, counting a start up to
+ * `OVERLAP_EPSILON` before it as at it (ESCSUITE-364): the "after the edit
+ * point" test of the ripple tools, `shiftClipsAfter` and `rippleDeleteClip`.
+ * The clip butted against the edit is the one a float hair matters for —
+ * after a split the next clip can sit at 0.09999999999999998 against an edit
+ * at 0.1 — and a strict `>=` left it behind while the clips after it moved,
+ * so they slid into it. The same tolerance as `overlapsSpan`, so a clip the
+ * overlap check calls butted is one the ripple moves.
+ */
+export function startsAtOrAfter(clip: Pick<Clip, 'timelinePosition'>, time: number): boolean {
+  return clip.timelinePosition >= time - OVERLAP_EPSILON;
+}
+
 // Check if clip placement would overlap with another on same track
 export function wouldOverlap(
   clips: Clip[],
