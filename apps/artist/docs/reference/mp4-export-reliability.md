@@ -47,3 +47,36 @@ MP4 export includes robust error handling and codec compatibility:
 frame-closing shape of MP4's own encode block (which closes the canvas-drawn frame on both its
 success and its fatal-retry paths): an encoder that throws mid-export no longer leaves the frame
 it was encoding for the GC to finalise on top of the error that is already failing the export.
+
+## Long exports (ESCSUITE-367)
+
+Chromium refuses any single `ArrayBuffer` of 2 GiB or more (Chromium 141: 1.99 GiB allocates,
+1.999 GiB throws `RangeError: Array buffer allocation failed`). A user's two-hour CRAFT recording
+failed every MP4 export because three things grew past it:
+
+- **The output file.** `BufferTarget` with `fastStart: 'in-memory'` built the whole MP4 in one
+  buffer at `finalize()`, after the whole encode: about 55 minutes at Medium (5 Mbps). Both
+  exporters now write through a `StreamTarget` into `createChunkCollector`
+  (`core/chunkCollector.ts`), which keeps parts and moves every 64 MiB (`SPILL_BYTES`) into a
+  Blob, so no single buffer approaches the limit and the browser's blob store may move large
+  blobs out of the renderer (Chromium keeps them in the browser process and can spill them to
+  disk; that is the browser's choice, not something the app controls). A multi-gigabyte export
+  therefore needs about that much free disk; a refused blob fails at download, not during encode. A write-back into a Blob
+  part splices it. MP4 uses `fastStart: 'reserve'`, so the moov stays at the front as before,
+  with each track's `maximumPacketCount` a third over the expected count plus 64 (one video
+  packet per frame; one AAC packet per 1024 audio frames). Reserve mode holds packets back until
+  every track has produced its first one, so both exporters encode and flush the audio
+  **before** the frames: otherwise the whole video would wait in memory for the first audio
+  packet.
+- **The audio mix** covered the whole timeline interleaved (2.76 GB for two hours, refused before
+  a frame was encoded, even for a range export). It now covers only the exported range, one
+  array per channel.
+- **Each source's audio** was read whole, twice, then decoded whole; see `audioMixer.ts` in
+  `core-modules.md`.
+
+One channel's array at 48 kHz holds a little over three hours, so an exported stretch longer
+than `EXPORT_MAX_SECONDS` (3 h) is refused up front by `exportedLengthReason` in the dialog and
+in both exporters, with a sentence pointing at in and out points. Only the stretch encoded
+counts: a section of a longer timeline exports. Regression spec:
+`apps/e2e/tests/regressions/ESCSUITE-367.spec.ts` (a two-hour timeline, a two-second section).
+

@@ -21,6 +21,7 @@ import {
   getMediabunnyState,
   lastMediabunnyOutput,
   resetMediabunnyDouble,
+  StreamTargetDouble,
 } from '../test/doubles/mediabunny'
 import {
   destBox,
@@ -72,8 +73,8 @@ let logs: ReturnType<typeof vi.spyOn>
 let warns: ReturnType<typeof vi.spyOn>
 let errors: ReturnType<typeof vi.spyOn>
 
-/** Stereo interleaved audio covering `seconds` of timeline. */
-const audioFor = (seconds: number) => new Float32Array(Math.round(seconds * SAMPLE_RATE) * 2)
+/** Planar stereo audio (`[left, right]`) covering `seconds` of timeline, as the mixer returns it. */
+const audioFor = (seconds: number) => [0, 1].map(() => new Float32Array(Math.round(seconds * SAMPLE_RATE)))
 
 async function storeSource(id: string, type = 'video/mp4'): Promise<void> {
   await storeVideo(id, new Blob([new Uint8Array(8)], { type }), makeSourceVideo({ id }))
@@ -201,6 +202,21 @@ describe('exportToMP4 timeline length (ESCSUITE-257)', () => {
     expect(getMediabunnyState().outputs).toHaveLength(0)
   })
 
+  // ESCSUITE-367: only the stretch encoded is mixed, one array per channel at
+  // 48 kHz, and three hours is as long as one array Chromium allocates holds.
+  it('refuses more than three hours before any work, and a section of a longer timeline exports', async () => {
+    const long = [makeClip({ duration: 3 * 3600 + 1, endTime: 3 * 3600 + 1 })]
+
+    const error = await run({ clips: long }).catch((e: unknown) => e)
+
+    expect(error).toBeInstanceOf(ExportError)
+    expect((error as ExportError).message).toBe('Cannot export more than 3 hours at once: set in and out points and export it in sections')
+    expect(mixAudio).not.toHaveBeenCalled()
+    expect(getMediabunnyState().outputs).toHaveLength(0)
+
+    await expect(run({ clips: long, options: { timeRange: { start: 7200, end: 7200.1 } } })).resolves.toBeDefined()
+  })
+
   it.each([
     ['an empty range', { start: 2, end: 2 }],
     ['a reversed range', { start: 3, end: 1 }],
@@ -244,13 +260,18 @@ describe('exportToMP4 muxing', () => {
     expect(audio).toBe(true)
   })
 
-  it('muxes an in-memory fast-start MP4 with one AVC video track', async () => {
+  // ESCSUITE-367: `'in-memory'` into a BufferTarget built the file in one
+  // ArrayBuffer, which Chromium refuses past 2 GiB. `'reserve'` keeps the moov
+  // at the front with the file streamed into Blob parts.
+  it('muxes a reserved fast-start MP4 with one AVC video track, streamed', async () => {
     await run()
 
     const output = lastMediabunnyOutput()
-    expect(output.format).toMatchObject({ name: 'mp4', options: { fastStart: 'in-memory' } })
+    expect(output.format).toMatchObject({ name: 'mp4', options: { fastStart: 'reserve' } })
+    expect(output.target).toBeInstanceOf(StreamTargetDouble)
     expect(output.tracks).toHaveLength(1)
-    expect(output.tracks[0]).toMatchObject({ kind: 'video', options: { frameRate: 30 } })
+    // Six frames: room reserved for a third more, plus the floor.
+    expect(output.tracks[0]).toMatchObject({ kind: 'video', options: { frameRate: 30, maximumPacketCount: 72 } })
     expect(getMediabunnyState().videoSources[0].codec).toBe('avc')
   })
 
@@ -516,6 +537,8 @@ describe('exportToMP4 audio', () => {
     await run()
 
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video', 'audio'])
+    // 1.5 s is 71 AAC packets of 1024 frames; the moov's room is sized from that.
+    expect(lastMediabunnyOutput().tracks[1].options).toEqual({ maximumPacketCount: Math.ceil(71 * 4 / 3) + 64 })
     expect(getMediabunnyState().audioSources[0].codec).toBe('aac')
     expect(webcodecs.audioEncoders[0].configs[0]).toMatchObject({
       codec: 'mp4a.40.2',
@@ -531,11 +554,11 @@ describe('exportToMP4 audio', () => {
     expect(getMediabunnyState().audioSources[0].packets).toHaveLength(2)
   })
 
-  it('deinterleaves each chunk into planar float data and closes it', async () => {
+  it('hands each chunk to the encoder as planar float data and closes it', async () => {
     const mix = audioFor(0.5)
-    mix[0] = 0.25 // left, sample 0
-    mix[1] = -0.25 // right, sample 0
-    mix[2] = 0.5 // left, sample 1
+    mix[0][0] = 0.25 // left, sample 0
+    mix[1][0] = -0.25 // right, sample 0
+    mix[0][1] = 0.5 // left, sample 1
     mixAudio.mockResolvedValue(mix)
 
     await run()
@@ -598,13 +621,15 @@ describe('exportToMP4 audio', () => {
     expect(lastMediabunnyOutput().tracks.map((t) => t.kind)).toEqual(['video', 'audio'])
   })
 
-  it('mixes the whole timeline even when only part of it is exported', async () => {
-    mixAudio.mockResolvedValue(audioFor(1))
+  // ESCSUITE-367: the whole timeline used to be mixed and then sliced, so a
+  // few seconds of a two-hour recording asked for one 2.76 GB buffer and failed.
+  it('asks the mixer for the exported range only', async () => {
+    mixAudio.mockResolvedValue(audioFor(0.2))
     const clips = [makeClip({ duration: 1, endTime: 1 })]
 
     await run({ clips, options: { timeRange: { start: 0.5, end: 0.7 } } })
 
-    expect(mixAudio).toHaveBeenCalledWith(clips, expect.any(Array), 1, expect.any(Function))
+    expect(mixAudio).toHaveBeenCalledWith(clips, expect.any(Array), 1, expect.any(Function), { start: 0.5, end: 0.7 })
   })
 })
 
@@ -619,10 +644,9 @@ describe('exportToMP4 time range', () => {
     expect(encodes.map((e) => e.timestamp)).toEqual([0, 33333, 66667])
   })
 
-  it('slices the mixed audio down to the selected range', async () => {
-    const mix = audioFor(1)
-    // Mark the first sample of the second half-second, so the slice is visible.
-    mix[Math.floor(0.5 * SAMPLE_RATE) * 2] = 0.75
+  it("encodes the range's mix as the mixer returns it", async () => {
+    const mix = audioFor(0.5)
+    mix[0][0] = 0.75
     mixAudio.mockResolvedValue(mix)
     const clips = [makeClip({ duration: 1, endTime: 1 })]
 
@@ -1156,14 +1180,14 @@ describe('exportToMP4 failure handling', () => {
 })
 
 describe('exportToMP4 loudness (ESCSUITE-292)', () => {
-  /** Stereo interleaved 1 kHz sine at `peakDbfs`, `seconds` long — a stereo sine reads at its peak level in LUFS. */
+  /** Planar stereo 1 kHz sine at `peakDbfs`, `seconds` long — a stereo sine reads at its peak level in LUFS. */
   const toneMix = (seconds: number, peakDbfs: number) => {
     const mix = audioFor(seconds)
     const a = 10 ** (peakDbfs / 20)
-    for (let i = 0; i < mix.length / 2; i++) {
+    for (let i = 0; i < mix[0].length; i++) {
       const v = a * Math.sin((2 * Math.PI * 1000 * i) / SAMPLE_RATE)
-      mix[2 * i] = v
-      mix[2 * i + 1] = v
+      mix[0][i] = v
+      mix[1][i] = v
     }
     return mix
   }
@@ -1202,9 +1226,12 @@ describe('exportToMP4 loudness (ESCSUITE-292)', () => {
     // The first half second 4 dB quieter than the second: both halves pass the
     // gates, so the whole mix reads ≈ −21.8 LUFS, the exported second half the
     // tone's own −20.
-    const mix = toneMix(1, -20)
-    for (let i = 0; i < SAMPLE_RATE; i++) mix[i] *= 10 ** (-4 / 20)
-    mixAudio.mockResolvedValue(mix)
+    const whole = toneMix(1, -20)
+    for (let i = 0; i < SAMPLE_RATE / 2; i++) for (const ch of whole) ch[i] *= 10 ** (-4 / 20)
+    // The mixer returns only the range it was asked for (ESCSUITE-367).
+    mixAudio.mockImplementation(async (_clips, _tracks, _duration, _progress, range) =>
+      range ? whole.map((ch) => ch.slice(range.start * SAMPLE_RATE, range.end * SAMPLE_RATE)) : whole
+    )
 
     const { loudness } = await run({ clips, options: { timeRange: { start: 0.5, end: 1 } } })
 

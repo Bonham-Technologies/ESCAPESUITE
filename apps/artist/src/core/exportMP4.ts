@@ -4,7 +4,7 @@
 import {
   Output,
   Mp4OutputFormat,
-  BufferTarget,
+  StreamTarget,
   EncodedVideoPacketSource,
   EncodedAudioPacketSource,
   EncodedPacket,
@@ -26,6 +26,7 @@ import {
   yieldToMain,
   calculateTimelineDuration,
   assertExportableLength,
+  exportedLengthReason,
   getActiveTransition,
   findSupportedVideoConfig,
   mp4VideoCodecConfigs,
@@ -58,6 +59,7 @@ import {
   disposeFrameManager,
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
+import { createChunkCollector } from './chunkCollector';
 import { assignElementSlots } from './elementSlots';
 import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
@@ -72,6 +74,21 @@ export { ExportError } from './exportTypes';
 
 /** Marks a promise's rejection handled where another `await` of it rethrows it. */
 const ignoreRejection = (): void => {};
+
+/** Frames in one AAC-LC packet. */
+const AAC_FRAMES_PER_PACKET = 1024;
+
+/**
+ * The packet count `fastStart: 'reserve'` sizes the moov's space from, for a
+ * track expected to carry `expected` packets: a third more, as Mediabunny's own
+ * guidance asks when the count is not exact (an encoder's priming packets, the
+ * last partial one), plus a floor for a very short export. A finalize with more
+ * packets than this throws, and the spare room costs up to ~35 bytes a packet
+ * (its sample table entries).
+ */
+function reservedPacketCount(expected: number): number {
+  return Math.ceil(expected * 4 / 3) + 64;
+}
 
 /**
  * Export timeline to MP4 using WebCodecs + Mediabunny
@@ -142,10 +159,14 @@ export async function exportToMP4(
   // A timeline with no length cannot be mixed or encoded (ESCSUITE-257): refuse
   // it before anything below spends work on it.
   assertExportableLength(calculateTimelineDuration(clips), 'mp4', exportLog);
-  // And the length that will actually be encoded: a selected range's own.
-  if (options.timeRange) {
-    assertExportableLength(options.timeRange.end - options.timeRange.start, 'mp4', exportLog);
-  }
+  // And the length that will actually be encoded — a selected range's own — no
+  // longer than one channel's mix can hold (ESCSUITE-367).
+  assertExportableLength(
+    options.timeRange ? options.timeRange.end - options.timeRange.start : calculateTimelineDuration(clips),
+    'mp4',
+    exportLog,
+    exportedLengthReason
+  );
 
   // Ask both codecs before spending anything (ESCSUITE-175). The ladder walker
   // and the candidate list are the ones the export dialog's own up-front probe
@@ -216,27 +237,20 @@ export async function exportToMP4(
   const totalFrames = Math.ceil(totalDuration * frameRate);
 
   // Extract and mix audio first, on the main thread — but only when there is an
-  // encoder that could carry it.
-  // Note: we extract the full timeline audio, then slice it later
-  let fullAudioData: Float32Array | null = null;
+  // encoder that could carry it. Only the exported range is mixed, one array per
+  // channel (ESCSUITE-367): a whole two-hour timeline interleaved was one 2.76 GB
+  // buffer, which Chromium refuses, even when a few seconds were exported.
+  let audioData: Float32Array[] | null = null;
   if (aacSupported) {
     onProgress({ phase: 'preparing', progress: 2, message: 'Extracting audio...' });
 
     log('audio', 'Starting audio extraction');
-    fullAudioData = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
+    audioData = await extractAndMixAudio(clips, exportTracks, fullDuration, (p) => {
       onProgress({ phase: 'preparing', progress: 2 + p * 0.08, message: 'Extracting audio...' });
-    });
-    log('audio', fullAudioData ? `Audio extracted: ${fullAudioData.length} samples` : 'No audio data');
+    }, options.timeRange);
+    log('audio', audioData ? `Audio extracted: ${audioData[0].length} frames` : 'No audio data');
   }
-
-  // Slice audio to the selected time range
-  // Audio is stereo interleaved (2 channels), so multiply sample indices by 2
   const audioChannels = EXPORT_AUDIO_CHANNELS;
-  const audioData: Float32Array | null = fullAudioData && options.timeRange ? (() => {
-    const startSample = Math.floor(rangeStart * sampleRate) * audioChannels;
-    const endSample = Math.floor(rangeEnd * sampleRate) * audioChannels;
-    return fullAudioData.slice(startSample, endSample);
-  })() : fullAudioData;
 
   // Measure the sound this file will carry — the exported range, as mixed —
   // and normalise it onto the chosen target in place, before any encoder sees
@@ -383,25 +397,32 @@ export async function exportToMP4(
 
     onProgress({ phase: 'encoding', progress: 15, message: 'Initializing encoder...' });
 
-    // Create Mediabunny output with MP4 format
-    const target = new BufferTarget();
+    // Create Mediabunny output with MP4 format. Streamed into Blob parts, never
+    // one ArrayBuffer: a `BufferTarget` held the whole file in one, which
+    // Chromium refuses past 2 GiB — about 55 minutes at Medium — so a long
+    // export failed at `finalize()` after the whole encode (ESCSUITE-367).
+    // `'reserve'` keeps the moov at the front, as `'in-memory'` did, by
+    // reserving room for it sized from each track's most packets.
+    const collector = createChunkCollector();
     const output = new Output({
       format: new Mp4OutputFormat({
-        fastStart: 'in-memory',
+        fastStart: 'reserve',
       }),
-      target,
+      target: new StreamTarget(collector.writable),
     });
 
-    // Create video packet source
+    // Create video packet source: one packet per frame.
     const videoSource = new EncodedVideoPacketSource('avc');
-    output.addVideoTrack(videoSource, { frameRate });
+    output.addVideoTrack(videoSource, { frameRate, maximumPacketCount: reservedPacketCount(totalFrames) });
 
     // Create audio packet source if we have audio. AAC was probed before the mix
     // ran (above), so reaching here with audio data means the encoder exists.
     let audioSource: EncodedAudioPacketSource | null = null;
     if (audioData) {
       audioSource = new EncodedAudioPacketSource('aac');
-      output.addAudioTrack(audioSource);
+      output.addAudioTrack(audioSource, {
+        maximumPacketCount: reservedPacketCount(Math.ceil(audioData[0].length / AAC_FRAMES_PER_PACKET)),
+      });
     }
 
     // Start the output
@@ -442,6 +463,49 @@ export async function exportToMP4(
 
     // WebCodecs-based frame fetching runs at full speed (no browser throttling)
     const frameDurationUs = Math.round((1 / frameRate) * 1_000_000);
+
+    // Encode audio in chunks if available — before the frames, and flushed, so
+    // the muxer has both tracks' first packets from the start (ESCSUITE-367).
+    // The muxer interleaves by timestamp and holds every packet of a track
+    // until each track has one: audio after video kept the whole encoded video
+    // in page memory until the end, gigabytes for a long export. The audio
+    // waiting for the video instead is ~170 MB for two hours of AAC at 192 kbps.
+    if (audioEncoder && audioData) {
+      onProgress({ phase: 'encoding', progress: 18, message: 'Encoding audio...' });
+
+      const samplesPerChunk = sampleRate; // 1 second chunks
+      const [left, right] = audioData; // planar stereo (ESCSUITE-367)
+      const totalSamples = left.length;
+      const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
+
+      for (let i = 0; i < totalChunks; i++) {
+        // Check for abort during audio encoding
+        checkAborted(signal);
+
+        const startSample = i * samplesPerChunk;
+        const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
+        const chunkSamples = endSample - startSample;
+
+        // Create planar audio data (left channel first, then right channel)
+        const chunkData = new Float32Array(chunkSamples * 2);
+
+        chunkData.set(left.subarray(startSample, endSample), 0);
+        chunkData.set(right.subarray(startSample, endSample), chunkSamples);
+
+        const audioDataObj = new AudioData({
+          format: 'f32-planar',
+          sampleRate,
+          numberOfFrames: chunkSamples,
+          numberOfChannels: 2,
+          timestamp: Math.round((startSample / sampleRate) * 1_000_000),
+          data: chunkData,
+        });
+
+        audioEncoder.encode(audioDataObj);
+        audioDataObj.close();
+      }
+      await audioEncoder.flush();
+    }
 
     onProgress({ phase: 'encoding', progress: 18, message: 'Encoding frames...' });
     reportedProgress = { phase: 'encoding', progress: 18 };
@@ -716,48 +780,6 @@ export async function exportToMP4(
       }
     }
 
-    // Encode audio in chunks if available
-    if (audioEncoder && audioData) {
-      onProgress({ phase: 'encoding', progress: 89, message: 'Encoding audio...' });
-
-      const samplesPerChunk = sampleRate; // 1 second chunks
-      const totalSamples = audioData.length / 2; // audioData is interleaved stereo
-      const totalChunks = Math.ceil(totalSamples / samplesPerChunk);
-
-      for (let i = 0; i < totalChunks; i++) {
-        // Check for abort during audio encoding
-        checkAborted(signal);
-
-        const startSample = i * samplesPerChunk;
-        const endSample = Math.min((i + 1) * samplesPerChunk, totalSamples);
-        const chunkSamples = endSample - startSample;
-
-        // Create planar audio data (left channel first, then right channel)
-        const chunkData = new Float32Array(chunkSamples * 2);
-
-        // Left channel (first half)
-        for (let s = 0; s < chunkSamples; s++) {
-          chunkData[s] = audioData[(startSample + s) * 2]; // Left from interleaved
-        }
-        // Right channel (second half)
-        for (let s = 0; s < chunkSamples; s++) {
-          chunkData[chunkSamples + s] = audioData[(startSample + s) * 2 + 1]; // Right from interleaved
-        }
-
-        const audioDataObj = new AudioData({
-          format: 'f32-planar',
-          sampleRate,
-          numberOfFrames: chunkSamples,
-          numberOfChannels: 2,
-          timestamp: Math.round((startSample / sampleRate) * 1_000_000),
-          data: chunkData,
-        });
-
-        audioEncoder.encode(audioDataObj);
-        audioDataObj.close();
-      }
-    }
-
     log('frames', `Frame loop complete: ${frameCount} frames encoded`);
 
     // Check for any encoder errors before finalizing
@@ -776,8 +798,8 @@ export async function exportToMP4(
     await videoEncoder.flush();
     videoEncoder.close();
 
+    // Flushed already, before the frames (ESCSUITE-367).
     if (audioEncoder) {
-      await audioEncoder.flush();
       audioEncoder.close();
     }
 
@@ -793,9 +815,9 @@ export async function exportToMP4(
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-    // Get the final buffer
-    const buffer = target.buffer;
-    if (!buffer) {
+    // Get the final file
+    const blob = collector.toBlob('video/mp4');
+    if (blob.size === 0) {
       throw new Error('Export failed: no data was written to buffer');
     }
     // `audio` reports whether this browser could carry sound at all, which here
@@ -803,7 +825,7 @@ export async function exportToMP4(
     // question the exporter deliberately cannot answer — knowing would mean
     // decoding, which is the cost the probe-first ordering removed — so the
     // dialog pairs this with its own `projectHasAudio` before claiming a loss.
-    return { blob: new Blob([buffer], { type: 'video/mp4' }), audio: aacSupported, framesEncoded: frameCount, loudness };
+    return { blob, audio: aacSupported, framesEncoded: frameCount, loudness };
   } catch (error) {
     // The same release the success path made, run at most once: the two paths
     // are not exclusive — the "complete" report and the empty-buffer refusal

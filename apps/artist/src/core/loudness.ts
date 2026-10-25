@@ -723,7 +723,7 @@ export interface ExportLoudness {
 }
 
 /**
- * Measure the export's interleaved mix and, when `target` is one of the
+ * Measure the export's mix (planar, or interleaved) and, when `target` is one of the
  * three, normalise it onto that target in place under the −1 dBTP ceiling.
  * `undefined` — nothing to say — for no mix at all and for a mix with no
  * measurable loudness (silence, or nothing above −70 LUFS for 400 ms), which
@@ -740,7 +740,7 @@ export interface ExportLoudness {
  * is abandoned and nothing reads this buffer again.
  */
 export async function exportLoudness(
-  data: Float32Array | null,
+  data: Float32Array | readonly Float32Array[] | null,
   channelCount: number,
   sampleRate: number,
   target: unknown,
@@ -748,18 +748,21 @@ export async function exportLoudness(
 ): Promise<ExportLoudness | undefined> {
   if (!data) return undefined;
   checkAborted(pacing.signal);
-  const lanes = interleavedLanes(data, channelCount);
+  // The exporters hand over one array per channel (ESCSUITE-367); an
+  // interleaved mix is still read as one.
+  const lanes = data instanceof Float32Array ? interleavedLanes(data, channelCount) : planarLanes(data);
+  const buffers = data instanceof Float32Array ? [data] : data;
   const targetLufs = loudnessTargetOrOff(target);
   const measureSpan = targetLufs === undefined ? 1 : 0.5;
   const measured = await measureCooperatively(lanes, sampleRate, pacing, 0, measureSpan);
-  const result = await normalise(lanes, data, measured, targetLufs, sampleRate, pacing);
+  const result = await normalise(lanes, buffers, measured, targetLufs, sampleRate, pacing);
   pacing.onProgress?.(1);
   return result;
 }
 
 async function normalise(
   lanes: Lanes,
-  data: Float32Array,
+  buffers: readonly Float32Array[],
   measured: LoudnessMeasurement,
   targetLufs: LoudnessTarget | undefined,
   sampleRate: number,
@@ -778,7 +781,7 @@ async function normalise(
     // so when the gained true peak is under the ceiling it could never engage:
     // a plain multiply gives the same samples without the detector's cost.
     const gain = 10 ** (gainDb / 20);
-    for (let i = 0; i < data.length; i++) data[i] *= gain;
+    for (const data of buffers) for (let i = 0; i < data.length; i++) data[i] *= gain;
   }
   return { ...base, gainDb, targetLufs, limited };
 }

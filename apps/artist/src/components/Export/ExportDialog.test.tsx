@@ -2076,6 +2076,43 @@ describe('ExportDialog', () => {
     })
   })
 
+  // ESCSUITE-367: an export's audio is mixed one array per channel, and three
+  // hours is as long as one array Chromium allocates holds. Only the stretch
+  // encoded counts, so a section of a longer timeline still exports.
+  describe('a timeline longer than three hours (ESCSUITE-367)', () => {
+    const SENTENCE = 'Cannot export more than 3 hours at once: set in and out points and export it in sections'
+    const longTimeline = () => {
+      useEditorStore.setState((state) => ({
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            clips: state.project.timeline.clips.map((c) => ({ ...c, duration: 3 * 3600 + 1, endTime: 3 * 3600 + 1 })),
+          },
+        },
+      }))
+    }
+
+    it('disables the download with the sentence', () => {
+      longTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      const button = screen.getByRole('button', { name: 'Download WebM' })
+      expect(button).toBeDisabled()
+      expect(button).toHaveAttribute('title', SENTENCE)
+    })
+
+    it('keeps a section enabled and disables only the full video', () => {
+      longTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 1, end: 3 }} />)
+
+      expect(screen.getByRole('button', { name: /Export Section/ })).toBeEnabled()
+      const full = screen.getByRole('button', { name: 'Export Full Video' })
+      expect(full).toBeDisabled()
+      expect(full).toHaveAttribute('title', SENTENCE)
+    })
+  })
+
   describe('exporting a section', () => {
     it('offers section and full-video buttons once in and out points are set', async () => {
       store().setInPoint(1)
