@@ -598,10 +598,29 @@ jobs:
       - name: Run headless-artist Chromium tests
         run: pnpm --filter=@escapesuite/headless-artist run test:e2e
 
+      # Runs every CI project: `chromium` (retries 2) plus `chromium-strict` (journeys,
+      # the ARTIST soaks and tests/regressions, retries 0), and the responsive ones.
       - name: Run E2E tests
         run: pnpm --filter=@escapesuite/e2e exec playwright test
         env:
           CI: true
+
+      # ESCSUITE-352: a test that fails and then passes on retry leaves the job green.
+      # List each one in the job summary and as a ::warning annotation, and keep the
+      # list as the `e2e-flaky` artifact, which the steward reads from main's runs.
+      - name: Report flaky tests
+        if: always()
+        working-directory: apps/e2e
+        run: node scripts/report-flaky.mjs playwright-results.json flaky.json
+
+      - name: Upload flaky test list
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: e2e-flaky
+          path: apps/e2e/flaky.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       - name: Upload Playwright Report
         uses: actions/upload-artifact@v7

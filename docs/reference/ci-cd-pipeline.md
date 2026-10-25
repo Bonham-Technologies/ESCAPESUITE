@@ -12,7 +12,7 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 | `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes (E2E halves skipped for Dependabot) |
-| `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests | PRs and pushes (skipped for Dependabot) |
+| `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests; lists pass-on-retry tests (see below) | PRs and pushes (skipped for Dependabot) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
 | `ci-status` | Summary/gate job | All PRs |
 
@@ -35,6 +35,49 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
 - Playwright browser download and apt system-deps are separate steps, each with
   `timeout-minutes: 8` and a plain-bash retry, so an apt stall fails fast
   instead of hanging the job
+
+**E2E retries and flaky tests** (ESCSUITE-352):
+- In CI, `apps/e2e/playwright.config.ts` retries a failing test twice. A test that fails and then
+  passes counts as passed and `ci-status` stays green, so an intermittent regression could pass
+  silently. Two things now stop that:
+  - **Zero retries where flakiness is the bug.** The `chromium-strict` project runs
+    `tests/journeys/**/*.spec.ts`, the ARTIST soaks (`tests/escapeartist/*soak.spec.ts`) and
+    `tests/regressions/**/*.spec.ts` with `retries: 0` (and `trace`/`video: 'retain-on-failure'`,
+    since `on-first-retry` never fires without a retry); the `chromium` project ignores those
+    paths, so every spec still runs exactly once.
+    These specs exist to catch intermittent breakage (a pass-on-retry in a regression spec *is* the
+    regression), so a first-attempt failure there fails the job. Everything else keeps `retries: 2`.
+    The step runs `playwright test` with no `--project`, so both projects (and the responsive ones)
+    run; there is no sharding.
+  - **Every pass-on-retry is reported.** In CI the config adds the JSON reporter
+    (`apps/e2e/playwright-results.json`, beside the html and list reporters). The `Report flaky
+    tests` step (`if: always()`) runs `apps/e2e/scripts/report-flaky.mjs`, which writes every test
+    Playwright marked `flaky` to the job summary and to a `::warning` annotation titled
+    "Flaky e2e test" (spec file, line and test title), and saves the list to `flaky.json`, uploaded
+    as the **`e2e-flaky`** artifact (30 days). A clean run uploads an empty list, so a missing
+    artifact means the step did not run. Tests: `apps/e2e/scripts/report-flaky.test.mjs`
+    (`pnpm test:scripts`).
+- **Reading the flaky list from the last 7 days of `main`** (the steward does this every sweep).
+  Run it from inside the repo checkout: `gh api` fills `{owner}/{repo}` from the current
+  repository. `--paginate` matters: `main` can have well over 100 CI push runs in a week.
+
+  ```bash
+  since=$(date -u -d '7 days ago' +%Y-%m-%d)
+  for run in $(gh api --paginate "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?branch=main&event=push&created=>=$since&per_page=100" \
+                 --jq '.workflow_runs[].id'); do
+    url=$(gh api "repos/{owner}/{repo}/actions/runs/$run/artifacts?name=e2e-flaky" --jq '.artifacts[0].archive_download_url // empty')
+    [ -n "$url" ] && gh api "$url" > "flaky-$run.zip" &&
+      unzip -p "flaky-$run.zip" flaky.json | jq -c --arg run "$run" '.flaky[] + {run: $run}'
+  done | jq -s 'group_by(.file + " › " + .title)
+    | map({test: (.[0].file + " › " + .[0].title), runs: (map(.run) | unique | length)})
+    | sort_by(-.runs)'
+  ```
+
+  `runs` counts distinct CI runs, not entries (one run can list a test once per project). Any
+  test with `runs` above 1 is "flaky more than once" and gets a ticket. Without downloading, one run's annotations show the
+  same thing: `gh api repos/{owner}/{repo}/check-runs/<e2e job id>/annotations --jq '.[] |
+  select(.title == "Flaky e2e test") | .message'` (GitHub caps annotations per step, so the
+  artifact is the complete list).
 
 **Release** (`.github/workflows/release.yml`):
 - A release is cut by adding a changeset and merging it to `main`. `changesets/action` (v2) then pushes a `changeset-release/main` branch with the version bump and opens the "Version Packages" PR itself (the org setting "Allow GitHub Actions to create and approve pull requests" is enabled for this repo). CI on that bot-authored PR is held as "action required" until someone approves it. Relaxing the repository's fork-PR approval policy (now `first_time_contributors_new_to_github`) did not change this, so the hold is enforced at the organisation level (Organization → Settings → Actions → General → "Fork pull request workflows from outside collaborators"; org admin only). Approve the run under Actions ("Approve and run") or with `gh api -X POST repos/Bonham-Technologies/ESCAPESUITE/actions/runs/<run-id>/approve`. Merging the PR tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.
