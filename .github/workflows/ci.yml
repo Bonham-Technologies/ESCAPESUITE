@@ -230,12 +230,11 @@ jobs:
   # Builds the reference headless-artist Docker image and smoke-tests it: a real render
   # through `docker run` plus `--version`. Does NOT need `build` (it assembles the kit
   # itself via the headless-artist package's own `build` script), so it starts alongside
-  # `build` rather than waiting on it. Skipped for Dependabot, same as `e2e`.
+  # `build` rather than waiting on it. Runs for Dependabot too (ESCSUITE-337).
   kit-docker:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: [lint-and-typecheck, test]
-    if: github.actor != 'dependabot[bot]'
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -428,7 +427,6 @@ jobs:
           retention-days: 30
 
       - name: Cache Playwright browsers
-        if: github.actor != 'dependabot[bot]'
         uses: actions/cache@v6
         id: playwright-cache
         with:
@@ -440,7 +438,7 @@ jobs:
       # apt, which stalled for 30 minutes on a runner; an 8-minute cap plus a
       # single retry turns that hang into a fast, visible failure.
       - name: Install Playwright browser (cache miss)
-        if: github.actor != 'dependabot[bot]' && steps.playwright-cache.outputs.cache-hit != 'true'
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 8
         run: |
           for attempt in 1 2; do
@@ -454,7 +452,6 @@ jobs:
           exit 1
 
       - name: Install Playwright system dependencies
-        if: github.actor != 'dependabot[bot]'
         timeout-minutes: 8
         run: |
           for attempt in 1 2; do
@@ -468,14 +465,13 @@ jobs:
           exit 1
 
       - name: Run standalone E2E tests
-        if: github.actor != 'dependabot[bot]'
         run: pnpm test:e2e:standalone
         env:
           CI: true
 
       - name: Upload Standalone Test Report
         uses: actions/upload-artifact@v7
-        if: always() && github.actor != 'dependabot[bot]'
+        if: always()
         with:
           name: playwright-report-standalone
           path: apps/e2e/playwright-report-standalone/
@@ -483,7 +479,7 @@ jobs:
 
       - name: Upload Standalone Test Results
         uses: actions/upload-artifact@v7
-        if: failure() && github.actor != 'dependabot[bot]'
+        if: failure()
         with:
           name: test-results-standalone
           path: apps/e2e/test-results/
@@ -495,18 +491,16 @@ jobs:
       # job: `build:deploy` rebuilds apps/*/dist as hosted bundles, which would
       # otherwise clobber the standalone artifact and the suite that tests it.
       - name: Build combined production dist
-        if: github.actor != 'dependabot[bot]'
         run: pnpm build:deploy
 
       - name: Run production-layout E2E tests
-        if: github.actor != 'dependabot[bot]'
         run: pnpm test:e2e:production
         env:
           CI: true
 
       - name: Upload Production Test Report
         uses: actions/upload-artifact@v7
-        if: always() && github.actor != 'dependabot[bot]'
+        if: always()
         with:
           name: playwright-report-production
           path: apps/e2e/playwright-report-production/
@@ -514,7 +508,7 @@ jobs:
 
       - name: Upload Production Test Results
         uses: actions/upload-artifact@v7
-        if: failure() && github.actor != 'dependabot[bot]'
+        if: failure()
         with:
           name: test-results-production
           path: apps/e2e/test-results/
@@ -524,7 +518,8 @@ jobs:
   # adds ~2 min). Runs on PRs AND on pushes to main/dev: besides gating the
   # production deploy, a main-branch run is what SAVES the browser cache, so PR
   # branches can restore it (cache reads fall back to the base branch).
-  # Skipped for Dependabot.
+  # Runs for Dependabot too: autopilot merges a Dependabot PR on a green
+  # ci-status, so a bump must prove itself in a browser first (ESCSUITE-337).
   e2e:
     runs-on: ubuntu-latest
     # 30 min was enough for the Playwright suite alone; the headless-artist Chromium
@@ -532,7 +527,6 @@ jobs:
     # a cold-cache run close enough to that budget to raise it.
     timeout-minutes: 40
     needs: build
-    if: github.actor != 'dependabot[bot]'
 
     steps:
       - name: Checkout code
@@ -759,25 +753,22 @@ jobs:
             exit 1
           fi
 
-          # Standalone builds the offline bundles for every event (including
-          # Dependabot PRs) and runs the standalone E2E suite for everyone else,
-          # so it must succeed unconditionally.
+          # Standalone builds the offline bundles and runs the standalone and
+          # production-layout E2E suites for every event, Dependabot included.
           if [ "${{ needs.standalone.result }}" != "success" ]; then
             echo "Standalone build/E2E failed"
             exit 1
           fi
 
-          # E2E runs on PRs and on pushes to main/dev (skipped for Dependabot)
-          if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
-             [ "${{ needs.e2e.result }}" != "success" ]; then
+          # E2E runs on every PR (Dependabot included, ESCSUITE-337) and on
+          # pushes to main/dev
+          if [ "${{ needs.e2e.result }}" != "success" ]; then
             echo "E2E tests failed"
             exit 1
           fi
 
           # kit-docker builds and smoke-tests the headless-artist Docker image
-          # (skipped for Dependabot, same as e2e)
-          if [ "${{ github.actor }}" != "dependabot[bot]" ] && \
-             [ "${{ needs.kit-docker.result }}" != "success" ]; then
+          if [ "${{ needs.kit-docker.result }}" != "success" ]; then
             echo "headless-artist Docker image build/smoke test failed"
             exit 1
           fi
