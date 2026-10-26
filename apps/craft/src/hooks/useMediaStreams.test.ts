@@ -68,7 +68,7 @@ describe('useMediaStreams acquiring', () => {
 
     expect(permissionsOverrides.requestScreenCapture).toHaveBeenCalledWith(true)
     expect(permissionsOverrides.requestWebcam).not.toHaveBeenCalled()
-    expect(acquired).toEqual({ screen, webcam: null, mic, micUnavailable: false })
+    expect(acquired).toEqual({ screen, webcam: null, mic, micUnavailable: false, webcamError: null })
   })
 
   it('skips a source the environment cannot provide', async () => {
@@ -83,18 +83,60 @@ describe('useMediaStreams acquiring', () => {
 
     expect(permissionsOverrides.requestScreenCapture).not.toHaveBeenCalled()
     expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled()
-    expect(acquired).toEqual({ screen: null, webcam, mic: null, micUnavailable: false })
+    expect(acquired).toEqual({ screen: null, webcam, mic: null, micUnavailable: false, webcamError: null })
   })
 
-  it('releases what it already got when a later source fails, and rethrows', async () => {
+  // ESCSUITE-342 (owner decision A1). A camera that cannot be opened no
+  // longer costs a take that has a screen in it: the camera is asked for after
+  // the share picker has been answered, and throwing that share away over the
+  // camera meant picking the same window again. The take degrades to the
+  // screen (and the microphone), and the error comes back for the notice.
+  it('keeps a granted screen capture when the camera cannot be opened, and still asks for the microphone', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const screenTrack = createTrackDouble('video', { id: 'screen' })
-    permissionsOverrides.requestScreenCapture.mockResolvedValue(streamWith(screenTrack))
-    permissionsOverrides.requestWebcam.mockRejectedValue(new Error('Camera in use'))
+    const screen = streamWith(screenTrack)
+    const mic = streamWith(createTrackDouble('audio', { id: 'mic' }))
+    const cameraError = new Error('Camera in use')
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screen)
+    permissionsOverrides.requestWebcam.mockRejectedValue(cameraError)
+    permissionsOverrides.requestMicrophone.mockResolvedValue(mic)
+    const onPartial = vi.fn()
 
     const { result } = mountStreams(deps({ screenEnabled: true, webcamEnabled: true, microphoneEnabled: true }))
+    const acquired = await result.current.acquireStreams(onPartial)
+
+    expect(acquired).toEqual({ screen, webcam: null, mic, micUnavailable: false, webcamError: cameraError })
+    expect(screenTrack.stop).not.toHaveBeenCalled()
+    expect(permissionsOverrides.requestMicrophone).toHaveBeenCalledTimes(1)
+    // The camera stage is reported even though it produced nothing, so the
+    // deadline release (ESCSUITE-116) still holds the screen in its report.
+    expect(onPartial).toHaveBeenNthCalledWith(2, { screen, webcam: null, mic: null })
+    expect(warn).toHaveBeenCalledWith(
+      'Camera could not be opened — recording the screen without it:',
+      cameraError
+    )
+  })
+
+  it('reports both when the camera and the microphone are lost from a screen take', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const screen = streamWith(createTrackDouble('video', { id: 'screen' }))
+    const cameraError = new Error('Camera not found')
+    permissionsOverrides.requestScreenCapture.mockResolvedValue(screen)
+    permissionsOverrides.requestWebcam.mockRejectedValue(cameraError)
+    permissionsOverrides.requestMicrophone.mockRejectedValue(new Error('Microphone not found'))
+
+    const { result } = mountStreams(deps({ screenEnabled: true, webcamEnabled: true, microphoneEnabled: true }))
+    const acquired = await result.current.acquireStreams()
+
+    expect(acquired).toEqual({ screen, webcam: null, mic: null, micUnavailable: true, webcamError: cameraError })
+  })
+
+  it('still fails a take with no screen when the camera cannot be opened — it would record no picture', async () => {
+    permissionsOverrides.requestWebcam.mockRejectedValue(new Error('Camera in use'))
+
+    const { result } = mountStreams(deps({ screenEnabled: false, webcamEnabled: true, microphoneEnabled: true }))
 
     await expect(result.current.acquireStreams()).rejects.toThrow('Camera in use')
-    expect(screenTrack.stop).toHaveBeenCalledTimes(1)
     expect(permissionsOverrides.requestMicrophone).not.toHaveBeenCalled()
   })
 
@@ -117,7 +159,7 @@ describe('useMediaStreams acquiring', () => {
     )
     const acquired = await result.current.acquireStreams()
 
-    expect(acquired).toEqual({ screen, webcam: null, mic: null, micUnavailable: true })
+    expect(acquired).toEqual({ screen, webcam: null, mic: null, micUnavailable: true, webcamError: null })
     expect(screenTrack.stop).not.toHaveBeenCalled()
     expect(warn).toHaveBeenCalledWith(
       'Microphone could not be opened — recording without it:',
@@ -155,7 +197,7 @@ describe('useMediaStreams acquiring', () => {
     )
     const acquired = await result.current.acquireStreams()
 
-    expect(acquired).toEqual({ screen: null, webcam, mic: null, micUnavailable: true })
+    expect(acquired).toEqual({ screen: null, webcam, mic: null, micUnavailable: true, webcamError: null })
     expect(webcamTrack.stop).not.toHaveBeenCalled()
   })
 
@@ -203,7 +245,7 @@ describe('useMediaStreams acquiring', () => {
     const onPartial = vi.fn()
     const acquired = await result.current.acquireStreams(onPartial)
 
-    expect(acquired).toEqual({ screen, webcam, mic, micUnavailable: false })
+    expect(acquired).toEqual({ screen, webcam, mic, micUnavailable: false, webcamError: null })
     expect(onPartial).toHaveBeenNthCalledWith(1, { screen, webcam: null, mic: null })
     expect(onPartial).toHaveBeenNthCalledWith(2, { screen, webcam, mic: null })
     expect(onPartial).toHaveBeenNthCalledWith(3, { screen, webcam, mic })

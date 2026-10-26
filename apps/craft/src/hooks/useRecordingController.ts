@@ -31,10 +31,12 @@ import {
 } from '../core/recorder-factory';
 import { CaptureRequestError, hasSystemAudio, stopStream } from '../core/permissions';
 import {
+  CAMERA_AND_MIC_UNAVAILABLE,
   CAPTURE_REFUSED,
   CAPTURE_UNANSWERED,
   captureFailed,
   MIC_UNAVAILABLE,
+  webcamUnavailable,
   NO_SYSTEM_AUDIO,
   SAVE_FAILED,
   START_FAILED,
@@ -630,6 +632,20 @@ export function useRecordingController({
         setNotice(MIC_UNAVAILABLE);
       }
 
+      // The camera was asked for and could not be opened, and the take is
+      // going ahead as a screen take (ESCSUITE-342). Said last, so it wins the
+      // channel: a missing picture is the larger loss, and the user must not
+      // find the missing overlay only at playback. Both lost at once gets one
+      // sentence naming both. With `webcam` null, `isPiP` below is false, so
+      // there is no compositor, no overlay box and no separate camera track.
+      if (acquired.webcamError != null) {
+        setNotice(
+          acquired.micUnavailable
+            ? CAMERA_AND_MIC_UNAVAILABLE
+            : webcamUnavailable(captureFailureReason(failureName(acquired.webcamError)))
+        );
+      }
+
       // Which take this is, decided once and handed to everything below: the
       // compositor's mode, the factory, the recorder type the save path keys
       // the container repair off, the config the recorder initializes with, and
@@ -663,7 +679,10 @@ export function useRecordingController({
       // describe the take it was handed, not whatever the sidebar has moved to
       // by the time one of those settles.
       const systemAudioEnabled = config.systemAudioEnabled;
-      const webcamEnabled = config.webcamEnabled;
+      // The toggle AND a camera that arrived, like `micAcquired` above: a take
+      // whose camera could not be opened went ahead without it (ESCSUITE-342)
+      // and must not be stored as having one.
+      const webcamEnabled = config.webcamEnabled && webcam !== null;
       const overlayPlacement = {
         position: config.webcamPosition,
         size: config.webcamSize,
