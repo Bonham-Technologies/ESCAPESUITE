@@ -14,6 +14,15 @@
   (`apps/e2e/scripts/report-flaky.mjs`; details in `ci-cd-pipeline.md`). Running one of those
   specs locally with `--project=chromium` finds nothing: use `--project=chromium-strict`, or no
   `--project`. A new regression spec goes under `tests/regressions/` and is strict automatically.
+- **Nightly-only specs** (`@nightly`): a spec too long for the per-PR `e2e` job carries
+  Playwright's `{ tag: '@nightly' }` and skips itself unless `E2E_NIGHTLY=1`, so the plain
+  `playwright test` CI runs never starts it. The nightly workflow (ESCSUITE-353, not built yet)
+  runs them with `E2E_NIGHTLY=1 pnpm --filter=@escapesuite/e2e exec playwright test --grep @nightly
+  --project=chromium-strict`. Today: `tests/regressions/ESCSUITE-368.spec.ts`, two 120 s CRAFT
+  takes (WebCodecs under CPU ×4, composited PiP through MediaRecorder) and an ESCAPEARTIST export
+  of the PiP take, each file's A/V offset read in the browser by `apps/e2e/utils/avSync.ts`
+  (`decodeAudioData` beeps against the Mediabunny-decoded frame timecodes of
+  `mockSyntheticMedia(..., { markers: true })`); first-to-last beep must move under 50 ms.
 - **Production-layout tests**: `apps/e2e/tests/production/` runs against the combined
   `dist/` from `pnpm build:deploy`, served on ONE port by `apps/e2e/scripts/serve-dist.mjs`
   (which mirrors `vercel.json`'s rewrites, and — since ESCSUITE-121 part 2 — reads and sends
