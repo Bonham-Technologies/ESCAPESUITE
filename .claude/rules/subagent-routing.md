@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops (23d3028). Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops (d170167). Edit there and re-run bin/vendor-claude-setup. -->
 ## Subagent model routing
 Always pass an explicit `model` when spawning a subagent. Choose by how novel the task is, what a failure would cost, and whether success can be checked mechanically.
 
