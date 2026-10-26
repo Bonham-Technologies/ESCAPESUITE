@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops (c8ca056). Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops (b546eb9). Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -51,7 +51,7 @@ Runs are scheduled tasks in cloud sessions.
 
 **Jira statuses.** The projects have only **To Do**, **In Progress** and **Done**. Use
 no other status. Labels are free-form: the class labels, `needs-owner`, `needs-operator`,
-`ap-steward-log`, `ap-asked` and `ap-scout` need no setup.
+`ap-steward-log`, `ap-asked`, `ap-scout`, `ap-security` and `ap-ignore` need no setup.
 
 **The GitHub label `needs-owner`** may not exist yet. Before you first apply it in a
 run, create it; HTTP 422 means it already exists, so carry on:
@@ -209,14 +209,14 @@ get 403 on every one. That is expected.
 - **gitleaks** stands in for secret scanning;
 - code scanning has no stand-in. Leave it "not available".
 
-**Install** both tools once per run, into a fresh temporary directory, never into the
-repo. Use the pinned releases, and check each download twice: against the release's
+**Install** both tools once per run, into `/tmp/autopilot-scan`, never into the repo. Use the pinned releases, and check each download twice: against the release's
 checksums file, and against the digest pinned in the command. If the command exits
 non-zero, run no scanner, and report the failure in the digest. Never run an
 unverified binary.
 
 ```
-OSV=2.6.0 GL=8.30.1 SCAN="$(mktemp -d)"
+OSV=2.6.0 GL=8.30.1 SCAN=/tmp/autopilot-scan
+rm -rf "$SCAN" && mkdir -p "$SCAN"
 case "$(uname -m)" in
   x86_64) A=amd64 G=x64
     OSV_SHA=ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
@@ -243,7 +243,9 @@ Then compare each tool's latest release with the pin:
 - the same for `gitleaks/gitleaks`.
 
 If either is newer, say so in the digest. Bumping a pin is a bonham-ops change, never
-one a run makes. Run every scanner from the repo root.
+one a run makes. Run every scanner from the repo root. Each shell command starts a fresh
+shell, so set `SCAN=/tmp/autopilot-scan` again in every later command that uses
+`$SCAN`.
 
 **Dependency vulnerabilities.**
 
@@ -297,8 +299,8 @@ one a run makes. Run every scanner from the repo root.
   | 4.0 to 6.9 | medium |
   | below 4.0 | low |
 
-  If there's no score, use the GHSA record's `database_specific.severity`, and failing
-  that, low.
+  If there's no score, use the GHSA record's `database_specific.severity` (`MODERATE` is
+  medium), and failing that, low.
 - **Fixed version:** the record's `affected[].ranges[].events[].fixed` for this package.
   Take the lowest fixed version above the installed one. Prefer one in the installed
   major version.
@@ -313,7 +315,10 @@ one a run makes. Run every scanner from the repo root.
 `.gitleaks.toml` and `.gitleaksignore` from the directory it runs in; both are respected.
 
 - **History since the last run.** The last digest's **Security scan** line records the
-  commit it scanned, `main@<sha>`.
+  commit scanned up to, `main@<sha>`. Record this run's `HEAD` there only when the
+  history scan succeeded and every real finding from it has a ticket. If the scan
+  failed, or the ticket cap stopped filing, repeat the previous sha (or "none"), so the
+  next run scans those commits again; deduplication keeps it from filing twice.
   1. If `git rev-parse --is-shallow-repository` prints `true`, run
      `git fetch --unshallow` first.
   2. If `git merge-base --is-ancestor <sha> HEAD` succeeds, scan the new commits:
@@ -330,15 +335,21 @@ one a run makes. Run every scanner from the repo root.
     changes.
   - A working-tree finding's fingerprint is `<file>:<rule>:<line>`, and it moves
     whenever lines above it shift. Convert it with
-    `git blame -L <line>,<line> --porcelain -- <file>`. The first output line starts
+    `git blame -L <line>,<line> --porcelain -- <file> | grep -v $'^\t'`. The `grep`
+    drops the line's content, which is the secret. The first output line starts
     with the commit and the original line number; the `filename` line gives the
     original path. Put those together as `<commit>:<file>:<rule>:<line>`, the same
     fingerprint a history scan reports.
+  - Skip a working-tree finding in a file git doesn't track
+    (`git ls-files --error-unmatch <file>` fails), such as installed dependencies.
   - Skip a finding whose fingerprint is listed in `.gitleaksignore`. Gitleaks does this
     itself for a history scan, but a working-tree scan doesn't recognise history
     fingerprints, so check the converted one yourself.
-- **Fakes:** read each finding's line in the repo to judge it, without copying the value
-  anywhere. These are false positives, not leaks:
+  - A history finding and a converted working-tree finding with the same fingerprint
+    are one finding. Merge them before filing.
+- **Fakes:** judge each finding from its path, its rule, the redacted `Match` and the
+  lines around it (`sed -n '<l-3>,<l-1>p;<l+1>,<l+3>p' <file>`). Never print the
+  finding's own line: it holds the value. These are false positives, not leaks:
   - a test fixture for a scanner;
   - a documented dummy key or a placeholder;
   - a match that is plainly not a credential, such as an identifier.
@@ -346,15 +357,22 @@ one a run makes. Run every scanner from the repo root.
   Put them all in one P3 `ap-owner-merge` ticket, "Allowlist gitleaks false
   positives". It lists each fingerprint and why it's fake, never a value, so the owner
   can confirm before the builder adds them to `.gitleaksignore`. Search Jira for an
-  open one first, and add to it. When unsure, treat the finding as real.
+  open one first, and add only the fingerprints it doesn't already list. A fingerprint
+  that a Done allowlist ticket lists but `.gitleaksignore` lacks was rejected by the
+  owner: treat it as real. When unsure, treat the finding as real.
 
 ### Security tickets
 
 Security tickets are filed before any other finding and count toward the 25-ticket cap.
+Every security ticket also gets the Jira label `ap-security`, next to its class label.
+
+**The owner can ignore one:** a ticket closed with the Jira label `ap-ignore` is never
+reopened and never filed again. The digest counts those advisories as "ignored".
 
 1. **An open Dependabot PR already fixes it:** file nothing. A PR fixes an alert or an
    advisory when it bumps the package to at least the first patched (fixed) version.
-   The **Dependabot** sweep handles it.
+   The **Dependabot** sweep handles it. List each one in the digest's **Security scan**
+   line as "fixed by PR #<n>: <advisory id>".
 2. **Alerts from the API.** File one ticket per alert. Dependabot and code-scanning
    alerts are numbered separately, so the summary carries both the source and the
    number:
@@ -381,10 +399,14 @@ Security tickets are filed before any other finding and count toward the 25-tick
 3. **Vulnerabilities from the scan.** File one ticket per advisory per package, summary
    `[security] <advisory id> in <package>`. Merge every lockfile it appears in into
    that one ticket.
-   - **Search first,** Done tickets included:
+   - **Search first,** Done tickets included, for each of the group's ids in turn,
+     since an advisory can gain a GHSA alias later:
      `project = ESCSUITE AND summary ~ "\"<advisory id>\""`. A match on the same
-     package is that ticket, even one filed from a Dependabot alert. Leave an open one;
-     reopen a Done one as in step 2.
+     package is that ticket, even one filed from a Dependabot alert.
+     - Leave an open one.
+     - Reopen a Done one as in step 2, except one labelled `ap-ignore`, or an
+       `ap-watch` ticket. A Done `ap-watch` ticket has fired: its linked follow-up is
+       the ticket for this advisory, so reopen that one instead if it is Done.
    - **The ticket names:**
      - each lockfile and the installed version;
      - the fixed version;
@@ -396,9 +418,10 @@ Security tickets are filed before any other finding and count toward the 25-tick
    - **No fixed version exists:** file it `ap-watch` instead. Link the osv.dev page.
      The trigger is "a fixed version is released", and the follow-up is the bump.
    - **No longer reported:** if a successful scan of a lockfile no longer reports an
-     advisory that an open scan ticket names for it, comment that on the ticket and
-     move it to Done. A merged Dependabot PR usually does this. Never apply this to
-     secret tickets.
+     advisory that an open scan ticket names for it, or the lockfile no longer exists,
+     comment that on the ticket and move it to Done once no lockfile it names still
+     reports it. A merged Dependabot PR usually does this. Never apply this to secret
+     tickets.
 4. **Secrets, from the API or the scan,** are P1 `ap-owner-merge`.
    - **Summary:** `[security] secret-scanning #<n>: <secret type>` for an alert, or
      `[security] gitleaks <fingerprint>` for a scan finding.
@@ -619,7 +642,9 @@ the alerts with
 If that answers 403 or 404, as it does in cloud runs today, use the steward's open scan
 tickets instead: a PR that bumps a ticket's package to at least its fixed version
 fixes it. Find them with
-`project = ESCSUITE AND summary ~ "\"[security]\"" AND statusCategory != Done`.
+`project = ESCSUITE AND labels = ap-security AND statusCategory != Done`. The PRs
+the latest digest's **Security scan** line lists as "fixed by PR #<n>" are security
+updates too.
 
 **Find them:**
 
