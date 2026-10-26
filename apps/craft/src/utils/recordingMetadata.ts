@@ -63,7 +63,11 @@ export interface CapturedTake {
    * where this half comes from moves (ESCSUITE-104).
    */
   systemAudioEnabled: boolean;
-  /** The webcam toggle, as it stood when the take started. */
+  /**
+   * The webcam toggle as it stood when the take started, AND a camera that
+   * really arrived: a screen take whose camera could not be opened went ahead
+   * without it (ESCSUITE-342) and is stored as having no webcam.
+   */
   webcamEnabled: boolean;
   /**
    * Whether the take captured a picture at all — a stream AND its toggle, for

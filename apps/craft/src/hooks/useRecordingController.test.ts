@@ -89,6 +89,8 @@ interface AcquiredDoubles {
  */
 interface AcquisitionDoubles extends AcquiredDoubles {
   micUnavailable: boolean
+  /** Why the camera could not be opened in a take that went ahead without it (ESCSUITE-342). */
+  webcamError: unknown
 }
 
 interface Harness {
@@ -147,7 +149,7 @@ function resetStore(config: Partial<RecordingConfig> = {}): void {
 /** Build the controller's inputs, with the capture side as plain doubles. */
 function makeHarness(config: Partial<RecordingConfig> = {}, acquired?: Partial<AcquisitionDoubles>): Harness {
   const streams: AcquisitionDoubles = {
-    screen: screenStream(), webcam: null, mic: null, micUnavailable: false, ...acquired,
+    screen: screenStream(), webcam: null, mic: null, micUnavailable: false, webcamError: null, ...acquired,
   }
   const acquireStreams = vi.fn(async () => streams)
   const stopAllStreams = vi.fn()
@@ -409,9 +411,11 @@ describe('startFailureNotice names the source that failed (ESCSUITE-341)', () =>
     )
   })
 
+  // A webcam-only take: with no screen in it, a camera that cannot be opened
+  // still costs the take (ESCSUITE-342 degrades only a take with a screen).
   it('raises the camera sentence through the start path, and nothing is recorded', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const { result } = mountController({ countdownSeconds: 0, webcamEnabled: true })
+    const { result } = mountController({ countdownSeconds: 0, screenEnabled: false, webcamEnabled: true })
     harness.acquireStreams.mockRejectedValue(failure('webcam', 'NotReadableError'))
 
     await startTake(result)
@@ -505,6 +509,84 @@ describe('useRecordingController notices', () => {
     await startTake(result)
 
     expect(useRecorderStore.getState().notice).toBeNull()
+  })
+})
+
+// ESCSUITE-342 (owner decision A1). A camera that cannot be opened no longer
+// throws away the screen share the user just granted: `acquireStreams` hands
+// back the screen with `webcam: null` and the camera's error, and the take
+// goes ahead as a screen take — no compositor, no empty overlay box — with a
+// notice that says the camera is not in this recording.
+describe('useRecordingController a camera that could not be opened (ESCSUITE-342)', () => {
+  const cameraError = (name: string) =>
+    new CaptureRequestError('webcam', 'webcam failed', { cause: new DOMException('no', name) })
+
+  it('records the screen without the camera, and says the camera is not in the recording', async () => {
+    const screen = screenStream()
+    const { result } = mountController(
+      { screenEnabled: true, webcamEnabled: true, countdownSeconds: 0 },
+      { screen, webcam: null, webcamError: cameraError('NotAllowedError') }
+    )
+
+    await startTake(result)
+
+    expect(state()).toBe('recording')
+    expect(useRecorderStore.getState().notice).toBe(
+      'The camera could not be opened (permission refused or blocked in site settings) — recording the screen without it: the camera is not in this recording.'
+    )
+    // A screen take, not a picture-in-picture one with an empty overlay.
+    expect(harness.deps.compositorRef.current).toBeNull()
+    expect(harness.setIsPiPActive).not.toHaveBeenCalledWith(true)
+    expect(harness.setPreviewStream).toHaveBeenCalledWith(screen)
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false)
+    expect(recorderFactory.last().initializeCalls[0].screen).toBe(screen)
+  })
+
+  it.each([
+    ['NotFoundError', 'The camera could not be opened (not found, or in use by another app) — recording the screen without it: the camera is not in this recording.'],
+    ['AbortError', 'The camera could not be opened — recording the screen without it: the camera is not in this recording.'],
+  ])('names why the camera could not be opened (%s)', async (name, notice) => {
+    const { result } = mountController(
+      { screenEnabled: true, webcamEnabled: true, countdownSeconds: 0 },
+      { webcamError: cameraError(name) }
+    )
+
+    await startTake(result)
+
+    expect(useRecorderStore.getState().notice).toBe(notice)
+  })
+
+  it('stores a screen take, with no separate camera track it cannot have', async () => {
+    const { result } = mountController(
+      { screenEnabled: true, webcamEnabled: true, separateTracks: true, countdownSeconds: 0 },
+      { webcamError: cameraError('NotReadableError') }
+    )
+
+    await startTake(result)
+
+    expect(recorderFactory.createRecorder).toHaveBeenCalledWith(expect.any(Object), false, true, false)
+    const recorder = recorderFactory.last()
+    await act(async () => { await result.current.handleStopRecording() })
+    const [, , , captured] = harness.saveRecording.mock.calls[0] as [Blob, number, unknown, CapturedTake]
+    expect(captured).toMatchObject({ separateTracks: false, webcamEnabled: false })
+    expect(recorder.stop).toHaveBeenCalledTimes(1)
+    expect(useRecorderStore.getState().notice).not.toBe(
+      'A separate track could not be saved — the screen recording was kept.'
+    )
+  })
+
+  it('says the camera and microphone are both missing when both were lost', async () => {
+    const { result } = mountController(
+      { screenEnabled: true, webcamEnabled: true, microphoneEnabled: true, countdownSeconds: 0 },
+      { mic: null, micUnavailable: true, webcamError: cameraError('NotFoundError') }
+    )
+
+    await startTake(result)
+
+    expect(state()).toBe('recording')
+    expect(useRecorderStore.getState().notice).toBe(
+      'The camera and the microphone could not be opened — recording the screen without them: neither is in this recording.'
+    )
   })
 })
 
@@ -2180,7 +2262,7 @@ describe('useRecordingController teardown', () => {
         const acquired: AcquisitionDoubles[] = []
         harness.acquireStreams.mockImplementation(async () => {
           const streams: AcquisitionDoubles = {
-            screen: screenStream(), webcam: null, mic: null, micUnavailable: false,
+            screen: screenStream(), webcam: null, mic: null, micUnavailable: false, webcamError: null,
           }
           acquired.push(streams)
           return streams
@@ -2392,6 +2474,7 @@ describe('useRecordingController teardown', () => {
               webcam: webcamStream(),
               mic: micStreamWithTrack(),
               micUnavailable: false,
+              webcamError: null,
             }
             let release!: () => void
             const gate = new Promise<void>(resolve => { release = resolve })

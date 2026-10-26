@@ -167,19 +167,26 @@ describe('App start recording', () => {
     expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error));
   });
 
-  it('releases the streams it already got when a later source fails', async () => {
-    const consoleError = expectedConsoleError();
+  // ESCSUITE-342: a camera that cannot be opened no longer throws away the
+  // screen share the user just granted — the take records the screen without
+  // it, and the notice says the camera is not in this recording.
+  it('keeps the screen and records without the camera when the camera fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const screenStream = screenStreamDouble();
     permissionsOverrides.requestScreenCapture.mockResolvedValue(screenStream.stream);
     permissionsOverrides.requestWebcam.mockRejectedValue(new Error('Camera in use'));
-    resetRecorderStore({ screenEnabled: true, webcamEnabled: true });
+    resetRecorderStore({ screenEnabled: true, webcamEnabled: true, countdownSeconds: 0 });
     await renderApp();
 
     await startRecordingViaButton();
 
-    expect(screenStream.video!.stop).toHaveBeenCalledTimes(1);
-    expect(state()).toBe('idle');
-    expect(consoleError).toHaveBeenCalledWith('Failed to start recording:', expect.any(Error));
+    expect(screenStream.video!.stop).not.toHaveBeenCalled();
+    expect(state()).toBe('recording');
+    expect(warn).toHaveBeenCalledWith(
+      'Camera could not be opened — recording the screen without it:',
+      expect.any(Error)
+    );
+    expect(screen.getByText(/the camera is not in this recording/)).toBeInTheDocument();
   });
 
   it('starts immediately when the countdown is switched off', async () => {

@@ -15,8 +15,14 @@ const SCREEN_REFUSED =
   'The screen was not shared (the picker was cancelled or screen sharing is blocked) — nothing was recorded.'
 const CAMERA_REFUSED =
   'The camera could not be opened (permission refused or blocked in site settings) — nothing was recorded.'
-const CAMERA_UNAVAILABLE =
-  'The camera could not be opened (not found, or in use by another app) — nothing was recorded.'
+// `webcamUnavailable` and `CAMERA_AND_MIC_UNAVAILABLE` (ESCSUITE-342): a camera
+// that cannot be opened in a screen take degrades the take instead of costing it.
+const CAMERA_UNAVAILABLE_SCREEN_KEPT =
+  'The camera could not be opened (not found, or in use by another app) — recording the screen without it: the camera is not in this recording.'
+const CAMERA_REFUSED_SCREEN_KEPT =
+  'The camera could not be opened (permission refused or blocked in site settings) — recording the screen without it: the camera is not in this recording.'
+const CAMERA_AND_MIC_UNAVAILABLE =
+  'The camera and the microphone could not be opened — recording the screen without them: neither is in this recording.'
 
 test.describe('Camera Permission Denied', () => {
   test.beforeEach(async ({ page }) => {
@@ -36,20 +42,6 @@ test.describe('Camera Permission Denied', () => {
     // disabled.
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
-
-  // FIXME(ux): needs denied-device feedback for the toggle-time gap — tracked
-  // in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289. Nothing
-  // is shown when the Webcam is switched ON with a refused camera: the toggle
-  // is a pure config flip (`App.tsx`'s `toggleSource`) with no probe of its
-  // own, so the refusal is only discovered at Start. A take STARTED with a
-  // refused camera is no longer this gap — ESCSUITE-341 gave that path a
-  // notice naming the camera, which "Camera Refused At Start" below proves.
-  // Bodiless on purpose — a real version needs the toggle-time notice
-  // issue #289 asks for, which does not exist yet to assert against.
-  test.fixme(
-    'shows error UI when the webcam is toggled on with a refused camera',
-    async () => {}
-  )
 
   test('app remains functional after camera denial', async ({ page }) => {
     // Other controls should still work — the camera denial must not take the
@@ -73,13 +65,12 @@ test.describe('Camera Refused At Start', () => {
     await waitForAppReady(page, 'craft')
   })
 
-  // ESCSUITE-341: the camera is asked for after the screen, so its refusal
-  // lands after the user has answered the share picker. The notice used to be
-  // "The browser refused the capture", which read as if that share had failed;
-  // `core/permissions.ts` now tags the rejection with its source and
-  // `startFailureNotice` names the camera. The take is still thrown away — the
-  // overlay is what the user asked for — so Start is offered again.
-  test('names the camera when it is refused at Start', async ({ page }) => {
+  // ESCSUITE-341 named the camera in the notice; ESCSUITE-342 (owner decision
+  // A1) stopped a refused camera from costing a take that has a screen in it.
+  // The camera is asked for after the share picker has been answered, so the
+  // take goes ahead as a screen take and the notice says the camera is not in
+  // it. The full record-and-save path is `regressions/ESCSUITE-342.spec.ts`.
+  test('records the screen and names the camera when it is refused at Start', async ({ page }) => {
     // Capability detection is async; Start acquires no stream if clicked
     // before it finishes.
     const screenSource = page
@@ -87,6 +78,24 @@ test.describe('Camera Refused At Start', () => {
       .filter({ hasText: 'Screen' })
       .last()
     await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
+    await webcamToggle.click()
+    await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+
+    await expect(page.getByText(CAMERA_REFUSED_SCREEN_KEPT)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible()
+  })
+
+  // A webcam-only take has no screen to fall back to, so a refused camera
+  // still fails it, with the ESCSUITE-341 sentence naming the camera.
+  test('still fails a webcam-only take whose camera is refused', async ({ page }) => {
+    const screenToggle = page.getByRole('button', { name: 'Screen', exact: true })
+    await expect(screenToggle).toBeEnabled({ timeout: 30_000 })
+    await screenToggle.click()
+    await expect(screenToggle).toHaveAttribute('aria-pressed', 'false')
 
     const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
     await webcamToggle.click()
@@ -114,20 +123,6 @@ test.describe('Microphone Permission Denied', () => {
     await page.goto('http://localhost:5174')
     await waitForAppReady(page, 'craft')
   })
-
-  // FIXME(ux): needs denied-device feedback for the toggle-time gap — tracked
-  // in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289. Nothing
-  // is shown when the microphone is switched ON before a take: the toggle is
-  // a pure config flip (`App.tsx`'s `toggleSource`) with no probe of its own,
-  // so a refused prompt is only discovered at Start. A take STARTED with a
-  // closed microphone is no longer this gap — ESCSUITE-184 gave that path the
-  // notice the real case below proves.
-  // Bodiless on purpose — a real version needs the toggle-time notice
-  // issue #289 asks for, which does not exist yet to assert against.
-  test.fixme(
-    'shows error UI when the microphone is toggled on with a refused prompt',
-    async () => {}
-  )
 
   // ESCSUITE-184, proved in a real browser (ESCSUITE-187). Screen and
   // Microphone are both on by default (`recorderStore`'s initial config), so
@@ -293,13 +288,13 @@ test.describe('Device Not Found', () => {
     await page.getByRole('button', { name: 'Start recording' }).click()
 
     // `mockDeviceNotFound` throws `NotFoundError` for every `getUserMedia`
-    // call. The camera is asked for first, so `startFailureNotice` names it,
-    // with the not-found-or-in-use reason (ESCSUITE-341) rather than the
-    // refusal one.
-    await expect(page.getByText(CAMERA_UNAVAILABLE)).toBeVisible({
+    // call, so the camera and the microphone (on by default) are both lost.
+    // The screen was shared, so the take goes ahead without them and one
+    // sentence names both (ESCSUITE-342).
+    await expect(page.getByText(CAMERA_AND_MIC_UNAVAILABLE)).toBeVisible({
       timeout: 15_000,
     })
-    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible()
   })
 })
 
@@ -324,15 +319,22 @@ test.describe('Device In Use', () => {
     const webcamToggle = page.getByRole('button', { name: 'Webcam', exact: true })
     await webcamToggle.click()
     await expect(webcamToggle).toHaveAttribute('aria-pressed', 'true')
+    // The mock fails every `getUserMedia` call; with the microphone off, the
+    // camera is the only one asked for, so its own reason is what is said.
+    const micToggle = page.getByRole('button', { name: 'Microphone', exact: true })
+    await micToggle.click()
+    await expect(micToggle).toHaveAttribute('aria-pressed', 'false')
 
     await page.getByRole('button', { name: 'Start recording' }).click()
 
     // `mockDeviceInUse` throws `NotReadableError` — the camera held by another
-    // app — which shares the camera's not-found-or-in-use sentence (ESCSUITE-341).
-    await expect(page.getByText(CAMERA_UNAVAILABLE)).toBeVisible({
+    // app — which shares the camera's not-found-or-in-use reason (ESCSUITE-341).
+    // The screen was shared, so the take records it without the camera
+    // (ESCSUITE-342).
+    await expect(page.getByText(CAMERA_UNAVAILABLE_SCREEN_KEPT)).toBeVisible({
       timeout: 15_000,
     })
-    await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
+    await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible()
   })
 })
 
