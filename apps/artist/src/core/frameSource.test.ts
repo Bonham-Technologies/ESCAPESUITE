@@ -8,7 +8,7 @@ import {
   type IFrameSource,
 } from './frameSource';
 import { elementSeekTarget } from './elementSeek';
-import { SourceNotSeekableError } from './seekWedge';
+import { SEEK_IN_FLIGHT_GRACE_MS, SourceNotSeekableError } from './seekWedge';
 
 // A mutable slot a test can fill in before calling factory.initialize(), so
 // the *next* MockVideoDecodeManager's initialize() rejects once (ESCSUITE-29
@@ -414,7 +414,7 @@ describe('frameSource', () => {
           (frame) => frame,
           (error: unknown) => error
         );
-        await vi.advanceTimersByTimeAsync(600);
+        await vi.advanceTimersByTimeAsync(600 + SEEK_IN_FLIGHT_GRACE_MS);
         return pending;
       }
 
@@ -550,7 +550,7 @@ describe('frameSource', () => {
         // time asked for twice more at once — the transition's outgoing clip is
         // fetched twice a frame. Neither may be counted before the seek has had
         // the wait a seeking request gets; it lands at 900 ms, inside it.
-        expect(await requestThenIdle(source, 1, 600)).toBe(element);
+        expect(await requestThenIdle(source, 1, 600 + SEEK_IN_FLIGHT_GRACE_MS)).toBe(element);
         const again = [source.getFrame(1), source.getFrame(1)].map((p) =>
           p.then(
             (frame) => frame,
@@ -979,7 +979,7 @@ describe('frameSource', () => {
               () => 'frame',
               (error: unknown) => error
             );
-            await vi.advanceTimersByTimeAsync(600);
+            await vi.advanceTimersByTimeAsync(600 + SEEK_IN_FLIGHT_GRACE_MS);
             outcomes.push(await pending);
           }
 

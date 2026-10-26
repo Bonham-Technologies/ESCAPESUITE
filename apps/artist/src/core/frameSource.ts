@@ -13,7 +13,7 @@
 import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
+import { countWedgedSeek, settleSeekInFlight, wedgeCountAtStart } from './seekWedge';
 import { ExportAbortedError, loadVideoElementFromUrl } from './exportTypes';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
@@ -362,6 +362,13 @@ export class HTMLVideoFrameSource implements IFrameSource {
           // Timeout fallback
           setTimeout(resolve, 100);
         });
+      }
+
+      // Still seeking with nothing to show: a slow seek gets a grace to land
+      // before it is counted, or the next request's seek would abort it
+      // (ESCSUITE-370). A wedged one sits it out and is counted as before.
+      if (video.seeking && video.readyState < 2) {
+        seekLanded = (await settleSeekInFlight(video)) || seekLanded;
       }
     }
 
