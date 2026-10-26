@@ -43,20 +43,6 @@ test.describe('Camera Permission Denied', () => {
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeEnabled()
   })
 
-  // FIXME(ux): needs denied-device feedback for the toggle-time gap — tracked
-  // in https://github.com/Bonham-Technologies/ESCAPESUITE/issues/289. Nothing
-  // is shown when the Webcam is switched ON with a refused camera: the toggle
-  // is a pure config flip (`App.tsx`'s `toggleSource`) with no probe of its
-  // own, so the refusal is only discovered at Start. A take STARTED with a
-  // refused camera is no longer this gap — ESCSUITE-341 gave that path a
-  // notice naming the camera, which "Camera Refused At Start" below proves.
-  // Bodiless on purpose — a real version needs the toggle-time notice
-  // issue #289 asks for, which does not exist yet to assert against.
-  test.fixme(
-    'shows error UI when the webcam is toggled on with a refused camera',
-    async () => {}
-  )
-
   test('app remains functional after camera denial', async ({ page }) => {
     // Other controls should still work — the camera denial must not take the
     // rest of the recorder down with it.
