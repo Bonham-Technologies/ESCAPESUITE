@@ -24,7 +24,7 @@
 // source in all four.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createFrameComposer, loadElementSources, rewindElementSources } from './elementFrames'
-import { SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
+import { SEEK_IN_FLIGHT_GRACE_MS, SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
 import { storeVideo } from './storage'
 import {
   getLastCanvasContext,
@@ -129,7 +129,7 @@ async function run(composeFrame: (t: number) => Promise<void>, count: number): P
   for (let i = 0; i < count; i++) {
     const pending = composeFrame(i / 30)
     pending.catch(() => {})
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(1_000 + SEEK_IN_FLIGHT_GRACE_MS)
     const error = await pending.then(
       () => null,
       (e: unknown) => e
@@ -155,9 +155,9 @@ describe('createFrameComposer: a seek wedge on one of a source\'s two elements',
   })
 
   it('fails by name when the extra slot wedges and slot 0\'s seeks land after its waits', async () => {
-    // Slot 0's healthy seeks outlast the seek fallback, so each counts one for
-    // its own frame — and is cleared at the next frame's start, since it has
-    // landed by then. The stuck element's run is its own.
+    // Slot 0's healthy seeks outlast the seek fallback but land inside the
+    // grace a seek still in flight gets (ESCSUITE-370), so none counts. The
+    // stuck element's run is its own.
     media.script({ video: { wedgeSeekAt: isSlot1, seekLandsAfterMsAt: (t) => (isSlot0(t) ? LATE_MS : undefined) } })
     const { composeFrame, ctx } = await composer()
 
@@ -165,8 +165,9 @@ describe('createFrameComposer: a seek wedge on one of a source\'s two elements',
 
     expect(thrown).toBeInstanceOf(SourceNotSeekableError)
     expect(thrown).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: REFUSAL })
-    // Only slot 0's frame 0, already at its time, had a picture to draw.
-    expect(ctx.argsFor('drawImage')).toHaveLength(1)
+    // Slot 0 had a picture on frame 0, already at its time, and on frame 1,
+    // whose late seek landed in its grace; frame 2 refused before drawing.
+    expect(ctx.argsFor('drawImage')).toHaveLength(2)
   })
 
   it('fails by name when slot 0 wedges and the extra slot seeks normally', async () => {

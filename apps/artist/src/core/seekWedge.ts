@@ -22,6 +22,17 @@
 // round 1). Anything else — a seek whose fallback fired over an element that is
 // no longer seeking but has no frame yet, a slow machine — leaves the count as
 // it was.
+//
+// A request whose waits end over an element still seeking with no frame gives
+// that seek `SEEK_IN_FLIGHT_GRACE_MS` more to land before it is counted
+// (ESCSUITE-370). Without it, a seek merely slower than the 800 ms of waits was
+// counted as wedged, and the export's next frame — they run back to back —
+// issued its own seek over it, which aborts the one in flight (the HTML seek
+// algorithm: only the last seek ever lands). Chrome on a loaded CI runner whose
+// seeks briefly ran past the waits therefore never landed one, and the third
+// frame refused a healthy recording by this module's own message. A slow seek
+// now lands, and its frame is drawn; a wedged one still never does, and is
+// refused after three requests as before, each a grace longer.
 
 /** Consecutive wedged requests of one element before the export gives up on it. */
 export const WEDGED_SEEK_FRAMES = 3;
@@ -40,6 +51,33 @@ export class SourceNotSeekableError extends Error {
     );
     this.name = 'SourceNotSeekableError';
   }
+}
+
+/**
+ * How long a request whose waits are over gives a seek still in flight on its
+ * element, with no frame yet, to land before counting it (ESCSUITE-370).
+ */
+export const SEEK_IN_FLIGHT_GRACE_MS = 2_000;
+
+/**
+ * Wait up to {@link SEEK_IN_FLIGHT_GRACE_MS} for the seek in flight on `video`
+ * to land. Callers ask only for an element still `seeking` with no frame
+ * (`readyState < 2`), so a request that can draw never waits. Resolves to
+ * whether 'seeked' fired. Whichever settles the wait cancels the other, so
+ * neither the timer nor the listener outlives it.
+ */
+export function settleSeekInFlight(video: HTMLVideoElement): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    const onSeeked = () => {
+      clearTimeout(fallback);
+      resolve(true);
+    };
+    const fallback = setTimeout(() => {
+      video.removeEventListener('seeked', onSeeked);
+      resolve(false);
+    }, SEEK_IN_FLIGHT_GRACE_MS);
+    video.addEventListener('seeked', onSeeked, { once: true });
+  });
 }
 
 /**

@@ -25,7 +25,7 @@ import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek, wedgeCountAtStart } from './seekWedge';
+import { countWedgedSeek, settleSeekInFlight, wedgeCountAtStart } from './seekWedge';
 import {
   getActiveTransition,
   loadVideoElement,
@@ -292,6 +292,13 @@ async function syncVideoToTime(
       };
       check();
     });
+  }
+
+  // Still seeking with nothing to draw: a slow seek gets a grace to land before
+  // the frame is drawn and counted, or the next frame's seek would abort it
+  // (ESCSUITE-370). A wedged one sits it out and is counted as before.
+  if (video.seeking && video.readyState < 2) {
+    seekLanded = (await settleSeekInFlight(video)) || seekLanded;
   }
 
   return seekLanded;

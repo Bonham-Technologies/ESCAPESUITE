@@ -170,8 +170,22 @@ test.describe('Journey: Record, Edit, Export', () => {
       await expect(downloadWebM).toBeVisible({ timeout: 15_000 })
 
       const downloadPromise = artist.waitForEvent('download', { timeout: 120_000 })
+      // An export that fails says so in the dialog and never downloads. Fail on
+      // its message the moment it shows, rather than sitting out the whole
+      // download wait with nothing to say why (ESCSUITE-370).
+      const exportFailed = artist.getByRole('alert').filter({ hasText: 'Export failed' })
+      const failurePromise = exportFailed
+        .waitFor({ state: 'visible', timeout: 120_000 })
+        .then(() => exportFailed.innerText())
+      downloadPromise.catch(() => {})
+      failurePromise.catch(() => {})
       await downloadWebM.click()
-      const download = await downloadPromise
+      const outcome = await Promise.race([
+        downloadPromise.then((download) => ({ download, failure: null })),
+        failurePromise.then((failure) => ({ download: null, failure })),
+      ])
+      expect(outcome.failure, 'the export failed instead of downloading').toBeNull()
+      const download = outcome.download!
 
       expect(download.suggestedFilename()).toMatch(/\.webm$/)
 
