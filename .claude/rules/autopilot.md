@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops (d170167). Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops (c8ca056). Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -13,8 +13,9 @@ Verify command: see `CLAUDE.md`.
 
 Each run plays the roles named in its prompt, in the order given.
 
-- **steward**: sweeps the product and its open security alerts, files tickets, checks
-  `ap-watch` tickets and posts the weekly digest. Writes no code.
+- **steward**: sweeps the product, scans it for vulnerable dependencies and leaked
+  secrets, files tickets, checks `ap-watch` tickets and posts the weekly digest. Writes
+  no code.
 - **builder**: implements ready tickets and merges them when the gates pass.
 - **dependabot**: triages open Dependabot PRs, security updates first. It runs as a
   sweep over every open Dependabot PR that has no triage comment yet; the builder task
@@ -36,12 +37,14 @@ Runs are scheduled tasks in cloud sessions.
   **Refresh** tickets below allow.
 - **GitHub**: `gh api` REST only. `gh pr …` and GraphQL (`gh api graphql`) are blocked
   in cloud sessions. In `gh api` paths, `{owner}` and `{repo}` fill in from the
-  current repository.
+  current repository. The Claude GitHub App can't read security alerts, so the steward
+  runs its own scanners (**Security sweep**).
 - **No other connector.** A run may be given other connectors, such as Gmail, Google
   Drive, Supabase or Vercel. Never call their tools, for any reason. End every run's
   summary with the list of other connectors whose tools were present, or "none".
-  (`git`, the verify command, reading the public pages `ap-watch` tickets link to, and
-  the scout's web search and page fetches are not connectors and are fine.)
+  (`git`, the verify command, the steward's security scanners and their downloads,
+  reading the public pages `ap-watch` tickets link to, and the scout's web search and
+  page fetches are not connectors and are fine.)
 - Comments and PRs post under the **owner's own** GitHub and Jira identity, so the
   author never tells you whether autopilot wrote something. Use the fixed markers below
   to recognise autopilot's own comments.
@@ -154,7 +157,7 @@ Sweep these dimensions:
 - UI;
 - UX and flow;
 - design consistency;
-- security, including the **Security alerts** sweep below;
+- security, including the **Security sweep** below;
 - reliability and error handling;
 - developer experience and docs.
 
@@ -179,9 +182,12 @@ coverage report. Where the environment allows, run the app and look at it.
   `docs/reference/ci-cd-pipeline.md`) and file a ticket for any test flaky more than once.
 - Score each dimension 1–5 with one line of evidence.
 
-### Security alerts
+### Security sweep
 
-Every run, read the repository's open security alerts:
+Every run, check the repository for vulnerable dependencies and leaked secrets. There are
+two sources: GitHub's alerts when they answer, and a scan the steward runs itself.
+
+**1. GitHub's alerts.** Read them first:
 
 ```
 gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'
@@ -189,38 +195,227 @@ gh api 'repos/{owner}/{repo}/code-scanning/alerts?state=open&per_page=100'
 gh api 'repos/{owner}/{repo}/secret-scanning/alerts?state=open&per_page=100'
 ```
 
-A private repo without GitHub Code Security or Secret Protection answers the last two
-with 403 or 404 and a message that the feature "must be enabled" or is "disabled".
-That means **not available**, not a failure: note it once in the digest and carry on.
-If the Dependabot alerts call fails, say exactly what is missing in the digest.
+- **200:** use that call's alerts as **Security tickets** describes.
+- **403 or 404** means **not available**, not a failure. The message is "Resource not
+  accessible by integration", or that the feature "must be enabled" or is "disabled".
+  Note it once in the digest.
+- **Any other answer:** say exactly what failed in the digest.
 
-For each open alert:
+Today the Claude GitHub App has no permission to read any of the three, so cloud runs
+get 403 on every one. That is expected.
 
-1. **An open Dependabot PR already fixes it**, meaning the PR bumps the alert's package
-   to at least its first patched version: file nothing. The **Dependabot** sweep
-   handles it.
-2. **Otherwise file one ticket per alert.** Dependabot and code-scanning alerts are
-   numbered separately, so the summary carries both the source and the number:
-   `[security] dependabot #<n>: <GHSA id> in <package>`, or
-   `[security] code-scanning #<n>: <rule> in <file>`. Search Jira for it first, Done
-   tickets included: `project = ESCSUITE AND summary ~ "\"dependabot #<n>\""`.
-   If an open ticket exists, leave it. If a Done ticket
-   exists but the alert is still open, move it back to To Do with a comment saying so.
-   - **Priority:** critical and high are P1, medium P2, low P3. The severity is
-     `security_advisory.severity` on a Dependabot alert and
-     `rule.security_severity_level` on a code-scanning alert.
-   - **Class:** `ap-auto` if the fix is a patch or minor bump or a code change;
-     `ap-owner-merge` if it needs a major bump or removing the package. The class rules
-     above still apply, so a code change to authentication, say, is `ap-owner-merge`.
-   - **No patched version exists:** file it `ap-watch` instead. Link
-     `https://github.com/advisories/<GHSA id>`; the trigger is "a patched version is
-     released" (`gh api advisories/<GHSA id>` shows it), and the follow-up is the bump.
-3. **Secret-scanning alerts** are P1 `ap-owner-merge`, summary
-   `[security] secret-scanning #<n>: <secret type>`. The owner must rotate the secret,
-   so the ticket says that first. Never copy the secret's value into Jira, a PR or a
-   comment.
+**2. The self-run scan.** Run it for each source that isn't available:
+- **osv-scanner** stands in for the Dependabot alerts;
+- **gitleaks** stands in for secret scanning;
+- code scanning has no stand-in. Leave it "not available".
+
+**Install** both tools once per run, into a fresh temporary directory, never into the
+repo. Use the pinned releases, and check each download twice: against the release's
+checksums file, and against the digest pinned in the command. If the command exits
+non-zero, run no scanner, and report the failure in the digest. Never run an
+unverified binary.
+
+```
+OSV=2.6.0 GL=8.30.1 SCAN="$(mktemp -d)"
+case "$(uname -m)" in
+  x86_64) A=amd64 G=x64
+    OSV_SHA=ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+    GL_SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;;
+  aarch64|arm64) A=arm64 G=arm64
+    OSV_SHA=2c71403eb443d05891c4f268c3ad771cf4f16e5443463fd7851ef8f454d3c7e4
+    GL_SHA=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;;
+esac
+O="osv-scanner_linux_$A" T="gitleaks_${GL}_linux_$G.tar.gz"
+( cd "$SCAN" &&
+curl -fsSLO "https://github.com/google/osv-scanner/releases/download/v$OSV/$O" &&
+curl -fsSLO "https://github.com/google/osv-scanner/releases/download/v$OSV/osv-scanner_SHA256SUMS" &&
+curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v$GL/$T" &&
+curl -fsSLO "https://github.com/gitleaks/gitleaks/releases/download/v$GL/gitleaks_${GL}_checksums.txt" &&
+grep " $O\$" osv-scanner_SHA256SUMS | sha256sum -c - &&
+grep " $T\$" "gitleaks_${GL}_checksums.txt" | sha256sum -c - &&
+echo "$OSV_SHA  $O" | sha256sum -c - && echo "$GL_SHA  $T" | sha256sum -c - &&
+tar -xzf "$T" gitleaks && mv "$O" osv-scanner && chmod +x osv-scanner gitleaks &&
+./osv-scanner --version && ./gitleaks version )
+```
+
+Then compare each tool's latest release with the pin:
+- `gh api repos/google/osv-scanner/releases/latest --jq .tag_name`;
+- the same for `gitleaks/gitleaks`.
+
+If either is newer, say so in the digest. Bumping a pin is a bonham-ops change, never
+one a run makes. Run every scanner from the repo root.
+
+**Dependency vulnerabilities.**
+
+```
+"$SCAN/osv-scanner" scan source -r --no-resolve --format json --output-file "$SCAN/osv.json" .
+```
+
+- **Exit codes:** 0 means none found, 1 means vulnerabilities found, and 128 means no
+  lockfile was found. Any other exit code is a failed scan.
+- **Keep `--no-resolve`.** Without it, osv-scanner resolves a manifest's dependencies
+  itself and can pick versions far older than the ones that get installed. In one test
+  it chose aiohttp 3.9.5 where pip installs 3.14.5, and that produced dozens of false
+  findings.
+- **Lockfiles covered:** stderr lists each one, as "Scanned <file> file and found <n>
+  packages". Compare those with the repo's lockfiles from `git ls-files`.
+  osv-scanner reads these, among others:
+  - `package-lock.json`, `pnpm-lock.yaml` and `yarn.lock`;
+  - `uv.lock` and `poetry.lock`;
+  - `Cargo.lock` and `go.sum`.
+
+  It doesn't fully cover the following, so cover them another way:
+  - **`requirements.txt`** lists only the direct dependencies, often as ranges. With
+    `--no-resolve`, osv-scanner checks just the lines pinned with `==`. Resolve each
+    one first:
+    `uv pip compile <file> -q --no-header -o "$SCAN/pinned/<n>/requirements.txt"`.
+    Then scan the result with `-L <that path>`, and report what it finds against the
+    original file. If `uv` is missing, run `uvx pip-audit -r <file> --format json`.
+  - **`deno.lock`.** osv-scanner 2.6 can't parse it. In the lockfile's directory, run
+    `NO_COLOR=1 deno audit --lock deno.lock` (Deno 2.6 or later). Exit code 1 means
+    it found vulnerabilities. Each finding gives a GHSA id, a severity ("moderate" is
+    medium), the package and the vulnerable range; the range's upper bound is the
+    fixed version. It covers `npm:` packages only. `jsr:` and remote imports
+    have no advisory database, so list them as uncovered.
+  - **Any other lockfile:** use that ecosystem's own audit, such as `npm audit --json`.
+
+  Anything still uncovered goes in the digest by name.
+- **Reading the JSON:**
+  - `results[].packages[]` lists each vulnerable package: `package.name`, `.version`
+    and `.ecosystem`.
+  - Each package has `groups[]`, one per advisory. A group has `ids` (the OSV id and its
+    aliases) and `max_severity`, a CVSS score.
+  - The package's `vulnerabilities[]` hold the full records.
+- **Advisory id:** the group's GHSA id if it has one; otherwise its first id, such as
+  `PYSEC-…` or `RUSTSEC-…`.
+- **Severity:** from `max_severity`:
+
+  | Score | Severity |
+  |---|---|
+  | 9.0 and above | critical |
+  | 7.0 to 8.9 | high |
+  | 4.0 to 6.9 | medium |
+  | below 4.0 | low |
+
+  If there's no score, use the GHSA record's `database_specific.severity`, and failing
+  that, low.
+- **Fixed version:** the record's `affected[].ranges[].events[].fixed` for this package.
+  Take the lowest fixed version above the installed one. Prefer one in the installed
+  major version.
+
+**Leaked secrets.** Run every gitleaks command with these flags:
+
+```
+--redact --no-banner --exit-code 0 --report-format json --report-path "$SCAN/<name>.json"
+```
+
+`--redact` keeps secret values out of the report. Gitleaks reads a repo
+`.gitleaks.toml` and `.gitleaksignore` from the directory it runs in; both are respected.
+
+- **History since the last run.** The last digest's **Security scan** line records the
+  commit it scanned, `main@<sha>`.
+  1. If `git rev-parse --is-shallow-repository` prints `true`, run
+     `git fetch --unshallow` first.
+  2. If `git merge-base --is-ancestor <sha> HEAD` succeeds, scan the new commits:
+     `"$SCAN/gitleaks" git . --log-opts="<sha>..HEAD" <flags>`.
+  3. Otherwise, scan the full history once: `"$SCAN/gitleaks" git . <flags>`. This
+     applies on the first run, when no digest has the line, and when the sha is
+     missing. Say in the digest which scan ran.
+
+  Check the ancestor first: gitleaks still exits 0, with an empty report, when given a
+  range it can't read. Treat any `ERR` line on its stderr as a failed scan.
+- **Working tree:** `"$SCAN/gitleaks" dir . <flags>`.
+- **The fingerprint** identifies a finding.
+  - A history finding's `Fingerprint` is `<commit>:<file>:<rule>:<line>`. It never
+    changes.
+  - A working-tree finding's fingerprint is `<file>:<rule>:<line>`, and it moves
+    whenever lines above it shift. Convert it with
+    `git blame -L <line>,<line> --porcelain -- <file>`. The first output line starts
+    with the commit and the original line number; the `filename` line gives the
+    original path. Put those together as `<commit>:<file>:<rule>:<line>`, the same
+    fingerprint a history scan reports.
+  - Skip a finding whose fingerprint is listed in `.gitleaksignore`. Gitleaks does this
+    itself for a history scan, but a working-tree scan doesn't recognise history
+    fingerprints, so check the converted one yourself.
+- **Fakes:** read each finding's line in the repo to judge it, without copying the value
+  anywhere. These are false positives, not leaks:
+  - a test fixture for a scanner;
+  - a documented dummy key or a placeholder;
+  - a match that is plainly not a credential, such as an identifier.
+
+  Put them all in one P3 `ap-owner-merge` ticket, "Allowlist gitleaks false
+  positives". It lists each fingerprint and why it's fake, never a value, so the owner
+  can confirm before the builder adds them to `.gitleaksignore`. Search Jira for an
+  open one first, and add to it. When unsure, treat the finding as real.
+
+### Security tickets
 
 Security tickets are filed before any other finding and count toward the 25-ticket cap.
+
+1. **An open Dependabot PR already fixes it:** file nothing. A PR fixes an alert or an
+   advisory when it bumps the package to at least the first patched (fixed) version.
+   The **Dependabot** sweep handles it.
+2. **Alerts from the API.** File one ticket per alert. Dependabot and code-scanning
+   alerts are numbered separately, so the summary carries both the source and the
+   number:
+   - `[security] dependabot #<n>: <GHSA id> in <package>`;
+   - `[security] code-scanning #<n>: <rule> in <file>`.
+
+   Search Jira first, Done tickets included:
+   `project = ESCSUITE AND summary ~ "\"dependabot #<n>\""`.
+   - If an open ticket exists, leave it.
+   - If a Done ticket exists but the alert is still open, move it back to To Do with a
+     comment saying so.
+
+   **Priority:** critical and high are P1, medium P2, low P3. The severity is
+   `security_advisory.severity` on a Dependabot alert and
+   `rule.security_severity_level` on a code-scanning alert.
+
+   **Class:** `ap-auto` if the fix is a patch or minor bump or a code change;
+   `ap-owner-merge` if it needs a major bump or removing the package. The class rules
+   above still apply, so a code change to authentication, say, is `ap-owner-merge`.
+
+   **No patched version exists:** file it `ap-watch` instead. Link
+   `https://github.com/advisories/<GHSA id>`. The trigger is "a patched version is
+   released" (`gh api advisories/<GHSA id>` shows it), and the follow-up is the bump.
+3. **Vulnerabilities from the scan.** File one ticket per advisory per package, summary
+   `[security] <advisory id> in <package>`. Merge every lockfile it appears in into
+   that one ticket.
+   - **Search first,** Done tickets included:
+     `project = ESCSUITE AND summary ~ "\"<advisory id>\""`. A match on the same
+     package is that ticket, even one filed from a Dependabot alert. Leave an open one;
+     reopen a Done one as in step 2.
+   - **The ticket names:**
+     - each lockfile and the installed version;
+     - the fixed version;
+     - the severity and its source;
+     - `https://osv.dev/vulnerability/<advisory id>`.
+   - **Priority** follows the severity, as in step 2.
+   - **Class:** `ap-auto` when the fixed version is a patch or minor bump;
+     `ap-owner-merge` when it is a major bump, or the fix is removing the package.
+   - **No fixed version exists:** file it `ap-watch` instead. Link the osv.dev page.
+     The trigger is "a fixed version is released", and the follow-up is the bump.
+   - **No longer reported:** if a successful scan of a lockfile no longer reports an
+     advisory that an open scan ticket names for it, comment that on the ticket and
+     move it to Done. A merged Dependabot PR usually does this. Never apply this to
+     secret tickets.
+4. **Secrets, from the API or the scan,** are P1 `ap-owner-merge`.
+   - **Summary:** `[security] secret-scanning #<n>: <secret type>` for an alert, or
+     `[security] gitleaks <fingerprint>` for a scan finding.
+   - **Search first:** for a scan finding, search the summary for its commit sha. A
+     ticket with the same fingerprint is the same finding, so handle it as in step 2.
+   - **The ticket** starts with "Rotate this secret". The owner must rotate it, so that
+     comes first. It names:
+     - the file and line;
+     - the commit;
+     - the gitleaks rule or the alert's secret type.
+
+     Removing the value from the tree isn't enough: the commit keeps it. The
+     acceptance criteria are:
+     1. the owner has rotated the secret;
+     2. the value is gone from the tree;
+     3. the fingerprint is in `.gitleaksignore`.
+   - **Never copy the secret's value** into Jira, a PR or a comment.
 
 ### Watch tickets
 
@@ -260,6 +455,18 @@ The digest covers:
 - reverts;
 - **Open security alerts:** one line with the counts, for example
   "Dependabot 3 (high 1, medium 2) · code scanning not available · secret scanning 0";
+- **Security scan:** one line, for example "main@1a2b3c4 · osv-scanner 2.6.0: 4
+  lockfiles (pnpm-lock.yaml, api/uv.lock, …), critical 0 · high 2 · medium 3 · low 1 ·
+  gitleaks 8.30.1: history since 9f8e7d6 (14 commits) and tree, 0 new, 2 fakes ·
+  uncovered: jsr: packages in deno.lock". It gives:
+  - `main@<sha>`, the commit scanned, which the next run's history scan starts from;
+  - the tool versions, and any newer release;
+  - the lockfiles scanned, the fallbacks used, and anything uncovered;
+  - the vulnerability counts by severity;
+  - the secret findings: new, already ticketed, and fakes;
+  - any failure, with the step that failed.
+
+  If both alert APIs answered 200 and no scan ran, say "not needed: alerts available";
 - scores and their trend;
 - backlog size by priority.
 
@@ -294,7 +501,8 @@ add this run's entry to that page, in the record's convention:
   the session hooks write. Below it:
   - **Shipped:** each merged PR and its ticket, both linked;
   - **Waiting on the owner:** the digest's **Waiting on you** items, linked;
-  - **Security alerts:** the digest's count line;
+  - **Security alerts:** the digest's **Open security alerts** and **Security scan**
+    lines;
   - **Scores:** each dimension's score, with the trend;
   - **Decisions:** the Decision Log pages added this run, linked, or "none";
   - **Digest:** a link to this run's comment on the steward log ticket.
@@ -408,6 +616,10 @@ Dependabot alert, then the rest, oldest first within each group. A PR fixes an a
 when it bumps the alert's package to at least the alert's first patched version; read
 the alerts with
 `gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'`.
+If that answers 403 or 404, as it does in cloud runs today, use the steward's open scan
+tickets instead: a PR that bumps a ticket's package to at least its fixed version
+fixes it. Find them with
+`project = ESCSUITE AND summary ~ "\"[security]\"" AND statusCategory != Done`.
 
 **Find them:**
 
@@ -433,8 +645,8 @@ For each untriaged PR:
 2. Run verify, and fix breakages with the smallest change that keeps the upgrade.
 3. Comment the triage (`gh api repos/{owner}/{repo}/issues/{n}/comments -f body=…`).
    The **first line is exactly** `<!-- autopilot:dependabot-triage -->`. Then give the
-   verdict (`merge` or `needs-owner`), the packages bumped, the security alerts it
-   fixes, the breaking changes, your fixes, and the verify result.
+   verdict (`merge` or `needs-owner`), the packages bumped, the security alerts or
+   tickets it fixes, the breaking changes, your fixes, and the verify result.
 4. Merge it yourself, under the builder's merge rules, only if all of these hold:
    - it's a **patch or minor** bump;
    - verify passes;
@@ -494,7 +706,7 @@ is not on Fable, do the analysis in the `analyst` subagent (`.claude/agents/anal
 model `fable`, read-only plus web):
 
 - **steward:** hand it the sweep and the ranking. Give it the dimensions, the open
-  tickets' summaries and the security alerts; it returns ranked findings with evidence
+  tickets' summaries and the security findings; it returns ranked findings with evidence
   and scores.
 - **scout:** hand it the research and the ranking. Give it the charter, the company
   direction, the README and the digest; it returns ranked proposals with evidence.
