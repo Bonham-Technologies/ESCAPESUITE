@@ -361,8 +361,8 @@ jobs:
   # built-output suites share one runner (and one pnpm install).
   #
   # The build + upload half is unconditional: standalone-release consumes the
-  # artifact on main/dev pushes, and Dependabot PRs still need the build to be
-  # proven. Only the E2E halves are skipped for Dependabot.
+  # artifact on main/dev pushes. The E2E halves run for every PR, Dependabot
+  # included (ESCSUITE-337).
   standalone:
     runs-on: ubuntu-latest
     timeout-minutes: 30
