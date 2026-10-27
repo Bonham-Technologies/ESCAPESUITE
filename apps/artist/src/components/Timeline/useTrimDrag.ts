@@ -80,11 +80,26 @@
 // is still rebuilt on every render, so the moves and the release read exactly
 // the clips they always did. The track area is measured once on mousedown
 // (`useTrackAreaCache`); a move reads only `scrollLeft`.
+//
+// **A ripple trim trims the take** (ESCSUITE-360). With the ripple tool out,
+// every clip linked to the grabbed one (`linkedPartners`, ESCSUITE-355) has the
+// same edge moved by the same amount, and on release each row shifts its own
+// later clips by its own clip's delta, all in the gesture's one undo entry. The
+// amount is the smallest any of them can follow, so a partner that runs out of
+// source holds the whole group where it stops instead of falling out of step.
+// Alt, read on every move as the clip drag reads it, trims the one clip and
+// puts the partners back where they began. A partner on a locked track refuses
+// the whole ripple trim, as it refuses a ripple delete. A plain trim stays per
+// clip. The partners' origins are taken on the first move, before anything is
+// written, so they are the mousedown's state without the mousedown reading
+// `clips`.
 import type * as React from 'react';
 import { useCallback, useRef, useState, type RefObject } from 'react';
 import { useDocumentListener } from '../../hooks/useDocumentListener';
 import { useGestureHistory } from '../../hooks/useGestureHistory';
+import { linkedPartners } from '../../store/linkedClips';
 import { clampTrimToNeighbours } from '../../store/timelineSnapping';
+import { isTrackLocked } from '../../store/trackLock';
 import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
 import { computeTrimUpdate, pointerTime, type TrimOrigin } from './timelineGeometry';
 import type { TrimState } from './types';
@@ -105,6 +120,21 @@ import { useTrackAreaCache } from './useTrackAreaCache';
  */
 function changesClip(clip: Clip, update: Partial<Clip>): boolean {
   return (Object.keys(update) as (keyof Clip)[]).some((key) => clip[key] !== update[key]);
+}
+
+/** Where `edge` of a clip (or of its trim origin) sits on the timeline. */
+function edgeTime(clip: Pick<Clip, 'timelinePosition' | 'startTime' | 'endTime'>, edge: 'start' | 'end'): number {
+  return edge === 'start' ? clip.timelinePosition : clip.timelinePosition + clip.endTime - clip.startTime;
+}
+
+/** The trim origin of a clip as it stands now. */
+function originOf(clip: Clip): TrimOrigin {
+  return {
+    startTime: clip.startTime,
+    endTime: clip.endTime,
+    timelinePosition: clip.timelinePosition,
+    animation: clip.animation,
+  };
 }
 
 /** What a trim gesture needs that it cannot reach on its own. */
@@ -180,6 +210,13 @@ export function useTrimDrag({
    * write the store itself refused.
    */
   const gestureHistory = useGestureHistory();
+  /**
+   * The ripple trim's linked partners and their origins (ESCSUITE-360), taken
+   * on the gesture's first move; null until then.
+   */
+  const partnersRef = useRef<Map<string, TrimOrigin> | null>(null);
+  /** Whether Alt was held at the last move: trim the grabbed clip alone. */
+  const aloneRef = useRef(false);
 
   const handleMouseMove = (e: MouseEvent) => {
     if (!trackContainerRef.current) return;
@@ -207,7 +244,7 @@ export function useTrimDrag({
         ? mouseTime
         : clampTrimToNeighbours(clips, clip, trim.edge, trim.origin, mouseTime);
 
-    const update = computeTrimUpdate({
+    let update = computeTrimUpdate({
       edge: trim.edge,
       mouseTime: limitedTime,
       clip,
@@ -215,8 +252,62 @@ export function useTrimDrag({
       origin: trim.origin,
     });
 
+    // ESCSUITE-360: the ripple tool trims the clip's linked partners with it.
+    if (partnersRef.current === null) {
+      partnersRef.current = new Map(
+        activeTool === 'ripple' ? linkedPartners(clips, clip).map((p) => [p.id, originOf(p)]) : []
+      );
+    }
+    aloneRef.current = e.altKey;
+    const partners = [...partnersRef.current]
+      .map(([id, origin]) => ({ clip: clips.find((c) => c.id === id), origin }))
+      .filter((p): p is { clip: Clip; origin: TrimOrigin } => p.clip !== undefined);
+    if (!e.altKey && partners.some((p) => isTrackLocked(tracks, p.clip.trackId))) return;
+    // The partner's update for the edge moved by `delta`, clamped as the
+    // grabbed clip's own is.
+    const partnerUpdate = (p: { clip: Clip; origin: TrimOrigin }, delta: number) => {
+      const target = edgeTime(p.origin, trim.edge) + delta;
+      return computeTrimUpdate({
+        edge: trim.edge,
+        mouseTime: trim.edge === 'end' ? target : clampTrimToNeighbours(clips, p.clip, 'start', p.origin, target),
+        clip: p.clip,
+        sourceVideo: sourceVideos.find((v) => v.id === p.clip.sourceVideoId),
+        origin: p.origin,
+      });
+    };
+    let delta = 0;
+    if (update && !e.altKey && partners.length > 0) {
+      // Move every clip by the least any of them can follow, so none falls
+      // out of step with the others.
+      const wanted = edgeTime({ ...clip, ...update }, trim.edge) - edgeTime(trim.origin, trim.edge);
+      delta = wanted;
+      for (const p of partners) {
+        const u = partnerUpdate(p, wanted);
+        const reached = u ? edgeTime({ ...p.clip, ...u }, trim.edge) - edgeTime(p.origin, trim.edge) : 0;
+        if (Math.abs(reached) < Math.abs(delta)) delta = reached;
+      }
+      if (delta !== wanted) {
+        update = computeTrimUpdate({
+          edge: trim.edge,
+          mouseTime: edgeTime(trim.origin, trim.edge) + delta,
+          clip,
+          sourceVideo,
+          origin: trim.origin,
+        });
+      }
+    }
+
     if (update && changesClip(clip, update)) {
-      gestureHistory.commit((skipHistory) => trimClip(trim.clipId, trim.edge, update, trim.origin, skipHistory));
+      const primary = update;
+      gestureHistory.commit((skipHistory) => trimClip(trim.clipId, trim.edge, primary, trim.origin, skipHistory));
+    }
+    // With Alt (delta 0) a partner goes back to where it began.
+    for (const p of partners) {
+      if (isTrackLocked(tracks, p.clip.trackId)) continue;
+      const u = partnerUpdate(p, delta);
+      if (u && changesClip(p.clip, u)) {
+        gestureHistory.commit((skipHistory) => trimClip(p.clip.id, trim.edge, u, p.origin, skipHistory));
+      }
     }
   };
 
@@ -224,12 +315,16 @@ export function useTrimDrag({
     const trim = trimRef.current;
     // If ripple tool is active, shift subsequent clips
     if (activeTool === 'ripple' && trim) {
-      const clip = clips.find((c) => c.id === trim.clipId);
-      if (clip) {
-        const originalEnd = trim.origin.timelinePosition +
-          (trim.origin.endTime - trim.origin.startTime);
-        const currentEnd = clip.timelinePosition + (clip.endTime - clip.startTime);
-        const delta = currentEnd - originalEnd;
+      // ESCSUITE-360: each linked partner's row closes its own gap too.
+      const trimmed: [string, TrimOrigin][] = [
+        [trim.clipId, trim.origin],
+        ...(aloneRef.current ? [] : [...(partnersRef.current ?? [])]),
+      ];
+      for (const [id, origin] of trimmed) {
+        const clip = clips.find((c) => c.id === id);
+        if (!clip) continue;
+        const originalEnd = edgeTime(origin, 'end');
+        const delta = edgeTime(clip, 'end') - originalEnd;
 
         if (delta !== 0) {
           // Shift all clips after the original end position. Part of the trim
@@ -244,6 +339,8 @@ export function useTrimDrag({
       }
     }
     trimRef.current = null;
+    partnersRef.current = null;
+    aloneRef.current = false;
     trackArea.end();
     // Belt and braces with the `begin` in `handleTrimMouseDown`: every write is
     // gated on a `trimRef` only that handler fills, so the flag cannot be read
@@ -270,6 +367,8 @@ export function useTrimDrag({
       // write will push. A press released without a move writes nothing and so
       // pushes nothing.
       gestureHistory.begin();
+      partnersRef.current = null;
+      aloneRef.current = e.altKey;
       // Where the track area is, taken once: a trim reads only `scrollLeft`
       // per move after this.
       trackArea.begin(trackContainerRef.current, false);
