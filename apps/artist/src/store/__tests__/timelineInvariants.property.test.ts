@@ -18,7 +18,9 @@
 // model and is discarded (`fc.pre(false)`) rather than failed; see the guards
 // in `src/test/timelineModel.ts`. Locally, `pnpm --filter=@escapesuite/artist
 // test:fuzz` runs 5,000 sequences (ARTIST_FUZZ_RUNS); ARTIST_FUZZ_SEED picks
-// another seed.
+// another seed. The nightly workflow (.github/workflows/nightly.yml,
+// ESCSUITE-353) sets both, drawing the seed from the run id; when either is
+// set, the seed and run count are printed so a failing night can be replayed.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import fc from 'fast-check'
 import { storeVideo, deleteVideo } from '../../core/storage'
@@ -26,6 +28,9 @@ import { KnownBug, SOURCES, opCounts, runSequence, type MoveTarget, type Op } fr
 
 const SEED = Number(process.env.ARTIST_FUZZ_SEED ?? 0x5eed0349)
 const NUM_RUNS = Number(process.env.ARTIST_FUZZ_RUNS ?? 200)
+if (process.env.ARTIST_FUZZ_SEED !== undefined || process.env.ARTIST_FUZZ_RUNS !== undefined) {
+  console.info(`timeline property test: ARTIST_FUZZ_SEED=${SEED} ARTIST_FUZZ_RUNS=${NUM_RUNS}`)
+}
 
 /**
  * `n` hundred-thousandths in `[min, max]`: decimal values binary floating

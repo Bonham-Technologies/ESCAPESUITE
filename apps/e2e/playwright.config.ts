@@ -2,6 +2,15 @@ import { defineConfig, devices } from '@playwright/test'
 
 const isCI = !!process.env.CI
 
+// ESCSUITE-353: CI runs Chromium only, so the Firefox and WebKit projects are
+// local-only unless E2E_CROSS_BROWSER is set; the nightly workflow
+// (.github/workflows/nightly.yml) sets it to run all three browsers on main.
+const crossBrowser = !isCI || !!process.env.E2E_CROSS_BROWSER
+
+// ESCSUITE-353: a test tagged @nightly (too slow for every PR) runs only when
+// E2E_NIGHTLY is set, as the nightly workflow does.
+const nightly = !!process.env.E2E_NIGHTLY
+
 // Standalone, production-layout and perf tests use separate configs. The perf
 // benchmarks in particular must never run here: they assert nothing, they take
 // minutes of real encoding, and a run under this config's parallel workers
@@ -69,6 +78,7 @@ export default defineConfig({
   testIgnore: baseIgnore,
   fullyParallel: true,
   forbidOnly: isCI,
+  grepInvert: nightly ? undefined : /@nightly/,
   retries: isCI ? 2 : 0,
   workers: isCI ? 1 : undefined,
   // CI adds the list reporter so the job log carries one line per test — a run that hits the
@@ -102,8 +112,8 @@ export default defineConfig({
       // trace and video of a failed attempt instead.
       use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure', video: 'retain-on-failure' },
     },
-    // Cross-browser projects only run locally (not in CI)
-    ...(isCI ? [] : crossBrowserProjects),
+    // Cross-browser projects run locally, and in CI only when E2E_CROSS_BROWSER is set (the nightly)
+    ...(crossBrowser ? crossBrowserProjects : []),
     {
       name: 'mobile-chromium',
       use: { ...devices['Pixel 5'] },
@@ -118,8 +128,8 @@ export default defineConfig({
       },
       testMatch: '**/responsive/**',
     },
-    // Cross-browser responsive projects only run locally
-    ...(isCI ? [] : crossBrowserResponsiveProjects),
+    // Cross-browser responsive projects: same rule as the cross-browser ones above
+    ...(crossBrowser ? crossBrowserResponsiveProjects : []),
   ],
 
   webServer: [

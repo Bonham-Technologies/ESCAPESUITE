@@ -42,7 +42,12 @@
   (`tests/production/slashless-redirect.spec.ts`).
 - **Property-based tests**: ESCAPEARTIST's timeline edit logic has a model-based fast-check suite
   (ESCSUITE-349): random edit sequences with invariants checked after every step. What it checks
-  and how to add an operation: `apps/artist/docs/reference/testing.md`.
+  and how to add an operation: `apps/artist/docs/reference/testing.md`. PR CI runs 200 sequences on
+  a fixed seed; the nightly runs 5,000 on a seed from the run id (`ARTIST_FUZZ_RUNS`,
+  `ARTIST_FUZZ_SEED`; ESCSUITE-353).
+- **Cross-browser and `@nightly` e2e**: CI runs Chromium only. `E2E_CROSS_BROWSER=1` adds the
+  Firefox and WebKit projects under `CI`, and specs tagged `@nightly` run only when `E2E_NIGHTLY=1`.
+  The nightly workflow sets both (ESCSUITE-353, `ci-cd-pipeline.md`).
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.
@@ -130,7 +135,9 @@ most its cycle-1 value plus `ALLOWED_GROWTH` (1 per kind; measured growth was 0)
 A second test reloads 10 times, restores the session from the "Resume Previous Session?" prompt
 each time, checks the waveform is drawn and the preview plays, and asserts live counts and every
 IndexedDB store's record count stay flat across the reloads. The two run in the normal e2e job,
-under 2 minutes together. A failure message lists every count since cycle 1 and where the leaked
+under 2 minutes together. `SOAK_CYCLES` and `SOAK_RELOADS` raise the counts (the time budgets scale
+with them); unset, they are 25 and 10. The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353)
+runs 200 and 30; see `ci-cd-pipeline.md`. A failure message lists every count since cycle 1 and where the leaked
 resources were made; rerunning replays the same clicks.
 
 **Import soak (ESCSUITE-365).** `tests/escapeartist/import-soak.spec.ts` (Chromium, ~35 s) covers

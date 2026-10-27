@@ -38,10 +38,28 @@ test.skip(
   'Live counts need a forced GC, which goes through Chromium’s DevTools protocol'
 )
 
-/** The cycles the soak runs, and how often it checks. */
-const CYCLES = 25
+/**
+ * A positive whole number from the environment, or `fallback`. The nightly
+ * run (`.github/workflows/nightly.yml`, ESCSUITE-353) raises the counts below
+ * this way; unset, the soak is the one every PR runs.
+ */
+function envCount(name: string, fallback: number): number {
+  const value = Number(process.env[name])
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+/** The cycles the soak runs, and how often it checks. `SOAK_CYCLES` raises it. */
+const CYCLES = envCount('SOAK_CYCLES', 25)
 const CHECK_EVERY = 5
-const RELOADS = 10
+/** `SOAK_RELOADS` raises it. */
+const RELOADS = envCount('SOAK_RELOADS', 10)
+
+/**
+ * Each test's time budget: 180 s at the PR counts, scaled with the count (7.2 s
+ * per cycle, 18 s per reload) when the nightly raises it.
+ */
+const CYCLES_TIMEOUT = Math.max(180_000, CYCLES * 7_200)
+const RELOADS_TIMEOUT = Math.max(180_000, RELOADS * 18_000)
 
 /** Seeded, so a failing run is replayed exactly by rerunning it. */
 const SEED = 350
@@ -224,7 +242,7 @@ function countStoredRecords(page: Page): Promise<Record<string, number>> {
 
 test.describe('ESCAPEARTIST resource soak (ESCSUITE-350)', () => {
   test(`${CYCLES} scrub/click/play/seek cycles leave no resource behind`, async ({ page }) => {
-    test.setTimeout(180_000)
+    test.setTimeout(CYCLES_TIMEOUT)
     await openEditorWithFixture(page)
     const random = seededRandom(SEED)
 
@@ -256,7 +274,7 @@ test.describe('ESCAPEARTIST resource soak (ESCSUITE-350)', () => {
   })
 
   test(`the restored session plays and draws its waveform across ${RELOADS} reloads`, async ({ page }) => {
-    test.setTimeout(180_000)
+    test.setTimeout(RELOADS_TIMEOUT)
     await openEditorWithFixture(page)
     await waitForSavedSession(page)
 
