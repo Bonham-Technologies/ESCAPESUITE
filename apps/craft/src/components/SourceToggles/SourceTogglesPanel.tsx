@@ -35,8 +35,8 @@ interface SourceTogglesPanelProps {
  *
  * Every field the panel draws is selected here, so the panel is the whole
  * subscription: `detailedCapabilities`, `audioLevels` and `systemAudioShared`
- * reach nothing else in the tree, and `config` and `capabilities` are read by
- * `App` too — selecting them twice costs a subscription and no extra render,
+ * reach nothing else in the tree, and `config`, `capabilities` and
+ * `capabilitiesReady` are read by `App` too — selecting them twice costs a subscription and no extra render,
  * and it keeps the panel's inputs in one place. `disabled` and `showMeters`
  * both stay props because `App` derives them from `state`, alongside the
  * transport bar's own (narrower still) reading of it.
@@ -47,6 +47,7 @@ export function SourceTogglesPanel({ disabled, showMeters, onToggleSource }: Sou
   const detailedCapabilities = useRecorderStore((s) => s.detailedCapabilities);
   const audioLevels = useRecorderStore((s) => s.audioLevels);
   const systemAudioShared = useRecorderStore((s) => s.systemAudioShared);
+  const capabilitiesReady = useRecorderStore((s) => s.capabilitiesReady);
 
   return (
     <SourceToggles
@@ -57,6 +58,7 @@ export function SourceTogglesPanel({ disabled, showMeters, onToggleSource }: Sou
       disabled={disabled}
       showMeters={showMeters}
       systemAudioShared={systemAudioShared}
+      capabilitiesReady={capabilitiesReady}
       onToggleSource={onToggleSource}
     />
   );

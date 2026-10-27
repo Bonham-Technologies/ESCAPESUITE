@@ -1,5 +1,7 @@
+import { useId } from 'react';
 import type {
   AudioLevels,
+  CapabilityInfo,
   DetailedCapabilities,
   EnvironmentCapabilities,
   RecordingConfig,
@@ -50,6 +52,12 @@ interface SourceTogglesProps {
    * hand it over, and a live-looking meter stuck at 0 is a lie.
    */
   systemAudioShared: boolean;
+  /**
+   * Whether capability detection has finished. Until it has, every capability
+   * reads false ("Checking..."), which means "not known yet", not
+   * "unavailable": the toggles keep showing the stored preference.
+   */
+  capabilitiesReady: boolean;
   onToggleSource: (source: RecordingSource) => void;
 }
 
@@ -67,6 +75,15 @@ interface SourceTogglesProps {
  * plus whether a take is in progress. The two are separate on purpose: the
  * tooltip explains a permanent limitation, the disabled state also covers the
  * temporary one.
+ *
+ * A toggle whose source cannot be captured is drawn and announced as off
+ * whatever its stored flag says (ESCSUITE-343): the take records nothing from
+ * it (`useMediaStreams` skips it), so a greyed-but-ON switch was a lie. The
+ * stored preference itself is left alone, so the toggle comes back on when
+ * the device appears. The row's reason is also tied to the button with
+ * `aria-describedby`, since a `title` tooltip is not reliably announced.
+ * Neither applies before detection has finished (`capabilitiesReady`), when
+ * every source reads unavailable only because it has not been checked yet.
  */
 export function SourceToggles({
   config,
@@ -76,8 +93,22 @@ export function SourceToggles({
   disabled,
   showMeters,
   systemAudioShared,
+  capabilitiesReady,
   onToggleSource,
 }: SourceTogglesProps) {
+  const reasonId = useId();
+  const screenOn = config.screenEnabled && (capabilities.screenCapture || !capabilitiesReady);
+  const webcamOn = config.webcamEnabled && (capabilities.webcam || !capabilitiesReady);
+  const microphoneOn = config.microphoneEnabled && (capabilities.microphone || !capabilitiesReady);
+  const systemAudioOn =
+    config.systemAudioEnabled && (capabilities.systemAudio || !capabilitiesReady);
+  const unavailableReason = (c: CapabilityInfo) =>
+    c.available || !capabilitiesReady ? undefined : c.message;
+  const screenReason = unavailableReason(detailedCapabilities.screenCapture);
+  const webcamReason = unavailableReason(detailedCapabilities.webcam);
+  const microphoneReason = unavailableReason(detailedCapabilities.microphone);
+  const systemAudioReason = unavailableReason(detailedCapabilities.systemAudio);
+
   return (
     <section className={styles.sidebarSection}>
       <h2 className={styles.sidebarTitle}>Sources</h2>
@@ -93,11 +124,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {screenReason && (
+            <span id={`${reasonId}-screen`} className={styles.srOnly}>
+              {screenReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${screenOn ? styles.active : ''}`}
             onClick={() => onToggleSource('screen')}
             disabled={!capabilities.screenCapture || disabled}
-            aria-pressed={config.screenEnabled}
+            aria-pressed={screenOn}
+            aria-describedby={screenReason ? `${reasonId}-screen` : undefined}
             aria-label="Screen"
           >
             <span className={styles.toggleKnob} />
@@ -115,11 +152,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {webcamReason && (
+            <span id={`${reasonId}-webcam`} className={styles.srOnly}>
+              {webcamReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${webcamOn ? styles.active : ''}`}
             onClick={() => onToggleSource('webcam')}
             disabled={!capabilities.webcam || disabled}
-            aria-pressed={config.webcamEnabled}
+            aria-pressed={webcamOn}
+            aria-describedby={webcamReason ? `${reasonId}-webcam` : undefined}
             aria-label="Webcam"
           >
             <span className={styles.toggleKnob} />
@@ -137,11 +180,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {microphoneReason && (
+            <span id={`${reasonId}-microphone`} className={styles.srOnly}>
+              {microphoneReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${microphoneOn ? styles.active : ''}`}
             onClick={() => onToggleSource('microphone')}
             disabled={!capabilities.microphone || disabled}
-            aria-pressed={config.microphoneEnabled}
+            aria-pressed={microphoneOn}
+            aria-describedby={microphoneReason ? `${reasonId}-microphone` : undefined}
             aria-label="Microphone"
           >
             <span className={styles.toggleKnob} />
@@ -159,11 +208,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {systemAudioReason && (
+            <span id={`${reasonId}-systemAudio`} className={styles.srOnly}>
+              {systemAudioReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${systemAudioOn ? styles.active : ''}`}
             onClick={() => onToggleSource('systemAudio')}
             disabled={!capabilities.systemAudio || disabled}
-            aria-pressed={config.systemAudioEnabled}
+            aria-pressed={systemAudioOn}
+            aria-describedby={systemAudioReason ? `${reasonId}-systemAudio` : undefined}
             aria-label="System Audio"
           >
             <span className={styles.toggleKnob} />
@@ -172,9 +227,9 @@ export function SourceToggles({
       </div>
 
       {/* Audio meters */}
-      {(config.microphoneEnabled || config.systemAudioEnabled) && showMeters && (
+      {(microphoneOn || config.systemAudioEnabled) && showMeters && (
         <div className={styles.audioMeters}>
-          {config.microphoneEnabled && (
+          {microphoneOn && (
             <div className={styles.audioMeter}>
               <span className={styles.meterLabel}>Mic</span>
               <div className={styles.meterBar}>
