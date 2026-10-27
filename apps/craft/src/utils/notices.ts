@@ -71,7 +71,9 @@ const CAPTURE_FAILED: Record<CaptureSource, Record<CaptureFailureReason, string>
  *
  * The microphone sentences are reached only by a microphone-only take: in any
  * take with a screen or camera, a closed microphone does not cost the take and
- * says `MIC_UNAVAILABLE` instead. A function over a table rather than nine
+ * says `MIC_UNAVAILABLE` instead. The camera sentences, likewise, are reached
+ * only by a take with no screen in it: in a screen take a closed camera says
+ * `webcamUnavailable` instead (ESCSUITE-342). A function over a table rather than nine
  * exports, the way `mp4ConversionFailed` is a function — still one string
  * through the same `setNotice`, and every sentence is readable above.
  */
@@ -110,8 +112,8 @@ export const NO_SYSTEM_AUDIO =
  * shape with the mic part simply absent, and a user who has already chosen the
  * window they wanted to share must not lose it to a prompt they said no to. A
  * refused screen capture still fails the take — there would be nothing to
- * record — and so does a refused webcam in a PiP take, because the overlay is
- * what the user explicitly asked for.
+ * record. A camera that cannot be opened in a screen take degrades the take
+ * the same way, and says `webcamUnavailable` (ESCSUITE-342).
  *
  * One sentence for every way the request failed, because there is one channel
  * and the fact the user can act on is the same: the recording they are now
@@ -124,6 +126,42 @@ export const NO_SYSTEM_AUDIO =
  */
 export const MIC_UNAVAILABLE =
   'The microphone could not be opened — recording without it.'
+
+const WEBCAM_UNAVAILABLE: Record<CaptureFailureReason, string> = {
+  refused:
+    'The camera could not be opened (permission refused or blocked in site settings) — recording the screen without it: the camera is not in this recording.',
+  unavailable:
+    'The camera could not be opened (not found, or in use by another app) — recording the screen without it: the camera is not in this recording.',
+  failed:
+    'The camera could not be opened — recording the screen without it: the camera is not in this recording.',
+}
+
+/**
+ * Said when the camera a screen take asked for could not be opened and the
+ * take went ahead as a screen take without it (ESCSUITE-342, owner decision
+ * A1). The camera is asked for after the share picker has been answered, so
+ * failing the take threw away the window the user had just chosen.
+ *
+ * It says outright that the camera is not in this recording — the user's
+ * preview shows the screen with no overlay, but a user not looking at the
+ * preview would otherwise find the missing picture-in-picture only at
+ * playback. The parenthetical is the same one `captureFailed` gives, so the
+ * user can tell a permission from a device in use.
+ *
+ * It wins the channel over `MIC_UNAVAILABLE` and `NO_SYSTEM_AUDIO`: a missing
+ * picture is the larger loss. When the microphone is gone as well, the take
+ * says `CAMERA_AND_MIC_UNAVAILABLE` instead, so neither loss goes unsaid.
+ */
+export const webcamUnavailable = (reason: CaptureFailureReason): string =>
+  WEBCAM_UNAVAILABLE[reason]
+
+/**
+ * `webcamUnavailable` and `MIC_UNAVAILABLE` at once: one channel, so one
+ * sentence naming both. The reasons are dropped — the two requests can fail
+ * for different ones, and the console carries each.
+ */
+export const CAMERA_AND_MIC_UNAVAILABLE =
+  'The camera and the microphone could not be opened — recording the screen without them: neither is in this recording.'
 
 /**
  * Said after a conversion that ran in a browser with no AAC encoder. The codec

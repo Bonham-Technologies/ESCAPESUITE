@@ -284,10 +284,13 @@
   black (review round 1); and leaves it for anything else (a fallback over an element no longer
   seeking but with no frame yet). A healthy seek that lands late — after the fallbacks, so its
   own request counts one — is cleared by the next request's start, so a slow machine whose seeks
-  land between requests is never refused (re-review round 1); only an element that stays `seeking`
-  across three requests is — a new seek aborts the one in flight, so seeks that each outlast the
-  waits plus the gap to the next request are refused too, and those frames could not have been
-  drawn either way.
+  land between requests is never refused (re-review round 1). A request whose waits end over an
+  element still `seeking` with no frame first gives that seek `SEEK_IN_FLIGHT_GRACE_MS` (2 s)
+  more to land (`settleSeekInFlight`, ESCSUITE-370): the export's frames run back to back and a
+  new seek aborts the one in flight, so before this a seek merely slower than the waits never
+  landed and a healthy recording was refused on a loaded machine (the CI journey's flake). Now a
+  slow seek lands and its frame is drawn; only an element that stays `seeking` through three
+  requests' waits and graces is refused.
   At `WEDGED_SEEK_FRAMES` (3) it throws `SourceNotSeekableError`, which both exporters' catch turns into an
   `ExportError` with `code: 'SOURCE_NOT_SEEKABLE'` (`exportErrorCodeOf`) and the sentence
   `This browser cannot read "<name>" frame by frame (its seeks never completed). Re-save the

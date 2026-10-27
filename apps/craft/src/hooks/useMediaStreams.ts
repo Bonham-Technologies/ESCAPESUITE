@@ -51,6 +51,13 @@ export interface AcquiredStreams {
  */
 export interface AcquisitionResult extends AcquiredStreams {
   micUnavailable: boolean;
+  /**
+   * Why the camera could not be opened, in a take that is going ahead as a
+   * screen take without it (ESCSUITE-342); `null` when the camera opened or
+   * was never asked for. The error itself rather than a flag, so the
+   * controller can say *why*, the way a failed start does (ESCSUITE-341).
+   */
+  webcamError: unknown;
 }
 
 export interface MediaStreams {
@@ -80,8 +87,9 @@ export interface MediaStreams {
    * already handed over instead of waiting for the whole request to settle
    * (ESCSUITE-116).
    *
-   * The microphone is the one exception to "releases what it got if one
-   * fails": see the catch around its request below (ESCSUITE-184).
+   * The microphone (ESCSUITE-184) and, in a take with a screen, the camera
+   * (ESCSUITE-342) are the exceptions to "releases what it got if one fails":
+   * see the catches around their requests below.
    */
   acquireStreams: (onPartial?: (partial: AcquiredStreams) => void) => Promise<AcquisitionResult>;
 }
@@ -160,6 +168,7 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
     let webcam: MediaStream | null = null;
     let mic: MediaStream | null = null;
     let micUnavailable = false;
+    let webcamError: unknown = null;
 
     try {
       // Get screen capture if enabled
@@ -170,7 +179,27 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
 
       // Get webcam if enabled
       if (config.webcamEnabled && capabilities.webcam) {
-        webcam = await requestWebcam();
+        try {
+          webcam = await requestWebcam();
+        } catch (error) {
+          // ESCSUITE-342 (owner decision A1): a camera that cannot be opened
+          // degrades the take instead of costing it, the way the microphone
+          // does (ESCSUITE-184). It is asked for after the share picker has
+          // been answered, so throwing the share away here meant picking the
+          // same window again. The take goes ahead as a screen take — no
+          // compositor, no empty overlay box — and the controller says the
+          // camera is not in it.
+          //
+          // Unless there is no screen: a webcam-only take would record no
+          // picture at all, so it still fails, with the start path's own
+          // notice naming the camera.
+          if (!screen) throw error;
+          console.warn('Camera could not be opened — recording the screen without it:', error);
+          webcamError = error;
+        }
+        // Reported whether or not it produced a stream, for the same reason
+        // as the microphone stage below: the deadline release reads the
+        // latest report (ESCSUITE-116).
         onPartial?.({ screen, webcam, mic });
       }
 
@@ -203,7 +232,7 @@ export function useMediaStreams({ config, capabilities, setStreams }: MediaStrea
         onPartial?.({ screen, webcam, mic });
       }
 
-      return { screen, webcam, mic, micUnavailable };
+      return { screen, webcam, mic, micUnavailable, webcamError };
     } catch (error) {
       // Clean up any acquired streams on error
       stopStream(screen);

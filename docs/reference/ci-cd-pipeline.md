@@ -10,10 +10,10 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 | `lint-and-typecheck` | Security audit + ESLint + TypeScript (shared, plan, craft, artist, headless-artist, e2e) | PRs and pushes |
 | `test` | Unit tests with coverage | PRs and pushes |
 | `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
-| `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes (skipped for Dependabot) |
-| `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes (E2E halves skipped for Dependabot) |
-| `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests; lists pass-on-retry tests (see below) | PRs and pushes (skipped for Dependabot) |
-| `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot) |
+| `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes |
+| `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes |
+| `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests; lists pass-on-retry tests (see below) | PRs and pushes |
+| `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot: its PRs get no secrets) |
 | `ci-status` | Summary/gate job | All PRs |
 
 The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes to `main`/`dev`, PRs labelled `perf`, and `workflow_dispatch`; informational only, never gates, skipped for Dependabot.
@@ -132,6 +132,11 @@ The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes
   which is kept as the hero's secondary "All downloads" link instead (ESCSUITE-195).
 
 **Dependabot** (`.github/dependabot.yml`):
+- Dependabot PRs run every job except `deploy`, browser suites included: `e2e`, `kit-docker`
+  and both E2E halves of `standalone` (ESCSUITE-337). Autopilot merges a patch/minor bump on a
+  green `ci-status`, and #913 (`@axe-core/playwright`) once merged green without a browser run
+  and turned main's e2e red. `deploy` alone stays skipped, because Dependabot PRs get no
+  `VERCEL_TOKEN`.
 - Weekly updates for all apps
 - Grouped PRs: React, testing, linting
 - GitHub Actions version updates

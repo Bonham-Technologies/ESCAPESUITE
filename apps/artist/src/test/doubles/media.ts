@@ -62,7 +62,9 @@ export interface SeekScript {
    * A slow but healthy seek (ESCSUITE-305 re-review): the seek reports
    * `seeking` true at HAVE_METADATA (1) until this many milliseconds later,
    * when it lands — `seeking` false, the scripted `readyState` back, 'seeked'
-   * dispatched — on a `setTimeout`, so fake timers drive it.
+   * dispatched — on a `setTimeout`, so fake timers drive it. A seek issued
+   * while one is still in flight aborts it, as the HTML seek algorithm does:
+   * the earlier one never lands and only the last dispatches 'seeked'.
    */
   seekLandsAfterMs?: number
   /**
@@ -201,6 +203,11 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
    */
   function defineCurrentTime(el: HTMLMediaElement, s: SeekScript, readyState?: number): void {
     let currentTime = 0
+    // The landing of a slow seek still in flight. A new seek aborts it, as the
+    // HTML seek algorithm does ("if the element's seeking IDL attribute is
+    // true, … abort that other instance"): only the last seek lands and
+    // dispatches 'seeked' (ESCSUITE-370).
+    let landing: ReturnType<typeof setTimeout> | undefined
     Object.defineProperty(el, 'currentTime', {
       configurable: true,
       get: () => currentTime,
@@ -214,6 +221,10 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
           throw new TypeError('Failed to set the currentTime property: The provided double value is non-finite.')
         }
         seeks.push(next)
+        if (landing !== undefined) {
+          clearTimeout(landing)
+          landing = undefined
+        }
         if (s.durationAfterSeek === undefined) {
           currentTime = next
         } else {
@@ -230,7 +241,8 @@ export function installMediaElementDoubles(initial: Partial<MediaDoubleScript> =
         if (landsAfterMs !== undefined) {
           own(el, 'seeking', true)
           own(el, 'readyState', 1)
-          setTimeout(() => {
+          landing = setTimeout(() => {
+            landing = undefined
             own(el, 'seeking', false)
             own(el, 'readyState', readyState)
             el.dispatchEvent(new Event('seeked'))

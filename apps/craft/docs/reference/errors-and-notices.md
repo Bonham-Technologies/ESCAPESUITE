@@ -7,11 +7,11 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `handleStartRecording` clears it when the next take begins. Every string lives in
 `src/utils/notices.ts` — `SAVE_FAILED`, `NOT_SEEKABLE`, `CAPTURE_REFUSED`,
 `CAPTURE_UNANSWERED`, `START_FAILED`, `LIBRARY_UNREADABLE`, `DETECTION_FAILED`,
-`NO_SYSTEM_AUDIO`, `MIC_UNAVAILABLE`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
+`NO_SYSTEM_AUDIO`, `MIC_UNAVAILABLE`, `CAMERA_AND_MIC_UNAVAILABLE`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
 `UPLOAD_NO_HOST_ORIGIN`,
 `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED`,
 `RECORDING_UNAVAILABLE`,
-`captureFailed()` and `mp4ConversionFailed()` —
+`captureFailed()`, `webcamUnavailable()` and `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
 is still one string through the same `setNotice`, and it says "Conversion failed: …" rather
@@ -61,11 +61,12 @@ Two related rules follow from it:
   the wrapper instead (as it did before ESCSUITE-210) made every refusal fall
   through to the generic sentence. The microphone sentences are reached only by
   a microphone-only take — anywhere else a closed microphone does not cost the
-  take (`MIC_UNAVAILABLE`, below). A start that fails *without* a tagged
+  take (`MIC_UNAVAILABLE`, below) — and the camera sentences only by a take
+  with no screen in it (`webcamUnavailable`, below). A start that fails *without* a tagged
   request — a recorder that would not initialise — keeps the two unnamed
   sentences: `CAPTURE_REFUSED` for a `NotAllowedError`, `START_FAILED` for the
-  rest. Whether a camera failure costs the take is unchanged: it still does,
-  because the overlay is what the user asked for. A start whose capture
+  rest. A camera failure no longer costs a take that has a screen in it
+  (ESCSUITE-342, `webcamUnavailable` below). A start whose capture
   request is never answered at all raises `CAPTURE_UNANSWERED` when its
   deadline expires (ESCSUITE-109) —
   a silence has to be reported too, because the alternative is a UI parked in
@@ -94,6 +95,16 @@ Two related rules follow from it:
   the system-audio line is a nudge about a tick box the user can tick next time and the greyed
   System meter carries its own weaker wording for the rest of the take, while this names a source
   that is simply gone.
+- **`webcamUnavailable(reason)`** is the fourth: the camera a screen take asked for could not be
+  opened and the take went ahead as a screen take without it (ESCSUITE-342, owner decision A1 —
+  see "A camera that cannot be opened does not cost a screen take either" under "Recorder
+  lifecycle"). It carries the same refused/unavailable/failed parenthetical as `captureFailed`,
+  and ends "the camera is not in this recording", so the user learns it now rather than at
+  playback. It is raised last, so it wins the channel over `MIC_UNAVAILABLE` and
+  `NO_SYSTEM_AUDIO`; when the microphone was lost too, `CAMERA_AND_MIC_UNAVAILABLE` names both in
+  one sentence. A webcam-only take still fails with `captureFailed('webcam', …)`. There is no
+  toggle-time probe for the camera or the microphone (owner decision B2): both are found out, and
+  reported, at Start.
 
 **`RECORDING_UNAVAILABLE`** covers three more paths through the same channel, on any row —
 companion or primary. `useRecordingLibrary`'s `handlePlayRecording` and `handleDownload` each

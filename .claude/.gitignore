@@ -9,3 +9,6 @@
 !rules/**
 !hooks/
 !hooks/**
+!autopilot/
+!autopilot/**
+!.vendored-manifest

@@ -14,7 +14,7 @@
 // on every frame and the source was never refused.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { HTMLVideoFrameSource } from './frameSource'
-import { SourceNotSeekableError } from './seekWedge'
+import { SEEK_IN_FLIGHT_GRACE_MS, SourceNotSeekableError } from './seekWedge'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 
 const SOURCE_NAME = 'zoomed-take.webm'
@@ -49,7 +49,7 @@ async function run(source: HTMLVideoFrameSource, count: number): Promise<unknown
     const t = i / 30
     const pending = Promise.all([source.getFrame(t, 0), source.getFrame(10 + t, 1)])
     pending.catch(() => {})
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(1_000 + SEEK_IN_FLIGHT_GRACE_MS)
     const error = await pending.then(
       () => null,
       (e: unknown) => e

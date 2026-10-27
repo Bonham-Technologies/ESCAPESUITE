@@ -15,7 +15,7 @@ import {
   rewindElementSources,
 } from './elementFrames'
 import { elementSeekTarget } from './elementSeek'
-import { SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
+import { SEEK_IN_FLIGHT_GRACE_MS, SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
 import { ExportError, type ExportLogEntry } from './exportTypes'
 import { getVideoBlob, storeVideo } from './storage'
 import {
@@ -1065,7 +1065,7 @@ describe('createFrameComposer seek wedge', () => {
     // Settle the rejection's handling before advancing, so a throw is observed
     // as the frame's own result rather than as an unhandled rejection.
     pending.catch(() => {})
-    await vi.advanceTimersByTimeAsync(800)
+    await vi.advanceTimersByTimeAsync(800 + SEEK_IN_FLIGHT_GRACE_MS)
     return pending
   }
 
@@ -1178,6 +1178,33 @@ describe('createFrameComposer seek wedge', () => {
       await vi.advanceTimersByTimeAsync(1_000)
       await pending
     }
+  })
+
+  // ESCSUITE-370: the case above with the frames back to back, as the export
+  // loop runs them. A seek that outlasts the frame's 800 ms of waits is still
+  // in flight when the next frame starts, and that frame's own seek aborted it
+  // (the HTML seek algorithm: only the last seek lands), so on a machine whose
+  // seeks briefly ran past 800 ms nothing ever landed and the third frame
+  // refused a healthy source — the journey's "cannot read … frame by frame"
+  // on a loaded CI runner. A frame now lets the seek in flight land first.
+  it('never refuses a healthy source whose seeks outlast the waits, frames back to back', async () => {
+    await store('v1')
+    media.script({ video: { seekLandsAfterMs: 1_200 } })
+    const { composeFrame, ctx } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1' })]))
+
+    for (let i = 1; i <= 6; i++) {
+      let settled = false
+      const pending = composeFrame(i / 30).finally(() => {
+        settled = true
+      })
+      pending.catch(() => {})
+      // No gap between frames: the next one starts the moment this one ends.
+      while (!settled) await vi.advanceTimersByTimeAsync(10)
+      await pending
+    }
+
+    // Every frame after the first had the previous frame's seek landed to draw.
+    expect(ctx.argsFor('drawImage').length).toBeGreaterThanOrEqual(5)
   })
 
   it('does not count a seek that runs slow but settles (`seeking` false)', async () => {

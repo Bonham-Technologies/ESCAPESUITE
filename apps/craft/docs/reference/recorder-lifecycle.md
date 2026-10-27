@@ -375,11 +375,11 @@ so it treats every rejection the same way: the screen and webcam captures are ke
 proceeds without sound, and the result carries `micUnavailable: true` so the controller can raise
 `MIC_UNAVAILABLE` through the one notice channel.
 
-The reasoning for why this is the *only* optional source: a take with no sound is a take — the
+The reasoning: a take with no sound is a take — the
 ESCSUITE-14 companion shape with the mic part simply absent, which every consumer already reads,
 because a machine with no microphone has produced exactly that since ESCSUITE-70. A refused
-**screen** capture still fails the take (there is nothing to record), and so does a refused
-**webcam** in a PiP take, because the overlay is what the user explicitly asked for. The one
+**screen** capture still fails the take (there is nothing to record). A **webcam** that cannot be
+opened in a take with a screen no longer does either (ESCSUITE-342, below). The one
 exception to the exception: a **microphone-only** take whose microphone could not be opened has
 nothing left either, so `!screen && !webcam` rethrows and that take fails exactly as it did
 before — with a notice that names the microphone (`captureFailed`, ESCSUITE-341; see "Errors
@@ -401,6 +401,29 @@ Three details follow from the shape:
   on `micStream &&`, and the `CapturedTake` the save path is handed describes a recording with no
   microphone — so the library's M4A gate, the MP4 conversion and the ARTIST handoff all see the
   take as it was actually recorded.
+
+**A camera that cannot be opened does not cost a screen take either** (ESCSUITE-342, owner
+decision A1). The camera is asked for after the share picker has been answered, and a camera
+refused, missing or in use used to release that share with "nothing was recorded" — the user had
+to pick the same window again to record without the camera. `requestWebcam()` now sits in its own
+try/catch, the same shape as the microphone's: when a screen was acquired, the error is logged,
+`webcam` stays `null`, the microphone is still asked for, and the result carries the error as
+`webcamError`. The controller turns it into `webcamUnavailable(reason)` — the same
+refused/unavailable/failed parenthetical `captureFailed` uses — which says outright that the
+camera is not in this recording, so a user not watching the preview does not find the missing
+overlay only at playback. Both camera and microphone lost gets one sentence naming both
+(`CAMERA_AND_MIC_UNAVAILABLE`). See "Errors and notices".
+
+- **No empty overlay, no crash.** With `webcam` null, `isPiP` is false, so the take is an
+  ordinary screen take: no `Compositor`, no canvas preview, `separateTracks` false (no camera
+  companion is expected, so no `SEPARATE_TRACK_NOT_SAVED`), and the recorder gets the raw screen.
+- **Stored as what it is.** `CapturedTake.webcamEnabled` is now "the toggle AND a camera that
+  arrived", like `micAcquired`, so the library row and the ARTIST handoff carry `hasWebcam: false`.
+- **A take with no screen still fails.** A webcam-only take whose camera cannot be opened would
+  record no picture, so `!screen` rethrows and the start path says `captureFailed('webcam', …)`
+  ("— nothing was recorded"), as before.
+- **No toggle-time probe** (owner decision B2). Switching the Webcam or Microphone toggle on is
+  still a pure config flip; a failure is discovered, and reported, at Start.
 
 **A capture request the browser never answers gets a deadline.** `getDisplayMedia` and
 `getUserMedia` take no `AbortController`, so a picker or a permission prompt left on screen — or a

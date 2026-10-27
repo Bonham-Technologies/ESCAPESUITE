@@ -62,8 +62,8 @@ headless Chromium and exposes `window.__renderProject(input, onProgress?)`.
   any inlined filename survives inside a `new URL(...)`/`new Worker(...)` expression after the
   rewrite, or if any `.js` file is left behind in the output directory (`dist-headless/` for the
   headless build, `dist/` for standalone). That turns a future
-  emission change red in CI's `build` job (which runs for Dependabot PRs) instead of only in
-  `e2e`/`kit-docker`, which Dependabot skips. Vite 8.3 broke exactly this and shipped a
+  emission change red early, in CI's `build` job, instead of only in
+  `e2e`/`kit-docker`. Vite 8.3 broke exactly this and shipped a
   headless bundle whose workers 404'd from `file://` with
   `SecurityError: Failed to construct 'Worker'`.
 - `options.resolution` defaults to `'project'`; `meta` describes the encoded output

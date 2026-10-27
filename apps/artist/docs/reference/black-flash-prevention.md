@@ -35,11 +35,12 @@ To prevent black frames during export:
   whenever a request starts over an element no longer seeking, or ends with a landed seek or a
   frame to draw. So a seek still in flight over a frame it can already draw is not counted; a
   seek that settles late, after the fallbacks, counts for its own request and is cleared by the
-  next one's start — a slow machine whose seeks land between requests is never refused (a new
-  seek aborts the one in flight, so an element whose every seek outlasts the waits plus the gap to
-  the next request — about 800 ms on WebM/GIF, 600 ms on MP4 — stays `seeking` across three
-  requests and is refused; those frames could not have been drawn either way, since the draw
-  needs `readyState >= 2`); a fallback over an element that stopped seeking but has no frame yet
+  next one's start — a slow machine whose seeks land between requests is never refused. A
+  request whose waits end with the element still `seeking` and no frame gives that seek
+  `SEEK_IN_FLIGHT_GRACE_MS` (2 s) more before it is counted (ESCSUITE-370): a new seek aborts
+  the one in flight, so without it a seek merely slower than the waits (about 800 ms on WebM/GIF,
+  600 ms on MP4) never landed under back-to-back frames, and Chrome on a loaded CI runner refused
+  a healthy recording; a fallback over an element that stopped seeking but has no frame yet
   leaves the count alone; and a request held at one time over a seek still outstanding counts
   after a wait: on the MP4 path the same 500 ms `seeked` wait plus 100 ms readiness wait a seek
   gets, on the WebM/GIF path the composer's 300 ms readiness wait alone (no seek is issued, so
