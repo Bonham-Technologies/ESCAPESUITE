@@ -28,10 +28,12 @@ cutting a sliver off it, and a partner starting at the cut goes to the right.
 | Split (`Ctrl+B`, the razor, the inspector's Split) | Cuts every linked clip at the same time, one undo step |
 | Delete (`Delete`/`Backspace`, the toolbar, the inspector) | Removes the linked clips too, one undo step |
 | Ripple delete (ripple tool + `Delete`) | Removes them and closes the gap on each one's own row |
+| Ripple trim (ripple tool + an edge drag) | Moves the same edge of every linked clip by the same amount, the least any of them can follow, and closes the gap on each one's own row, one undo step (`useTrimDrag`, ESCSUITE-360) |
 | Drag | Moves the linked clips by the same time and rows, through `moveClips`; refused whole when any of them cannot land (`canMoveSelectedClips`), and their boxes follow the ghost (`DragState.companions`) |
 
 `Ctrl+Alt+B` is matched on `e.code === 'KeyB'` because macOS reports Option+B
-as `∫`. Alt during a drag is read at the mousedown and on every move. Some Linux
+as `∫`. Alt during a drag is read at the mousedown and on every move; during a ripple
+trim it is read on every mouse move only (the release uses the last move's). Some Linux
 window managers take Alt+drag for moving windows; there, press Alt after the drag
 has started, or use **Unlink**.
 
@@ -45,8 +47,8 @@ Alt-drag keeps the link but leaves the clips out of step; Unlink them if that is
 meant to last.
 
 **Locks.** A linked clip on a locked track is left alone by a split or a delete:
-the lock means "do not touch this row". A ripple delete and a drag refuse whole
-instead: closing the gap on some rows only would put the later pieces out of
+the lock means "do not touch this row". A ripple delete, a ripple trim and a
+drag refuse whole instead: closing the gap on some rows only would put the later pieces out of
 step. Unlink leaves a last partner on a locked track linked.
 
 **Unlinking.** The inspector's Actions section shows **Unlink** for a clip linked
@@ -57,12 +59,11 @@ too, since a group of one links nothing.
 other with fresh ids (`relinkCopies`), so a pasted take stays a take but is not
 tied to the one it came from; a copy with no partner in the paste is unlinked.
 
-**Not linked.** Trims, a move to another row from the inspector,
-mute and the inspector's per-clip settings all stay per clip. A ripple trim
-(`useTrimDrag` → `shiftClipsAfter`) shifts the later clips on its own row only,
-so it puts a take's rows out of step; follow-up ticket ESCSUITE-360.
+**Not linked.** A plain (non-ripple) trim, a move to another row from the
+inspector, mute and the inspector's per-clip settings all stay per clip.
 
 Tests: `src/store/linkedClips.test.ts`, the Alt cases in
 `useAppKeyboardShortcuts.test.ts` and `useClipDrag.test.ts`,
-`ClipEditor.unlink.test.tsx`, and the browser journey
-`apps/e2e/tests/regressions/ESCSUITE-355.spec.ts`.
+`useTrimDrag.linked.test.ts`, `ClipEditor.unlink.test.tsx`, and the browser
+journeys `apps/e2e/tests/regressions/ESCSUITE-355.spec.ts` and
+`ESCSUITE-360.spec.ts`.
