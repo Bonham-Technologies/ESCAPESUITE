@@ -136,6 +136,50 @@ describe('SourceToggles availability', () => {
     expect(toggle(label)).toBeEnabled()
   })
 
+  // ESCSUITE-343. The default config has the mic on, so with no mic (or a
+  // denied one) the greyed toggle used to stay drawn ON and announced
+  // "pressed" while the take silently recorded no mic. An unavailable source
+  // shows as off, whatever the stored preference says.
+  it.each(rows)('%s shows as off when unavailable, even with its flag on', (label, _source, flag, capability) => {
+    renderToggles({
+      config: { [flag]: true } as Partial<RecordingConfig>,
+      capabilities: { [capability]: false },
+      detailedCapabilities: { [capability]: { available: false, message: `No ${label} here` } },
+    })
+
+    expect(toggle(label)).toHaveAttribute('aria-pressed', 'false')
+    expect(toggle(label)).not.toHaveClass(styles.active)
+  })
+
+  it.each(rows)('%s gives assistive tech the reason it is unavailable', (label, _source, flag, capability) => {
+    renderToggles({
+      config: { [flag]: true } as Partial<RecordingConfig>,
+      capabilities: { [capability]: false },
+      detailedCapabilities: { [capability]: { available: false, message: `No ${label} here` } },
+    })
+
+    expect(toggle(label)).toHaveAccessibleDescription(`No ${label} here`)
+  })
+
+  it.each(rows)('%s carries no description while it is available', (label) => {
+    renderToggles()
+    expect(toggle(label)).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('leaves the other rows pressed when only the mic is unavailable', () => {
+    renderToggles({
+      config: { screenEnabled: true, webcamEnabled: true, microphoneEnabled: true, systemAudioEnabled: true },
+      capabilities: { microphone: false },
+      detailedCapabilities: { microphone: { available: false, message: 'No microphone found' } },
+    })
+
+    expect(toggle('Microphone')).toHaveAttribute('aria-pressed', 'false')
+    for (const label of ['Screen', 'Webcam', 'System Audio']) {
+      expect(toggle(label)).toHaveAttribute('aria-pressed', 'true')
+      expect(toggle(label)).toHaveClass(styles.active)
+    }
+  })
+
   it('greys a row out and explains why, with a struck-through icon', () => {
     const { container } = renderToggles({
       detailedCapabilities: {

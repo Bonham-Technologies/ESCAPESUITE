@@ -1,5 +1,7 @@
+import { useId } from 'react';
 import type {
   AudioLevels,
+  CapabilityInfo,
   DetailedCapabilities,
   EnvironmentCapabilities,
   RecordingConfig,
@@ -67,6 +69,13 @@ interface SourceTogglesProps {
  * plus whether a take is in progress. The two are separate on purpose: the
  * tooltip explains a permanent limitation, the disabled state also covers the
  * temporary one.
+ *
+ * A toggle whose source cannot be captured is drawn and announced as off
+ * whatever its stored flag says (ESCSUITE-343): the take records nothing from
+ * it (`useMediaStreams` skips it), so a greyed-but-ON switch was a lie. The
+ * stored preference itself is left alone, so the toggle comes back on when
+ * the device appears. The row's reason is also tied to the button with
+ * `aria-describedby`, since a `title` tooltip is not reliably announced.
  */
 export function SourceToggles({
   config,
@@ -78,6 +87,17 @@ export function SourceToggles({
   systemAudioShared,
   onToggleSource,
 }: SourceTogglesProps) {
+  const reasonId = useId();
+  const screenOn = config.screenEnabled && capabilities.screenCapture;
+  const webcamOn = config.webcamEnabled && capabilities.webcam;
+  const microphoneOn = config.microphoneEnabled && capabilities.microphone;
+  const systemAudioOn = config.systemAudioEnabled && capabilities.systemAudio;
+  const unavailableReason = (c: CapabilityInfo) => (c.available ? undefined : c.message);
+  const screenReason = unavailableReason(detailedCapabilities.screenCapture);
+  const webcamReason = unavailableReason(detailedCapabilities.webcam);
+  const microphoneReason = unavailableReason(detailedCapabilities.microphone);
+  const systemAudioReason = unavailableReason(detailedCapabilities.systemAudio);
+
   return (
     <section className={styles.sidebarSection}>
       <h2 className={styles.sidebarTitle}>Sources</h2>
@@ -93,11 +113,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {screenReason && (
+            <span id={`${reasonId}-screen`} className={styles.srOnly}>
+              {screenReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.screenEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${screenOn ? styles.active : ''}`}
             onClick={() => onToggleSource('screen')}
             disabled={!capabilities.screenCapture || disabled}
-            aria-pressed={config.screenEnabled}
+            aria-pressed={screenOn}
+            aria-describedby={screenReason ? `${reasonId}-screen` : undefined}
             aria-label="Screen"
           >
             <span className={styles.toggleKnob} />
@@ -115,11 +141,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {webcamReason && (
+            <span id={`${reasonId}-webcam`} className={styles.srOnly}>
+              {webcamReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.webcamEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${webcamOn ? styles.active : ''}`}
             onClick={() => onToggleSource('webcam')}
             disabled={!capabilities.webcam || disabled}
-            aria-pressed={config.webcamEnabled}
+            aria-pressed={webcamOn}
+            aria-describedby={webcamReason ? `${reasonId}-webcam` : undefined}
             aria-label="Webcam"
           >
             <span className={styles.toggleKnob} />
@@ -137,11 +169,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {microphoneReason && (
+            <span id={`${reasonId}-microphone`} className={styles.srOnly}>
+              {microphoneReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.microphoneEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${microphoneOn ? styles.active : ''}`}
             onClick={() => onToggleSource('microphone')}
             disabled={!capabilities.microphone || disabled}
-            aria-pressed={config.microphoneEnabled}
+            aria-pressed={microphoneOn}
+            aria-describedby={microphoneReason ? `${reasonId}-microphone` : undefined}
             aria-label="Microphone"
           >
             <span className={styles.toggleKnob} />
@@ -159,11 +197,17 @@ export function SourceToggles({
               <UnavailableIcon className={styles.unavailableIcon} />
             )}
           </span>
+          {systemAudioReason && (
+            <span id={`${reasonId}-systemAudio`} className={styles.srOnly}>
+              {systemAudioReason}
+            </span>
+          )}
           <button
-            className={`${styles.toggle} ${config.systemAudioEnabled ? styles.active : ''}`}
+            className={`${styles.toggle} ${systemAudioOn ? styles.active : ''}`}
             onClick={() => onToggleSource('systemAudio')}
             disabled={!capabilities.systemAudio || disabled}
-            aria-pressed={config.systemAudioEnabled}
+            aria-pressed={systemAudioOn}
+            aria-describedby={systemAudioReason ? `${reasonId}-systemAudio` : undefined}
             aria-label="System Audio"
           >
             <span className={styles.toggleKnob} />
