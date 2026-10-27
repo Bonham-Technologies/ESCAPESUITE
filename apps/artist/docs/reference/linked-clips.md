@@ -32,7 +32,8 @@ cutting a sliver off it, and a partner starting at the cut goes to the right.
 | Drag | Moves the linked clips by the same time and rows, through `moveClips`; refused whole when any of them cannot land (`canMoveSelectedClips`), and their boxes follow the ghost (`DragState.companions`) |
 
 `Ctrl+Alt+B` is matched on `e.code === 'KeyB'` because macOS reports Option+B
-as `∫`. Alt during a drag is read at the mousedown and on every move. Some Linux
+as `∫`. Alt during a drag is read at the mousedown and on every move; during a ripple
+trim it is read on every mouse move only (the release uses the last move's). Some Linux
 window managers take Alt+drag for moving windows; there, press Alt after the drag
 has started, or use **Unlink**.
 

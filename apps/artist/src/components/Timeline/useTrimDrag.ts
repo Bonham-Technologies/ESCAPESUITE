@@ -262,7 +262,22 @@ export function useTrimDrag({
     const partners = [...partnersRef.current]
       .map(([id, origin]) => ({ clip: clips.find((c) => c.id === id), origin }))
       .filter((p): p is { clip: Clip; origin: TrimOrigin } => p.clip !== undefined);
-    if (!e.altKey && partners.some((p) => isTrackLocked(tracks, p.clip.trackId))) return;
+    if (!e.altKey && partners.some((p) => isTrackLocked(tracks, p.clip.trackId))) {
+      // Refused whole, as a ripple trim that starts this way is: a clip an
+      // earlier Alt move trimmed goes back to where it began, so the release
+      // has nothing to shift.
+      const home = computeTrimUpdate({
+        edge: trim.edge,
+        mouseTime: edgeTime(trim.origin, trim.edge),
+        clip,
+        sourceVideo,
+        origin: trim.origin,
+      });
+      if (home && changesClip(clip, home)) {
+        gestureHistory.commit((skipHistory) => trimClip(trim.clipId, trim.edge, home, trim.origin, skipHistory));
+      }
+      return;
+    }
     // The partner's update for the edge moved by `delta`, clamped as the
     // grabbed clip's own is.
     const partnerUpdate = (p: { clip: Clip; origin: TrimOrigin }, delta: number) => {
@@ -283,6 +298,7 @@ export function useTrimDrag({
       delta = wanted;
       for (const p of partners) {
         const u = partnerUpdate(p, wanted);
+        // A partner that cannot move at all (no source, or too short) holds the group still.
         const reached = u ? edgeTime({ ...p.clip, ...u }, trim.edge) - edgeTime(p.origin, trim.edge) : 0;
         if (Math.abs(reached) < Math.abs(delta)) delta = reached;
       }

@@ -85,18 +85,24 @@ const mountTrim = () =>
 
 /** Grab `clip`'s edge, run the pointer through `times`, let go. */
 function trim(clip: Clip, edge: 'start' | 'end', times: number[], altKey = false) {
+  trimWithAlt(clip, edge, times.map((seconds) => [seconds, altKey]))
+}
+
+/** As `trim`, with Alt held or not at each move: `[seconds, altKey]`. */
+function trimWithAlt(clip: Clip, edge: 'start' | 'end', moves: [number, boolean][]) {
   const { result } = mountTrim()
+  const altKey = moves[0]?.[1] ?? false
   const event = { stopPropagation: () => {}, preventDefault: () => {}, altKey } as unknown as React.MouseEvent
   act(() => {
     result.current.handleTrimMouseDown(event, clip, edge)
   })
-  for (const seconds of times) {
+  for (const [seconds, alt] of moves) {
     act(() => {
-      document.dispatchEvent(new MouseEvent('mousemove', { clientX: LEFT + seconds * PPS, altKey }))
+      document.dispatchEvent(new MouseEvent('mousemove', { clientX: LEFT + seconds * PPS, altKey: alt }))
     })
   }
   act(() => {
-    document.dispatchEvent(new MouseEvent('mouseup', { altKey }))
+    document.dispatchEvent(new MouseEvent('mouseup', { altKey: moves[moves.length - 1]?.[1] ?? false }))
   })
 }
 
@@ -173,6 +179,42 @@ describe('ripple-trimming a linked clip (ESCSUITE-360)', () => {
     expect(row(screenRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
     expect(row(micRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
     expect(past()).toBe(before)
+  })
+
+  it('with Alt let go mid-drag over a locked partner, puts the clip back and shifts nothing', () => {
+    const { screenRow, micRow, pieces } = cutTake()
+    store().updateTrack(micRow, { locked: true })
+    store().setActiveTool('ripple')
+
+    trimWithAlt(pieces[1], 'end', [[5.5, true], [5, false]])
+
+    expect(row(screenRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
+    expect(row(micRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
+  })
+
+  it('Alt pressed and let go mid-drag ends with both rows rippled, one undo step', () => {
+    const { screenRow, micRow, pieces } = cutTake()
+    store().setActiveTool('ripple')
+    const before = past()
+
+    trimWithAlt(pieces[1], 'end', [[5.5, false], [5.2, true], [5, false]])
+
+    expect(row(screenRow)).toEqual([[0, 0, 3], [3, 3, 5], [5, 6, 10]])
+    expect(row(micRow)).toEqual([[0, 0, 3], [3, 3, 5], [5, 6, 10]])
+    expect(past() - before).toBe(1)
+    store().undo()
+    expect(row(screenRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
+    expect(row(micRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
+  })
+
+  it('Alt pressed at the last move ripples the grabbed row alone and puts the partner back', () => {
+    const { screenRow, micRow, pieces } = cutTake()
+    store().setActiveTool('ripple')
+
+    trimWithAlt(pieces[1], 'end', [[5.5, false], [5, true]])
+
+    expect(row(screenRow)).toEqual([[0, 0, 3], [3, 3, 5], [5, 6, 10]])
+    expect(row(micRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
   })
 
   it('a plain trim stays per clip', () => {
