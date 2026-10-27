@@ -158,6 +158,22 @@ describe('placeWholeBuffer', () => {
     expect(runs).toEqual(Array.from({ length: 10 }, (_, k) => [k * 2880, 2880, k * 2880 + (k >= 2 ? 1920 : 0)]));
   });
 
+  it('gives the priming the decode dropped to the first packets, not spread over every run', () => {
+    // 1024-frame AAC packets from -2112 frames, decoded 2112 frames short,
+    // with a 40 ms hole before the tenth packet.
+    const stamps = Array.from({ length: 20 }, (_, k) => (k * 1024 - 2112 + (k >= 9 ? 1920 : 0)) / RATE);
+
+    const runs = placeWholeBuffer(stamps, 20 * 1024 - 2112, RATE)!;
+
+    // Every kept frame lands at its packet's time, the hole silent between.
+    for (const [from, frames, at] of runs) {
+      const k = Math.floor((from + 2112) / 1024);
+      expect(frames).toBeGreaterThan(0);
+      expect(at - from).toBe(k >= 9 ? 1920 : 0);
+    }
+    expect(runs.reduce((sum, [, frames]) => sum + frames, 0)).toBe(20 * 1024 - 2112);
+  });
+
   it('answers null for a clean track that mixes frame sizes, rather than cut it into equal runs', () => {
     // Opus at 60 ms, then 20 ms frames: no holes, but the median step is 20 ms.
     const stamps = [...Array.from({ length: 10 }, (_, k) => k * 0.06), ...Array.from({ length: 30 }, (_, k) => 0.6 + k * 0.02)];

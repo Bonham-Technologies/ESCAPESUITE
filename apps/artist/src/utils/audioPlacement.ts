@@ -10,8 +10,9 @@
  * sync, and so must ESCAPEARTIST's export mix and waveforms.
  *
  * Neither mediabunny's `AudioSampleSink` nor Chromium's `AudioDecoder` passes
- * a packet's timestamp through: both count decoded frames from the first one.
- * So the timestamps are read from the packets themselves ({@link PacketClock})
+ * a packet's timestamp through exactly: both count decoded frames from the
+ * first one (mediabunny resyncs only once they drift a whole chunk apart). So
+ * the timestamps are read from the packets themselves ({@link PacketClock})
  * and paired with the decoded chunks in decode order, one chunk per packet,
  * and {@link TimestampPlacer} decides where each chunk goes.
  *
@@ -164,12 +165,18 @@ export function placeWholeBuffer(
   const holes = timestamps[count - 1] - timestamps[0] - (count - 1) * frame;
   if (Math.abs(holes) <= PLACEMENT_TOLERANCE_SECONDS) return null;
 
+  // Priming the decode dropped (packets stamped before zero, an AAC edit
+  // list's) belongs to the first packets' runs, not spread over all of them.
+  const priming = Math.round(Math.max(0, -timestamps[0]) * sampleRate);
+  const total = length + priming;
   const placer = new TimestampPlacer(sampleRate);
   const runs: [number, number, number][] = [];
   for (let k = 0; k < count; k++) {
-    const from = Math.round((k * length) / count);
-    const to = Math.round(((k + 1) * length) / count);
-    const { at, skip } = placer.place(timestamps[k], to - from);
+    const start = Math.round((k * total) / count) - priming;
+    const to = Math.round(((k + 1) * total) / count) - priming;
+    if (to <= 0) continue;
+    const from = Math.max(0, start);
+    const { at, skip } = placer.place(timestamps[k] + (from - start) / sampleRate, to - from);
     if (to - from - skip > 0) runs.push([from + skip, to - from - skip, at]);
   }
   return runs.length > 0 ? runs : null;

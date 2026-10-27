@@ -48,7 +48,8 @@ placed by timestamp. This supersedes the 2026-10-23 reading that the gaps were j
 ESCSUITE-367 note not to fill them), and reopens ESCSUITE-297 H4.
 
 - **How.** Neither mediabunny's `AudioSampleSink` nor Chromium's `AudioDecoder` passes a packet's
-  timestamp through (both count decoded frames from the first), so `PacketClock` reads the
+  timestamp through exactly (both count decoded frames from the first; mediabunny resyncs only once
+  they drift a whole chunk apart), so `PacketClock` reads the
   packets' timestamps (`EncodedPacketSink`, metadata only) alongside the decode and pairs them
   with the decoded chunks in order, one chunk per packet. `TimestampPlacer` puts each chunk at
   its timestamp: a later one leaves silence before it, an earlier one has its overlapping start
@@ -65,7 +66,9 @@ ESCSUITE-367 note not to fill them), and reopens ESCSUITE-297 H4.
   no holes.
 - **First chunk.** The clock is set from the second chunk: Chromium trims Opus pre-skip from the
   first chunk (648 of 960 frames for a CRAFT take), so the first chunk's timestamp says nothing
-  about where its frames end. A hole between the first two packets is not seen, and a track whose
+  about where its frames end. (A decoder that swallowed its first packets whole would shift the
+  pairing, and so each hole, by that many chunks; Chromium's Opus and AAC decoders do not, and
+  Safari's AAC is unmeasured.) A hole between the first two packets is not seen, and a track whose
   first packet is stamped after zero still starts at the source's frame 0 (as before; the preview's
   media element honours that lead-in, the export does not).
 - **`decodeAudioData` fallback.** It returns one buffer with no per-packet lengths, so
