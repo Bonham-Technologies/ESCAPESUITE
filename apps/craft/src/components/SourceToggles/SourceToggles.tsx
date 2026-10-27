@@ -52,6 +52,12 @@ interface SourceTogglesProps {
    * hand it over, and a live-looking meter stuck at 0 is a lie.
    */
   systemAudioShared: boolean;
+  /**
+   * Whether capability detection has finished. Until it has, every capability
+   * reads false ("Checking..."), which means "not known yet", not
+   * "unavailable": the toggles keep showing the stored preference.
+   */
+  capabilitiesReady: boolean;
   onToggleSource: (source: RecordingSource) => void;
 }
 
@@ -76,6 +82,8 @@ interface SourceTogglesProps {
  * stored preference itself is left alone, so the toggle comes back on when
  * the device appears. The row's reason is also tied to the button with
  * `aria-describedby`, since a `title` tooltip is not reliably announced.
+ * Neither applies before detection has finished (`capabilitiesReady`), when
+ * every source reads unavailable only because it has not been checked yet.
  */
 export function SourceToggles({
   config,
@@ -85,14 +93,17 @@ export function SourceToggles({
   disabled,
   showMeters,
   systemAudioShared,
+  capabilitiesReady,
   onToggleSource,
 }: SourceTogglesProps) {
   const reasonId = useId();
-  const screenOn = config.screenEnabled && capabilities.screenCapture;
-  const webcamOn = config.webcamEnabled && capabilities.webcam;
-  const microphoneOn = config.microphoneEnabled && capabilities.microphone;
-  const systemAudioOn = config.systemAudioEnabled && capabilities.systemAudio;
-  const unavailableReason = (c: CapabilityInfo) => (c.available ? undefined : c.message);
+  const screenOn = config.screenEnabled && (capabilities.screenCapture || !capabilitiesReady);
+  const webcamOn = config.webcamEnabled && (capabilities.webcam || !capabilitiesReady);
+  const microphoneOn = config.microphoneEnabled && (capabilities.microphone || !capabilitiesReady);
+  const systemAudioOn =
+    config.systemAudioEnabled && (capabilities.systemAudio || !capabilitiesReady);
+  const unavailableReason = (c: CapabilityInfo) =>
+    c.available || !capabilitiesReady ? undefined : c.message;
   const screenReason = unavailableReason(detailedCapabilities.screenCapture);
   const webcamReason = unavailableReason(detailedCapabilities.webcam);
   const microphoneReason = unavailableReason(detailedCapabilities.microphone);
@@ -216,9 +227,9 @@ export function SourceToggles({
       </div>
 
       {/* Audio meters */}
-      {(config.microphoneEnabled || config.systemAudioEnabled) && showMeters && (
+      {(microphoneOn || config.systemAudioEnabled) && showMeters && (
         <div className={styles.audioMeters}>
-          {config.microphoneEnabled && (
+          {microphoneOn && (
             <div className={styles.audioMeter}>
               <span className={styles.meterLabel}>Mic</span>
               <div className={styles.meterBar}>

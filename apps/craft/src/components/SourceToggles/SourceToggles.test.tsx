@@ -54,6 +54,8 @@ interface Options {
    */
   showMeters?: boolean
   systemAudioShared?: boolean
+  /** Whether capability detection has finished. Defaults to `true`. */
+  capabilitiesReady?: boolean
 }
 
 function renderToggles(options: Options = {}) {
@@ -67,6 +69,7 @@ function renderToggles(options: Options = {}) {
       disabled={options.disabled ?? false}
       showMeters={options.showMeters ?? false}
       systemAudioShared={options.systemAudioShared ?? true}
+      capabilitiesReady={options.capabilitiesReady ?? true}
       onToggleSource={onToggleSource}
     />
   )
@@ -180,6 +183,51 @@ describe('SourceToggles availability', () => {
     }
   })
 
+  // ESCSUITE-343 review. Before detection resolves the store holds every
+  // capability false with a "Checking..." message. That is "not known yet",
+  // not "unavailable": the toggles keep the stored preference instead of
+  // sliding from off to on at every load, and announce no reason.
+  it.each(rows)('%s keeps its preference and says nothing while detection is pending', (label, _source, flag, capability) => {
+    renderToggles({
+      config: { [flag]: true } as Partial<RecordingConfig>,
+      capabilities: { [capability]: false },
+      detailedCapabilities: { [capability]: { available: false, message: 'Checking...' } },
+      capabilitiesReady: false,
+    })
+
+    expect(toggle(label)).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle(label)).toHaveClass(styles.active)
+    expect(toggle(label)).not.toHaveAttribute('aria-describedby')
+    expect(screen.queryByText('Checking...', { selector: `.${styles.srOnly}` })).not.toBeInTheDocument()
+  })
+
+  it.each(rows)('%s comes back on when its source appears, its preference untouched', (label, _source, flag, capability) => {
+    const props = {
+      config: { ...defaultConfig, [flag]: true },
+      detailedCapabilities: allDetailed(),
+      audioLevels: { microphone: 0, system: 0 },
+      disabled: false,
+      showMeters: false,
+      systemAudioShared: true,
+      capabilitiesReady: true,
+      onToggleSource: vi.fn<(source: RecordingSource) => void>(),
+    }
+    const { rerender } = render(
+      <SourceToggles
+        {...props}
+        capabilities={{ ...allCapabilities(), [capability]: false }}
+        detailedCapabilities={{ ...allDetailed(), [capability]: { available: false, message: 'Gone' } }}
+      />
+    )
+    expect(toggle(label)).toHaveAttribute('aria-pressed', 'false')
+
+    rerender(<SourceToggles {...props} capabilities={allCapabilities()} />)
+
+    expect(toggle(label)).toHaveAttribute('aria-pressed', 'true')
+    expect(toggle(label)).toHaveClass(styles.active)
+    expect(toggle(label)).not.toHaveAttribute('aria-describedby')
+  })
+
   it('greys a row out and explains why, with a struck-through icon', () => {
     const { container } = renderToggles({
       detailedCapabilities: {
@@ -283,6 +331,18 @@ describe('SourceToggles audio meters', () => {
     const [mic, system] = fills(container)
     expect(mic).toHaveStyle({ width: '10%' })
     expect(system).toHaveStyle({ width: '100%' })
+  })
+
+  it('draws no mic meter for a take that cannot have a mic (ESCSUITE-343)', () => {
+    renderToggles({
+      config: { microphoneEnabled: true, systemAudioEnabled: false },
+      capabilities: { microphone: false },
+      detailedCapabilities: { microphone: { available: false, message: 'No microphone found' } },
+      disabled: true,
+      showMeters: true,
+    })
+
+    expect(screen.queryByText('Mic')).not.toBeInTheDocument()
   })
 
   // ESCSUITE-104 review. `disabled` covers a take that is being saved as well
