@@ -58,13 +58,21 @@ ESCSUITE-367 note not to fill them), and reopens ESCSUITE-297 H4.
   timestamps themselves, so jitter never adds up. A MediaRecorder track's per-packet jitter is a
   few ms either way and cancels; its holes are 20–50 ms. A file whose packets tile — a CRAFT
   WebCodecs take, WAV, MP3, AAC from other tools — comes out sample for sample as before.
+- **Opus and AAC only** (`placesByTimestamp`): their every packet decodes to one chunk of one
+  fixed frame, so chunk and packet pair up in order, and MediaRecorder writes nothing else. Any
+  other codec (Vorbis, whose first packet decodes to nothing and whose blocks vary; PCM; FLAC;
+  MP3) is laid end to end as before: a pairing off by one there would move audio in a file with
+  no holes.
 - **First chunk.** The clock is set from the second chunk: Chromium trims Opus pre-skip from the
   first chunk (648 of 960 frames for a CRAFT take), so the first chunk's timestamp says nothing
-  about where its frames end. A hole between the first two packets is not seen.
+  about where its frames end. A hole between the first two packets is not seen, and a track whose
+  first packet is stamped after zero still starts at the source's frame 0 (as before; the preview's
+  media element honours that lead-in, the export does not).
 - **`decodeAudioData` fallback.** It returns one buffer with no per-packet lengths, so
   `placeDecodedFile` reads the packets' timestamps and, for an Opus or AAC track only (one fixed
-  frame per packet), takes the median step as the frame. If the timestamps hold no more than
-  10 ms of holes overall, the buffer stays end to end; otherwise it is cut into one equal run per
+  frame per packet), takes the median step as the frame. If fewer than 80% of steps are within
+  30% of it (a track mixing frame sizes), or the timestamps hold no more than 10 ms of holes
+  overall, the buffer stays end to end; otherwise it is cut into one equal run per
   packet and each run placed. AAC priming that `decodeAudioData` trims does not count as a hole.
 - **The guard.** `apps/e2e/tests/regressions/ESCSUITE-368.spec.ts` (`@nightly`) records 120 s
   takes on both recorder paths and exports the PiP take; each must keep its beep-to-picture

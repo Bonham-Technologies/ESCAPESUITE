@@ -6,7 +6,7 @@
 import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, type InputAudioTrack } from 'mediabunny';
 import type { WaveformPeak } from '../store/types';
 import { PeakReducer, mixToMono, peaksFromPcm } from './waveformPeaks';
-import { PacketClock, TimestampPlacer, placeDecodedFile } from './audioPlacement';
+import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } from './audioPlacement';
 
 /**
  * Extract waveform peak data from a media file (audio or video)
@@ -77,12 +77,14 @@ async function streamWaveformPeaks(
     // MP3 is left to decodeAudioData: mediabunny does not apply the encoder
     // delay and padding a LAME/Xing header declares, which decodeAudioData
     // trims, so streamed peaks would sit ~25 ms late against the old ones.
-    if ((await track.getCodec()) === 'mp3') return null;
+    const codec = await track.getCodec();
+    if (codec === 'mp3') return null;
     if (!(await track.canDecode())) return null;
 
     let reducer: PeakReducer | null = null;
     let placer: TimestampPlacer | null = null;
-    const clock = new PacketClock(track);
+    // Opus and AAC only: see `placesByTimestamp`.
+    const clock = placesByTimestamp(codec) ? new PacketClock(track) : null;
     // Reused across chunks: one plane per channel the mix reads (at most two).
     const planes: Float32Array[] = [];
     try {
@@ -91,7 +93,7 @@ async function streamWaveformPeaks(
           // One decoded chunk per packet, in decode order: each chunk is
           // placed by its packet's timestamp (ESCSUITE-368), so a hole in a
           // MediaRecorder track shows as a silent stretch where it plays.
-          const stamp = await clock.next();
+          const stamp = clock ? await clock.next() : null;
           // Frames before zero are codec priming (an MP4 edit list's, say),
           // which decodeAudioData drops too. Opus pre-skip in a WebM is not
           // skipped here: mediabunny's Matroska demuxer ignores it, but
@@ -126,7 +128,7 @@ async function streamWaveformPeaks(
         }
       }
     } finally {
-      await clock.close();
+      await clock?.close();
     }
     return reducer ? reducer.finish() : [];
   } finally {

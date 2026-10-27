@@ -32,6 +32,18 @@ import { ALL_FORMATS, BlobSource, EncodedPacketSink, Input, type InputAudioTrack
  */
 export const PLACEMENT_TOLERANCE_SECONDS = 0.01;
 
+/**
+ * Whether a track's codec is placed by timestamp at all: Opus and AAC, whose
+ * every packet decodes to one chunk of one fixed frame, so chunk and packet
+ * pair up in order. MediaRecorder writes only these. Anything else (Vorbis's
+ * varying blocks and silent first packet, PCM, FLAC) is laid end to end as
+ * before, since a pairing off by one there would move audio in a file with
+ * no holes.
+ */
+export function placesByTimestamp(codec: string | null): boolean {
+  return codec === 'opus' || codec === 'aac';
+}
+
 /** Where one decoded chunk goes, in frames of the placed stream. */
 export interface Placement {
   /** Frame the chunk's first kept frame lands on; any frames between the previous chunk's end and this are silence. */
@@ -144,6 +156,11 @@ export function placeWholeBuffer(
   for (let k = 1; k < count; k++) steps.push(timestamps[k] - timestamps[k - 1]);
   steps.sort((a, b) => a - b);
   const frame = steps[Math.floor(steps.length / 2)];
+  // One fixed frame: most steps within 30% of it (a MediaRecorder track's
+  // jitter is about 15%, its holes a few percent of packets). A track that
+  // mixes frame sizes is left end to end rather than cut into equal runs.
+  const regular = steps.filter((step) => Math.abs(step - frame) <= 0.3 * frame).length;
+  if (!(frame > 0) || regular < 0.8 * steps.length) return null;
   const holes = timestamps[count - 1] - timestamps[0] - (count - 1) * frame;
   if (Math.abs(holes) <= PLACEMENT_TOLERANCE_SECONDS) return null;
 
@@ -173,8 +190,7 @@ export async function placeDecodedFile(
   try {
     const track = await input.getPrimaryAudioTrack();
     if (!track) return null;
-    const codec = await track.getCodec();
-    if (codec !== 'opus' && codec !== 'aac') return null;
+    if (!placesByTimestamp(await track.getCodec())) return null;
     const timestamps: number[] = [];
     for await (const packet of new EncodedPacketSink(track).packets(undefined, undefined, { metadataOnly: true })) {
       timestamps.push(packet.timestamp);

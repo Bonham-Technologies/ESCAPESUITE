@@ -2,7 +2,7 @@
 // (ESCSUITE-368), the way the export mixes it and a player plays it: a hole in
 // a MediaRecorder track shows as a silent stretch where it falls.
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AudioSample, AudioSampleSink, EncodedPacketSink } from 'mediabunny';
+import { AudioSample, AudioSampleSink, EncodedPacketSink, InputAudioTrack } from 'mediabunny';
 import { extractWaveformData } from './waveform';
 import * as placement from './audioPlacement';
 import { createAudioBufferDouble, installAudioContextDouble, type AudioContextDoubles } from '../test/doubles/audio';
@@ -38,6 +38,8 @@ describe('extractWaveformData, placed by timestamp (ESCSUITE-368)', () => {
   });
 
   it('draws a hole in the track as silence, and the sound after it at its timestamp', async () => {
+    vi.spyOn(InputAudioTrack.prototype, 'getCodec').mockResolvedValue('opus');
+    vi.spyOn(InputAudioTrack.prototype, 'canDecode').mockResolvedValue(true);
     vi.spyOn(AudioSampleSink.prototype, 'samples').mockImplementation(async function* () {
       for (const [k, value] of [0.25, 0.5, 0.75].entries()) yield chunk(value, (k * FRAME) / RATE);
     });

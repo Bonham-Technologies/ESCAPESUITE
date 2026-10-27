@@ -4,7 +4,7 @@
 // sound with its picture. Chunks and packets are doubles; the WAV only gives
 // mediabunny a 48 kHz audio track to open.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { AudioSample, AudioSampleSink, EncodedPacketSink } from 'mediabunny'
+import { AudioSample, AudioSampleSink, EncodedPacketSink, InputAudioTrack } from 'mediabunny'
 import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import * as placement from '../utils/audioPlacement'
@@ -35,8 +35,13 @@ const chunk = (value: number, timestamp: number) =>
     timestamp,
   })
 
-/** Decode `values` as one chunk each, counted end to end as the decoder stamps them, from packets stamped `stamps`. */
-function decodeAs(values: number[], stamps: number[]): void {
+/**
+ * Decode `values` as one chunk each, counted end to end as the decoder stamps
+ * them, from packets stamped `stamps`, of a track reporting `codec`.
+ */
+function decodeAs(values: number[], stamps: number[], codec = 'opus'): void {
+  vi.spyOn(InputAudioTrack.prototype, 'getCodec').mockResolvedValue(codec as never)
+  vi.spyOn(InputAudioTrack.prototype, 'canDecode').mockResolvedValue(true)
   vi.spyOn(AudioSampleSink.prototype, 'samples').mockImplementation(async function* () {
     for (let k = 0; k < values.length; k++) yield chunk(values[k], (k * FRAME) / SAMPLE_RATE)
   })
@@ -93,6 +98,14 @@ describe('extractAndMixAudio, placed by timestamp (ESCSUITE-368)', () => {
     decodeAs([0.1, 0.2, 0.3, 0.4], [0, 0.023, 0.037, 0.061])
 
     expect(frames(await mix(), 5)).toEqual([0.1, 0.2, 0.3, 0.4, 0].map(Math.fround))
+  })
+
+  it('lays a codec whose packets need not decode one chunk each (Vorbis) end to end, holes or not', async () => {
+    decodeAs([0.1, 0.2, 0.3, 0.4], [0, 0.02, 0.06, 0.08], 'vorbis')
+    const packets = vi.mocked(EncodedPacketSink.prototype.packets)
+
+    expect(frames(await mix(), 5)).toEqual([0.1, 0.2, 0.3, 0.4, 0].map(Math.fround))
+    expect(packets).not.toHaveBeenCalled()
   })
 
   it('places the whole-file fallback by the packets too, when the timestamps leave holes', async () => {

@@ -10,6 +10,7 @@ import {
   TimestampPlacer,
   placeDecodedFile,
   placeWholeBuffer,
+  placesByTimestamp,
 } from './audioPlacement';
 import { floatWav } from '../test/fixtures/wavFixture';
 
@@ -89,6 +90,14 @@ describe('TimestampPlacer', () => {
   });
 });
 
+describe('placesByTimestamp', () => {
+  it('places Opus and AAC, whose packets each decode to one fixed-length chunk, and nothing else', () => {
+    expect(['opus', 'aac', 'vorbis', 'pcm-f32', 'flac', 'mp3', null].map(placesByTimestamp)).toEqual([
+      true, true, false, false, false, false, false,
+    ]);
+  });
+});
+
 describe('PacketClock', () => {
   afterEach(() => vi.restoreAllMocks());
 
@@ -141,15 +150,19 @@ describe('placeWholeBuffer', () => {
   });
 
   it('cuts the buffer into one run per packet and places each by its timestamp when there are holes', () => {
-    // Four 60 ms packets with a 40 ms hole before the third.
-    const stamps = [0, 0.06, 0.16, 0.22];
+    // Ten 60 ms packets with a 40 ms hole before the third.
+    const stamps = Array.from({ length: 10 }, (_, k) => k * 0.06 + (k >= 2 ? 0.04 : 0));
 
-    expect(placeWholeBuffer(stamps, 4 * 2880, RATE)).toEqual([
-      [0, 2880, 0],
-      [2880, 2880, 2880],
-      [5760, 2880, 7680],
-      [8640, 2880, 10560],
-    ]);
+    const runs = placeWholeBuffer(stamps, 10 * 2880, RATE);
+
+    expect(runs).toEqual(Array.from({ length: 10 }, (_, k) => [k * 2880, 2880, k * 2880 + (k >= 2 ? 1920 : 0)]));
+  });
+
+  it('answers null for a clean track that mixes frame sizes, rather than cut it into equal runs', () => {
+    // Opus at 60 ms, then 20 ms frames: no holes, but the median step is 20 ms.
+    const stamps = [...Array.from({ length: 10 }, (_, k) => k * 0.06), ...Array.from({ length: 30 }, (_, k) => 0.6 + k * 0.02)];
+
+    expect(placeWholeBuffer(stamps, 10 * 2880 + 30 * 960, RATE)).toBeNull();
   });
 
   it('answers null for too few packets to tell a frame from a hole', () => {

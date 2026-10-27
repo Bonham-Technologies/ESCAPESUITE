@@ -27,7 +27,7 @@ import type { Clip, Track } from '../store/types';
 import { isVisibleTrack } from '../store/trackVisibility';
 import { getVideoBlob } from './storage';
 import { getAnimatedVolume } from '../utils/animation';
-import { PacketClock, TimestampPlacer, placeDecodedFile } from '../utils/audioPlacement';
+import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } from '../utils/audioPlacement';
 
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
@@ -246,13 +246,15 @@ async function streamSourceInto(
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
   try {
     let track;
+    let codec: string | null = null;
     try {
       track = await input.getPrimaryAudioTrack();
       if (!track) return false;
       // MP3 is left to decodeAudioData: mediabunny does not apply the encoder
       // delay and padding a LAME/Xing header declares, which decodeAudioData
       // trims (see `utils/waveform.ts`).
-      if ((await track.getCodec()) === 'mp3') return null;
+      codec = await track.getCodec();
+      if (codec === 'mp3') return null;
       if (track.sampleRate !== SAMPLE_RATE) return null;
       if (!(await track.canDecode())) return null;
     } catch {
@@ -265,14 +267,15 @@ async function streamSourceInto(
     if (stopAt <= 0) return true;
 
     const placer = new TimestampPlacer(SAMPLE_RATE);
-    const clock = new PacketClock(track);
+    // Opus and AAC only: see `placesByTimestamp`.
+    const clock = placesByTimestamp(codec) ? new PacketClock(track) : null;
     // Reused across chunks: one plane per channel the mix reads (at most two).
     const planes: Float32Array[] = [];
     try {
       for await (const sample of new AudioSampleSink(track).samples()) {
         try {
           // One decoded chunk per packet, in decode order.
-          const stamp = await clock.next();
+          const stamp = clock ? await clock.next() : null;
           if (sample.sampleRate !== SAMPLE_RATE) {
             throw new Error(`decoded at ${sample.sampleRate} Hz`);
           }
@@ -313,7 +316,7 @@ async function streamSourceInto(
         `Could not read the sound of ${name}: its audio stopped decoding ${formatSeconds(placer.position)} in (${messageOf(error)})`
       );
     } finally {
-      await clock.close();
+      await clock?.close();
     }
     return true;
   } finally {
