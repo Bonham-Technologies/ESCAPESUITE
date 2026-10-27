@@ -36,6 +36,8 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
      every other run skips through `grepInvert`), and `SOAK_CYCLES=200` / `SOAK_RELOADS=30` for
      `tests/escapeartist/soak.spec.ts` (PR defaults 25 / 10). Per-browser gaps stay each spec's own
      `test.skip(browserName …, reason)`; the soaks are Chromium-only that way.
+- **Not in the nightly:** the responsive projects (`mobile-*`, `tablet-*`; the Chromium ones still
+  run in every PR's `e2e` job) and the headless-artist Chromium tests (also in `ci.yml`'s `e2e`).
 - **Setup** mirrors `ci.yml`'s `e2e` job (pnpm action pin, Node 24, pnpm cache, the capped and retried
   browser and apt installs), but installs Chromium, Firefox and WebKit under its own browser cache key
   (`playwright-all-…`), so it never fills `ci.yml`'s Chromium-only cache.
@@ -48,7 +50,8 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
   as a red `main` (`.claude/rules/autopilot.local.md`, "Main must stay green, step 1").
 - **Actions minutes.** About one 40–60 min job a day (PR e2e takes ~15 min for Chromium alone;
   Firefox and WebKit roughly add one suite each, and the longer soak ~15 min), so ~1,200–1,800
-  Linux minutes a month. `timeout-minutes` is 120.
+  Linux minutes a month. `timeout-minutes` is 120. This is an estimate: check it against the first
+  `workflow_dispatch` run and update this line with the measured time.
 - **Re-running with a given seed.** Actions → Nightly → "Run workflow" → `seed` = the seed from the
   failing run's summary, or `gh api -X POST repos/{owner}/{repo}/actions/workflows/nightly.yml/dispatches
   -f ref=main -f 'inputs[seed]=<seed>'`. "Re-run jobs" on the failing run reuses its run id and so

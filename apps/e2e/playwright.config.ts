@@ -3,13 +3,13 @@ import { defineConfig, devices } from '@playwright/test'
 const isCI = !!process.env.CI
 
 // ESCSUITE-353: CI runs Chromium only, so the Firefox and WebKit projects are
-// local-only unless E2E_CROSS_BROWSER is set; the nightly workflow
+// local-only unless E2E_CROSS_BROWSER=1; the nightly workflow
 // (.github/workflows/nightly.yml) sets it to run all three browsers on main.
-const crossBrowser = !isCI || !!process.env.E2E_CROSS_BROWSER
+const crossBrowser = !isCI || process.env.E2E_CROSS_BROWSER === '1'
 
 // ESCSUITE-353: a test tagged @nightly (too slow for every PR) runs only when
-// E2E_NIGHTLY is set, as the nightly workflow does.
-const nightly = !!process.env.E2E_NIGHTLY
+// E2E_NIGHTLY=1, as the nightly workflow does.
+const nightly = process.env.E2E_NIGHTLY === '1'
 
 // Standalone, production-layout and perf tests use separate configs. The perf
 // benchmarks in particular must never run here: they assert nothing, they take

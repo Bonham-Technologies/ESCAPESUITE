@@ -62,13 +62,13 @@ const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ')
  */
 export function toSummary({ failed, seed, runs, propertyOutcome, reportNote }) {
   const lines = ['### Nightly: property tests (ESCSUITE-349)', '']
-  lines.push(`Seed **${seed ?? 'unknown'}**, ${runs ?? 'unknown'} runs: ${propertyOutcome ?? 'unknown'}.`)
+  lines.push(`Seed **${seed || 'unknown'}**, ${runs || 'unknown'} runs: ${propertyOutcome || 'unknown'}.`)
   lines.push('')
   lines.push('Replay this seed locally:')
   lines.push('')
   lines.push('```bash')
   lines.push(
-    `ARTIST_FUZZ_SEED=${seed ?? '<seed>'} ARTIST_FUZZ_RUNS=${runs ?? 5000} pnpm --filter=@escapesuite/artist exec vitest run src/store/__tests__/timelineInvariants.property.test.ts`
+    `ARTIST_FUZZ_SEED=${seed || '<seed>'} ARTIST_FUZZ_RUNS=${runs || 5000} pnpm --filter=@escapesuite/artist exec vitest run src/store/__tests__/timelineInvariants.property.test.ts`
   )
   lines.push('```')
   lines.push('')

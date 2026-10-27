@@ -63,8 +63,10 @@ jobs:
           INPUT_SEED: ${{ github.event.inputs.seed }}
         run: |
           if [ -n "$INPUT_SEED" ]; then
-            if ! [[ "$INPUT_SEED" =~ ^[0-9]+$ ]] || [ "$INPUT_SEED" -gt 2147483647 ]; then
-              echo "::error::seed must be a whole number from 0 to 2147483647, got '${INPUT_SEED}'"
+            # The length check comes first: a 20-digit number overflows `-gt`, which then
+            # errors (and so passes) instead of rejecting it.
+            if ! [[ "$INPUT_SEED" =~ ^[0-9]+$ ]] || [ ${#INPUT_SEED} -gt 10 ] || [ "$INPUT_SEED" -gt 2147483647 ]; then
+              echo "::error::The seed input must be a whole number from 0 to 2147483647."
               exit 1
             fi
             seed="$INPUT_SEED"

@@ -26,8 +26,14 @@ import fc from 'fast-check'
 import { storeVideo, deleteVideo } from '../../core/storage'
 import { KnownBug, SOURCES, opCounts, runSequence, type MoveTarget, type Op } from '../../test/timelineModel'
 
-const SEED = Number(process.env.ARTIST_FUZZ_SEED ?? 0x5eed0349)
-const NUM_RUNS = Number(process.env.ARTIST_FUZZ_RUNS ?? 200)
+/** A whole number from the environment (at least `min`), or `fallback` when unset or malformed. */
+function envInt(name: string, fallback: number, min: number): number {
+  const value = Number(process.env[name] || NaN)
+  return Number.isInteger(value) && value >= min ? value : fallback
+}
+
+const SEED = envInt('ARTIST_FUZZ_SEED', 0x5eed0349, 0)
+const NUM_RUNS = envInt('ARTIST_FUZZ_RUNS', 200, 1)
 if (process.env.ARTIST_FUZZ_SEED !== undefined || process.env.ARTIST_FUZZ_RUNS !== undefined) {
   console.info(`timeline property test: ARTIST_FUZZ_SEED=${SEED} ARTIST_FUZZ_RUNS=${NUM_RUNS}`)
 }

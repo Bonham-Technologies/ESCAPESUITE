@@ -88,6 +88,12 @@ test('the summary names the seed with its replay command and lists the failures'
   assert.match(toSummary({ failed: null, reportNote: 'gone' }), /gone/)
 })
 
+test('an empty seed or outcome (a step that never ran) reads as unknown, not blank', () => {
+  const md = toSummary({ failed: [], seed: '', runs: '', propertyOutcome: '' })
+  assert.match(md, /Seed \*\*unknown\*\*, unknown runs: unknown\./)
+  assert.match(md, /ARTIST_FUZZ_SEED=<seed> ARTIST_FUZZ_RUNS=5000 pnpm/)
+})
+
 test('the CLI appends to the step summary, and notes a missing report without failing', () => {
   const dir = mkdtempSync(path.join(tmpdir(), 'report-nightly-'))
   const reportPath = path.join(dir, 'results.json')
