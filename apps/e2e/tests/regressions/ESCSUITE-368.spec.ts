@@ -32,15 +32,18 @@ import { canConvertToMp4, canEncodeAac } from '../../utils/webcodecs'
  *   camera on records through.
  * - **That PiP take exported by ESCAPEARTIST** as WebM, and as MP4 where the
  *   browser has H.264 and AAC encoders (the bundled Chromium has neither, so
- *   CI exports WebM only). The export decodes the source the same way the
- *   measurement does (`core/audioMixer.ts`, samples laid end to end).
+ *   CI exports WebM only).
  *
- * MediaRecorder's Opus track has PTS gaps and overlaps. They are read as
- * jitter: the measurement lays the decoded samples end to end and never
- * treats a gap as silence. Where the gaps do not cancel (what is left is in the
- * failure message as "audio timestamps hold N ms more than its samples"), the
- * file plays in sync in a player that honours the timestamps but this reading,
- * and an ESCAPEARTIST export of it, moves by about that much.
+ * MediaRecorder's Opus track has holes: packets whose timestamps jump past
+ * the end of the one before, where the recorder lost audio (20–50 ms each,
+ * about 85 ms a minute on a loaded machine; the failure message's "audio
+ * timestamps hold N ms more than its samples"). A player honours the
+ * timestamps, so the raw PiP take is read by them. ESCAPEARTIST used to lay
+ * the decoded samples end to end, closing every hole, so its export's sound
+ * led the picture further and further (−173 ms over 120 s); it now places
+ * them by timestamp too (`utils/audioPlacement.ts`), and its export is read
+ * end to end, the strict reading, so the export must carry the holes as
+ * silence itself.
  *
  * Chromium only: CDP throttling and the WebCodecs recorder.
  *
@@ -119,8 +122,8 @@ async function recordTake(page: Page, take: Take, file: string): Promise<void> {
 }
 
 /** Measure `file` and assert its sound stayed with its picture from the first beep to the last. */
-async function expectInSync(page: Page, file: string, label: string): Promise<void> {
-  const reading = await readAvSync(page.context(), file)
+async function expectInSync(page: Page, file: string, label: string, byTimestamp = false): Promise<void> {
+  const reading = await readAvSync(page.context(), file, { byTimestamp })
   const summary = `${label}: ${describeAvSync(reading)}`
   console.log(summary)
   test.info().annotations.push({ type: 'av-sync', description: summary })
@@ -161,7 +164,7 @@ test.describe('ESCSUITE-368: a long CRAFT take keeps its sound with its picture'
     test.setTimeout(TAKE_TIMEOUT_MS)
     const file = pipTakePath(test.info().project.outputDir)
     await recordTake(page, { webcam: true, capturePath: 'media-recorder' }, file)
-    await expectInSync(page, file, 'PiP take')
+    await expectInSync(page, file, 'PiP take (by timestamp)', true)
   })
 
   test('the composited take exported by ESCAPEARTIST', async ({ page }) => {

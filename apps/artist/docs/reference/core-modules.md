@@ -398,7 +398,11 @@
   a failed read was taken for "no audio". Measured on Chromium 141, the streamed path matches
   `decodeAudioData` sample for sample at offset 0 on a 48 kHz Opus WebM (ffmpeg-made, and a real
   MediaRecorder take) and on a float WAV; the one difference is a mix that goes past full scale,
-  which `decodeAudioData` clips at ±1 and the streamed path keeps for the peak normalisation. A clip
+  which `decodeAudioData` clips at ±1 and the streamed path keeps for the peak normalisation.
+  Since ESCSUITE-368 both paths place a source's audio **by its packets' timestamps**
+  (`utils/audioPlacement.ts`): a hole in a MediaRecorder track (lost audio) stays silent instead
+  of pulling the rest of the take earlier, and a file whose packets tile is mixed as before. See
+  "Audio placement" in [`audio-waveform-visibility.md`](audio-waveform-visibility.md). A clip
   whose track has been deleted is **skipped**, the same as a muted track (ESCSUITE-99;
   previously it was mixed in at full volume), and the same as a **hidden** track (ESCSUITE-127:
   the preview was already silent for one — `store/clipQueries.ts`'s `getClipsAtTime` filters on

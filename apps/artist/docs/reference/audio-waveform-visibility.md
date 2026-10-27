@@ -33,6 +33,43 @@ is **MP3**, which mediabunny decodes without trimming the LAME/Xing encoder dela
 `decodeAudioData` trims (streamed peaks would sit ~25 ms late). A container mediabunny reads and
 finds no audio track in answers `hasAudio: false` with no decode at all.
 
+## Audio placement: holes are lost audio (ESCSUITE-368)
+
+**Decision (owner, 2026-10-27).** A MediaRecorder Opus track (a CRAFT PiP or webcam take) has
+**holes**: packets whose timestamps jump 20–50 ms past the end of the one before, where the
+recorder lost audio. They are real lost audio, not timestamp jitter. ESCAPEARTIST places a
+source's decoded audio **by its packets' timestamps** and leaves each hole silent, in the export
+mix (`core/audioMixer.ts`) and the waveform peaks (`utils/waveform.ts`), both through
+`utils/audioPlacement.ts`. The preview already did: it plays the source through a `<video>` /
+`<audio>` element, which honours the timestamps. Laying the samples end to end instead closed
+every hole and pulled the rest of the take earlier: measured on 120 s PiP takes on a loaded host,
+−170 to −189 ms laid end to end and −173 ms through the WebM export, against +29, ≈−10 and +21 ms
+placed by timestamp. This supersedes the 2026-10-23 reading that the gaps were jitter (and the
+ESCSUITE-367 note not to fill them), and reopens ESCSUITE-297 H4.
+
+- **How.** Neither mediabunny's `AudioSampleSink` nor Chromium's `AudioDecoder` passes a packet's
+  timestamp through (both count decoded frames from the first), so `PacketClock` reads the
+  packets' timestamps (`EncodedPacketSink`, metadata only) alongside the decode and pairs them
+  with the decoded chunks in order, one chunk per packet. `TimestampPlacer` puts each chunk at
+  its timestamp: a later one leaves silence before it, an earlier one has its overlapping start
+  trimmed, so samples never stack.
+- **Tolerance: 10 ms** (`PLACEMENT_TOLERANCE_SECONDS`, half a 20 ms Opus frame). A chunk within
+  10 ms of where end to end puts it is not moved, and the error is measured against the
+  timestamps themselves, so jitter never adds up. A MediaRecorder track's per-packet jitter is a
+  few ms either way and cancels; its holes are 20–50 ms. A file whose packets tile — a CRAFT
+  WebCodecs take, WAV, MP3, AAC from other tools — comes out sample for sample as before.
+- **First chunk.** The clock is set from the second chunk: Chromium trims Opus pre-skip from the
+  first chunk (648 of 960 frames for a CRAFT take), so the first chunk's timestamp says nothing
+  about where its frames end. A hole between the first two packets is not seen.
+- **`decodeAudioData` fallback.** It returns one buffer with no per-packet lengths, so
+  `placeDecodedFile` reads the packets' timestamps and, for an Opus or AAC track only (one fixed
+  frame per packet), takes the median step as the frame. If the timestamps hold no more than
+  10 ms of holes overall, the buffer stays end to end; otherwise it is cut into one equal run per
+  packet and each run placed. AAC priming that `decodeAudioData` trims does not count as a hole.
+- **The guard.** `apps/e2e/tests/regressions/ESCSUITE-368.spec.ts` (`@nightly`) records 120 s
+  takes on both recorder paths and exports the PiP take; each must keep its beep-to-picture
+  offset within 50 ms from first beep to last.
+
 What still differs from the old peaks, measured in Chromium 141:
 
 - **Sample rate.** Peaks are computed at the file's own sample rate. `decodeAudioData` resampled to

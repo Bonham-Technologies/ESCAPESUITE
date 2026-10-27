@@ -15,11 +15,14 @@ import { MARKER_PERIOD_MS } from './media-mocks'
  * the top-left edge. It is the same reading `scripts/av-drift-report.mjs`
  * takes with ffmpeg, made where CI has no ffmpeg:
  *
- * - **Sound**: `decodeAudioData` — the decoded samples laid end to end, which is
- *   how ESCAPEARTIST's `core/audioMixer.ts` reads a source too (a MediaRecorder
- *   Opus track's PTS gaps are jitter, not lost audio). Each beep's onset is the
- *   first millisecond whose peak passes a third of the file's peak after at
- *   least 50 ms of quiet; a burst that is not 60–200 ms long is not a beep.
+ * - **Sound**: `decodeAudioData` — the decoded samples laid end to end — or,
+ *   with `byTimestamp`, each decoded chunk placed at its packet's timestamp, as
+ *   a player plays the file. A MediaRecorder Opus track has holes where the
+ *   recorder lost audio (ESCSUITE-368), so its raw take is read by timestamp;
+ *   an ESCAPEARTIST export is read end to end, which proves the export placed
+ *   its sound itself. Each beep's onset is the first millisecond whose peak
+ *   passes a third of the file's peak after at least 50 ms of quiet; a burst
+ *   that is not 60–200 ms long is not a beep.
  * - **Picture**: Mediabunny (the demuxer and decoder both apps ship) decodes
  *   the frames within ±2 s of each beep, cropped to the strip, and reads each
  *   frame's paint time with its parity bit. The picture's wall time at the beep
@@ -47,9 +50,9 @@ export interface AvSyncReading {
   /**
    * The sound's container timestamps against its decoded length: the span from
    * the first packet to the end of the last, minus the decoded samples' length,
-   * ms. Near zero when the packets tile; a MediaRecorder track's gaps and
-   * overlaps (jitter) cancel; what is left is time the timestamps say passed
-   * that the samples, laid end to end, do not cover. A diagnostic for a failure
+   * ms. Near zero when the packets tile; a MediaRecorder track's jitter
+   * cancels; what is left is its holes, time the timestamps say passed that
+   * the samples, laid end to end, do not cover. A diagnostic for a failure
    * message, not part of the offset.
    */
   ptsHolesMs: number
@@ -74,8 +77,16 @@ function mediabunnyBundle(): string {
 
 const ANALYSIS_ORIGIN = 'http://localhost:5174'
 
-/** Measure `file`'s A/V offset at every marker beep, in a fresh page of `context`. */
-export async function readAvSync(context: BrowserContext, file: string): Promise<AvSyncReading> {
+/**
+ * Measure `file`'s A/V offset at every marker beep, in a fresh page of
+ * `context`; with `byTimestamp`, the sound placed by its packets' timestamps
+ * rather than laid end to end.
+ */
+export async function readAvSync(
+  context: BrowserContext,
+  file: string,
+  { byTimestamp = false }: { byTimestamp?: boolean } = {}
+): Promise<AvSyncReading> {
   const page = await context.newPage()
   try {
     const pageUrl = `${ANALYSIS_ORIGIN}/__av-sync/index.html`
@@ -90,15 +101,42 @@ export async function readAvSync(context: BrowserContext, file: string): Promise
     await page.addScriptTag({ content: mediabunnyBundle() })
 
     return await page.evaluate(
-      async ({ fileUrl, periodMs }) => {
+      async ({ fileUrl, periodMs, byTimestamp }) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const MB = (window as any).Mediabunny
         const bytes = await (await fetch(fileUrl)).arrayBuffer()
+        const input = new MB.Input({ source: new MB.BufferSource(bytes), formats: MB.ALL_FORMATS })
 
         // --- Sound: beep onsets in the decoded samples. ---
         const audio = await new OfflineAudioContext(1, 1, 48_000).decodeAudioData(bytes.slice(0))
         const rate = audio.sampleRate
-        const samples = audio.getChannelData(0)
+        let samples = audio.getChannelData(0)
+        if (byTimestamp) {
+          // One decoded chunk per packet, in decode order (neither mediabunny
+          // nor AudioDecoder passes a packet's timestamp through), each written
+          // at its packet's timestamp from the first.
+          const track = await input.getPrimaryAudioTrack()
+          if (!track) throw new Error('the file has no audio track')
+          const packets = new MB.EncodedPacketSink(track).packets(undefined, undefined, { metadataOnly: true })
+          const chunks: [number, Float32Array][] = []
+          let end = 0
+          let first = NaN
+          for await (const sample of new MB.AudioSampleSink(track).samples()) {
+            const packet = await packets.next()
+            const stamp: number = packet.done ? NaN : packet.value.timestamp
+            if (Number.isNaN(first)) first = stamp
+            if (sample.sampleRate !== rate) throw new Error(`decoded at ${sample.sampleRate} Hz`)
+            const plane = new Float32Array(sample.numberOfFrames)
+            sample.copyTo(plane, { planeIndex: 0, format: 'f32-planar' })
+            const at = Math.round((stamp - first) * rate)
+            chunks.push([at, plane])
+            end = Math.max(end, at + plane.length)
+            sample.close()
+          }
+          await packets.return(undefined)
+          samples = new Float32Array(end)
+          for (const [at, plane] of chunks) samples.set(plane, at)
+        }
         const block = Math.round(rate / 1000)
         const peaks = new Float32Array(Math.floor(samples.length / block))
         let loudest = 0
@@ -133,7 +171,6 @@ export async function readAvSync(context: BrowserContext, file: string): Promise
           quiet = 0
         }
 
-        const input = new MB.Input({ source: new MB.BufferSource(bytes), formats: MB.ALL_FORMATS })
         let ptsHolesMs = NaN
         const audioTrack = await input.getPrimaryAudioTrack()
         if (audioTrack) {
@@ -210,7 +247,7 @@ export async function readAvSync(context: BrowserContext, file: string): Promise
         }
         return { audioSeconds: audio.duration, offsets, ptsHolesMs, frames: kept.length, badFrames: bad }
       },
-      { fileUrl, periodMs: MARKER_PERIOD_MS }
+      { fileUrl, periodMs: MARKER_PERIOD_MS, byTimestamp }
     ).then((raw) => {
       const { offsets } = raw
       const driftMs = offsets.length > 1 ? offsets[offsets.length - 1][1] - offsets[0][1] : NaN
