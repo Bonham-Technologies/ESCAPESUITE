@@ -16,8 +16,11 @@ on:
 
 # Cancel in-progress runs when a new commit is pushed to the same branch/PR
 # Include event_name to prevent pull_request and pull_request_target from cancelling each other
+# Pushes to main group by commit SHA instead, so every merged commit runs to the end and
+# gets its own ci-status verdict; a burst of merges no longer cancels all but the last
+# (ESCSUITE-382). The deploy job below keeps production deploys in order.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -652,34 +655,58 @@ jobs:
       name: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'preview' }}
       url: ${{ steps.deploy.outputs.url }}
 
+    # Main's CI runs no longer cancel each other (ESCSUITE-382), so two of them can reach
+    # this job. Production deploys run one at a time, and the stale check below skips a
+    # commit that main has already moved past, so an older commit never replaces a newer
+    # one in production. Other events get a group of their own.
+    concurrency:
+      group: deploy-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || github.run_id }}
+      cancel-in-progress: false
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
 
+      - name: Skip production deploy if main has moved on
+        id: stale
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          HEAD_SHA=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$HEAD_SHA" != "$GITHUB_SHA" ]; then
+            echo "::notice::main is at $HEAD_SHA, not $GITHUB_SHA; its own run deploys it"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup pnpm
+        if: steps.stale.outputs.skip != 'true'
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
 
       - name: Setup Node.js
+        if: steps.stale.outputs.skip != 'true'
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
       - name: Install Vercel CLI
+        if: steps.stale.outputs.skip != 'true'
         run: npm install -g vercel@latest
 
       - name: Pull Vercel Environment
+        if: steps.stale.outputs.skip != 'true'
         run: vercel pull --yes --environment=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'production' || 'preview' }} --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Build with Vercel
+        if: steps.stale.outputs.skip != 'true'
         run: vercel build ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '--prod' || '' }} --token=${{ secrets.VERCEL_TOKEN }}
         env:
           VITE_BUILD_MODE: saas
 
       - name: Deploy to Vercel
         id: deploy
+        if: steps.stale.outputs.skip != 'true'
         run: |
           if [ "${{ github.event_name }}" == "push" ] && [ "${{ github.ref }}" == "refs/heads/main" ]; then
             URL=$(vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }})
@@ -739,8 +766,10 @@ jobs:
       )
     # Don't cancel ci-status when new commits are pushed - let it complete
     # This prevents "canceled" status from blocking PRs when commits are pushed quickly
+    # On main the group is per commit, like the workflow's: a shared group would let a
+    # third queued run replace (cancel) the pending ci-status of the second.
     concurrency:
-      group: ci-status-${{ github.event.pull_request.number || github.ref }}
+      group: ci-status-${{ github.event.pull_request.number || (github.ref == 'refs/heads/main' && github.sha) || github.ref }}
       cancel-in-progress: false
     steps:
       - name: Check CI Status

@@ -61,7 +61,13 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
   `SOAK_CYCLES=200 SOAK_RELOADS=30 pnpm --filter=@escapesuite/e2e exec playwright test tests/escapeartist/soak.spec.ts --project=chromium-strict`.
 
 **CI Optimizations:**
-- Concurrency control cancels in-progress runs when new commits are pushed
+- Concurrency control cancels in-progress runs when new commits are pushed to a PR or to
+  `dev`. Pushes to `main` are grouped by commit SHA, so every merged commit runs to the end
+  and gets its own `ci-status` verdict (ESCSUITE-382; before, a burst of merges cancelled
+  all but the last run). Because main runs can now overlap, the `deploy` job runs
+  production deploys one at a time (`deploy-production` group) and skips a commit that
+  `main` has already moved past, so an older commit never replaces a newer one in
+  production. `Perf` still cancels superseded main runs; it is informational.
 - Combined lint + type-check + audit saves ~30s of runner setup overhead
 - `standalone` builds the offline bundles once, uploads the `standalone-builds`
   artifact (consumed cross-run by `standalone-release.yml`), then tests that
