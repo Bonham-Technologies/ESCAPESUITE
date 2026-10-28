@@ -50,6 +50,16 @@ alone doesn't meet this step. Use the media-health helpers in `apps/e2e/utils/` 
 they exist. Where the container can't run it (e.g. H.264/AAC media), let CI prove it
 and say so in the PR.
 
+## Builder, step 4: the reviewer checks the test's layer
+
+The `reviewer` subagent, when the builder hands it a diff. Adds to its checklist. Moved
+here from a hand edit of the vendored `.claude/agents/reviewer.md`, which a refresh
+overwrites.
+
+Check the test is at the layer where the bug is visible: if the user sees it in the
+browser, a Playwright test must fail without the change, not only a unit test (the
+**Builder, step 2** rule above). Block on a UI bug fixed with a unit test alone.
+
 ## Main must stay green, step 1: the nightly
 
 Every role that runs **Main must stay green**. Adds to step 1. Moved here from the
