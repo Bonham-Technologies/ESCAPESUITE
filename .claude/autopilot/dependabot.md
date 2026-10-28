@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v2. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
