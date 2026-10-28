@@ -6,6 +6,7 @@
 import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, type InputAudioTrack } from 'mediabunny';
 import type { WaveformPeak } from '../store/types';
 import { PeakReducer, mixToMono, peaksFromPcm } from './waveformPeaks';
+import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } from './audioPlacement';
 
 /**
  * Extract waveform peak data from a media file (audio or video)
@@ -76,42 +77,74 @@ async function streamWaveformPeaks(
     // MP3 is left to decodeAudioData: mediabunny does not apply the encoder
     // delay and padding a LAME/Xing header declares, which decodeAudioData
     // trims, so streamed peaks would sit ~25 ms late against the old ones.
-    if ((await track.getCodec()) === 'mp3') return null;
+    const codec = await track.getCodec();
+    if (codec === 'mp3') return null;
     if (!(await track.canDecode())) return null;
 
     let reducer: PeakReducer | null = null;
+    let placer: TimestampPlacer | null = null;
+    // Opus and AAC only: see `placesByTimestamp`.
+    const clock = placesByTimestamp(codec) ? new PacketClock(track) : null;
     // Reused across chunks: one plane per channel the mix reads (at most two).
     const planes: Float32Array[] = [];
-    for await (const sample of new AudioSampleSink(track).samples()) {
-      try {
-        // Frames before zero are codec priming (an MP4 edit list's, say),
-        // which decodeAudioData drops too. Opus pre-skip in a WebM is not
-        // skipped here: mediabunny's Matroska demuxer ignores it, but
-        // Chromium's AudioDecoder trims it itself (a CRAFT take's first chunk
-        // is 960 - 312 frames), so skipping it again would put peaks early.
-        const skip = Math.min(
-          sample.numberOfFrames,
-          Math.max(0, Math.round(-sample.timestamp * sample.sampleRate))
-        );
-        const frames = sample.numberOfFrames - skip;
-        if (frames === 0) continue;
-        reducer ??= new PeakReducer(sample.sampleRate, samplesPerSecond);
-        const channels = Math.min(2, sample.numberOfChannels);
-        const chunk: Float32Array[] = [];
-        for (let c = 0; c < channels; c++) {
-          if (!planes[c] || planes[c].length < frames) planes[c] = new Float32Array(frames);
-          const plane = planes[c].subarray(0, frames);
-          sample.copyTo(plane, { planeIndex: c, format: 'f32-planar', frameOffset: skip, frameCount: frames });
-          chunk.push(plane);
+    try {
+      for await (const sample of new AudioSampleSink(track).samples()) {
+        try {
+          // One decoded chunk per packet, in decode order: each chunk is
+          // placed by its packet's timestamp (ESCSUITE-368), so a hole in a
+          // MediaRecorder track shows as a silent stretch where it plays.
+          const stamp = clock ? await clock.next() : null;
+          // Frames before zero are codec priming (an MP4 edit list's, say),
+          // which decodeAudioData drops too. Opus pre-skip in a WebM is not
+          // skipped here: mediabunny's Matroska demuxer ignores it, but
+          // Chromium's AudioDecoder trims it itself (a CRAFT take's first chunk
+          // is 960 - 312 frames), so skipping it again would put peaks early.
+          const priming = Math.min(
+            sample.numberOfFrames,
+            Math.max(0, Math.round(-sample.timestamp * sample.sampleRate))
+          );
+          if (sample.numberOfFrames - priming === 0) continue;
+          reducer ??= new PeakReducer(sample.sampleRate, samplesPerSecond);
+          placer ??= new TimestampPlacer(sample.sampleRate);
+          const before = placer.position;
+          const { at, skip } = placer.place(
+            stamp === null ? null : stamp + priming / sample.sampleRate,
+            sample.numberOfFrames - priming
+          );
+          pushSilence(reducer, at - before);
+          const frames = sample.numberOfFrames - priming - skip;
+          if (frames === 0) continue;
+          const channels = Math.min(2, sample.numberOfChannels);
+          const chunk: Float32Array[] = [];
+          for (let c = 0; c < channels; c++) {
+            if (!planes[c] || planes[c].length < frames) planes[c] = new Float32Array(frames);
+            const plane = planes[c].subarray(0, frames);
+            sample.copyTo(plane, { planeIndex: c, format: 'f32-planar', frameOffset: priming + skip, frameCount: frames });
+            chunk.push(plane);
+          }
+          reducer.push(chunk);
+        } finally {
+          sample.close();
         }
-        reducer.push(chunk);
-      } finally {
-        sample.close();
       }
+    } finally {
+      await clock?.close();
     }
     return reducer ? reducer.finish() : [];
   } finally {
     input.dispose();
+  }
+}
+
+/** Up to a second of zeros, shared by every hole {@link pushSilence} fills. */
+let silence = new Float32Array(0);
+
+/** Feed `frames` frames of silence to `reducer`: a hole in the track, placed by its timestamps. */
+function pushSilence(reducer: PeakReducer, frames: number): void {
+  if (frames <= 0) return;
+  if (silence.length === 0) silence = new Float32Array(48_000);
+  for (let left = frames; left > 0; left -= silence.length) {
+    reducer.push([silence.subarray(0, Math.min(left, silence.length))]);
   }
 }
 
@@ -139,7 +172,16 @@ async function decodeWholeFileWaveform(
     // The first channel, or the average of the first two for stereo and wider
     const channels = [audioBuffer.getChannelData(0)];
     if (audioBuffer.numberOfChannels > 1) channels.push(audioBuffer.getChannelData(1));
-    const audioData = mixToMono(channels, audioBuffer.length);
+    let audioData = mixToMono(channels, audioBuffer.length);
+    // decodeAudioData lays the samples end to end; where the packets'
+    // timestamps leave holes, place them by those instead (ESCSUITE-368).
+    const runs = await placeDecodedFile(blob, audioBuffer.length, audioBuffer.sampleRate);
+    if (runs) {
+      const last = runs[runs.length - 1];
+      const placed = new Float32Array(last[2] + last[1]);
+      for (const [from, frames, at] of runs) placed.set(audioData.subarray(from, from + frames), at);
+      audioData = placed;
+    }
     const peaks = peaksFromPcm(audioData, audioBuffer.sampleRate, samplesPerSecond);
 
     await audioContext.close();

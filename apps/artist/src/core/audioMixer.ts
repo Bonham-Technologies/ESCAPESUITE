@@ -27,6 +27,7 @@ import type { Clip, Track } from '../store/types';
 import { isVisibleTrack } from '../store/trackVisibility';
 import { getVideoBlob } from './storage';
 import { getAnimatedVolume } from '../utils/animation';
+import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } from '../utils/audioPlacement';
 
 const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
@@ -226,7 +227,10 @@ function neededEnd(placements: readonly Placement[]): number {
  * The streamed path: the source's primary audio track decoded a chunk at a
  * time and mixed as it arrives, so neither the file nor its decoded track is
  * ever held whole. Frames are counted from the first one at or after time
- * zero, end to end, which is how `decodeAudioData` lays a track out.
+ * zero, and each chunk is placed by its packet's timestamp (ESCSUITE-368,
+ * `utils/audioPlacement.ts`): a hole in a MediaRecorder track stays a hole,
+ * silent, instead of pulling the rest of the sound earlier. A track whose
+ * packets tile lands end to end, as `decodeAudioData` lays it out.
  *
  * `true` when the source has audio (mixed), `false` when it has none, and
  * `null` when this path cannot read it at all — no demuxer, no decoder, MP3,
@@ -242,13 +246,15 @@ async function streamSourceInto(
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
   try {
     let track;
+    let codec: string | null = null;
     try {
       track = await input.getPrimaryAudioTrack();
       if (!track) return false;
       // MP3 is left to decodeAudioData: mediabunny does not apply the encoder
       // delay and padding a LAME/Xing header declares, which decodeAudioData
       // trims (see `utils/waveform.ts`).
-      if ((await track.getCodec()) === 'mp3') return null;
+      codec = await track.getCodec();
+      if (codec === 'mp3') return null;
       if (track.sampleRate !== SAMPLE_RATE) return null;
       if (!(await track.canDecode())) return null;
     } catch {
@@ -260,12 +266,16 @@ async function streamSourceInto(
     const stopAt = neededEnd(placements);
     if (stopAt <= 0) return true;
 
-    let position = 0;
+    const placer = new TimestampPlacer(SAMPLE_RATE);
+    // Opus and AAC only: see `placesByTimestamp`.
+    const clock = placesByTimestamp(codec) ? new PacketClock(track) : null;
     // Reused across chunks: one plane per channel the mix reads (at most two).
     const planes: Float32Array[] = [];
     try {
       for await (const sample of new AudioSampleSink(track).samples()) {
         try {
+          // One decoded chunk per packet, in decode order.
+          const stamp = clock ? await clock.next() : null;
           if (sample.sampleRate !== SAMPLE_RATE) {
             throw new Error(`decoded at ${sample.sampleRate} Hz`);
           }
@@ -273,34 +283,40 @@ async function streamSourceInto(
           // which decodeAudioData drops too. Opus pre-skip in a WebM is not
           // skipped here: Chromium's AudioDecoder trims it itself (see
           // `utils/waveform.ts`).
-          const skip = Math.min(
+          const priming = Math.min(
             sample.numberOfFrames,
             Math.max(0, Math.round(-sample.timestamp * sample.sampleRate))
           );
-          const frames = sample.numberOfFrames - skip;
+          if (sample.numberOfFrames - priming === 0) continue;
+          const { at, skip } = placer.place(
+            stamp === null ? null : stamp + priming / SAMPLE_RATE,
+            sample.numberOfFrames - priming
+          );
+          const frames = sample.numberOfFrames - priming - skip;
           if (frames === 0) continue;
           const channels = Math.min(CHANNELS, sample.numberOfChannels);
           const chunk: Float32Array[] = [];
           for (let c = 0; c < channels; c++) {
             if (!planes[c] || planes[c].length < frames) planes[c] = new Float32Array(frames);
             const plane = planes[c].subarray(0, frames);
-            sample.copyTo(plane, { planeIndex: c, format: 'f32-planar', frameOffset: skip, frameCount: frames });
+            sample.copyTo(plane, { planeIndex: c, format: 'f32-planar', frameOffset: priming + skip, frameCount: frames });
             chunk.push(plane);
           }
-          mixChunk(chunk, position, frames, placements, output);
-          position += frames;
+          mixChunk(chunk, at, frames, placements, output);
         } finally {
           sample.close();
         }
         // Nothing past the last frame any clip reads is needed.
-        if (position >= stopAt) break;
+        if (placer.position >= stopAt) break;
       }
     } catch (error) {
       // Nothing mixed yet: the whole-file path may still read it.
-      if (position === 0) return null;
+      if (placer.position === 0) return null;
       throw new SourceAudioError(
-        `Could not read the sound of ${name}: its audio stopped decoding ${formatSeconds(position)} in (${messageOf(error)})`
+        `Could not read the sound of ${name}: its audio stopped decoding ${formatSeconds(placer.position)} in (${messageOf(error)})`
       );
+    } finally {
+      await clock?.close();
     }
     return true;
   } finally {
@@ -339,7 +355,17 @@ async function decodeWholeSourceInto(
   for (let ch = 0; ch < Math.min(CHANNELS, audioBuffer.numberOfChannels); ch++) {
     planes.push(audioBuffer.getChannelData(ch));
   }
-  if (planes.length > 0) mixChunk(planes, 0, audioBuffer.length, placements, output);
+  if (planes.length === 0) return true;
+  // decodeAudioData lays the samples end to end; where the packets'
+  // timestamps leave holes, place them by those instead (ESCSUITE-368).
+  const runs = await placeDecodedFile(blob, audioBuffer.length, SAMPLE_RATE);
+  if (!runs) {
+    mixChunk(planes, 0, audioBuffer.length, placements, output);
+    return true;
+  }
+  for (const [from, frames, at] of runs) {
+    mixChunk(planes.map((plane) => plane.subarray(from, from + frames)), at, frames, placements, output);
+  }
   return true;
 }
 
