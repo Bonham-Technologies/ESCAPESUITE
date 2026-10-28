@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops (8b8c74c). Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -42,6 +42,16 @@ budget, or after two failures in a row. For each ticket:
    relabel it, comment on what you found, move it back to To Do, and move on.
 8. If you stop on a ticket without a PR, move it back to To Do with a comment saying
    exactly what blocked it.
+
+**A refresh PR** is one bonham-ops's propagation workflow opened on a branch
+`autopilot/refresh-v<N>`. Before taking tickets, find them:
+`gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[] | select(.head.ref | startswith("autopilot/refresh-v")) | .number'`.
+Merge one under the `ap-auto` rules, with no ticket, when all of these hold: every file
+in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
+listed in it; `.claude/rules/autopilot.local.md` is not among them; `ci-status` is
+green on the head. Otherwise label it `needs-owner` and comment which condition failed.
+This is the one `.claude/` change that isn't owner-merged: the owner approved it when
+it merged in bonham-ops.
 
 **A "Refresh <page title> for <changes>" ticket** is a Confluence edit, not a PR. Change
 only the statements the ticket names, keep the page's structure and voice, and never

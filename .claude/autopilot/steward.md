@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops (8b8c74c). Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -89,6 +89,13 @@ The digest covers:
   - any failure, with the step that failed.
 
   If both alert APIs answered 200 and no scan ran, say "not needed: alerts available";
+- **Setup:** one line, for example `policy v12 (bonham-ops@1a2b3c4) · instructions v4 ·
+  model: Fable 5.1`. The policy version is in the first line of
+  `.claude/rules/autopilot.md` and the commit on the `source-commit:` line of
+  `.claude/.vendored-manifest`; the instructions version is the `Instructions v<M>.` at
+  the end of this run's task prompt, or the Project instructions' first line when the
+  two differ (then show both); the model is the one this run can tell it is on, or
+  `unknown`;
 - scores and their trend;
 - backlog size by priority.
 

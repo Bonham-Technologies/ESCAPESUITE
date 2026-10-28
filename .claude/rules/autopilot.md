@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops (8b8c74c). Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -23,6 +23,9 @@ Each run plays the roles named in its prompt, in the order given.
 - **scout**: looks outward where the steward looks inward. It researches competing
   tools, user needs and new capabilities, and files up to 5 feature proposals as
   `ap-decision` tickets. Writes no code and builds nothing.
+- **fleet** (bonham-ops only): reads the six product autopilots' digests and records,
+  posts the owner's one weekly inbox and files policy tickets. Runs in place of the
+  steward's sweep where `autopilot.local.md` says so.
 
 Every steward, builder and dependabot run starts with **Main must stay green** and then
 **Reconcile**, below. The scout skips both.
@@ -40,11 +43,13 @@ from .claude/rules/autopilot.md" means exactly that.
 | builder | `.claude/autopilot/builder.md` |
 | dependabot | `.claude/autopilot/dependabot.md`, and `.claude/autopilot/builder.md` for the merge rules it follows |
 | scout | `.claude/autopilot/scout.md` and `.claude/autopilot/confluence-record.md` |
+| fleet | `.claude/autopilot/fleet.md`, with the steward's files |
 
 A bold section name that isn't in this file is in one of them:
 - **Steward**, **Watch tickets**, **Weekly digest** and **Decision Log**: `steward.md`;
 - **Security sweep** and **Security tickets**: `security-sweep.md`;
 - **Record in Confluence**: `confluence-record.md`;
+- **Fleet digest** and **Policy tickets**: `fleet.md`;
 - **Builder**, **Dependabot** and **Scout**: the role's own file.
 
 If a role's file is missing, don't improvise the role: say which file is missing in the
@@ -155,7 +160,8 @@ Bugzilla bug, a GitHub issue or a release page) and states the **trigger**, for 
 When unsure between two classes, pick the stricter one.
 
 **Legacy `needs-operator`.** Tickets from before autopilot may carry `needs-operator`:
-operator-only work. Treat them like `ap-decision`. Never build them, and never relabel
+operator-only work. So do the fleet role's owner-action tickets (`fleet.md`), which
+carry it in place of a class label. Treat them like `ap-decision`. Never build them, and never relabel
 them, even if they also carry another class label. The steward lists them under
 **Waiting on you**.
 
