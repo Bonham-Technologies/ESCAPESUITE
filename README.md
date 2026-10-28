@@ -3,6 +3,7 @@
 [![CI](https://github.com/Bonham-Technologies/ESCAPESUITE/actions/workflows/ci.yml/badge.svg)](https://github.com/Bonham-Technologies/ESCAPESUITE/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/Bonham-Technologies/ESCAPESUITE)](LICENSE)
 [![Latest release](https://img.shields.io/github/v/release/Bonham-Technologies/ESCAPESUITE)](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest)
+[![Sponsor](https://img.shields.io/badge/sponsor-Bonham%20Technologies-f59e0b?logo=githubsponsors)](https://github.com/sponsors/Bonham-Technologies)
 
 Free, open-source (MIT), privacy-first media creation tools that run entirely in the browser. Nothing you record or edit ever leaves your machine.
 
@@ -118,6 +119,18 @@ pnpm test:e2e             # Playwright E2E tests (Chromium)
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and PR guidelines.
+
+## Sponsoring
+
+ESCAPE Suite is free and will stay free. If it's doing real work for you or your team,
+[sponsoring Bonham Technologies](https://github.com/sponsors/Bonham-Technologies) keeps it
+maintained. Sponsors are listed at [bonham.tech](https://bonham.tech/#sponsors); Maintainer tier
+and up get a logo here and on [escapesuite.io](https://escapesuite.io), and the upper tiers include
+hours with the maintainer each month.
+
+<!-- sponsors:start -->
+<!-- Maintainer-tier sponsors and above are listed here. -->
+<!-- sponsors:end -->
 
 ## License
 
