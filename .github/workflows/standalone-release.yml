@@ -241,6 +241,16 @@ jobs:
           ARTIST_VERSION: ${{ needs.prepare.outputs.artist_version }}
           COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
+          # Main's CI runs no longer cancel each other (ESCSUITE-382), so an older
+          # commit's run (a re-run, or a slow runner) can complete after a newer one.
+          # Only main's head may create or re-mark the latest release; otherwise an
+          # older version would take `latest` and the *-latest.html download links.
+          HEAD_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" --jq .object.sha)
+          if [ "$HEAD_SHA" != "$COMMIT" ]; then
+            echo "::notice::main is at ${HEAD_SHA}, not ${COMMIT}; leaving the release to main's own run"
+            exit 0
+          fi
+
           if gh release view "v${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
             echo "Release v${VERSION} already exists, skipping asset upload."
             # A kit-, shared- or plan-only push still runs release.yml, which

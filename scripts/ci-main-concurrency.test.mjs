@@ -68,3 +68,17 @@ test('the deploy job skips a commit main has moved past', () => {
   const deployStep = deploy.slice(deploy.indexOf('- name: Deploy to Vercel'));
   assert.match(deployStep, /if: steps\.stale\.outputs\.skip != 'true'/);
 });
+
+test('standalone-release only lets main\'s head create or re-mark the latest release', () => {
+  const standaloneYml = readFileSync(
+    join(here, '..', '.github/workflows/standalone-release.yml'),
+    'utf8'
+  );
+  const release = standaloneYml.slice(standaloneYml.indexOf('\n  release:\n'));
+  const guard = release.indexOf('git/ref/heads/main');
+  assert.ok(guard >= 0, 'release job has no main-head check');
+  assert.ok(
+    guard < release.indexOf('--latest'),
+    'the main-head check must run before any --latest call'
+  );
+});

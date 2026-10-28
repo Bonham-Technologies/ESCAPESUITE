@@ -67,7 +67,12 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
   all but the last run). Because main runs can now overlap, the `deploy` job runs
   production deploys one at a time (`deploy-production` group) and skips a commit that
   `main` has already moved past, so an older commit never replaces a newer one in
-  production. `Perf` still cancels superseded main runs; it is informational.
+  production. `standalone-release.yml`'s `release` job applies the same check, so only
+  main's head creates or re-marks the `latest` release. With three or more merges inside
+  one run's length, GitHub keeps one running and one pending deploy, so a middle commit's
+  deploy is cancelled: its `ci-status` is still a real verdict, but the run concludes
+  `cancelled` and it gets no standalone release (the newer commit does). `Perf` still
+  cancels superseded main runs; it is informational.
 - Combined lint + type-check + audit saves ~30s of runner setup overhead
 - `standalone` builds the offline bundles once, uploads the `standalone-builds`
   artifact (consumed cross-run by `standalone-release.yml`), then tests that
