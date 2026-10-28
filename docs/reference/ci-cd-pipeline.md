@@ -18,6 +18,48 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 
 The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes to `main`/`dev`, PRs labelled `perf`, and `workflow_dispatch`; informational only, never gates, skipped for Dependabot.
 
+The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow, also outside `ci-status`:
+
+| Workflow / job | Purpose | Runs On |
+|-----|---------|---------|
+| `nightly.yml` / `nightly` | Full e2e in Chromium, Firefox and WebKit + the soak at 200 cycles / 30 reloads + the timeline property tests at 5,000 runs | 11:00 UTC daily (`schedule`, on `main`) and `workflow_dispatch` |
+
+**Nightly** (ESCSUITE-353):
+- **What it runs**, one job, in order:
+  1. The ESCSUITE-349 timeline property tests
+     (`apps/artist/src/store/__tests__/timelineInvariants.property.test.ts`) with
+     `ARTIST_FUZZ_RUNS=5000` and `ARTIST_FUZZ_SEED` = the run id mod 2³¹−1 (or the dispatch's
+     `seed` input). The seed is printed by the "Pick property-test seed" step and by the test itself.
+  2. Even if those fail: `pnpm test:e2e:browsers` (projects `chromium`, `chromium-strict`, `firefox`,
+     `webkit`) with `CI=true`, `E2E_CROSS_BROWSER=1` (otherwise `playwright.config.ts` drops the
+     Firefox/WebKit projects under `CI`), `E2E_NIGHTLY=1` (includes specs tagged `@nightly`, which
+     every other run skips through `grepInvert`), and `SOAK_CYCLES=200` / `SOAK_RELOADS=30` for
+     `tests/escapeartist/soak.spec.ts` (PR defaults 25 / 10). Per-browser gaps stay each spec's own
+     `test.skip(browserName …, reason)`; the soaks are Chromium-only that way.
+- **Not in the nightly:** the responsive projects (`mobile-*`, `tablet-*`; the Chromium ones still
+  run in every PR's `e2e` job) and the headless-artist Chromium tests (also in `ci.yml`'s `e2e`).
+- **Setup** mirrors `ci.yml`'s `e2e` job (pnpm action pin, Node 24, pnpm cache, the capped and retried
+  browser and apt installs), but installs Chromium, Firefox and WebKit under its own browser cache key
+  (`playwright-all-…`), so it never fills `ci.yml`'s Chromium-only cache.
+- **Output.** The job summary always gets the property-test seed with its replay command, and every
+  e2e test that failed on all attempts (`apps/e2e/scripts/report-nightly.mjs`; tests:
+  `report-nightly.test.mjs`, which also guards the workflow's key tokens), plus the usual flaky list
+  (`report-flaky.mjs`). Artifacts: `nightly-playwright-report` (HTML report, 30 days),
+  `nightly-e2e-flaky` (30 days), `nightly-test-results` (on failure, 7 days).
+- **Gating.** Not part of `ci-status`; it never blocks a PR. Autopilot treats a red nightly on `main`
+  as a red `main` (`.claude/rules/autopilot.local.md`, "Main must stay green, step 1").
+- **Actions minutes.** About one 40–60 min job a day (PR e2e takes ~15 min for Chromium alone;
+  Firefox and WebKit roughly add one suite each, and the longer soak ~15 min), so ~1,200–1,800
+  Linux minutes a month. `timeout-minutes` is 120. This is an estimate: check it against the first
+  `workflow_dispatch` run and update this line with the measured time.
+- **Re-running with a given seed.** Actions → Nightly → "Run workflow" → `seed` = the seed from the
+  failing run's summary, or `gh api -X POST repos/{owner}/{repo}/actions/workflows/nightly.yml/dispatches
+  -f ref=main -f 'inputs[seed]=<seed>'`. "Re-run jobs" on the failing run reuses its run id and so
+  its seed. Locally:
+  `ARTIST_FUZZ_SEED=<seed> ARTIST_FUZZ_RUNS=5000 pnpm --filter=@escapesuite/artist exec vitest run src/store/__tests__/timelineInvariants.property.test.ts`.
+  The soak at nightly size:
+  `SOAK_CYCLES=200 SOAK_RELOADS=30 pnpm --filter=@escapesuite/e2e exec playwright test tests/escapeartist/soak.spec.ts --project=chromium-strict`.
+
 **CI Optimizations:**
 - Concurrency control cancels in-progress runs when new commits are pushed
 - Combined lint + type-check + audit saves ~30s of runner setup overhead

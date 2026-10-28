@@ -1,0 +1,179 @@
+name: Nightly
+
+# ESCSUITE-353: what is too slow or too broad for every PR, once a day on main.
+#
+# - the full e2e suite in Chromium, Firefox and WebKit (`pnpm test:e2e:browsers`;
+#   PR CI runs Chromium only), with @nightly-tagged specs included;
+# - the ESCSUITE-350 resource soak at 200 cycles and 30 reloads (PR CI: 25 and 10);
+# - the ESCSUITE-349 timeline property tests at 5,000 runs (PR CI: 200 on a fixed
+#   seed) on a seed drawn from the run id, printed in the log and the job summary.
+#
+# Informational for PRs: `ci-status` (ci.yml) never depends on this workflow. A red
+# nightly counts as a red main for autopilot's "Main must stay green" (see
+# .claude/rules/autopilot.local.md). Docs: docs/reference/ci-cd-pipeline.md.
+on:
+  schedule:
+    - cron: '0 11 * * *' # 11:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: 'Property-test seed to replay (blank: derive one from the run id)'
+        required: false
+        default: ''
+
+# Never cancel a running nightly: a dispatch while one runs waits for it.
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    # Expected 40-60 min; double that before calling it hung.
+    timeout-minutes: 120
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # A seed from the run id, unless the dispatch named one. A re-run of the same
+      # run keeps its run id, so it replays the same seed. fast-check takes a 32-bit
+      # integer, hence the modulo.
+      - name: Pick property-test seed
+        id: seed
+        env:
+          INPUT_SEED: ${{ github.event.inputs.seed }}
+        run: |
+          if [ -n "$INPUT_SEED" ]; then
+            # The length check comes first: a 20-digit number overflows `-gt`, which then
+            # errors (and so passes) instead of rejecting it.
+            if ! [[ "$INPUT_SEED" =~ ^[0-9]+$ ]] || [ ${#INPUT_SEED} -gt 10 ] || [ "$INPUT_SEED" -gt 2147483647 ]; then
+              echo "::error::The seed input must be a whole number from 0 to 2147483647."
+              exit 1
+            fi
+            seed="$INPUT_SEED"
+          else
+            seed=$(( GITHUB_RUN_ID % 2147483647 ))
+          fi
+          echo "Property-test seed: ${seed} (ARTIST_FUZZ_SEED=${seed} ARTIST_FUZZ_RUNS=5000)"
+          echo "seed=${seed}" >> "$GITHUB_OUTPUT"
+
+      - name: Run timeline property tests (5000 runs)
+        id: property
+        run: pnpm --filter=@escapesuite/artist exec vitest run src/store/__tests__/timelineInvariants.property.test.ts
+        env:
+          ARTIST_FUZZ_SEED: ${{ steps.seed.outputs.seed }}
+          ARTIST_FUZZ_RUNS: '5000'
+
+      # Its own key: this cache holds Chromium, Firefox and WebKit, while ci.yml's
+      # holds Chromium alone, and a hit on that one would leave the other two missing.
+      - name: Cache Playwright browsers
+        if: ${{ !cancelled() }}
+        uses: actions/cache@v6
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-all-${{ runner.os }}-${{ hashFiles('apps/e2e/package.json', 'services/headless-artist/package.json') }}
+
+      # Same split, cap and retry as ci.yml's browser installs, for all three browsers.
+      - name: Install Playwright browsers (cache miss)
+        id: install-browsers
+        if: ${{ !cancelled() && steps.playwright-cache.outputs.cache-hit != 'true' }}
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install chromium firefox webkit; then
+              exit 0
+            fi
+            echo "::warning::playwright install failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install failed after 2 attempts"
+          exit 1
+
+      - name: Install Playwright system dependencies
+        id: install-deps
+        if: ${{ !cancelled() }}
+        timeout-minutes: 8
+        run: |
+          for attempt in 1 2; do
+            if pnpm --filter=@escapesuite/e2e exec playwright install-deps chromium firefox webkit; then
+              exit 0
+            fi
+            echo "::warning::playwright install-deps failed (attempt ${attempt}/2)"
+            [ "$attempt" = "2" ] || sleep 20
+          done
+          echo "::error::playwright install-deps failed after 2 attempts"
+          exit 1
+
+      # Runs even when the property tests failed: the two are independent. The
+      # projects are chromium, chromium-strict (journeys, soaks, regressions), firefox
+      # and webkit; per-browser gaps are each spec's own `test.skip(browserName …)`.
+      - name: Run E2E tests (Chromium, Firefox, WebKit)
+        id: e2e
+        if: ${{ !cancelled() && steps.install-deps.outcome == 'success' && steps.install-browsers.outcome != 'failure' }}
+        run: pnpm test:e2e:browsers
+        env:
+          CI: true
+          E2E_CROSS_BROWSER: '1'
+          E2E_NIGHTLY: '1'
+          SOAK_CYCLES: '200'
+          SOAK_RELOADS: '30'
+
+      - name: Report flaky tests
+        if: always()
+        working-directory: apps/e2e
+        run: node scripts/report-flaky.mjs playwright-results.json flaky.json
+
+      # The seed with its replay command, and every test that failed on all attempts.
+      - name: Nightly summary
+        if: always()
+        working-directory: apps/e2e
+        run: node scripts/report-nightly.mjs playwright-results.json
+        env:
+          ARTIST_FUZZ_SEED: ${{ steps.seed.outputs.seed }}
+          ARTIST_FUZZ_RUNS: '5000'
+          PROPERTY_OUTCOME: ${{ steps.property.outcome }}
+
+      - name: Upload Playwright Report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nightly-playwright-report
+          path: apps/e2e/playwright-report/
+          retention-days: 30
+
+      - name: Upload flaky test list
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nightly-e2e-flaky
+          path: apps/e2e/flaky.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: nightly-test-results
+          path: apps/e2e/test-results/
+          retention-days: 7
