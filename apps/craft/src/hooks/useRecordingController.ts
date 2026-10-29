@@ -30,7 +30,9 @@ import {
   type AnyRecorder,
 } from '../core/recorder-factory';
 import { CaptureRequestError, hasSystemAudio, stopStream } from '../core/permissions';
+import { AudioOutputUnavailableError } from '../core/audioContextStart';
 import {
+  AUDIO_UNAVAILABLE,
   CAMERA_AND_MIC_UNAVAILABLE,
   CAPTURE_REFUSED,
   CAPTURE_UNANSWERED,
@@ -157,6 +159,8 @@ function captureFailureReason(name: string | undefined): CaptureFailureReason {
  * sentence that reads as if the screen share failed. "Nothing happened" is
  * otherwise indistinguishable from a bug.
  *
+ * A recorder whose AudioContext never started says so (ESCSUITE-390).
+ *
  * Anything else — a recorder that failed to initialise, a refusal that came
  * from somewhere no request tagged — keeps the two unnamed sentences:
  * `CAPTURE_REFUSED` for a `NotAllowedError`, `START_FAILED` for the rest. A
@@ -168,6 +172,7 @@ export function startFailureNotice(error: unknown): string {
   if (error instanceof CaptureRequestError) {
     return captureFailed(error.source, captureFailureReason(name));
   }
+  if (error instanceof AudioOutputUnavailableError) return AUDIO_UNAVAILABLE;
   return name === 'NotAllowedError' ? CAPTURE_REFUSED : START_FAILED;
 }
 
