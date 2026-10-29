@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Recorder } from './recorder'
 import { getSupportedAudioMimeType, getSupportedMimeType } from './permissions'
+import { AUDIO_START_TIMEOUT_MS, AudioOutputUnavailableError } from './audioContextStart'
 import type { RecorderCallbacks } from './recorder'
 import type { RecordingConfig } from '../store/types'
 
@@ -291,6 +292,45 @@ describe('Recorder', () => {
         await testRecorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
         expect(resumeMock).toHaveBeenCalledTimes(1)
       } finally {
+        testRecorder.dispose()
+        vi.stubGlobal('AudioContext', OriginalAudioContext)
+      }
+    })
+
+    it('fails a take whose AudioContext never starts, after the deadline (ESCSUITE-390)', async () => {
+      // Firefox with no audio output device: resume() never settles, and the
+      // take used to wait on it forever.
+      class NeverStartingAudioContext {
+        state = 'suspended'
+        resume = vi.fn(() => new Promise<void>(() => {}))
+        createMediaStreamDestination = vi.fn(() => ({
+          stream: { getAudioTracks: vi.fn(() => []) },
+        }))
+        createMediaStreamSource = vi.fn(() => ({ connect: vi.fn() }))
+        createAnalyser = vi.fn(() => ({
+          connect: vi.fn(),
+          fftSize: 256,
+          frequencyBinCount: 128,
+          getByteFrequencyData: vi.fn(),
+        }))
+        close = vi.fn()
+      }
+      const OriginalAudioContext = globalThis.AudioContext
+      vi.stubGlobal('AudioContext', NeverStartingAudioContext)
+      vi.useFakeTimers()
+
+      const testRecorder = new Recorder(callbacks)
+      try {
+        const outcome = testRecorder
+          .initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+          .then(
+            () => 'resolved',
+            (e: unknown) => e
+          )
+        await vi.advanceTimersByTimeAsync(AUDIO_START_TIMEOUT_MS)
+        expect(await outcome).toBeInstanceOf(AudioOutputUnavailableError)
+      } finally {
+        vi.useRealTimers()
         testRecorder.dispose()
         vi.stubGlobal('AudioContext', OriginalAudioContext)
       }

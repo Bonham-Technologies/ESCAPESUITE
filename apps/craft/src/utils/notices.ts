@@ -25,6 +25,14 @@ export const CAPTURE_REFUSED =
 
 export const START_FAILED = 'The recording could not be started.'
 
+/**
+ * Said when a take's AudioContext never started (ESCSUITE-390): a browser with
+ * no working sound output device leaves it suspended, and every take's audio
+ * runs through it.
+ */
+export const AUDIO_UNAVAILABLE =
+  'Audio could not be started (no working sound output device was found) — nothing was recorded.'
+
 /** How a capture request failed, as far as the user can act on it. */
 export type CaptureFailureReason = 'refused' | 'unavailable' | 'failed'
 

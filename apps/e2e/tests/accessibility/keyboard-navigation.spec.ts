@@ -368,14 +368,18 @@ test.describe('ESCAPEARTIST Keyboard Navigation', () => {
     const blur = group.getByRole('button', { name: 'Blur' })
 
     // One tab stop for the rows: from the play button a single Tab lands on
-    // the first row, and a second leaves them all.
-    await panel.getByRole('button', { name: 'Play clip preview' }).focus()
+    // the first row, Shift+Tab goes straight back, and no other row is in the
+    // tab order. (The rows are the panel's last tab stop, so a forward Tab
+    // leaves the page: Chromium then blurs to <body>, but Firefox keeps the
+    // row focused, so "focus left the group" is not something to assert on,
+    // ESCSUITE-391.)
+    const play = panel.getByRole('button', { name: 'Play clip preview' })
+    await play.focus()
     await page.keyboard.press('Tab')
     await expect(group.getByRole('button', { name: 'Position X' })).toBeFocused()
-    await page.keyboard.press('Tab')
-    expect(
-      await group.evaluate((el) => el.contains(document.activeElement))
-    ).toBe(false)
+    await expect(group.locator('[tabindex="0"]')).toHaveCount(1)
+    await page.keyboard.press('Shift+Tab')
+    await expect(play).toBeFocused()
 
     // Arrows walk the rows and wrap; End jumps.
     await group.getByRole('button', { name: 'Position X' }).focus()
