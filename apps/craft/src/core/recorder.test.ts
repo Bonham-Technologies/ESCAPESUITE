@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Recorder } from './recorder'
+import { getSupportedAudioMimeType, getSupportedMimeType } from './permissions'
 import type { RecorderCallbacks } from './recorder'
 import type { RecordingConfig } from '../store/types'
 
@@ -11,6 +12,7 @@ vi.mock('webm-duration-fix', () => ({
 // Mock permissions module
 vi.mock('./permissions', () => ({
   getSupportedMimeType: vi.fn(() => 'video/webm;codecs=vp9,opus'),
+  getSupportedAudioMimeType: vi.fn(() => 'audio/webm;codecs=opus'),
   stopStream: vi.fn(),
 }))
 
@@ -322,6 +324,84 @@ describe('Recorder', () => {
         testRecorder.dispose()
         vi.stubGlobal('AudioContext', OriginalAudioContext)
       }
+    })
+
+    describe('the type asked of MediaRecorder (ESCSUITE-394)', () => {
+      // Firefox's MediaRecorder, handed an audio-only stream and a video type,
+      // delivers nothing and never fires stop: a microphone-only take froze at
+      // Stop and was never saved.
+      let constructed: { stream: MediaStream; options?: MediaRecorderOptions }[]
+      let OriginalMediaRecorder: typeof MediaRecorder
+
+      beforeEach(() => {
+        constructed = []
+        OriginalMediaRecorder = globalThis.MediaRecorder
+        vi.stubGlobal(
+          'MediaRecorder',
+          class extends OriginalMediaRecorder {
+            constructor(stream: MediaStream, options?: MediaRecorderOptions) {
+              super(stream, options)
+              constructed.push({ stream, options })
+            }
+          }
+        )
+      })
+
+      afterEach(() => {
+        vi.stubGlobal('MediaRecorder', OriginalMediaRecorder)
+      })
+
+      it('asks for an audio type when the take has no video', async () => {
+        await recorder.initialize(null, null, mockMicStream, {
+          ...defaultConfig,
+          screenEnabled: false,
+          microphoneEnabled: true,
+        })
+        expect(constructed).toHaveLength(1)
+        expect(constructed[0].options?.mimeType).toBe('audio/webm;codecs=opus')
+        expect(constructed[0].options?.videoBitsPerSecond).toBeUndefined()
+      })
+
+      it('keeps the video type for a take with video', async () => {
+        await recorder.initialize(mockScreenStream, null, mockMicStream, defaultConfig)
+        expect(constructed[0].options?.mimeType).toBe('video/webm;codecs=vp9,opus')
+        expect(constructed[0].options?.videoBitsPerSecond).toBe(2500000)
+      })
+
+      it('falls back to the video type when no audio type is supported', async () => {
+        vi.mocked(getSupportedAudioMimeType).mockReturnValueOnce(null)
+        await recorder.initialize(null, null, mockMicStream, {
+          ...defaultConfig,
+          screenEnabled: false,
+          microphoneEnabled: true,
+        })
+        expect(constructed[0].options?.mimeType).toBe('video/webm;codecs=vp9,opus')
+      })
+
+      it('keeps the video type when the browser records video as MP4', async () => {
+        // The blob is labelled with the video type, so asking for a WebM
+        // audio type here would store WebM bytes labelled video/mp4.
+        vi.mocked(getSupportedMimeType).mockReturnValueOnce('video/mp4')
+        await recorder.initialize(null, null, mockMicStream, {
+          ...defaultConfig,
+          screenEnabled: false,
+          microphoneEnabled: true,
+        })
+        expect(constructed[0].options?.mimeType).toBe('video/mp4')
+        expect(getSupportedAudioMimeType).not.toHaveBeenCalled()
+      })
+
+      it('stores an audio-only take with the type it always had', async () => {
+        await recorder.initialize(null, null, mockMicStream, {
+          ...defaultConfig,
+          screenEnabled: false,
+          microphoneEnabled: true,
+        })
+        recorder.start()
+        recorder.stop()
+        const blob = vi.mocked(callbacks.onStop).mock.calls[0][0]
+        expect(blob.type).toBe('video/webm;codecs=vp9,opus')
+      })
     })
 
     it('should create MediaRecorder with correct options', async () => {
