@@ -1,6 +1,7 @@
 // Core recording engine using MediaRecorder API
 
 import { getSupportedMimeType, stopStream } from './permissions';
+import { startAudioContext } from './audioContextStart';
 import type { AudioLevels, RecorderStopCallback, RecordingConfig } from '../store/types';
 
 export interface RecorderCallbacks {
@@ -65,9 +66,11 @@ export class Recorder {
 
     // Set up audio context for mixing and level monitoring
     this.audioContext = new AudioContext();
-    // Resume audio context (required in Chrome due to autoplay policy)
+    // Resume audio context (required in Chrome due to autoplay policy). Bounded
+    // (ESCSUITE-390): with no output device to run on it never starts, and an
+    // unbounded wait left Start hanging with no way out.
     if (this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
+      await startAudioContext(this.audioContext);
     }
     const destination = this.audioContext.createMediaStreamDestination();
 

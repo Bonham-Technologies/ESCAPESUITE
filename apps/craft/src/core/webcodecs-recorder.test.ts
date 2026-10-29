@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { WebCodecsRecorder, isWebCodecsRecordingSupported } from './webcodecs-recorder'
+import { AUDIO_START_TIMEOUT_MS, AudioOutputUnavailableError } from './audioContextStart'
 import type { RecordingConfig } from '../store/types'
 import {
   installWebCodecsDoubles,
@@ -299,6 +300,50 @@ describe('WebCodecsRecorder', () => {
 
       expect(lastAudioContext().resume).toHaveBeenCalledTimes(1)
       expect(lastAudioContext().state).toBe('running')
+    })
+
+    it('fails a take whose AudioContext never starts, after the deadline (ESCSUITE-390)', async () => {
+      // Firefox with no audio output device: the context stays suspended and
+      // resume() never settles. Setup used to wait on it forever.
+      vi.useFakeTimers()
+      try {
+        audio.initialState = 'suspended'
+        audio.resumeGate = new Promise<void>(() => {})
+        const init = recorder.initialize(screenStream, null, micStream, {
+          ...defaultConfig,
+          microphoneEnabled: true,
+        })
+        const outcome = init.then(
+          () => 'resolved',
+          (e: unknown) => e
+        )
+        await vi.advanceTimersByTimeAsync(AUDIO_START_TIMEOUT_MS)
+
+        const error = await outcome
+        expect(error).toBeInstanceOf(AudioOutputUnavailableError)
+        // Nothing past the audio graph was built for a take that cannot record.
+        expect(getMediabunnyState().outputs).toHaveLength(0)
+        expect([...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('resolves, not fails, when disposed while the AudioContext never starts', async () => {
+      vi.useFakeTimers()
+      try {
+        audio.initialState = 'suspended'
+        audio.resumeGate = new Promise<void>(() => {})
+        const init = recorder.initialize(screenStream, null, null, defaultConfig)
+        await vi.advanceTimersByTimeAsync(1)
+        recorder.dispose()
+        await vi.advanceTimersByTimeAsync(AUDIO_START_TIMEOUT_MS)
+
+        await expect(init).resolves.toBeUndefined()
+        expect(getMediabunnyState().outputs).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
     })
 
     it('does not resume an already-running AudioContext', async () => {

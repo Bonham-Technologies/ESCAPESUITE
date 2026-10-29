@@ -23,6 +23,7 @@ import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
 import { createAudioCapture, type AudioCapture, type AudioCaptureOptions } from './audioWorkletCapture';
+import { startAudioContext } from './audioContextStart';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
 // muxer; re-exported here because this is where every caller imports it from.
@@ -488,7 +489,14 @@ export class WebCodecsRecorder {
       );
     }
     if (this.audioContext.state === 'suspended') {
-      await this.audioContext.resume();
+      // Bounded (ESCSUITE-390): a context with no output device to run on never
+      // starts, and an unbounded wait here left Start hanging with no way out.
+      // A disposal during the wait closes the context, which either settles the
+      // wait or rejects `resume()`: both end in the disposal check, not a notice.
+      await startAudioContext(this.audioContext).catch((e: unknown) => {
+        this.abortIfDisposed();
+        throw e;
+      });
       // `cleanup()` closes and nulls the context, so without this the very next
       // line reads `createMediaStreamDestination` off null and the whole
       // initialize rejects — a notice about a take the user never saw.
