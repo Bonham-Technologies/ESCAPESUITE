@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -66,7 +66,9 @@ classes**. "This policy" means this file and the role files.
 
 ## Tools and access
 
-Runs are scheduled tasks in cloud sessions.
+Runs are scheduled tasks in cloud sessions. If the Atlassian tools aren't present in a
+run, write exactly `Atlassian tools: missing` as the first line of the run summary and
+stop; a steward also leaves no digest, which the fleet counts as a missed run.
 
 - **Jira** (`bonham.atlassian.net`): the Atlassian connector only.
 - **Confluence** (`bonham.atlassian.net`, space `OPS`): the same Atlassian connector.
@@ -194,6 +196,14 @@ model `fable`, read-only plus web):
 Either way, the session itself files the tickets and writes to Jira and Confluence: the
 analyst only reads. The builder's subagents follow `.claude/rules/subagent-routing.md`:
 `builder` sonnet, `reviewer` opus, `qc` fable.
+
+**Fallback.** When the Agent tool doesn't offer a vendored type (`analyst`, `builder`,
+`reviewer`, `qc`), use the built-in `general-purpose` type with the model the vendored
+file's frontmatter names (`analyst` and `qc` fable, `reviewer` opus, `builder` sonnet),
+and put the vendored file's body, minus its frontmatter, at the top of the prompt as the
+agent's instructions. Never fall back to the thread model for the steward's or scout's
+analysis when a fable `general-purpose` agent is available. Say which path ran in the
+steward's Setup line.
 
 ## Main must stay green
 

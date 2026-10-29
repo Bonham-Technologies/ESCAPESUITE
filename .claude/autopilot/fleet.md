@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -25,20 +25,26 @@ For each project, read:
    `fleet.json`: the steward's last scheduled day, the scout's last day of the month in
    its list, and the builder's two most recent scheduled nights
    (`space = OPS AND type = page AND title = "<record> — Session Log"`);
-4. its local rules:
-   `gh api -H 'Accept: application/vnd.github.raw' repos/<repo>/contents/.claude/rules/autopilot.local.md`;
-5. the week's counts, over the last 7 days:
+4. the week's counts, over the last 7 days:
    - tickets filed: `project = <jiraKey> AND created >= -7d AND (labels is EMPTY OR labels not in (ap-steward-log))`;
-   - decisions answered: the `ap-asked` query under **Decision Log**, with `updated >= -7d`;
-   - `needs-owner` PRs merged: `gh api 'repos/<repo>/pulls?state=closed&per_page=50'`,
-     counting those with `merged_at` in the window and the label `needs-owner`.
+   - decisions answered: the `ap-asked` query under **Decision Log**, with `updated >= -7d`.
 
 From this repo, read the previous fleet digest (the newest earlier comment on this
-project's steward log), for the "two consecutive weeks" signals, and the open
-`propagation` issues: `gh api 'repos/{owner}/{repo}/issues?labels=propagation&state=open'`.
+project's steward log), for the "two consecutive weeks" signals, the open
+`propagation` issues: `gh api 'repos/{owner}/{repo}/issues?labels=propagation&state=open'`,
+and two issues bonham-ops Actions write:
+- **the propagation log:** its `number` and `comments` count from
+  `gh api 'repos/{owner}/{repo}/issues?labels=propagation-log&state=open&per_page=5' --jq '.[0] | {number, comments}'`,
+  then its newest comment:
+  `gh api 'repos/{owner}/{repo}/issues/<number>/comments?per_page=1&page=<comments>' --jq '.[0].body'`.
+  Its first line is `policy v<N>`; each other line is `<project>: <result>`, with the
+  PR's URL after a `pr #n` or `updated #n`;
+- **the scanner releases:** `gh api 'repos/{owner}/{repo}/issues?labels=scanner-releases&state=open&per_page=5' --jq '.[0].body'`,
+  whose `osv-scanner:` and `gitleaks:` lines are the latest release tags.
 
-Another repo's `gh api` may answer 403 or 404 in a cloud run. Then skip that input,
-say so in the digest and write "unknown" for a count; never guess.
+A cloud run's `gh api` reaches only this repo; any other repo answers 403, so call
+none. If a read fails, skip that input, say so in the digest and write "unknown" for a
+count; never guess.
 
 ### Fleet digest
 
@@ -50,21 +56,25 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
 - **Missed runs.** A steward or scout always leaves a trace, a digest comment or a
   Session Log entry, so one whose scheduled time in `fleet.json` passed with no trace
   is missed. A builder with nothing to do leaves none, so flag a builder only when
-  ready tickets or untriaged Dependabot PRs existed at the start of its window and
-  nothing moved (no PR, no status change, no triage comment) across two consecutive
-  scheduled runs. The cause is invisible from here: write only "no trace of the
+  ready tickets (`labels in (ap-auto, ap-owner-merge)`, not Done) existed at the start
+  of its window and none changed status or gained a PR-link comment across two
+  consecutive scheduled runs. The cause is invisible from here: write only "no trace of the
   <role> run since <date>".
 - **Setup:** a table of each project's reported policy and instructions versions
-  against `fleet.json`, with any open refresh PR linked, and the projects whose digest
-  has no Setup line (they run a policy older than the fleet).
+  against `fleet.json`, an agents column (`vendored` or `fallback`, from the same line),
+  a Refresh PR column (the project's PR from the propagation log, linked), and the
+  projects whose digest has no Setup line (they run a policy older than the fleet).
 - **Scoreboard:** one line per project, linking its digest: the ten dimension scores,
   each with its trend (this digest's score minus the previous digest's); reverts this
-  week; owner interventions this week, counted as decisions answered plus `needs-owner`
-  PRs merged (input 5); the security counts; tickets filed (input 5) and shipped (the
-  digest's shipped list).
+  week; owner interventions this week, counted as decisions answered only (input 4;
+  merges in another repo can't be read from here); the security counts; tickets filed
+  (input 4) and shipped (the digest's shipped list).
 - **Policy findings filed this run**, linked, or "none".
 - The tail of **Weekly digest** for this repo itself: **Open security alerts**,
-  **Security scan** and **Setup**.
+  **Security scan** and **Setup**. The **Security scan** line adds `pins vs latest:
+  osv-scanner <pin>/<latest> · gitleaks <pin>/<latest> · checked <date>` from the
+  `scanner-releases` issue, flagging a `checked:` date older than 14 days as stale, or
+  `pins vs latest: not checked yet` if the issue is missing.
 
 ### Policy tickets
 
@@ -78,8 +88,7 @@ problem. The list is closed: a signal not in it files nothing.
 | A run stopped on a missing tool, env var or service that the readiness check should have caught | P2: add the check |
 | A digest field is missing or malformed in two or more projects | P3: the rule is unclear; rewrite it |
 | The owner answered the same `ap-decision` question the same way in two or more projects | P3: propose promoting the answer to a rule |
-| A rule in one project's `autopilot.local.md` appears in two or more | P3: propose promoting it to policy |
-| The digest reports a newer osv-scanner or gitleaks release | P3 `ap-owner-merge`: bump the pin |
+| The `scanner-releases` issue's tag, minus its leading `v`, is newer than the pin (`OSV=` or `GL=` in `security-sweep.md`) | P3 `ap-owner-merge`: bump the pin |
 | A missed run in two consecutive weeks | P2: the schedule, prompt or environment needs the owner; file `ap-decision` |
 
 Cap 10 per run, highest priority first. Before filing, search this project's open
@@ -99,10 +108,12 @@ Any lag at all gets a ticket that week, in this project, labelled `needs-operato
 only the owner can do the work. Search for an open one with the same title first.
 
 - **`<project>: refresh autopilot setup to policy v<N>`**, when a project reports an
-  older policy version or no Setup line. Look for its refresh PR:
-  `gh api 'repos/<repo>/pulls?state=open&per_page=100' --jq '.[] | select(.head.ref == "autopilot/refresh-v<N>") | .html_url'`.
-  If one is open, file nothing and link it under **Setup**; the project's builder
-  merges it. If the read fails, file the ticket and say the PR couldn't be checked.
+  older policy version or no Setup line. Read the propagation log's newest comment: if
+  it is for `policy v<N>` and the project's line is `pr #n` or `updated #n`, its
+  refresh PR is open: file nothing and link it under **Setup**; the project's builder
+  merges it. If the line is `FAILED …`, `kept-edits issue #n` or anything else (such
+  as `nothing to do`), the project has no line, or the comment is for another version,
+  file the ticket and quote the line.
 - **`<project>: paste Project instructions v<M>`**, when a project reports an older
   instructions version, or two that differ. The body is the text to paste, from
   `bin/fleet render-instructions <name>` in this checkout. When the "Scheduled tasks"
