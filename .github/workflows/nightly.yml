@@ -124,17 +124,60 @@ jobs:
           echo "::error::playwright install-deps failed after 2 attempts"
           exit 1
 
+      # ESCSUITE-389: the runner has no sound device. Without one, Firefox's AudioContext
+      # never leaves `suspended` and `resume()` never settles, so CRAFT's recorder waits at
+      # Start forever and every Firefox recording test times out. Headless Chromium falls
+      # back to a fake audio output when it finds no audio server, and needs no device.
+      # A PulseAudio daemon with a null sink gives
+      # Firefox a device; the sink check fails here rather than in 35 tests later.
+      # Chromium must not use that sink: on it, a playing <video>'s clock stalls. So the
+      # e2e step sets E2E_PULSE_NULL_SINK, and playwright.config.ts keeps Chromium off it.
+      - name: Start a PulseAudio null sink
+        id: audio-sink
+        if: ${{ !cancelled() && steps.install-deps.outcome == 'success' }}
+        timeout-minutes: 8
+        run: |
+          installed=false
+          for attempt in 1 2; do
+            if sudo apt-get install -y --no-install-recommends pulseaudio; then
+              installed=true
+              break
+            fi
+            echo "::warning::pulseaudio install failed (attempt ${attempt}/2)"
+            # `|| true`: the step runs under `bash -e`, so a failed refresh here would end
+            # the step before the second install attempt.
+            [ "$attempt" = "2" ] || { sleep 20; sudo apt-get update || true; }
+          done
+          if [ "$installed" != "true" ]; then
+            echo "::error::pulseaudio install failed after 2 attempts"
+            exit 1
+          fi
+          if ! pulseaudio --start --exit-idle-time=-1; then
+            echo "::error::pulseaudio --start failed"
+            exit 1
+          fi
+          pactl load-module module-null-sink sink_name=nightly_null
+          pactl set-default-sink nightly_null
+          # Captured first: under `pipefail`, `pactl … | grep -q` can fail on SIGPIPE.
+          sinks=$(pactl list short sinks)
+          echo "$sinks"
+          if ! grep -q nightly_null <<<"$sinks"; then
+            echo "::error::PulseAudio started but no null sink is listed"
+            exit 1
+          fi
+
       # Runs even when the property tests failed: the two are independent. The
       # projects are chromium, chromium-strict (journeys, soaks, regressions), firefox
       # and webkit; per-browser gaps are each spec's own `test.skip(browserName …)`.
       - name: Run E2E tests (Chromium, Firefox, WebKit)
         id: e2e
-        if: ${{ !cancelled() && steps.install-deps.outcome == 'success' && steps.install-browsers.outcome != 'failure' }}
+        if: ${{ !cancelled() && steps.install-deps.outcome == 'success' && steps.install-browsers.outcome != 'failure' && steps.audio-sink.outcome == 'success' }}
         run: pnpm test:e2e:browsers
         env:
           CI: true
           E2E_CROSS_BROWSER: '1'
           E2E_NIGHTLY: '1'
+          E2E_PULSE_NULL_SINK: '1'
           SOAK_CYCLES: '200'
           SOAK_RELOADS: '30'
 

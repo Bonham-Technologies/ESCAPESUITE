@@ -131,6 +131,30 @@ test('nightly.yml runs at 11:00 UTC and on dispatch, with every nightly knob set
   assert.match(nightlyYml, /path: apps\/e2e\/playwright-report\//)
 })
 
+// ESCSUITE-389: the runner has no sound device, and without one Firefox's AudioContext
+// never leaves `suspended`, so CRAFT's recorder waits on `resume()` forever and every
+// Firefox recording test times out at Start. The nightly starts a PulseAudio null sink first.
+test('nightly.yml gives Firefox an audio sink before the e2e step', () => {
+  const sinkStep = nightlyYml.indexOf('- name: Start a PulseAudio null sink')
+  const e2eStep = nightlyYml.indexOf('- name: Run E2E tests (Chromium, Firefox, WebKit)')
+  assert.ok(sinkStep > 0, 'nightly.yml has no PulseAudio step')
+  assert.ok(sinkStep < e2eStep, 'the PulseAudio step must come before the e2e step')
+  const step = nightlyYml.slice(sinkStep, e2eStep)
+  assert.match(step, /apt-get install -y[^\n]*pulseaudio/)
+  assert.match(step, /pulseaudio --start/)
+  assert.match(step, /module-null-sink/)
+  // A sink that never came up must fail this step, not 35 tests an hour later.
+  assert.match(step, /pactl list short sinks/)
+  assert.match(nightlyYml.slice(e2eStep), /^\s+if: .*steps\.audio-sink\.outcome == 'success'/m)
+  // playwright.config.ts keeps Chromium off the sink only when the e2e step sets this: on it,
+  // Chromium's <video> clock stalls.
+  const nextStep = nightlyYml.indexOf('\n      - name:', e2eStep + 1)
+  assert.match(nightlyYml.slice(e2eStep, nextStep), /^\s+E2E_PULSE_NULL_SINK: '1'$/m)
+  const playwrightConfig = readFileSync(path.join(repoRoot, 'apps/e2e/playwright.config.ts'), 'utf8')
+  assert.match(playwrightConfig, /process\.env\.E2E_PULSE_NULL_SINK === '1'/)
+  assert.match(playwrightConfig, /PULSE_SERVER: /)
+})
+
 test('ci-status does not depend on the nightly', () => {
   const ciStatus = ciYml.slice(ciYml.indexOf('\n  ci-status:'))
   assert.ok(ciStatus.length > 1, 'ci.yml has no ci-status job')
