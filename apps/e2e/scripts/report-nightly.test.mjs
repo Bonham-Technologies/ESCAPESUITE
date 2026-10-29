@@ -146,6 +146,13 @@ test('nightly.yml gives Firefox an audio sink before the e2e step', () => {
   // A sink that never came up must fail this step, not 35 tests an hour later.
   assert.match(step, /pactl list short sinks/)
   assert.match(nightlyYml.slice(e2eStep), /^\s+if: .*steps\.audio-sink\.outcome == 'success'/m)
+  // playwright.config.ts keeps Chromium off the sink only when the e2e step sets this: on it,
+  // Chromium's <video> clock stalls.
+  const nextStep = nightlyYml.indexOf('\n      - name:', e2eStep + 1)
+  assert.match(nightlyYml.slice(e2eStep, nextStep), /^\s+E2E_PULSE_NULL_SINK: '1'$/m)
+  const playwrightConfig = readFileSync(path.join(repoRoot, 'apps/e2e/playwright.config.ts'), 'utf8')
+  assert.match(playwrightConfig, /process\.env\.E2E_PULSE_NULL_SINK === '1'/)
+  assert.match(playwrightConfig, /PULSE_SERVER: /)
 })
 
 test('ci-status does not depend on the nightly', () => {

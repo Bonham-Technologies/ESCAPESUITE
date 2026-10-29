@@ -11,6 +11,24 @@ const crossBrowser = !isCI || process.env.E2E_CROSS_BROWSER === '1'
 // E2E_NIGHTLY=1, as the nightly workflow does.
 const nightly = process.env.E2E_NIGHTLY === '1'
 
+// ESCSUITE-389: the nightly gives Firefox a PulseAudio null sink (nightly.yml) and sets
+// E2E_PULSE_NULL_SINK=1. On that sink a playing <video>'s clock in headless Chromium stalls
+// (currentTime stops advancing), so Chromium gets an unreachable PULSE_SERVER and falls back
+// to the fake audio output it uses on every PR run, where no PulseAudio exists.
+// `env` replaces the browser's whole environment, so the rest of process.env is copied in.
+const chromiumUse = process.env.E2E_PULSE_NULL_SINK === '1'
+  ? {
+      launchOptions: {
+        env: {
+          ...Object.fromEntries(
+            Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+          ),
+          PULSE_SERVER: 'unix:/nonexistent/pulse-native',
+        },
+      },
+    }
+  : {}
+
 // Standalone, production-layout and perf tests use separate configs. The perf
 // benchmarks in particular must never run here: they assert nothing, they take
 // minutes of real encoding, and a run under this config's parallel workers
@@ -99,7 +117,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], ...chromiumUse },
       // A project's testIgnore replaces the top-level one, so repeat it.
       testIgnore: [...baseIgnore, ...strictSpecs],
     },
@@ -110,13 +128,13 @@ export default defineConfig({
       retries: 0,
       // No retry means 'on-first-retry' would never record anything: keep the
       // trace and video of a failed attempt instead.
-      use: { ...devices['Desktop Chrome'], trace: 'retain-on-failure', video: 'retain-on-failure' },
+      use: { ...devices['Desktop Chrome'], ...chromiumUse, trace: 'retain-on-failure', video: 'retain-on-failure' },
     },
     // Cross-browser projects run locally, and in CI only when E2E_CROSS_BROWSER is set (the nightly)
     ...(crossBrowser ? crossBrowserProjects : []),
     {
       name: 'mobile-chromium',
-      use: { ...devices['Pixel 5'] },
+      use: { ...devices['Pixel 5'], ...chromiumUse },
       testMatch: '**/responsive/**',
     },
     {
@@ -125,6 +143,7 @@ export default defineConfig({
         viewport: { width: 768, height: 1024 },
         isMobile: false,
         hasTouch: true,
+        ...chromiumUse,
       },
       testMatch: '**/responsive/**',
     },

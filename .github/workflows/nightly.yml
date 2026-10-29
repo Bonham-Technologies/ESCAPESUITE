@@ -126,9 +126,12 @@ jobs:
 
       # ESCSUITE-389: the runner has no sound device. Without one, Firefox's AudioContext
       # never leaves `suspended` and `resume()` never settles, so CRAFT's recorder waits at
-      # Start forever and every Firefox recording test times out. Headless Chromium fakes
-      # its audio output and is unaffected. A PulseAudio daemon with a null sink gives
+      # Start forever and every Firefox recording test times out. Headless Chromium falls
+      # back to a fake audio output when it finds no audio server, and needs no device.
+      # A PulseAudio daemon with a null sink gives
       # Firefox a device; the sink check fails here rather than in 35 tests later.
+      # Chromium must not use that sink: on it, a playing <video>'s clock stalls. So the
+      # e2e step sets E2E_PULSE_NULL_SINK, and playwright.config.ts keeps Chromium off it.
       - name: Start a PulseAudio null sink
         id: audio-sink
         if: ${{ !cancelled() && steps.install-deps.outcome == 'success' }}
@@ -174,6 +177,7 @@ jobs:
           CI: true
           E2E_CROSS_BROWSER: '1'
           E2E_NIGHTLY: '1'
+          E2E_PULSE_NULL_SINK: '1'
           SOAK_CYCLES: '200'
           SOAK_RELOADS: '30'
 
