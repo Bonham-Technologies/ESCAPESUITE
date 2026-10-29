@@ -1,6 +1,6 @@
 // Core recording engine using MediaRecorder API
 
-import { getSupportedMimeType, stopStream } from './permissions';
+import { getSupportedAudioMimeType, getSupportedMimeType, stopStream } from './permissions';
 import { startAudioContext } from './audioContextStart';
 import type { AudioLevels, RecorderStopCallback, RecordingConfig } from '../store/types';
 
@@ -141,12 +141,26 @@ export class Recorder {
       this.trackEndedHandlers.set(track, handler);
     }
 
-    // Create MediaRecorder
+    // Create MediaRecorder. A take with no video asks for an audio type
+    // (ESCSUITE-394): given a video type for an audio-only stream, Firefox's
+    // MediaRecorder never delivers and never stops. The blob below keeps the
+    // video type every take is stored with, which is what Chromium has always
+    // stored audio-only WebM under, so nothing downstream sees a new type.
+    // Only when that video type is WebM too: a browser that records video as
+    // MP4 would otherwise store WebM bytes labelled `video/mp4`.
     const mimeType = getSupportedMimeType();
-    this.mediaRecorder = new MediaRecorder(this.combinedStream, {
-      mimeType,
-      videoBitsPerSecond: 2500000, // 2.5 Mbps — good quality for screen capture, less CPU pressure
-    });
+    const hasVideo = tracks.some(track => track.kind === 'video');
+    const audioMimeType =
+      hasVideo || !mimeType.startsWith('video/webm') ? null : getSupportedAudioMimeType();
+    this.mediaRecorder = new MediaRecorder(
+      this.combinedStream,
+      audioMimeType
+        ? { mimeType: audioMimeType }
+        : {
+            mimeType,
+            videoBitsPerSecond: 2500000, // 2.5 Mbps — good quality for screen capture, less CPU pressure
+          }
+    );
 
     this.mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {

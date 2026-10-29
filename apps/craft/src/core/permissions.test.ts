@@ -8,6 +8,7 @@ import {
   CaptureRequestError,
   hasSystemAudio,
   getSupportedMimeType,
+  getSupportedAudioMimeType,
 } from './permissions'
 
 function withUserAgent(ua: string): () => void {
@@ -515,6 +516,23 @@ describe('permissions', () => {
 
       const mimeType = getSupportedMimeType()
       expect(mimeType).toBe('video/webm')
+    })
+  })
+
+  describe('getSupportedAudioMimeType (ESCSUITE-394)', () => {
+    it('prefers Opus in WebM', () => {
+      vi.mocked(MediaRecorder.isTypeSupported).mockReturnValue(true)
+      expect(getSupportedAudioMimeType()).toBe('audio/webm;codecs=opus')
+    })
+
+    it('falls back to plain audio WebM', () => {
+      vi.mocked(MediaRecorder.isTypeSupported).mockImplementation((type) => type === 'audio/webm')
+      expect(getSupportedAudioMimeType()).toBe('audio/webm')
+    })
+
+    it('answers null when no audio type is supported', () => {
+      vi.mocked(MediaRecorder.isTypeSupported).mockReturnValue(false)
+      expect(getSupportedAudioMimeType()).toBeNull()
     })
   })
 })

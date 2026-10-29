@@ -396,3 +396,18 @@ export function getSupportedMimeType(): string {
 
   return 'video/webm';
 }
+
+/**
+ * The type a take with no video asks MediaRecorder for (ESCSUITE-394), or
+ * `null` when no audio type is supported. Firefox's MediaRecorder, handed an
+ * audio-only stream and a video type, delivers no data and never fires `stop`,
+ * so a microphone-only take froze at Stop and was never saved.
+ */
+export function getSupportedAudioMimeType(): string | null {
+  for (const type of ['audio/webm;codecs=opus', 'audio/webm']) {
+    if (MediaRecorder.isTypeSupported(type)) {
+      return type;
+    }
+  }
+  return null;
+}
