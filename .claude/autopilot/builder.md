@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -7,11 +7,12 @@ Part of the autopilot policy. `.claude/rules/autopilot.md` and
 ## Builder
 
 Take ready tickets: those labelled `ap-auto` or `ap-owner-merge`, with no open PR, and
-never one labelled `ap-decision`, `ap-watch`, `needs-operator` or `needs-owner`:
+never one labelled `ap-decision`, `ap-watch`, `needs-operator`, `needs-owner` or
+`ap-triage`:
 
 ```
 project = ESCSUITE AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge)
-  AND labels not in (ap-decision, ap-watch, needs-operator, needs-owner)
+  AND labels not in (ap-decision, ap-watch, needs-operator, needs-owner, ap-triage)
 ```
 
 Take the highest priority first, then the oldest first. Stop after the run's ticket
