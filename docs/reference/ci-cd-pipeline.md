@@ -36,6 +36,12 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
      every other run skips through `grepInvert`), and `SOAK_CYCLES=200` / `SOAK_RELOADS=30` for
      `tests/escapeartist/soak.spec.ts` (PR defaults 25 / 10). Per-browser gaps stay each spec's own
      `test.skip(browserName …, reason)`; the soaks are Chromium-only that way.
+- **Audio sink** (ESCSUITE-389): before the e2e step, "Start a PulseAudio null sink" installs
+  PulseAudio and starts it with a null sink. The runner has no sound device, and without one
+  Firefox's AudioContext never leaves `suspended`, so CRAFT's recorder waits on `resume()` forever
+  and every Firefox recording test times out at Start. Headless Chromium fakes its audio output.
+  Locally, in a cloud container: `apt-get install -y pulseaudio && pulseaudio --start` before
+  running the `firefox` project.
 - **Not in the nightly:** the responsive projects (`mobile-*`, `tablet-*`; the Chromium ones still
   run in every PR's `e2e` job) and the headless-artist Chromium tests (also in `ci.yml`'s `e2e`).
 - **Setup** mirrors `ci.yml`'s `e2e` job (pnpm action pin, Node 24, pnpm cache, the capped and retried
