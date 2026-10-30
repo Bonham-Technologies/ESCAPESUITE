@@ -35,8 +35,8 @@ export interface AxeResult {
  * ESCSUITE-393: a dialog that fades in is audited at whatever opacity it has
  * reached, and axe blends that opacity into `color-contrast`. Audited mid-fade,
  * the keyboard shortcuts sheet's muted tip failed contrast on a slow first
- * attempt and passed on retry. Infinite animations (a spinner) never finish,
- * so they are not waited on.
+ * attempt and passed on retry. Infinite animations (a spinner) and paused ones
+ * never finish, so they are not waited on.
  */
 export async function waitForAnimationsToFinish(target: Locator): Promise<void> {
   await target.evaluate(async (el) => {
@@ -51,7 +51,8 @@ export async function waitForAnimationsToFinish(target: Locator): Promise<void> 
           effect?.target != null &&
           related(effect.target) &&
           effect.getComputedTiming().endTime !== Infinity &&
-          animation.playState !== 'finished'
+          // A paused animation would never settle, so only running ones count.
+          animation.playState === 'running'
         )
       })
     const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
