@@ -38,7 +38,7 @@ test.describe('ESCSUITE-386: a ripple start trim closes the gap it leaves', () =
     await waitForAppReady(page, 'artist')
   })
 
-  test('trimming 2 s off the second piece’s head keeps it at 5 s and moves nothing out of place', async ({ page }) => {
+  test('trimming 2 s off the middle piece’s head keeps it at 5 s and moves the piece after it up', async ({ page }) => {
     await importMediaAndAddToTimeline(page, {
       name: 'tone.wav',
       mimeType: 'audio/wav',
@@ -48,18 +48,23 @@ test.describe('ESCSUITE-386: a ripple start trim closes the gap it leaves', () =
     await expect(clip).toBeVisible()
     const pxPerSec = await pixelsPerSecond(clip, CLIP_SECONDS)
 
+    // Three pieces: 0-5, 5-8 and 8-10.
     await razorSplit(page, clip, 5, pxPerSec)
-    await expect(timelineClips(page)).toHaveCount(2)
+    await razorSplit(page, await clipFromLeft(page, 1), 3, pxPerSec)
+    await expect(timelineClips(page)).toHaveCount(3)
     const before = await clipSpans(page, pxPerSec)
     expect(before[1].start, 'the second piece starts at 5 s').toBeCloseTo(5, 1)
+    expect(before[2].start, 'the third piece starts at 8 s').toBeCloseTo(8, 1)
 
     await page.getByTitle(/^Ripple Edit/).click()
     await dragStartEdgeBy(page, await clipFromLeft(page, 1), 2, pxPerSec)
 
-    const [first, second] = await clipSpans(page, pxPerSec)
+    const [first, second, third] = await clipSpans(page, pxPerSec)
     expect(first.end, 'the first piece still ends at 5 s').toBeCloseTo(5, 1)
     expect(second.start, 'the trimmed piece still starts at 5 s: no gap in front of it').toBeCloseTo(5, 1)
     // About 2 s: the handle is grabbed a few pixels in, so the trim is a hair over.
-    expect(second.end, 'the trimmed piece is about 2 s shorter').toBeCloseTo(8, 0)
+    expect(second.end, 'the trimmed piece is about 2 s shorter').toBeCloseTo(6, 0)
+    expect(third.start, 'the piece after it moved up to meet it: no gap behind it').toBeCloseTo(second.end, 1)
+    expect(third.end - third.start, 'the piece after it kept its length').toBeCloseTo(2, 1)
   })
 })

@@ -243,8 +243,9 @@ mousedown, the first write unskipped and the rest passing `true`. It throttles n
 write is still `commit`ted *inside* the `if (update)` rather than at the move, because
 `computeTrimUpdate` refuses a move that would leave the clip too short and such a move writes
 nothing at all: a gesture whose opening move was rejected must still push on the write that does
-land. The one thing a trim does on release — the ripple tool's `shiftClipsAfter`, which closes
-the gap the trim left — takes the flag too, and `shiftClipsAfter` grew it for that:
+land. What a trim does on release — the ripple tool's `shiftClipsAfter`, which closes
+the gap the trim left, and for a ripple start trim the `setClipTimelinePosition` that puts the
+clip's front back where it began (ESCSUITE-386) — takes the flag too, and `shiftClipsAfter` grew it for that:
 the shift belongs to the trim that produced it, and pushing an entry of its own made
 one ripple trim two undo steps, the first Ctrl+Z sliding the downstream clips back and
 leaving the clip trimmed.
@@ -339,18 +340,20 @@ two had not:
 3. **The edge trim** (ESCSUITE-161) — `useTrimDrag.handleMouseMove` now puts the pointer time
    through `clampTrimToNeighbours` before `computeTrimUpdate` sees it, so an end trim stops at
    the next clip's start and a start trim at the previous clip's end. The clamp lives in the
-   **hook and not in `trimClip`**, for three reasons: the **ripple** tool's *end* trim is
-   excepted (it lengthens the clip over its neighbours during the drag and shifts them out of
-   the way on release, so the overlap is real and transient) and which tool is out is something
+   **hook and not in `trimClip`**, for three reasons: the **ripple** tool's trims are
+   excepted (an end trim lengthens the clip over its neighbours during the drag and shifts them
+   out of the way on release; a start trim that lengthens the head runs over the previous clip
+   until the release puts the clip's front back, ESCSUITE-386; so the overlap is real and
+   transient) and which tool is out is something
    only the gesture knows; the store is already not where a trim's geometry is enforced, since
    the source's length and `MIN_CLIP_DURATION` are `computeTrimUpdate`'s rules too and
    `trimClip` enforces only what it owns (the locked row, ESCSUITE-84); and `trimClip` has
    exactly one caller, this hook, so a second copy of the rule there would buy no defence and
-   would cost the ripple tool a flag to switch it off again. The exception is the **end edge's
-   alone**: `handleMouseUp` measures the ripple shift from the clip's *end*
-   (`currentEnd - originalEnd`), and a start trim never moves the end — so a ripple start trim
-   shifts nothing, and leaving it unclamped left the overlap on the row for good rather than
-   transiently. The clamp is applied to the **pointer time**
+   would cost the ripple tool a flag to switch it off again. Until ESCSUITE-386 the exception
+   was the end edge's alone, because the release measured the shift from the clip's end, which a
+   start trim never moves: a ripple start trim shifted nothing and left a gap. The release now
+   shifts by how far the front moved and puts the front back, so both edges are excepted. The
+   clamp is applied to the **pointer time**
    rather than to the computed update, which is what keeps ESCSUITE-110's idempotence — a trim
    that wanders out past the neighbour and back comes home exactly instead of accumulating the
    clamped frames in between. Once the pointer is out past the neighbour every move computes

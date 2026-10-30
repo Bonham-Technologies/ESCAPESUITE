@@ -23,8 +23,9 @@
 // write of a gesture goes through unskipped — so the entry snapshots the clip's
 // in and out points as they were before the drag — and every write after it
 // passes `skipHistory`. Nothing extra happens on release *for the undo stack*, so
-// a trim abandoned mid-drag is already undoable to where it started — and the one
-// thing release does do, the ripple tool's `shiftClipsAfter`, takes the flag too:
+// a trim abandoned mid-drag is already undoable to where it started — and what
+// release does do, the ripple tool's `shiftClipsAfter` (and, for a start trim, the
+// `setClipTimelinePosition` that puts the clip's front back), takes the flag too:
 // it belongs to the trim that produced it, and pushing an entry of its own made
 // one ripple trim two undo steps. Unlike
 // `Preview/useTransformHandles.ts`, whose writes are throttled to an animation
