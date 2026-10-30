@@ -10,7 +10,9 @@
 //
 // Release only does something with the ripple tool out, and then the origin is
 // what makes it possible: the clips after this one shift by however much the
-// end moved over the whole gesture.
+// end moved over the whole gesture. A ripple start trim (ESCSUITE-386) moves the
+// clip's front instead, so its release puts the front back where it began and
+// shifts the clips after it by what the trim took off the head (or added to it).
 //
 // **One trim is one undo entry** (ESCSUITE-77, the rule ESCSUITE-52 set for a
 // preview transform drag and ESCSUITE-75 for the inspector's sliders). Writing
@@ -55,14 +57,12 @@
 // mousedown's snapshot, so nothing is taken or allocated per move.
 //
 // **The clamp lives here and not in `trimClip`**, deliberately, for three
-// reasons. The **ripple** tool's end trim is excepted: it lengthens the clip
-// over its neighbours during the drag and pushes them out of the way on
-// release, so the overlap is real and transient and refusing it would break the
-// tool — and which tool is out is something only the gesture knows, never the
-// store. Its *start* trim is not excepted, and that is the asymmetry the review
-// caught: `handleMouseUp` measures the shift from the clip's end, which a start
-// trim never moves, so a ripple start trim shifts nothing and its overlap would
-// be permanent rather than transient. And
+// reasons. The **ripple** tool's trims are excepted: an end trim lengthens the
+// clip over its neighbours during the drag and pushes them out of the way on
+// release, and a start trim that lengthens the head runs over the previous clip
+// until the release puts the clip's front back where it began (ESCSUITE-386).
+// The overlap is real and transient and refusing it would break the tool — and
+// which tool is out is something only the gesture knows, never the store. And
 // the store is already not where a trim's geometry is enforced: the source's
 // length and `MIN_CLIP_DURATION` are `computeTrimUpdate`'s rules too, with
 // `trimClip` enforcing only what it owns (the locked row, ESCSUITE-84). It also
@@ -172,6 +172,12 @@ export interface TrimDragDeps {
    * it joins that gesture's entry rather than opening one of its own.
    */
   shiftClipsAfter: (trackId: string | undefined, afterTime: number, delta: number, skipHistory?: boolean) => boolean;
+  /**
+   * The store's `setClipTimelinePosition`, for a ripple start trim's release
+   * (ESCSUITE-386), which puts the clip's front back where it began. Same
+   * trailing `skipHistory`, for the same reason.
+   */
+  setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => boolean;
 }
 
 /** The trim in progress, and the way to start one. */
@@ -192,6 +198,7 @@ export function useTrimDrag({
   setSelectedClipId,
   trimClip,
   shiftClipsAfter,
+  setClipTimelinePosition,
 }: TrimDragDeps): TrimDrag {
   const [trimState, setTrimState] = useState<TrimState | null>(null);
   /** The same gesture, for handlers that must not wait on a render. */
@@ -233,14 +240,12 @@ export function useTrimDrag({
     const area = trackArea.read(container);
     const mouseTime = pointerTime(e.clientX, area.left, container.scrollLeft, pixelsPerSecond);
 
-    // The ripple tool's END trim is the one trim allowed to run over its
-    // neighbours: the release shifts them by however much the end moved, so the
-    // overlap the drag makes lasts only as long as the drag. A ripple START
-    // trim earns no such exception — `handleMouseUp` measures its shift from
-    // the clip's **end**, and a start trim never moves the end, so the delta is
-    // 0, nothing is shifted and the overlap would be permanent.
+    // The ripple tool's trims may run over their neighbours: the release shifts
+    // the later clips by however much the trim changed the clip's length, and
+    // puts a start-trimmed clip's front back where it began (ESCSUITE-386), so
+    // the overlap the drag makes lasts only as long as the drag.
     const limitedTime =
-      activeTool === 'ripple' && trim.edge === 'end'
+      activeTool === 'ripple'
         ? mouseTime
         : clampTrimToNeighbours(clips, clip, trim.edge, trim.origin, mouseTime);
 
@@ -278,13 +283,13 @@ export function useTrimDrag({
       }
       return;
     }
-    // The partner's update for the edge moved by `delta`, clamped as the
-    // grabbed clip's own is.
+    // The partner's update for the edge moved by `delta`. Partners exist only
+    // for a ripple trim, so, like the grabbed clip's, it is not clamped.
     const partnerUpdate = (p: { clip: Clip; origin: TrimOrigin }, delta: number) => {
       const target = edgeTime(p.origin, trim.edge) + delta;
       return computeTrimUpdate({
         edge: trim.edge,
-        mouseTime: trim.edge === 'end' ? target : clampTrimToNeighbours(clips, p.clip, 'start', p.origin, target),
+        mouseTime: target,
         clip: p.clip,
         sourceVideo: sourceVideos.find((v) => v.id === p.clip.sourceVideoId),
         origin: p.origin,
@@ -340,7 +345,12 @@ export function useTrimDrag({
         const clip = clips.find((c) => c.id === id);
         if (!clip) continue;
         const originalEnd = edgeTime(origin, 'end');
-        const delta = edgeTime(clip, 'end') - originalEnd;
+        // An end trim moved the end; a start trim moved the front, and the
+        // clips after it shift by the opposite of that (ESCSUITE-386).
+        const delta =
+          trim.edge === 'end'
+            ? edgeTime(clip, 'end') - originalEnd
+            : origin.timelinePosition - clip.timelinePosition;
 
         if (delta !== 0) {
           // Shift all clips after the original end position. Part of the trim
@@ -351,6 +361,13 @@ export function useTrimDrag({
           gestureHistory.commit((skipHistory) =>
             shiftClipsAfter(clip.trackId, originalEnd, delta, skipHistory)
           );
+          // The start-trimmed clip keeps its place: its front goes back to where
+          // the gesture began, and its end meets the shifted clips again.
+          if (trim.edge === 'start') {
+            gestureHistory.commit((skipHistory) =>
+              setClipTimelinePosition(clip.id, origin.timelinePosition, skipHistory)
+            );
+          }
         }
       }
     }

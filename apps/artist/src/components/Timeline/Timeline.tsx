@@ -208,6 +208,7 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
     setSelectedClipId,
     trimClip,
     shiftClipsAfter,
+    setClipTimelinePosition,
   });
 
   // Calculate total tracks height
