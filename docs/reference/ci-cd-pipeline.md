@@ -41,8 +41,8 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
   Firefox's AudioContext never leaves `suspended`, so CRAFT's recorder waits on `resume()` forever
   and every Firefox recording test times out at Start. The sink is `module-pipe-sink` with
   `use_system_clock_for_timing=yes` (ESCSUITE-396), not `module-null-sink`: on the null sink an
-  unmuted `<video>` stalls at `currentTime` 0, in Firefox (ARTIST's preview never plays) as in
-  Chromium. Headless Chromium falls back to a fake audio output when it finds no audio server,
+  unmuted `<video>` in Firefox stalls at `currentTime` 0 or crawls, so ARTIST's preview never
+  plays. Headless Chromium falls back to a fake audio output when it finds no audio server,
   and stays off PulseAudio (ESCSUITE-389 found its `<video>` clock stalled on the null sink; the
   A/V fixture and soak specs failed). The e2e step sets
   `E2E_PULSE_NULL_SINK=1`, and `playwright.config.ts` then gives the Chromium projects an
