@@ -11,8 +11,8 @@ const crossBrowser = !isCI || process.env.E2E_CROSS_BROWSER === '1'
 // E2E_NIGHTLY=1, as the nightly workflow does.
 const nightly = process.env.E2E_NIGHTLY === '1'
 
-// ESCSUITE-389: the nightly gives Firefox a PulseAudio null sink (nightly.yml) and sets
-// E2E_PULSE_NULL_SINK=1. On that sink a playing <video>'s clock in headless Chromium stalls
+// ESCSUITE-389: the nightly gives Firefox a PulseAudio sink (nightly.yml) and sets
+// E2E_PULSE_NULL_SINK=1. On a null sink a playing <video>'s clock in headless Chromium stalled
 // (currentTime stops advancing), so Chromium gets an unreachable PULSE_SERVER and falls back
 // to the fake audio output it uses on every PR run, where no PulseAudio exists.
 // `env` replaces the browser's whole environment, so the rest of process.env is copied in.

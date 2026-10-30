@@ -128,11 +128,16 @@ jobs:
       # never leaves `suspended` and `resume()` never settles, so CRAFT's recorder waits at
       # Start forever and every Firefox recording test times out. Headless Chromium falls
       # back to a fake audio output when it finds no audio server, and needs no device.
-      # A PulseAudio daemon with a null sink gives
+      # A PulseAudio daemon with a silent sink gives
       # Firefox a device; the sink check fails here rather than in 35 tests later.
-      # Chromium must not use that sink: on it, a playing <video>'s clock stalls. So the
-      # e2e step sets E2E_PULSE_NULL_SINK, and playwright.config.ts keeps Chromium off it.
-      - name: Start a PulseAudio null sink
+      # ESCSUITE-396: the sink is a pipe sink timed by the system clock, not
+      # module-null-sink. On the null sink an unmuted <video> in Firefox stalls at
+      # currentTime 0, so ARTIST's preview never plays. The pipe sink drops what it
+      # can't write, so its FIFO needs no reader.
+      # Chromium must not use PulseAudio: on the null sink, a playing <video>'s clock
+      # stalled (ESCSUITE-389). So the e2e step sets E2E_PULSE_NULL_SINK, and
+      # playwright.config.ts keeps Chromium off it.
+      - name: Start a PulseAudio sink
         id: audio-sink
         if: ${{ !cancelled() && steps.install-deps.outcome == 'success' }}
         timeout-minutes: 8
@@ -156,13 +161,14 @@ jobs:
             echo "::error::pulseaudio --start failed"
             exit 1
           fi
-          pactl load-module module-null-sink sink_name=nightly_null
-          pactl set-default-sink nightly_null
+          pactl load-module module-pipe-sink sink_name=nightly_sink \
+            file="$RUNNER_TEMP/pulse-sink.fifo" use_system_clock_for_timing=yes
+          pactl set-default-sink nightly_sink
           # Captured first: under `pipefail`, `pactl … | grep -q` can fail on SIGPIPE.
           sinks=$(pactl list short sinks)
           echo "$sinks"
-          if ! grep -q nightly_null <<<"$sinks"; then
-            echo "::error::PulseAudio started but no null sink is listed"
+          if ! grep -q nightly_sink <<<"$sinks"; then
+            echo "::error::PulseAudio started but its sink is not listed"
             exit 1
           fi
 
