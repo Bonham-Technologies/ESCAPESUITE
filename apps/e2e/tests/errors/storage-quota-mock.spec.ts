@@ -22,6 +22,11 @@ test.describe('Storage Quota Exceeded — mock shape', () => {
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
+    // ESCSUITE-392: the rows hold a string, not a Blob. WebKit's ephemeral
+    // sessions (every Playwright WebKit context, and Safari Private Browsing)
+    // refuse to store a Blob in IndexedDB, so a Blob seed failed this
+    // transaction there with a null error before the mock was installed.
+    // What a row holds is irrelevant to the mock's shape.
     await page.evaluate(
       () =>
         new Promise<void>((resolve, reject) => {
@@ -29,7 +34,7 @@ test.describe('Storage Quota Exceeded — mock shape', () => {
           req.onsuccess = () => {
             const db = req.result
             const tx = db.transaction('videos', 'readwrite')
-            tx.objectStore('videos').put({ id: 'escsuite-207-probe', blob: new Blob(['x']), metadata: {} })
+            tx.objectStore('videos').put({ id: 'escsuite-207-probe', blob: 'x', metadata: {} })
             tx.oncomplete = () => {
               db.close()
               resolve()
@@ -113,10 +118,10 @@ test.describe('Storage Quota Exceeded — mock shape', () => {
 
       return (async () => {
         const put = await withTx((store) => {
-          store.put({ id: 'escsuite-207-probe', blob: new Blob(['y']), metadata: {} })
+          store.put({ id: 'escsuite-207-probe', blob: 'y', metadata: {} })
         })
         const add = await withTx((store) => {
-          store.add({ id: 'escsuite-207-probe-2', blob: new Blob(['y']), metadata: {} })
+          store.add({ id: 'escsuite-207-probe-2', blob: 'y', metadata: {} })
         })
         // Cursor update before delete: it needs the seeded row still there.
         const cursorUpdateResult = await cursorUpdate()
