@@ -36,15 +36,20 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
      every other run skips through `grepInvert`), and `SOAK_CYCLES=200` / `SOAK_RELOADS=30` for
      `tests/escapeartist/soak.spec.ts` (PR defaults 25 / 10). Per-browser gaps stay each spec's own
      `test.skip(browserName …, reason)`; the soaks are Chromium-only that way.
-- **Audio sink** (ESCSUITE-389): before the e2e step, "Start a PulseAudio null sink" installs
-  PulseAudio and starts it with a null sink. The runner has no sound device, and without one
+- **Audio sink** (ESCSUITE-389): before the e2e step, "Start a PulseAudio sink" installs
+  PulseAudio and starts it with a silent sink. The runner has no sound device, and without one
   Firefox's AudioContext never leaves `suspended`, so CRAFT's recorder waits on `resume()` forever
-  and every Firefox recording test times out at Start. Headless Chromium falls back to a fake
-  audio output when it finds no audio server, and must stay off the null sink: on it a playing
-  `<video>`'s clock stalls (the A/V fixture and soak specs fail). The e2e step sets
+  and every Firefox recording test times out at Start. The sink is `module-pipe-sink` with
+  `use_system_clock_for_timing=yes` (ESCSUITE-396), not `module-null-sink`: on the null sink an
+  unmuted `<video>` in Firefox stalls at `currentTime` 0 or crawls, so ARTIST's preview never
+  plays. Headless Chromium falls back to a fake audio output when it finds no audio server,
+  and stays off PulseAudio (ESCSUITE-389 found its `<video>` clock stalled on the null sink; the
+  A/V fixture and soak specs failed). The e2e step sets
   `E2E_PULSE_NULL_SINK=1`, and `playwright.config.ts` then gives the Chromium projects an
   unreachable `PULSE_SERVER`. Locally, in a cloud container: `apt-get install -y pulseaudio &&
-  pulseaudio --start` before running the `firefox` project; while PulseAudio is running, set
+  pulseaudio --start && pactl load-module module-pipe-sink sink_name=pipe file=/tmp/pulse.fifo
+  use_system_clock_for_timing=yes && pactl set-default-sink pipe` before running the `firefox`
+  project; while PulseAudio is running, set
   `E2E_PULSE_NULL_SINK=1` for any Chromium run of this config (the other configs, such as
   av-drift, have no such switch, so stop PulseAudio with `pulseaudio --kill` before them).
 - **Not in the nightly:** the responsive projects (`mobile-*`, `tablet-*`; the Chromium ones still
