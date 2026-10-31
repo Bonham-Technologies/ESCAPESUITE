@@ -7,6 +7,7 @@ import {
 } from '../../utils/media-mocks'
 import {
   runAxeCheck,
+  waitForAnimationsToFinish,
   checkImageAltText,
   checkHeadingHierarchy,
   checkFormLabels,
@@ -612,6 +613,8 @@ test.describe('ESCAPEARTIST Accessibility', () => {
    * of it.
    */
   async function dialogViolations(page: Page) {
+    // ESCSUITE-393: not mid-fade, or axe judges contrast at partial opacity.
+    await waitForAnimationsToFinish(page.locator('[role="dialog"]').first())
     const results = await runAxeCheck(page, { includeSelector: '[role="dialog"]' })
     expect(results.passes).toBeGreaterThan(0)
     return results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
