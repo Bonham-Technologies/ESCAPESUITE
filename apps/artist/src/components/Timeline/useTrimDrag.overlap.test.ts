@@ -23,7 +23,7 @@ const PPS = 50
 const LEFT = 100
 
 let containerRef: { current: HTMLDivElement | null }
-let actions: Pick<TrimDragDeps, 'setSelectedClipId' | 'trimClip' | 'shiftClipsAfter'>
+let actions: Pick<TrimDragDeps, 'setSelectedClipId' | 'trimClip' | 'shiftClipsAfter' | 'setClipTimelinePosition'>
 
 const style = captionStyleFor({ width: 1920, height: 1080 })
 
@@ -40,6 +40,7 @@ beforeEach(() => {
     setSelectedClipId: vi.fn(state.setSelectedClipId),
     trimClip: vi.fn(state.trimClip),
     shiftClipsAfter: vi.fn(state.shiftClipsAfter),
+    setClipTimelinePosition: vi.fn(state.setClipTimelinePosition),
   }
 })
 

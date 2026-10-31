@@ -74,6 +74,7 @@ const deps = (): TrimDragDeps => {
     setSelectedClipId: state.setSelectedClipId,
     trimClip: state.trimClip,
     shiftClipsAfter: state.shiftClipsAfter,
+    setClipTimelinePosition: state.setClipTimelinePosition,
   }
 }
 
@@ -132,14 +133,16 @@ describe('ripple-trimming a linked clip (ESCSUITE-360)', () => {
     expect(row(micRow)).toEqual([[0, 0, 3], [3, 3, 6], [6, 6, 10]])
   })
 
-  it('trims a linked clip at the same edge for a start trim', () => {
+  it('trims a linked clip at the same edge for a start trim, and closes the gap on every row (ESCSUITE-386)', () => {
     const { screenRow, micRow, pieces } = cutTake()
     store().setActiveTool('ripple')
 
     trim(pieces[1], 'start', [3.5])
 
-    expect(row(screenRow)).toEqual([[0, 0, 3], [3.5, 3.5, 6], [6, 6, 10]])
-    expect(row(micRow)).toEqual([[0, 0, 3], [3.5, 3.5, 6], [6, 6, 10]])
+    // Half a second off the middle piece's head on both rows: each piece keeps
+    // its 3 s start and the last piece moves up from 6 s to 5.5 s.
+    expect(row(screenRow)).toEqual([[0, 0, 3], [3, 3.5, 6], [5.5, 6, 10]])
+    expect(row(micRow)).toEqual([[0, 0, 3], [3, 3.5, 6], [5.5, 6, 10]])
   })
 
   it('stops every linked clip where the first of them runs out of source', () => {

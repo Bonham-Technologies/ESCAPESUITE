@@ -35,7 +35,7 @@ let addListener: MockInstance
 let removeListener: MockInstance
 let containerRef: { current: HTMLDivElement | null }
 let trackA: string
-let actions: Pick<TrimDragDeps, 'setSelectedClipId' | 'trimClip' | 'shiftClipsAfter'>
+let actions: Pick<TrimDragDeps, 'setSelectedClipId' | 'trimClip' | 'shiftClipsAfter' | 'setClipTimelinePosition'>
 
 /** clip1's trim origin at the start of every test below: no animation, so `trimClip` never rebases one. */
 const ORIGIN = { startTime: 0, endTime: 2, timelinePosition: 2, animation: undefined }
@@ -59,6 +59,7 @@ beforeEach(() => {
     setSelectedClipId: vi.fn(state.setSelectedClipId),
     trimClip: vi.fn(state.trimClip),
     shiftClipsAfter: vi.fn(state.shiftClipsAfter),
+    setClipTimelinePosition: vi.fn(state.setClipTimelinePosition),
   }
 })
 
@@ -377,6 +378,40 @@ describe('useTrimDrag ripple', () => {
     expect(theClip('clip3')).toMatchObject({ trackId: trackB, timelinePosition: 6 })
   })
 
+  // ESCSUITE-386: the start edge ripples too. Its trim moves the clip's front,
+  // and the release puts the front back where it was and shifts the later clips
+  // by what the trim took off (or added to) the head.
+  it('closes the gap a ripple start trim leaves: the clip keeps its start and the clips after it move up', () => {
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'start')
+    moveTo(2.5)
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2.5, startTime: 0.5 })
+
+    release()
+
+    // Half a second off clip1's head: it still starts at 2s, now ends at 3.5s,
+    // and clip2 moves from 6s to 5.5s.
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, startTime: 0.5, endTime: 2, duration: 1.5 })
+    expect(actions.shiftClipsAfter).toHaveBeenCalledWith(trackA, 4, -0.5, true)
+    expect(theClip('clip2').timelinePosition).toBe(5.5)
+  })
+
+  it('pushes the clips after a ripple start trim that lengthened the head out of its way', () => {
+    act(() => {
+      store().updateClip('clip1', { startTime: 1, endTime: 3 })
+    })
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'start')
+    moveTo(1)
+
+    release()
+
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, startTime: 0, endTime: 3, duration: 3 })
+    expect(theClip('clip2').timelinePosition).toBe(7)
+  })
+
   it('shifts nothing when the trim left the clip’s length unchanged', () => {
     store().setActiveTool('ripple')
     const { result } = mountTrim()
@@ -497,6 +532,25 @@ describe('useTrimDrag and the undo stack', () => {
     // the downstream clips back and left the clip trimmed — a state the user had
     // never seen.
     expect(theClip('clip1')).toMatchObject({ endTime: 2, timelinePosition: 2 })
+    expect(theClip('clip2').timelinePosition).toBe(6)
+  })
+
+  it('records one entry for a ripple start trim, the put-back and the shift included (ESCSUITE-386)', () => {
+    store().setActiveTool('ripple')
+    const { result } = mountTrim()
+    grabEdge(result, 'start')
+    const before = past()
+
+    for (const seconds of [2.1, 2.3, 2.5]) moveTo(seconds)
+    release()
+
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, startTime: 0.5 })
+    expect(theClip('clip2').timelinePosition).toBe(5.5)
+    expect(past() - before).toBe(1)
+
+    store().undo()
+
+    expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, startTime: 0, endTime: 2 })
     expect(theClip('clip2').timelinePosition).toBe(6)
   })
 
@@ -637,36 +691,29 @@ describe('useTrimDrag and the clip next to it (ESCSUITE-161)', () => {
     expect(drawnAt(6.5)).toEqual(['clip1'])
   })
 
-  it('clamps a ripple START trim, because the release shifts nothing for one', () => {
-    // The ripple exception is the END edge's alone. `handleMouseUp` measures
-    // its shift from the clip's **end** (`currentEnd - originalEnd`), and a
-    // start trim never moves the end — for a source clip
-    // `pos' + (endTime - startTime')` reduces to the origin's own end — so
-    // `delta` is 0, `shiftClipsAfter` is never called, and an unclamped start
-    // trim left the overlap on the row for good rather than transiently.
-    //
+  it('does not clamp a ripple START trim either: the release puts the clip back and shifts the row (ESCSUITE-386)', () => {
     // clip2 needs source before its in point for its start edge to have
-    // anywhere to go, as in the start case above: it plays 4s-6s of the 30s
-    // source.
+    // anywhere to go: it plays 4s-6s of the 30s source. clip3 sits after it.
     act(() => {
       store().updateClip('clip2', { startTime: 4, endTime: 6 })
     })
+    addClip('clip3', 9, 2, trackA)
     store().setActiveTool('ripple')
     const { result } = mountTrim()
     grabEdge(result, 'start', 'clip2')
 
-    // clip1 ends at 4s; the pointer is asking for 3s.
+    // clip1 ends at 4s; the pointer asks for 3s, and the drag follows it over clip1.
     moveTo(3)
-
-    expect(theClip('clip2')).toMatchObject({ timelinePosition: 4, startTime: 2, duration: 4 })
-    expect(drawnAt(3)).toEqual(['clip1'])
+    expect(theClip('clip2')).toMatchObject({ timelinePosition: 3, startTime: 1, duration: 5 })
 
     release()
 
-    // And the proof that the exception could not have earned the start edge:
-    // the release has nothing to shift, so clip1 stays exactly where it was.
-    expect(actions.shiftClipsAfter).not.toHaveBeenCalled()
+    // Three seconds of head revealed: clip2 keeps its 6s start and grows to
+    // 11s, clip3 moves out of its way by the same three, clip1 is untouched.
+    expect(theClip('clip2')).toMatchObject({ timelinePosition: 6, startTime: 1, endTime: 6, duration: 5 })
+    expect(theClip('clip3').timelinePosition).toBe(9 + 3)
     expect(theClip('clip1')).toMatchObject({ timelinePosition: 2, duration: 2 })
+    expect(drawnAt(3)).toEqual(['clip1'])
   })
 
   it('leaves the row a group drag can still move after an end trim butts up to it', () => {
