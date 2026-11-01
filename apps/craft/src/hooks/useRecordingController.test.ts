@@ -24,6 +24,7 @@ import {
 import type { Compositor } from '../core/compositor'
 import { CaptureRequestError, type CaptureSource } from '../core/permissions'
 import { AudioOutputUnavailableError } from '../core/audioContextStart'
+import { FrameCaptureUnavailableError } from '../core/frameCaptureVideo'
 import { useRecorderStore } from '../store/recorderStore'
 import { defaultConfig, type RecordingConfig } from '../store/types'
 import {
@@ -415,6 +416,12 @@ describe('startFailureNotice names the source that failed (ESCSUITE-341)', () =>
   it('names the audio when the AudioContext never started (ESCSUITE-390)', () => {
     expect(startFailureNotice(new AudioOutputUnavailableError())).toBe(
       'Audio could not be started (no working sound output device was found) — nothing was recorded.'
+    )
+  })
+
+  it('names the picture when no video element would play it (ESCSUITE-398)', () => {
+    expect(startFailureNotice(new FrameCaptureUnavailableError())).toBe(
+      'The picture could not be read for recording (the browser never started playing it) — nothing was recorded. Try again, or use Chrome or Edge.'
     )
   })
 

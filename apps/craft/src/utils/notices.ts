@@ -33,6 +33,10 @@ export const START_FAILED = 'The recording could not be started.'
 export const AUDIO_UNAVAILABLE =
   'Audio could not be started (no working sound output device was found) — nothing was recorded.'
 
+/** The browser never played the screen or camera picture for the recorder to read (ESCSUITE-398). */
+export const VIDEO_CAPTURE_UNAVAILABLE =
+  'The picture could not be read for recording (the browser never started playing it) — nothing was recorded. Try again, or use Chrome or Edge.'
+
 /** How a capture request failed, as far as the user can act on it. */
 export type CaptureFailureReason = 'refused' | 'unavailable' | 'failed'
 

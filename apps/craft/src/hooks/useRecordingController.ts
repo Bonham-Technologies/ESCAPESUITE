@@ -31,8 +31,10 @@ import {
 } from '../core/recorder-factory';
 import { CaptureRequestError, hasSystemAudio, stopStream } from '../core/permissions';
 import { AudioOutputUnavailableError } from '../core/audioContextStart';
+import { FrameCaptureUnavailableError } from '../core/frameCaptureVideo';
 import {
   AUDIO_UNAVAILABLE,
+  VIDEO_CAPTURE_UNAVAILABLE,
   CAMERA_AND_MIC_UNAVAILABLE,
   CAPTURE_REFUSED,
   CAPTURE_UNANSWERED,
@@ -173,6 +175,7 @@ export function startFailureNotice(error: unknown): string {
     return captureFailed(error.source, captureFailureReason(name));
   }
   if (error instanceof AudioOutputUnavailableError) return AUDIO_UNAVAILABLE;
+  if (error instanceof FrameCaptureUnavailableError) return VIDEO_CAPTURE_UNAVAILABLE;
   return name === 'NotAllowedError' ? CAPTURE_REFUSED : START_FAILED;
 }
 
