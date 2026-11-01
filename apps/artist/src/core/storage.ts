@@ -35,6 +35,8 @@ import {
   setSetting,
   createBlobUrl,
   revokeBlobUrl,
+  storedBlobSize,
+  writeStoredBlob,
   type VideoEditorDB,
 } from '@escapesuite/shared/storage'
 import type { IDBPDatabase } from 'idb'
@@ -91,10 +93,15 @@ export async function getVideoBlob(
  */
 async function storeRepair(id: string, size: number, repaired: Blob): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction('videos', 'readwrite')
-  const current = await tx.store.get(id)
-  if (current && current.blob.size === size) await tx.store.put({ ...current, blob: repaired })
-  await tx.done
+  // As a Blob or as its bytes, as the browser allows (ESCSUITE-397).
+  await writeStoredBlob(repaired, async (stored) => {
+    const tx = db.transaction('videos', 'readwrite')
+    const current = await tx.store.get(id)
+    if (current && storedBlobSize(current) === size) {
+      await tx.store.put({ id: current.id, metadata: current.metadata, ...stored })
+    }
+    await tx.done
+  })
 }
 
 // Session state for auto-save/restore
@@ -209,7 +216,7 @@ export async function hasSpaceForFile(fileSize: number): Promise<boolean> {
 export async function getTotalVideoSize(): Promise<number> {
   const db = await getDB()
   const records = await db.getAll('videos')
-  return records.reduce((total, record) => total + (record.blob?.size || 0), 0)
+  return records.reduce((total, record) => total + storedBlobSize(record), 0)
 }
 
 // Session state operations (auto-save/restore)

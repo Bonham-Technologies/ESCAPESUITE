@@ -5,7 +5,12 @@
 - **IndexedDB Database**: CRAFT and ARTIST share `video-editor-db` for seamless data transfer.
   The connection is shared through one cached open in `getDB()` (`packages/shared/src/storage`) and
   reopens itself after the browser closes it (Clear site data, an eviction), closing itself for a
-  version change or a delete from another tab rather than blocking it (ESCSUITE-226)
+  version change or a delete from another tab rather than blocking it (ESCSUITE-226).
+  A `videos` or `thumbnails` row holds its bytes as a `Blob`, or, where the browser refuses to
+  store one (WebKit's ephemeral sessions: Safari Private Browsing and every Playwright WebKit
+  context), as `bytes: ArrayBuffer` plus `type` (ESCSUITE-397). Read a row through `getVideo`,
+  `getThumbnail` or `storedBlob()`/`storedBlobSize()`, never `row.blob`, and write one through
+  `storeVideo`, `storeThumbnail` or `writeStoredBlob()`.
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
   (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)
