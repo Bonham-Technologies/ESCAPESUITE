@@ -38,5 +38,5 @@
   recorded by `WebCodecsRecorder` and needs no repair)
 - AudioContext needs `resume()` call due to Chrome autoplay policy
 - A browser with no working audio output device (Firefox with no sound server) never starts an AudioContext: `resume()` never settles. CRAFT's recorders wait at most 5 s (`apps/craft/src/core/audioContextStart.ts`, ESCSUITE-390) and then fail the take with a notice naming the audio. For this reason ESCSUITE-389 gives the nightly's runner a PulseAudio sink (a pipe sink timed by the system clock since ESCSUITE-396: on `module-null-sink`, an unmuted `<video>` in Firefox stalls at `currentTime` 0 or crawls, as ESCSUITE-389 saw in Chromium)
-- WebKit draws a `<video>`'s frames (onto a canvas, too) only while the element is laid out on screen: a detached, hidden or off-screen element draws black. ARTIST's preview keeps its `<video>` elements in a 1 px transparent host on screen for this reason (`components/Preview/usePreviewMedia.ts`, ESCSUITE-399)
 - System audio capture only works with getDisplayMedia (Chrome/Edge)
+- WebKit draws a `<video>`'s frames (onto a canvas, too) only while the element is laid out on screen: a detached, hidden or off-screen element draws black. ARTIST's preview keeps its `<video>` elements in a 1 px transparent host on screen for this reason (`components/Preview/usePreviewMedia.ts`, ESCSUITE-399)
