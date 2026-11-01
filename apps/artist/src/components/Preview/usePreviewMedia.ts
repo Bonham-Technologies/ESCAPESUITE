@@ -39,6 +39,27 @@ export interface PreviewMedia {
   imageUrlsKey: string;
 }
 
+/**
+ * Where the preview's `<video>` elements live (ESCSUITE-399): in the document,
+ * on screen, 1 px and transparent. WebKit draws a video's frames only while the
+ * element is laid out on screen, so a detached element, the way they were
+ * built, painted the preview canvas black in Safari. `drawImage` reads the
+ * decoded frame at its full size, whatever size the element is shown at.
+ */
+const PREVIEW_VIDEO_HOST_ID = 'artist-preview-videos';
+
+function previewVideoHost(): HTMLElement {
+  const existing = document.getElementById(PREVIEW_VIDEO_HOST_ID);
+  if (existing) return existing;
+  const host = document.createElement('div');
+  host.id = PREVIEW_VIDEO_HOST_ID;
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText =
+    'position:fixed;top:0;left:0;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none;z-index:-1;';
+  document.body.appendChild(host);
+  return host;
+}
+
 /** A preview `<video>` over `url`: muted until playback routes its sound. */
 function createPreviewVideoElement(url: string): HTMLVideoElement {
   const video = document.createElement('video');
@@ -47,7 +68,16 @@ function createPreviewVideoElement(url: string): HTMLVideoElement {
   video.playsInline = true;
   video.muted = true; // Start muted, we'll unmute the active audio track
   video.crossOrigin = 'anonymous';
+  video.style.cssText = 'display:block;width:1px;height:1px;';
+  previewVideoHost().appendChild(video);
   return video;
+}
+
+/** Stop, empty and take out of the document one preview `<video>`. */
+function releasePreviewVideo(video: HTMLVideoElement): void {
+  video.pause();
+  video.src = '';
+  video.remove();
 }
 
 /**
@@ -81,10 +111,7 @@ export function previewVideoForSlot(
 
 /** Pause and empty a source's further elements, and forget them. */
 function releaseExtraVideos(extras: Map<string, HTMLVideoElement[]>, sourceId: string): void {
-  for (const video of extras.get(sourceId) ?? []) {
-    video.pause();
-    video.src = '';
-  }
+  for (const video of extras.get(sourceId) ?? []) releasePreviewVideo(video);
   extras.delete(sourceId);
 }
 
@@ -229,8 +256,7 @@ export function usePreviewMedia(): PreviewMedia {
 
     existingVideos.forEach((video, id) => {
       if (!newVideos.has(id)) {
-        video.pause();
-        video.src = '';
+        releasePreviewVideo(video);
         releaseExtraVideos(extraVideoElementsRef.current, id);
       }
     });
@@ -306,8 +332,7 @@ export function usePreviewMedia(): PreviewMedia {
         urls.forEach(url => URL.revokeObjectURL(url));
       }
       videoElementsRef.current.forEach((video, id) => {
-        video.pause();
-        video.src = '';
+        releasePreviewVideo(video);
         releaseExtraVideos(extraVideos, id);
       });
       audioElementsRef.current.forEach(audio => {

@@ -70,6 +70,25 @@ describe('usePreviewMedia element creation', () => {
     expect(doubles.media.srcAssignments).toEqual([lastObjectUrl()])
   })
 
+  // ESCSUITE-399: WebKit draws a video's frames only while it is laid out on
+  // screen, so a detached element left the preview black in Safari.
+  it('puts each <video> in the document, in one 1 px transparent host on screen', async () => {
+    addClip('clip1', 0, 2)
+    const { result } = await mountMedia()
+    const videos = result.current.videoElementsRef.current
+    const second = previewVideoForSlot(videos, result.current.extraVideoElementsRef.current, video.id, 1)!
+
+    const host = document.getElementById('artist-preview-videos')!
+    expect(host.parentElement).toBe(document.body)
+    expect(host.getAttribute('aria-hidden')).toBe('true')
+    expect(host.style.opacity).toBe('0')
+    expect(host.style.width).toBe('1px')
+    expect(host.style.visibility).toBe('')
+    expect(host.style.display).toBe('')
+    expect(videos.get(video.id)!.parentElement).toBe(host)
+    expect(second.parentElement).toBe(host)
+  })
+
   it('creates an <img> for an image source and an <audio> for an audio one', async () => {
     store().addSourceVideo(imageSource)
     store().addSourceVideo(audioSource)
@@ -128,6 +147,7 @@ describe('usePreviewMedia release', () => {
     expect(result.current.videoElementsRef.current.size).toBe(0)
     expect(element.pause).toHaveBeenCalled()
     expect(element.src).toBe('')
+    expect(element.isConnected).toBe(false)
   })
 
   it('keeps the element it already has when the timeline changes around it', async () => {
@@ -157,6 +177,7 @@ describe('usePreviewMedia release', () => {
 
     expect(videoElement.pause).toHaveBeenCalled()
     expect(videoElement.src).toBe('')
+    expect(videoElement.isConnected).toBe(false)
     expect(audioElement.pause).toHaveBeenCalled()
     expect(audioElement.src).toBe('')
   })
