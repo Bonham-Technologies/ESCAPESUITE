@@ -29,6 +29,45 @@ export interface AxeResult {
 }
 
 /**
+ * Wait until every finite CSS animation or transition on `target`, its
+ * ancestors and its descendants has finished.
+ *
+ * ESCSUITE-393: a dialog that fades in is audited at whatever opacity it has
+ * reached, and axe blends that opacity into `color-contrast`. Audited mid-fade,
+ * the keyboard shortcuts sheet's muted tip failed contrast on a slow first
+ * attempt and passed on retry. Infinite animations (a spinner) and paused ones
+ * never finish, so they are not waited on.
+ */
+export async function waitForAnimationsToFinish(target: Locator): Promise<void> {
+  await target.evaluate(async (el) => {
+    const related = (node: Element) => {
+      const animTarget = node as Node
+      return animTarget === el || animTarget.contains(el) || el.contains(animTarget)
+    }
+    const running = () =>
+      document.getAnimations().filter((animation) => {
+        const effect = animation.effect as KeyframeEffect | null
+        return (
+          effect?.target != null &&
+          related(effect.target) &&
+          effect.getComputedTiming().endTime !== Infinity &&
+          // A paused animation would never settle, so only running ones count.
+          animation.playState === 'running'
+        )
+      })
+    const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    // Re-scanned after two frames: an animation that starts once the first
+    // ones end (or one WebKit had not yet created) would otherwise be missed.
+    for (let round = 0; round < 10; round++) {
+      await nextFrame()
+      const pending = running()
+      if (pending.length === 0) return
+      await Promise.all(pending.map((animation) => animation.finished.catch(() => undefined)))
+    }
+  })
+}
+
+/**
  * Run axe-core accessibility audit on a page
  * @param page - Playwright Page object
  * @param options - Optional axe configuration
