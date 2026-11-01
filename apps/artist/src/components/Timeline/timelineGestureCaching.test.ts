@@ -254,6 +254,7 @@ describe('a trim whose last move lands after the release', () => {
       setSelectedClipId: state.setSelectedClipId,
       trimClip: state.trimClip,
       shiftClipsAfter: state.shiftClipsAfter,
+      setClipTimelinePosition: state.setClipTimelinePosition,
     }
   }
 
