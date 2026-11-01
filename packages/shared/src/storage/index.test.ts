@@ -284,6 +284,101 @@ describe('storage', () => {
     })
   })
 
+  // ESCSUITE-397: WebKit's ephemeral sessions (Safari Private Browsing, every
+  // Playwright WebKit context) refuse to store a Blob in IndexedDB.
+  describe('a browser that refuses to store a Blob', () => {
+    const refusal = () =>
+      new DOMException('Error preparing Blob/File data to be stored in object store', 'UnknownError')
+
+    /** Make every put() of a record holding a Blob fail as WebKit's does. */
+    function refuseBlobs() {
+      const put = IDBObjectStore.prototype.put
+      return vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+        this: IDBObjectStore,
+        value: unknown,
+        key?: IDBValidKey,
+      ) {
+        if (value && typeof value === 'object' && (value as { blob?: unknown }).blob instanceof Blob) {
+          throw refusal()
+        }
+        return put.call(this, value, key)
+      })
+    }
+
+    it('stores the bytes and MIME type instead, and reads them back as the same Blob', async () => {
+      refuseBlobs()
+      const metadata = createMockMetadata()
+      await storage.storeVideo(metadata.id, new Blob(['video bytes'], { type: 'video/webm' }), metadata)
+      await storage.storeThumbnail(metadata.id, new Blob(['thumb'], { type: 'image/jpeg' }))
+
+      const row = await (await storage.getDB()).get('videos', metadata.id)
+      expect(row && 'bytes' in row && row.type).toBe('video/webm')
+      expect(row && 'blob' in row).toBe(false)
+
+      const video = await storage.getVideo(metadata.id)
+      expect(video?.blob).toBeInstanceOf(Blob)
+      expect(video?.blob.type).toBe('video/webm')
+      expect(await video?.blob.text()).toBe('video bytes')
+      expect(video?.metadata).toEqual(metadata)
+      expect(await (await storage.getVideoBlob(metadata.id))?.text()).toBe('video bytes')
+
+      const thumbnail = await storage.getThumbnail(metadata.id)
+      expect(thumbnail?.type).toBe('image/jpeg')
+      expect(await thumbnail?.text()).toBe('thumb')
+    })
+
+    it('stops offering Blobs once one has been refused', async () => {
+      const put = refuseBlobs()
+      await storage.storeVideo('a', new Blob(['a']), createMockMetadata({ id: 'a' }))
+      const attemptsForFirst = put.mock.calls.length
+      await storage.storeVideo('b', new Blob(['b']), createMockMetadata({ id: 'b' }))
+      // One refused attempt and one write for the first; one write for the second.
+      expect(attemptsForFirst).toBe(2)
+      expect(put.mock.calls.length).toBe(3)
+    })
+
+    it('keeps offering Blobs when the bytes could not be written either', async () => {
+      // A File that changed on disk fails the same way in an ordinary session,
+      // and must not switch the whole session to bytes.
+      const put = refuseBlobs()
+      const unreadable = new Blob(['x'])
+      vi.spyOn(unreadable, 'arrayBuffer').mockRejectedValue(new DOMException('gone', 'NotReadableError'))
+      await expect(storage.storeVideo('a', unreadable, createMockMetadata({ id: 'a' }))).rejects.toThrow('gone')
+      put.mockRestore()
+
+      await storage.storeVideo('b', new Blob(['b']), createMockMetadata({ id: 'b' }))
+      const row = await (await storage.getDB()).get('videos', 'b')
+      expect(row && 'blob' in row).toBe(true)
+    })
+
+    it('keeps reading rows stored as Blobs before the browser refused one', async () => {
+      const metadata = createMockMetadata({ id: 'old' })
+      await storage.storeVideo('old', new Blob(['old bytes'], { type: 'video/webm' }), metadata)
+      refuseBlobs()
+      await storage.storeVideo('new', new Blob(['new bytes'], { type: 'video/webm' }), createMockMetadata({ id: 'new' }))
+
+      // A Blob row is handed back as it is. (This environment's structured clone
+      // does not keep a Blob's bytes, so its contents are not compared.)
+      const oldRow = await (await storage.getDB()).get('videos', 'old')
+      expect(oldRow && 'blob' in oldRow).toBe(true)
+      expect(await storage.getVideoBlob('old')).toEqual(oldRow && 'blob' in oldRow ? oldRow.blob : null)
+      expect(await (await storage.getVideoBlob('new'))?.text()).toBe('new bytes')
+    })
+
+    it('passes any other failure through, a full quota included', async () => {
+      const quota = new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+        throw quota
+      })
+      await expect(storage.storeVideo('a', new Blob(['a']), createMockMetadata({ id: 'a' }))).rejects.toBe(quota)
+    })
+
+    it('sizes either shape without building a Blob', () => {
+      expect(storage.storedBlobSize({ blob: new Blob(['12345']) })).toBe(5)
+      expect(storage.storedBlobSize({ bytes: new ArrayBuffer(7), type: 'video/mp4' })).toBe(7)
+    })
+  })
+
   describe('settings operations', () => {
     it('stores and retrieves a setting', async () => {
       await storage.setSetting('theme', 'dark')

@@ -8,22 +8,31 @@ import type { SourceVideo } from '../types'
 export const DB_NAME = 'video-editor-db'
 export const DB_VERSION = 1
 
+/**
+ * The bytes of a stored video or thumbnail, in one of two shapes (ESCSUITE-397).
+ *
+ * A `Blob` where the browser will store one, which is everywhere but WebKit's
+ * ephemeral sessions: Safari Private Browsing, and every Playwright WebKit
+ * context. There `put` fails with `UnknownError` "Error preparing Blob/File data
+ * to be stored in object store", so the bytes go in as an `ArrayBuffer` with
+ * the Blob's MIME type beside them. Read either one back with `storedBlob()`.
+ */
+export type StoredBlob = { blob: Blob } | { bytes: ArrayBuffer; type: string }
+
 // Database schema - common between apps
 export interface VideoEditorDB extends DBSchema {
   videos: {
     key: string
     value: {
       id: string
-      blob: Blob
       metadata: SourceVideo
-    }
+    } & StoredBlob
   }
   thumbnails: {
     key: string
     value: {
       id: string
-      blob: Blob
-    }
+    } & StoredBlob
   }
   projects: {
     key: string
@@ -119,18 +128,81 @@ export async function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
   return opening
 }
 
+// Blob records (ESCSUITE-397)
+
+/** The record's bytes as a `Blob`, whichever shape they were stored in. */
+export function storedBlob(record: StoredBlob): Blob {
+  return 'blob' in record ? record.blob : new Blob([record.bytes], { type: record.type })
+}
+
+/** The size of the record's bytes, without building a Blob for them. */
+export function storedBlobSize(record: StoredBlob): number {
+  return 'blob' in record ? record.blob.size : record.bytes.byteLength
+}
+
+/**
+ * WebKit's refusal to store a Blob in an ephemeral session: `UnknownError`,
+ * "Error preparing Blob/File data to be stored in object store". Matched on the
+ * name alone, not the wording: an `UnknownError` from a write holding a Blob
+ * that was not this costs a second write as bytes, while missing the refusal
+ * because WebKit reworded it would break storage outright.
+ */
+function isBlobRefusal(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'UnknownError'
+}
+
+/**
+ * Set once this browser has refused a Blob, so later writes go straight to the
+ * `ArrayBuffer` shape: the session will not change its mind, and every refused
+ * attempt costs a failed transaction first.
+ */
+let blobsRefused = false
+
+/**
+ * Write `blob` through `write`, as a Blob where the browser stores one and as
+ * its bytes where it refuses (ESCSUITE-397). Any other failure, a full quota
+ * included, is passed through untouched.
+ *
+ * The bytes are read before `write` runs: an IndexedDB transaction commits as
+ * soon as it awaits anything else, so `write` must not have to read them.
+ *
+ * Memory: a Blob row is a handle the browser reads lazily, a bytes row is not.
+ * A write holds the source about three times at its peak (the Blob, its
+ * `ArrayBuffer`, the structured-clone copy), and every read of a bytes row
+ * loads all of it. So nothing here reads a whole store at once: the metadata
+ * listing walks a cursor, one row in memory at a time.
+ */
+export async function writeStoredBlob(
+  blob: Blob,
+  write: (stored: StoredBlob) => Promise<void>,
+): Promise<void> {
+  const offerBlob = !blobsRefused
+  if (offerBlob) {
+    try {
+      await write({ blob })
+      return
+    } catch (error) {
+      if (!isBlobRefusal(error)) throw error
+    }
+  }
+  await write({ bytes: await blob.arrayBuffer(), type: blob.type })
+  // Only once the bytes are in: a File that could not be read (changed on
+  // disk) fails the same way and must not switch the whole session over.
+  if (offerBlob) blobsRefused = true
+}
+
 // Video operations
 
 export async function storeVideo(id: string, blob: Blob, metadata: SourceVideo): Promise<void> {
   const db = await getDB()
-  await db.put('videos', { id, blob, metadata })
+  await writeStoredBlob(blob, (stored) => db.put('videos', { id, metadata, ...stored }).then(() => {}))
 }
 
 export async function getVideo(id: string): Promise<{ blob: Blob; metadata: SourceVideo } | undefined> {
   const db = await getDB()
   const record = await db.get('videos', id)
   if (record) {
-    return { blob: record.blob, metadata: record.metadata }
+    return { blob: storedBlob(record), metadata: record.metadata }
   }
   return undefined
 }
@@ -142,8 +214,13 @@ export async function getVideoBlob(id: string): Promise<Blob | undefined> {
 
 export async function getAllVideoMetadata(): Promise<SourceVideo[]> {
   const db = await getDB()
-  const records = await db.getAll('videos')
-  return records.map(r => r.metadata)
+  // A cursor, not getAll(): a bytes row (ESCSUITE-397) is loaded whole, so
+  // getAll() would hold every stored source in memory to read its metadata.
+  const metadata: SourceVideo[] = []
+  for (let cursor = await db.transaction('videos').store.openCursor(); cursor; cursor = await cursor.continue()) {
+    metadata.push(cursor.value.metadata)
+  }
+  return metadata
 }
 
 export async function deleteVideo(id: string): Promise<void> {
@@ -156,13 +233,13 @@ export async function deleteVideo(id: string): Promise<void> {
 
 export async function storeThumbnail(id: string, blob: Blob): Promise<void> {
   const db = await getDB()
-  await db.put('thumbnails', { id, blob })
+  await writeStoredBlob(blob, (stored) => db.put('thumbnails', { id, ...stored }).then(() => {}))
 }
 
 export async function getThumbnail(id: string): Promise<Blob | undefined> {
   const db = await getDB()
   const record = await db.get('thumbnails', id)
-  return record?.blob
+  return record ? storedBlob(record) : undefined
 }
 
 // Settings operations
