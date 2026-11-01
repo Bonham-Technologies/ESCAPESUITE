@@ -24,6 +24,7 @@ import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
 import { createAudioCapture, type AudioCapture, type AudioCaptureOptions } from './audioWorkletCapture';
 import { startAudioContext } from './audioContextStart';
+import { openFrameCaptureVideo, releaseFrameCaptureVideo, type FrameCaptureVideo } from './frameCaptureVideo';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
 // muxer; re-exported here because this is where every caller imports it from.
@@ -290,6 +291,8 @@ export class WebCodecsRecorder {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private videoElement: HTMLVideoElement | null = null;
+  /** Who owns `videoElement`: a borrowed preview is never paused or removed. */
+  private frameCaptureVideo: FrameCaptureVideo | null = null;
   private frameInterval: number | null = null;
 
   // Frame capture (for MediaStreamTrackProcessor method)
@@ -456,16 +459,21 @@ export class WebCodecsRecorder {
       this.trackProcessor = new MediaStreamTrackProcessor!({ track: this.videoTrack });
       this.frameReader = this.trackProcessor.readable.getReader();
     } else {
-      // Fallback: Use video element + canvas approach
+      // Fallback: draw a playing <video> onto a canvas. Bounded, and
+      // borrowing the page's preview where WebKit will not play an element
+      // of the take's own (ESCSUITE-398): see `frameCaptureVideo.ts`.
       console.log('Falling back to video element for frame capture');
-      this.videoElement = document.createElement('video');
-      this.videoElement.srcObject = new MediaStream([this.videoTrack]);
-      this.videoElement.muted = true;
-      this.videoElement.playsInline = true;
-      // Use visibility:hidden and actual dimensions to ensure proper decoding
-      this.videoElement.style.cssText = `position:fixed;top:0;left:0;width:${this.width}px;height:${this.height}px;visibility:hidden;pointer-events:none;z-index:-9999;`;
-      document.body.appendChild(this.videoElement);
-      await this.videoElement.play();
+      // A disposal during the wait takes the element down, which either
+      // rejects `play()` or runs out the clock: both end in the disposal
+      // check, not a notice.
+      const capture = await openFrameCaptureVideo(this.videoTrack, this.width, this.height, (own) => {
+        this.frameCaptureVideo = own;
+      }).catch((e: unknown) => {
+        this.abortIfDisposed();
+        throw e;
+      });
+      this.frameCaptureVideo = capture;
+      this.videoElement = capture.element;
       // The earliest await, and the one a dispose costs the most: everything
       // below — the AudioContext, its analysers, the muxer, the codecs — would
       // be built into a recorder whose cleanup has already run, and setup would
@@ -1918,15 +1926,12 @@ export class WebCodecsRecorder {
       this.audioContext = null;
     }
 
-    if (this.videoElement) {
-      this.videoElement.pause();
-      this.videoElement.srcObject = null;
-      // Remove from DOM since we attached it during initialization
-      if (this.videoElement.parentNode) {
-        this.videoElement.parentNode.removeChild(this.videoElement);
-      }
-      this.videoElement = null;
+    // The element the take built goes; a preview it borrowed stays playing.
+    if (this.frameCaptureVideo) {
+      releaseFrameCaptureVideo(this.frameCaptureVideo);
+      this.frameCaptureVideo = null;
     }
+    this.videoElement = null;
 
     // Remove track ended event listeners
     for (const [track, handler] of this.trackEndedHandlers) {

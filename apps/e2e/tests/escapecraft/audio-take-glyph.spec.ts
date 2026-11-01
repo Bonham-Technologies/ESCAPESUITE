@@ -11,6 +11,14 @@ test('an audio-only take shows one centred glyph, paused and playing', async ({ 
   await grantMediaPermissions(page)
   await page.goto('http://localhost:5174')
   await waitForAppReady(page, 'craft')
+  // ESCSUITE-398: a take with no video is recorded by MediaRecorder, and
+  // Playwright's Linux WebKit build has none (`typeof MediaRecorder` is
+  // 'undefined' there; Safari ships one), so in that browser there is nothing
+  // to record the take with.
+  test.skip(
+    await page.evaluate(() => typeof MediaRecorder === 'undefined'),
+    'this browser build has no MediaRecorder, which an audio-only take needs',
+  )
   const screen = page.getByRole('button', { name: 'Screen', exact: true })
   await expect(screen).toBeEnabled({ timeout: 30_000 })
   await screen.click()

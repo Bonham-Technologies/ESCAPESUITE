@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vitest'
 import { WebCodecsRecorder, isWebCodecsRecordingSupported } from './webcodecs-recorder'
 import { AUDIO_START_TIMEOUT_MS, AudioOutputUnavailableError } from './audioContextStart'
+import { FRAME_CAPTURE_START_TIMEOUT_MS, FrameCaptureUnavailableError } from './frameCaptureVideo'
 import type { RecordingConfig } from '../store/types'
 import {
   installWebCodecsDoubles,
@@ -363,6 +364,41 @@ describe('WebCodecsRecorder', () => {
       const video = getLastVideoDouble()!
       expect(document.body.contains(video.element)).toBe(true)
       expect(video.play).toHaveBeenCalled()
+    })
+
+    it('fails a take whose capture video never starts and has nothing to borrow (ESCSUITE-398)', async () => {
+      // Safari: WebKit never played the hidden element, and setup waited on
+      // its play() forever.
+      vi.useFakeTimers()
+      try {
+        setVideoPlayGate(new Promise<void>(() => {}))
+        const outcome = recorder.initialize(screenStream, null, null, defaultConfig).then(
+          () => 'resolved',
+          (e: unknown) => e
+        )
+        await vi.advanceTimersByTimeAsync(FRAME_CAPTURE_START_TIMEOUT_MS)
+
+        expect(await outcome).toBeInstanceOf(FrameCaptureUnavailableError)
+        expect(document.body.querySelector('video')).toBeNull()
+        // Nothing past the frame source was built for a take that cannot record.
+        expect([...VideoEncoderDouble.instances, ...AudioEncoderDouble.instances]).toHaveLength(0)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('resolves, not fails, when disposed while the capture video is starting', async () => {
+      let interrupt!: (e: unknown) => void
+      setVideoPlayGate(new Promise<void>((_, reject) => (interrupt = reject)))
+      const init = recorder.initialize(screenStream, null, null, defaultConfig)
+      await Promise.resolve()
+      recorder.dispose()
+      // Taking the element down interrupts its play(), as a browser does.
+      interrupt(new DOMException('The play() request was interrupted', 'AbortError'))
+
+      await expect(init).resolves.toBeUndefined()
+      expect(document.body.querySelector('video')).toBeNull()
+      expect(callbacks.onError).not.toHaveBeenCalled()
     })
   })
 

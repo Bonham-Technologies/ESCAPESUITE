@@ -65,7 +65,9 @@ Two related rules follow from it:
   with no screen in it (`webcamUnavailable`, below). A start that fails *without* a tagged
   request — a recorder that would not initialise — keeps the two unnamed
   sentences: `CAPTURE_REFUSED` for a `NotAllowedError`, `START_FAILED` for the
-  rest. A camera failure no longer costs a take that has a screen in it
+  rest, except two set-up failures that name what is missing: `AUDIO_UNAVAILABLE` for an
+  AudioContext that never started (ESCSUITE-390) and `VIDEO_CAPTURE_UNAVAILABLE` for a
+  picture no `<video>` would play (ESCSUITE-398, `core/frameCaptureVideo.ts`). A camera failure no longer costs a take that has a screen in it
   (ESCSUITE-342, `webcamUnavailable` below). A start whose capture
   request is never answered at all raises `CAPTURE_UNANSWERED` when its
   deadline expires (ESCSUITE-109) —
