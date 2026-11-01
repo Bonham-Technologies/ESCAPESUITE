@@ -97,10 +97,14 @@ async function storeRepair(id: string, size: number, repaired: Blob): Promise<vo
   await writeStoredBlob(repaired, async (stored) => {
     const tx = db.transaction('videos', 'readwrite')
     const current = await tx.store.get(id)
-    if (current && storedBlobSize(current) === size) {
-      await tx.store.put({ id: current.id, metadata: current.metadata, ...stored })
-    }
-    await tx.done
+    // Both settled together, so a refused put does not leave `tx.done`
+    // rejecting with nothing to catch it.
+    await Promise.all([
+      current && storedBlobSize(current) === size
+        ? tx.store.put({ id: current.id, metadata: current.metadata, ...stored })
+        : undefined,
+      tx.done,
+    ])
   })
 }
 
@@ -215,8 +219,12 @@ export async function hasSpaceForFile(fileSize: number): Promise<boolean> {
 
 export async function getTotalVideoSize(): Promise<number> {
   const db = await getDB()
-  const records = await db.getAll('videos')
-  return records.reduce((total, record) => total + storedBlobSize(record), 0)
+  // A cursor, one row in memory at a time: see getAllVideoMetadata.
+  let total = 0
+  for (let cursor = await db.transaction('videos').store.openCursor(); cursor; cursor = await cursor.continue()) {
+    total += storedBlobSize(cursor.value)
+  }
+  return total
 }
 
 // Session state operations (auto-save/restore)

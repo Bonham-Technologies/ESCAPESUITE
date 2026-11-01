@@ -337,6 +337,20 @@ describe('storage', () => {
       expect(put.mock.calls.length).toBe(3)
     })
 
+    it('keeps offering Blobs when the bytes could not be written either', async () => {
+      // A File that changed on disk fails the same way in an ordinary session,
+      // and must not switch the whole session to bytes.
+      const put = refuseBlobs()
+      const unreadable = new Blob(['x'])
+      vi.spyOn(unreadable, 'arrayBuffer').mockRejectedValue(new DOMException('gone', 'NotReadableError'))
+      await expect(storage.storeVideo('a', unreadable, createMockMetadata({ id: 'a' }))).rejects.toThrow('gone')
+      put.mockRestore()
+
+      await storage.storeVideo('b', new Blob(['b']), createMockMetadata({ id: 'b' }))
+      const row = await (await storage.getDB()).get('videos', 'b')
+      expect(row && 'blob' in row).toBe(true)
+    })
+
     it('keeps reading rows stored as Blobs before the browser refused one', async () => {
       const metadata = createMockMetadata({ id: 'old' })
       await storage.storeVideo('old', new Blob(['old bytes'], { type: 'video/webm' }), metadata)

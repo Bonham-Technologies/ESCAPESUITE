@@ -140,13 +140,15 @@ export function storedBlobSize(record: StoredBlob): number {
   return 'blob' in record ? record.blob.size : record.bytes.byteLength
 }
 
-/** WebKit's refusal to store a Blob in an ephemeral session. */
+/**
+ * WebKit's refusal to store a Blob in an ephemeral session: `UnknownError`,
+ * "Error preparing Blob/File data to be stored in object store". Matched on the
+ * name alone, not the wording: an `UnknownError` from a write holding a Blob
+ * that was not this costs a second write as bytes, while missing the refusal
+ * because WebKit reworded it would break storage outright.
+ */
 function isBlobRefusal(error: unknown): boolean {
-  return (
-    error instanceof DOMException &&
-    error.name === 'UnknownError' &&
-    /Blob|File/.test(error.message)
-  )
+  return error instanceof DOMException && error.name === 'UnknownError'
 }
 
 /**
@@ -162,23 +164,31 @@ let blobsRefused = false
  * included, is passed through untouched.
  *
  * The bytes are read before `write` runs: an IndexedDB transaction commits as
- * soon as it awaits anything else, so `write` must not have to read them. For a
- * large source that is one whole copy in memory for the length of the write.
+ * soon as it awaits anything else, so `write` must not have to read them.
+ *
+ * Memory: a Blob row is a handle the browser reads lazily, a bytes row is not.
+ * A write holds the source about three times at its peak (the Blob, its
+ * `ArrayBuffer`, the structured-clone copy), and every read of a bytes row
+ * loads all of it. So nothing here reads a whole store at once: the metadata
+ * listing walks a cursor, one row in memory at a time.
  */
 export async function writeStoredBlob(
   blob: Blob,
   write: (stored: StoredBlob) => Promise<void>,
 ): Promise<void> {
-  if (!blobsRefused) {
+  const offerBlob = !blobsRefused
+  if (offerBlob) {
     try {
       await write({ blob })
       return
     } catch (error) {
       if (!isBlobRefusal(error)) throw error
-      blobsRefused = true
     }
   }
   await write({ bytes: await blob.arrayBuffer(), type: blob.type })
+  // Only once the bytes are in: a File that could not be read (changed on
+  // disk) fails the same way and must not switch the whole session over.
+  if (offerBlob) blobsRefused = true
 }
 
 // Video operations
@@ -204,8 +214,13 @@ export async function getVideoBlob(id: string): Promise<Blob | undefined> {
 
 export async function getAllVideoMetadata(): Promise<SourceVideo[]> {
   const db = await getDB()
-  const records = await db.getAll('videos')
-  return records.map(r => r.metadata)
+  // A cursor, not getAll(): a bytes row (ESCSUITE-397) is loaded whole, so
+  // getAll() would hold every stored source in memory to read its metadata.
+  const metadata: SourceVideo[] = []
+  for (let cursor = await db.transaction('videos').store.openCursor(); cursor; cursor = await cursor.continue()) {
+    metadata.push(cursor.value.metadata)
+  }
+  return metadata
 }
 
 export async function deleteVideo(id: string): Promise<void> {

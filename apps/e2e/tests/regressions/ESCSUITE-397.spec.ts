@@ -13,11 +13,13 @@ import { waitForAppReady } from '../../utils/ready'
  * so each one failed. Now the bytes go in as an `ArrayBuffer` with the MIME
  * type beside them, and are read back as a Blob.
  *
- * The init script reproduces the refusal in any engine; in the nightly's WebKit
- * project the real one applies as well.
+ * The init script reproduces the refusal in Chromium and Firefox. WebKit gets
+ * no init script: its own refusal, asynchronous and aborting the transaction,
+ * is the one the fix has to recognise.
  */
 
-async function refuseBlobsInIndexedDB(page: Page): Promise<void> {
+async function refuseBlobsInIndexedDB(page: Page, browserName: string): Promise<void> {
+  if (browserName === 'webkit') return
   await page.addInitScript(() => {
     const put = IDBObjectStore.prototype.put
     IDBObjectStore.prototype.put = function (this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
@@ -30,8 +32,8 @@ async function refuseBlobsInIndexedDB(page: Page): Promise<void> {
 }
 
 test.describe('ESCSUITE-397: storage works where IndexedDB refuses Blobs', () => {
-  test('ARTIST imports a source onto the timeline', async ({ page }) => {
-    await refuseBlobsInIndexedDB(page)
+  test('ARTIST imports a source onto the timeline', async ({ page, browserName }) => {
+    await refuseBlobsInIndexedDB(page, browserName)
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
 
@@ -45,8 +47,8 @@ test.describe('ESCSUITE-397: storage works where IndexedDB refuses Blobs', () =>
     await expect(page.getByTitle('tone.wav', { exact: true })).toBeVisible()
   })
 
-  test('CRAFT saves a take to its library', async ({ page }) => {
-    await refuseBlobsInIndexedDB(page)
+  test('CRAFT saves a take to its library', async ({ page, browserName }) => {
+    await refuseBlobsInIndexedDB(page, browserName)
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
     await page.goto('http://localhost:5174')

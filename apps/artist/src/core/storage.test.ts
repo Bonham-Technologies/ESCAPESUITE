@@ -113,6 +113,35 @@ describe('storage', () => {
         expect(await dropDeltaFrameCues(stored!.blob)).toBeNull()
       })
 
+      // ESCSUITE-397: where the browser refuses Blobs, the row is bytes, and so
+      // is the repair written back over it.
+      it('writes the repair back as bytes where the browser refuses Blobs', async () => {
+        const put = IDBObjectStore.prototype.put
+        vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+          this: IDBObjectStore,
+          value: unknown,
+          key?: IDBValidKey
+        ) {
+          if (value && typeof value === 'object' && (value as { blob?: unknown }).blob instanceof Blob) {
+            throw new DOMException('Error preparing Blob/File data to be stored in object store', 'UnknownError')
+          }
+          return put.call(this, value, key)
+        })
+        const storage = await getStorageModule()
+        const original = storedTake()
+        await storage.storeVideo('take', original, metadata)
+
+        await storage.getVideoBlob('take', { persistRepair: true })
+
+        const shared = await import('@escapesuite/shared/storage')
+        const row = await (await shared.getDB()).get('videos', 'take')
+        expect(row && 'bytes' in row).toBe(true)
+        const stored = await storage.getVideo('take')
+        expect(stored?.metadata).toEqual(metadata)
+        expect(await dropDeltaFrameCues(stored!.blob)).toBeNull()
+        expect(await storage.getTotalVideoSize()).toBe(stored!.blob.size)
+      })
+
       it('hands back a sound WebM exactly as stored, and writes nothing', async () => {
         const storage = await getStorageModule()
         await storage.storeVideo('take', webmBlob({ cues: 'indexed' }), metadata)
