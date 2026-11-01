@@ -35,6 +35,8 @@ import {
   setSetting,
   createBlobUrl,
   revokeBlobUrl,
+  storedBlobSize,
+  writeStoredBlob,
   type VideoEditorDB,
 } from '@escapesuite/shared/storage'
 import type { IDBPDatabase } from 'idb'
@@ -91,10 +93,19 @@ export async function getVideoBlob(
  */
 async function storeRepair(id: string, size: number, repaired: Blob): Promise<void> {
   const db = await getDB()
-  const tx = db.transaction('videos', 'readwrite')
-  const current = await tx.store.get(id)
-  if (current && current.blob.size === size) await tx.store.put({ ...current, blob: repaired })
-  await tx.done
+  // As a Blob or as its bytes, as the browser allows (ESCSUITE-397).
+  await writeStoredBlob(repaired, async (stored) => {
+    const tx = db.transaction('videos', 'readwrite')
+    const current = await tx.store.get(id)
+    // Both settled together, so a refused put does not leave `tx.done`
+    // rejecting with nothing to catch it.
+    await Promise.all([
+      current && storedBlobSize(current) === size
+        ? tx.store.put({ id: current.id, metadata: current.metadata, ...stored })
+        : undefined,
+      tx.done,
+    ])
+  })
 }
 
 // Session state for auto-save/restore
@@ -208,8 +219,12 @@ export async function hasSpaceForFile(fileSize: number): Promise<boolean> {
 
 export async function getTotalVideoSize(): Promise<number> {
   const db = await getDB()
-  const records = await db.getAll('videos')
-  return records.reduce((total, record) => total + (record.blob?.size || 0), 0)
+  // A cursor, one row in memory at a time: see getAllVideoMetadata.
+  let total = 0
+  for (let cursor = await db.transaction('videos').store.openCursor(); cursor; cursor = await cursor.continue()) {
+    total += storedBlobSize(cursor.value)
+  }
+  return total
 }
 
 // Session state operations (auto-save/restore)

@@ -128,7 +128,11 @@ test.describe('Project Save and Reload', () => {
               const all = db.transaction('videos', 'readonly').objectStore('videos').getAll()
               all.onerror = () => reject(new Error('read failed'))
               all.onsuccess = () => {
-                resolve((all.result as Array<{ blob: Blob }>).map((record) => record.blob.size))
+                // A Blob, or its bytes where WebKit refuses Blobs (ESCSUITE-397).
+                type Row = { blob: Blob } | { bytes: ArrayBuffer }
+                resolve(
+                  (all.result as Row[]).map((row) => ('blob' in row ? row.blob.size : row.bytes.byteLength))
+                )
                 db.close()
               }
             }
