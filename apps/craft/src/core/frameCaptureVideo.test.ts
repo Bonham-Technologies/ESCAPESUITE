@@ -42,6 +42,7 @@ describe('openFrameCaptureVideo (ESCSUITE-398)', () => {
     expect(capture.element.isConnected).toBe(true);
     expect((capture.element.srcObject as MediaStream).getVideoTracks()).toEqual([track]);
     expect(capture.element.muted).toBe(true);
+    expect(capture.element.getAttribute('aria-hidden')).toBe('true');
     // WebKit never plays a MediaStream into an element that is not rendered.
     expect(capture.element.style.visibility).not.toBe('hidden');
     expect(capture.element.style.opacity).toBe('0');
@@ -66,13 +67,13 @@ describe('openFrameCaptureVideo (ESCSUITE-398)', () => {
     expect(onOwn).toHaveBeenCalledTimes(1);
   });
 
-  it('matches the preview by track id, so a clone of the track counts', async () => {
+  it('does not borrow an element showing another track with the same id', async () => {
     vi.useFakeTimers();
     stubPlay(never);
-    const preview = pagePreview({ id: track.id, kind: 'video' } as MediaStreamTrack);
-    const opened = openFrameCaptureVideo(track, 1280, 720);
+    pagePreview({ id: track.id, kind: 'video' } as MediaStreamTrack);
+    const opened = openFrameCaptureVideo(track, 1280, 720).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(FRAME_CAPTURE_START_TIMEOUT_MS);
-    expect((await opened).element).toBe(preview);
+    expect(await opened).toBeInstanceOf(FrameCaptureUnavailableError);
   });
 
   it('fails with FrameCaptureUnavailableError when nothing on the page is playing the track', async () => {

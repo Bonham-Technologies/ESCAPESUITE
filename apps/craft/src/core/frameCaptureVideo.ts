@@ -44,14 +44,14 @@ export interface FrameCaptureVideo {
 }
 
 /**
- * Whether `video` is playing `track` with a frame to draw. Matched by id as
- * well as identity: a `MediaStream` built around a track holds the same object,
- * but a clone the page made for its preview would not.
+ * Whether `video` is playing `track` itself, with a frame to draw. CRAFT's
+ * preview is handed the very stream the take records, so it holds the same
+ * track object; a clone would carry a new id and is not this take's picture.
  */
 function isPlaying(video: HTMLVideoElement, track: MediaStreamTrack): boolean {
   const source = video.srcObject;
   if (!(source instanceof MediaStream)) return false;
-  const showsTrack = source.getVideoTracks().some((t) => t === track || t.id === track.id);
+  const showsTrack = source.getVideoTracks().some((t) => t === track);
   return showsTrack && !video.paused && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA;
 }
 
@@ -81,6 +81,9 @@ export async function openFrameCaptureVideo(
   element.srcObject = new MediaStream([track]);
   element.muted = true;
   element.playsInline = true;
+  // Transparent is not hidden from assistive technology the way
+  // `visibility:hidden` was, so say it outright.
+  element.setAttribute('aria-hidden', 'true');
   // Laid out in the viewport, at full size so it decodes every pixel, but
   // transparent, behind the page and out of the way of the pointer. Not
   // `visibility:hidden`: WebKit never plays that.

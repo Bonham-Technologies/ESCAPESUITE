@@ -1,6 +1,8 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { waitForAppReady } from '../../utils/ready'
+import { recordATake } from '../../utils/craft'
+import { storedRecordingDuration } from '../../utils/seekable'
 
 /**
  * ESCSUITE-398: in Safari, Start never reached the recording state.
@@ -71,13 +73,15 @@ async function openCraft(page: Page, refuse: Refuse): Promise<void> {
   await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
 }
 
-/** Record a short screen take and wait for it to be saved. */
-async function recordATake(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Start recording' }).click()
-  await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 20_000 })
-  await page.waitForTimeout(1500) // a take's length, not an arbitrary pause
-  await page.getByRole('button', { name: 'Stop recording' }).click()
-  await expect(page.getByRole('button', { name: /^Play / })).toHaveCount(1, { timeout: 30_000 })
+/**
+ * Record a take and check the saved file has a picture timeline: a recorder
+ * that got no frames would save nothing playable, or nothing at all.
+ */
+async function recordAPlayableTake(page: Page): Promise<void> {
+  await recordATake(page)
+  const stored = await storedRecordingDuration(page)
+  expect(stored.size).toBeGreaterThan(0)
+  expect(stored.finite, `the saved take reports duration ${stored.reported}`).toBe(true)
 }
 
 test.describe('ESCSUITE-398: Start never hangs on frame capture', () => {
@@ -90,7 +94,7 @@ test.describe('ESCSUITE-398: Start never hangs on frame capture', () => {
       await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 20_000 })
       return
     }
-    await recordATake(page)
+    await recordAPlayableTake(page)
   })
 
   // WebKit's own rule, measured: an on-screen transparent element plays alone,
@@ -103,7 +107,7 @@ test.describe('ESCSUITE-398: Start never hangs on frame capture', () => {
       await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 20_000 })
       return
     }
-    await recordATake(page)
+    await recordAPlayableTake(page)
   })
 
   test('with no video playing at all, the take fails with a notice', async ({ page }) => {
