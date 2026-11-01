@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
 ## Subagent model routing
 Always pass an explicit `model` when spawning a subagent. Choose by how novel the task is, what a failure would cost, and whether success can be checked mechanically.
 
@@ -10,6 +10,6 @@ When unsure, pick the higher tier for work that writes code and the lower tier f
 
 **Escalation:** a sonnet failure goes to opus with the failure details, never a second sonnet attempt. If opus fails twice, handle it in the main session. Mention every escalation in your summary.
 
-**Pipeline for substantial changes:** `builder` (sonnet, precise testable specs only) → `reviewer` (opus) → `qc` (fable, high-risk changes only). For novel or loose specs, skip builder and go straight to opus. Skip reviewer for trivial changes with passing tests. Tests and verification commands are the first reviewer; don't add model hops where a test would do.
+**Pipeline for substantial changes:** `builder` (sonnet, precise testable specs only) → `reviewer` (opus) → `qc` (fable, high-risk changes only). For novel or loose specs, skip builder and go straight to opus. Skip reviewer for trivial changes with passing tests. Tests and verification commands are the first reviewer; don't add model hops where a test would do. If a named agent type isn't offered, dispatch `general-purpose` with that tier's model and the agent file's body as the brief.
 
 **Handoffs:** give every subagent the goal, file paths, acceptance criteria and the verify command. Ask for a short report: files changed, checks run with results, open risks. Pass review and QC agents the diff and the spec, not a request to explore.

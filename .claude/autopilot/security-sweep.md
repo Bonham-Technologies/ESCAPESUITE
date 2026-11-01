@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v1. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward's security sweep
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -60,14 +60,11 @@ tar -xzf "$T" gitleaks && mv "$O" osv-scanner && chmod +x osv-scanner gitleaks &
 ./osv-scanner --version && ./gitleaks version )
 ```
 
-Then compare each tool's latest release with the pin:
-- `gh api repos/google/osv-scanner/releases/latest --jq .tag_name`;
-- the same for `gitleaks/gitleaks`.
-
-If either is newer, say so in the digest. Bumping a pin is a bonham-ops change, never
-one a run makes. Run every scanner from the repo root. Each shell command starts a fresh
-shell, so set `SCAN=/tmp/autopilot-scan` again in every later command that uses
-`$SCAN`.
+Don't look for newer releases from a product run: other repos' APIs are blocked in
+cloud. The fleet digest compares the pins with the latest releases. Bumping a pin is a
+bonham-ops change, never one a run makes. Run every scanner from the repo root. Each
+shell command starts a fresh shell, so set `SCAN=/tmp/autopilot-scan` again in every
+later command that uses `$SCAN`.
 
 **Dependency vulnerabilities.**
 
