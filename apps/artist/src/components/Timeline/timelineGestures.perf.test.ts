@@ -411,6 +411,7 @@ describe('useTrimDrag per-move work', () => {
       setSelectedClipId: state.setSelectedClipId,
       trimClip: state.trimClip,
       shiftClipsAfter: state.shiftClipsAfter,
+      setClipTimelinePosition: state.setClipTimelinePosition,
     }
   }
 
