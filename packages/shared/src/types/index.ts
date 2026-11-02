@@ -88,6 +88,13 @@ export interface SourceVideo {
   waveformData?: WaveformPeak[]
   hasAudio?: boolean
   /**
+   * Set when ESCAPEARTIST's load-time waveform rebuild (ESCSUITE-347) decoded
+   * this source and found no audio peaks, so a later load does not decode the
+   * same bytes again (ESCSUITE-361). Only ever stored in this browser's
+   * database, never written to a `.veditor`. Absent means "not tried".
+   */
+  waveformUnavailable?: boolean
+  /**
    * The take this file is one part of. Absent on a single-file take, which is
    * every recording made before ESCSUITE-14 and every composited PiP take
    * after it. The take's primary part carries its own id here, so grouping is

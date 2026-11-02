@@ -28,6 +28,7 @@ import {
   getStorageEstimate,
   getThumbnail,
   getVideo,
+  storeRebuiltWaveform,
   storeThumbnail,
   storeVideo,
 } from './storage'
@@ -46,6 +47,7 @@ vi.mock('./storage', async (importOriginal) => {
     getVideo: vi.fn(actual.getVideo),
     getThumbnail: vi.fn(actual.getThumbnail),
     storeVideo: vi.fn(actual.storeVideo),
+    storeRebuiltWaveform: vi.fn(actual.storeRebuiltWaveform),
     storeThumbnail: vi.fn(actual.storeThumbnail),
     deleteVideo: vi.fn(actual.deleteVideo),
     getStorageEstimate: vi.fn(actual.getStorageEstimate),
@@ -2777,5 +2779,151 @@ describe('loadProject regenerates a missing waveform (ESCSUITE-347)', () => {
     const reopened = await loadProject(legacyFile(silent))
     expect(reopened.sourceVideos[0].waveformData).toBeUndefined()
     await deleteVideo(silent)
+  })
+})
+
+// ESCSUITE-361: ESCSUITE-347's rebuild used to run on every reopen when it
+// found no audio, or when the row already stored here had no waveform (loads
+// never rewrite a present row's bytes). Each source now decodes once per browser.
+describe('loadProject rebuilds a missing waveform once per browser (ESCSUITE-361)', () => {
+  let media: MediaDoubles
+  const peaks = [
+    { min: -0.4, max: 0.6 },
+    { min: -0.1, max: 0.2 },
+  ]
+  const takeIdentity = {
+    source: 'recording',
+    takeId: 'take-1',
+    role: 'screen',
+    startOffset: 0.25,
+    overlayPlacement: { position: 'bottom-right', size: 0.25, shape: 'circle' },
+  } as const satisfies Partial<SourceVideo>
+
+  beforeEach(() => {
+    media = installMediaElementDoubles({ video: { duration: 8, videoWidth: 640, videoHeight: 360 } })
+    vi.mocked(extractWaveformData).mockClear()
+  })
+
+  afterEach(() => {
+    media.uninstall()
+    vi.mocked(extractWaveformData).mockReset()
+    vi.mocked(extractWaveformData).mockResolvedValue({ peaks: [], hasAudio: false })
+    vi.mocked(storeRebuiltWaveform).mockReset()
+    vi.mocked(storeRebuiltWaveform).mockImplementation(actualStorage.storeRebuiltWaveform)
+  })
+
+  function legacyFile(id: string): File {
+    return new File(
+      [
+        JSON.stringify({
+          version: 1,
+          project: createTestProject(id),
+          videos: [{ id, name: 'legacy', mimeType: 'video/webm', data: base64Of([1, 2, 3]) }],
+        } satisfies ProjectFile),
+      ],
+      'legacy.veditor',
+      { type: 'application/json' }
+    )
+  }
+
+  async function storeRowWithoutWaveform(id: string): Promise<void> {
+    await storeVideo(id, new Blob([new Uint8Array([9, 8, 7])], { type: 'video/webm' }), {
+      id,
+      name: 'stored',
+      duration: 8,
+      width: 640,
+      height: 360,
+      frameRate: 30,
+      mimeType: 'video/webm',
+      size: 3,
+      ...takeIdentity,
+    })
+  }
+
+  it('does not decode a source new to this browser again when its decode found no audio', async () => {
+    const id = uniqueId('silent-new')
+
+    await loadProject(legacyFile(id))
+    const reopened = await loadProject(legacyFile(id))
+
+    expect(extractWaveformData).toHaveBeenCalledTimes(1)
+    expect(reopened.sourceVideos[0].waveformData).toBeUndefined()
+    expect((await getVideo(id))?.metadata.waveformUnavailable).toBe(true)
+    await deleteVideo(id)
+  })
+
+  it("writes a rebuilt waveform back into a present row's metadata only, and never decodes it again", async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true })
+    const id = uniqueId('stored-rebuilt')
+    await storeRowWithoutWaveform(id)
+
+    await loadProject(legacyFile(id))
+    const reopened = await loadProject(legacyFile(id))
+
+    expect(extractWaveformData).toHaveBeenCalledTimes(1)
+    expect(reopened.sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    const row = await getVideo(id)
+    expect(row?.metadata).toMatchObject({ waveformData: peaks, hasAudio: true, name: 'stored', ...takeIdentity })
+    // The stored bytes, not the file's, are still the row's.
+    expect(Array.from(new Uint8Array(await row!.blob.arrayBuffer()))).toEqual([9, 8, 7])
+    await deleteVideo(id)
+  })
+
+  it('records on a present row that its decode found no audio, and never decodes it again', async () => {
+    const id = uniqueId('stored-silent')
+    await storeRowWithoutWaveform(id)
+
+    await loadProject(legacyFile(id))
+    await loadProject(legacyFile(id))
+
+    expect(extractWaveformData).toHaveBeenCalledTimes(1)
+    const row = await getVideo(id)
+    expect(row?.metadata).toMatchObject({ waveformUnavailable: true, ...takeIdentity })
+    expect(row?.metadata.waveformData).toBeUndefined()
+    expect(Array.from(new Uint8Array(await row!.blob.arrayBuffer()))).toEqual([9, 8, 7])
+    await deleteVideo(id)
+  })
+
+  it('still loads the source when the write-back fails', async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true })
+    vi.mocked(storeRebuiltWaveform).mockRejectedValueOnce(new DOMException('full', 'QuotaExceededError'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const id = uniqueId('write-back-fails')
+    await storeRowWithoutWaveform(id)
+
+    const { sourceVideos } = await loadProject(legacyFile(id))
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect((await getVideo(id))?.metadata.waveformData).toBeUndefined()
+    warn.mockRestore()
+    await deleteVideo(id)
+  })
+
+  it('tries again on the next load when the decode rejected', async () => {
+    vi.mocked(extractWaveformData).mockRejectedValueOnce(new Error('decoder gone'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const id = uniqueId('decode-rejects')
+
+    await loadProject(legacyFile(id))
+    expect((await getVideo(id))?.metadata.waveformUnavailable).toBeUndefined()
+    await loadProject(legacyFile(id))
+
+    expect(extractWaveformData).toHaveBeenCalledTimes(2)
+    warn.mockRestore()
+    await deleteVideo(id)
+  })
+
+  it('leaves a row that gained a waveform meanwhile as it now is', async () => {
+    const id = uniqueId('gained-wave')
+    await storeRowWithoutWaveform(id)
+    const row = await getVideo(id)
+    await storeVideo(id, row!.blob, { ...row!.metadata, waveformData: peaks })
+
+    await storeRebuiltWaveform(id, { waveformUnavailable: true })
+
+    expect((await getVideo(id))?.metadata).toMatchObject({ waveformData: peaks })
+    expect((await getVideo(id))?.metadata.waveformUnavailable).toBeUndefined()
+    await deleteVideo(id)
   })
 })

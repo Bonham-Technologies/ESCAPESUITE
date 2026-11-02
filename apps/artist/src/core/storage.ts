@@ -108,6 +108,30 @@ async function storeRepair(id: string, size: number, repaired: Blob): Promise<vo
   })
 }
 
+/**
+ * Write a rebuilt waveform (or the marker that a rebuild found none) into a
+ * stored row's metadata, in one transaction (ESCSUITE-361). Only the waveform
+ * fields change: the bytes, and every other metadata field (CRAFT's take
+ * identity included, ESCSUITE-151), are put back exactly as read. A row that
+ * is gone, or that has meanwhile gained a waveform, is left as it now is.
+ */
+export async function storeRebuiltWaveform(
+  id: string,
+  waveform: Pick<SourceVideo, 'waveformData' | 'hasAudio' | 'waveformUnavailable'>
+): Promise<void> {
+  const db = await getDB()
+  const tx = db.transaction('videos', 'readwrite')
+  const current = await tx.store.get(id)
+  // Both settled together, so a refused put does not leave `tx.done`
+  // rejecting with nothing to catch it.
+  await Promise.all([
+    current && !current.metadata.waveformData?.length
+      ? tx.store.put({ ...current, metadata: { ...current.metadata, ...waveform } })
+      : undefined,
+    tx.done,
+  ])
+}
+
 // Session state for auto-save/restore
 export interface SessionState {
   /**
