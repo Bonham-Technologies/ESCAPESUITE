@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import { seedTextClip } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -227,4 +228,18 @@ test.describe('ESCAPEARTIST Standalone - IndexedDB Storage', () => {
 
     expect(databases).toContain('video-editor-db')
   })
+})
+
+// ESCSUITE-369: the offline file names its version and says it is the offline
+// build, so a stale download is visible as one.
+test('ESCAPEARTIST Standalone - names its version as the offline file', async ({ page }) => {
+  const { version } = JSON.parse(readFileSync(new URL('../../../artist/package.json', import.meta.url), 'utf8'))
+  await page.goto(ARTIST_URL)
+  await waitForAppReady(page, 'artist')
+
+  // `?` is the only way in — there is no button for it.
+  await page.keyboard.press('Shift+Slash')
+  const dialog = page.getByRole('dialog', { name: 'Keyboard Shortcuts' })
+
+  await expect(dialog.getByText(`ESCAPEARTIST v${version} · offline file`, { exact: true })).toBeVisible()
 })

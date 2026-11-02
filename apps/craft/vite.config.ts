@@ -3,6 +3,7 @@ import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { viteSingleFile } from 'vite-plugin-singlefile'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { readFileSync } from 'node:fs'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -27,6 +28,10 @@ export default defineConfig({
   define: {
     // Build mode: 'saas' (default) or 'standalone'
     'import.meta.env.VITE_BUILD_MODE': JSON.stringify(process.env.VITE_BUILD_MODE || 'saas'),
+    // This app's own package.json version, shown in its help sheet (ESCSUITE-369).
+    __APP_VERSION__: JSON.stringify(
+      JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')).version
+    ),
   },
   test: {
     globals: true,
