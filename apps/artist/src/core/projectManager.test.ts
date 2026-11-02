@@ -2914,6 +2914,40 @@ describe('loadProject rebuilds a missing waveform once per browser (ESCSUITE-361
     await deleteVideo(id)
   })
 
+  it("does not take the marker from a file's own meta", async () => {
+    vi.mocked(extractWaveformData).mockRejectedValueOnce(new Error('decoder gone'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const id = uniqueId('file-marker')
+    const file = (): File =>
+      new File(
+        [
+          JSON.stringify({
+            version: 1,
+            project: createTestProject(id),
+            videos: [
+              {
+                id,
+                name: 'hand-edited',
+                mimeType: 'video/webm',
+                data: base64Of([1, 2, 3]),
+                meta: { duration: 8, width: 640, height: 360, frameRate: 30, waveformUnavailable: true },
+              },
+            ],
+          } satisfies ProjectFile),
+        ],
+        'hand-edited.veditor',
+        { type: 'application/json' }
+      )
+
+    await loadProject(file())
+    expect((await getVideo(id))?.metadata.waveformUnavailable).toBeUndefined()
+    await loadProject(file())
+
+    expect(extractWaveformData).toHaveBeenCalledTimes(2)
+    warn.mockRestore()
+    await deleteVideo(id)
+  })
+
   it('leaves a row that gained a waveform meanwhile as it now is', async () => {
     const id = uniqueId('gained-wave')
     await storeRowWithoutWaveform(id)

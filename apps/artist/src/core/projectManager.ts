@@ -289,6 +289,10 @@ async function probeMetadata(entry: SourceEntry, blob: Blob, existing: StoredSou
  * next load tries again.
  */
 async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: StoredSource): Promise<void> {
+  // The marker is this browser's own record, never a file's: a `meta` that
+  // carries one (hand-edited, since `saveProject` never writes it) must not
+  // stop a source new to this browser from being decoded.
+  delete metadata.waveformUnavailable;
   if (metadata.waveformData?.length) return;
   if (metadata.mediaType === 'image' || metadata.mimeType.startsWith('image/')) return;
   const stored = existing?.metadata;
