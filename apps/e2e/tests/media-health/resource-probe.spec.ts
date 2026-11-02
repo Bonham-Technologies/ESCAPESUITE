@@ -192,7 +192,8 @@ test('a decoder and a blob URL made inside a worker are counted until they are r
   await tellWorker(page, 'close')
   const released = await readLiveCounts(page)
   expect(released.live).toEqual(baseline.live)
-  expect(released.created.videoDecoder).toBe(1)
+  // Reported over the channel, a moment after the worker made it.
+  await expect.poll(async () => (await readLiveCounts(page)).created.videoDecoder).toBe(1)
 })
 
 test('an unclosed decoder in a worker is reported as growth, naming the worker', async ({ page }) => {
@@ -214,7 +215,7 @@ test('a terminated worker takes its decoder with it', async ({ page }) => {
   const after = await readLiveCounts(page)
   expect(after.live).toEqual(NONE)
   // What it made is still counted as made, reported to the page as it was made.
-  expect(after.created).toMatchObject({ videoDecoder: 1, objectUrl: 1 })
+  await expect.poll(async () => (await readLiveCounts(page)).created).toMatchObject({ videoDecoder: 1, objectUrl: 1 })
 })
 
 test("a worker's reports reach only the page that started it", async ({ page, context }) => {

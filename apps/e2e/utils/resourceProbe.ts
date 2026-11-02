@@ -349,7 +349,12 @@ async function probeWorkerScripts(target: Page | BrowserContext): Promise<void> 
   await target.route(marker, async (route) => {
     const url = route.request().url().replace(marker, '')
     const response = await route.fetch({ url })
-    await route.fulfill({ response, body: probe + (await response.text()) })
+    // The body is re-sent as plain text, so the server's encoding and length
+    // no longer describe it (a compressing server, such as `vite preview`).
+    const headers = { ...response.headers() }
+    delete headers['content-encoding']
+    delete headers['content-length']
+    await route.fulfill({ response, headers, body: probe + (await response.text()) })
   })
 }
 
