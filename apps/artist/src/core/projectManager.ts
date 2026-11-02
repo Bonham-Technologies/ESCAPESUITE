@@ -286,7 +286,10 @@ async function probeMetadata(entry: SourceEntry, blob: Blob, existing: StoredSou
  * finds by the caller. A row already stored gets it written back here, into
  * its metadata only (`storeRebuiltWaveform`); a write-back that fails is
  * logged and the load goes on. A decode that rejects records nothing, so the
- * next load tries again.
+ * next load tries again. `extractWaveformData`'s whole-file fallback answers
+ * no peaks, rather than rejecting, for a decode it could not run (no
+ * AudioContext, out of memory), so such a failure is also marked; re-importing
+ * the file clears the marker.
  */
 async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: StoredSource): Promise<void> {
   // The marker is this browser's own record, never a file's: a `meta` that
@@ -307,7 +310,9 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
   }
   let decoded: Awaited<ReturnType<typeof extractWaveformData>>;
   try {
-    decoded = await extractWaveformData(blob);
+    // A present row is decoded from its own bytes, which are what playback and
+    // export read, so the waveform written back describes the row it lands in.
+    decoded = await extractWaveformData(existing?.blob ?? blob);
   } catch (error) {
     console.warn(`Could not rebuild the waveform for "${metadata.name}":`, error);
     return;

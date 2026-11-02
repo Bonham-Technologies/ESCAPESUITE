@@ -2861,6 +2861,9 @@ describe('loadProject rebuilds a missing waveform once per browser (ESCSUITE-361
     const reopened = await loadProject(legacyFile(id))
 
     expect(extractWaveformData).toHaveBeenCalledTimes(1)
+    // Decoded from the row's own bytes, the ones playback and export read.
+    const decodedBlob = vi.mocked(extractWaveformData).mock.calls[0][0]
+    expect(Array.from(new Uint8Array(await decodedBlob.arrayBuffer()))).toEqual([9, 8, 7])
     expect(reopened.sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
     const row = await getVideo(id)
     expect(row?.metadata).toMatchObject({ waveformData: peaks, hasAudio: true, name: 'stored', ...takeIdentity })
