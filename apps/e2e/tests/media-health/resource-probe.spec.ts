@@ -1,6 +1,8 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { installMediaHealthProbe } from '../../utils/mediaHealth'
-import { installResourceProbe, readLiveCounts } from '../../utils/resourceProbe'
+import { describeGrowth, installResourceProbe, readLiveCounts, type ResourceCounts } from '../../utils/resourceProbe'
 
 /**
  * ESCSUITE-350: the resource probe counts what it claims to. A probe that
@@ -105,4 +107,112 @@ test('a dropped, unclosed decoder stops counting once it is collected', async ({
   const after = await readLiveCounts(page)
   expect(after.created.videoDecoder).toBe(2)
   expect(after.live.videoDecoder).toBe(1)
+})
+
+// ESCSUITE-366: a decoder made inside a dedicated worker used to be invisible,
+// and ARTIST's only VideoDecoder lives in its decode worker.
+const WORKER_SCRIPT = `
+let decoder = null
+let url = null
+onmessage = (event) => {
+  if (event.data === 'make') {
+    decoder = new VideoDecoder({ output: () => {}, error: () => {} })
+    url = URL.createObjectURL(new Blob(['x']))
+  } else if (event.data === 'close') {
+    decoder.close()
+    URL.revokeObjectURL(url)
+  }
+  postMessage(event.data)
+}
+`
+
+/**
+ * Start a module worker served from the page's own origin, as Vite serves
+ * ARTIST's. A real server on `localhost` rather than a route: the probe
+ * rewrites worker scripts with a route of its own, which fetches the script
+ * from the network.
+ */
+async function startWorker(page: Page): Promise<void> {
+  const server = createServer((request, response) => {
+    const isWorker = request.url === '/probe-worker.js'
+    response.writeHead(200, { 'content-type': isWorker ? 'text/javascript' : 'text/html' })
+    response.end(isWorker ? WORKER_SCRIPT : '<!doctype html><title>probe</title>')
+  })
+  await new Promise<void>((resolve) => server.listen(0, 'localhost', resolve))
+  servers.push(server)
+  const { port } = server.address() as AddressInfo
+  await installResourceProbe(page)
+  await page.goto(`http://localhost:${port}/`)
+  await page.evaluate(() => {
+    const worker = new Worker('/probe-worker.js', { type: 'module' })
+    ;(window as unknown as { worker: Worker }).worker = worker
+  })
+}
+
+const servers: Server[] = []
+test.afterEach(async () => {
+  await Promise.all(servers.splice(0).map((server) => new Promise((resolve) => server.close(resolve))))
+})
+
+async function tellWorker(page: Page, message: 'make' | 'close'): Promise<void> {
+  await page.evaluate(
+    (message) =>
+      new Promise<void>((resolve) => {
+        const worker = (window as unknown as { worker: Worker }).worker
+        worker.addEventListener('message', () => resolve(), { once: true })
+        worker.postMessage(message)
+      }),
+    message
+  )
+}
+
+const NONE: ResourceCounts = {
+  audioContext: 0,
+  offlineAudioContext: 0,
+  videoDecoder: 0,
+  audioDecoder: 0,
+  worker: 0,
+  objectUrl: 0,
+  mediaElement: 0,
+}
+
+test('a decoder and a blob URL made inside a worker are counted until they are released', async ({ page }) => {
+  await startWorker(page)
+  const baseline = await readLiveCounts(page)
+  expect(baseline.live).toEqual({ ...NONE, worker: 1 })
+
+  await tellWorker(page, 'make')
+  const held = await readLiveCounts(page)
+  expect(held.live).toEqual({ ...NONE, worker: 1, videoDecoder: 1, objectUrl: 1 })
+  expect(held.liveSites.filter((r) => r.site.startsWith('worker: ')).map((r) => r.kind).sort()).toEqual([
+    'objectUrl',
+    'videoDecoder',
+  ])
+
+  await tellWorker(page, 'close')
+  const released = await readLiveCounts(page)
+  expect(released.live).toEqual(baseline.live)
+  expect(released.created.videoDecoder).toBe(1)
+})
+
+test('an unclosed decoder in a worker is reported as growth, naming the worker', async ({ page }) => {
+  await startWorker(page)
+  const baseline = await readLiveCounts(page)
+
+  await tellWorker(page, 'make')
+  const growth = describeGrowth(baseline.live, await readLiveCounts(page), NONE)
+
+  expect(growth).toHaveLength(2)
+  expect(growth.find((line) => line.startsWith('videoDecoder: 1 live'))).toContain('worker: ')
+})
+
+test('a terminated worker takes its decoder with it', async ({ page }) => {
+  await startWorker(page)
+  await tellWorker(page, 'make')
+  await page.evaluate(() => (window as unknown as { worker: Worker }).worker.terminate())
+
+  const after = await readLiveCounts(page)
+  expect(after.live).toEqual(NONE)
+  // What it made is still counted as made, reported to the page as it was made.
+  expect(after.created).toMatchObject({ videoDecoder: 1, objectUrl: 1 })
 })

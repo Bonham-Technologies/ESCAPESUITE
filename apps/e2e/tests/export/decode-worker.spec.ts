@@ -10,6 +10,7 @@ import {
   openExportDialog,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
+import { installResourceProbe, readLiveCounts } from '../../utils/resourceProbe'
 
 /**
  * ESCSUITE-254: the WebCodecs decode worker had never decoded a frame.
@@ -653,6 +654,27 @@ test.describe('MP4 export decodes in the WebCodecs worker (ESCSUITE-254)', () =>
 
     expectWorkerDecoded(run)
     expectMp4(run.bytes)
+  })
+
+  // ESCSUITE-366: the resource probe now sees inside the decode worker, so an
+  // export's decoders are counted, and none may outlive it.
+  test('an export leaves no decoder open in the worker', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'readLiveCounts forces a GC through Chromium’s DevTools protocol')
+    test.setTimeout(180_000)
+    await installResourceProbe(page)
+    await openWithSource(page, ARTIST_FIXTURE_MP4)
+    const before = await readLiveCounts(page)
+
+    await exportMp4FromDialog(page, '480p')
+
+    // The worker made decoders and the probe saw them: one the probe could
+    // not see would leave both counts flat and the check below proving nothing.
+    await expect
+      .poll(async () => (await readLiveCounts(page)).created.videoDecoder, { timeout: 15_000 })
+      .toBeGreaterThan(before.created.videoDecoder)
+    await expect
+      .poll(async () => (await readLiveCounts(page)).live.videoDecoder, { timeout: 15_000 })
+      .toBe(before.live.videoDecoder)
   })
 
   for (const parity of PARITY_CASES) {
