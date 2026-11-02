@@ -1,0 +1,9 @@
+# gitleaks false positives, all test fixtures in files no longer in the tree (ESCSUITE-380).
+# Add a line here only for a finding someone has checked by hand, and name its ticket.
+# Mock Supabase anon key (JWT-shaped) for the intercepted e2e mock project (#247).
+cfff55f62f93aaa2ddb364d29805ebe25a688d76:apps/e2e/utils/auth.ts:jwt:28
+# Disposable Ed25519 test keypair that signed mock licences for the standalone e2e (#232).
+2caaa3b1f0c2a4a9927e690c5913a736a04f7aee:apps/e2e/utils/license-mocks.ts:generic-api-key:50
+2caaa3b1f0c2a4a9927e690c5913a736a04f7aee:apps/e2e/utils/license-mocks.ts:generic-api-key:51
+# Licence-key literal in the "saves and loads license" unit test.
+c696601955ad4f02dd72d15b6f19af6ffa0b77dd:packages/shared/src/auth/license.test.ts:generic-api-key:271
