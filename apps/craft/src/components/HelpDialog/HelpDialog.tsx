@@ -1,3 +1,4 @@
+import { appVersionLabel } from '@escapesuite/shared/config';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { CloseIcon } from '../icons';
 import styles from '../../App.module.css';
@@ -117,6 +118,9 @@ export function HelpDialog({ onClose }: HelpDialogProps) {
             </ul>
           </section>
         </div>
+
+        {/* Which build this is, for a bug report (ESCSUITE-369). */}
+        <p className={styles.helpVersion}>{appVersionLabel('ESCAPECRAFT', __APP_VERSION__)}</p>
       </div>
     </div>
   );

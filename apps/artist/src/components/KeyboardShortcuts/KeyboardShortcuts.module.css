@@ -156,6 +156,13 @@
   color: var(--text-muted);
 }
 
+.version {
+  display: block;
+  margin-top: var(--spacing-xs);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .tip .key {
   height: 20px;
   min-width: 20px;

@@ -10,6 +10,8 @@ import userEvent from '@testing-library/user-event'
 import { HelpDialog } from './HelpDialog'
 import { installGetClientRectsStub } from '../../test/doubles/browser'
 import styles from '../../App.module.css'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 let restoreGetClientRects: () => void
 
@@ -160,5 +162,16 @@ describe('HelpDialog keyboard and focus', () => {
     // no controls of its own, so it has to be reachable by Tab to be scrollable
     // from the keyboard at all.
     expect(container.querySelector(`.${styles.helpBody}`)).toHaveAttribute('tabindex', '0')
+  })
+})
+
+// ESCSUITE-369: a bug report can say which build it came from.
+describe('HelpDialog version line', () => {
+  it("shows this app's package.json version", () => {
+    const { version } = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+    renderDialog()
+
+    expect(screen.getByRole('dialog')).toHaveTextContent(`ESCAPECRAFT v${version}`)
+    expect(screen.getByText(`ESCAPECRAFT v${version}`)).toHaveClass(styles.helpVersion)
   })
 })

@@ -15,6 +15,7 @@
 // `document` and `stopPropagation()`s it, which the sheet's own listener never
 // did (it did not need to: the cascades below were already gated).
 import { useEffect, useRef } from 'react';
+import { appVersionLabel } from '@escapesuite/shared/config';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import styles from './KeyboardShortcuts.module.css';
 
@@ -202,6 +203,8 @@ export function KeyboardShortcuts({ isOpen, onClose }: KeyboardShortcutsProps) {
 
         <div className={styles.footer}>
           <span className={styles.tip}>Press <kbd className={styles.key}>?</kbd> to toggle this panel</span>
+          {/* Which build this is, for a bug report (ESCSUITE-369). */}
+          <span className={styles.version}>{appVersionLabel('ESCAPEARTIST', __APP_VERSION__)}</span>
         </div>
       </div>
     </div>

@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import {
@@ -428,4 +429,17 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     expect(lines.filter((line) => new RegExp(`through an AudioWorklet \\(${moduleKind}\\)`).test(line))).toHaveLength(1)
     expect(lines.filter((line) => /ScriptProcessorNode/.test(line))).toHaveLength(0)
   })
+})
+
+// ESCSUITE-369: the offline file names its version and says it is the offline
+// build, so a stale download is visible as one.
+test('ESCAPECRAFT Standalone - names its version as the offline file', async ({ page }) => {
+  const { version } = JSON.parse(readFileSync(new URL('../../../craft/package.json', import.meta.url), 'utf8'))
+  await page.goto(CRAFT_URL)
+  await waitForAppReady(page, 'craft')
+
+  await page.getByRole('button', { name: /help - recording tips/i }).click()
+  const dialog = page.getByRole('dialog', { name: 'Recording Tips' })
+
+  await expect(dialog.getByText(`ESCAPECRAFT v${version} · offline file`, { exact: true })).toBeVisible()
 })
