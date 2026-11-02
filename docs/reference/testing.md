@@ -129,19 +129,21 @@ released, and a dropped decoder gone once collected.
 **Workers** (ESCSUITE-366). The probe also runs inside every dedicated worker the page starts from
 an http(s) URL, so the decode worker's `VideoDecoder` (`workers/decodeWorker.ts`, the app's only
 one) and any blob URL a worker makes are counted. The probe's `Worker` wrapper marks the script URL
-(`?__resourceProbe`), and a route of the probe's own fetches the unmarked script and prepends the
+(`?__resourceProbe=<id>`), and a route of the probe's own fetches the unmarked script and prepends the
 probe, so it runs before the worker's first line. (Evaluating it over the DevTools protocol on
 attach raced the worker and lost about one run in three: Playwright's own session resumes it.)
 `readLiveCounts` collects garbage in each worker too and adds the workers' counts to the page's,
 their sites prefixed `worker:`. A terminated worker takes its live resources with it, but each
-worker also reports what it makes to the page over a `BroadcastChannel` (`__resourceProbe`), so
-`created` still counts a worker that is gone: the decode worker is terminated when an export ends. `resource-probe.spec.ts` pins it with a module worker that makes and closes a decoder and
+worker also reports what it makes to the page over a `BroadcastChannel` named by the page's
+own id (the marker's value, so another page of the context never counts it), so `created` still
+counts a worker that is gone: the decode worker is terminated when an export ends. `resource-probe.spec.ts` pins it with a module worker that makes and closes a decoder and
 a blob URL, an unclosed one reported by `describeGrowth`, and a terminated one gone;
 `export/decode-worker.spec.ts` checks an MP4 export made decoders in the worker (`created` grew)
 and left none open.
 
 **Blind spots.** Workers started from `blob:` or `data:` URLs (the single-file builds inline theirs
-that way), shared and service workers are not probed. In a module worker, a decoder made while its
+that way), workers started by a worker (Playwright does not route their script requests), shared
+and service workers are not probed. In a module worker, a decoder made while its
 static imports load is missed (imports evaluate before the prepended probe). Media elements made by
 `cloneNode`, `innerHTML` or parsed markup are not tracked. A worker that ends itself with
 `self.close()` stays counted live.

@@ -216,3 +216,15 @@ test('a terminated worker takes its decoder with it', async ({ page }) => {
   // What it made is still counted as made, reported to the page as it was made.
   expect(after.created).toMatchObject({ videoDecoder: 1, objectUrl: 1 })
 })
+
+test("a worker's reports reach only the page that started it", async ({ page, context }) => {
+  await startWorker(page)
+  // A second page on the same origin hears the same BroadcastChannels.
+  const other = await context.newPage()
+  await installResourceProbe(other)
+  await other.goto(page.url())
+
+  await tellWorker(page, 'make')
+  await expect.poll(async () => (await readLiveCounts(page)).created.videoDecoder).toBe(1)
+  expect((await readLiveCounts(other)).created).toEqual(NONE)
+})

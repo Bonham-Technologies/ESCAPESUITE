@@ -50,7 +50,8 @@ import type { BrowserContext, CDPSession, Page } from '@playwright/test'
  *
  * Blind spots:
  * - Workers started from a `blob:` or `data:` URL (the single-file builds
- *   inline theirs this way), shared and service workers are not probed.
+ *   inline theirs this way), workers started by a worker (Playwright does not
+ *   route their script requests), shared and service workers are not probed.
  * - In a module worker, a decoder made while its static imports load is
  *   missed: imports evaluate before the prepended probe.
  * - Media elements made by `cloneNode`, `innerHTML` or parsed markup are not
@@ -155,10 +156,24 @@ function resourceProbeScript(): void {
   // Every worker's creations are also reported to the page over a channel of
   // the probe's own, so `created` still counts what a worker made after the
   // worker is terminated (ESCSUITE-366): a decode worker can make its decoders
-  // and be gone between two reads.
+  // and be gone between two reads. A BroadcastChannel reaches every same-origin
+  // page of the browser, so each page names its own: the page picks an id and
+  // its `Worker` wrapper writes it into the worker's URL marker, where the
+  // worker reads it back.
+  const WORKER_MARK = '__resourceProbe'
   const inWorker = typeof document === 'undefined'
+  const fresh = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
+  let channelId = fresh()
+  if (inWorker) {
+    try {
+      channelId = new URL(location.href).searchParams.get(WORKER_MARK) || channelId
+    } catch {
+      // Keep the fresh id: this worker's reports then reach no page.
+    }
+  }
   const workerCreated = zero()
-  const channel = typeof BroadcastChannel === 'function' ? new BroadcastChannel('__resourceProbe') : null
+  const channel =
+    typeof BroadcastChannel === 'function' ? new BroadcastChannel(`${WORKER_MARK}:${channelId}`) : null
   if (channel && !inWorker) {
     channel.onmessage = (event: MessageEvent) => {
       const kind = event.data as Kind
@@ -194,7 +209,7 @@ function resourceProbeScript(): void {
         const el = obj as HTMLMediaElement
         const hasSource = !!el.getAttribute('src') || !!el.srcObject || !!el.querySelector('source[src]')
         // 0 is NETWORK_EMPTY, spelled out: a worker scope has no HTMLMediaElement.
-      return hasSource && el.networkState !== 0
+        return hasSource && el.networkState !== 0
       }
       default:
         return false
@@ -203,14 +218,14 @@ function resourceProbeScript(): void {
 
   // Constructors: subclass, so `instanceof` and statics keep working.
   // A worker's script URL gets a marker that `probeWorkerScripts` routes on,
-  // strips, and answers with the probe prepended (ESCSUITE-366). Only an
-  // http(s) URL without a fragment: a blob: or data: worker is no request.
-  const WORKER_MARK = '__resourceProbe'
+  // strips, and answers with the probe prepended (ESCSUITE-366); its value is
+  // the page's channel id. Only an http(s) URL without a fragment: a blob: or
+  // data: worker is no request.
   const markWorkerUrl = (scriptUrl: unknown): unknown => {
     try {
       const url = new URL(String(scriptUrl), location.href)
       if ((url.protocol !== 'http:' && url.protocol !== 'https:') || url.hash) return scriptUrl
-      return `${url.href}${url.search ? '&' : '?'}${WORKER_MARK}`
+      return `${url.href}${url.search ? '&' : '?'}${WORKER_MARK}=${channelId}`
     } catch {
       return scriptUrl
     }
@@ -319,8 +334,9 @@ function resourceProbeScript(): void {
  * protocol raced the worker's first line and lost about one run in three).
  * Rewriting the script has no race.
  *
- * The probe's `Worker` wrapper marks the script URL (`?__resourceProbe`, or
- * `&` after an existing query); this route answers exactly those requests,
+ * The probe's `Worker` wrapper marks the script URL (`?__resourceProbe=<id>`,
+ * or `&` after an existing query, the id naming the page's report channel);
+ * this route answers exactly those requests,
  * fetching the unmarked URL and prepending the probe, so the server never
  * sees the marker. In a module worker the script's static imports evaluate
  * before the probe (imports are hoisted), so a dependency that made a decoder
@@ -329,8 +345,9 @@ function resourceProbeScript(): void {
  */
 async function probeWorkerScripts(target: Page | BrowserContext): Promise<void> {
   const probe = `;(${resourceProbeScript.toString()})();\n`
-  await target.route(/[?&]__resourceProbe$/, async (route) => {
-    const url = route.request().url().replace(/[?&]__resourceProbe$/, '')
+  const marker = /[?&]__resourceProbe=\w+$/
+  await target.route(marker, async (route) => {
+    const url = route.request().url().replace(marker, '')
     const response = await route.fetch({ url })
     await route.fulfill({ response, body: probe + (await response.text()) })
   })
@@ -363,23 +380,33 @@ async function collectWorkerGarbage(cdp: CDPSession): Promise<void> {
   await cdp.send('Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: false })
   cdp.off('Target.attachedToTarget', onAttached)
   const done = new Map<number, () => void>()
+  const gone = new Map<string, () => void>()
   const onMessage = ({ message }: { message: string }) => done.get((JSON.parse(message) as { id?: number }).id ?? -1)?.()
+  // A worker that ends mid-collection never answers: stop waiting for it.
+  const onDetached = ({ sessionId }: { sessionId: string }) => gone.get(sessionId)?.()
   cdp.on('Target.receivedMessageFromTarget', onMessage)
+  cdp.on('Target.detachedFromTarget', onDetached)
   try {
     await Promise.all(
       workers.map(
         (sessionId, i) =>
           new Promise<void>((resolve) => {
-            done.set(i + 1, resolve)
+            const timer = setTimeout(finish, 5_000)
+            function finish() {
+              clearTimeout(timer)
+              resolve()
+            }
+            done.set(i + 1, finish)
+            gone.set(sessionId, finish)
             const message = JSON.stringify({ id: i + 1, method: 'HeapProfiler.collectGarbage' })
             // A worker that ended meanwhile has nothing left to collect.
-            cdp.send('Target.sendMessageToTarget', { sessionId, message }).catch(() => resolve())
-            setTimeout(resolve, 5_000)
+            cdp.send('Target.sendMessageToTarget', { sessionId, message }).catch(finish)
           })
       )
     )
   } finally {
     cdp.off('Target.receivedMessageFromTarget', onMessage)
+    cdp.off('Target.detachedFromTarget', onDetached)
   }
 }
 
@@ -392,8 +419,9 @@ async function collectWorkerGarbage(cdp: CDPSession): Promise<void> {
  * A worker's live resources are added to the page's, their sites prefixed
  * `worker:`. A terminated worker takes its resources with it, but not its
  * `created` counts: each worker reports what it makes to the page over a
- * `BroadcastChannel` as it makes it, so `created` covers every worker the
- * page started (counted a moment after the worker made it).
+ * `BroadcastChannel` of that page's own as it makes it, so `created` covers
+ * every worker the page started (counted a moment after the worker made it),
+ * and no other page's.
  */
 export async function readLiveCounts(page: Page): Promise<ResourceSnapshot> {
   const cdp = await page.context().newCDPSession(page)
