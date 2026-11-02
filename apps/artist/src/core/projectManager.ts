@@ -6,6 +6,7 @@ import {
   getStorageEstimate,
   getVideo,
   storeVideo,
+  storeRebuiltWaveform,
   storeThumbnail,
   getThumbnail,
   resolveThumbnailUrl,
@@ -276,10 +277,25 @@ async function probeMetadata(entry: SourceEntry, blob: Blob, existing: StoredSou
  * import-time decode failed (`waveformData: []`), reopened without a waveform
  * for good, and was stored that way. A waveform already in hand is never
  * decoded again: the file's own first, then the stored row's. An image has no
- * audio to decode. A decode that rejects or finds no audio leaves `metadata`
- * as it was: the source loads, as it always did, just without a waveform.
+ * audio to decode. A decode that rejects leaves `metadata` as it was: the
+ * source loads, as it always did, just without a waveform.
+ *
+ * Each source is decoded once per browser (ESCSUITE-361). A decode that finds
+ * no audio sets `waveformUnavailable`, and a stored row carrying it is not
+ * decoded again. A source new to this browser is stored with whatever this
+ * finds by the caller. A row already stored gets it written back here, into
+ * its metadata only (`storeRebuiltWaveform`); a write-back that fails is
+ * logged and the load goes on. A decode that rejects records nothing, so the
+ * next load tries again. `extractWaveformData`'s whole-file fallback answers
+ * no peaks, rather than rejecting, for a decode it could not run (no
+ * AudioContext, out of memory), so such a failure is also marked; re-importing
+ * the file clears the marker.
  */
 async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: StoredSource): Promise<void> {
+  // The marker is this browser's own record, never a file's: a `meta` that
+  // carries one (hand-edited, since `saveProject` never writes it) must not
+  // stop a source new to this browser from being decoded.
+  delete metadata.waveformUnavailable;
   if (metadata.waveformData?.length) return;
   if (metadata.mediaType === 'image' || metadata.mimeType.startsWith('image/')) return;
   const stored = existing?.metadata;
@@ -288,15 +304,36 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
     metadata.hasAudio = metadata.hasAudio === true || stored.hasAudio;
     return;
   }
-  const { peaks, hasAudio } = await extractWaveformData(blob).catch((error) => {
+  if (stored?.waveformUnavailable) {
+    metadata.waveformUnavailable = true;
+    return;
+  }
+  let decoded: Awaited<ReturnType<typeof extractWaveformData>>;
+  try {
+    // A present row is decoded from its own bytes, which are what playback and
+    // export read, so the waveform written back describes the row it lands in.
+    decoded = await extractWaveformData(existing?.blob ?? blob);
+  } catch (error) {
     console.warn(`Could not rebuild the waveform for "${metadata.name}":`, error);
-    return { peaks: [], hasAudio: false };
+    return;
+  }
+  const { peaks, hasAudio } = decoded;
+  if (peaks.length === 0) {
+    metadata.waveformUnavailable = true;
+  } else {
+    metadata.waveformData = peaks;
+    // A rebuilt waveform never downgrades a `true` already recorded: a decode's
+    // `hasAudio` is only a silence check (a quiet take still has audio; see takeImport.ts).
+    metadata.hasAudio = metadata.hasAudio === true || hasAudio;
+  }
+  if (!existing) return;
+  const writeBack =
+    peaks.length === 0
+      ? { waveformUnavailable: true }
+      : { waveformData: peaks, hasAudio: stored?.hasAudio === true || hasAudio };
+  await storeRebuiltWaveform(metadata.id, writeBack).catch((error) => {
+    console.warn(`Could not store the rebuilt waveform for "${metadata.name}":`, error);
   });
-  if (peaks.length === 0) return;
-  metadata.waveformData = peaks;
-  // A rebuilt waveform never downgrades a `true` already recorded: a decode's
-  // `hasAudio` is only a silence check (a quiet take still has audio; see takeImport.ts).
-  metadata.hasAudio = metadata.hasAudio === true || hasAudio;
 }
 
 /**
