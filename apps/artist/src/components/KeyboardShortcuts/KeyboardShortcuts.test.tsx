@@ -6,6 +6,8 @@ import { pretendElementsAreVisible } from '../../test/doubles/layout'
 import styles from './KeyboardShortcuts.module.css'
 import { BOUND_SINGLE_KEYS, BOUND_CHORDS } from '../../app/useAppKeyboardShortcuts'
 import { TRANSPORT_KEYS } from '../Preview/transportKeys'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 describe('KeyboardShortcuts', () => {
   it('renders nothing while closed', () => {
@@ -282,5 +284,16 @@ describe('KeyboardShortcuts matches the keys the app binds', () => {
     }
     expect(chordRows.length).toBeGreaterThan(5)
     expect(unbound).toEqual([])
+  })
+})
+
+// ESCSUITE-369: a bug report can say which build it came from.
+describe('KeyboardShortcuts version line', () => {
+  it("shows this app's package.json version", () => {
+    const { version } = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8'))
+    render(<KeyboardShortcuts isOpen onClose={vi.fn()} />)
+
+    expect(screen.getByRole('dialog')).toHaveTextContent(`ESCAPEARTIST v${version}`)
+    expect(screen.getByText(`ESCAPEARTIST v${version}`)).toHaveClass(styles.version)
   })
 })

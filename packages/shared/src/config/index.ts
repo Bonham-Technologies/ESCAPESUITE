@@ -13,6 +13,12 @@ export const BUILD_MODE = import.meta.env.VITE_BUILD_MODE || 'saas'
 export const isSaaSMode = (): boolean => BUILD_MODE === 'saas'
 export const isStandaloneMode = (): boolean => BUILD_MODE === 'standalone'
 
+// The version line CRAFT and ARTIST show in their help sheets (ESCSUITE-369),
+// so a bug report can name the build it came from. The offline single-file
+// build says so, so a stale downloaded copy is visible as one.
+export const appVersionLabel = (app: string, version: string): string =>
+  `${app} v${version}${isStandaloneMode() ? ' · offline file' : ''}`
+
 // True when the current document is running inside a frame (e.g. ESCAPEARTIST
 // embedded in a host page). Safe to call during SSR / in workers where
 // `window` does not exist.

@@ -32,3 +32,8 @@
   `build:standalone` — `playwright.standalone.config.ts` serves the whole directory with `npx
   serve`, which is why the browser-driven standalone specs never caught a second file sitting
   next to `index.html`.
+- **App version on screen** (ESCSUITE-369): `vite.config.ts` defines `__APP_VERSION__` from
+  this app's `package.json` (typed in `src/vite-env.d.ts`), in dev, the hosted, headless and
+  standalone builds and the tests alike. The keyboard shortcuts sheet (press `?`) ends with
+  "ESCAPEARTIST vX.Y.Z", and "ESCAPEARTIST vX.Y.Z · offline file" in the standalone build
+  (`appVersionLabel` in `@escapesuite/shared/config`). Ask a reporter for that line.

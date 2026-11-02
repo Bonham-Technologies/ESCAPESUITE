@@ -3,6 +3,7 @@ import {
   isEmbedded,
   isFileOrigin,
   BUILD_MODE,
+  appVersionLabel,
   isSaaSMode,
   isStandaloneMode,
   EDITOR_URL,
@@ -32,6 +33,25 @@ describe('build mode', () => {
     expect(config.BUILD_MODE).toBe('standalone')
     expect(config.isSaaSMode()).toBe(false)
     expect(config.isStandaloneMode()).toBe(true)
+  })
+})
+
+describe('appVersionLabel (ESCSUITE-369)', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.resetModules()
+  })
+
+  it('names the app and its version in the hosted build', () => {
+    expect(appVersionLabel('ESCAPECRAFT', '2.18.27')).toBe('ESCAPECRAFT v2.18.27')
+  })
+
+  it('says the standalone build is the offline file', async () => {
+    vi.stubEnv('VITE_BUILD_MODE', 'standalone')
+    vi.resetModules()
+    const config = await import('./index')
+
+    expect(config.appVersionLabel('ESCAPEARTIST', '2.18.27')).toBe('ESCAPEARTIST v2.18.27 · offline file')
   })
 })
 

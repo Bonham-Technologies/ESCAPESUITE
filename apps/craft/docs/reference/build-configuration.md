@@ -11,3 +11,8 @@
   app's favicon is an inline `data:` URI in `index.html`) was deleted for exactly this reason;
   a future legitimate static asset (an icon, a `robots.txt`) needs a different route into the
   bundle, not `public/`
+- **App version on screen** (ESCSUITE-369): `vite.config.ts` defines `__APP_VERSION__` from
+  this app's `package.json` (typed in `src/vite-env.d.ts`), in dev, the hosted build, the
+  standalone file and the tests alike. The Recording Tips dialog's last line reads
+  "ESCAPECRAFT vX.Y.Z", and "ESCAPECRAFT vX.Y.Z · offline file" in the standalone build
+  (`appVersionLabel` in `@escapesuite/shared/config`). Ask a reporter for that line.
