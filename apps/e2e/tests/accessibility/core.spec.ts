@@ -631,6 +631,33 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     expect(await dialogViolations(page)).toHaveLength(0)
   })
 
+  // ESCSUITE-369: the sheet's footer (the `?` tip and the version line) is
+  // --text-muted, whose light value was 3.74:1 on the sheet's --bg-secondary.
+  // `?theme=` is the app's own override and does not persist. The group
+  // headings are left out: they are --accent-primary, 2.56:1 on the light
+  // background, a light-palette failure that predates this sheet's footer
+  // and is not fixed here.
+  test('keyboard shortcuts sheet passes axe-core audit (light theme)', async ({ page }) => {
+    await page.goto('http://localhost:5175?suppressRestore=1&theme=light')
+    await waitForAppReady(page, 'artist')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+    await page.keyboard.press('Shift+Slash')
+    const sheet = page.getByRole('dialog', { name: 'Keyboard Shortcuts' })
+    await expect(sheet).toBeVisible()
+    await expect(sheet.getByText(/^ESCAPEARTIST v/)).toBeVisible()
+    await waitForAnimationsToFinish(sheet)
+
+    const results = await runAxeCheck(page, {
+      includeSelector: '[role="dialog"]',
+      excludeSelector: '[role="dialog"] h3',
+    })
+    expect(results.passes).toBeGreaterThan(0)
+    expect(
+      results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+    ).toHaveLength(0)
+  })
+
   test('an open modal covers the keyframe panel, so a pointer cannot reach the graph behind it', async ({
     page,
   }) => {
