@@ -19,5 +19,7 @@ custom event tracking:
   *and* every custom event with the full page URL (`location.href`, query string included) and,
   when it is off-site, the referrer; Vercel derives browser, OS, device type and city-level
   geolocation from the request. No `beforeSend` strips the query today, so an integration host's
-  `?video=` / `?title=` / `?project=` reaches Vercel inside that URL. The hub's `/limitations`
-  page (ESCSUITE-402) states exactly this; change it with any change here.
+  `?hostOrigin=` / `?tabKey=` / `?video=` / `?title=` / `?project=` (CRAFT and ARTIST) reaches
+  Vercel inside that URL, and a framing host's page address arrives as the referrer
+  (ESCSUITE-406 tracks stripping the query). The hub's `/limitations` page (ESCSUITE-402) states
+  exactly this; change it with any change here.

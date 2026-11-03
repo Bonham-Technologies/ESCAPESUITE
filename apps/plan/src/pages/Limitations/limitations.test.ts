@@ -51,6 +51,14 @@ describe('LIMITATIONS', () => {
   it('says the offline build sends nothing', () => {
     const analytics = LIMITATIONS.find((l) => l.id === 'hosted-analytics')
     expect(analytics!.body.join(' ')).toMatch(/offline build contains no analytics code/i)
+    // The one fetch in app code: ESCAPEARTIST's ?video= / LOAD_VIDEO loader.
+    expect(analytics!.body.join(' ')).toMatch(/unless you give ESCAPEARTIST a video address/i)
+  })
+
+  it('names both apps and the host page in the embedding exception', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'hosted-analytics')!.body.join(' ')
+    expect(body).toMatch(/embeds ESCAPECRAFT or ESCAPEARTIST/)
+    expect(body).toMatch(/shows the app inside its own page/)
   })
 
   it('links every document source to the repository on GitHub', () => {

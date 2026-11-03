@@ -109,11 +109,11 @@ export const LIMITATIONS: Limitation[] = [
     title: 'What the hosted site sends',
     body: [
       'The hosted site (www.escapesuite.io) uses Vercel Web Analytics. Our code sends two kinds of record: a page view when a page opens, and a named event when you do certain things, such as “Recording Started”, “Export Completed” or “Tool Launched”.',
-      'Every record includes the address of the page you are on and, if you followed a link from another site, that site’s address. Vercel also works out your browser, operating system, device type and approximate location (down to the city) from the request itself.',
+      'Every record includes the address of the page you are on and, if you came from another site or another site shows the app inside its own page, that site’s address. Vercel also works out your browser, operating system, device type and approximate location (down to the city) from the request itself.',
       'An event adds at most a few short labels and numbers: which tool, which export format, a length in whole seconds, a media type (video, image or audio), and for a failed export its error type and how far it got. Nothing you record, import, type or export is sent, and neither are file names.',
-      'The page address is normally just the app’s own, plus a random ID when ESCAPECRAFT hands a recording to ESCAPEARTIST. The one exception: a website that embeds ESCAPEARTIST in its own page can put a video’s address, a title or a whole project into the editor’s address, and then that is sent as part of the address.',
+      'The page address is normally just the app’s own, plus a random ID when ESCAPECRAFT hands a recording to ESCAPEARTIST. The exception is a website that embeds ESCAPECRAFT or ESCAPEARTIST in its own page: it can put its own address, a video’s address, a title, a whole project or a window name into the app’s address, and then that is sent as part of the address.',
       'Both kinds of record go to /_vercel/insights/ on www.escapesuite.io itself, not to another site. Our code sets no cookies.',
-      'The offline build contains no analytics code at all and makes no network requests.',
+      'The offline build contains no analytics code at all. It makes no network requests unless you give ESCAPEARTIST a video address to load, and then it fetches only that address.',
     ],
     sources: [
       repoFile('docs/reference/vercel-analytics.md'),
