@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -72,6 +72,11 @@ budget, or after two failures in a row. For each ticket:
    - `ap-owner-merge`: label the PR `needs-owner` on GitHub. The ticket **stays In
      Progress**: add the Jira label `needs-owner` and a comment linking the PR, and
      leave it. **Reconcile** moves it to Done once the owner merges.
+   - **Merge refused.** If the session's permission check refuses the merge call (it
+     never reached GitHub), don't retry it or work around it: label the PR `needs-owner`
+     and comment on the PR with the first line `<!-- autopilot:merge-refused -->` and the
+     refusal. Its ticket, if any, goes as `ap-owner-merge` above, saying the merge was
+     refused; Reconcile moves it to Done once the owner merges.
 7. If a ticket turns out ambiguous, bigger than described, or of a stricter class,
    relabel it, comment on what you found, move it back to To Do, and move on.
 8. If you stop on a ticket without a PR, move it back to To Do with a comment saying
@@ -84,6 +89,7 @@ Merge one under the `ap-auto` rules, with no ticket, when all of these hold: eve
 in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
 listed in it; `.claude/rules/autopilot.local.md` is not among them; `ci-status` is
 green on the head. Otherwise label it `needs-owner` and comment which condition failed.
+A refused merge goes as step 6's **Merge refused**.
 This is the one `.claude/` change that isn't owner-merged: the owner approved it when
 it merged in bonham-ops.
 

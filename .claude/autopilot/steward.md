@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -91,11 +91,13 @@ The digest covers:
   - `ap-decision` tickets;
   - `needs-operator` tickets;
   - `ap-owner-merge` PRs labelled `needs-owner`, and any closed without merging;
+  - open PRs whose merge was refused (a `<!-- autopilot:merge-refused -->` comment),
+    each as "merge refused: #n";
   - watch triggers that fired, and watch pages that couldn't be reached;
 - reverts;
 - **Open security alerts:** one line with the counts, for example
   "Dependabot 3 (high 1, medium 2) · code scanning not available · secret scanning 0";
-- **Security scan:** one line, for example "main@1a2b3c4 · osv-scanner 2.6.0: 4
+- **Security scan:** one line, for example "main@1a2b3c4 · osv-scanner 2.7.0: 4
   lockfiles (pnpm-lock.yaml, api/uv.lock, …), critical 0 · high 2 · medium 3 · low 1 ·
   gitleaks 8.30.1: history since 9f8e7d6 (14 commits) and tree, 0 new, 2 fakes ·
   uncovered: jsr: packages in deno.lock". It gives:
