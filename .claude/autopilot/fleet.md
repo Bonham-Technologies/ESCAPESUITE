@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v8. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -152,9 +152,10 @@ only the owner can do the work. Search for an open one with the same title first
   older policy version or no Setup line. Read the propagation log's newest comment: if
   it is for `policy v<N>` and the project's line is `pr #n` or `updated #n`, its
   refresh PR is open: file nothing and link it under **Setup**; the project's builder
-  merges it. If the line is `FAILED …`, `kept-edits issue #n` or anything else (such
-  as `nothing to do`), the project has no line, or the comment is for another version,
-  file the ticket and quote the line.
+  merges it, or labels it `needs-owner` when its merge is refused (builder step 6). If
+  the line is `FAILED …`, `kept-edits issue #n` or anything else (such as `nothing to
+  do`), the project has no line, or the comment is for another version, file the
+  ticket and quote the line.
 - **`<project>: paste Project instructions v<M>`**, when a project reports an older
   instructions version, or two that differ. The body is the text to paste, from
   `bin/fleet render-instructions <name>` in this checkout. Task edits go on the
