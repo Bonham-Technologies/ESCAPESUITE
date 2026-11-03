@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -28,8 +28,10 @@ gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' \
 **Skip the triaged ones.** A PR is triaged when one of its comments starts with the
 marker line `<!-- autopilot:dependabot-triage -->`. Comments post as the owner, so the
 marker is the only reliable sign; never judge by author. The one exception: a triaged
-PR whose verdict is `merge` and that is still open was waiting on CI. Merge it under
-the rules below once `ci-status` is green on its head, without commenting again.
+PR whose verdict is `merge`, that is still open with no `needs-owner` label, and whose
+head is still the comment's `Head:` sha was waiting on CI. Merge it under the rules
+below once `ci-status` is green on that head, without commenting again. If the head
+changed, triage it again with a new comment.
 Check for the marker with:
 
 ```
@@ -39,17 +41,36 @@ gh api 'repos/{owner}/{repo}/issues/{n}/comments?per_page=100' \
 
 For each untriaged PR:
 1. Read the changelog or release notes for each bump and flag breaking changes.
-2. Run verify, and fix breakages with the smallest change that keeps the upgrade.
-3. Comment the triage (`gh api repos/{owner}/{repo}/issues/{n}/comments -f body=…`).
-   The **first line is exactly** `<!-- autopilot:dependabot-triage -->`. Then give the
-   verdict (`merge` or `needs-owner`), the packages bumped, the security alerts or
-   tickets it fixes, the breaking changes, your fixes, and the verify result.
-4. Merge it yourself, under the builder's merge rules (`.claude/autopilot/builder.md`,
-   step 6), only if all of these hold:
+2. **Drift scan.** Find every other place the bumped runtime or package is pinned:
+   Dockerfile `FROM`, CI `setup-python`/`setup-node` versions and matrices,
+   `requires-python` or `engines`, `.python-version`, `.nvmrc`, `.tool-versions`,
+   ruff, mypy and tsconfig targets, Helm and compose image tags, and the docs. Also
+   find companion packages that must move with it (vitest with `@vitest/coverage-v8`).
+   An image moving to Python 3.13 while CI and `requires-python` stay on 3.12 is drift.
+   Fold any other open Dependabot PR for the same package or runtime into this one,
+   then close it with a comment linking this PR.
+3. **Align on the PR.** Push the alignment, and any fix for a breakage (the smallest
+   change that keeps the upgrade), as normal commits to Dependabot's branch. Never
+   force-push it. When `main` moves, merge `main` into the branch; never rebase it.
+4. **Regression checks.** Run verify, then wait for `ci-status` to be green on the new
+   head. Anything the cloud can't check, such as a docker build or a deploy, is listed
+   as "not checked", never as passing.
+5. Comment the triage (`gh api repos/{owner}/{repo}/issues/{n}/comments -f body=…`). The
+   **first line is exactly** `<!-- autopilot:dependabot-triage -->`, the second
+   `Head: <sha>` (the PR's head commit you checked). Then give the verdict (`merge` or
+   `needs-owner`), the packages bumped, the security alerts or tickets it fixes, the
+   breaking changes, and a **What all changed** table (file, old → new, why) of every
+   commit you pushed, or "nothing". End with the checks that ran and their results, and
+   the ones not checked.
+6. Merge it yourself, under the builder's merge rules (`.claude/autopilot/builder.md`,
+   step 6, except that you never rebase it: step 3), only if all of these hold:
    - it's a **patch or minor** bump;
+   - the drift scan found nothing and you pushed no commits to it;
    - verify passes;
    - `ci-status` is green;
    - no breaking changes were found.
 
-   Otherwise label it `needs-owner` with the reason. If the verdict is `merge` but
+   Otherwise label it `needs-owner` with the reason. **Any PR autopilot pushed
+   commits to, a breakage fix or an alignment, is `needs-owner`** and never
+   auto-merged, even when every check passes. If the verdict is `merge` but
    `ci-status` is still pending, leave it open for a later sweep.
