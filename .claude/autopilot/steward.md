@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v6. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -86,7 +86,7 @@ The digest is a comment on the **steward log**, a Jira ticket:
 
 The digest covers:
 - what shipped;
-- what's in flight;
+- what's in flight, with each open feature (`ap-feature-<slug>`) and its PRs in merge order;
 - **Waiting on you**, with links:
   - `ap-decision` tickets;
   - `needs-operator` tickets;
