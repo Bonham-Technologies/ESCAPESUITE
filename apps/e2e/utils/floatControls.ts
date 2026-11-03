@@ -39,6 +39,21 @@ export async function openFloatingControls(page: Page): Promise<Page> {
 }
 
 /**
+ * Close the Picture-in-Picture window from inside it, the way its own close
+ * button does, and wait until it is gone. Not `page.close()`: on Playwright's
+ * Firefox that never settles for a Picture-in-Picture window.
+ */
+export async function closeFloatingControls(floating: Page): Promise<void> {
+  const closed = floating.waitForEvent('close')
+  // Deferred, so the evaluate has answered before the window goes away;
+  // closing inline races the reply against the target closing.
+  await floating.evaluate(() => {
+    setTimeout(() => window.close(), 0)
+  })
+  await closed
+}
+
+/**
  * Start a take from the page and wait for it to be recording. Capture
  * detection is async, so the Screen toggle must be enabled first — a take
  * started before then acquires no stream.

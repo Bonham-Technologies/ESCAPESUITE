@@ -2,7 +2,12 @@ import { test, expect, type Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { waitForAppReady } from '../../utils/ready'
 import { runAxeCheck } from '../../utils/accessibility'
-import { recordFloatingWindowRequests, openFloatingControls, startTake } from '../../utils/floatControls'
+import {
+  recordFloatingWindowRequests,
+  openFloatingControls,
+  closeFloatingControls,
+  startTake,
+} from '../../utils/floatControls'
 
 /**
  * ESCSUITE-400: "Float controls" puts the recorder's timer, level meters and
@@ -19,11 +24,9 @@ import { recordFloatingWindowRequests, openFloatingControls, startTake } from '.
  *
  * Where the API exists the window-opening tests run; where it does not they
  * skip, and the last test pins that the button is then not drawn (WebKit, in
- * the nightly's cross-browser run). Playwright's Firefox does expose the API,
- * and CRAFT draws and fills the window there, but its driver cannot close a
- * browser context that holds a Picture-in-Picture window (`Browser.removeBrowserContext`:
- * "this[#windows][aWindow.__SSi] is undefined"), so every such test fails in
- * teardown; those are skipped on Firefox by name.
+ * the nightly's cross-browser run). Playwright's Firefox exposes the API too,
+ * so the window tests run there as well; see the `afterEach` for the one
+ * thing its driver needs.
  */
 
 const CRAFT_URL = 'http://localhost:5174'
@@ -94,11 +97,14 @@ async function storedTakes(page: Page) {
 }
 
 test.describe('ESCAPECRAFT Float controls (ESCSUITE-400)', () => {
-  test.beforeEach(({ browserName }) => {
-    test.skip(
-      browserName === 'firefox',
-      "Playwright's Firefox cannot close a context holding a Picture-in-Picture window (Browser.removeBrowserContext)"
-    )
+  // Playwright's Firefox cannot tear down a context that still holds a
+  // Picture-in-Picture window (`Browser.removeBrowserContext` throws), and its
+  // `page.close()` on that window never settles; the window closing itself
+  // first leaves nothing for the teardown to trip on.
+  test.afterEach(async ({ page, context }) => {
+    for (const other of context.pages()) {
+      if (other !== page && !other.isClosed()) await closeFloatingControls(other)
+    }
   })
 
   test('opens a window no bigger than 360x160 showing the timer, meters, Pause and Stop, and it passes axe', async ({ page }) => {
@@ -183,7 +189,8 @@ test.describe('ESCAPECRAFT Float controls (ESCSUITE-400)', () => {
     const floating = await openFloatingControls(page)
     await expect(floating.getByRole('button', { name: 'Pause recording' })).toBeVisible()
 
-    await floating.close()
+    // The window closing itself, as its own close button does.
+    await closeFloatingControls(floating)
 
     await expect(page.getByRole('button', { name: 'Float controls' })).toHaveAttribute('aria-pressed', 'false')
     await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible()
