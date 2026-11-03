@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -27,7 +27,27 @@ For each project, read:
    (`space = OPS AND type = page AND title = "<record> — Session Log"`);
 4. the week's counts, over the last 7 days:
    - tickets filed: `project = <jiraKey> AND created >= -7d AND (labels is EMPTY OR labels not in (ap-steward-log))`;
-   - decisions answered: the `ap-asked` query under **Decision Log**, with `updated >= -7d`.
+   - decisions answered: the `ap-asked` query under **Decision Log**, with `updated >= -7d`;
+5. the ready backlog, split `ap-auto` / `ap-owner-merge` / `ap-feature-*` (a feature
+   ticket counts only under feature):
+   `project = <jiraKey> AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge) AND labels not in (needs-owner, needs-operator, ap-decision, ap-watch, ap-triage)`;
+6. **its repo's `main`, read directly.** Attach the repo read-only (`add_repo`), then
+   read the `policy v<N>` header line of `.claude/rules/autopilot.md`
+   (`gh api 'repos/<repo>/contents/.claude/rules/autopilot.md?ref=main' --jq .content | base64 -d | head -1`)
+   and its open PRs on `autopilot/refresh-v*` branches. If `gh api` still refuses a
+   public repo, read `main` from an anonymous `git clone --depth 1 --no-checkout`
+   (`git show HEAD:.claude/rules/autopilot.md`) and its refresh branches with
+   `git ls-remote`, marked "branch only". A repo that can't be attached or read is "not
+   read": never carry a digest's version forward as fact.
+
+**Read the source systems, not only the digests.** Digests report what their run saw,
+often before a later merge; a digest-reported version is only a cross-check on input 6.
+Also read, once per run:
+- **the scheduled tasks:** `list_triggers` with `recurring: true` and `limit: 100`, saved
+  as JSON. If the tool isn't present, write "scheduled tasks: not readable" and skip
+  **Drift** and the `last_run` half of **Missed runs**;
+- **the control panel:** the **Settings** table of the OPS page "Autopilot control
+  panel" (`bin/fleet render-panel` shows its shape).
 
 From this repo, read the previous fleet digest (the newest earlier comment on this
 project's steward log), for the "two consecutive weeks" signals, the open
@@ -42,9 +62,9 @@ and two issues bonham-ops Actions write:
 - **the scanner releases:** `gh api 'repos/{owner}/{repo}/issues?labels=scanner-releases&state=open&per_page=5' --jq '.[0].body'`,
   whose `osv-scanner:` and `gitleaks:` lines are the latest release tags.
 
-A cloud run's `gh api` reaches only this repo; any other repo answers 403, so call
-none. If a read fails, skip that input, say so in the digest and write "unknown" for a
-count; never guess.
+`gh api` reaches another repo only after `add_repo` attaches it; read product repos,
+never write to them. If a read fails, skip that input, say so in the digest and write
+"unknown" for a count, or "not read" for a repo; never guess.
 
 ### Fleet digest
 
@@ -53,17 +73,29 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
 - **Waiting on you**, grouped by project, every item linked: each project's waiting
   tickets and `needs-owner` PRs, and this project's own, with each refresh, paste and
   policy ticket under the project it concerns. This is the owner's inbox.
-- **Missed runs.** A steward or scout always leaves a trace, a digest comment or a
-  Session Log entry, so one whose scheduled time in `fleet.json` passed with no trace
-  is missed. A builder with nothing to do leaves none, so flag a builder only when
-  ready tickets (`labels in (ap-auto, ap-owner-merge)`, not Done) existed at the start
-  of its window and none changed status or gained a PR-link comment across two
-  consecutive scheduled runs. The cause is invisible from here: write only "no trace of the
-  <role> run since <date>".
-- **Setup:** a table of each project's reported policy and instructions versions
-  against `fleet.json`, an agents column (`vendored` or `fallback`, from the same line),
-  a Refresh PR column (the project's PR from the propagation log, linked), and the
-  projects whose digest has no Setup line (they run a policy older than the fleet).
+- **Missed runs.** A task whose `last_run.status` is not `ROUTINE_RUN_STATUS_SUCCEEDED`,
+  or whose last run is older than its previous scheduled time (its cron in
+  `fleet.json`), is missed: quote the status and time. Skip this run's own task and a
+  run still in progress; a task with no `last_run` is missed only if it was created
+  before its previous scheduled time. Without the task listing, fall back to traces: a
+  steward or scout always leaves one, a digest comment or a Session Log entry, so one
+  whose scheduled time passed with no trace is missed. A builder with nothing to do
+  leaves none, so flag a builder only when ready tickets (`labels in (ap-auto,
+  ap-owner-merge)`, not Done) existed at the start of its window and none changed status
+  or gained a PR-link comment across two consecutive scheduled runs. The cause is
+  invisible from here: write only "no trace of the <role> run since <date>".
+- **Setup:** a table of each project's policy version on `main` (input 6, or "not
+  read") and its digest-reported instructions version against `fleet.json`, an agents
+  column (`vendored` or `fallback`, from the digest's Setup line), and a Refresh PR
+  column (its open `autopilot/refresh-v*` PR, linked, else the propagation log's).
+- **Capacity:** one row per project. Columns: Project · Policy on main · Ready (auto /
+  owner-merge / feature) · Waiting on you · Runs/week × budget · Capacity/week · Weeks to
+  clear · Paused · Last run per task + result · Drift (`none` or the ticket's link).
+  Runs/week comes from the builder's cron, budget and Paused from the panel (else
+  `fleet.json`'s `builderBudget`, marked "fallback"), and weeks to clear is ready ÷
+  capacity, one decimal. Then rewrite the panel's **Status** section with the same
+  table and "Last updated <date>", leaving **Settings** untouched: the update sends the
+  whole page, so copy **Settings** back exactly as read, then re-read it to confirm.
 - **Scoreboard:** one line per project, linking its digest: the ten dimension scores,
   each with its trend (this digest's score minus the previous digest's); reverts this
   week; owner interventions this week, counted as decisions answered only (input 4;
@@ -102,6 +134,15 @@ comment the ticket's link on the issue
 (`gh api repos/{owner}/{repo}/issues/{n}/comments -f body=…`), then close it
 (`gh api -X PATCH repos/{owner}/{repo}/issues/{n} -f state=closed`).
 
+### Drift
+
+Run `bin/fleet drift <saved listing>` in this checkout. For each project with lines,
+file or update one `needs-operator` ticket in this project titled
+**`<project>: fix scheduled tasks`** (search for an open one with that title first).
+Its body lists every edit per task: name, cron, model and the full prompt, from
+`bin/fleet tasks <name>`. When a later run finds no drift for that project, comment so
+on the open ticket and move it to Done.
+
 ### Refresh and paste tickets
 
 Any lag at all gets a ticket that week, in this project, labelled `needs-operator`:
@@ -116,10 +157,8 @@ only the owner can do the work. Search for an open one with the same title first
   file the ticket and quote the line.
 - **`<project>: paste Project instructions v<M>`**, when a project reports an older
   instructions version, or two that differ. The body is the text to paste, from
-  `bin/fleet render-instructions <name>` in this checkout. When the "Scheduled tasks"
-  section differs between the reported version and v<M> (this repo's history of
-  `autopilot/project-instructions.md` has both), add the edits to make to each task in
-  claude.ai: prompt, schedule or budget.
+  `bin/fleet render-instructions <name>` in this checkout. Task edits go on the
+  project's **Drift** ticket, not here.
 
 **Close them** when the work is done: once a project's Setup line reports the version
 a refresh or paste ticket names, or a newer one, comment that on the ticket and move it
@@ -128,10 +167,14 @@ version the same way.
 
 ### Never
 
-The fleet role reads the product projects and never writes to a product's Jira
-project, never opens a PR in a product repo, and never writes to a product's Session
-Log. Its tickets live in this project, so no product builder can take them; its
-owner-action tickets carry `needs-operator`, so no builder, this repo's included, takes
-those. Its **Record in Confluence** entry goes to this repo's Session Log, with the
-role name `autopilot fleet` in the heading and the once-per-day check; in place of
-**Scores** it lists the tickets filed this run.
+The fleet role reads the product projects and never writes to a product's Jira project,
+never opens a PR or comments in a product repo, and never writes to a product's Session
+Log. Besides the steward duties named under **Fleet** (a **Main must stay green** revert
+PR and the **Decision Log**), its only writes are tickets in this project, the steward
+log (this project's digest comment), this repo's `propagation` issues, the control
+panel's **Status** section and this repo's Session Log entry. Its tickets live in this
+project, so no product builder can take them; its owner-action tickets carry
+`needs-operator`, so no builder, this repo's included, takes those. Its **Record in
+Confluence** entry goes to this repo's Session Log, with the role name `autopilot fleet`
+in the heading and the once-per-day check; in place of **Scores** it lists the tickets
+filed this run.
