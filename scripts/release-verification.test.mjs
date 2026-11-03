@@ -132,6 +132,9 @@ test('release.yml writes SHA256SUMS.txt and attests every per-package build it a
   const attach = step(upload, /Attach builds to GitHub Release/);
   assert.match(attach, /name:\s*'SHA256SUMS\.txt'/);
   assert.match(attach, /docs\/VERIFY\.md/);
+  // The notes edit must not hand a per-package release GitHub's "latest".
+  const update = attach.slice(attach.indexOf('updateRelease'));
+  assert.match(update.slice(0, update.indexOf('});')), /make_latest:\s*'false'/);
 });
 
 test('release.yml verifies every per-package release it attached to', () => {

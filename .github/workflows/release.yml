@@ -376,11 +376,17 @@ jobs:
                 console.log(`Attached SHA256SUMS.txt to release ${tagName}`);
                 const body = release.body || '';
                 if (!body.includes(verifyUrl)) {
+                  // make_latest: 'false' restated on purpose: this edit can
+                  // land after the job above re-pointed /releases/latest at
+                  // the umbrella release, and the API documents make_latest
+                  // as defaulting to true. A per-package release must never
+                  // take "latest" (ESCSUITE-195, -218).
                   await github.rest.repos.updateRelease({
                     owner: context.repo.owner,
                     repo: context.repo.repo,
                     release_id: release.id,
-                    body: `${body}\n\n${verifyLine}`.trim()
+                    body: `${body}\n\n${verifyLine}`.trim(),
+                    make_latest: 'false'
                   });
                 }
                 attached.push(tagName);
