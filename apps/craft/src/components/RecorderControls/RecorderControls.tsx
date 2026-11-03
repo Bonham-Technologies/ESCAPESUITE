@@ -1,133 +1,38 @@
-import type { RecordingState } from '../../store/types';
-import { CloseIcon, PauseIcon, PlayIcon } from '../icons';
-import { RecordingDurationReadout } from './RecordingDurationReadout';
+import { TransportBar, type TransportBarProps } from './TransportBar';
 import styles from '../../App.module.css';
 
-interface RecorderControlsProps {
-  state: RecordingState;
-  /** True for countdown, recording and paused. */
-  isRecordingActive: boolean;
-  onPause: () => void;
-  onResume: () => void;
-  onStart: () => void;
-  onStop: () => void;
+interface RecorderControlsProps extends Omit<TransportBarProps, 'blockedReasonId'> {
   /**
-   * Abandons whatever is running. The caller picks which "abandon" that is —
-   * cancelling a countdown throws away nothing, cancelling a take throws away
-   * a recording — so the choice stays with the App.
+   * Opens or closes the "Float controls" window (ESCSUITE-400). Absent where
+   * the window cannot be opened — no Document Picture-in-Picture, or CRAFT is
+   * embedded — and then the button is not drawn at all.
    */
-  onCancel: () => void;
-  /**
-   * Why a take cannot be started right now, or null when one can. Non-null
-   * disables the record button, titles it with the reason, and prints the
-   * reason under the bar as the button's accessible description.
-   */
-  blockedReason: string | null;
+  onToggleFloat?: () => void;
+  /** Whether the "Float controls" window is open; drawn as the button's pressed state. */
+  floating?: boolean;
 }
 
 /** The id `aria-describedby` points at; there is only ever one of these. */
 const BLOCKED_REASON_ID = 'record-blocked-reason';
 
 /**
- * The transport bar and the keyboard-shortcut legend underneath it.
+ * The transport bar, the keyboard-shortcut legend underneath it, and the
+ * "Float controls" toggle at the end of that legend.
  *
- * Which controls exist depends on the state: pause/resume only while a take is
- * running, cancel only while something is running, and the record button
- * itself changes meaning. Its `onClick` is a four-way ladder — start when
- * idle, **cancel** (not stop) during the countdown, stop once a take is
- * actually recording or paused, and nothing at all in the two in-between
- * states (`preparing` and `saving`), which is what the `undefined` arm is
- * for. Those same two states set `disabled`, so the `undefined` arm and the
- * disabled attribute say the same thing twice; both are kept, because the
- * button's label and title still read "Stop" there and a handler would be a
- * lie.
+ * The bar itself — which buttons exist in which state, and what the record
+ * button does — is `TransportBar`, shared with the floating window.
  *
- * The countdown arm exists because `recorder.stop()` is a no-op before
- * `start()` — clicking a button labelled "Stop recording" during the 3-2-1
- * count did nothing but leave the ticker running and the take starting
- * anyway. During `countdown` the button reads "Cancel countdown" instead and
- * calls `onCancel`, the same action Escape and the bar's own Cancel button
- * already take (ESCSUITE-106), so all three agree.
- *
- * `blockedReason` sits in front of that ladder: while it is set there is
- * nothing the button could usefully do, so it loses its handler, goes
- * disabled, and says why — in its `title`, and in a line under the bar that
- * `aria-describedby` points at. The reason is computed by the App (see
+ * `blockedReason` is printed under the bar as the record button's accessible
+ * description while it is set. The reason is computed by the App (see
  * `utils/recordReadiness.ts`), because it is a fact about the store's
  * capabilities and config rather than about this bar.
  */
-export function RecorderControls({
-  state,
-  isRecordingActive,
-  onPause,
-  onResume,
-  onStart,
-  onStop,
-  onCancel,
-  blockedReason,
-}: RecorderControlsProps) {
-  const blocked = blockedReason !== null;
+export function RecorderControls({ onToggleFloat, floating = false, ...transport }: RecorderControlsProps) {
+  const { blockedReason } = transport;
 
   return (
     <>
-      <div className={styles.controlsBar}>
-        {/* Pause/Resume button */}
-        {(state === 'recording' || state === 'paused') && (
-          <button
-            className={styles.controlButton}
-            onClick={state === 'recording' ? onPause : onResume}
-            title={state === 'recording' ? 'Pause (P)' : 'Resume (P)'}
-            aria-label={state === 'recording' ? 'Pause recording' : 'Resume recording'}
-          >
-            {state === 'recording' ? <PauseIcon /> : <PlayIcon />}
-          </button>
-        )}
-
-        {/* Timer — the number subscribes to the store itself, so the
-            once-a-second tick re-renders it and not this bar */}
-        <span className={`${styles.timer} ${isRecordingActive ? styles.recording : ''}`}>
-          <RecordingDurationReadout />
-        </span>
-
-        {/* Main record button */}
-        <button
-          className={`${styles.recordButton} ${isRecordingActive ? styles.recording : ''}`}
-          onClick={
-            blocked
-              ? undefined
-              : state === 'idle'
-              ? onStart
-              : state === 'countdown'
-              ? onCancel
-              : isRecordingActive
-              ? onStop
-              : undefined
-          }
-          disabled={blocked || state === 'preparing' || state === 'saving'}
-          title={
-            blockedReason ??
-            (state === 'idle' ? 'Record (R)' : state === 'countdown' ? 'Cancel countdown (Esc)' : 'Stop (S)')
-          }
-          aria-label={
-            state === 'idle' ? 'Start recording' : state === 'countdown' ? 'Cancel countdown' : 'Stop recording'
-          }
-          aria-describedby={blocked ? BLOCKED_REASON_ID : undefined}
-        >
-          <span className={styles.recordButtonInner} aria-hidden="true" />
-        </button>
-
-        {/* Cancel button */}
-        {isRecordingActive && (
-          <button
-            className={styles.controlButton}
-            onClick={onCancel}
-            title="Cancel (Esc)"
-            aria-label="Cancel recording"
-          >
-            <CloseIcon />
-          </button>
-        )}
-      </div>
+      <TransportBar {...transport} blockedReasonId={BLOCKED_REASON_ID} />
 
       {/* Why the record button is dead, when it is */}
       {blockedReason && (
@@ -150,6 +55,17 @@ export function RecorderControls({
         <span className={styles.shortcut}>
           <kbd className={styles.shortcutKey}>Esc</kbd> Cancel
         </span>
+        {onToggleFloat && (
+          <button
+            type="button"
+            className={styles.floatButton}
+            onClick={onToggleFloat}
+            aria-pressed={floating}
+            title="Keep the timer and controls on top of the window you are recording"
+          >
+            Float controls
+          </button>
+        )}
       </div>
     </>
   );

@@ -79,8 +79,8 @@ Two related rules follow from it:
 - **`systemAudioShared`** is the one other honesty flag: enabling "System Audio" only
   *asks* for it (the browser's share dialog carries the tick box), so the controller
   checks `hasSystemAudio(screen)` after acquisition, raises `NO_SYSTEM_AUDIO` when a
-  display capture came back without an audio track, and `SourceToggles` greys the System
-  meter for the take. The notice is withheld when there was no display capture at all
+  display capture came back without an audio track, and `AudioLevelMeters` (in the Sources
+  panel, and in the "Float controls" window) greys the System meter for the take. The notice is withheld when there was no display capture at all
   (system audio on, screen off) — there was no dialog to miss a tick box in — so the
   greyed meter carries its own, weaker wording (`NO_SYSTEM_AUDIO_HINT`, "No system audio
   arrived for this take") rather than the notice's. `handleStartRecording` resetting it to

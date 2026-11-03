@@ -17,7 +17,9 @@ the outcome, not on the double.
   `CanvasRenderingContext2D` plus `toBlob`), `video.ts` (the `<video>` elements the code
   creates, which jsdom never loads), `audio.ts` (`AudioContext` and the nodes the recorder and
   converter build on it), `webcodecs.ts` (`VideoEncoder`, `AudioEncoder`, `VideoDecoder`,
-  `VideoFrame`, `AudioData`), `mediabunny.ts` (the muxer, recorded rather than run) and
+  `VideoFrame`, `AudioData`), `mediabunny.ts` (the muxer, recorded rather than run),
+  `documentPictureInPicture.ts` (`window.documentPictureInPicture`, each window a real jsdom
+  iframe whose `close()` fires `pagehide`, plus a counted page `window.focus()`; ESCSUITE-400) and
   `browser.ts` (the prototype-level gaps `installBrowserStubs()` fills — media playback,
   navigation from an anchor click, `window.open`).
 - **`src/test/appDoubles.ts`** — the collaborator modules the `App.*.test.tsx` files hand to

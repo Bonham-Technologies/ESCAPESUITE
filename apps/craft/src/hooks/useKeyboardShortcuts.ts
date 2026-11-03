@@ -1,7 +1,10 @@
 // The recorder's window-level keyboard shortcuts: R, P, S and Escape, each
 // gated on the state the app is in.
 //
-// One effect, and the only window listener App itself binds (VideoPlayer binds its own while the playback dialog is open). Its dependency array
+// One effect, and the only window listener App itself binds (VideoPlayer binds its own while the playback dialog is open).
+// While the "Float controls" window is open (ESCSUITE-400) the same listener is
+// bound on that window too, so the keys answer whichever of the two has focus.
+// Its dependency array
 // is the whole set of handlers plus `state`, so the listener is torn down and
 // re-bound whenever any of them changes identity — including on every change
 // to `config`, which handleStartRecording depends on. That is the behaviour as
@@ -27,6 +30,11 @@ export interface KeyboardShortcutsDeps {
   handleStopRecording: () => void;
   cancelCountdown: () => void;
   handleCancelRecording: () => void;
+  /**
+   * The open "Float controls" Picture-in-Picture window, or null. Keys pressed
+   * there never reach the page's window, so the listener is bound on it too.
+   */
+  floatingWindow?: Window | null;
 }
 
 export function useKeyboardShortcuts({
@@ -39,6 +47,7 @@ export function useKeyboardShortcuts({
   handleStopRecording,
   cancelCountdown,
   handleCancelRecording,
+  floatingWindow = null,
 }: KeyboardShortcutsDeps): void {
   // Keyboard shortcuts
   useEffect(() => {
@@ -101,6 +110,10 @@ export function useKeyboardShortcuts({
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [state, canRecord, modalOpen, handleStartRecording, handlePauseRecording, handleResumeRecording, handleStopRecording, cancelCountdown, handleCancelRecording]);
+    floatingWindow?.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      floatingWindow?.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [state, canRecord, modalOpen, handleStartRecording, handlePauseRecording, handleResumeRecording, handleStopRecording, cancelCountdown, handleCancelRecording, floatingWindow]);
 }

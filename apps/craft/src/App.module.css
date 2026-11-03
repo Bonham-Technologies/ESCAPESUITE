@@ -857,11 +857,43 @@
 /* Keyboard shortcuts hint */
 .shortcutsHint {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: center;
-  gap: 2rem;
+  gap: 0.5rem 2rem;
   padding: 0.5rem;
   font-size: 0.75rem;
   color: var(--text-secondary);
+}
+
+/* "Float controls" (ESCSUITE-400): a small toggle at the end of the legend */
+.floatButton {
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+}
+
+.floatButton[aria-pressed='true'] {
+  border-color: var(--accent);
+  background-color: var(--bg-tertiary);
+}
+
+/* The "Float controls" window's body: the transport bar and the meters, sized
+   to fit the 360x160 window it is requested at. */
+.floatingControls {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--bg-secondary);
+}
+
+.floatingControls .controlsBar {
+  padding: 0.5rem;
+  border-top: none;
+}
+
+.floatingControls .audioMeters {
+  margin-top: 0;
+  padding: 0 1rem 0.5rem;
 }
 
 .shortcut {
