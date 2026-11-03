@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v4. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -13,9 +13,8 @@ Verify command: see `CLAUDE.md`.
 
 Each run plays the roles named in its prompt, in the order given.
 
-- **steward**: sweeps the product, scans it for vulnerable dependencies and leaked
-  secrets, files tickets, checks `ap-watch` tickets and posts the weekly digest. Writes
-  no code.
+- **steward**: sweeps the product, scans for vulnerable dependencies and leaked secrets,
+  files tickets, checks `ap-watch` tickets and posts the weekly digest. Writes no code.
 - **builder**: implements ready tickets and merges them when the gates pass.
 - **dependabot**: triages open Dependabot PRs, security updates first. It runs as a
   sweep over every open Dependabot PR that has no triage comment yet; the builder task
@@ -73,7 +72,8 @@ stop; a steward also leaves no digest, which the fleet counts as a missed run.
 - **Jira** (`bonham.atlassian.net`): the Atlassian connector only.
 - **Confluence** (`bonham.atlassian.net`, space `OPS`): the same Atlassian connector.
   Write only what **Record in Confluence**, **Decision Log** and the builder's
-  **Refresh** tickets in the role files allow.
+  **Refresh** tickets in the role files allow, and the fleet role's **Status** section of
+  "Autopilot control panel". Only the owner edits that page's **Settings**; no run does.
 - **GitHub**: `gh api` REST only. `gh pr …` and GraphQL (`gh api graphql`) are blocked
   in cloud sessions. In `gh api` paths, `{owner}` and `{repo}` fill in from the
   current repository. The Claude GitHub App can't read security alerts, so the steward

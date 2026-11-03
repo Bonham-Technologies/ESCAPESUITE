@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v3. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v4. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -14,6 +14,16 @@ never one labelled `ap-decision`, `ap-watch`, `needs-operator`, `needs-owner` or
 project = ESCSUITE AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge)
   AND labels not in (ap-decision, ap-watch, needs-operator, needs-owner, ap-triage)
 ```
+
+**Control panel.** First read the **Settings** row whose `Jira` is this project's key on
+the OPS page `space = OPS AND type = page AND title = "Autopilot control panel"`.
+`Paused: yes` means take no tickets this run and say "paused by control panel" in the
+summary; the Dependabot sweep and **Reconcile** still run. `Builder budget` (0 to 10)
+replaces the prompt's budget, and `Feature cap` is read the same way. A missing page or
+row, or a value that isn't a valid number, falls back to the budget in the prompt
+(`Fallback ticket budget: N`, or `Ticket budget: N` in older prompts) and a feature cap
+of 8; the summary names the fallback and why. Never guess a value, and never edit
+**Settings**: only the owner does.
 
 Take the highest priority first, then the oldest first. Stop after the run's ticket
 budget, or after two failures in a row. For each ticket:
