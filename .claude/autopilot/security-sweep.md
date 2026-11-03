@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward's security sweep
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -37,14 +37,14 @@ non-zero, run no scanner, and report the failure in the digest. Never run an
 unverified binary.
 
 ```
-OSV=2.6.0 GL=8.30.1 SCAN=/tmp/autopilot-scan
+OSV=2.7.0 GL=8.30.1 SCAN=/tmp/autopilot-scan
 rm -rf "$SCAN" && mkdir -p "$SCAN"
 case "$(uname -m)" in
   x86_64) A=amd64 G=x64
-    OSV_SHA=ca69b3d3cd08f889a49dc0a383122f71cc528b83803671df5fd874d97485b108
+    OSV_SHA=160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
     GL_SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;;
   aarch64|arm64) A=arm64 G=arm64
-    OSV_SHA=2c71403eb443d05891c4f268c3ad771cf4f16e5443463fd7851ef8f454d3c7e4
+    OSV_SHA=4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7
     GL_SHA=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;;
 esac
 O="osv-scanner_linux_$A" T="gitleaks_${GL}_linux_$G.tar.gz"
@@ -92,7 +92,7 @@ later command that uses `$SCAN`.
     `uv pip compile <file> -q --no-header -o "$SCAN/pinned/<n>/requirements.txt"`.
     Then scan the result with `-L <that path>`, and report what it finds against the
     original file. If `uv` is missing, run `uvx pip-audit -r <file> --format json`.
-  - **`deno.lock`.** osv-scanner 2.6 can't parse it. In the lockfile's directory, run
+  - **`deno.lock`.** osv-scanner 2.7 can't parse it. In the lockfile's directory, run
     `NO_COLOR=1 deno audit --lock deno.lock` (Deno 2.6 or later). Exit code 1 means
     it found vulnerabilities. Each finding gives a GHSA id, a severity ("moderate" is
     medium), the package and the vulnerable range; the range's upper bound is the

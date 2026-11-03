@@ -12,5 +12,10 @@
         ]
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(gh api -X PUT repos/{owner}/{repo}/pulls/*/merge -f merge_method=squash)"
+    ]
   }
 }
