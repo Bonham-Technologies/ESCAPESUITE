@@ -45,7 +45,7 @@ pnpm lint                # Run ESLint
 ```
 src/
 ├── main.tsx              # Entry point
-├── App.tsx                # Routes (/, /privacy, /terms)
+├── App.tsx                # Routes (/, /privacy, /terms, /limitations)
 ├── index.css              # Global styles and CSS variables
 ├── components/
 │   └── Layout/            # Header and Layout components
@@ -56,7 +56,8 @@ src/
 │   └── analytics.ts       # Vercel Analytics tracking
 └── pages/
     ├── Home.tsx            # Landing page — links to ESCAPECRAFT and ESCAPEARTIST
-    └── Legal/              # Privacy and Terms pages
+    ├── Legal/              # Privacy and Terms pages
+    └── Limitations/        # Known limitations page and its sourced list
 ```
 
 `Layout.tsx` renders a visually hidden "Skip to main content" link as its first child on every
@@ -70,6 +71,7 @@ itself rather than leaving the jump to the browser's fragment navigation (ESCSUI
 | `/` | Home | Landing page linking to ESCAPECRAFT and ESCAPEARTIST |
 | `/privacy` | Privacy | Privacy policy |
 | `/terms` | Terms | Terms of use |
+| `/limitations` | Limitations | Known limitations and how to check nothing leaves (ESCSUITE-402; see `docs/reference/escapeplan.md`) |
 
 Any unmatched path redirects to `/`.
 

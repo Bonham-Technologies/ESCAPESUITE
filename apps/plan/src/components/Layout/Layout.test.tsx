@@ -124,7 +124,7 @@ describe('Layout', () => {
     expect(screen.getByText(/Bonham Technologies/)).toBeInTheDocument()
   })
 
-  it('links to the legal pages and the GitHub repository from the footer', () => {
+  it('links to the legal pages, the known limitations and the GitHub repository from the footer', () => {
     const { container } = renderLayout()
     const footer = container.querySelector('footer')
     expect(footer).not.toBeNull()
@@ -137,6 +137,10 @@ describe('Layout', () => {
     expect(inFooter.getByRole('link', { name: /terms of service/i })).toHaveAttribute(
       'href',
       '/terms'
+    )
+    expect(inFooter.getByRole('link', { name: /known limitations/i })).toHaveAttribute(
+      'href',
+      '/limitations'
     )
 
     // The header renders its own GitHub link, so scope this to the footer.

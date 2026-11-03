@@ -68,6 +68,48 @@ test.describe('ESCAPEPLAN Accessibility', () => {
   })
 })
 
+// ESCSUITE-402: the hub's Known limitations page, in both themes — it is mostly
+// links inside running text, which is where a palette tuned for one theme
+// fails contrast (or link-in-text-block) in the other. `?theme=` is the shared
+// theme system's own override and does not persist.
+test.describe('ESCAPEPLAN Known limitations Accessibility', () => {
+  for (const theme of ['dark', 'light'] as const) {
+    test(`/limitations passes axe-core audit (${theme} theme)`, async ({ page }) => {
+      await page.goto(`http://localhost:5173/limitations?theme=${theme}`)
+      await waitForAppReady(page, 'plan')
+      if (theme === 'light') {
+        await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+      } else {
+        await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'light')
+      }
+      // Anchor on the real page: an empty one has no violations either.
+      await expect(page.getByRole('heading', { level: 1, name: /known limitations/i })).toBeVisible()
+      await expect(page.getByRole('heading', { level: 2, name: 'Check it yourself' })).toBeVisible()
+
+      const results = await runAxeCheck(page, {})
+      expect(results.violations).toEqual([])
+    })
+  }
+
+  test('/limitations has a valid heading hierarchy', async ({ page }) => {
+    await page.goto('http://localhost:5173/limitations')
+    await waitForAppReady(page, 'plan')
+    await expect(page.getByRole('heading', { level: 1, name: /known limitations/i })).toBeVisible()
+
+    const { valid, errors } = await checkHeadingHierarchy(page)
+    expect(errors).toEqual([])
+    expect(valid).toBe(true)
+  })
+
+  test('the hub footer links to /limitations', async ({ page }) => {
+    await page.goto('http://localhost:5173/')
+    await waitForAppReady(page, 'plan')
+    await page.locator('footer').getByRole('link', { name: 'Known limitations' }).click()
+    await expect(page).toHaveURL(/\/limitations$/)
+    await expect(page.getByRole('heading', { level: 1, name: /known limitations/i })).toBeVisible()
+  })
+})
+
 test.describe('ESCAPECRAFT Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await mockGetUserMedia(page)
