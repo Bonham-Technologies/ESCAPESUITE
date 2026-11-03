@@ -15,6 +15,7 @@ import {
   RELEASES_URL,
   CRAFT_OFFLINE_BUILD_URL,
   ARTIST_OFFLINE_BUILD_URL,
+  VERIFY_DOWNLOAD_URL,
 } from './launch'
 
 describe('constants', () => {
@@ -39,6 +40,12 @@ describe('constants', () => {
   it('ARTIST_OFFLINE_BUILD_URL points at the stable ESCAPEARTIST asset on the latest release', () => {
     expect(ARTIST_OFFLINE_BUILD_URL).toBe(
       'https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest/download/ESCAPEARTIST-latest.html'
+    )
+  })
+
+  it('VERIFY_DOWNLOAD_URL points at the verification steps on main (ESCSUITE-401)', () => {
+    expect(VERIFY_DOWNLOAD_URL).toBe(
+      'https://github.com/Bonham-Technologies/ESCAPESUITE/blob/main/docs/VERIFY.md'
     )
   })
 })

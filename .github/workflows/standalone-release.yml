@@ -222,8 +222,16 @@ jobs:
     if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # contents: write creates the release. id-token and attestations sign and
+    # store the build-provenance attestation over every asset (ESCSUITE-401).
+    # No other job in this workflow gets them, and this one never runs for a
+    # pull request.
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+    outputs:
+      created: ${{ steps.publish.outputs.created }}
 
     steps:
       - name: Download artifacts
@@ -232,13 +240,12 @@ jobs:
           name: standalone-release
           path: ./dist
 
-      - name: Create release with attached builds
+      - name: Decide whether this run publishes the release
+        id: decide
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           VERSION: ${{ needs.prepare.outputs.version }}
-          CRAFT_VERSION: ${{ needs.prepare.outputs.craft_version }}
-          ARTIST_VERSION: ${{ needs.prepare.outputs.artist_version }}
           COMMIT: ${{ github.event.workflow_run.head_sha }}
         run: |
           # Main's CI runs no longer cancel each other (ESCSUITE-382), so an older
@@ -248,6 +255,7 @@ jobs:
           HEAD_SHA=$(gh api "repos/${REPO}/git/ref/heads/main" --jq .object.sha)
           if [ "$HEAD_SHA" != "$COMMIT" ]; then
             echo "::notice::main is at ${HEAD_SHA}, not ${COMMIT}; leaving the release to main's own run"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -265,17 +273,93 @@ jobs:
             # publish (ESCSUITE-218) — this is the second line of defence,
             # for whenever this workflow runs after it.
             gh release edit "v${VERSION}" --repo "${REPO}" --latest
+            echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
+      # Every file the release carries goes through release-assets/, so
+      # SHA256SUMS.txt and the attestation below cover exactly what is
+      # uploaded, the -latest aliases included (ESCSUITE-401).
+      - name: Stage release assets and write SHA256SUMS.txt
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CRAFT_VERSION: ${{ needs.prepare.outputs.craft_version }}
+          ARTIST_VERSION: ${{ needs.prepare.outputs.artist_version }}
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          cp "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html" \
+             "dist/craft/ESCAPECRAFT-latest.html" \
+             "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" \
+             "dist/artist/ESCAPEARTIST-latest.html" \
+             "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" \
+             release-assets/
+          cd release-assets
+          # Written outside the directory first, so the sums never list themselves.
+          sha256sum -- * > ../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attest build provenance for every release asset
+        if: steps.decide.outputs.publish == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/*
+
+      - name: Create release with attached builds
+        id: publish
+        if: steps.decide.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          CRAFT_VERSION: ${{ needs.prepare.outputs.craft_version }}
+          ARTIST_VERSION: ${{ needs.prepare.outputs.artist_version }}
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
           gh release create "v${VERSION}" \
-            "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html" \
-            "dist/craft/ESCAPECRAFT-latest.html" \
-            "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" \
-            "dist/artist/ESCAPEARTIST-latest.html" \
-            "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" \
+            "release-assets/ESCAPECRAFT-${CRAFT_VERSION}.html" \
+            "release-assets/ESCAPECRAFT-latest.html" \
+            "release-assets/ESCAPEARTIST-${ARTIST_VERSION}.html" \
+            "release-assets/ESCAPEARTIST-latest.html" \
+            "release-assets/escapesuite-headless-artist-${VERSION}.tgz" \
+            release-assets/SHA256SUMS.txt \
             --repo "${REPO}" \
             --target "${COMMIT}" \
             --title "ESCAPE Suite v${VERSION}" \
             --latest \
-            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. The \`*-latest.html\` files are stable download links that always point at this release's build (used by escapesuite.io's own download buttons); the versioned files are kept for anyone who wants to pin a specific release. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports."
+            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. The \`*-latest.html\` files are stable download links that always point at this release's build (used by escapesuite.io's own download buttons); the versioned files are kept for anyone who wants to pin a specific release. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports. Verify your download: \`SHA256SUMS.txt\` lists the SHA-256 of every file here, and each file has a GitHub build-provenance attestation. Steps: https://github.com/${REPO}/blob/main/docs/VERIFY.md"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+  # Downloads the release the job above just published, as a user would, and
+  # checks every asset against SHA256SUMS.txt and its build-provenance
+  # attestation (ESCSUITE-401). Red here means users cannot verify the
+  # published release; see "For maintainers: if a release's verify job fails"
+  # in docs/VERIFY.md.
+  verify-release:
+    name: Verify Published Release
+    needs: [prepare, release]
+    # Only a release this run created carries sums and attestations; the skip
+    # paths above leave an older release as it is.
+    if: needs.release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read      # checkout, and download the release assets
+      attestations: read  # gh attestation verify
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Verify checksums and attestations of every published asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: bash scripts/verify-release-assets.sh "v${VERSION}" "$REPO" "${REPO}/.github/workflows/standalone-release.yml"

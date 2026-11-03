@@ -248,6 +248,22 @@
   padding: 1rem 2.5rem;
 }
 
+/* ESCSUITE-401: how to check an offline download. Quieter than the section's
+   intro, and the link is underlined because it sits in same-coloured text
+   (WCAG 1.4.1, as .heroLinks a). */
+.cta .verifyNote {
+  max-width: 40rem;
+  margin: 2rem auto 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.verifyNote a {
+  color: var(--text-secondary);
+  text-decoration: underline;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .heroTitle {
