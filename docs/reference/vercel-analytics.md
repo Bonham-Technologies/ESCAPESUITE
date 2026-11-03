@@ -15,3 +15,9 @@ custom event tracking:
   runtime by `apps/e2e/tests/standalone/craft.spec.ts` ("makes no requests off the local
   origin"), which records a real take and then asserts there is no `window.va`, no queue
   and no injected script
+- **What each record carries.** Vercel's `/_vercel/insights/script.js` posts every page view
+  *and* every custom event with the full page URL (`location.href`, query string included) and,
+  when it is off-site, the referrer; Vercel derives browser, OS, device type and city-level
+  geolocation from the request. No `beforeSend` strips the query today, so an integration host's
+  `?video=` / `?title=` / `?project=` reaches Vercel inside that URL. The hub's `/limitations`
+  page (ESCSUITE-402) states exactly this; change it with any change here.

@@ -73,9 +73,9 @@ export default function Limitations() {
             </li>
           </ol>
           <p>
-            On escapesuite.io, every request should go to escapesuite.io itself: the apps’ own files,
-            and the analytics page views and events under /_vercel/insights/. The offline build should
-            make no requests at all. If you see anything else, please report it on GitHub.
+            On www.escapesuite.io, every request should go to www.escapesuite.io itself: the apps’ own
+            files, and the analytics page views and events under /_vercel/insights/. The offline build
+            should make no requests at all. If you see anything else, please report it on GitHub.
           </p>
 
           <h3>From the source code</h3>
