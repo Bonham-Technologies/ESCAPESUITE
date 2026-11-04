@@ -5,6 +5,7 @@ import {
   RELEASES_URL,
   CRAFT_OFFLINE_BUILD_URL,
   ARTIST_OFFLINE_BUILD_URL,
+  VERIFY_DOWNLOAD_URL,
 } from '../lib/launch'
 import { useSeo, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../lib/seo'
 import styles from './Home.module.css'
@@ -185,6 +186,15 @@ export default function Home() {
             Download ESCAPEARTIST
           </a>
         </div>
+        <p className={styles.verifyNote}>
+          Every release lists each file&apos;s SHA-256 checksum and carries a GitHub build-provenance
+          attestation, so you can check a download before it goes onto your network:{' '}
+          <a href={VERIFY_DOWNLOAD_URL} target="_blank" rel="noopener noreferrer">
+            verify your download
+          </a>
+          . These buttons always fetch the newest build, which changes with every release, so
+          check it against the checksums on that same release.
+        </p>
       </section>
     </div>
   )

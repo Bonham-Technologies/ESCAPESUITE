@@ -21,6 +21,13 @@ export const RELEASES_URL = `${GITHUB_URL}/releases/latest`
 export const CRAFT_OFFLINE_BUILD_URL = `${GITHUB_URL}/releases/latest/download/ESCAPECRAFT-latest.html`
 export const ARTIST_OFFLINE_BUILD_URL = `${GITHUB_URL}/releases/latest/download/ESCAPEARTIST-latest.html`
 
+/**
+ * How to check a download against the release's `SHA256SUMS.txt` and its
+ * build-provenance attestation, both published by `standalone-release.yml`
+ * (ESCSUITE-401).
+ */
+export const VERIFY_DOWNLOAD_URL = `${GITHUB_URL}/blob/main/docs/VERIFY.md`
+
 const PROD_URLS: Record<ToolId, string> = { craft: '/craft/', artist: '/artist/' }
 const DEV_URLS: Record<ToolId, string> = {
   craft: 'http://localhost:5174',

@@ -63,13 +63,14 @@ test.describe('ESCAPEPLAN Mobile Layout', () => {
   // iteration was itself guarded by `if (isVisible)`. The count is pinned
   // first and every paragraph is asserted visible.
   test('text is readable on mobile', async ({ page }) => {
-    // `Home.tsx`'s nine body paragraphs: the hero subtitle, the hero's links
-    // line, one per tool card, one per feature, and the open-source blurb.
+    // `Home.tsx`'s ten body paragraphs: the hero subtitle, the hero's links
+    // line, one per tool card, one per feature, the open-source blurb, and
+    // the download-verification note under the download buttons (ESCSUITE-401).
     const paragraphs = page.locator('main p')
-    await expect(paragraphs).toHaveCount(9)
+    await expect(paragraphs).toHaveCount(10)
     await expect(paragraphs.first()).toContainText(/records and edits screencasts/i)
 
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 10; i++) {
       const p = paragraphs.nth(i)
       await expect(p).toBeVisible()
       const fontSize = await p.evaluate((el) => parseFloat(window.getComputedStyle(el).fontSize))

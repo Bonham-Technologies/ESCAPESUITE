@@ -199,6 +199,24 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
   CTAs at exactly those two URLs — which the `--latest` / `make_latest: false` split above keeps
   pinned to this release's own build — rather than GitHub's bare `/releases/latest` listing page,
   which is kept as the hero's secondary "All downloads" link instead (ESCSUITE-195).
+- **Checksums and build provenance** (ESCSUITE-401). The `release` job's "Decide" step runs the
+  stale-commit and already-exists guards and outputs `publish`; only when it is `true` does the
+  job stage every asset in `release-assets/`, write `SHA256SUMS.txt` over all of them (the
+  `-latest.html` aliases included), attest them all with
+  `actions/attest-build-provenance` (pinned by commit SHA; `subject-path: release-assets/*`, so
+  `SHA256SUMS.txt` is attested too), then `gh release create` with those files and a notes line
+  pointing at `docs/VERIFY.md`. Only that job has `id-token: write` and `attestations: write`,
+  and it never runs for a pull request. The `verify-release` job (needs `release`, runs only when
+  it output `created=true`) checks out the commit and runs `scripts/verify-release-assets.sh`,
+  which downloads the published release (retrying while GitHub catches up), fails unless
+  `SHA256SUMS.txt` lists exactly the other assets, runs `sha256sum -c`, and runs
+  `gh attestation verify --signer-workflow .../standalone-release.yml` on every asset.
+  `release.yml`'s `upload-standalone` job does the same for the per-package releases: one
+  `SHA256SUMS.txt` per release, an attestation over every build and sums file, the notes line
+  appended to the changelog body, and a final step that runs the same script for each release it
+  attached to (`--signer-workflow .../release.yml`). Tests: `scripts/verify-release-assets.test.mjs`
+  (the script, against a fake `gh`) and `scripts/release-verification.test.mjs` (the workflow
+  wiring), both in `pnpm test:scripts`. Releases up to v2.18.27 predate this and carry neither.
 
 **Dependabot** (`.github/dependabot.yml`):
 - Dependabot PRs run every job except `deploy`, browser suites included: `e2e`, `kit-docker`
