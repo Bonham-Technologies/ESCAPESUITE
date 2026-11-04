@@ -180,6 +180,19 @@ export interface ExportLogEntry {
 }
 
 /**
+ * The diagnostic log as text, one entry a line, each timed from the first
+ * (ESCSUITE-412). The dialog logs the entries as objects too, but a console
+ * captured outside DevTools — a CI trace — shows those only as `Object`, and the
+ * two journey failures that ticket diagnosed carried nothing readable.
+ */
+export function formatExportLog(entries: readonly ExportLogEntry[]): string {
+  const start = entries[0]?.timestamp ?? 0;
+  return entries
+    .map((entry) => `+${Math.round(entry.timestamp - start)} ms ${entry.phase}: ${entry.detail}`)
+    .join('\n');
+}
+
+/**
  * Error class that carries the export diagnostic log for debugging. Lives
  * here (rather than in exportMP4.ts, where it was first written) so both
  * exporters can throw and catch it without one importing from the other;

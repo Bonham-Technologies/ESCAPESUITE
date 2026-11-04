@@ -1506,9 +1506,15 @@ describe('exportToWebM on a source that cannot seek', () => {
     )
 
     expect(error).toBeInstanceOf(ExportError)
-    expect(error).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: UNSEEKABLE_SENTENCE, frameIndex: 3 })
-    // Frame 0 and the two wedged frames before the refusal; nothing after it.
-    expect(webcodecs.videoEncoders[0].encodes).toHaveLength(3)
+    expect(error).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: UNSEEKABLE_SENTENCE, frameIndex: 5 })
+    // Frame 0, the two wedged frames before the reload at frame 3 (ESCSUITE-412),
+    // frame 3 composed again and frame 4 — both wedged on the reloaded element —
+    // and nothing after the refusal at frame 5.
+    expect(webcodecs.videoEncoders[0].encodes).toHaveLength(5)
+    // Each wedged request is in the diagnostic log the refusal carries.
+    const seeks = (error as ExportError).exportLog.filter((e) => e.phase === 'seek').map((e) => e.detail)
+    expect(seeks.filter((line) => line.includes('never landed'))).toHaveLength(6)
+    expect(seeks).toContain('"take.webm" stopped completing seeks; reloaded it from a fresh copy')
   })
 
   it('finishes when one frame wedges and the next seek lands', async () => {

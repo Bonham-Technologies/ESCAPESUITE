@@ -33,6 +33,7 @@ import {
   calculateTimelineDuration,
   exportLengthReason,
   exportedLengthReason,
+  formatExportLog,
   projectHasAudio as computeProjectHasAudio,
 } from '../../core/exportTypes';
 import { LOUDNESS_TARGETS, formatLoudnessSummary, loudnessTargetOrOff } from '../../core/loudness';
@@ -572,7 +573,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
       console.error('Export failed:', err);
       if (err instanceof ExportError) {
-        console.debug(`[${format === 'gif' ? 'GIF' : format === 'mp4' ? 'MP4' : 'WebM'} Export] Diagnostic log:`, err.exportLog);
+        const label = `[${format === 'gif' ? 'GIF' : format === 'mp4' ? 'MP4' : 'WebM'} Export]`;
+        console.debug(`${label} Diagnostic log:`, err.exportLog);
+        // The same entries as text, which a console captured outside DevTools
+        // (a CI trace) can read (ESCSUITE-412).
+        console.debug(`${label} Diagnostic log (text):\n${formatExportLog(err.exportLog)}`);
       }
 
       // Track the failure

@@ -43,11 +43,9 @@
  * frame-rate probe's (Chromium only, ESCSUITE-327).
  */
 
-/** The parts of `navigator` this reads; `userAgentData` is not in TypeScript's DOM lib. */
-export interface EngineNavigator {
-  userAgent: string;
-  userAgentData?: { brands?: ReadonlyArray<{ brand: string }> };
-}
+import { isChromiumEngine, type EngineNavigator } from './browserEngine';
+
+export type { EngineNavigator };
 
 export function isMeasuredWorkerDecodeEngine(nav: EngineNavigator | undefined): boolean {
   if (!nav) return false;
@@ -68,8 +66,7 @@ export function isMeasuredWorkerDecodeEngine(nav: EngineNavigator | undefined): 
  * Firefox is a measurement task, not a code change here.
  */
 export function isMeasuredFrameRateEngine(nav: EngineNavigator | undefined): boolean {
-  if (!nav) return false;
-  return nav.userAgentData?.brands?.some(({ brand }) => brand === 'Chromium') === true;
+  return isChromiumEngine(nav);
 }
 
 /**

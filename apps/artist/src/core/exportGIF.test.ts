@@ -710,7 +710,8 @@ describe('exportToGIF on a source that cannot seek', () => {
     )
 
     expect(error).toBeInstanceOf(ExportError)
-    expect(error).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: UNSEEKABLE_SENTENCE, frameIndex: 3 })
-    expect(gifWriters[0].frames).toHaveLength(3)
+    // Refused on the reloaded element's third wedge (ESCSUITE-412).
+    expect(error).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: UNSEEKABLE_SENTENCE, frameIndex: 5 })
+    expect(gifWriters[0].frames).toHaveLength(5)
   })
 })

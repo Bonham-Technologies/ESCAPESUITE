@@ -49,6 +49,24 @@ To prevent black frames during export:
   two integer compares per request; the perf ceilings are unchanged. The cure for the file itself is "Seek
   index repair at import"; this is what a source that was never repaired (stored before the
   repair, or a remux that failed) gets on Firefox
+- **A wedged source is reloaded once before it is refused** (ESCSUITE-412, WebM and GIF):
+  Chromium wedges too, the same way, on an ESCAPECRAFT take whose key frame shares its WebM
+  timecode with the delta frame before it (ESCAPECRAFT declares 30 fps to Mediabunny, which snaps
+  every timestamp to that grid, so two frames captured inside one 33 ms slot share a timecode;
+  Mediabunny cannot start a Cluster on such a key frame, so it sits mid-Cluster with no cue). A
+  fresh element over the same bytes wedges at the same seek, so the grace above cannot help:
+  this turned the record → edit → export journey red twice. When an element reaches
+  `WEDGED_SEEK_FRAMES`, the composer reads the source's bytes again, remuxes a WebM with every
+  video timecode advancing (`remuxWithAdvancingTimestamps`, which gives that key frame a
+  Cluster and a cue of its own), loads it into a fresh `<video>` over a fresh URL, retires the
+  wedged elements and composes the frame again; only a second wedge of the same source is
+  refused. Every slow or wedged seek request goes into the export's diagnostic log (target,
+  whether it landed, `seeking`, `readyState`, elapsed ms; at most `MAX_LOGGED_SEEK_REQUESTS`),
+  and the dialog logs that trail as text as well as objects, so a CI console shows it. In
+  Chromium the refusal no longer says to export in Chrome or Edge: it says to convert the file
+  to MP4. New ESCAPECRAFT takes can still carry the collision (1 of 5 local journey runs met it,
+  and was reloaded); `tests/regressions/ESCSUITE-412.spec.ts` exports the CI take
+  itself
 - **Transition safety**: `drawTransition()` (`canvasRenderer.ts`) warns when a transition's video
   is below `readyState >= 1` — "forgiving" on purpose, per its own comment, to match the preview
   player's threshold rather than the frame loop's stricter `>= 2`
