@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v10. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -91,7 +91,8 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
 - **Capacity:** one row per project. Columns: Project · Policy on main · Ready (auto /
   owner-merge / feature) · Waiting on you · Runs/week × budget · Capacity/week · Weeks to
   clear · Paused · Last run per task + result · Drift (`none` or the ticket's link).
-  Runs/week comes from the builder's cron, budget and Paused from the panel (else
+  Runs/week is the days the builder's cron fires that are also panel `Build days`
+  (else every cron day), budget and Paused from the panel (else
   `fleet.json`'s `builderBudget`, marked "fallback"), and weeks to clear is ready ÷
   capacity, one decimal. Then rewrite the panel's **Status** section with the same
   table and "Last updated <date>", leaving **Settings** untouched: the update sends the
