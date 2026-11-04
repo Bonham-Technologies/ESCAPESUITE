@@ -23,10 +23,13 @@ import { waitForAppReady } from '../../utils/ready'
  * longer sends a Chromium user to Chrome or Edge.
  *
  *   * The CI take itself, imported and exported: before the fix it is refused
- *     at frame 62.
+ *     at frame 62. Every frame the encoder is handed has the take drawn on it:
+ *     the reload comes on the first wedged seek and that frame is composed
+ *     again, where reloading on the third left frames 62 and 63 black.
  *   * The same take with its export `<video>` forced to never fire `seeked`
- *     on its first three requests, at frames 1-3: before the fix it is
- *     refused; now the reload lands them.
+ *     on its first three requests: before the fix it is refused; now the
+ *     first reloads the source, the fresh element outlasts the other two,
+ *     and the export finishes.
  *   * Forced to never finish a seek at all, reload included: the refusal's
  *     copy is Chromium's own.
  *
@@ -87,6 +90,33 @@ async function wedgeExportSeeks(page: Page, limit: number): Promise<void> {
   }, limit)
 }
 
+/**
+ * Count the export's video frames, and those the encoder was handed with no
+ * export `<video>` (detached, `crossOrigin`, as above) drawn since the frame
+ * before: a frame whose source was wedged, drawn as the black fill alone.
+ */
+async function countUndrawnExportFrames(page: Page): Promise<() => Promise<{ encoded: number; undrawn: number }>> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __exportFrames: { encoded: number; undrawn: number } }
+    w.__exportFrames = { encoded: 0, undrawn: 0 }
+    let drawn = false
+    const drawImage = CanvasRenderingContext2D.prototype.drawImage as (...args: unknown[]) => void
+    CanvasRenderingContext2D.prototype.drawImage = function (this: CanvasRenderingContext2D, ...args: unknown[]) {
+      const [image] = args
+      if (image instanceof HTMLVideoElement && !image.isConnected && image.crossOrigin === 'anonymous') drawn = true
+      drawImage.apply(this, args)
+    } as typeof CanvasRenderingContext2D.prototype.drawImage
+    const encode = VideoEncoder.prototype.encode
+    VideoEncoder.prototype.encode = function (this: VideoEncoder, ...args: Parameters<VideoEncoder['encode']>) {
+      w.__exportFrames.encoded += 1
+      if (!drawn) w.__exportFrames.undrawn += 1
+      drawn = false
+      return encode.apply(this, args)
+    }
+  })
+  return () => page.evaluate(() => (window as unknown as { __exportFrames: { encoded: number; undrawn: number } }).__exportFrames)
+}
+
 /** Open ARTIST with the CI take on the timeline. */
 async function openWithTake(page: Page): Promise<void> {
   await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
@@ -118,6 +148,7 @@ test.describe('ESCSUITE-412: a CRAFT take whose seeks wedge in Chromium still ex
     page.on('console', (m) => {
       if (m.text().includes('reloaded it from a repaired copy')) reloads.push(m.text())
     })
+    const exportFrames = await countUndrawnExportFrames(page)
     await openWithTake(page)
 
     const outcome = await exportWebM(page)
@@ -126,6 +157,10 @@ test.describe('ESCSUITE-412: a CRAFT take whose seeks wedge in Chromium still ex
     expect((outcome as { size: number }).size).toBeGreaterThan(1000)
     // The export got past the take's own wedge by the reload, not by luck.
     expect(reloads).toHaveLength(1)
+    // And no frame went into the file without the take on it.
+    const { encoded, undrawn } = await exportFrames()
+    expect(encoded).toBeGreaterThan(80)
+    expect(undrawn, `${undrawn} of ${encoded} exported frames were black`).toBe(0)
   })
 
   test('an export whose first three seeks never complete reloads the source and finishes', async ({ page }) => {

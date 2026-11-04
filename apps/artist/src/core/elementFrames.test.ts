@@ -1096,7 +1096,7 @@ describe('createFrameComposer seek wedge', () => {
 
   const oneClip = () => [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
 
-  it('reloads the source on the third consecutive wedged seek, and fails by name on the third after that', async () => {
+  it('reloads the source on its first wedged seek, and fails by name on the third after that', async () => {
     await store('v1')
     // Every seek but the rewind's to 0 wedges, the way Firefox's did past 1.07 s
     // — in the reloaded element too (the doubles script every element alike).
@@ -1108,12 +1108,10 @@ describe('createFrameComposer seek wedge', () => {
     const wedgedElement = sources.videoElements.get('v1')!
 
     await frame(composeFrame, 0) // no seek: the rewind left it at 0
-    await frame(composeFrame, 1) // wedged #1
-    await frame(composeFrame, 2) // wedged #2
-    await frame(composeFrame, 3) // wedged #3: reloaded, and frame 3 asked again — wedged #1
+    await frame(composeFrame, 1) // wedged: reloaded, and frame 1 asked again — wedged #1
     expect(sources.videoElements.get('v1')).not.toBe(wedgedElement)
-    await frame(composeFrame, 4) // wedged #2
-    const thrown = await frame(composeFrame, 5).then(
+    await frame(composeFrame, 2) // wedged #2
+    const thrown = await frame(composeFrame, 3).then(
       () => null,
       (error: unknown) => error
     )
@@ -1134,9 +1132,9 @@ describe('createFrameComposer seek wedge', () => {
     media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
     const { composeFrame } = await composerOver(oneClip(), new Map())
 
-    for (let i = 1; i <= 4; i++) await frame(composeFrame, i)
+    for (let i = 1; i <= 2; i++) await frame(composeFrame, i)
 
-    await expect(frame(composeFrame, 5)).rejects.toThrow('This browser cannot read "v1" frame by frame')
+    await expect(frame(composeFrame, 3)).rejects.toThrow('This browser cannot read "v1" frame by frame')
   })
 
   it('starts the count again after a seek that completes', async () => {
@@ -1171,16 +1169,15 @@ describe('createFrameComposer seek wedge', () => {
       sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2', name: 'incoming.webm' })])
     )
 
-    await frame(composeFrame, 15) // the incoming clip's one seek, to 0.25: wedged
+    await frame(composeFrame, 15) // the incoming clip's one seek, to 0.25: wedged — reloaded, and the fresh element's seek wedges
     await frame(composeFrame, 16) // held at 0.25: no seek, still seeking
-    await frame(composeFrame, 17) // third: reloaded, and the fresh element's seek to 0.25 wedges
-    await frame(composeFrame, 18) // held again, still seeking
-    await expect(frame(composeFrame, 19)).rejects.toThrow('This browser cannot read "incoming.webm" frame by frame')
+    await expect(frame(composeFrame, 17)).rejects.toThrow('This browser cannot read "incoming.webm" frame by frame')
   })
 
   // ESCSUITE-412: Chromium wedges on a take whose key frame shares a WebM
   // timecode with the frame before it, and a seek that never lands outlasts
-  // ESCSUITE-370's grace. The composer reloads the source once before it refuses.
+  // ESCSUITE-370's grace. The composer reloads the source once, on its first
+  // wedged seek, and composes that frame again, so no frame goes undrawn.
   it('reloads a source whose seeks stopped completing, and draws from the reloaded element', async () => {
     await store('v1')
     media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
@@ -1199,8 +1196,8 @@ describe('createFrameComposer seek wedge', () => {
     expect(reloaded).not.toBe(wedgedElement)
     expect(reloaded.src).not.toBe(wedgedUrl)
     expect(URL.revokeObjectURL).toHaveBeenCalledWith(wedgedUrl)
-    // Frame 0, then frame 3 composed again over the reloaded element, and 4-6.
-    expect(ctx.argsFor('drawImage')).toHaveLength(5)
+    // Every frame: 0, then frame 1 composed again over the reloaded element, and 2-6.
+    expect(ctx.argsFor('drawImage')).toHaveLength(7)
     expect(ctx.argsFor('drawImage').slice(1).every(([image]) => image === reloaded)).toBe(true)
     // The stored 8 bytes are no WebM Mediabunny can read, so it reloads them as stored.
     expect(log.map((e) => e.detail)).toContain('"take.webm" stopped completing seeks; reloaded it from a fresh copy')
@@ -1219,19 +1216,17 @@ describe('createFrameComposer seek wedge', () => {
     for (let i = 0; i <= 4; i++) await frame(composeFrame, i)
 
     const seeks = log.filter((e) => e.phase === 'seek').map((e) => e.detail)
-    expect(seeks).toHaveLength(5)
-    for (const [i, line] of seeks.slice(0, 3).entries()) {
-      expect(line).toMatch(
-        new RegExp(
-          `^"take\\.webm" element 0, seek to ${elementSeekTarget((i + 1) / 30).toFixed(4)} s: never landed after \\d+ ms ` +
-            `\\(seeking=true, readyState=1, wedged ${i + 1}/3\\)$`
-        )
+    expect(seeks).toHaveLength(3)
+    expect(seeks[0]).toMatch(
+      new RegExp(
+        `^"take\\.webm" element 0, seek to ${elementSeekTarget(1 / 30).toFixed(4)} s: never landed after \\d+ ms ` +
+          `\\(seeking=true, readyState=1, wedged 1/3\\)$`
       )
-    }
-    expect(seeks[3]).toMatch(/^"take\.webm" could not be repaired \(.+\); reloading it as stored$/)
-    expect(seeks[4]).toBe('"take.webm" stopped completing seeks; reloaded it from a fresh copy')
+    )
+    expect(seeks[1]).toMatch(/^"take\.webm" could not be repaired \(.+\); reloading it as stored$/)
+    expect(seeks[2]).toBe('"take.webm" stopped completing seeks; reloaded it from a fresh copy')
     // The prompt seeks after the reload are not logged.
-    expect(log[log.length - 1].detail).toBe(seeks[4])
+    expect(log[log.length - 1].detail).toBe(seeks[2])
   })
 
   it('logs a seek that lands late but in its grace, and stops logging after MAX_LOGGED_SEEK_REQUESTS', async () => {
@@ -1254,10 +1249,7 @@ describe('createFrameComposer seek wedge', () => {
     const { composeFrame } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1', name: 'gone.webm' })]))
     vi.mocked(getVideoBlob).mockResolvedValueOnce(undefined)
 
-    await frame(composeFrame, 1)
-    await frame(composeFrame, 2)
-
-    await expect(frame(composeFrame, 3)).rejects.toThrow('This browser cannot read "gone.webm" frame by frame')
+    await expect(frame(composeFrame, 1)).rejects.toThrow('This browser cannot read "gone.webm" frame by frame')
   })
 
   it('refuses by name when the reloaded copy will not load', async () => {
@@ -1266,10 +1258,7 @@ describe('createFrameComposer seek wedge', () => {
     const { composeFrame } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1', name: 'broken.webm' })]))
     media.script({ video: { fail: true } })
 
-    await frame(composeFrame, 1)
-    await frame(composeFrame, 2)
-
-    await expect(frame(composeFrame, 3)).rejects.toThrow('This browser cannot read "broken.webm" frame by frame')
+    await expect(frame(composeFrame, 1)).rejects.toThrow('This browser cannot read "broken.webm" frame by frame')
   })
 
   it('reloads a non-WebM source from its stored bytes, with no remux', async () => {

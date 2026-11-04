@@ -55,12 +55,14 @@ To prevent black frames during export:
   every timestamp to that grid, so two frames captured inside one 33 ms slot share a timecode;
   Mediabunny cannot start a Cluster on such a key frame, so it sits mid-Cluster with no cue). A
   fresh element over the same bytes wedges at the same seek, so the grace above cannot help:
-  this turned the record → edit → export journey red twice. When an element reaches
-  `WEDGED_SEEK_FRAMES`, the composer reads the source's bytes again, remuxes a WebM with every
+  this turned the record → edit → export journey red twice. On an element's first wedged
+  request (still `seeking` with no frame after its waits and grace), the composer reads the
+  source's bytes again, remuxes a WebM with every
   video timecode advancing (`remuxWithAdvancingTimestamps`, which gives that key frame a
   Cluster and a cue of its own), loads it into a fresh `<video>` over a fresh URL, retires the
-  wedged elements and composes the frame again; only a second wedge of the same source is
-  refused. Every slow or wedged seek request goes into the export's diagnostic log (target,
+  wedged elements and composes the frame again, so the export has no frame drawn without the
+  source (waiting for `WEDGED_SEEK_FRAMES` first left two black frames in it); only a reloaded
+  source whose element then reaches `WEDGED_SEEK_FRAMES` is refused. Every slow or wedged seek request goes into the export's diagnostic log (target,
   whether it landed, `seeking`, `readyState`, elapsed ms; at most `MAX_LOGGED_SEEK_REQUESTS`),
   and the dialog logs that trail as text as well as objects, so a CI console shows it. In
   Chromium the refusal no longer says to export in Chrome or Edge: it says to convert the file

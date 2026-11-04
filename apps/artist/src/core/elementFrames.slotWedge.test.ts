@@ -173,12 +173,12 @@ describe('createFrameComposer: a seek wedge on one of a source\'s two elements',
 
     expect(thrown).toBeInstanceOf(SourceNotSeekableError)
     expect(thrown).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: REFUSAL })
-    // Slot 0 had a picture on frame 0, already at its time, and on frame 1,
-    // whose late seek landed in its grace. Frame 2 reloaded the source
-    // (ESCSUITE-412) and was composed again, slot 0 drawn; frame 3 drew slot 0
-    // too, and frame 4, the reloaded extra element's third wedge, refused
-    // before drawing.
-    expect(ctx.argsFor('drawImage')).toHaveLength(4)
+    // Frame 0's extra element wedged on its first seek, so the source was
+    // reloaded (ESCSUITE-412) and frame 0 composed again: slot 0 drawn, already
+    // at its time, and the fresh extra element's seek wedged (#1). Frame 1's
+    // late slot-0 seek landed in its grace and was drawn (#2); frame 2, the
+    // fresh extra element's third wedge, refused before drawing.
+    expect(ctx.argsFor('drawImage')).toHaveLength(2)
   })
 
   it('fails by name when slot 0 wedges and the extra slot seeks normally', async () => {

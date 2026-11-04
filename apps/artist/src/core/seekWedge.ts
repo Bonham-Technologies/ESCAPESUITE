@@ -41,9 +41,11 @@
 // Cluster in progress already holds cannot start a Cluster. Every seek past that
 // key frame never lands, in a fresh element over the same bytes as well; the
 // same packets remuxed with that frame 1 ms later seek every time. The grace above cannot help a seek that never lands,
-// so the element exporters (`elementFrames.ts`) reload a source whose element
-// reaches `WEDGED_SEEK_FRAMES` once, from such a copy, before they refuse it;
-// and the refusal no longer sends a Chromium user to Chrome or Edge.
+// so the element exporters (`elementFrames.ts`) reload a source once, from such
+// a copy, on its first wedged request — and compose that frame again, so no
+// frame is drawn without it — and refuse it only when the reloaded element
+// reaches `WEDGED_SEEK_FRAMES`; and the refusal no longer sends a Chromium user
+// to Chrome or Edge.
 import { isChromiumEngine, type EngineNavigator } from './browserEngine';
 
 /** Consecutive wedged requests of one element before the export gives up on it. */

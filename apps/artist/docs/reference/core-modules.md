@@ -291,15 +291,16 @@
   landed and a healthy recording was refused on a loaded machine (the CI journey's flake). Now a
   slow seek lands and its frame is drawn; only an element that stays `seeking` through three
   requests' waits and graces is refused.
-  At `WEDGED_SEEK_FRAMES` (3) the composer first **reloads the source** (ESCSUITE-412): its
+  On an element's first wedged request the composer first **reloads the source**
+  (ESCSUITE-412), so the frame it wedged on is composed again rather than drawn black: its
   bytes read again through `getVideoBlob`, a WebM remuxed with every video timecode advancing
   (`remuxWithAdvancingTimestamps` in `webmSeekIndex.ts`), loaded into a fresh `<video>` over a
   fresh object URL that replaces the source's own element. Its further elements are unloaded and
   made again from the new URL when a frame next needs them; the wedged elements are unloaded,
   their URL revoked, and the frame composed again. Each frame's syncs all settle before this
   (none rejects), so nothing still waits on an element being retired. The reload is logged and
-  `console.warn`ed. Only a source that reaches the limit again after its reload — or has no bytes
-  to reload, or whose copy will not load — throws `SourceNotSeekableError`, which both exporters'
+  `console.warn`ed. Only a reloaded source whose element reaches `WEDGED_SEEK_FRAMES` (3), or a
+  wedged source with no bytes to reload or whose copy will not load, throws `SourceNotSeekableError`, which both exporters'
   catch turns into an `ExportError` with `code: 'SOURCE_NOT_SEEKABLE'` (`exportErrorCodeOf`) and,
   outside Chromium, the sentence `This browser cannot read "<name>" frame by frame (its seeks
   never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.` In

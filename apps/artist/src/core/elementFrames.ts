@@ -406,9 +406,15 @@ export function createFrameComposer({
 
   /**
    * Sync one element and count it against the wedge limit. Resolves to the
-   * source's id when the element reached {@link WEDGED_SEEK_FRAMES}, for the
-   * frame to reload or refuse; to `undefined` otherwise. A slow or wedged
-   * request is written to the diagnostic log.
+   * source's id when the frame must reload or refuse it; to `undefined`
+   * otherwise. A source not yet reloaded is reloaded on its element's first
+   * wedged request — one whose seek is still in flight with no frame after
+   * its waits and ESCSUITE-370's grace — and the frame composed again over the
+   * fresh element, so no frame of the export is drawn without it; waiting for
+   * {@link WEDGED_SEEK_FRAMES} first left two black frames in every export of
+   * the take that wedged (ESCSUITE-412 review). A reloaded source is refused
+   * at {@link WEDGED_SEEK_FRAMES}, as before. A slow or wedged request is
+   * written to the diagnostic log.
    */
   const syncCounted = async (
     sourceId: string,
@@ -435,11 +441,12 @@ export function createFrameComposer({
         log('seek', `Further slow seeks are not logged (the first ${MAX_LOGGED_SEEK_REQUESTS} are above)`);
       }
     }
-    return wedged >= WEDGED_SEEK_FRAMES ? sourceId : undefined;
+    const limit = reloadedSources.has(sourceId) ? WEDGED_SEEK_FRAMES : 1;
+    return wedged >= limit ? sourceId : undefined;
   };
 
   /**
-   * A source whose element reached the wedge limit, reloaded (ESCSUITE-412):
+   * A source whose element wedged, reloaded (ESCSUITE-412):
    * its stored bytes read again, remuxed with timestamps that advance when it
    * is a WebM (`remuxWithAdvancingTimestamps`, the copy Chromium seeks a
    * shared-timecode key frame in), and loaded into a fresh `<video>` over a
