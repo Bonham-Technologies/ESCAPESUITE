@@ -130,16 +130,6 @@ export default defineConfig({
       // trace and video of a failed attempt instead.
       use: { ...devices['Desktop Chrome'], ...chromiumUse, trace: 'retain-on-failure', video: 'retain-on-failure' },
     },
-    // TEMPORARY (ESCSUITE-412 AC5): 19 more strict runs of the record-edit-export
-    // journey, making 20 with chromium-strict's own. Reverted before merge.
-    {
-      name: 'chromium-strict-repeat-412',
-      testMatch: ['**/journeys/01-record-edit-export.spec.ts'],
-      testIgnore: baseIgnore,
-      retries: 0,
-      repeatEach: 19,
-      use: { ...devices['Desktop Chrome'], ...chromiumUse, trace: 'retain-on-failure', video: 'retain-on-failure' },
-    },
     // Cross-browser projects run locally, and in CI only when E2E_CROSS_BROWSER is set (the nightly)
     ...(crossBrowser ? crossBrowserProjects : []),
     {
