@@ -7,7 +7,8 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 /**
  * ESCSUITE-153: `playwright.standalone.config.ts` serves each app's `dist/`
- * with `npx serve -s`, which happily serves a second file sitting next to
+ * with a static server (`vite preview` since ESCSUITE-410, `npx serve -s`
+ * before), which happily serves a second file sitting next to
  * `index.html` — so the standalone ESCAPEARTIST build shipping
  * `index.html` *and* a separate `decodeWorker-*.js` chunk passed every
  * browser-driven standalone test here, even though `standalone-release.yml`
