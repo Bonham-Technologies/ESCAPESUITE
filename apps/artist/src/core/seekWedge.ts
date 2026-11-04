@@ -33,6 +33,20 @@
 // frame refused a healthy recording by this module's own message. A slow seek
 // now lands, and its frame is drawn; a wedged one still never does, and is
 // refused after three requests as before, each a grace longer.
+//
+// Chromium wedges too (ESCSUITE-412), on a take whose key frame shares its
+// WebM timecode with the delta frame before it — ESCAPECRAFT declares 30 fps to
+// Mediabunny, which snaps every timestamp to that grid, so two frames captured
+// inside one 33 ms slot get one timecode, and a key frame with a timecode the
+// Cluster in progress already holds cannot start a Cluster. Every seek past that
+// key frame never lands, in a fresh element over the same bytes as well; the
+// same packets remuxed with that frame 1 ms later seek every time. The grace above cannot help a seek that never lands,
+// so the element exporters (`elementFrames.ts`) reload a source once, from such
+// a copy, on its first wedged request — and compose that frame again, so no
+// frame is drawn without it — and refuse it only when the reloaded element
+// reaches `WEDGED_SEEK_FRAMES`; and the refusal no longer sends a Chromium user
+// to Chrome or Edge.
+import { isChromiumEngine, type EngineNavigator } from './browserEngine';
 
 /** Consecutive wedged requests of one element before the export gives up on it. */
 export const WEDGED_SEEK_FRAMES = 3;
@@ -45,12 +59,24 @@ export const WEDGED_SEEK_FRAMES = 3;
 export class SourceNotSeekableError extends Error {
   readonly code = 'SOURCE_NOT_SEEKABLE' as const;
 
-  constructor(sourceName: string) {
-    super(
-      `This browser cannot read "${sourceName}" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.`
-    );
+  constructor(sourceName: string, nav: EngineNavigator | undefined = globalThis.navigator) {
+    super(sourceNotSeekableMessage(sourceName, nav));
     this.name = 'SourceNotSeekableError';
   }
+}
+
+/**
+ * The refusal's sentence, by engine (ESCSUITE-412). Firefox's wedge
+ * (ESCSUITE-305) is Firefox's own, so Chrome or Edge is real advice there. A
+ * Chromium user *is* in Chrome or Edge, and the export has already reloaded
+ * the source before refusing it: what is left is a different file, and an MP4
+ * is read by a different decoder.
+ */
+export function sourceNotSeekableMessage(sourceName: string, nav: EngineNavigator | undefined): string {
+  if (isChromiumEngine(nav)) {
+    return `This browser cannot read "${sourceName}" frame by frame (its seeks never completed, even after reloading it). Convert it to MP4 (ESCAPECRAFT's MP4 download does) and import that instead.`;
+  }
+  return `This browser cannot read "${sourceName}" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.`;
 }
 
 /**
@@ -100,8 +126,56 @@ export function countWedgedSeek(
   seekLanded: boolean,
   sourceName: string
 ): number {
+  const next = nextWedgeCount(previous, video, seekLanded);
+  if (next >= WEDGED_SEEK_FRAMES) throw new SourceNotSeekableError(sourceName);
+  return next;
+}
+
+/**
+ * {@link countWedgedSeek}'s count without the throw: the caller decides what
+ * reaching {@link WEDGED_SEEK_FRAMES} means. The element exporters reload the
+ * source once before they refuse it (ESCSUITE-412).
+ */
+export function nextWedgeCount(previous: number, video: HTMLVideoElement, seekLanded: boolean): number {
   if (seekLanded || video.readyState >= 2) return 0;
   if (!video.seeking) return previous;
-  if (previous + 1 >= WEDGED_SEEK_FRAMES) throw new SourceNotSeekableError(sourceName);
   return previous + 1;
+}
+
+/** What one seek request did, for the export's diagnostic log (ESCSUITE-412). */
+export interface SeekRequestState {
+  /** The time the request asked the element for, in source seconds. */
+  target: number;
+  /** Whether it assigned `currentTime`: a request within half a frame of the element issues none. */
+  issued: boolean;
+  /** Whether 'seeked' fired for it, within its waits or its grace. */
+  landed: boolean;
+  /** The element's `seeking` and `readyState` once the request's waits were over. */
+  seeking: boolean;
+  readyState: number;
+  /** How long the request took, waits and grace included. */
+  elapsedMs: number;
+  /** The element's consecutive wedged requests after this one. */
+  wedged: number;
+}
+
+/**
+ * One line of the diagnostic log for one seek request: enough to tell a slow
+ * seek (landed, late) from a wedge (never landed, `seeking` true, `readyState`
+ * 1) from the console alone, which the two CI failures of ESCSUITE-412 could
+ * not — their log had no seek in it at all.
+ */
+export function describeSeekRequest(sourceName: string, element: number, state: SeekRequestState): string {
+  const outcome = !state.issued
+    ? 'no seek issued'
+    : state.landed
+      ? 'landed'
+      : state.seeking
+        ? 'never landed'
+        : 'no seeked event in its waits';
+  return (
+    `"${sourceName}" element ${element}, seek to ${state.target.toFixed(4)} s: ${outcome} after ` +
+    `${Math.round(state.elapsedMs)} ms (seeking=${state.seeking}, readyState=${state.readyState}, ` +
+    `wedged ${state.wedged}/${WEDGED_SEEK_FRAMES})`
+  );
 }

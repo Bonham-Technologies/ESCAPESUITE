@@ -197,6 +197,7 @@ export async function exportToGIF(
       outputSize,
       drawOptions,
       frameRate,
+      log,
     });
 
     onProgress({ phase: 'encoding', progress: 15, message: 'Encoding frames...' });

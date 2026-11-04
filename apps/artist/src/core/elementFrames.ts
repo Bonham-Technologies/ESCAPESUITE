@@ -25,7 +25,15 @@ import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
-import { countWedgedSeek, settleSeekInFlight, wedgeCountAtStart } from './seekWedge';
+import {
+  SourceNotSeekableError,
+  WEDGED_SEEK_FRAMES,
+  describeSeekRequest,
+  nextWedgeCount,
+  settleSeekInFlight,
+  wedgeCountAtStart,
+} from './seekWedge';
+import { isWebmType, remuxWithAdvancingTimestamps } from './webmSeekIndex';
 import {
   getActiveTransition,
   loadVideoElement,
@@ -224,25 +232,40 @@ export function createElementSourceRelease(sources: ElementSources): () => void 
   };
 }
 
+/** What {@link syncVideoToTime} did, for the wedge count and the diagnostic log. */
+interface SyncOutcome {
+  /** Whether it assigned `currentTime`. */
+  issued: boolean;
+  /** Whether the seek it issued landed ('seeked' fired), within its waits or its grace. */
+  landed: boolean;
+  /** Whether it landed within the 500 ms seek wait — an unremarkable request, not logged. */
+  landedPromptly: boolean;
+  elapsedMs: number;
+}
+
 /**
  * Sync a video to a target time. Seeks to just past the target
  * (`elementSeekTarget`, ESCSUITE-265) for frame-accurate export, skipping the
  * seek when the element is already within (a little under) half an output
  * frame of it.
  *
- * Resolves to whether a seek it issued landed ('seeked' fired) — what the
- * wedge count reads alongside the element's state once both waits are over
- * (`seekWedge.ts`, ESCSUITE-305). A skipped seek did not land.
+ * Resolves to what the request did: above all whether a seek it issued landed
+ * ('seeked' fired) — what the wedge count reads alongside the element's state
+ * once both waits are over (`seekWedge.ts`, ESCSUITE-305). A skipped seek did
+ * not land.
  */
 async function syncVideoToTime(
   video: HTMLVideoElement,
   targetTime: number,
   frameRate: number
-): Promise<boolean> {
+): Promise<SyncOutcome> {
+  const started = performance.now();
   let seekLanded = false;
+  let issued = false;
   // Skip if already within (a little under) half a frame of the target.
   const frameDuration = 1 / frameRate;
   if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
+    issued = true;
     // Just past the target: a target on a frame's exact start would otherwise
     // show the frame before it a third of the time (ESCSUITE-265).
     video.currentTime = elementSeekTarget(targetTime);
@@ -266,6 +289,7 @@ async function syncVideoToTime(
       video.addEventListener('seeked', onSeeked, { once: true });
     });
   }
+  const landedPromptly = seekLanded;
 
   // Ensure frame data is decoded (readyState >= 2 = HAVE_CURRENT_DATA).
   //
@@ -301,8 +325,15 @@ async function syncVideoToTime(
     seekLanded = (await settleSeekInFlight(video)) || seekLanded;
   }
 
-  return seekLanded;
+  return { issued, landed: seekLanded, landedPromptly, elapsedMs: performance.now() - started };
 }
+
+/**
+ * At most this many seek requests go into one export's diagnostic log
+ * (ESCSUITE-412), so a long export on a slow machine — every request a late
+ * one — cannot grow the log without bound. A wedge is three requests.
+ */
+export const MAX_LOGGED_SEEK_REQUESTS = 60;
 
 export interface FrameComposerParams {
   ctx: CanvasRenderingContext2D;
@@ -318,6 +349,14 @@ export interface FrameComposerParams {
   drawOptions: MediaDrawOptions;
   /** Output frame rate — the seek tolerance is a little under half a frame of it. */
   frameRate: number;
+  /**
+   * The export's diagnostic log (ESCSUITE-412). Every seek request that did
+   * not land within its 500 ms wait, or that counted toward a wedge, is
+   * written here with its target, `seeking`, `readyState`, whether it landed
+   * and how long it took — up to {@link MAX_LOGGED_SEEK_REQUESTS} — and so is
+   * a reload of a wedged source.
+   */
+  log?: (phase: string, detail: string) => void;
 }
 
 /** Draw the whole timeline at one instant onto `ctx`. Resolves once the frame is complete. */
@@ -348,6 +387,7 @@ export function createFrameComposer({
   outputSize,
   drawOptions,
   frameRate,
+  log = () => {},
 }: FrameComposerParams): FrameComposer {
   const { videoElements, imageElements, extraVideoElements, sourceNames } = sources;
   // Consecutive wedged seeks per element (ESCSUITE-305): one integer per
@@ -356,12 +396,123 @@ export function createFrameComposer({
   // have a playhead of their own, so each wedges, or recovers, on its own — and
   // the refusal names the source the element reads.
   const wedgedSeeks = new Map<HTMLVideoElement, number>();
+  // Sources already reloaded once (ESCSUITE-412): a second wedge refuses.
+  const reloadedSources = new Set<string>();
+  let loggedSeeks = 0;
 
-  /** Sync one element and count it against the wedge limit; throws by name at the limit. */
-  const syncCounted = async (sourceId: string, video: HTMLVideoElement, sourceTime: number) => {
+  /** Which of its source's elements `video` is — 0 its own, 1 onwards its further ones — for the log. */
+  const elementIndex = (sourceId: string, video: HTMLVideoElement) =>
+    videoElements.get(sourceId) === video ? 0 : (extraVideoElements.get(sourceId) ?? []).indexOf(video) + 1;
+
+  /**
+   * Sync one element and count it against the wedge limit. Resolves to the
+   * source's id when the frame must reload or refuse it; to `undefined`
+   * otherwise. A source not yet reloaded is reloaded on its element's first
+   * wedged request — one whose seek is still in flight with no frame after
+   * its waits and ESCSUITE-370's grace — and the frame composed again over the
+   * fresh element, so no frame of the export is drawn without it; waiting for
+   * {@link WEDGED_SEEK_FRAMES} first left two black frames in every export of
+   * the take that wedged (ESCSUITE-412 review). A reloaded source is refused
+   * at {@link WEDGED_SEEK_FRAMES}, as before. A slow or wedged request is
+   * written to the diagnostic log.
+   */
+  const syncCounted = async (
+    sourceId: string,
+    video: HTMLVideoElement,
+    sourceTime: number
+  ): Promise<string | undefined> => {
     const atStart = wedgeCountAtStart(wedgedSeeks.get(video) ?? 0, video);
-    const seekLanded = await syncVideoToTime(video, sourceTime, frameRate);
-    wedgedSeeks.set(video, countWedgedSeek(atStart, video, seekLanded, sourceNames.get(sourceId)!));
+    const outcome = await syncVideoToTime(video, sourceTime, frameRate);
+    const wedged = nextWedgeCount(atStart, video, outcome.landed);
+    wedgedSeeks.set(video, wedged);
+    if ((outcome.issued && !outcome.landedPromptly) || wedged > atStart) {
+      loggedSeeks += 1;
+      if (loggedSeeks <= MAX_LOGGED_SEEK_REQUESTS) {
+        log('seek', describeSeekRequest(sourceNames.get(sourceId)!, elementIndex(sourceId, video), {
+          target: elementSeekTarget(sourceTime),
+          issued: outcome.issued,
+          landed: outcome.landed,
+          seeking: video.seeking,
+          readyState: video.readyState,
+          elapsedMs: outcome.elapsedMs,
+          wedged,
+        }));
+      } else if (loggedSeeks === MAX_LOGGED_SEEK_REQUESTS + 1) {
+        log('seek', `Further slow seeks are not logged (the first ${MAX_LOGGED_SEEK_REQUESTS} are above)`);
+      }
+    }
+    const limit = reloadedSources.has(sourceId) ? WEDGED_SEEK_FRAMES : 1;
+    return wedged >= limit ? sourceId : undefined;
+  };
+
+  /**
+   * A source whose element wedged, reloaded (ESCSUITE-412):
+   * its stored bytes read again, remuxed with timestamps that advance when it
+   * is a WebM (`remuxWithAdvancingTimestamps`, the copy Chromium seeks a
+   * shared-timecode key frame in), and loaded into a fresh `<video>` over a
+   * fresh object URL. That element replaces the source's own; its further
+   * elements are unloaded and made again, from the new URL, the next time a
+   * frame needs them. The wedged elements are unloaded and their URL revoked.
+   *
+   * Refuses by name when there is nothing to reload: no bytes, or a copy that
+   * will not load. A remux that throws reloads the bytes as stored, since a
+   * fresh element is still a fresh decoder.
+   */
+  const reloadSource = async (sourceId: string): Promise<void> => {
+    reloadedSources.add(sourceId);
+    const name = sourceNames.get(sourceId)!;
+    const stored = await getVideoBlob(sourceId);
+    if (!stored) throw new SourceNotSeekableError(name);
+    let bytes = stored;
+    if (isWebmType(stored.type)) {
+      try {
+        bytes = await remuxWithAdvancingTimestamps(stored);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        log('seek', `"${name}" could not be repaired (${reason}); reloading it as stored`);
+      }
+    }
+    let fresh: HTMLVideoElement;
+    try {
+      fresh = await loadVideoElement(bytes, name);
+    } catch {
+      throw new SourceNotSeekableError(name);
+    }
+
+    const own = videoElements.get(sourceId)!;
+    const wedgedUrl = own.src;
+    for (const video of [own, ...(extraVideoElements.get(sourceId) ?? [])]) {
+      if (!video) continue;
+      video.pause();
+      video.removeAttribute('src');
+      video.load();
+      playbackState.delete(video);
+      wedgedSeeks.delete(video);
+    }
+    URL.revokeObjectURL(wedgedUrl);
+    videoElements.set(sourceId, fresh);
+    extraVideoElements.set(sourceId, []);
+    playbackState.set(fresh, { playing: false, targetTime: 0 });
+
+    const copy = bytes === stored ? 'a fresh copy' : 'a repaired copy';
+    log('seek', `"${name}" stopped completing seeks; reloaded it from ${copy}`);
+    console.warn(`Export: "${name}" stopped completing seeks; reloaded it from ${copy}`);
+  };
+
+  /**
+   * The sources this frame found wedged, each reloaded once (ESCSUITE-412); a
+   * source already reloaded is refused by name instead.
+   */
+  const reloadOrRefuse = async (wedgedSourceIds: string[]): Promise<void> => {
+    const unique = [...new Set(wedgedSourceIds)];
+    for (const sourceId of unique) {
+      if (reloadedSources.has(sourceId)) {
+        const name = sourceNames.get(sourceId)!;
+        log('seek', `"${name}" stopped completing seeks again after its reload; refusing it`);
+        throw new SourceNotSeekableError(name);
+      }
+    }
+    for (const sourceId of unique) await reloadSource(sourceId);
   };
 
   /**
@@ -446,7 +597,7 @@ export function createFrameComposer({
     }
 
     // Sync all active videos to their target times
-    const syncPromises: Promise<void>[] = [];
+    const syncPromises: Promise<string | undefined>[] = [];
     activeVideos.clear();
 
     for (const { clip, clipTime } of mediaClips) {
@@ -481,7 +632,15 @@ export function createFrameComposer({
       }
     }
 
-    await Promise.all(syncPromises);
+    // Every sync settles and none rejects, so no element is still being waited
+    // on when a wedged source's elements are swapped out below.
+    const wedgedSourceIds = (await Promise.all(syncPromises)).filter((id): id is string => id !== undefined);
+    if (wedgedSourceIds.length > 0) {
+      // Nothing is drawn yet but the black fill, so the frame is composed
+      // again, over the reloaded elements (ESCSUITE-412).
+      await reloadOrRefuse(wedgedSourceIds);
+      return composeFrame(currentTime);
+    }
 
     // Helper to calculate clip time
     const getClipTime = (clip: Clip) => currentTime - clip.timelinePosition;

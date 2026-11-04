@@ -1764,6 +1764,8 @@ describe('ExportDialog', () => {
           )
         )
         expect(debugLog).toHaveBeenCalledWith('[WebM Export] Diagnostic log:', log)
+        // And as text, which a console read from a CI trace can show (ESCSUITE-412).
+        expect(debugLog).toHaveBeenCalledWith('[WebM Export] Diagnostic log (text):\n+0 ms codec: no supported video codec')
 
         const retry = screen.getByRole('button', { name: 'Try MP4 Instead' })
         fireEvent.click(retry)

@@ -387,6 +387,7 @@ export async function exportToWebM(
       outputSize,
       drawOptions,
       frameRate,
+      log,
     });
 
     for (let frameIndex = 0; frameIndex < totalFrames; frameIndex++) {
