@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward's security sweep
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -182,7 +182,7 @@ later command that uses `$SCAN`.
 
 ### Security tickets
 
-Security tickets are filed before any other finding and count toward the 25-ticket cap.
+Security tickets are filed before any other finding and count toward the run's ticket cap.
 Every security ticket also gets the Jira label `ap-security`, next to its class label.
 
 **The owner can ignore one:** a ticket closed with the Jira label `ap-ignore` is never
