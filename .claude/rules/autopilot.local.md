@@ -13,19 +13,6 @@ Put each rule under a heading that names the policy section it changes, such as
 that section or replaces part of it. A rule that applies only to one role is still read
 by every role, so name the role.
 
-## Ticket classes: protected editor paths
-
-Adds to the `ap-owner-merge` list (stricter). Moved here from the vendored policy, where
-ESCAPESUITE #933 added it.
-
-**Protected editor paths (temporary).** Until ESCSUITE-348, -349, -350 and -351 are all
-Done and green on `main`, a diff touching any of these in `apps/artist/src/` is also
-`ap-owner-merge`: `components/Preview/**`, `components/Timeline/**`,
-`store/clipSlice.ts`, `store/historySlice.ts`, `store/projectMigration.ts`,
-`core/projectFileFormat.ts`, `core/projectManager.ts`, `utils/waveform.ts` and
-`core/audioMixer.ts`. Once all four tickets are Done, the rule lapses: the steward says
-so in the next digest and files an `ap-owner-merge` ticket to delete this paragraph.
-
 ## Steward: regression specs and flaky e2e tests
 
 The steward role only. Adds two items to the steward's filing rules, before "Score each

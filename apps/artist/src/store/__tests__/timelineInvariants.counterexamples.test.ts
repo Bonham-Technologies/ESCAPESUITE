@@ -1,9 +1,9 @@
 // The counterexamples `timelineInvariants.property.test.ts` found (ESCSUITE-349),
 // each kept as an example test through the same gesture model. Each is a real
-// bug the suite found, filed as its own ticket and fixed in its own PR (the code
-// each points at is on the owner-protected editor paths). While a bug is open its
-// test is an `it.fails`: it asserts the correct behaviour, and passes only while
-// the bug is still there. Once fixed it is a plain `it` and stays as a regression.
+// bug the suite found, filed as its own ticket and fixed in its own PR. While a
+// bug is open its test is an `it.fails`: it asserts the correct behaviour, and
+// passes only while the bug is still there. Once fixed it is a plain `it` and
+// stays as a regression.
 //
 // They run with the model's known-bug guards OFF (`resetModel({ guards: false })`,
 // `runSequence(ops, { guards: false })`), so they keep reaching the bug the
