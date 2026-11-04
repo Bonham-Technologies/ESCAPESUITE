@@ -50,6 +50,9 @@
   the one document too (temporary, 307, so no browser caches it and a future real sub-route stays reachable), since neither app has client-side routes. Paths ending in a file extension
   are excluded so `/artist/decodeWorker-<hash>.js` is still served as itself
   (`tests/production/slashless-redirect.spec.ts`).
+  ESCSUITE-406: `tests/production/analytics-strip-query.spec.ts` is the one spec that needs the
+  network: it fetches Vercel's live Web Analytics script from `va.vercel-scripts.com` (Vercel
+  publishes it under no licence, so it is not committed) and fails if the CDN is unreachable.
 - **Property-based tests**: ESCAPEARTIST's timeline edit logic has a model-based fast-check suite
   (ESCSUITE-349): random edit sequences with invariants checked after every step. What it checks
   and how to add an operation: `apps/artist/docs/reference/testing.md`. PR CI runs 200 sequences on

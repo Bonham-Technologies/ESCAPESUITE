@@ -1,6 +1,3 @@
-import { readFileSync } from 'node:fs'
-import { dirname, resolve as resolvePath } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -20,9 +17,14 @@ import { waitForAppReady } from '../../utils/ready'
  * script `@vercel/analytics` injects; `serve-dist.mjs` 404s it), so without
  * help nothing would ever be sent and the test would prove nothing. So:
  *
- * - the script request is fulfilled with Vercel's real script, vendored
- *   byte for byte in `fixtures/vercel-insights/` (see its README), so the
- *   app's own `beforeSend` runs through the same code it meets on Vercel;
+ * - the script request is fulfilled with Vercel's real script, fetched from
+ *   its CDN (`INSIGHTS_SCRIPT_URL`) once per worker, so the app's own
+ *   `beforeSend` runs through the code it meets on Vercel today. It is fetched
+ *   rather than committed because Vercel publishes that script under no
+ *   licence (`@vercel/analytics`, which is MIT, only injects it and does not
+ *   ship it), and this is how Vercel's own e2e suite for the package gets it
+ *   (`apps/nextjs/e2e/utils.ts` in vercel/analytics). An unreachable CDN fails
+ *   the suite rather than skipping it;
  * - the script skips automated browsers (`navigator.webdriver`), so an init
  *   script reports `false` there, which is all it checks besides a "Headless"
  *   user agent (the Desktop Chrome device's has none);
@@ -35,10 +37,44 @@ import { waitForAppReady } from '../../utils/ready'
 
 const ORIGIN = 'http://localhost:5190'
 
-const INSIGHTS_SCRIPT = readFileSync(
-  resolvePath(dirname(fileURLToPath(import.meta.url)), '../../fixtures/vercel-insights/script.js'),
-  'utf8'
-)
+/**
+ * Where Vercel serves the Web Analytics script outside a deployment: the
+ * non-debug twin of the `script.debug.js` URL `@vercel/analytics` injects in
+ * development. On a deployment the same script is served at
+ * `/_vercel/insights/script.js`.
+ */
+const INSIGHTS_SCRIPT_URL = 'https://va.vercel-scripts.com/v1/script.js'
+
+let insightsScript = ''
+
+test.beforeAll(async ({ playwright }) => {
+  const request = await playwright.request.newContext()
+  let lastError = ''
+  try {
+    for (let attempt = 1; attempt <= 3 && !insightsScript; attempt++) {
+      try {
+        const response = await request.get(INSIGHTS_SCRIPT_URL, { timeout: 15_000 })
+        const body = await response.text()
+        // The script must still offer the hook this suite exercises, or the
+        // test would be proving something about a different script.
+        if (response.ok() && body.includes('beforeSend')) {
+          insightsScript = body
+        } else {
+          lastError = `HTTP ${response.status()}, ${body.length} bytes, no beforeSend hook`
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error)
+      }
+    }
+  } finally {
+    await request.dispose()
+  }
+  if (!insightsScript) {
+    throw new Error(
+      `Could not fetch Vercel's insights script from ${INSIGHTS_SCRIPT_URL}: ${lastError}`
+    )
+  }
+})
 
 const SECRET_TITLE = 'secret-title-406'
 const SECRET_FRAGMENT = 'secret-fragment-406'
@@ -84,7 +120,7 @@ async function captureInsights(page: Page): Promise<InsightsRecord[]> {
       await route.fulfill({
         status: 200,
         contentType: 'text/javascript; charset=utf-8',
-        body: INSIGHTS_SCRIPT,
+        body: insightsScript,
       })
       return
     }
