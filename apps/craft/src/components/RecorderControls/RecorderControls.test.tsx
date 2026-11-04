@@ -236,3 +236,42 @@ describe('RecorderControls shortcuts hint', () => {
     expect(hints).toEqual(['R Record', 'P Pause', 'S Stop', 'Esc Cancel'])
   })
 })
+
+describe('RecorderControls "Float controls" (ESCSUITE-400)', () => {
+  it('draws no button when the window cannot be floated', () => {
+    renderControls()
+
+    expect(screen.queryByRole('button', { name: 'Float controls' })).toBeNull()
+  })
+
+  it('toggles the window, and shows whether it is open', async () => {
+    const user = userEvent.setup()
+    const onToggleFloat = vi.fn()
+    const { rerender } = render(
+      <RecorderControls
+        state="recording"
+        isRecordingActive
+        blockedReason={null}
+        {...makeCallbacks()}
+        onToggleFloat={onToggleFloat}
+      />
+    )
+    const button = screen.getByRole('button', { name: 'Float controls' })
+    expect(button).toHaveAttribute('aria-pressed', 'false')
+
+    await user.click(button)
+    expect(onToggleFloat).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <RecorderControls
+        state="recording"
+        isRecordingActive
+        blockedReason={null}
+        {...makeCallbacks()}
+        onToggleFloat={onToggleFloat}
+        floating
+      />
+    )
+    expect(screen.getByRole('button', { name: 'Float controls' })).toHaveAttribute('aria-pressed', 'true')
+  })
+})

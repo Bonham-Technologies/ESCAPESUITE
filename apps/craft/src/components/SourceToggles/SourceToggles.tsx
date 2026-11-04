@@ -7,17 +7,8 @@ import type {
   RecordingConfig,
 } from '../../store/types';
 import { MicIcon, ScreenIcon, SpeakerIcon, UnavailableIcon, WebcamIcon } from '../icons';
+import { AudioLevelMeters } from './AudioLevelMeters';
 import styles from '../../App.module.css';
-
-/**
- * Why the System meter is greyed.
- *
- * Deliberately *not* the `NO_SYSTEM_AUDIO` notice: that one tells the user to
- * tick a box in the share dialog, and the meter also greys for a take that
- * never opened one (system audio on, screen off). This says only what is true
- * in both cases; the actionable version reaches the header when it applies.
- */
-const NO_SYSTEM_AUDIO_HINT = 'No system audio arrived for this take.';
 
 /** The four capture sources the sidebar can switch on and off. */
 export type RecordingSource = 'screen' | 'webcam' | 'microphone' | 'systemAudio';
@@ -228,33 +219,12 @@ export function SourceToggles({
 
       {/* Audio meters */}
       {(microphoneOn || config.systemAudioEnabled) && showMeters && (
-        <div className={styles.audioMeters}>
-          {microphoneOn && (
-            <div className={styles.audioMeter}>
-              <span className={styles.meterLabel}>Mic</span>
-              <div className={styles.meterBar}>
-                <div
-                  className={styles.meterFill}
-                  style={{ width: `${audioLevels.microphone * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-          {config.systemAudioEnabled && (
-            <div
-              className={`${styles.audioMeter} ${!systemAudioShared ? styles.meterUnavailable : ''}`}
-              title={systemAudioShared ? undefined : NO_SYSTEM_AUDIO_HINT}
-            >
-              <span className={styles.meterLabel}>System</span>
-              <div className={styles.meterBar}>
-                <div
-                  className={styles.meterFill}
-                  style={{ width: `${audioLevels.system * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
+        <AudioLevelMeters
+          audioLevels={audioLevels}
+          showMicrophone={microphoneOn}
+          showSystem={config.systemAudioEnabled}
+          systemAudioShared={systemAudioShared}
+        />
       )}
     </section>
   );

@@ -1,7 +1,8 @@
 <!-- Moved verbatim from apps/craft/CLAUDE.md on 2026-10-19. Edit here; CLAUDE.md only indexes this file. -->
 # The record button only offers what it can deliver
 
-`RecorderControls` takes a `blockedReason: string | null`. Non-null and the record button
+`RecorderControls` takes a `blockedReason: string | null` and hands it to `TransportBar`, the bar it
+shares with the "Float controls" window (ESCSUITE-400), where the button is built. Non-null and the record button
 loses its handler, goes `disabled`, puts the reason in its `title`, and prints it under the
 bar as the button's `aria-describedby` target — the same "say why" shape the Sources rows
 already use. `App` computes it once with `recordBlockedReason()`

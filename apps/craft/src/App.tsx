@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import styles from './App.module.css';
 import { useRecorderStore } from './store/recorderStore';
 import { useThemeLifecycle } from './hooks/useThemeLifecycle';
@@ -8,6 +9,7 @@ import { useRecordingSave } from './hooks/useRecordingSave';
 import { useRecordingController } from './hooks/useRecordingController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRecordingLibrary } from './hooks/useRecordingLibrary';
+import { useFloatingControlsWindow } from './hooks/useFloatingControlsWindow';
 import { recordBlockedReason } from './utils/recordReadiness';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import type { RecordingSource } from './components/SourceToggles/SourceToggles';
@@ -16,6 +18,7 @@ import { WebcamOverlaySettingsPanel } from './components/WebcamOverlaySettings/W
 import { RecordingsListPanel } from './components/RecordingsList/RecordingsListPanel';
 import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
 import { RecorderControls } from './components/RecorderControls/RecorderControls';
+import { FloatingControls } from './components/RecorderControls/FloatingControls';
 import { PlaybackDialog } from './components/PlaybackDialog/PlaybackDialog';
 import { HelpDialog } from './components/HelpDialog/HelpDialog';
 
@@ -164,6 +167,13 @@ function App() {
     handleDownload,
   } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace, setNotice });
 
+  // The "Float controls" Picture-in-Picture window (ESCSUITE-400). It registers
+  // its own effects (theme mirroring, closing the window on unmount), which
+  // touch nothing the hooks above own; it is called here because the
+  // shortcuts below bind on its window as well as the page's.
+  const { supported: canFloat, floatingWindow, toggle: toggleFloatingControls } =
+    useFloatingControlsWindow();
+
   useKeyboardShortcuts({
     state,
     canRecord: blockedReason === null,
@@ -178,6 +188,7 @@ function App() {
     handleStopRecording,
     cancelCountdown,
     handleCancelRecording,
+    floatingWindow,
   });
 
   // Toggle source
@@ -212,6 +223,19 @@ function App() {
   // moment it starts preparing until the write to storage is done — not just
   // while it is actively recording.
   const sidebarLocked = isRecordingActive || state === 'preparing' || state === 'saving';
+
+  // The transport bar's props, shared by the page's bar and the floating one so
+  // both are wired to the same controller actions.
+  const transport = {
+    state,
+    isRecordingActive,
+    onPause: handlePauseRecording,
+    onResume: handleResumeRecording,
+    onStart: handleStartRecording,
+    onStop: handleStopRecording,
+    onCancel: state === 'countdown' ? cancelCountdown : handleCancelRecording,
+    blockedReason,
+  };
 
   return (
     <div className={styles.app}>
@@ -263,14 +287,9 @@ function App() {
 
           {/* Controls bar and keyboard shortcuts hint */}
           <RecorderControls
-            state={state}
-            isRecordingActive={isRecordingActive}
-            onPause={handlePauseRecording}
-            onResume={handleResumeRecording}
-            onStart={handleStartRecording}
-            onStop={handleStopRecording}
-            onCancel={state === 'countdown' ? cancelCountdown : handleCancelRecording}
-            blockedReason={blockedReason}
+            {...transport}
+            onToggleFloat={canFloat ? toggleFloatingControls : undefined}
+            floating={floatingWindow !== null}
           />
         </div>
       </main>
@@ -288,6 +307,9 @@ function App() {
 
       {/* Help Modal */}
       {showHelpModal && <HelpDialog onClose={() => setShowHelpModal(false)} />}
+
+      {/* The "Float controls" window's contents, drawn into its own document */}
+      {floatingWindow && createPortal(<FloatingControls {...transport} />, floatingWindow.document.body)}
     </div>
   );
 }
