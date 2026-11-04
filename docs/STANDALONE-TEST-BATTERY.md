@@ -36,10 +36,11 @@ cd apps/craft && pnpm exec vite preview --port 5184
 cd apps/artist && pnpm exec vite preview --port 5185
 ```
 
-Or using any static file server:
+Or exactly what `playwright.standalone.config.ts` runs, from `apps/e2e` (it has no Vite
+config, so neither app's `base`, plugins or preview settings apply):
 ```bash
-npx serve apps/craft/dist -l 5184
-npx serve apps/artist/dist -l 5185
+cd apps/e2e && pnpm exec vite preview --outDir ../craft/dist --port 5184 --strictPort
+cd apps/e2e && pnpm exec vite preview --outDir ../artist/dist --port 5185 --strictPort
 ```
 
 Or open directly in browser (fully offline, `file://` origin):
@@ -66,7 +67,7 @@ cd apps/e2e && pnpm exec playwright test --config=playwright.standalone.config.t
 - [ ] While one conversion runs, every other row's MP4 button is disabled and says why
 - [ ] Switching to another tab mid-conversion does not stall or cancel it
 - [ ] In a browser without WebCodecs the MP4 button is visible, disabled, and gives its reason; the WebM download still works
-- [ ] Opened from `file://`, the header's "Open Editor" and every row's "Open in Editor" are visible but disabled, with the visible reason "Download this recording's WebM and import it into the offline ESCAPEARTIST file." (no error page opens); served over http (`serve`, an intranet share) the offline build shows the same disabled buttons and the same reason, because it has no absolute editor address (ESCSUITE-221, 259)
+- [ ] Opened from `file://`, the header's "Open Editor" and every row's "Open in Editor" are visible but disabled, with the visible reason "Download this recording's WebM and import it into the offline ESCAPEARTIST file." (no error page opens); served over http (`vite preview`, any static server, an intranet share) the offline build shows the same disabled buttons and the same reason, because it has no absolute editor address (ESCSUITE-221, 259)
 
 #### ESCAPEARTIST (http://localhost:5185/ or file://)
 - [ ] App loads with no network requests (check DevTools Network tab)

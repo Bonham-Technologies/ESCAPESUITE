@@ -268,7 +268,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
 
 /**
  * ESCSUITE-259: the same file served from a plain web server (this project's
- * `serve` on 5184) has no ESCAPEARTIST at `/artist/` either, and the offline
+ * `vite preview` on 5184) has no ESCAPEARTIST at `/artist/` either, and the offline
  * build is not given an absolute editor address, so the header button is
  * disabled with the same reason rather than opening a 404.
  */

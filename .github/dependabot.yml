@@ -40,7 +40,6 @@ updates:
           - "@playwright/test"
           - "@axe-core/*"
           - "wait-on"
-          - "serve"
       linting:
         patterns:
           - "eslint*"

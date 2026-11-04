@@ -29,8 +29,8 @@
   extension (no warning) without ever being a `.ts` import (no TS5097). Guarded end to end by
   `apps/e2e/tests/standalone/dist-single-file.spec.ts`, a node-side assertion (no browser fixture)
   that each of `apps/artist/dist` and `apps/craft/dist` contains exactly one file after
-  `build:standalone` — `playwright.standalone.config.ts` serves the whole directory with `npx
-  serve`, which is why the browser-driven standalone specs never caught a second file sitting
+  `build:standalone` — `playwright.standalone.config.ts` serves the whole directory with a static
+  server (`vite preview` since ESCSUITE-410, `npx serve` before), which is why the browser-driven standalone specs never caught a second file sitting
   next to `index.html`.
 - **App version on screen** (ESCSUITE-369): `vite.config.ts` defines `__APP_VERSION__` from
   this app's `package.json` (typed in `src/vite-env.d.ts`), in dev, the hosted, headless and
