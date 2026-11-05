@@ -76,3 +76,8 @@
   justify-content: flex-end;
   gap: var(--spacing-xs);
 }
+
+/* The live region stays in the page while idle; empty, it takes no room in the row. */
+.status:empty {
+  position: absolute;
+}

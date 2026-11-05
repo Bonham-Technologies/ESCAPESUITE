@@ -136,6 +136,7 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
     store().undo();
     expect(captionClips()).toHaveLength(0);
     expect(button()).toBeEnabled();
+    expect(button()).toHaveFocus();
   });
 
   it('says so when the timeline has no sound, or no speech was heard', async () => {
@@ -166,7 +167,10 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
     const { showNotification } = renderControl();
 
     await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
-    expect(await screen.findByRole('status')).toHaveTextContent('Transcribing on this device… 0:04 / 0:10');
+    expect(await screen.findByText('Transcribing on this device…')).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByText('0:04 / 0:10')).not.toHaveAttribute('aria-live');
+    // The same button, so keyboard focus stays on it.
+    expect(screen.getByRole('button', { name: 'Stop transcribing' })).toHaveFocus();
     await user.click(screen.getByRole('button', { name: 'Stop transcribing' }));
 
     await waitFor(() => expect(showNotification).toHaveBeenCalledWith('Transcription stopped. No captions were added.', 'info'));
@@ -181,7 +185,7 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
     transcribeTimeline.mockImplementation(() => new Promise(() => {}));
     renderControl();
     await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
-    expect(await screen.findByRole('status')).toHaveTextContent('Preparing the sound…');
+    expect(await screen.findByText('Preparing the sound…')).toHaveAttribute('aria-live', 'polite');
   });
 
   it("shows a recogniser's error in its own words, and any other failure generically", async () => {
@@ -255,6 +259,71 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
   });
 });
 
+describe('TranscribeControl: one run at a time (ESCSUITE-404)', () => {
+  it('starts one transcription however often it is pressed while the browser is asked', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValueOnce('available');
+    let answer!: (value: string) => void;
+    available.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
+    transcribeTimeline.mockImplementation(() => new Promise(() => {}));
+    renderControl();
+    const transcribeButton = await screen.findByRole('button', { name: 'Transcribe to captions' });
+    await user.click(transcribeButton);
+    await user.click(transcribeButton);
+    await user.click(transcribeButton);
+    await act(async () => answer('available'));
+    await screen.findByRole('button', { name: 'Stop transcribing' });
+    expect(available).toHaveBeenCalledTimes(2);
+    expect(transcribeTimeline).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start listening once the editor has gone, when a pack finishes installing', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('downloadable');
+    let finish!: (ok: boolean) => void;
+    install.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    const { unmount, showNotification } = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await user.click(screen.getByRole('button', { name: 'Download language pack' }));
+    unmount();
+    await act(async () => finish(true));
+    expect(transcribeTimeline).not.toHaveBeenCalled();
+    expect(showNotification).not.toHaveBeenCalled();
+  });
+
+  it('gives focus back to its button when a pack finishes installing and listening starts', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('downloadable');
+    let finish!: (ok: boolean) => void;
+    install.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+    transcribeTimeline.mockImplementation(() => new Promise(() => {}));
+    renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await user.click(screen.getByRole('button', { name: 'Download language pack' }));
+    await act(async () => finish(true));
+    expect(await screen.findByRole('button', { name: 'Stop transcribing' })).toHaveFocus();
+  });
+
+  it('leaves focus alone once the user has moved it elsewhere', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    let done!: (cues: CaptionCue[] | null) => void;
+    transcribeTimeline.mockImplementation(() => new Promise((resolve) => { done = resolve; }));
+    renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await screen.findByRole('button', { name: 'Stop transcribing' });
+    // A click on nothing in particular leaves focus on the page itself.
+    await user.click(document.body);
+    expect(document.body).toHaveFocus();
+    await act(async () => done(null));
+    expect(document.body).toHaveFocus();
+  });
+});
+
 describe('TranscribeControl: the language pack (ESCSUITE-404)', () => {
   it('says what will be downloaded before anything is, and downloads only when asked', async () => {
     const user = userEvent.setup();
@@ -285,6 +354,7 @@ describe('TranscribeControl: the language pack (ESCSUITE-404)', () => {
     await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
     await user.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByText(LANGUAGE_PACK_NOTICE)).not.toBeInTheDocument();
+    expect(button()).toHaveFocus();
     expect(install).not.toHaveBeenCalled();
     expect(transcribeTimeline).not.toHaveBeenCalled();
   });
@@ -297,7 +367,7 @@ describe('TranscribeControl: the language pack (ESCSUITE-404)', () => {
     install.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
     const { showNotification } = renderControl();
     await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
-    expect(screen.getByRole('status')).toHaveTextContent('Downloading the speech language pack…');
+    expect(screen.getByText('Downloading the speech language pack…')).toHaveAttribute('aria-live', 'polite');
     await act(async () => finish(false));
     expect(showNotification).toHaveBeenCalledWith('The speech language pack could not be installed.', 'error');
     expect(transcribeTimeline).not.toHaveBeenCalled();

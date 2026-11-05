@@ -198,6 +198,7 @@ export function transcribeChannels(options: TranscribeOptions): Promise<CaptionC
     let session = 0;
     let progressTimer: ReturnType<typeof setInterval> | undefined;
     const heard = new Map<string, HeardSegment>();
+    const finals = new Set<string>();
     let source: AudioBufferSourceNode | null = null;
 
     const clock = () => Math.max(0, Math.min(duration, ctx.currentTime - startedAt));
@@ -208,6 +209,9 @@ export function transcribeChannels(options: TranscribeOptions): Promise<CaptionC
       recognition.onresult = null;
       recognition.onerror = null;
       recognition.onend = null;
+      // Stopping the source fires its `ended` event later: it must not report
+      // progress or stop the recogniser after the transcription has settled.
+      if (source) source.onended = null;
       try { source?.stop(); } catch { /* already stopped */ }
       try { source?.disconnect(); } catch { /* not connected */ }
       void ctx.close().catch(() => {});
@@ -242,6 +246,12 @@ export function transcribeChannels(options: TranscribeOptions): Promise<CaptionC
           segment.text = text;
           segment.finalAt = now;
         }
+        if (result?.isFinal) finals.add(key);
+      }
+      // `results` is the session's whole current list: an interim result past
+      // its end was folded into an earlier one, and must not become a cue of its own.
+      for (let i = event.results.length; heard.has(`${session}:${i}`); i++) {
+        if (!finals.has(`${session}:${i}`)) heard.delete(`${session}:${i}`);
       }
     };
     recognition.onerror = (event: SpeechErrorEventLike) => {

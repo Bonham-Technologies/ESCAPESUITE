@@ -49,12 +49,50 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
   const [availability, setAvailability] = useState<LocalSpeechAvailability | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const abortRef = useRef<AbortController | null>(null);
+  // One run at a time: a second press while the first is still asking the
+  // browser (before the button turns into "Stop transcribing") is ignored.
+  const runningRef = useRef(false);
+  // Nothing starts listening after the editor has gone, e.g. once a language
+  // pack the user asked for finishes installing.
+  const mountedRef = useRef(true);
   const addCaptionCues = useEditorStore((state) => state.addCaptionCues);
-  // The notice's own button takes focus when it opens: the button that opened it is disabled.
+
+  // Keyboard focus. The main button stays one element while it reads
+  // "Transcribe to captions" and "Stop transcribing", so focus stays on it. When
+  // the element that had focus goes away (the notice closes, the pack finishes
+  // installing), focus comes back to the main button, but only if it was in
+  // this control and the user has not moved it elsewhere since.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mainRef = useRef<HTMLButtonElement>(null);
   const downloadRef = useRef<HTMLButtonElement>(null);
+  const ownsFocusRef = useRef(false);
   useEffect(() => {
-    if (phase.kind === 'consent') downloadRef.current?.focus();
+    const leave = (event: Event) => {
+      if (!containerRef.current?.contains(event.target as Node)) ownsFocusRef.current = false;
+    };
+    document.addEventListener('focusin', leave);
+    document.addEventListener('pointerdown', leave);
+    return () => {
+      document.removeEventListener('focusin', leave);
+      document.removeEventListener('pointerdown', leave);
+    };
+  }, []);
+  useEffect(() => {
+    // The notice's own button takes focus when it opens: the button that opened it is disabled.
+    if (phase.kind === 'consent') {
+      downloadRef.current?.focus();
+      return;
+    }
+    const active = document.activeElement;
+    if (ownsFocusRef.current && (!active || active === document.body)) mainRef.current?.focus();
   }, [phase.kind]);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let live = true;
@@ -69,7 +107,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
 
   const transcribe = useCallback(async () => {
     const Recognition = getLocalRecognitionCtor();
-    if (!Recognition) return;
+    if (!Recognition || !mountedRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase({ kind: 'mixing' });
@@ -133,6 +171,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
   const install = useCallback(async () => {
     setPhase({ kind: 'installing' });
     const installed = await installLocalLanguagePack(lang);
+    if (!mountedRef.current) return;
     if (!installed) {
       setPhase({ kind: 'idle' });
       showNotification('The speech language pack could not be installed.', 'error');
@@ -150,6 +189,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     }
     // Asked again: a pack may have been installed, or removed, since the editor opened.
     const answer = await probeLocalRecognition(lang);
+    if (!mountedRef.current) return;
     setAvailability(answer);
     if (answer === 'available') await transcribe();
     else if (answer === 'downloadable') setPhase({ kind: 'consent' });
@@ -157,33 +197,57 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     else showNotification('On-device speech recognition is not available in this browser.', 'info');
   }, [install, lang, showNotification, transcribe]);
 
+  const runOnce = useCallback(async (task: () => Promise<void>) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    try {
+      await task();
+    } finally {
+      runningRef.current = false;
+    }
+  }, []);
+
   if (availability === null || availability === 'unavailable') return null;
 
   const busy = phase.kind === 'mixing' || phase.kind === 'listening';
+  // A live region that is always there, so each new phase is announced; the
+  // running clock sits outside it so it is not read out every second.
+  const status =
+    phase.kind === 'mixing'
+      ? 'Preparing the sound…'
+      : phase.kind === 'listening'
+        ? 'Transcribing on this device…'
+        : phase.kind === 'installing'
+          ? 'Downloading the speech language pack…'
+          : '';
   return (
-    <div className={styles.transcribe}>
-      {busy ? (
-        <>
-          <span className={styles.status} role="status">
-            {phase.kind === 'mixing'
-              ? 'Preparing the sound…'
-              : `Transcribing on this device… ${clock(phase.played)} / ${clock(phase.total)}`}
-          </span>
-          <button type="button" className={styles.button} onClick={() => abortRef.current?.abort()}>
-            Stop transcribing
-          </button>
-        </>
-      ) : phase.kind === 'installing' ? (
-        <span className={styles.status} role="status">Downloading the speech language pack…</span>
-      ) : (
+    <div
+      ref={containerRef}
+      className={styles.transcribe}
+      onFocus={() => {
+        ownsFocusRef.current = true;
+      }}
+    >
+      <span className={styles.status} aria-live="polite" aria-atomic="true">
+        {status}
+      </span>
+      {phase.kind === 'listening' && (
+        <span className={styles.status}>{`${clock(phase.played)} / ${clock(phase.total)}`}</span>
+      )}
+      {phase.kind !== 'installing' && (
         <button
+          ref={mainRef}
           type="button"
           className={styles.button}
-          onClick={() => void start()}
+          onClick={busy ? () => abortRef.current?.abort() : () => void runOnce(start)}
           disabled={phase.kind === 'consent'}
-          title={`Make captions from the timeline's sound with your browser's on-device speech recognition (${lang})`}
+          title={
+            busy
+              ? undefined
+              : `Make captions from the timeline's sound with your browser's on-device speech recognition (${lang})`
+          }
         >
-          Transcribe to captions
+          {busy ? 'Stop transcribing' : 'Transcribe to captions'}
         </button>
       )}
       {phase.kind === 'consent' && (
@@ -193,7 +257,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
             <button type="button" className={styles.button} onClick={() => setPhase({ kind: 'idle' })}>
               Cancel
             </button>
-            <button type="button" ref={downloadRef} className={styles.primary} onClick={() => void install()}>
+            <button type="button" ref={downloadRef} className={styles.primary} onClick={() => void runOnce(install)}>
               Download language pack
             </button>
           </div>

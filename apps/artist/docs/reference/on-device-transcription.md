@@ -75,6 +75,13 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   is never opened.** A 10-minute timeline takes about 10 minutes. The status line reads
   "Transcribing on this device… m:ss / m:ss". **Stop transcribing** ends it and adds nothing.
   Edits made during the run do not change what is heard: the mix was taken at the start.
+  One run at a time: presses while the browser is still being asked are ignored.
+- **Keyboard and screen readers:** the button is one element that reads **Transcribe to
+  captions** or **Stop transcribing**, so focus stays on it. When the notice closes, or a pack
+  finishes installing and listening starts, focus returns to it, unless the user has moved
+  focus elsewhere. The phase ("Preparing the sound…", "Transcribing on this device…",
+  "Downloading the speech language pack…") is in a polite live region that is always in the
+  page; the running `m:ss / m:ss` clock sits outside it, so it is not read out every second.
 - **Language:** the browser's own (`navigator.language`, `en-US` if it has none). There is no
   language picker, no translation and no speaker labels.
 - **Times are estimates.** The recogniser reports words, not times. A cue starts
@@ -125,3 +132,12 @@ on demand.
   audio track carrying the timeline's sound; the stub's words become caption clips and appear
   in the downloaded `.srt` and `.vtt`; one Ctrl+Z removes them; no fetch or XHR while
   transcribing; a `downloadable` pack is installed only after the notice.
+- **Every Chromium e2e project turns the real API off.** Playwright's Chromium headless shell
+  (what `chromium.launch()` runs headless, in CI too) kills the page's renderer ("Target
+  crashed") when a page calls `SpeechRecognition.available()`: it has the API in Blink but not
+  the browser-side speech service. The editor asks `available()` when it opens, so every
+  Chromium project in every `apps/e2e/playwright*.config.ts` passes
+  `--disable-blink-features=OnDeviceWebSpeechAvailable` (`apps/e2e/utils/chromiumLaunch.ts`).
+  With it the editor sees no on-device mode and shows no control. A new Chromium project or
+  config must pass it too. Full Chromium (`channel: 'chromium'`) answers `downloadable` and
+  does not crash.

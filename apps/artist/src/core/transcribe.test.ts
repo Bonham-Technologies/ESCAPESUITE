@@ -351,6 +351,44 @@ describe('transcribeChannels (ESCSUITE-404)', () => {
     await expect(run).resolves.toEqual([]);
   });
 
+  it('reports nothing and stops nothing after it has failed, when the stopped source ends', async () => {
+    const { ctx, source } = makeContext();
+    const progress = vi.fn();
+    // A real source fires `ended` when it is stopped, as cleaning up does.
+    source.stop.mockImplementation(() => source.onended?.());
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, onProgress: progress,
+    });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    progress.mockClear();
+    recognition.onerror?.({ error: 'network' });
+    await expect(run).rejects.toThrow('On-device speech recognition stopped (network).');
+    expect(source.stop).toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    expect(recognition.stop).not.toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it('drops an interim result the recogniser folded into an earlier one', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    const event = (resultIndex: number, results: Array<[string, boolean]>) =>
+      recognition.onresult?.({
+        resultIndex,
+        results: results.map(([transcript, isFinal]) => Object.assign([{ transcript }], { isFinal })) as unknown as SpeechResultEventLike['results'],
+      });
+    ctx.currentTime = 1;
+    event(0, [['hello', false], [' from the', false]]);
+    ctx.currentTime = 3;
+    event(0, [['hello from the stub', true]]);
+    source.onended?.();
+    const cues = await run;
+    expect(cues.map((c) => c.text)).toEqual(['hello from the stub']);
+  });
+
   it('finishes when stop() itself throws', async () => {
     const { ctx, source } = makeContext();
     const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });

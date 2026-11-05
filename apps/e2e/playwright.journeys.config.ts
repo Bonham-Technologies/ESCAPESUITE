@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { CHROMIUM_TEST_ARGS } from './utils/chromiumLaunch'
 
 const isCI = !!process.env.CI
 
@@ -36,7 +37,8 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // See utils/chromiumLaunch.ts (ESCSUITE-404).
+      use: { ...devices['Desktop Chrome'], launchOptions: { args: CHROMIUM_TEST_ARGS } },
     },
     // Cross-browser projects only run locally (not in CI)
     ...(isCI

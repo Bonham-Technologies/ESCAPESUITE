@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 import { PERF_LAUNCH_ARGS } from './utils/perf'
+import { CHROMIUM_TEST_ARGS } from './utils/chromiumLaunch'
 
 /**
  * Playwright configuration for the A/V drift rig — the ESCAPECRAFT arm
@@ -61,7 +62,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], launchOptions: { args: PERF_LAUNCH_ARGS } },
+      use: { ...devices['Desktop Chrome'], launchOptions: { args: [...PERF_LAUNCH_ARGS, ...CHROMIUM_TEST_ARGS] } },
     },
     {
       name: 'firefox',
