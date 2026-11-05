@@ -3,7 +3,8 @@
 
 Bound by `src/hooks/useKeyboardShortcuts.ts` — the only window listener `App` itself binds; `VideoPlayer` binds its own while the playback dialog is open — and listed
 for the user by `src/components/RecorderControls/RecorderControls.tsx`. None of them fire while
-a dialog is open; see "Dialogs".
+a dialog is open; see "Dialogs". While the "Float controls" window is open the same listener is
+bound on that window too (see below).
 
 Every one of them is gated on the state the app is in, so a key that has nothing to do is
 inert rather than wrong — there is no "else" branch anywhere in the switch. Two gates are
@@ -47,3 +48,35 @@ The record button agrees with this table, not just with R: during `countdown` th
 itself wired to cancel (see "The record button only offers what it can deliver" — ESCSUITE-106),
 so a click there and an Esc press do the same thing, and S stays inert through the countdown as
 this table already says.
+
+## Float controls (ESCSUITE-400)
+
+"Float controls", at the end of the shortcut legend, opens a Document Picture-in-Picture window
+(`documentPictureInPicture.requestWindow({ width: 360, height: 160 })`) that stays on top of
+whatever is being recorded. It holds the page's own `TransportBar` (timer, Pause/Resume, the
+record/stop button, Cancel), wired to the same `useRecordingController` handlers, and the Mic /
+System meters (`AudioLevelMeters`) while a take is live. `App` portals `FloatingControls` into the
+window's document, so it is the same React tree and the same store; `useFloatingControlsWindow`
+owns the window.
+
+- **Only where it can work.** The button is drawn only when `window.documentPictureInPicture`
+  exists and CRAFT is the top-level document (`canFloatControls()`; `requestWindow()` throws in
+  an iframe, and CRAFT can be embedded). Chromium has it; Safari does not. It is a toggle:
+  `aria-pressed` while the window is open, and a second press closes it.
+- **The window's document** gets clones of every `<style>` and stylesheet `<link>` in the page,
+  in order, the page's `lang`, the title "ESCAPECRAFT controls", and the page's `data-theme`,
+  kept in step by a `MutationObserver` while the window is open. Nothing is fetched: the
+  single-file build's styles are inline, which is why the offline file floats its controls from
+  `file://` too. Its content is one `<main>` named by a visually hidden `<h1>`.
+- **Keys.** R / P / S / Esc pressed in the window reach the same handler with the same gates
+  (`useKeyboardShortcuts`' `floatingWindow`).
+- **Closing it** (its own close button, the page's toggle) ends only the window: the take keeps
+  recording, the page takes focus back (`window.focus()` on the window's `pagehide`) and its own
+  controls already show the live state. The window also closes when `App` unmounts, and a window
+  that finishes opening after that is closed on arrival. A refused request (no user activation)
+  is a `console.warn` and nothing else.
+- **Out of scope:** a webcam preview in the window.
+
+Tests: `App.floatingControls.test.tsx` and `useFloatingControlsWindow.test.ts` (unit, through
+`src/test/doubles/documentPictureInPicture.ts`), and `apps/e2e/tests/escapecraft/float-controls.spec.ts`
+plus two cases in `tests/standalone/craft.spec.ts` (served and `file://`) in real Chromium.

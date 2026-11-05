@@ -36,16 +36,20 @@ export default defineConfig({
         ]),
   ],
 
-  // Serve the pre-built standalone HTML files
+  // Serve the pre-built standalone HTML files with Vite's own static preview
+  // server (ESCSUITE-410: replaces `npx serve -s`, whose serve-handler pins
+  // minimatch 3.x, GHSA-g3hv-75wg-m249). Run from apps/e2e, which has no Vite
+  // config, so neither app's config (base, plugins, preview port) applies;
+  // unknown paths fall back to index.html the way `serve -s` did.
   webServer: [
     {
-      command: 'npx serve -s ../craft/dist -l 5184 --no-clipboard',
+      command: 'pnpm exec vite preview --outDir ../craft/dist --port 5184 --strictPort',
       port: 5184,
       reuseExistingServer: !process.env.CI,
       timeout: 30000,
     },
     {
-      command: 'npx serve -s ../artist/dist -l 5185 --no-clipboard',
+      command: 'pnpm exec vite preview --outDir ../artist/dist --port 5185 --strictPort',
       port: 5185,
       reuseExistingServer: !process.env.CI,
       timeout: 30000,

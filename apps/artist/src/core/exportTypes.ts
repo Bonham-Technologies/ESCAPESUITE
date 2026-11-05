@@ -180,6 +180,19 @@ export interface ExportLogEntry {
 }
 
 /**
+ * The diagnostic log as text, one entry a line, each timed from the first
+ * (ESCSUITE-412). The dialog logs the entries as objects too, but a console
+ * captured outside DevTools — a CI trace — shows those only as `Object`, and the
+ * two journey failures that ticket diagnosed carried nothing readable.
+ */
+export function formatExportLog(entries: readonly ExportLogEntry[]): string {
+  const start = entries[0]?.timestamp ?? 0;
+  return entries
+    .map((entry) => `+${Math.round(entry.timestamp - start)} ms ${entry.phase}: ${entry.detail}`)
+    .join('\n');
+}
+
+/**
  * Error class that carries the export diagnostic log for debugging. Lives
  * here (rather than in exportMP4.ts, where it was first written) so both
  * exporters can throw and catch it without one importing from the other;
@@ -1393,6 +1406,14 @@ export function exportLengthReason(seconds: number): string | null {
 export const EXPORT_MAX_SECONDS = 3 * 60 * 60;
 
 /**
+ * The sentence {@link exportedLengthReason} gives for a stretch longer than
+ * {@link EXPORT_MAX_SECONDS}. Exported so the export dialog can tell it from
+ * the other length reasons and add how to set a section (ESCSUITE-385).
+ */
+export const EXPORT_TOO_LONG_REASON =
+  'Cannot export more than 3 hours at once: set in and out points and export it in sections';
+
+/**
  * Why the stretch an export will actually encode — a selected section, or the
  * whole timeline when none is selected — cannot be exported, or `null`: every
  * {@link exportLengthReason}, and longer than {@link EXPORT_MAX_SECONDS}. Not
@@ -1402,9 +1423,7 @@ export const EXPORT_MAX_SECONDS = 3 * 60 * 60;
 export function exportedLengthReason(seconds: number): string | null {
   const reason = exportLengthReason(seconds);
   if (reason !== null) return reason;
-  if (seconds > EXPORT_MAX_SECONDS) {
-    return 'Cannot export more than 3 hours at once: set in and out points and export it in sections';
-  }
+  if (seconds > EXPORT_MAX_SECONDS) return EXPORT_TOO_LONG_REASON;
   return null;
 }
 

@@ -69,9 +69,11 @@ what is already stored.
 
 ## Cues on delta frames (ESCSUITE-359)
 
-Mediabunny 1.61.6 forces a new Cluster once one would pass 32.767 s (a block's timestamp is an
-int16 of ms from its Cluster's), whatever frame comes next, and still writes a CuePoint for every
-track in it. A MediaRecorder take can go minutes between key frames, so between 2026-10-17 and
+Mediabunny up to 1.62.1 forces a new Cluster once one would pass 32.767 s (a block's timestamp
+is an int16 of ms from its Cluster's), whatever frame comes next, and still writes a CuePoint for
+every track in it. **From Mediabunny 1.63.0** (ARTIST ships 1.65.0) the muxer writes a cue only for
+each track's first key block in a Cluster, so the remux no longer writes a bad cue by itself; see
+**Upstream** below for why the drop stays. A MediaRecorder take can go minutes between key frames, so between 2026-10-17 and
 this fix the remux stored most of a long take's Clusters with a **video cue on a delta frame**.
 Chromium trusts a cue as a key frame: a seek onto one leaves the VP8/VP9 decoder nothing to start
 from, the element plays on (audio, `currentTime`) and never presents another picture. Every far
@@ -108,4 +110,10 @@ seek lands on another bad cue, so the preview froze for good until a reload (use
   write-back only when asked) and `apps/e2e/tests/regressions/ESCSUITE-359.spec.ts` (a fresh
   import and a pre-fix row: click the ruler at 45 s, play, and the canvas must change; both stay on
   one frame before the fix). Firefox seeking a re-indexed file is owner-checked.
-- **Upstream**: the forced Cluster's cue is Mediabunny's; watched on its own ticket.
+- **Upstream**: the forced Cluster's cue was Mediabunny's
+  ([Vanilagy/mediabunny#597](https://github.com/Vanilagy/mediabunny/issues/597), watched on
+  ESCSUITE-362), fixed in 1.63.0 (ESCSUITE-411). `dropDeltaFrameCues` stays in both places:
+  in `remuxWithSeekIndex` as a guard against a regression, and on read in `core/storage.ts`
+  because rows stored before the fix still carry the bad cues. `webmDeltaFrameCues.test.ts`
+  ("Mediabunny's own muxer, without dropDeltaFrameCues") runs the remux with the drop turned off
+  and fails if Mediabunny writes a video cue on a delta frame again (it fails on 1.62.1).

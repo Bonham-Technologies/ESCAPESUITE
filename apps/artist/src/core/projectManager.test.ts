@@ -1635,6 +1635,8 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
         { min: -0.5, max: 0.5 },
         { min: -0.2, max: 0.3 },
       ],
+      // ESCSUITE-403: each peak's length, saved beside the peaks.
+      waveformSecondsPerPeak: 479 / 48000,
       hasAudio: true,
       takeId: 'take-primary-id',
       role: 'screen',
@@ -1657,6 +1659,7 @@ describe('project file metadata round trip (ESCSUITE-97)', () => {
       source: 'recording',
       recordedAt: 1700000000000,
       waveformData: take.waveformData,
+      waveformSecondsPerPeak: 479 / 48000,
       hasAudio: true,
       takeId: 'take-primary-id',
       role: 'screen',
@@ -2614,6 +2617,20 @@ describe('loadProject regenerates a missing waveform (ESCSUITE-347)', () => {
     await deleteVideo(id)
   })
 
+  it("stores a rebuilt waveform's peak length with it (ESCSUITE-403)", async () => {
+    vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true, secondsPerPeak: 159 / 16000 })
+    const id = uniqueId('legacy-wave-timing')
+    await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), {
+      id, name: 'legacy', duration: 8, width: 640, height: 360, frameRate: 30, mimeType: 'video/webm', size: 3,
+    })
+
+    const { sourceVideos } = await loadProject(legacyFile(id))
+
+    expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, waveformSecondsPerPeak: 159 / 16000 })
+    expect((await getVideo(id))?.metadata).toMatchObject({ waveformData: peaks, waveformSecondsPerPeak: 159 / 16000 })
+    await deleteVideo(id)
+  })
+
   it('decodes a waveform for a v2 source whose meta carries an empty one', async () => {
     vi.mocked(extractWaveformData).mockResolvedValueOnce({ peaks, hasAudio: true })
     const id = uniqueId('v2-empty-wave')
@@ -2712,6 +2729,26 @@ describe('loadProject regenerates a missing waveform (ESCSUITE-347)', () => {
     expect(sourceVideos[0]).toMatchObject({ waveformData: peaks, hasAudio: true })
     expect(extractWaveformData).not.toHaveBeenCalled()
     await deleteVideo(id)
+  })
+
+  it("takes the stored row's peak length with its peaks, and none where the row has none (ESCSUITE-403)", async () => {
+    for (const [name, timing] of [['timed', 441 / 44100], ['untimed', undefined]] as const) {
+      const id = uniqueId(`stored-wave-${name}`)
+      await storeVideo(id, new Blob([new Uint8Array([1, 2, 3])], { type: 'video/webm' }), {
+        id, name: 'stored', duration: 8, width: 640, height: 360, frameRate: 30, mimeType: 'video/webm', size: 3,
+        waveformData: peaks, hasAudio: true, ...(timing ? { waveformSecondsPerPeak: timing } : {}),
+      })
+      // A file whose empty waveform claims a length: it describes no peaks, so it is not kept.
+      const file = v2File(createTestProject(id), [
+        { id, mimeType: 'video/webm', meta: { duration: 8, width: 640, height: 360, frameRate: 30, waveformData: [], waveformSecondsPerPeak: 0.01 }, bytes: [1, 2, 3] },
+      ])
+
+      const { sourceVideos } = await loadProject(file)
+
+      expect(sourceVideos[0].waveformData).toEqual(peaks)
+      expect(sourceVideos[0].waveformSecondsPerPeak, name).toBe(timing)
+      await deleteVideo(id)
+    }
   })
 
   it("keeps the file's hasAudio: true when it takes a stored row's waveform that says otherwise", async () => {

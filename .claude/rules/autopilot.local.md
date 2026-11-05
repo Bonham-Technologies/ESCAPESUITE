@@ -13,19 +13,6 @@ Put each rule under a heading that names the policy section it changes, such as
 that section or replaces part of it. A rule that applies only to one role is still read
 by every role, so name the role.
 
-## Ticket classes: protected editor paths
-
-Adds to the `ap-owner-merge` list (stricter). Moved here from the vendored policy, where
-ESCAPESUITE #933 added it.
-
-**Protected editor paths (temporary).** Until ESCSUITE-348, -349, -350 and -351 are all
-Done and green on `main`, a diff touching any of these in `apps/artist/src/` is also
-`ap-owner-merge`: `components/Preview/**`, `components/Timeline/**`,
-`store/clipSlice.ts`, `store/historySlice.ts`, `store/projectMigration.ts`,
-`core/projectFileFormat.ts`, `core/projectManager.ts`, `utils/waveform.ts` and
-`core/audioMixer.ts`. Once all four tickets are Done, the rule lapses: the steward says
-so in the next digest and files an `ap-owner-merge` ticket to delete this paragraph.
-
 ## Steward: regression specs and flaky e2e tests
 
 The steward role only. Adds two items to the steward's filing rules, before "Score each
@@ -50,7 +37,20 @@ alone doesn't meet this step. Use the media-health helpers in `apps/e2e/utils/` 
 they exist. Where the container can't run it (e.g. H.264/AAC media), let CI prove it
 and say so in the PR.
 
-## Builder, step 4: the reviewer checks the test's layer
+## Builder, step 5: a changeset for user-visible changes
+
+The builder role only. Adds to step 5 ("Open the PR"). ESCSUITE-384 added it.
+
+Before opening the PR, a change a user can notice (a fix, new or changed behaviour,
+new or changed wording in the UI) adds one `.changeset/escsuite-<n>-<slug>.md` file.
+It lists each affected package (`@escapesuite/plan`, `@escapesuite/craft`,
+`@escapesuite/artist`, `@escapesuite/shared`, `@escapesuite/headless-artist`) as
+`patch`, or `minor` for a new feature, and its text tells users what changed in plain
+words, not how the code changed (see the existing files in `.changeset/`). A PR that
+only changes tests, CI, docs, dependencies or `.claude/` adds none. The PR body says
+which it is.
+
+## Builder, step 4: the reviewer checks the test's layer and the changeset
 
 The `reviewer` subagent, when the builder hands it a diff. Adds to its checklist. Moved
 here from a hand edit of the vendored `.claude/agents/reviewer.md`, which a refresh
@@ -59,6 +59,10 @@ overwrites.
 Check the test is at the layer where the bug is visible: if the user sees it in the
 browser, a Playwright test must fail without the change, not only a unit test (the
 **Builder, step 2** rule above). Block on a UI bug fixed with a unit test alone.
+
+Also check the changeset (the **Builder, step 5** rule above): block when a
+user-visible change has no `.changeset/*.md` file, when a package it changes is missing
+from that file, or when the text describes code instead of what users notice.
 
 ## Main must stay green, step 1: the nightly
 

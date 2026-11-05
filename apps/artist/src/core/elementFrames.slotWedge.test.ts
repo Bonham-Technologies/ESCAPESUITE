@@ -21,7 +21,9 @@
 // late, slot 0 stuck) a shared count is pulled back to 1 every frame and never
 // reaches `WEDGED_SEEK_FRAMES`: the export completed with slot 0 black. That
 // case is the one a per-source count fails; the per-element count refuses the
-// source in all four.
+// source in all four. Since ESCSUITE-412 the first time either element reaches
+// the limit reloads the source, both its elements; the refusal is the reloaded
+// element's own third wedge.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { createFrameComposer, loadElementSources, rewindElementSources } from './elementFrames'
 import { SEEK_IN_FLIGHT_GRACE_MS, SourceNotSeekableError, WEDGED_SEEK_FRAMES } from './seekWedge'
@@ -127,9 +129,15 @@ async function composer() {
  */
 async function run(composeFrame: (t: number) => Promise<void>, count: number): Promise<unknown> {
   for (let i = 0; i < count; i++) {
-    const pending = composeFrame(i / 30)
+    let settled = false
+    const pending = composeFrame(i / 30).finally(() => {
+      settled = true
+    })
     pending.catch(() => {})
     await vi.advanceTimersByTimeAsync(1_000 + SEEK_IN_FLIGHT_GRACE_MS)
+    // A frame that reloads a wedged source (ESCSUITE-412) reads storage, in
+    // real time, between its waits: fake time moves on in steps until it settles.
+    while (!settled) await vi.advanceTimersByTimeAsync(100)
     const error = await pending.then(
       () => null,
       (e: unknown) => e
@@ -165,8 +173,11 @@ describe('createFrameComposer: a seek wedge on one of a source\'s two elements',
 
     expect(thrown).toBeInstanceOf(SourceNotSeekableError)
     expect(thrown).toMatchObject({ code: 'SOURCE_NOT_SEEKABLE', message: REFUSAL })
-    // Slot 0 had a picture on frame 0, already at its time, and on frame 1,
-    // whose late seek landed in its grace; frame 2 refused before drawing.
+    // Frame 0's extra element wedged on its first seek, so the source was
+    // reloaded (ESCSUITE-412) and frame 0 composed again: slot 0 drawn, already
+    // at its time, and the fresh extra element's seek wedged (#1). Frame 1's
+    // late slot-0 seek landed in its grace and was drawn (#2); frame 2, the
+    // fresh extra element's third wedge, refused before drawing.
     expect(ctx.argsFor('drawImage')).toHaveLength(2)
   })
 

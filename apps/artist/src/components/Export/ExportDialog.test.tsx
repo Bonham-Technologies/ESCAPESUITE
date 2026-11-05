@@ -1764,6 +1764,8 @@ describe('ExportDialog', () => {
           )
         )
         expect(debugLog).toHaveBeenCalledWith('[WebM Export] Diagnostic log:', log)
+        // And as text, which a console read from a CI trace can show (ESCSUITE-412).
+        expect(debugLog).toHaveBeenCalledWith('[WebM Export] Diagnostic log (text):\n+0 ms codec: no supported video codec')
 
         const retry = screen.getByRole('button', { name: 'Try MP4 Instead' })
         fireEvent.click(retry)
@@ -2037,6 +2039,17 @@ describe('ExportDialog', () => {
       expect(button).not.toHaveAttribute('title', SENTENCE)
     })
 
+    it('says so in visible text tied to the download, without the in/out key hint (ESCSUITE-385)', () => {
+      emptyTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(screen.getByText(`${SENTENCE}.`)).toBeVisible()
+      const button = screen.getByRole('button', { name: 'Download WebM' })
+      const id = button.getAttribute('aria-describedby')
+      expect(id).toBeTruthy()
+      expect(document.getElementById(id!)).toHaveTextContent(`${SENTENCE}.`)
+    })
+
     it('also disables the Advanced download', () => {
       emptyTimeline()
       render(<ExportDialog isOpen={true} onClose={onClose} />)
@@ -2110,6 +2123,63 @@ describe('ExportDialog', () => {
       const full = screen.getByRole('button', { name: 'Export Full Video' })
       expect(full).toBeDisabled()
       expect(full).toHaveAttribute('title', SENTENCE)
+    })
+
+    // ESCSUITE-385: the reason lived only in `title`, a hover tooltip that a
+    // keyboard or touch user never sees, and it told them to set in and out
+    // points without saying how.
+    const describedBy = (element: HTMLElement) =>
+      (element.getAttribute('aria-describedby') ?? '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .map((id) => document.getElementById(id)?.textContent ?? '')
+        .join(' ')
+
+    it('says why in visible text naming the I and O keys, tied to both disabled downloads (ESCSUITE-385)', () => {
+      longTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      const notice = screen.getByText(SENTENCE, { exact: false })
+      expect(notice).toBeVisible()
+      expect(notice).toHaveTextContent(/press I\b.*\bO\b/i)
+
+      const primary = screen.getByRole('button', { name: 'Download WebM' })
+      fireEvent.click(advancedToggle())
+      const advanced = screen.getAllByRole('button', { name: /^Download (WebM|MP4|GIF)$/ })
+      expect(advanced.length).toBeGreaterThan(1)
+      for (const button of [primary, ...advanced]) {
+        expect(button).toBeDisabled()
+        expect(describedBy(button)).toContain(SENTENCE)
+        expect(describedBy(button)).toMatch(/press I\b/i)
+      }
+    })
+
+    it('ties the reason to the full-video button alone when a section is set (ESCSUITE-385)', () => {
+      longTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 1, end: 3 }} />)
+
+      expect(screen.getByText(SENTENCE, { exact: false })).toBeVisible()
+      expect(describedBy(screen.getByRole('button', { name: 'Export Full Video' }))).toContain(SENTENCE)
+      expect(screen.getByRole('button', { name: /Export Section/ })).not.toHaveAttribute('aria-describedby')
+    })
+
+    it('gives a zero-length section and the too-long full video a line each (ESCSUITE-385)', () => {
+      longTimeline()
+      render(<ExportDialog isOpen={true} onClose={onClose} timeRange={{ start: 3, end: 3 }} />)
+
+      const section = describedBy(screen.getByRole('button', { name: /Export Section/ }))
+      expect(section).toContain('Cannot export: the timeline is empty')
+      expect(section).not.toContain(SENTENCE)
+      const full = describedBy(screen.getByRole('button', { name: 'Export Full Video' }))
+      expect(full).toContain(SENTENCE)
+      expect(full).toMatch(/press I\b/i)
+    })
+
+    it('shows no length notice for a timeline that exports (ESCSUITE-385)', () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+      expect(screen.queryByText(SENTENCE, { exact: false })).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Download WebM' })).not.toHaveAttribute('aria-describedby')
     })
   })
 

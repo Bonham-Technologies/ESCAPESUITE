@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -12,7 +12,9 @@ everything else in `steward.md` still applies: **Security sweep** of this repo, 
 tickets**, **Decision Log** and **Record in Confluence**; the **Fleet digest** below
 replaces the **Weekly digest**. bonham-ops is the only repo where the role runs. The
 projects come from `autopilot/fleet.json` in this checkout; skip the entry with
-`"fleet": true`, which is this repo.
+`"fleet": true`, which is this repo. Its panel row's `Steward paused: yes` skips only
+the signal table's **Policy tickets**; the digest still runs. Its `Steward ticket cap`
+caps security tickets only; Policy tickets keep their cap of 10.
 
 ### Inputs
 
@@ -21,9 +23,9 @@ For each project, read:
    (`project = <jiraKey> AND labels = ap-steward-log`), and the newest one's date;
 2. the open tickets waiting on the owner, with the PR links in their comments:
    `project = <jiraKey> AND statusCategory != Done AND labels in (ap-decision, needs-operator, ap-scout, needs-owner)`;
-3. its Session Log's entries, by role, since each role's last scheduled time in
-   `fleet.json`: the steward's last scheduled day, the scout's last day of the month in
-   its list, and the builder's two most recent scheduled nights
+3. its Session Log's entries, by role, since each role's last scheduled time: the
+   steward's last panel `Steward days` day, the scout's last panel `Scout days` date
+   (else `fleet.json`'s `stewardDays` and `scoutDays`), and the builder's two most recent scheduled nights
    (`space = OPS AND type = page AND title = "<record> — Session Log"`);
 4. the week's counts, over the last 7 days:
    - tickets filed: `project = <jiraKey> AND created >= -7d AND (labels is EMPTY OR labels not in (ap-steward-log))`;
@@ -77,9 +79,10 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   or whose last run is older than its previous scheduled time (its cron in
   `fleet.json`), is missed: quote the status and time. Skip this run's own task and a
   run still in progress; a task with no `last_run` is missed only if it was created
-  before its previous scheduled time. Without the task listing, fall back to traces: a
-  steward or scout always leaves one, a digest comment or a Session Log entry, so one
-  whose scheduled time passed with no trace is missed. A builder with nothing to do
+  before its previous scheduled time. The steward and scout tasks fire daily, so judge
+  them by trace alone. Without the task listing, fall back to traces: a
+  steward or scout always leaves one on its days (input 3), a digest comment or a Session
+  Log entry, so one whose scheduled time passed with no trace is missed. A builder with nothing to do
   leaves none, so flag a builder only when ready tickets (`labels in (ap-auto,
   ap-owner-merge)`, not Done) existed at the start of its window and none changed status
   or gained a PR-link comment across two consecutive scheduled runs. The cause is
@@ -90,13 +93,15 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   column (its open `autopilot/refresh-v*` PR, linked, else the propagation log's).
 - **Capacity:** one row per project. Columns: Project · Policy on main · Ready (auto /
   owner-merge / feature) · Waiting on you · Runs/week × budget · Capacity/week · Weeks to
-  clear · Paused · Last run per task + result · Drift (`none` or the ticket's link).
-  Runs/week comes from the builder's cron, budget and Paused from the panel (else
-  `fleet.json`'s `builderBudget`, marked "fallback"), and weeks to clear is ready ÷
+  clear · Paused (builder / steward / scout) · Last run per task + result · Drift (`none` or the ticket's link).
+  Runs/week is the days the builder's cron fires that are also panel `Build days`
+  (else every cron day), budget and Paused from the panel (else
+  `fleet.json`'s `builderBudget` and `no`, marked "fallback"), and weeks to clear is ready ÷
   capacity, one decimal. Then rewrite the panel's **Status** section with the same
   table and "Last updated <date>", leaving **Settings** untouched: the update sends the
   whole page, so copy **Settings** back exactly as read, then re-read it to confirm.
-- **Scoreboard:** one line per project, linking its digest: the ten dimension scores,
+- **Scoreboard:** one line per project, linking its digest: the ten dimension scores
+  ("paused" when the digest says so; that counts as present, not missing),
   each with its trend (this digest's score minus the previous digest's); reverts this
   week; owner interventions this week, counted as decisions answered only (input 4;
   merges in another repo can't be read from here); the security counts; tickets filed
@@ -152,9 +157,10 @@ only the owner can do the work. Search for an open one with the same title first
   older policy version or no Setup line. Read the propagation log's newest comment: if
   it is for `policy v<N>` and the project's line is `pr #n` or `updated #n`, its
   refresh PR is open: file nothing and link it under **Setup**; the project's builder
-  merges it. If the line is `FAILED …`, `kept-edits issue #n` or anything else (such
-  as `nothing to do`), the project has no line, or the comment is for another version,
-  file the ticket and quote the line.
+  merges it, or labels it `needs-owner` when its merge is refused (builder step 6). If
+  the line is `FAILED …`, `kept-edits issue #n` or anything else (such as `nothing to
+  do`), the project has no line, or the comment is for another version, file the
+  ticket and quote the line.
 - **`<project>: paste Project instructions v<M>`**, when a project reports an older
   instructions version, or two that differ. The body is the text to paste, from
   `bin/fleet render-instructions <name>` in this checkout. Task edits go on the

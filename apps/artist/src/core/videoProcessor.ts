@@ -383,8 +383,9 @@ async function finishVideoFile({ bytes, file }: IndexedImport, metadata: SourceV
 
   // Extract audio waveform data (videos may have audio tracks)
   try {
-    const { peaks, hasAudio } = await extractWaveformData(file);
+    const { peaks, hasAudio, secondsPerPeak } = await extractWaveformData(file);
     metadata.waveformData = peaks;
+    if (secondsPerPeak !== undefined) metadata.waveformSecondsPerPeak = secondsPerPeak;
     metadata.hasAudio = hasAudio;
   } catch (error) {
     console.warn('Failed to extract waveform data:', error);
@@ -626,8 +627,9 @@ async function finishAudioFile({ bytes, file }: IndexedImport): Promise<SourceVi
   // Extract waveform data for timeline visualization. The one decode of the
   // file's audio: the thumbnail below is drawn from these peaks (ESCSUITE-338).
   try {
-    const { peaks, hasAudio } = await extractWaveformData(file);
+    const { peaks, hasAudio, secondsPerPeak } = await extractWaveformData(file);
     metadata.waveformData = peaks;
+    if (secondsPerPeak !== undefined) metadata.waveformSecondsPerPeak = secondsPerPeak;
     metadata.hasAudio = hasAudio;
   } catch (error) {
     console.warn('Failed to extract waveform data:', error);

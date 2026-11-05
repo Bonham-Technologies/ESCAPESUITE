@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -27,7 +27,7 @@ Each run plays the roles named in its prompt, in the order given.
   steward's sweep where `autopilot.local.md` says so.
 
 Every steward, builder and dependabot run starts with **Main must stay green** and then
-**Reconcile**, below. The scout skips both.
+**Reconcile**, below (a steward off its control-panel days stops first). The scout skips both.
 
 ## Role files
 

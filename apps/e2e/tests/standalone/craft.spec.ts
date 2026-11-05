@@ -11,6 +11,7 @@ import {
 import { canConvertToMp4 } from '../../utils/webcodecs'
 import { waitForAppReady } from '../../utils/ready'
 import { assertNetworkSilence, trackNetworkSilence } from '../../utils/networkSilence'
+import { openFloatingControls, startTake } from '../../utils/floatControls'
 
 /**
  * Smoke tests for the ESCAPECRAFT offline build.
@@ -233,6 +234,36 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     assertNetworkSilence(network)
   })
 
+  // ESCSUITE-400: the "Float controls" window is a second document, and its
+  // styles are copied in from this one. Requests are tracked on the context,
+  // not the page, so anything the floating window itself fetched is counted.
+  test('floats the controls in a Picture-in-Picture window with no request off the origin', async ({ page, context, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Runs in Chromium; see tests/escapecraft/float-controls.spec.ts for the other browsers')
+
+    const externalCalls: string[] = []
+    context.on('request', (request) => {
+      const url = request.url()
+      if (!url.startsWith('data:') && !url.startsWith('blob:') && !url.includes('localhost:5184')) {
+        externalCalls.push(url)
+      }
+    })
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto(CRAFT_URL)
+    await waitForAppReady(page, 'craft')
+
+    await startTake(page)
+    const floating = await openFloatingControls(page)
+    await expect(floating.getByRole('button', { name: 'Pause recording' })).toBeVisible()
+    await expect(floating.getByText('Mic')).toBeVisible()
+    await page.waitForTimeout(2000)
+    await floating.getByRole('button', { name: 'Stop recording' }).click()
+    await expect(page.getByRole('button', { name: /^Play / })).toBeVisible({ timeout: 30_000 })
+
+    expect(externalCalls).toHaveLength(0)
+  })
+
   test('single HTML file contains all assets', async ({ page }) => {
     const requests: string[] = []
 
@@ -257,7 +288,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
 
 /**
  * ESCSUITE-259: the same file served from a plain web server (this project's
- * `serve` on 5184) has no ESCAPEARTIST at `/artist/` either, and the offline
+ * `vite preview` on 5184) has no ESCAPEARTIST at `/artist/` either, and the offline
  * build is not given an absolute editor address, so the header button is
  * disabled with the same reason rather than opening a 404.
  */
@@ -417,6 +448,36 @@ test.describe('ESCAPECRAFT Standalone - opened from file://', () => {
     const moduleKind = browserName === 'firefox' ? 'blob module' : 'data module'
     expect(lines.filter((line) => new RegExp(`through an AudioWorklet \\(${moduleKind}\\)`).test(line))).toHaveLength(1)
     expect(lines.filter((line) => /ScriptProcessorNode/.test(line))).toHaveLength(0)
+  })
+
+  // ESCSUITE-400: the released file floats its controls too — `file:` is a
+  // secure context, so Chromium offers the API there — and the window needs
+  // nothing from the network: every request it or the page makes stays on disk.
+  test('floats the controls from file://, and Stop there saves the take', async ({ page, context, browserName }) => {
+    test.skip(browserName !== 'chromium', 'Runs in Chromium; see tests/escapecraft/float-controls.spec.ts for the other browsers')
+
+    const offDisk: string[] = []
+    context.on('request', (request) => {
+      const url = request.url()
+      if (!/^(file|data|blob):/.test(url)) offDisk.push(url)
+    })
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto(CRAFT_FILE)
+    expect(page.url().startsWith('file://')).toBe(true)
+    await waitForAppReady(page, 'craft')
+
+    await startTake(page)
+    const floating = await openFloatingControls(page)
+    // Styled from the copied stylesheets: the record button is the round one.
+    const stop = floating.getByRole('button', { name: 'Stop recording' })
+    await expect(stop).toHaveCSS('border-radius', '50%')
+    await page.waitForTimeout(1000)
+    await stop.click()
+    await expect(page.getByRole('button', { name: /^Play / })).toBeVisible({ timeout: 30_000 })
+
+    expect(offDisk).toEqual([])
   })
 })
 

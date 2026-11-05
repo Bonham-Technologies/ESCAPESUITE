@@ -46,6 +46,7 @@ import {
   waitForEncoderBackpressure,
   webMVideoCodecConfigs,
   yieldToMain,
+  formatExportLog,
 } from './exportTypes'
 import type { Clip, Track, SourceVideo, TransitionType } from '../store/types'
 import { PRESET_SUPPRESSION } from '../utils/animation'
@@ -1300,5 +1301,20 @@ describe('GIF sentences', () => {
     expect(GIF_ALWAYS_AVAILABLE_NOTE).toMatch(/WebCodecs/)
     expect(GIF_ALWAYS_AVAILABLE_NOTE).toMatch(/GIF/)
     expect(EXPORT_NO_WEBCODECS_REASON).toMatch(/WebCodecs/)
+  })
+})
+
+describe('formatExportLog', () => {
+  it('writes one line an entry, timed from the first (ESCSUITE-412)', () => {
+    expect(
+      formatExportLog([
+        { phase: 'init', detail: 'Starting WebM export with 2 clips', timestamp: 1000.2 },
+        { phase: 'seek', detail: '"take.webm" element 0, seek to 2.0668 s: never landed', timestamp: 3803.9 },
+      ])
+    ).toBe('+0 ms init: Starting WebM export with 2 clips\n+2804 ms seek: "take.webm" element 0, seek to 2.0668 s: never landed')
+  })
+
+  it('is empty for an empty log', () => {
+    expect(formatExportLog([])).toBe('')
   })
 })

@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v7. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -18,13 +18,16 @@ project = ESCSUITE AND statusCategory != Done AND labels in (ap-auto, ap-owner-m
 **Control panel.** First read the **Settings** row whose `Jira` is this project's key on
 the OPS page `space = OPS AND type = page AND title = "Autopilot control panel"`.
 `Paused: yes` means take no tickets this run and say "paused by control panel" in the
-summary; the Dependabot sweep and **Reconcile** still run. `Builder budget` (0 to 10)
-replaces the prompt's budget, and `Feature cap` is read the same way. A missing page or
-row, a budget that isn't a whole number from 0 to 10, a feature cap that isn't a whole
-number, or a Paused that isn't yes or no falls back to the budget in the prompt
-(`Fallback ticket budget: N`, or `Ticket budget: N` in older prompts) and a feature cap
-of 8; the summary names the fallback and why. Never guess a value, and never edit
-**Settings**: only the owner does.
+summary; the Dependabot sweep and **Reconcile** still run. `Build days` (`Mon-Sun`, a
+range such as `Mon-Fri`, or a list such as `Mon,Wed,Fri`) names the days, by the run's
+start date in America/Denver, that take tickets; any other day works like Paused and
+says "not a build day". `Builder budget` (0 to 10) replaces the prompt's budget, and
+`Feature cap` is read the same way. A missing page or row, a budget that isn't a whole
+number from 0 to 10, a feature cap that isn't a whole number, or a Paused that isn't
+yes or no falls back to the budget in the prompt (`Fallback ticket budget: N`, or
+`Ticket budget: N` in older prompts) and a feature cap of 8, and `Build days` that don't
+parse fall back to every day; the summary names the fallback and why. Never guess a
+value, and never edit **Settings**: only the owner does.
 
 **Feature batches.** A feature is the open tickets sharing one Jira label
 `ap-feature-<slug>`, ordered by their "Blocks" links; each ticket keeps its own class
@@ -72,6 +75,11 @@ budget, or after two failures in a row. For each ticket:
    - `ap-owner-merge`: label the PR `needs-owner` on GitHub. The ticket **stays In
      Progress**: add the Jira label `needs-owner` and a comment linking the PR, and
      leave it. **Reconcile** moves it to Done once the owner merges.
+   - **Merge refused.** If the session's permission check refuses the merge call (it
+     never reached GitHub), don't retry it or work around it: label the PR `needs-owner`
+     and comment on the PR with the first line `<!-- autopilot:merge-refused -->` and the
+     refusal. Its ticket, if any, goes as `ap-owner-merge` above, saying the merge was
+     refused; Reconcile moves it to Done once the owner merges.
 7. If a ticket turns out ambiguous, bigger than described, or of a stricter class,
    relabel it, comment on what you found, move it back to To Do, and move on.
 8. If you stop on a ticket without a PR, move it back to To Do with a comment saying
@@ -84,6 +92,7 @@ Merge one under the `ap-auto` rules, with no ticket, when all of these hold: eve
 in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
 listed in it; `.claude/rules/autopilot.local.md` is not among them; `ci-status` is
 green on the head. Otherwise label it `needs-owner` and comment which condition failed.
+A refused merge goes as step 6's **Merge refused**.
 This is the one `.claude/` change that isn't owner-merged: the owner approved it when
 it merged in bonham-ops.
 

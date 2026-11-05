@@ -33,6 +33,8 @@ import {
   calculateTimelineDuration,
   exportLengthReason,
   exportedLengthReason,
+  EXPORT_TOO_LONG_REASON,
+  formatExportLog,
   projectHasAudio as computeProjectHasAudio,
 } from '../../core/exportTypes';
 import { LOUDNESS_TARGETS, formatLoudnessSummary, loudnessTargetOrOff } from '../../core/loudness';
@@ -100,6 +102,22 @@ const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
   srt: 'application/x-subrip',
   vtt: 'text/vtt',
 };
+
+/** The visible length notices the disabled downloads point at (ESCSUITE-385). */
+const LENGTH_REASON_ID = 'export-length-reason';
+const FULL_LENGTH_REASON_ID = 'export-full-length-reason';
+
+/**
+ * How to set a section, from the keys `useAppKeyboardShortcuts` binds: I and O
+ * set the in and out points at the playhead (ESCSUITE-385).
+ */
+const SECTION_KEYS_HINT =
+  'Close this dialog, then press I on the timeline to set the in point and O to set the out point at the playhead.';
+
+/** A length reason as the dialog says it: a sentence, plus how to set a section when it is too long. */
+function lengthNoticeText(reason: string): string {
+  return reason === EXPORT_TOO_LONG_REASON ? `${reason}. ${SECTION_KEYS_HINT}` : `${reason}.`;
+}
 
 interface ExportDialogProps {
   isOpen: boolean;
@@ -336,6 +354,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const lengthReason = timeRange
     ? wholeLengthReason ?? exportedLengthReason(timeRange.end - timeRange.start)
     : fullLengthReason;
+  // ESCSUITE-385: a length reason is said in the dialog, not only in a
+  // button's `title` (a hover tooltip keyboard and touch users never see), and
+  // each button it disables points at it with `aria-describedby`. The
+  // full-video button gets a line of its own only when its reason differs.
+  const fullLengthNotice = timeRange && fullLengthReason !== lengthReason ? fullLengthReason : null;
 
   // The Advanced "Download {format}" button must gate on the format the
   // click will actually run, not the one selected in the radio (review
@@ -572,7 +595,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
       console.error('Export failed:', err);
       if (err instanceof ExportError) {
-        console.debug(`[${format === 'gif' ? 'GIF' : format === 'mp4' ? 'MP4' : 'WebM'} Export] Diagnostic log:`, err.exportLog);
+        const label = `[${format === 'gif' ? 'GIF' : format === 'mp4' ? 'MP4' : 'WebM'} Export]`;
+        console.debug(`${label} Diagnostic log:`, err.exportLog);
+        // The same entries as text, which a console captured outside DevTools
+        // (a CI trace) can read (ESCSUITE-412).
+        console.debug(`${label} Diagnostic log (text):\n${formatExportLog(err.exportLog)}`);
       }
 
       // Track the failure
@@ -809,6 +836,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       onClick={() => handleExport(undefined, false)}
                       disabled={clips.length === 0 || !webmSupported || lengthReason !== null}
                       title={lengthReason ?? webmBlockedReason ?? undefined}
+                      aria-describedby={lengthReason !== null ? LENGTH_REASON_ID : undefined}
                     >
                       Export Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})
                     </button>
@@ -817,6 +845,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       onClick={() => handleExport(undefined, false, true)}
                       disabled={clips.length === 0 || !webmSupported || fullLengthReason !== null}
                       title={fullLengthReason ?? webmBlockedReason ?? undefined}
+                      aria-describedby={
+                        fullLengthNotice !== null
+                          ? FULL_LENGTH_REASON_ID
+                          : fullLengthReason !== null
+                            ? LENGTH_REASON_ID
+                            : undefined
+                      }
                       style={{ background: 'var(--bg-hover)', color: 'var(--text-primary)' }}
                     >
                       Export Full Video
@@ -828,11 +863,23 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                     onClick={() => handleExport(undefined, false)}
                     disabled={clips.length === 0 || !webmSupported || lengthReason !== null}
                     title={lengthReason ?? webmBlockedReason ?? undefined}
+                    aria-describedby={lengthReason !== null ? LENGTH_REASON_ID : undefined}
                   >
                     Download WebM
                   </button>
                 )}
               </div>
+
+              {lengthReason !== null && (
+                <div className={styles.summary} id={LENGTH_REASON_ID}>
+                  {lengthNoticeText(lengthReason)}
+                </div>
+              )}
+              {fullLengthNotice !== null && (
+                <div className={styles.summary} id={FULL_LENGTH_REASON_ID}>
+                  Export Full Video: {lengthNoticeText(fullLengthNotice)}
+                </div>
+              )}
 
               {/* WebM is possible but MP4 is not, or vice versa — say which,
                   without waiting for the Advanced panel (ESCSUITE-22: "when
@@ -1119,6 +1166,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       onClick={() => handleExport(undefined, true)}
                       disabled={clips.length === 0 || advancedBlockedReason !== null}
                       title={advancedBlockedReason ?? undefined}
+                      aria-describedby={lengthReason !== null ? LENGTH_REASON_ID : undefined}
                     >
                       Download {effectiveAdvancedFormat === 'gif' ? 'GIF' : effectiveAdvancedFormat === 'mp4' ? 'MP4' : 'WebM'}
                     </button>

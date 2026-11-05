@@ -35,6 +35,7 @@ export function ClipEditor() {
     handleSplitAtPlayhead,
     handleDeleteClip,
     handleUnlinkClip,
+    handleFindSilences,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,
@@ -223,6 +224,7 @@ export function ClipEditor() {
         onDuplicate={handleDuplicate}
         onSplit={handleSplitAtPlayhead}
         onUnlink={handleUnlinkClip}
+        onFindSilences={handleFindSilences}
         disabled={trackLocked}
       />
     </div>

@@ -59,9 +59,11 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Video Decode Worker (`src/workers/decodeWorker.ts`) | [`video-decode-worker.md`](docs/reference/video-decode-worker.md) |
 | Integration API (`src/utils/integration.ts`) | [`integration-api.md`](docs/reference/integration-api.md) |
 | Linked clips (`src/store/linkedClips.ts`) | [`linked-clips.md`](docs/reference/linked-clips.md) |
+| Remove silences (`src/core/silenceDetection.ts`, `src/store/rippleRanges.ts`, ESCSUITE-403) | [`remove-silences.md`](docs/reference/remove-silences.md) |
 | Build Configuration | [`build-configuration.md`](docs/reference/build-configuration.md) |
 | Overlay System | [`overlay-system.md`](docs/reference/overlay-system.md) |
 | Captions (`src/core/captions.ts`, ESCSUITE-293) | [`captions.md`](docs/reference/captions.md) |
+| On-device transcription (`src/core/transcribe.ts`, `src/core/speechRecognitionLocal.ts`, ESCSUITE-404) | [`on-device-transcription.md`](docs/reference/on-device-transcription.md) |
 | Keyframe Animation System (`src/utils/animation.ts`) | [`keyframe-animation-system.md`](docs/reference/keyframe-animation-system.md) |
 | Keyframe Panel (`src/components/KeyframePanel/`) | [`keyframe-panel.md`](docs/reference/keyframe-panel.md) |
 | Preview (`src/components/Preview/`) | [`preview.md`](docs/reference/preview.md) |

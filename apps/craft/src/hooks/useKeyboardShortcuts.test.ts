@@ -249,6 +249,53 @@ describe('useKeyboardShortcuts binding', () => {
   })
 })
 
+describe('useKeyboardShortcuts in the "Float controls" window (ESCSUITE-400)', () => {
+  // A stand-in for the Picture-in-Picture window: a real EventTarget, which is
+  // all the hook asks of it.
+  function floatingWindow(): Window {
+    return new EventTarget() as unknown as Window
+  }
+
+  it('answers R, P and S pressed in the floating window', () => {
+    const floating = floatingWindow()
+    const { rerender } = renderHook((props: KeyboardShortcutsDeps) => useKeyboardShortcuts(props), {
+      initialProps: { ...deps('idle'), floatingWindow: floating },
+    })
+
+    press('r', floating)
+    expect(handlers.handleStartRecording).toHaveBeenCalledTimes(1)
+
+    rerender({ ...deps('recording'), floatingWindow: floating })
+    press('p', floating)
+    expect(handlers.handlePauseRecording).toHaveBeenCalledTimes(1)
+    press('s', floating)
+    expect(handlers.handleStopRecording).toHaveBeenCalledTimes(1)
+  })
+
+  it('still answers on the page while the floating window is open', () => {
+    renderHook((props: KeyboardShortcutsDeps) => useKeyboardShortcuts(props), {
+      initialProps: { ...deps('recording'), floatingWindow: floatingWindow() },
+    })
+
+    press('p')
+
+    expect(handlers.handlePauseRecording).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops listening to the window once it has closed', () => {
+    const floating = floatingWindow()
+    const { rerender } = renderHook((props: KeyboardShortcutsDeps) => useKeyboardShortcuts(props), {
+      initialProps: { ...deps('recording'), floatingWindow: floating } as KeyboardShortcutsDeps,
+    })
+
+    rerender({ ...deps('recording'), floatingWindow: null })
+    press('p', floating)
+
+    expect(handlers.handlePauseRecording).not.toHaveBeenCalled()
+    expect(keydownBindings()).toBe(1)
+  })
+})
+
 describe('useKeyboardShortcuts while a modal is open', () => {
   it('lets no shortcut through', () => {
     const { rerender } = mountShortcuts('idle', true, true)

@@ -4,6 +4,8 @@
 import { track } from '@vercel/analytics'
 import { BUILD_MODE } from '../config'
 
+export { analyticsBeforeSend, stripQueryAndFragment } from './beforeSend'
+
 /**
  * Track a custom event in Vercel Analytics.
  *
@@ -19,6 +21,10 @@ import { BUILD_MODE } from '../config'
  * *absent*, not merely unused. A function call is opaque to that analysis and
  * would leave the library in the file. `apps/e2e/tests/standalone/craft.spec.ts`
  * holds the other end of the invariant at runtime.
+ *
+ * The page address an event carries is cut to its path by the
+ * `analyticsBeforeSend` hook every `<Analytics />` mount passes (ESCSUITE-406):
+ * the insights script runs custom events through that same hook.
  */
 export function trackEvent(
   event: string,

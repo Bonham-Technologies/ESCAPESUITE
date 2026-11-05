@@ -6,6 +6,7 @@ import { useVirtualizedTimeline, groupClipsByTrack } from '../../hooks';
 import { TimelinePlayhead } from './TimelinePlayhead';
 import { TimelineTimeReadout } from './TimelineTimeReadout';
 import { TimelineMarkerLines, TimelineRuler } from './TimelineRuler';
+import { TimelineSilenceBands } from './TimelineSilenceBands';
 import { TimelineTrack } from './TimelineTrack';
 import { TrackHeader } from './TrackHeader';
 import { PIXELS_PER_SECOND_BASE, type TimeRange } from './timelineGeometry';
@@ -359,6 +360,9 @@ export function Timeline({ onExportSelection }: TimelineProps = {}) {
 
             {/* Marker lines */}
             <TimelineMarkerLines markers={markers} pixelsPerSecond={pixelsPerSecond} />
+
+            {/* "Remove silences" review (ESCSUITE-403) */}
+            <TimelineSilenceBands pixelsPerSecond={pixelsPerSecond} height={totalTracksHeight} />
 
             {/* Snap indicator */}
             {dragState && dragState.snappedPosition !== null && (

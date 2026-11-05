@@ -4,6 +4,7 @@ import { StrictMode, type ComponentType, type ErrorInfo } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Analytics } from '@vercel/analytics/react'
 import { BUILD_MODE } from '../config'
+import { analyticsBeforeSend } from '../analytics/beforeSend'
 import { ErrorBoundary } from '../components/ErrorBoundary'
 
 export interface BootstrapConfig {
@@ -37,6 +38,9 @@ export interface BootstrapConfig {
  * `<Analytics />` is uncaught and blanks the page — the one render path at
  * the root this ticket leaves unprotected, accepted because it is a small,
  * third-party, hosted-only script injector rather than a reason to change.
+ * It passes `analyticsBeforeSend`, so no record carries the page's query
+ * string or fragment (ESCSUITE-406: an integration host's `?project=` and
+ * friends).
  */
 export function bootstrapApp(config: BootstrapConfig): void {
   const { rootId = 'root', App, onError } = config
@@ -51,7 +55,7 @@ export function bootstrapApp(config: BootstrapConfig): void {
       <ErrorBoundary onError={onError}>
         <App />
       </ErrorBoundary>
-      {BUILD_MODE === 'saas' && <Analytics />}
+      {BUILD_MODE === 'saas' && <Analytics beforeSend={analyticsBeforeSend} />}
     </StrictMode>
   )
 }

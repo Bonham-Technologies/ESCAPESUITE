@@ -9,6 +9,7 @@
 // whole export.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
+  MAX_LOGGED_SEEK_REQUESTS,
   createFrameComposer,
   loadElementSources,
   releaseElementSources,
@@ -1039,8 +1040,8 @@ describe('createFrameComposer with two live clips of one source', () => {
 // picture. Three consecutive seeks of one element that end that way now fail
 // the export by name; one that merely runs slow does not.
 describe('createFrameComposer seek wedge', () => {
-  /** A composer over `clips`, drawing from the sources named in `sources`. */
-  async function composerOver(clips: Clip[], sourceMap: Map<string, SourceVideo>) {
+  /** A composer over `clips`, drawing from the sources named in `sources`, writing to `log`. */
+  async function composerOver(clips: Clip[], sourceMap: Map<string, SourceVideo>, log: ExportLogEntry[] = []) {
     const sources = await loadElementSources(clips, sourceMap, [])
     const playbackState = rewindElementSources(sources)
     const { canvas, ctx } = outputCanvas()
@@ -1055,17 +1056,27 @@ describe('createFrameComposer seek wedge', () => {
       outputSize: PROJECT,
       drawOptions: { filterScale: 1 },
       frameRate: 30,
+      log: (phase, detail) => log.push({ phase, detail, timestamp: 0 }),
     })
-    return { composeFrame, ctx, sources }
+    return { composeFrame, ctx, sources, log }
   }
 
-  /** Compose frame `index` at 30 fps, sitting out every fallback the frame waits on. */
+  /**
+   * Compose frame `index` at 30 fps, sitting out every fallback the frame
+   * waits on — and, for a frame that reloads a wedged source (ESCSUITE-412),
+   * the storage read between them, which runs in real time: fake time then
+   * moves in steps until the frame settles.
+   */
   async function frame(composeFrame: (t: number) => Promise<void>, index: number): Promise<void> {
-    const pending = composeFrame(index / 30)
+    let settled = false
+    const pending = composeFrame(index / 30).finally(() => {
+      settled = true
+    })
     // Settle the rejection's handling before advancing, so a throw is observed
     // as the frame's own result rather than as an unhandled rejection.
     pending.catch(() => {})
     await vi.advanceTimersByTimeAsync(800 + SEEK_IN_FLIGHT_GRACE_MS)
+    while (!settled) await vi.advanceTimersByTimeAsync(100)
     return pending
   }
 
@@ -1085,17 +1096,20 @@ describe('createFrameComposer seek wedge', () => {
 
   const oneClip = () => [makeClip({ sourceVideoId: 'v1', duration: 1, endTime: 1 })]
 
-  it('fails by name on the third consecutive seek that never completes', async () => {
+  it('reloads the source on its first wedged seek, and fails by name on the third after that', async () => {
     await store('v1')
-    // Every seek but the rewind's to 0 wedges, the way Firefox's did past 1.07 s.
+    // Every seek but the rewind's to 0 wedges, the way Firefox's did past 1.07 s
+    // — in the reloaded element too (the doubles script every element alike).
     media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
-    const { composeFrame, ctx } = await composerOver(
+    const { composeFrame, ctx, sources } = await composerOver(
       oneClip(),
       sourceMapOf([makeSourceVideo({ id: 'v1', name: 'recording_2026-10-17.webm' })])
     )
+    const wedgedElement = sources.videoElements.get('v1')!
 
     await frame(composeFrame, 0) // no seek: the rewind left it at 0
-    await frame(composeFrame, 1) // wedged #1
+    await frame(composeFrame, 1) // wedged: reloaded, and frame 1 asked again — wedged #1
+    expect(sources.videoElements.get('v1')).not.toBe(wedgedElement)
     await frame(composeFrame, 2) // wedged #2
     const thrown = await frame(composeFrame, 3).then(
       () => null,
@@ -1108,7 +1122,7 @@ describe('createFrameComposer seek wedge', () => {
       message:
         'This browser cannot read "recording_2026-10-17.webm" frame by frame (its seeks never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.',
     })
-    // Frame 0 was drawn; the two wedged frames before the throw were not.
+    // Frame 0 was drawn; none of the wedged frames were.
     expect(ctx.argsFor('drawImage')).toHaveLength(1)
     expect(WEDGED_SEEK_FRAMES).toBe(3)
   })
@@ -1118,8 +1132,7 @@ describe('createFrameComposer seek wedge', () => {
     media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
     const { composeFrame } = await composerOver(oneClip(), new Map())
 
-    await frame(composeFrame, 1)
-    await frame(composeFrame, 2)
+    for (let i = 1; i <= 2; i++) await frame(composeFrame, i)
 
     await expect(frame(composeFrame, 3)).rejects.toThrow('This browser cannot read "v1" frame by frame')
   })
@@ -1156,9 +1169,144 @@ describe('createFrameComposer seek wedge', () => {
       sourceMapOf([makeSourceVideo({ id: 'v1' }), makeSourceVideo({ id: 'v2', name: 'incoming.webm' })])
     )
 
-    await frame(composeFrame, 15) // the incoming clip's one seek, to 0.25: wedged
+    await frame(composeFrame, 15) // the incoming clip's one seek, to 0.25: wedged — reloaded, and the fresh element's seek wedges
     await frame(composeFrame, 16) // held at 0.25: no seek, still seeking
     await expect(frame(composeFrame, 17)).rejects.toThrow('This browser cannot read "incoming.webm" frame by frame')
+  })
+
+  // ESCSUITE-412: Chromium wedges on a take whose key frame shares a WebM
+  // timecode with the frame before it, and a seek that never lands outlasts
+  // ESCSUITE-370's grace. The composer reloads the source once, on its first
+  // wedged seek, and composes that frame again, so no frame goes undrawn.
+  it('reloads a source whose seeks stopped completing, and draws from the reloaded element', async () => {
+    await store('v1')
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame, ctx, sources, log } = await composerOver(
+      oneClip(),
+      sourceMapOf([makeSourceVideo({ id: 'v1', name: 'take.webm' })])
+    )
+    const wedgedElement = sources.videoElements.get('v1')!
+    const wedgedUrl = wedgedElement.src
+    // The element the reload makes seeks normally.
+    media.script({ video: { wedgeSeekAt: undefined } })
+
+    for (let i = 0; i <= 6; i++) await frame(composeFrame, i)
+
+    const reloaded = sources.videoElements.get('v1')!
+    expect(reloaded).not.toBe(wedgedElement)
+    expect(reloaded.src).not.toBe(wedgedUrl)
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(wedgedUrl)
+    // Every frame: 0, then frame 1 composed again over the reloaded element, and 2-6.
+    expect(ctx.argsFor('drawImage')).toHaveLength(7)
+    expect(ctx.argsFor('drawImage').slice(1).every(([image]) => image === reloaded)).toBe(true)
+    // The stored 8 bytes are no WebM Mediabunny can read, so it reloads them as stored.
+    expect(log.map((e) => e.detail)).toContain('"take.webm" stopped completing seeks; reloaded it from a fresh copy')
+    expect(warns).toHaveBeenCalledWith('Export: "take.webm" stopped completing seeks; reloaded it from a fresh copy')
+  })
+
+  it('writes each wedged seek request, and the reload, to the diagnostic log', async () => {
+    await store('v1')
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame, log } = await composerOver(
+      oneClip(),
+      sourceMapOf([makeSourceVideo({ id: 'v1', name: 'take.webm' })])
+    )
+    media.script({ video: { wedgeSeekAt: undefined } })
+
+    for (let i = 0; i <= 4; i++) await frame(composeFrame, i)
+
+    const seeks = log.filter((e) => e.phase === 'seek').map((e) => e.detail)
+    expect(seeks).toHaveLength(3)
+    expect(seeks[0]).toMatch(
+      new RegExp(
+        `^"take\\.webm" element 0, seek to ${elementSeekTarget(1 / 30).toFixed(4)} s: never landed after \\d+ ms ` +
+          `\\(seeking=true, readyState=1, wedged 1/3\\)$`
+      )
+    )
+    expect(seeks[1]).toMatch(/^"take\.webm" could not be repaired \(.+\); reloading it as stored$/)
+    expect(seeks[2]).toBe('"take.webm" stopped completing seeks; reloaded it from a fresh copy')
+    // The prompt seeks after the reload are not logged.
+    expect(log[log.length - 1].detail).toBe(seeks[2])
+  })
+
+  it('logs a seek that lands late but in its grace, and stops logging after MAX_LOGGED_SEEK_REQUESTS', async () => {
+    await store('v1')
+    // Past the 800 ms of waits, inside ESCSUITE-370's grace: slow, never wedged.
+    media.script({ video: { seekLandsAfterMs: 1_200 } })
+    const clips = [makeClip({ sourceVideoId: 'v1', duration: 3, endTime: 3 })]
+    const { composeFrame, log } = await composerOver(clips, sourceMapOf([makeSourceVideo({ id: 'v1', name: 'slow.webm' })]))
+
+    for (let i = 1; i <= MAX_LOGGED_SEEK_REQUESTS + 3; i++) await frame(composeFrame, i)
+
+    expect(log).toHaveLength(MAX_LOGGED_SEEK_REQUESTS + 1)
+    expect(log[0].detail).toMatch(/^"slow\.webm" element 0, seek to 0\.0334 s: landed after \d+ ms \(seeking=false, readyState=4, wedged 0\/3\)$/)
+    expect(log[log.length - 1].detail).toBe(`Further slow seeks are not logged (the first ${MAX_LOGGED_SEEK_REQUESTS} are above)`)
+  })
+
+  it('refuses by name when the source has no bytes left to reload', async () => {
+    await store('v1')
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1', name: 'gone.webm' })]))
+    vi.mocked(getVideoBlob).mockResolvedValueOnce(undefined)
+
+    await expect(frame(composeFrame, 1)).rejects.toThrow('This browser cannot read "gone.webm" frame by frame')
+  })
+
+  it('refuses by name when the reloaded copy will not load', async () => {
+    await store('v1')
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1', name: 'broken.webm' })]))
+    media.script({ video: { fail: true } })
+
+    await expect(frame(composeFrame, 1)).rejects.toThrow('This browser cannot read "broken.webm" frame by frame')
+  })
+
+  it('reloads a non-WebM source from its stored bytes, with no remux', async () => {
+    await store('v1', 'video/mp4')
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 } })
+    const { composeFrame, log } = await composerOver(oneClip(), sourceMapOf([makeSourceVideo({ id: 'v1', name: 'take.mp4' })]))
+    media.script({ video: { wedgeSeekAt: undefined } })
+
+    for (let i = 1; i <= 3; i++) await frame(composeFrame, i)
+
+    expect(log.map((e) => e.detail)).toContain('"take.mp4" stopped completing seeks; reloaded it from a fresh copy')
+    expect(log.some((e) => e.detail.includes('could not be repaired'))).toBe(false)
+  })
+
+  it('reloads both elements of a source with two live clips, and makes the further one again from the new URL', async () => {
+    await store('v1')
+    const clips = [
+      makeClip({ id: 'A', sourceVideoId: 'v1', trackId: 'tA', startTime: 0, endTime: 1, duration: 1 }),
+      makeClip({ id: 'B', sourceVideoId: 'v1', trackId: 'tB', startTime: 5, endTime: 6, duration: 1 }),
+    ]
+    media.script({ video: { wedgeSeekAt: (t) => t > 0.02 && t < 5 } })
+    const sources = await loadElementSources(clips, sourceMapOf([makeSourceVideo({ id: 'v1', name: 'pair.webm' })]), [])
+    const playbackState = rewindElementSources(sources)
+    const { canvas, ctx } = outputCanvas()
+    const composeFrame = createFrameComposer({
+      ctx: ctx as unknown as CanvasRenderingContext2D,
+      canvas,
+      clips,
+      tracks: [makeTrack({ id: 'tA', index: 0 }), makeTrack({ id: 'tB', index: 1 })],
+      sources,
+      playbackState,
+      projectSize: PROJECT,
+      outputSize: PROJECT,
+      drawOptions: { filterScale: 1 },
+      frameRate: 30,
+    })
+
+    await frame(composeFrame, 0)
+    const [wedgedExtra] = sources.extraVideoElements.get('v1')!
+    media.script({ video: { wedgeSeekAt: undefined } })
+    for (let i = 1; i <= 4; i++) await frame(composeFrame, i)
+
+    const own = sources.videoElements.get('v1')!
+    const [extra] = sources.extraVideoElements.get('v1')!
+    expect(extra).not.toBe(wedgedExtra)
+    expect(extra!.src).toBe(own.src)
+    expect(playbackState.has(wedgedExtra!)).toBe(false)
+    expect(playbackState.has(extra!)).toBe(true)
   })
 
   // Re-review round 1, F1: a healthy element on a slow machine whose every

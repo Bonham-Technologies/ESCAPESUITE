@@ -8,10 +8,12 @@
 // hand-built files, so an upgrade that dropped side data or stopped writing
 // Cues would turn this red.
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BlobSource, EncodedPacketSink, Input, WEBM } from 'mediabunny'
+import { BlobSource, EncodedPacket, EncodedPacketSink, Input, WEBM } from 'mediabunny'
 import {
+  advancingTimestamps,
   isWebmType,
   needsSeekIndexRepair,
+  remuxWithAdvancingTimestamps,
   remuxWithSeekIndex,
   withSeekIndex,
 } from './webmSeekIndex'
@@ -206,6 +208,74 @@ describe('remuxWithSeekIndex', () => {
 
   it('throws on a track it cannot name a codec for', async () => {
     await expect(remuxWithSeekIndex(webmBlob({ cues: 'empty', videoCodecId: 'V_NOT_A_CODEC' }))).rejects.toThrow()
+  })
+})
+
+/** How many times `id` occurs in `bytes`. */
+function countOf(bytes: Uint8Array, id: number[]): number {
+  let count = 0
+  for (let i = 0; i + id.length <= bytes.length; i++) {
+    if (id.every((b, j) => bytes[i + j] === b)) count++
+  }
+  return count
+}
+
+/**
+ * The CI take of ESCSUITE-412 in miniature: 30 fps, key frames once a second,
+ * and at 2.033 s a key frame snapped onto the same 30 fps slot as the delta
+ * frame before it, so both carry the timecode 2033.
+ */
+function sharedKeyTimecodeFrames() {
+  const frames = Array.from({ length: 64 }, (_, i) => ({ timeMs: Math.round((i * 1000) / 30), key: i === 0 || i === 31 }))
+  frames.splice(62, 0, { timeMs: 2033, key: true })
+  return frames
+}
+
+describe('remuxWithAdvancingTimestamps', () => {
+  it('moves a key frame that shares its timecode 1 ms later, and keeps every other packet as it was', async () => {
+    const original = webmBlob({ cues: 'indexed', audio: true, frames: sharedKeyTimecodeFrames() })
+
+    const [beforeVideo, beforeAudio] = await packetsOf(original)
+    const [afterVideo, afterAudio] = await packetsOf(await remuxWithAdvancingTimestamps(original))
+
+    const shared = beforeVideo.packets.findIndex((p, i) => i > 0 && p.timestamp === beforeVideo.packets[i - 1].timestamp)
+    expect(beforeVideo.packets[shared]).toMatchObject({ timestamp: 2.033, type: 'key' })
+    expect(afterVideo.packets[shared]).toEqual({ ...beforeVideo.packets[shared], timestamp: 2.034 })
+    expect(afterVideo.packets.filter((_, i) => i !== shared)).toEqual(beforeVideo.packets.filter((_, i) => i !== shared))
+    expect(afterAudio).toEqual(beforeAudio)
+  })
+
+  it('gives that key frame a Cluster of its own, which a copy that keeps the timecode cannot', async () => {
+    const original = webmBlob({ cues: 'indexed', frames: sharedKeyTimecodeFrames() })
+    const clusters = async (blob: Blob) => countOf(new Uint8Array(await blob.arrayBuffer()), CLUSTER)
+
+    // Mediabunny starts a Cluster at a key frame a second or more into the
+    // current one, unless that Cluster already holds the key frame's timecode.
+    expect(await clusters(await remuxWithSeekIndex(original))).toBe(2)
+    expect(await clusters(await remuxWithAdvancingTimestamps(original))).toBe(3)
+  })
+
+  it('throws on a track it cannot name a codec for, as the import remux does', async () => {
+    await expect(remuxWithAdvancingTimestamps(webmBlob({ videoCodecId: 'V_NOT_A_CODEC' }))).rejects.toThrow()
+  })
+})
+
+describe('advancingTimestamps', () => {
+  const packet = (seconds: number) => new EncodedPacket(new Uint8Array([1]), 'delta', seconds, 1 / 30)
+
+  it('moves each packet whose millisecond does not advance to 1 ms past the last, carrying the move on', () => {
+    const retime = advancingTimestamps()
+
+    const out = [0, 0.033, 0.033, 0.0332, 0.035, 0.067].map((t) => retime(packet(t)).timestamp)
+
+    expect(out).toEqual([0, 0.033, 0.034, 0.035, 0.036, 0.067])
+  })
+
+  it('hands back the very same packet when it advances', () => {
+    const retime = advancingTimestamps()
+    const first = packet(1)
+
+    expect(retime(first)).toBe(first)
   })
 })
 

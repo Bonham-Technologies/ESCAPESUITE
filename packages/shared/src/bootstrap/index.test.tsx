@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act } from '@testing-library/react'
+import type { BeforeSend } from '@vercel/analytics/react'
 
 // Collaborators are mocked (never the module under test). react-dom/client
 // keeps its real implementation so bootstrapApp's render actually lands in
@@ -14,8 +15,15 @@ vi.mock('react-dom/client', async () => {
   }
 })
 
+// The props each render handed it, so the beforeSend it was given can be
+// exercised (ESCSUITE-406).
+const analyticsProps = vi.hoisted(() => [] as Array<{ beforeSend?: unknown }>)
+
 vi.mock('@vercel/analytics/react', () => ({
-  Analytics: () => <div data-testid="vercel-analytics-marker" />,
+  Analytics: (props: { beforeSend?: unknown }) => {
+    analyticsProps.push(props)
+    return <div data-testid="vercel-analytics-marker" />
+  },
 }))
 
 describe('bootstrapApp', () => {
@@ -90,6 +98,31 @@ describe('bootstrapApp', () => {
     })
 
     expect(root.querySelector('[data-testid="vercel-analytics-marker"]')).not.toBeNull()
+  })
+
+  // ESCSUITE-406: an integration host's query must not reach Vercel.
+  it('mounts Analytics with the shared beforeSend, which keeps only the path', async () => {
+    analyticsProps.length = 0
+    const root = document.createElement('div')
+    root.id = 'root'
+    document.body.appendChild(root)
+
+    const { bootstrapApp } = await import('./index')
+    const { analyticsBeforeSend } = await import('../analytics/beforeSend')
+    const App = () => <div data-testid="my-app">Hello</div>
+
+    act(() => {
+      bootstrapApp({ App })
+    })
+
+    const { beforeSend } = analyticsProps[analyticsProps.length - 1]
+    expect(beforeSend).toBe(analyticsBeforeSend)
+    expect(
+      (beforeSend as BeforeSend)({
+        type: 'pageview',
+        url: 'https://www.escapesuite.io/artist/?video=https%3A%2F%2Fh.example%2Fv.mp4&title=secret&project=eyJ9',
+      })
+    ).toEqual({ type: 'pageview', url: 'https://www.escapesuite.io/artist/' })
   })
 
   it('does not mount Analytics in standalone build mode', async () => {

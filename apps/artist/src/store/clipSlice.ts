@@ -15,6 +15,7 @@ import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './p
 import { clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock';
 import { deletableWithLinks, linkedPartners, withoutLink } from './linkedClips';
 import { pruneSelection } from './selectionPrune';
+import { cutTimeRanges, linkedRows, normaliseRanges } from './rippleRanges';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
 import { startsAtOrAfter } from './timelineSnapping';
@@ -24,7 +25,7 @@ import {
   strokeForPlacement,
 } from '../utils/overlayPlacement';
 
-export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'unlinkClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'removeTimeRanges' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'unlinkClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
 
 /**
  * How near a linked clip's edge a cut may fall and still count as falling on
@@ -389,6 +390,40 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       history: pushToHistory(state),
     };
   }),
+
+  // ESCSUITE-403: "Remove silences". Every row of the take moves by the same
+  // time at the same timeline time, so a lock on any of them refuses the whole
+  // cut, as it refuses a linked ripple delete.
+  removeTimeRanges: (clipId, ranges) => {
+    const { clips, tracks } = get().project.timeline;
+    const clip = clips.find((c) => c.id === clipId);
+    const cuts = normaliseRanges(ranges);
+    if (!clip || cuts.length === 0) return false;
+    const rows = linkedRows(clips, clip);
+    if ([...rows].some((id) => isTrackLocked(tracks, id))) return false;
+
+    const result = cutTimeRanges(clips, get().sourceVideos, rows, cuts);
+    if (result === clips) return false; // nothing on those rows to cut or move
+    const newClips = [...result];
+    set((state) => {
+      const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
+      return {
+        project: {
+          ...state.project,
+          modified: Date.now(),
+          timeline: {
+            ...state.project.timeline,
+            clips: newClips,
+            duration: calculateTimelineDuration(newClips),
+          },
+        },
+        selectedClipId: pruned.selectedClipId,
+        selectedClipIds: pruned.selectedClipIds,
+        history: pushToHistory(state),
+      };
+    });
+    return true;
+  },
 
   // Shift all clips on a track that are after a certain time by a delta amount.
   //

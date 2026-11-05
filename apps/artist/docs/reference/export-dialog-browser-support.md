@@ -237,6 +237,21 @@ stylistic preference. `LastExportSettings` gained an optional `fps`, carried in 
 MP4 Instead" (next paragraph): that button exists because a WebM `ExportError` is a diagnosed codec
 problem another codec might not have, and a GIF failure is not.
 
+**A length reason is said on screen, not only in a tooltip (ESCSUITE-385).** When
+`lengthReason` (the stretch the click encodes: the section when one is set) or `fullLengthReason`
+("Export Full Video") disables a download — an empty timeline (ESCSUITE-257) or a stretch over
+`EXPORT_MAX_SECONDS`, three hours (ESCSUITE-367) — the reason is a visible line in the main body
+under the primary buttons (`id="export-length-reason"`), and every button it disables (the
+primary download or "Export Section", and the Advanced download) carries
+`aria-describedby` pointing at it, beside the existing `title`. When a section is set and only
+"Export Full Video" is too long, that button gets a line of its own (`id="export-full-length-reason"`,
+"Export Full Video: …") and "Export Section" no description. The too-long sentence
+(`EXPORT_TOO_LONG_REASON`, shared with both exporters' refusal) says to set in and out points; the
+dialog adds how (`SECTION_KEYS_HINT`): close the dialog and press I and O on the timeline, the keys
+`useAppKeyboardShortcuts` binds to set the in and out points at the playhead. The exporters' own
+message stays the bare sentence, since a headless caller has no keyboard. Regression spec:
+`apps/e2e/tests/regressions/ESCSUITE-385.spec.ts`.
+
 **A WebM failure can offer MP4 as a retry, the mirror of MP4's own "Try WebM Instead."** MP4's
 failure has always replaced the dialog with a dedicated recovery screen (`mp4FailedError`) offering
 WebM as the alternative, regardless of what kind of error it was — gated on `webmSupported`

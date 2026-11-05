@@ -1,5 +1,6 @@
 import { Analytics } from '@vercel/analytics/react'
 import { isSaaSMode } from '@escapesuite/shared/config'
+import { analyticsBeforeSend } from '@escapesuite/shared/analytics'
 
 /**
  * Mounts Vercel Analytics only in hosted (saas) builds — the same intent
@@ -17,7 +18,10 @@ import { isSaaSMode } from '@escapesuite/shared/config'
  * ESCAPEPLAN has no standalone build today, so `isSaaSMode()` is always true
  * in practice; this exists for consistency with the other two apps rather
  * than to close a live leak.
+ *
+ * It passes the same `analyticsBeforeSend` as `bootstrapApp`, so no record
+ * carries the page's query string or fragment (ESCSUITE-406).
  */
 export function GatedAnalytics() {
-  return isSaaSMode() ? <Analytics /> : null
+  return isSaaSMode() ? <Analytics beforeSend={analyticsBeforeSend} /> : null
 }

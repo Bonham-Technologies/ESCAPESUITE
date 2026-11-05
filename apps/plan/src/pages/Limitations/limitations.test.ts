@@ -61,6 +61,13 @@ describe('LIMITATIONS', () => {
     expect(body).toMatch(/shows the app inside its own page/)
   })
 
+  it('says the query is never sent, since ESCSUITE-406 strips it', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'hosted-analytics')!.body.join(' ')
+    expect(body).toMatch(/never the part of the address after a \? or #/)
+    expect(body).toMatch(/None of that is sent/)
+    expect(body).not.toMatch(/that is sent as part of the address/)
+  })
+
   it('links every document source to the repository on GitHub', () => {
     for (const source of LIMITATIONS.flatMap((l) => l.sources)) {
       if (source.href !== undefined) {

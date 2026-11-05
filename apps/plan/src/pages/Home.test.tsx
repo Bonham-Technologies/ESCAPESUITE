@@ -89,6 +89,25 @@ describe('Home (open-source landing)', () => {
     )
   })
 
+  it('links to the download verification steps next to the offline downloads (ESCSUITE-401)', () => {
+    renderHome()
+    const verify = screen.getByRole('link', { name: /verify your download/i })
+    expect(verify).toHaveAttribute(
+      'href',
+      'https://github.com/Bonham-Technologies/ESCAPESUITE/blob/main/docs/VERIFY.md'
+    )
+    expect(verify).toHaveAttribute('target', '_blank')
+    expect(verify).toHaveAttribute('rel', 'noopener noreferrer')
+
+    // It sits in the same section as the per-app download buttons, and the
+    // note says the always-newest -latest builds change with every release.
+    const section = screen.getByRole('link', { name: 'Download ESCAPEARTIST' }).closest('section')
+    expect(section).toContainElement(verify)
+    const note = verify.closest('p')
+    expect(note).toHaveTextContent(/SHA-256/)
+    expect(note).toHaveTextContent(/changes with every release/i)
+  })
+
   it('launches ESCAPECRAFT from the hero "Start recording" CTA', async () => {
     const user = userEvent.setup()
     renderHome()

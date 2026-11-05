@@ -1,0 +1,434 @@
+// ESCSUITE-404: "Transcribe to captions". The recogniser is only ever created
+// on device, it hears the timeline's mix through a MediaStreamTrack (never the
+// microphone), and what it says becomes ordinary caption cues.
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  HEARD_LEAD_SECONDS,
+  MAX_CUE_CHARS,
+  TranscriptionError,
+  createLocalRecognition,
+  cuesFromSegments,
+  describeRecognitionError,
+  splitCueText,
+  transcribeChannels,
+  transcribeTimeline,
+  type TranscribeAudioContext,
+} from './transcribe';
+import type {
+  SpeechErrorEventLike,
+  SpeechRecognitionCtor,
+  SpeechRecognitionLike,
+  SpeechResultEventLike,
+} from './speechRecognitionLocal';
+
+vi.mock('./audioMixer', () => ({ extractAndMixAudio: vi.fn() }));
+import { extractAndMixAudio } from './audioMixer';
+
+// --- Doubles -----------------------------------------------------------------
+
+interface StartCall {
+  track: MediaStreamTrack | undefined;
+  processLocally: boolean | undefined;
+}
+
+class FakeRecognition implements SpeechRecognitionLike {
+  static instances: FakeRecognition[] = [];
+  /** When false, the "browser" drops processLocally (a recogniser that would send audio away). */
+  static keepsProcessLocally = true;
+  lang = '';
+  continuous = false;
+  interimResults = false;
+  private local: boolean | undefined = undefined;
+  onresult: ((event: SpeechResultEventLike) => void) | null = null;
+  onerror: ((event: SpeechErrorEventLike) => void) | null = null;
+  onend: (() => void) | null = null;
+  starts: StartCall[] = [];
+  stop = vi.fn(() => {
+    queueMicrotask(() => this.onend?.());
+  });
+  abort = vi.fn();
+  constructor() {
+    FakeRecognition.instances.push(this);
+  }
+  get processLocally() {
+    return this.local;
+  }
+  set processLocally(value: boolean | undefined) {
+    if (FakeRecognition.keepsProcessLocally) this.local = value;
+  }
+  start(track?: MediaStreamTrack) {
+    this.starts.push({ track, processLocally: this.processLocally });
+  }
+  say(index: number, transcript: string, isFinal: boolean) {
+    const results: SpeechResultEventLike['results'] = Object.assign([] as unknown[], {
+      [index]: Object.assign([{ transcript }], { isFinal }),
+      length: index + 1,
+    }) as unknown as SpeechResultEventLike['results'];
+    this.onresult?.({ resultIndex: index, results });
+  }
+}
+const Recognition = FakeRecognition as unknown as SpeechRecognitionCtor;
+
+function makeContext() {
+  const track = { kind: 'audio', readyState: 'live' } as unknown as MediaStreamTrack;
+  const source = {
+    buffer: null as AudioBuffer | null,
+    onended: null as (() => void) | null,
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    start: vi.fn(),
+    stop: vi.fn(),
+  };
+  const buffer = { copyToChannel: vi.fn() };
+  const ctx = {
+    currentTime: 0,
+    createBuffer: vi.fn(() => buffer as unknown as AudioBuffer),
+    createBufferSource: vi.fn(() => source as unknown as AudioBufferSourceNode),
+    createMediaStreamDestination: vi.fn(
+      () => ({ stream: { getAudioTracks: () => [track] } }) as unknown as MediaStreamAudioDestinationNode
+    ),
+    resume: vi.fn(() => Promise.resolve()),
+    close: vi.fn(() => Promise.resolve()),
+  };
+  return { ctx: ctx as typeof ctx & TranscribeAudioContext, source, buffer, track };
+}
+
+const flush = () => new Promise<void>((r) => setTimeout(r, 0));
+
+beforeEach(() => {
+  FakeRecognition.instances = [];
+  FakeRecognition.keepsProcessLocally = true;
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+// --- The recogniser -----------------------------------------------------------
+
+describe('createLocalRecognition (ESCSUITE-404)', () => {
+  it('creates the recogniser on device only, continuous with interim results', () => {
+    const recognition = createLocalRecognition(Recognition, 'en-GB');
+    expect(recognition.processLocally).toBe(true);
+    expect(recognition.lang).toBe('en-GB');
+    expect(recognition.continuous).toBe(true);
+    expect(recognition.interimResults).toBe(true);
+  });
+
+  it('refuses a recogniser that does not keep processLocally, so nothing could go off the device', () => {
+    FakeRecognition.keepsProcessLocally = false;
+    expect(() => createLocalRecognition(Recognition, 'en-US')).toThrow(TranscriptionError);
+    expect(FakeRecognition.instances[0].starts).toHaveLength(0);
+  });
+});
+
+// --- Words into cues ----------------------------------------------------------
+
+describe('cuesFromSegments', () => {
+  it('starts a cue just before its words were first heard and ends it when they were settled', () => {
+    expect(cuesFromSegments([{ text: 'hello there', heardAt: 1.5, finalAt: 3.2 }], 10)).toEqual([
+      { start: 1.5 - HEARD_LEAD_SECONDS, end: 3.2, text: 'hello there' },
+    ]);
+  });
+
+  it('keeps cues in order and apart, at least a second long and inside the timeline', () => {
+    const cues = cuesFromSegments(
+      [
+        { text: 'second', heardAt: 2.1, finalAt: 2.2 },
+        { text: 'first', heardAt: 0.1, finalAt: 2.15 },
+        { text: '   ', heardAt: 3, finalAt: 4 },
+        { text: 'last', heardAt: 9.8, finalAt: 10.5 },
+      ],
+      10
+    );
+    expect(cues.map((c) => c.text)).toEqual(['first', 'second', 'last']);
+    expect(cues[0]).toEqual({ start: 0, end: 2.15, text: 'first' });
+    expect(cues[1]).toEqual({ start: 2.15, end: 3.15, text: 'second' });
+    expect(cues[2]).toEqual({ start: 9, end: 10, text: 'last' });
+  });
+
+  it('joins words that land with no room left onto the cue before', () => {
+    const cues = cuesFromSegments(
+      [
+        { text: 'one', heardAt: 0, finalAt: 2 },
+        { text: 'two', heardAt: 2, finalAt: 2 },
+      ],
+      2
+    );
+    expect(cues).toEqual([{ start: 0, end: 2, text: 'one two' }]);
+    expect(cuesFromSegments([{ text: 'lost', heardAt: 0, finalAt: 0 }], 0)).toEqual([]);
+  });
+
+  it('splits a long result into caption-sized cues, sharing its time out by length', () => {
+    const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+    const cues = cuesFromSegments([{ text: words, heardAt: 0.3, finalAt: 12 }], 20);
+    expect(cues.length).toBeGreaterThan(1);
+    expect(cues.every((c) => c.text.length <= MAX_CUE_CHARS)).toBe(true);
+    expect(cues.map((c) => c.text).join(' ')).toBe(words);
+    expect(cues[0].start).toBe(0);
+    expect(cues[cues.length - 1].end).toBe(12);
+    for (let i = 1; i < cues.length; i++) expect(cues[i].start).toBe(cues[i - 1].end);
+  });
+});
+
+describe('splitCueText', () => {
+  it('cuts at word boundaries and leaves an over-long word whole', () => {
+    expect(splitCueText('aa bb cc', 5)).toEqual(['aa bb', 'cc']);
+    expect(splitCueText('abcdefgh ij', 5)).toEqual(['abcdefgh', 'ij']);
+    expect(splitCueText('  ')).toEqual([]);
+  });
+});
+
+describe('describeRecognitionError', () => {
+  it('names the errors a user can do something about', () => {
+    expect(describeRecognitionError('language-not-supported')).toMatch(/language pack/);
+    expect(describeRecognitionError('not-allowed')).toMatch(/did not allow/);
+    expect(describeRecognitionError('service-not-allowed')).toMatch(/did not allow/);
+    expect(describeRecognitionError('audio-capture')).toBe('On-device speech recognition stopped (audio-capture).');
+  });
+});
+
+// --- The whole run ------------------------------------------------------------
+
+const TEN_SECONDS = [new Float32Array(480_000), new Float32Array(480_000)];
+
+describe('transcribeChannels (ESCSUITE-404)', () => {
+  it('plays the mix into a stream track, hands that track to an on-device recogniser and returns its words as cues', async () => {
+    const { ctx, source, buffer, track } = makeContext();
+    const progress = vi.fn();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS,
+      sampleRate: 48000,
+      lang: 'en-US',
+      Recognition,
+      createAudioContext: () => ctx,
+      onProgress: progress,
+    });
+    await flush();
+
+    const [recognition] = FakeRecognition.instances;
+    expect(FakeRecognition.instances).toHaveLength(1);
+    // The track, never the microphone; on device at the moment it starts.
+    expect(recognition.starts).toEqual([{ track, processLocally: true }]);
+    expect(ctx.createBuffer).toHaveBeenCalledWith(2, 480_000, 48000);
+    expect(buffer.copyToChannel).toHaveBeenCalledTimes(2);
+    expect(source.connect).toHaveBeenCalled();
+    expect(source.start).toHaveBeenCalled();
+    expect(progress).toHaveBeenCalledWith(0, 10);
+
+    ctx.currentTime = 1;
+    recognition.say(0, 'the quick', false);
+    ctx.currentTime = 3;
+    recognition.say(0, 'the quick brown fox', true);
+    ctx.currentTime = 5;
+    recognition.say(1, 'jumps over', false);
+    ctx.currentTime = 7;
+    recognition.say(1, 'jumps over the lazy dog', true);
+
+    ctx.currentTime = 10;
+    source.onended?.();
+    expect(recognition.stop).toHaveBeenCalled();
+    const cues = await run;
+
+    expect(cues).toEqual([
+      { start: 0.7, end: 3, text: 'the quick brown fox' },
+      { start: 4.7, end: 7, text: 'jumps over the lazy dog' },
+    ]);
+    expect(progress).toHaveBeenLastCalledWith(10, 10);
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it('listens again, still on device and on the same track, when the recogniser ends before the sound does', async () => {
+    const { ctx, source, track } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    ctx.currentTime = 2;
+    recognition.say(0, 'before the pause', true);
+    recognition.onerror?.({ error: 'no-speech' });
+    recognition.onend?.();
+    expect(recognition.starts).toEqual([
+      { track, processLocally: true },
+      { track, processLocally: true },
+    ]);
+    ctx.currentTime = 6;
+    // A new session counts its results from 0 again.
+    recognition.say(0, 'after the pause', true);
+    source.onended?.();
+    const cues = await run;
+    expect(cues.map((c) => c.text)).toEqual(['before the pause', 'after the pause']);
+    expect(FakeRecognition.instances).toHaveLength(1);
+  });
+
+  it('keeps what was heard when listening again throws', async () => {
+    const { ctx } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    recognition.say(0, 'only this', false);
+    recognition.start = () => {
+      throw new DOMException('busy', 'InvalidStateError');
+    };
+    recognition.onend?.();
+    await expect(run).resolves.toEqual([{ start: 0, end: 1, text: 'only this' }]);
+  });
+
+  it('stops at once and keeps nothing when aborted', async () => {
+    const { ctx, source } = makeContext();
+    const controller = new AbortController();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, signal: controller.signal,
+    });
+    await flush();
+    FakeRecognition.instances[0].say(0, 'half a', false);
+    controller.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    expect(FakeRecognition.instances[0].abort).toHaveBeenCalled();
+    expect(source.stop).toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it('rejects an already-aborted signal before creating anything', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('answers no cues for an empty mix without creating a recogniser', async () => {
+    await expect(transcribeChannels({ channels: [new Float32Array(0)], sampleRate: 48000, lang: 'en-US', Recognition })).resolves.toEqual([]);
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('fails with the error in words when the recogniser reports one', async () => {
+    const { ctx } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    FakeRecognition.instances[0].onerror?.({ error: 'language-not-supported' });
+    await expect(run).rejects.toThrow('The speech language pack for this language is not installed on this device.');
+  });
+
+  it('refuses to play anything when the recogniser would not stay on device', async () => {
+    FakeRecognition.keepsProcessLocally = false;
+    const createAudioContext = vi.fn();
+    expect(() =>
+      transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext })
+    ).toThrow(TranscriptionError);
+    expect(createAudioContext).not.toHaveBeenCalled();
+  });
+
+  it('fails cleanly when the stream has no audio track or the context cannot start', async () => {
+    const noTrack = makeContext();
+    noTrack.ctx.createMediaStreamDestination.mockReturnValue(
+      { stream: { getAudioTracks: () => [] } } as unknown as MediaStreamAudioDestinationNode
+    );
+    await expect(
+      transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => noTrack.ctx })
+    ).rejects.toThrow('The browser gave no audio track to transcribe.');
+
+    const broken = makeContext();
+    broken.ctx.resume.mockRejectedValue(new Error('no audio device'));
+    await expect(
+      transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => broken.ctx })
+    ).rejects.toThrow('Could not start on-device speech recognition.');
+  });
+
+  it('reports progress on the playback clock while it listens', async () => {
+    vi.useFakeTimers();
+    const { ctx, source } = makeContext();
+    const progress = vi.fn();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, onProgress: progress,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    ctx.currentTime = 4;
+    await vi.advanceTimersByTimeAsync(250);
+    expect(progress).toHaveBeenLastCalledWith(4, 10);
+    source.onended?.();
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(run).resolves.toEqual([]);
+  });
+
+  it('reports nothing and stops nothing after it has failed, when the stopped source ends', async () => {
+    const { ctx, source } = makeContext();
+    const progress = vi.fn();
+    // A real source fires `ended` when it is stopped, as cleaning up does.
+    source.stop.mockImplementation(() => source.onended?.());
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, onProgress: progress,
+    });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    progress.mockClear();
+    recognition.onerror?.({ error: 'network' });
+    await expect(run).rejects.toThrow('On-device speech recognition stopped (network).');
+    expect(source.stop).toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+    expect(recognition.stop).not.toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it('drops an interim result the recogniser folded into an earlier one', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    const event = (resultIndex: number, results: Array<[string, boolean]>) =>
+      recognition.onresult?.({
+        resultIndex,
+        results: results.map(([transcript, isFinal]) => Object.assign([{ transcript }], { isFinal })) as unknown as SpeechResultEventLike['results'],
+      });
+    ctx.currentTime = 1;
+    event(0, [['hello', false], [' from the', false]]);
+    ctx.currentTime = 3;
+    event(0, [['hello from the stub', true]]);
+    source.onended?.();
+    const cues = await run;
+    expect(cues.map((c) => c.text)).toEqual(['hello from the stub']);
+  });
+
+  it('finishes when stop() itself throws', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    recognition.say(0, 'done', true);
+    recognition.stop.mockImplementation(() => {
+      throw new DOMException('not started', 'InvalidStateError');
+    });
+    source.onended?.();
+    await expect(run).resolves.toEqual([{ start: 0, end: 1, text: 'done' }]);
+  });
+});
+
+describe('transcribeTimeline (ESCSUITE-404)', () => {
+  it('is null when the timeline has no sound', async () => {
+    vi.mocked(extractAndMixAudio).mockResolvedValue(null);
+    const phases: string[] = [];
+    await expect(
+      transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition, onProgress: (p) => phases.push(p) })
+    ).resolves.toBeNull();
+    expect(phases).toEqual(['mixing']);
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('stops after mixing when aborted meanwhile', async () => {
+    const controller = new AbortController();
+    vi.mocked(extractAndMixAudio).mockImplementation(async () => {
+      controller.abort();
+      return TEN_SECONDS;
+    });
+    await expect(
+      transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition, signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('transcribes the mix the export would make', async () => {
+    vi.mocked(extractAndMixAudio).mockResolvedValue([new Float32Array(0)]);
+    await expect(transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition })).resolves.toEqual([]);
+    expect(extractAndMixAudio).toHaveBeenLastCalledWith([], [], 0, expect.any(Function));
+  });
+});

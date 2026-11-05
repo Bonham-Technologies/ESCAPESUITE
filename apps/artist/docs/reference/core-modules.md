@@ -291,10 +291,26 @@
   landed and a healthy recording was refused on a loaded machine (the CI journey's flake). Now a
   slow seek lands and its frame is drawn; only an element that stays `seeking` through three
   requests' waits and graces is refused.
-  At `WEDGED_SEEK_FRAMES` (3) it throws `SourceNotSeekableError`, which both exporters' catch turns into an
-  `ExportError` with `code: 'SOURCE_NOT_SEEKABLE'` (`exportErrorCodeOf`) and the sentence
-  `This browser cannot read "<name>" frame by frame (its seeks never completed). Re-save the
-  recording in ESCAPECRAFT, or export in Chrome or Edge.` The name is the `SourceVideo.name`,
+  On an element's first wedged request the composer first **reloads the source**
+  (ESCSUITE-412), so the frame it wedged on is composed again rather than drawn black: its
+  bytes read again through `getVideoBlob`, a WebM remuxed with every video timecode advancing
+  (`remuxWithAdvancingTimestamps` in `webmSeekIndex.ts`), loaded into a fresh `<video>` over a
+  fresh object URL that replaces the source's own element. Its further elements are unloaded and
+  made again from the new URL when a frame next needs them; the wedged elements are unloaded,
+  their URL revoked, and the frame composed again. Each frame's syncs all settle before this
+  (none rejects), so nothing still waits on an element being retired. The reload is logged and
+  `console.warn`ed. Only a reloaded source whose element reaches `WEDGED_SEEK_FRAMES` (3), or a
+  wedged source with no bytes to reload or whose copy will not load, throws `SourceNotSeekableError`, which both exporters'
+  catch turns into an `ExportError` with `code: 'SOURCE_NOT_SEEKABLE'` (`exportErrorCodeOf`) and,
+  outside Chromium, the sentence `This browser cannot read "<name>" frame by frame (its seeks
+  never completed). Re-save the recording in ESCAPECRAFT, or export in Chrome or Edge.` In
+  Chromium (`isChromiumEngine`, `core/browserEngine.ts`) it reads `… (its seeks never
+  completed, even after reloading it). Convert it to MP4 (ESCAPECRAFT's MP4 download does) and
+  import that instead.` A request that did not land within its 500 ms wait, or that counted, is
+  written to the export's diagnostic log by `describeSeekRequest` (target, landed or not,
+  `seeking`, `readyState`, elapsed ms, the count), up to `MAX_LOGGED_SEEK_REQUESTS` (60) an
+  export. The MP4 exporter's `<video>` fallback (`frameSource.ts`) counts the same way but does
+  not reload. The name is the `SourceVideo.name`,
   carried as `ElementSources.sourceNames` from `loadElementSources` (the id when the export
   was not handed the source's record). The count is per element, not per source, because an
   element has one playhead (ESCSUITE-313): a source drawn twice in one frame — a split clip's
@@ -546,7 +562,8 @@
   and, since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
   `duration`/`width`/`height`/`frameRate` plus whatever of `frameRateSource` (ESCSUITE-276),
   `mediaType`, `source`, `recordedAt`,
-  `waveformData`, `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
+  `waveformData`, `waveformSecondsPerPeak` (ESCSUITE-403, additive: each peak's length,
+  see `remove-silences.md`), `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
   `hasWebcam` it had (`id`/`name`/`mimeType` are already the entry's own top-level fields, and
   `size` is always the restored blob's). `saveProject` writes it from the `SourceVideo` it was
   given, **omitting** a `duration` that is not a finite number above 0 and a `width` or `height`

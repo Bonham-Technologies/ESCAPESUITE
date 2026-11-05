@@ -104,6 +104,42 @@ async function copyPackets(
  * codec) — and the caller keeps the original bytes.
  */
 export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
+  return remux(blob, false);
+}
+
+/**
+ * {@link remuxWithSeekIndex}, with every video packet whose millisecond
+ * timecode does not advance on the one before it moved to 1 ms past it
+ * (ESCSUITE-412). An ESCAPECRAFT take can hold two frames with one timecode:
+ * the recorder declares 30 fps to Mediabunny, which snaps every timestamp to
+ * that grid, so two frames captured inside one 33 ms slot land on the same
+ * one. When the second is a key frame, Mediabunny's muxer cannot start a
+ * Cluster on it — the Cluster in progress already holds that timecode. Chromium
+ * never finishes a seek past such a key frame, in any element over those
+ * bytes; over this copy, where the key frame has a timecode of its own and so a
+ * Cluster and a cue, it seeks every frame. The export's reload of a wedged
+ * source reads this; an import does not.
+ *
+ * Decode order is presentation order for every codec a WebM carries for this
+ * suite (VP8, VP9 and AV1 reorder nothing in the container), so a timecode that
+ * does not advance is a collision, never a reordered frame.
+ */
+export async function remuxWithAdvancingTimestamps(blob: Blob): Promise<Blob> {
+  return remux(blob, true);
+}
+
+/** Video packets with their millisecond timecodes made to advance (see {@link remuxWithAdvancingTimestamps}). */
+export function advancingTimestamps(): (packet: EncodedPacket) => EncodedPacket {
+  let lastMs = -Infinity;
+  return (packet) => {
+    const ms = Math.round(packet.timestamp * 1000);
+    const moved = ms > lastMs ? packet : packet.clone({ timestamp: (lastMs + 1) / 1000 });
+    lastMs = Math.max(ms, lastMs + 1);
+    return moved;
+  };
+}
+
+async function remux(blob: Blob, advanceVideoTimestamps: boolean): Promise<Blob> {
   const input = new Input({ source: new BlobSource(blob), formats: [WEBM] });
   try {
     const collector = createChunkCollector();
@@ -118,7 +154,8 @@ export async function remuxWithSeekIndex(blob: Blob): Promise<Blob> {
         // track whose first frame happens to carry no alpha plane keeps AlphaMode.
         output.addVideoTrack(source, { canBeTransparent: await track.canBeTransparent() });
         const meta = { decoderConfig: (await track.getDecoderConfig()) as VideoDecoderConfig };
-        pumps.push(() => copyPackets(track, (packet) => source.add(packet, meta), () => source.close()));
+        const retime = advanceVideoTimestamps ? advancingTimestamps() : (packet: EncodedPacket) => packet;
+        pumps.push(() => copyPackets(track, (packet) => source.add(retime(packet), meta), () => source.close()));
       } else {
         // Anything that is not video is copied as audio: a subtitle track's
         // codec is not an audio codec, so its source refuses it and the remux
