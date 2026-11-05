@@ -10,6 +10,7 @@ import {
   SIMPLE_KEYFRAMES,
   AUDIO_SPEC,
   bytesOf,
+  type FixtureSpec,
 } from '../test/webmFixture'
 
 /**
@@ -149,5 +150,67 @@ describe('writeKeyframeCues', () => {
     expect(readCues(fixture.bytes).cuesPayloadBytes).toBe(0)
     const out = await bytesOf(await writeKeyframeCues(fixture.blob))
     expect(readCues(out).points).toHaveLength(PIP_KEYFRAMES.length)
+  })
+
+  // ESCSUITE-395: every fixture's Duration says 3000; a block past it means
+  // the library's estimate fell short.
+  describe('raises a Duration that falls short of the last block', () => {
+    const pastDuration = (spec: FixtureSpec, track: number, timecode: number): FixtureSpec => ({
+      ...spec,
+      clusters: [
+        ...spec.clusters,
+        { timecode, unknownSize: true, children: [{ kind: 'simple', track, rel: 7, key: true }] },
+      ],
+    })
+
+    it('on an audio-only take, changing nothing but the Duration', async () => {
+      const fixture = buildWebM(pastDuration(AUDIO_SPEC, 1, 4000))
+
+      const out = await bytesOf(await writeKeyframeCues(fixture.blob))
+
+      expect(readCues(out).duration).toBe(4007)
+      expect(out.length).toBe(fixture.bytes.length)
+      const changed = [...out.keys()].filter((i) => out[i] !== fixture.bytes[i])
+      expect(changed.length).toBeGreaterThan(0)
+      expect(changed.length).toBeLessThanOrEqual(8)
+    })
+
+    it('on a video take, keeping every cue on its Cluster', async () => {
+      const fixture = buildWebM(pastDuration(SIMPLE_SPEC, 1, 5000))
+
+      const out = await bytesOf(await writeKeyframeCues(fixture.blob))
+
+      const read = readCues(out)
+      expect(read.duration).toBe(5007)
+      expect(read.points.map((p) => p.time)).toEqual([...SIMPLE_KEYFRAMES.map(([, , t]) => t), 5007])
+      for (const point of read.points) {
+        const at = read.segmentDataStart + point.clusterPosition
+        expect(out.slice(at, at + 4)).toEqual(new Uint8Array([0x1f, 0x43, 0xb6, 0x75]))
+      }
+    })
+
+    it('counts a BlockGroup and every track, not only video SimpleBlocks', async () => {
+      // Audio SimpleBlock past the Duration, then a video delta-frame BlockGroup past that.
+      const spec = pastDuration(PIP_SPEC, 2, 5500)
+      spec.clusters.push({ timecode: 6000, unknownSize: true, children: [{ kind: 'group', track: 1, rel: 0, reference: -33 }] })
+
+      const out = await bytesOf(await writeKeyframeCues(buildWebM(spec).blob))
+
+      expect(readCues(out).duration).toBe(6000)
+    })
+
+    it('leaves a take with no Duration, or a Duration not 8 bytes wide, as it came', async () => {
+      const none = buildWebM({ ...pastDuration(AUDIO_SPEC, 1, 4000), duration: null })
+      expect(await writeKeyframeCues(none.blob)).toBe(none.blob)
+      // A 4-byte float 3000.0: not what the library writes, so not rewritten.
+      const narrow = buildWebM({ ...pastDuration(AUDIO_SPEC, 1, 4000), duration: [0x45, 0x3b, 0x80, 0x00] })
+      expect(await writeKeyframeCues(narrow.blob)).toBe(narrow.blob)
+    })
+
+    it('reads the same through a window smaller than one element', async () => {
+      const fixture = buildWebM(pastDuration(AUDIO_SPEC, 1, 4000))
+      const whole = await bytesOf(await writeKeyframeCues(fixture.blob))
+      expect(await bytesOf(await writeKeyframeCues(fixture.blob, 4))).toEqual(whole)
+    })
   })
 })
