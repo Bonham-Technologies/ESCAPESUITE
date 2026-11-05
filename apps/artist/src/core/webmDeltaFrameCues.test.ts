@@ -12,6 +12,18 @@ import { dropDeltaFrameCues } from './webmDeltaFrameCues'
 import { needsSeekIndexRepair, remuxWithSeekIndex, withSeekIndex } from './webmSeekIndex'
 import { webmBlob, type WebmVideoFrame } from '../test/fixtures/webmFixture'
 
+// Lets one case run the remux without our own cue repair, to see what
+// Mediabunny's muxer writes by itself (ESCSUITE-411). Every other case gets the
+// real `dropDeltaFrameCues`.
+const repair = vi.hoisted(() => ({ bypass: false }))
+vi.mock('./webmDeltaFrameCues', async (importOriginal) => {
+  const real = await importOriginal<typeof import('./webmDeltaFrameCues')>()
+  return {
+    ...real,
+    dropDeltaFrameCues: (blob: Blob) => (repair.bypass ? Promise.resolve(null) : real.dropDeltaFrameCues(blob)),
+  }
+})
+
 interface Element {
   id: number
   start: number
@@ -146,6 +158,42 @@ describe('the import re-index (remuxWithSeekIndex)', () => {
 
     expect(video).toEqual([{ time: 0, track: 1, key: true }])
     expect(await packetsOf(remuxed)).toEqual(await packetsOf(original))
+  })
+})
+
+// Mediabunny 1.63.0 stopped writing a video cue on a Cluster it forces onto a
+// delta frame (upstream https://github.com/Vanilagy/mediabunny/issues/597,
+// watched on ESCSUITE-362). `remuxWithSeekIndex` still runs `dropDeltaFrameCues`
+// as a guard; this case turns the guard off so that a Mediabunny release that
+// brings the bad cues back fails here instead of being hidden by it.
+describe("Mediabunny's own muxer, without dropDeltaFrameCues (ESCSUITE-411)", () => {
+  async function remuxWithoutRepair(blob: Blob): Promise<Blob> {
+    repair.bypass = true
+    try {
+      return await remuxWithSeekIndex(blob)
+    } finally {
+      repair.bypass = false
+    }
+  }
+
+  it('writes no video cue on a delta frame for a take with sparse key frames', async () => {
+    const original = webmBlob({ cues: 'none', audio: true, frames: sparseFrames(100, 2) })
+
+    const cues = cuesOf(await bytesOf(await remuxWithoutRepair(original)))
+
+    const video = cues.filter((c) => c.track === 1)
+    expect(video.length).toBeGreaterThan(0)
+    expect(video.filter((c) => !c.key)).toEqual([])
+    // It still forced the Clusters at 32.767 s: their audio cues are there.
+    expect(cues.filter((c) => c.track === 2 && c.time > 32_000).length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('writes no video cue on a BlockGroup delta frame (alpha take)', async () => {
+    const original = webmBlob({ cues: 'empty', alphaMode: true, frames: sparseFrames(70, 1, Infinity, true) })
+
+    const video = cuesOf(await bytesOf(await remuxWithoutRepair(original))).filter((c) => c.track === 1)
+
+    expect(video).toEqual([{ time: 0, track: 1, key: true }])
   })
 })
 
