@@ -11,6 +11,7 @@ import {
   SIMPLE_KEYFRAMES,
   AUDIO_SPEC,
   type Fixture,
+  type FixtureSpec,
 } from '../test/webmFixture'
 
 /**
@@ -92,6 +93,62 @@ describe('fixWebMMetadata over real containers', () => {
     // Track 1 is the Opus track here; whatever the library indexes is audio.
     expect(read.points.length).toBeGreaterThan(0)
     expect(read.points.every((p) => p.track === 1)).toBe(true)
+  })
+
+  // ESCSUITE-395. The library takes the last frame's length from the gap
+  // between the last two blocks of a track. When the final Cluster holds one
+  // block, the block before it sits in the previous Cluster, its relative
+  // timecode is larger, and the gap comes out negative: the Duration it writes
+  // falls about one Cluster short of the last block.
+  const lastClusterHoldsOneBlock = (tracks: FixtureSpec['tracks'], track: number): FixtureSpec => ({
+    tracks,
+    cues: 'empty',
+    clusters: [
+      {
+        timecode: 0,
+        unknownSize: true,
+        children: Array.from({ length: 50 }, (_, i) => ({ kind: 'simple' as const, track, rel: i * 20, key: true })),
+      },
+      {
+        timecode: 1000,
+        unknownSize: true,
+        children: Array.from({ length: 50 }, (_, i) => ({ kind: 'simple' as const, track, rel: i * 20, key: true })),
+      },
+      { timecode: 2000, unknownSize: true, children: [{ kind: 'simple', track, rel: 0, key: true }] },
+    ],
+  })
+
+  it('never stores an audio-only take with a Duration short of its last block', async () => {
+    const fixture = buildWebM(lastClusterHoldsOneBlock([{ number: 1, type: 2, codec: 'A_OPUS' }], 1))
+
+    const read = readCues(await bytesOf(await fixWebMMetadata(webm(fixture))))
+
+    expect(read.duration).toBeGreaterThanOrEqual(2000)
+  })
+
+  it('never stores a video take with a Duration short of its last block', async () => {
+    const fixture = buildWebM(lastClusterHoldsOneBlock([{ number: 1, type: 1, codec: 'V_VP8' }], 1))
+
+    const out = await bytesOf(await fixWebMMetadata(webm(fixture)))
+
+    const read = readCues(out)
+    expect(read.duration).toBeGreaterThanOrEqual(2000)
+    // The keyframe index is still the one the Cues step writes, on the right Clusters.
+    expect(read.points).toHaveLength(101)
+    for (const point of read.points) {
+      const at = read.segmentDataStart + point.clusterPosition
+      expect(out.slice(at, at + 4)).toEqual(new Uint8Array([0x1f, 0x43, 0xb6, 0x75]))
+    }
+  })
+
+  it('keeps the Duration the library wrote when it already covers the last block', async () => {
+    const fixture = buildWebM({ ...AUDIO_SPEC, cues: 'empty' })
+
+    const read = readCues(await bytesOf(await fixWebMMetadata(webm(fixture))))
+
+    // Two blocks 20 ms apart: the library's estimate is 20 + 20 = 40 ms (less
+    // Opus codec delay, which this fixture does not declare).
+    expect(read.duration).toBe(40)
   })
 })
 
