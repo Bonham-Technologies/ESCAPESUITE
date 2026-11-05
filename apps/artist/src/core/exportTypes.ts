@@ -1406,6 +1406,14 @@ export function exportLengthReason(seconds: number): string | null {
 export const EXPORT_MAX_SECONDS = 3 * 60 * 60;
 
 /**
+ * The sentence {@link exportedLengthReason} gives for a stretch longer than
+ * {@link EXPORT_MAX_SECONDS}. Exported so the export dialog can tell it from
+ * the other length reasons and add how to set a section (ESCSUITE-385).
+ */
+export const EXPORT_TOO_LONG_REASON =
+  'Cannot export more than 3 hours at once: set in and out points and export it in sections';
+
+/**
  * Why the stretch an export will actually encode — a selected section, or the
  * whole timeline when none is selected — cannot be exported, or `null`: every
  * {@link exportLengthReason}, and longer than {@link EXPORT_MAX_SECONDS}. Not
@@ -1415,9 +1423,7 @@ export const EXPORT_MAX_SECONDS = 3 * 60 * 60;
 export function exportedLengthReason(seconds: number): string | null {
   const reason = exportLengthReason(seconds);
   if (reason !== null) return reason;
-  if (seconds > EXPORT_MAX_SECONDS) {
-    return 'Cannot export more than 3 hours at once: set in and out points and export it in sections';
-  }
+  if (seconds > EXPORT_MAX_SECONDS) return EXPORT_TOO_LONG_REASON;
   return null;
 }
 
