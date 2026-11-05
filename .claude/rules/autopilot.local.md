@@ -37,7 +37,20 @@ alone doesn't meet this step. Use the media-health helpers in `apps/e2e/utils/` 
 they exist. Where the container can't run it (e.g. H.264/AAC media), let CI prove it
 and say so in the PR.
 
-## Builder, step 4: the reviewer checks the test's layer
+## Builder, step 5: a changeset for user-visible changes
+
+The builder role only. Adds to step 5 ("Open the PR"). ESCSUITE-384 added it.
+
+Before opening the PR, a change a user can notice (a fix, new or changed behaviour,
+new or changed wording in the UI) adds one `.changeset/escsuite-<n>-<slug>.md` file.
+It lists each affected package (`@escapesuite/plan`, `@escapesuite/craft`,
+`@escapesuite/artist`, `@escapesuite/shared`, `@escapesuite/headless-artist`) as
+`patch`, or `minor` for a new feature, and its text tells users what changed in plain
+words, not how the code changed (see the existing files in `.changeset/`). A PR that
+only changes tests, CI, docs, dependencies or `.claude/` adds none. The PR body says
+which it is.
+
+## Builder, step 4: the reviewer checks the test's layer and the changeset
 
 The `reviewer` subagent, when the builder hands it a diff. Adds to its checklist. Moved
 here from a hand edit of the vendored `.claude/agents/reviewer.md`, which a refresh
@@ -46,6 +59,10 @@ overwrites.
 Check the test is at the layer where the bug is visible: if the user sees it in the
 browser, a Playwright test must fail without the change, not only a unit test (the
 **Builder, step 2** rule above). Block on a UI bug fixed with a unit test alone.
+
+Also check the changeset (the **Builder, step 5** rule above): block when a
+user-visible change has no `.changeset/*.md` file, when a package it changes is missing
+from that file, or when the text describes code instead of what users notice.
 
 ## Main must stay green, step 1: the nightly
 
