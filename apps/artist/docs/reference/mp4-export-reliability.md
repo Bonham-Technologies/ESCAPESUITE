@@ -76,7 +76,8 @@ failed every MP4 export because three things grew past it:
 
 One channel's array at 48 kHz holds a little over three hours, so an exported stretch longer
 than `EXPORT_MAX_SECONDS` (3 h) is refused up front by `exportedLengthReason` in the dialog and
-in both exporters, with a sentence pointing at in and out points. Only the stretch encoded
+in both exporters, with a sentence pointing at in and out points (`EXPORT_TOO_LONG_REASON`; the
+dialog shows it as visible text naming the I and O keys, ESCSUITE-385). Only the stretch encoded
 counts: a section of a longer timeline exports. Regression spec:
 `apps/e2e/tests/regressions/ESCSUITE-367.spec.ts` (a two-hour timeline, a two-second section).
 
