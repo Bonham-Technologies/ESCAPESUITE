@@ -15,7 +15,9 @@
   },
   "permissions": {
     "allow": [
-      "Bash(gh api -X PUT repos/{owner}/{repo}/pulls/*/merge -f merge_method=squash)"
+      "Bash(gh api -X PUT repos/{owner}/{repo}/pulls/*/merge -f merge_method=squash)",
+      "mcp__github__enable_pr_auto_merge",
+      "mcp__github__disable_pr_auto_merge"
     ]
   }
 }

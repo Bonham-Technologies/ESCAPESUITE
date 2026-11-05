@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: scout role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
