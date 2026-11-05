@@ -47,6 +47,19 @@
   `knownDuration`, which the player falls back to when `video.duration` is `Infinity` or 0
 - A repair that fails still saves the raw blob, and raises the `NOT_SEEKABLE` notice. That
   path exists only for MediaRecorder takes, for the same reason
+- **The Duration is floored at the last block** (ESCSUITE-395). `webm-duration-fix` takes the
+  last frame's length from the gap between a track's last two blocks. When a take's final Cluster
+  holds one block, the one before it is in the previous Cluster with a larger relative timecode,
+  so the gap is negative and the stored Duration came out about one Cluster short (about 1 s:
+  2.019 s for a 3.0 s Firefox microphone take). The same `writeKeyframeCues()` walk notes the
+  latest block timestamp on any track (SimpleBlock or BlockGroup) and, when the library's Duration
+  is below it, rewrites the float in place at its own width; audio-only takes, whose Cues it
+  otherwise leaves alone, get the same floor. A Duration at or past the last block is kept. The
+  short header showed in CRAFT's own player too: `VideoPlayer` takes the length from
+  `video.duration` once it is finite, and Chromium and Firefox both report the header's Duration
+  on `loadedmetadata`, so a 3 s take read 0:02. Pinned by `webmRepair.test.ts` (the real
+  library), `webmCues.test.ts`, and `apps/e2e/tests/regressions/ESCSUITE-395.spec.ts` (the
+  playback dialog, over `apps/e2e/fixtures/last-cluster-one-block/`).
 - **The import of `webm-duration-fix` is resolved by hand**, and has to be. The library is
   CommonJS: `lib/index.js` ends `exports.default = fixWebmDuration` and sets `__esModule`, so
   what a default import binds to is a toolchain decision — esbuild's `__toESM(mod, 0)` (Vite 7
