@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v12. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -68,8 +68,8 @@ budget, or after two failures in a row. For each ticket:
    ticket, lists each acceptance criterion with how it is verified, and states the
    class and any risk. Comment the PR link on the ticket.
 6. **Merging:**
-   - `ap-auto`: wait for `ci-status` to be green on the PR's head commit, rebase if
-     `main` moved, then merge:
+   - `ap-auto`: wait for a **fresh green** (policy, **Always**; after an update or a
+     rebase, the new head's `ci-status`), then merge:
      `gh api -X PUT repos/{owner}/{repo}/pulls/{n}/merge -f merge_method=squash`.
      Merge one PR at a time. Move the ticket to Done.
    - `ap-owner-merge`: label the PR `needs-owner` on GitHub. The ticket **stays In
@@ -90,8 +90,8 @@ budget, or after two failures in a row. For each ticket:
 `gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[] | select(.head.ref | startswith("autopilot/refresh-v")) | .number'`.
 Merge one under the `ap-auto` rules, with no ticket, when all of these hold: every file
 in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
-listed in it; `.claude/rules/autopilot.local.md` is not among them; `ci-status` is
-green on the head. Otherwise label it `needs-owner` and comment which condition failed.
+listed in it; `.claude/rules/autopilot.local.md` is not among them; the head has a
+fresh green. Otherwise label it `needs-owner` and comment which condition failed.
 A refused merge goes as step 6's **Merge refused**.
 This is the one `.claude/` change that isn't owner-merged: the owner approved it when
 it merged in bonham-ops.

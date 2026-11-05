@@ -1,16 +1,14 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v12. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
-Part of the autopilot policy. `.claude/rules/autopilot.md` and
-`.claude/rules/autopilot.local.md` load in every session and apply here too.
+Part of the autopilot policy. `.claude/rules/autopilot.md` and `.claude/rules/autopilot.local.md` load in every session and apply here too.
 
 ## Dependabot
 
 Run it as a sweep, one PR at a time: first every open Dependabot PR that fixes an open
 Dependabot alert, then the rest, oldest first within each group. A PR fixes an alert
 when it bumps the alert's package to at least the alert's first patched version; read
-the alerts with
-`gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'`.
+the alerts with `gh api 'repos/{owner}/{repo}/dependabot/alerts?state=open&per_page=100'`.
 If that answers 403 or 404, as it does in cloud runs today, use the steward's open scan
 tickets instead: a PR that bumps a ticket's package to at least its fixed version
 fixes it. Find them with
@@ -30,8 +28,8 @@ marker line `<!-- autopilot:dependabot-triage -->`. Comments post as the owner, 
 marker is the only reliable sign; never judge by author. The one exception: a triaged
 PR whose verdict is `merge`, that is still open with no `needs-owner` label, and whose
 head is still the comment's `Head:` sha was waiting on CI. Merge it under the rules
-below once `ci-status` is green on that head, without commenting again. If the head
-changed, triage it again with a new comment.
+below once it has a fresh green, without commenting again. If the head changed by
+anything but an update-branch merge of `main`, triage it again with a new comment.
 Check for the marker with:
 
 ```
@@ -67,7 +65,8 @@ For each untriaged PR:
    - it's a **patch or minor** bump;
    - the drift scan found nothing and you pushed no commits to it;
    - verify passes;
-   - `ci-status` is green;
+   - it has a fresh green (policy, **Always**; an update-branch merge of `main` is
+     not a pushed commit);
    - no breaking changes were found.
 
    Otherwise label it `needs-owner` with the reason. **Any PR autopilot pushed

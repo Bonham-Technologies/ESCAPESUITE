@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v12. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -104,8 +104,7 @@ It is the only GitHub label this policy uses; every other label here is a Jira l
 
 ## Ticket classes
 
-Every ticket carries exactly one class label. The steward log ticket is the only
-exception.
+Every ticket carries exactly one class label. The steward log ticket is the only exception.
 
 | Label | Meaning | Who acts |
 |---|---|---|
@@ -127,8 +126,7 @@ exception.
 - the autopilot's own setup: anything under `.claude/`, such as
   `.claude/rules/autopilot.local.md`, the agents, hooks and settings.
 
-It also applies if the diff exceeds about 800 changed lines, or the reviewer or QC
-raises a concern it can't resolve.
+It also applies if the diff exceeds about 800 changed lines, or the reviewer or QC raises a concern it can't resolve.
 
 **`ap-decision`** if the ticket asks for:
 - a new capability outside the product's current scope;
@@ -164,8 +162,7 @@ When unsure between two classes, pick the stricter one.
 **Legacy `needs-operator`.** Tickets from before autopilot may carry `needs-operator`:
 operator-only work. So do the fleet role's owner-action tickets (`fleet.md`), which
 carry it in place of a class label. Treat them like `ap-decision`. Never build them, and never relabel
-them, even if they also carry another class label. The steward lists them under
-**Waiting on you**.
+them, even if they also carry another class label. The steward lists them under **Waiting on you**.
 
 ## Reconcile
 
@@ -219,6 +216,8 @@ At the start of every run:
 ## Always
 
 - Never push to `main`; never force-push a branch you didn't create; never merge `ap-decision` work or anything labelled `needs-owner`.
+- Merge only on a **fresh green**: `ci-status` passed on the PR's head, and `gh api repos/{owner}/{repo}/compare/main...<head sha> --jq .behind_by` is 0. If it's behind, `gh api -X PUT repos/{owner}/{repo}/pulls/{n}/update-branch` (a merge of `main`, never a rebase) and wait for the new run.
+  This holds for every merge, a refresh PR's or one the owner asks a thread to make, whoever's go-ahead it has. Recheck the next PR after each merge.
 - Never build or relabel `ap-decision`, `ap-watch` or `needs-operator` tickets. The
   exceptions are adding the `ap-asked` marker, and a thread started from the Project
   conversation because the owner approved or rejected a named ticket there.

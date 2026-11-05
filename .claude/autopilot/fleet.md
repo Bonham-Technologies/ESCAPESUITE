@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v12. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -89,8 +89,9 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   invisible from here: write only "no trace of the <role> run since <date>".
 - **Setup:** a table of each project's policy version on `main` (input 6, or "not
   read") and its digest-reported instructions version against `fleet.json`, an agents
-  column (`vendored` or `fallback`, from the digest's Setup line), and a Refresh PR
-  column (its open `autopilot/refresh-v*` PR, linked, else the propagation log's).
+  column (`vendored` or `fallback`, from the digest's Setup line), a Refresh PR
+  column (its open `autopilot/refresh-v*` PR, linked, else the propagation log's), and
+  a Strict column: `main-protection`'s `strict_required_status_checks_policy`.
 - **Capacity:** one row per project. Columns: Project · Policy on main · Ready (auto /
   owner-merge / feature) · Waiting on you · Runs/week × budget · Capacity/week · Weeks to
   clear · Paused (builder / steward / scout) · Last run per task + result · Drift (`none` or the ticket's link).
