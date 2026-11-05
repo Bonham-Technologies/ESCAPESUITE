@@ -11,6 +11,7 @@ import type {
 } from '@escapesuite/shared/types'
 
 import type { CaptionCue, CaptionStyle } from '../core/captions'
+import type { TimeRange } from '../core/silenceDetection'
 
 // Re-export shared types
 export type { MediaType, MediaSource, WaveformPeak, SourceVideo, RecordingRole, OverlayPlacement }
@@ -549,6 +550,12 @@ export const DEFAULT_KEYFRAME_PANEL_STATE: KeyframePanelState = {
 // Tool types for timeline editing
 export type ToolType = 'select' | 'razor' | 'ripple';
 
+/** The "Remove silences" review's state (ESCSUITE-403); see `EditorState.silenceReview`. */
+export interface SilenceReview {
+  clipId: string;
+  candidates: TimeRange[];
+}
+
 // Marker for timeline
 export interface Marker {
   id: string;
@@ -643,6 +650,13 @@ export interface EditorState {
    * not in the undo history, not in a saved file.
    */
   cropClipId: string | null;
+  /**
+   * The "Remove silences" review (ESCSUITE-403), or null while closed: the
+   * clip it was opened on and the cuts still on the list, in timeline
+   * seconds, which the timeline draws as bands. View state, like `cropClipId`:
+   * not in the project, the undo history or a saved file.
+   */
+  silenceReview: SilenceReview | null;
   markers: Marker[];
 
   // Keyframe panel state
@@ -727,6 +741,16 @@ export interface EditorState {
    * A linked clip on a locked track is left where it is.
    */
   rippleDeleteClip: (clipId: string, alone?: boolean) => void;
+  /**
+   * Cut `ranges` (timeline seconds) out of every row `clipId` and the clips
+   * linked to it sit on (`linkedRows`), and close the gaps there, as one undo step
+   * (ESCSUITE-403, "Remove silences"). Each row moves by the same time at the
+   * same timeline time, so a take's parts stay in step; other rows stay put,
+   * as a ripple delete leaves them. Refused whole (`false`, nothing written)
+   * when any of those rows is locked, the clip is not there, or no range
+   * holds any time. See `store/rippleRanges.ts`.
+   */
+  removeTimeRanges: (clipId: string, ranges: readonly TimeRange[]) => boolean;
   /**
    * **A refused write says so** (ESCSUITE-87).
    *
@@ -925,6 +949,10 @@ export interface EditorState {
   setActiveTool: (tool: ToolType) => void;
   setLoopPlayback: (enabled: boolean) => void;
   setCropClipId: (clipId: string | null) => void;
+  /** Open the "Remove silences" review on a clip (no cuts listed yet), or close it with null. */
+  setSilenceReviewClip: (clipId: string | null) => void;
+  /** Replace the review's list of cuts. Does nothing while the review is closed. */
+  setSilenceCandidates: (candidates: TimeRange[]) => void;
   recalculateTimelineDuration: () => void;
 
   // Actions - Markers

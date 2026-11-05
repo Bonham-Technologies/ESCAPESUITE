@@ -29,6 +29,7 @@ cutting a sliver off it, and a partner starting at the cut goes to the right.
 | Delete (`Delete`/`Backspace`, the toolbar, the inspector) | Removes the linked clips too, one undo step |
 | Ripple delete (ripple tool + `Delete`) | Removes them and closes the gap on each one's own row |
 | Ripple trim (ripple tool + an edge drag) | Moves the same edge of every linked clip by the same amount, the least any of them can follow, and closes the gap on each one's own row, one undo step (`useTrimDrag`, ESCSUITE-360) |
+| Remove silences (ESCSUITE-403) | Cuts each pause out of every row a link reaches and closes it there, one undo step; a pause is one only where every linked part with sound is silent ([`remove-silences.md`](remove-silences.md)) |
 | Drag | Moves the linked clips by the same time and rows, through `moveClips`; refused whole when any of them cannot land (`canMoveSelectedClips`), and their boxes follow the ghost (`DragState.companions`) |
 
 `Ctrl+Alt+B` is matched on `e.code === 'KeyB'` because macOS reports Option+B

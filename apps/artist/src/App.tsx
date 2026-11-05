@@ -7,6 +7,7 @@ import { KeyframePanel } from './components/KeyframePanel';
 import { Toolbar } from './components/Toolbar';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ProjectLoadDialog } from './components/ProjectLoadDialog';
+import { SilenceDialog } from './components/SilenceDialog';
 import { parseUrlParams } from './utils/integration';
 import { AppHeader } from './app/AppHeader';
 import { MediaLibrarySidebar } from './app/MediaLibrarySidebar';
@@ -87,6 +88,8 @@ function App() {
   const setOutPoint = useEditorStore((state) => state.setOutPoint);
   const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
   const cropClipId = useEditorStore((state) => state.cropClipId);
+  // A boolean, so the review's list changing does not re-render App (ESCSUITE-403).
+  const silenceReviewOpen = useEditorStore((state) => state.silenceReview !== null);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);
 
   // The hooks below are called in a fixed order, because that order is the
@@ -166,7 +169,8 @@ function App() {
     showShortcuts ||
     showSessionPrompt ||
     showProjectLoadDialog ||
-    resolutionConfirmOpen;
+    resolutionConfirmOpen ||
+    silenceReviewOpen;
 
   useAppKeyboardShortcuts({
     canUndo,
@@ -302,6 +306,9 @@ function App() {
 
       {/* Export dialog */}
       <ExportDialog isOpen={showExport} onClose={() => { setShowExport(false); setExportTimeRange(undefined); }} timeRange={exportTimeRange} />
+
+      {/* "Remove silences" review, opened from the inspector (ESCSUITE-403) */}
+      {silenceReviewOpen && <SilenceDialog onRemoved={(message) => showNotification(message, 'success')} />}
 
       {/* Keyframe panel */}
       <KeyframePanel />

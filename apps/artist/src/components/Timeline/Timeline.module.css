@@ -838,3 +838,18 @@
 .rippleCursor .clip {
   cursor: ew-resize;
 }
+
+/* "Remove silences" review bands (ESCSUITE-403): what "Remove all" will cut. */
+.silenceBand {
+  position: absolute;
+  top: 0;
+  background: repeating-linear-gradient(
+    135deg,
+    rgba(248, 113, 113, 0.22) 0 6px,
+    rgba(248, 113, 113, 0.1) 6px 12px
+  );
+  border-left: 1px solid rgba(248, 113, 113, 0.7);
+  border-right: 1px solid rgba(248, 113, 113, 0.7);
+  pointer-events: none;
+  z-index: 6;
+}
