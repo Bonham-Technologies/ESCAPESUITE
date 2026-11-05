@@ -10,6 +10,8 @@
 // Pure functions only: the dialog runs them, the store cuts what they find.
 
 import type { Clip, SourceVideo, WaveformPeak } from '../store/types';
+import { linkedRows } from '../store/rippleRanges';
+import { peakTimingOf, type PeakTiming } from '../utils/peakTiming';
 
 /** A stretch of time, in seconds; `end` is after `start`. */
 export interface TimeRange {
@@ -36,21 +38,6 @@ export const DEFAULT_SILENCE_OPTIONS: SilenceOptions = {
 const EPSILON = 1e-9;
 
 /**
- * How long one peak of a library waveform lasts, in seconds of source.
- *
- * `extractWaveformData` makes 100 peaks a second nominally, but its bucketing
- * (`peaksFromPcm`, which the streamed reducer equals) puts
- * `floor(length / ceil(length / q))` samples in a bucket, q = sampleRate / 100.
- * For any track not an exact multiple of q long and over ~5 s that is q − 1
- * samples: 479 at 48 kHz, 0.2 % short of 10 ms. Read as
- * `peaks.length / duration` (≈ 10 ms) the peaks drift late by 2 ms a second,
- * so a pause 100 s in sat 0.2 s late — twice the default padding, and the cut
- * clipped the next word. 48 kHz is Opus's only rate (every CRAFT WebM) and the
- * usual AAC one; a 44.1 kHz track is left 0.02 % out (≈ 20 ms per 100 s).
- */
-export const SECONDS_PER_PEAK = 0.01 - 1 / 48_000;
-
-/**
  * The silent runs in `peaks`, in the peaks' own seconds, clipped to `within`.
  * Bucket `i` covers `[i, i + 1) / peaksPerSecond`.
  */
@@ -60,18 +47,56 @@ export function silentRuns(
   thresholdDb: number,
   within: TimeRange = { start: 0, end: peaks.length / peaksPerSecond }
 ): TimeRange[] {
-  if (peaks.length === 0 || !(peaksPerSecond > 0)) return [];
+  if (!(peaksPerSecond > 0)) return [];
+  const at = (i: number) => i / peaksPerSecond;
+  const buckets = { first: Math.floor(within.start * peaksPerSecond), last: Math.ceil(within.end * peaksPerSecond) };
+  return runsOver(peaks, thresholdDb, within, buckets, at, at);
+}
+
+/**
+ * The stretches of source time, within `within`, that are silent in `peaks`
+ * however long a peak really lasts within `timing` (`utils/peakTiming.ts`).
+ * A silent run of buckets `[i, j)` starts at `i · max` at the latest and ends
+ * at `j · min` at the earliest, so only that much of it is certainly silent;
+ * with exact timing that is the run itself. A run that leaves nothing certain
+ * is dropped, so wrong timing can only cut less, never into sound.
+ */
+export function certainSilentRuns(
+  peaks: readonly WaveformPeak[],
+  timing: Pick<PeakTiming, 'min' | 'max'>,
+  thresholdDb: number,
+  within: TimeRange
+): TimeRange[] {
+  if (!(timing.min > 0) || !(timing.max >= timing.min)) return [];
+  const buckets = { first: Math.floor(within.start / timing.max), last: Math.ceil(within.end / timing.min) };
+  return runsOver(peaks, thresholdDb, within, buckets, (i) => i * timing.max, (i) => i * timing.min);
+}
+
+/**
+ * Silent runs of buckets `[i, j)` of `peaks` as `[startOf(i), endOf(j))`,
+ * clipped to `within`. `buckets` are every bucket that may overlap `within`:
+ * from the first that can hold its start to the last that can hold its end.
+ */
+function runsOver(
+  peaks: readonly WaveformPeak[],
+  thresholdDb: number,
+  within: TimeRange,
+  buckets: { first: number; last: number },
+  startOf: (index: number) => number,
+  endOf: (index: number) => number
+): TimeRange[] {
+  if (peaks.length === 0) return [];
   const level = Math.pow(10, thresholdDb / 20);
-  const first = Math.max(0, Math.floor(within.start * peaksPerSecond));
-  const last = Math.min(peaks.length, Math.ceil(within.end * peaksPerSecond));
+  const first = Math.max(0, buckets.first);
+  const last = Math.min(peaks.length, buckets.last);
   const runs: TimeRange[] = [];
   let runStart = -1;
   for (let i = first; i <= last; i++) {
     const silent = i < last && Math.max(Math.abs(peaks[i].min), Math.abs(peaks[i].max)) < level;
     if (silent && runStart < 0) runStart = i;
     if (!silent && runStart >= 0) {
-      const start = Math.max(within.start, runStart / peaksPerSecond);
-      const end = Math.min(within.end, i / peaksPerSecond);
+      const start = Math.max(within.start, startOf(runStart));
+      const end = Math.min(within.end, endOf(i));
       if (end > start) runs.push({ start, end });
       runStart = -1;
     }
@@ -125,11 +150,11 @@ export function detectSilences(
   return cutsFromSilences(silentRuns(peaks, peaksPerSecond, options.thresholdDb, within), options);
 }
 
-/** The peaks a clip's waveform is drawn from, if its source has any. */
-function peaksOfSource(source: SourceVideo | undefined): { peaks: WaveformPeak[]; perSecond: number } | null {
+/** A source's peaks and how long each lasts, if it has peaks to read. */
+function peaksOfSource(source: SourceVideo | undefined): { peaks: WaveformPeak[]; timing: PeakTiming } | null {
   const peaks = source?.waveformData;
   if (!source || !source.hasAudio || !peaks?.length) return null;
-  return { peaks, perSecond: 1 / SECONDS_PER_PEAK };
+  return { peaks, timing: peakTimingOf(source) };
 }
 
 /** Whether a clip's source carries peaks that silence detection can read. */
@@ -138,17 +163,53 @@ export function clipHasPeaks(clip: Clip, sources: readonly SourceVideo[]): boole
 }
 
 /**
+ * The clips a cut through `target`'s span has to be judged against: every clip
+ * with sound (`hasAudio`) that overlaps the span on any row the cut moves
+ * (`linkedRows`, the rows `removeTimeRanges` cuts). Not only the target's own
+ * link group: a music bed or a voice-over on a partner's row, or a clip on a
+ * row a later piece's link reaches, is cut too, so it is listened to too. An
+ * overlay, and a clip whose source has no sound, has nothing to listen to.
+ */
+function listenedClips(clips: readonly Clip[], sources: readonly SourceVideo[], target: Clip): { clip: Clip; source: SourceVideo }[] {
+  const rows = linkedRows(clips, target);
+  const spanEnd = target.timelinePosition + target.duration;
+  const listened: { clip: Clip; source: SourceVideo }[] = [];
+  for (const clip of clips) {
+    if (!rows.has(clip.trackId) || clip.overlayType) continue;
+    if (clip.timelinePosition >= spanEnd || clip.timelinePosition + clip.duration <= target.timelinePosition) continue;
+    const source = sources.find((s) => s.id === clip.sourceVideoId);
+    if (source?.hasAudio) listened.push({ clip, source });
+  }
+  return listened;
+}
+
+/**
+ * Whether any clip `findTakeSilences(…, clipId, …)` listens to has peaks made
+ * before their length was recorded (`peakTimingOf`), so pauses late in it may
+ * be left in rather than placed exactly.
+ */
+export function hasApproximateTiming(clips: readonly Clip[], sources: readonly SourceVideo[], clipId: string): boolean {
+  const target = clips.find((c) => c.id === clipId);
+  if (!target) return false;
+  return listenedClips(clips, sources, target).some(({ source }) => {
+    const audio = peaksOfSource(source);
+    return audio !== null && !audio.timing.exact;
+  });
+}
+
+/**
  * The cuts to make in `clipId`'s stretch of the timeline, in timeline seconds.
  *
- * A take recorded as separate tracks has its sound on more than one clip (the
- * microphone, the system audio, a screen part with sound), so a stretch is a
- * pause only where **every** clip linked to `clipId` that has sound is silent;
- * where a part has no clip at all it is silent by definition. A part whose
+ * A stretch is a pause only where **every** clip the cut would touch that has
+ * sound is silent (`listenedClips`: the take's other parts — the microphone,
+ * the system audio, a screen part with sound — and anything else on the rows
+ * it moves); where such a clip is absent it does not speak. A clip whose
  * source has sound (`hasAudio`) but no peaks to read (its waveform could not
- * be decoded) is never silent within its clip: what it says there is unknown,
- * so nothing there is cut. Detection runs on the silent runs, before the
- * minimum gap and the padding apply, so a pause both parts share is judged by
- * its shared length.
+ * be decoded) is never silent within its span: what it says there is unknown,
+ * so nothing there is cut. Peaks are placed by `peakTimingOf`, and only what is
+ * silent whatever their exact length is counted (`certainSilentRuns`).
+ * Detection runs on the silent runs, before the minimum gap and the padding
+ * apply, so a pause every clip shares is judged by its shared length.
  */
 export function findTakeSilences(
   clips: readonly Clip[],
@@ -159,26 +220,22 @@ export function findTakeSilences(
   const target = clips.find((c) => c.id === clipId);
   if (!target) return [];
   const span: TimeRange = { start: target.timelinePosition, end: target.timelinePosition + target.duration };
-  const members = target.linkGroupId ? clips.filter((c) => c.linkGroupId === target.linkGroupId) : [target];
 
   let silent: TimeRange[] | null = null;
-  for (const member of members) {
-    if (member.overlayType) continue;
-    const source = sources.find((s) => s.id === member.sourceVideoId);
+  for (const { clip, source } of listenedClips(clips, sources, target)) {
     const audio = peaksOfSource(source);
-    if (!audio && !source?.hasAudio) continue;
     // Source time to timeline time for this clip.
-    const shift = member.timelinePosition - member.startTime;
-    const from = Math.max(span.start, member.timelinePosition);
-    const to = Math.min(span.end, member.timelinePosition + member.duration);
+    const shift = clip.timelinePosition - clip.startTime;
+    const from = Math.max(span.start, clip.timelinePosition);
+    const to = Math.min(span.end, clip.timelinePosition + clip.duration);
     const runs: TimeRange[] = [];
-    if (from > span.start) runs.push({ start: span.start, end: Math.min(from, span.end) });
-    if (to > from && audio) {
-      for (const run of silentRuns(audio.peaks, audio.perSecond, options.thresholdDb, { start: from - shift, end: to - shift })) {
+    if (from > span.start) runs.push({ start: span.start, end: from });
+    if (audio) {
+      for (const run of certainSilentRuns(audio.peaks, audio.timing, options.thresholdDb, { start: from - shift, end: to - shift })) {
         runs.push({ start: run.start + shift, end: run.end + shift });
       }
     }
-    if (to < span.end) runs.push({ start: Math.max(to, span.start), end: span.end });
+    if (to < span.end) runs.push({ start: to, end: span.end });
     silent = silent ? intersectRanges(silent, mergeTouching(runs)) : mergeTouching(runs);
   }
   return silent ? cutsFromSilences(silent, options) : [];

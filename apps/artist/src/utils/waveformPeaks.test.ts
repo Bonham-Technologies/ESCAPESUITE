@@ -13,6 +13,7 @@ import type { WaveformPeak } from '../store/types';
 import {
   PeakReducer,
   mixToMono,
+  peakSecondsFor,
   peaksFromPcm,
   streamingThreshold,
 } from './waveformPeaks';
@@ -215,5 +216,36 @@ describe('PeakReducer', () => {
     const reducer = new PeakReducer(48000, 100);
     reducer.finish();
     expect(() => reducer.push([new Float32Array(1)])).toThrow(/finished/);
+  });
+});
+
+describe('peakSecondsFor (ESCSUITE-403)', () => {
+  it('is the bucket over the rate: q − 1 samples off a multiple of q, q on one', () => {
+    expect(peakSecondsFor(Math.round(600.013 * 48000), 48000, 100)).toBe(479 / 48000);
+    expect(peakSecondsFor(600 * 48000, 48000, 100)).toBe(480 / 48000);
+    expect(peakSecondsFor(Math.round(600.013 * 44100), 44100, 100)).toBe(440 / 44100);
+    expect(peakSecondsFor(Math.round(600.013 * 16000), 16000, 100)).toBe(159 / 16000);
+    // A rate 100 does not divide: q's floor.
+    expect(peakSecondsFor(Math.round(600.013 * 22050), 22050, 100)).toBe(220 / 22050);
+  });
+
+  it('has nothing to time with no samples or no rate', () => {
+    expect(peakSecondsFor(0, 48000, 100)).toBeUndefined();
+    expect(peakSecondsFor(100, 0, 100)).toBeUndefined();
+  });
+
+  it('is what the reducer reports for the peaks it made, held or streamed', () => {
+    expect(new PeakReducer(48000, 100).secondsPerPeak).toBeUndefined();
+    for (const length of [1000, streamingThreshold(44100, 100) + 12345]) {
+      const mono = noise(length, length);
+      const reducer = new PeakReducer(44100, 100);
+      reducer.push([mono]);
+      const peaks = reducer.finish();
+      expect(reducer.secondsPerPeak, `length ${length}`).toBe(peakSecondsFor(length, 44100, 100));
+      expect(peaks.length).toBe(peaksFromPcm(mono, 44100, 100).length);
+    }
+    const empty = new PeakReducer(48000, 100);
+    empty.finish();
+    expect(empty.secondsPerPeak).toBeUndefined();
   });
 });

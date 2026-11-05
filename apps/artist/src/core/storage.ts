@@ -117,7 +117,7 @@ async function storeRepair(id: string, size: number, repaired: Blob): Promise<vo
  */
 export async function storeRebuiltWaveform(
   id: string,
-  waveform: Pick<SourceVideo, 'waveformData' | 'hasAudio' | 'waveformUnavailable'>
+  waveform: Pick<SourceVideo, 'waveformData' | 'waveformSecondsPerPeak' | 'hasAudio' | 'waveformUnavailable'>
 ): Promise<void> {
   const db = await getDB()
   const tx = db.transaction('videos', 'readwrite')

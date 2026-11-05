@@ -471,6 +471,8 @@ describe('importTake', () => {
       // library's import path gives a *video* a waveform, and a handed-over
       // take must not be the one import that looks different.
       expect(added[0].waveformData).toEqual(added[2].waveformData)
+      // ESCSUITE-403: each with its peaks' length, which silence detection reads.
+      expect(added.map((v) => typeof v.waveformSecondsPerPeak)).toEqual(['number', 'undefined', 'number'])
     })
 
     it('never decodes a part ESCAPECRAFT recorded with no audio', async () => {

@@ -7,14 +7,19 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { Clip, SourceVideo } from '../store/types';
+import fc from 'fast-check';
+import type { Clip, SourceVideo, WaveformPeak } from '../store/types';
 import { DEFAULT_EFFECTS, DEFAULT_TRANSFORM, DEFAULT_TRANSITION } from '../store/types';
-import { peaksFromPcm } from '../utils/waveformPeaks';
+import { linkedRows } from '../store/rippleRanges';
+import { PeakReducer, peakSecondsFor, peaksFromPcm } from '../utils/waveformPeaks';
+import { peakTimingOf } from '../utils/peakTiming';
 import {
   DEFAULT_SILENCE_OPTIONS,
+  certainSilentRuns,
   cutsFromSilences,
   detectSilences,
   findTakeSilences,
+  hasApproximateTiming,
   intersectRanges,
   silentRuns,
   totalLength,
@@ -135,23 +140,28 @@ describe('the range helpers', () => {
   });
 });
 
-describe('findTakeSilences', () => {
-  const clip = (id: string, sourceVideoId: string, at: number, from: number, to: number, linkGroupId?: string): Clip => ({
+/** A clip of `sourceVideoId` from `from` to `to` of it, at `at` on the timeline, on row `t-<id>` unless `trackId` says. */
+function clip(id: string, sourceVideoId: string, at: number, from: number, to: number, linkGroupId?: string, trackId = `t-${id}`): Clip {
+  return {
     id,
     sourceVideoId,
     name: id,
     startTime: from,
     endTime: to,
     duration: to - from,
-    trackId: `t-${id}`,
+    trackId,
     timelinePosition: at,
     blendMode: 'normal',
     transform: { ...DEFAULT_TRANSFORM },
     effects: { ...DEFAULT_EFFECTS },
     transition: { ...DEFAULT_TRANSITION },
     ...(linkGroupId ? { linkGroupId } : {}),
-  });
-  const source = (id: string, pcm: Float32Array | null, mediaType: 'video' | 'audio' = 'audio'): SourceVideo => ({
+  };
+}
+
+/** A library source with `pcm`'s peaks (48 kHz) and their recorded length, or one with no peaks. */
+function source(id: string, pcm: Float32Array | null, mediaType: 'video' | 'audio' = 'audio'): SourceVideo {
+  return {
     id,
     name: id,
     duration: pcm ? pcm.length / RATE : 10,
@@ -162,8 +172,11 @@ describe('findTakeSilences', () => {
     size: 1,
     mediaType,
     hasAudio: pcm !== null,
-    ...(pcm ? { waveformData: peaksOf(pcm) } : {}),
-  });
+    ...(pcm ? { waveformData: peaksOf(pcm), waveformSecondsPerPeak: peakSecondsFor(pcm.length, RATE, PEAKS_PER_SECOND) } : {}),
+  };
+}
+
+describe('findTakeSilences', () => {
 
   // Mic: tone 0–2, silence 2–4, tone 4–6. System audio: tone 0–3, silence 3–6.
   const mic = source('mic', speech([[2, true], [2, false], [2, true]]));
@@ -198,10 +211,9 @@ describe('findTakeSilences', () => {
   });
 
   it('places a pause minutes into a recording where it is, not where 100 peaks a second would put it', () => {
-    // A recording that is not a whole number of 10 ms buckets long, as no real
-    // one is: its peaks are 479 samples each at 48 kHz, not 480, so reading
-    // them as 10 ms each put this pause 0.2 s late — past the padding, into
-    // the word after it.
+    // A recording that is not a whole number of 10 ms buckets long: its peaks
+    // are 479 samples each at 48 kHz, not 480, so reading them as 10 ms each
+    // put this pause 0.2 s late — past the padding, into the word after it.
     const seconds = 120.013;
     const pcm = new Float32Array(Math.round(seconds * RATE));
     for (let i = 0; i < pcm.length; i++) {
@@ -232,5 +244,254 @@ describe('findTakeSilences', () => {
   it('finds nothing in a take with no sound to listen to, or for a clip that is not there', () => {
     expect(findTakeSilences([clip('s', 'screen', 0, 0, 6)], [screen], 's', options)).toEqual([]);
     expect(findTakeSilences([], [mic], 'missing', options)).toEqual([]);
+  });
+});
+
+/**
+ * A long track's peaks as an import makes them: PCM at `rate`, `seconds` long,
+ * at half scale except in `pauses` (digital silence), streamed through
+ * `PeakReducer` a second at a time so ten minutes cost no more than a chunk.
+ */
+function streamedTrack(rate: number, seconds: number, pauses: [number, number][]): { peaks: WaveformPeak[]; secondsPerPeak: number } {
+  const reducer = new PeakReducer(rate, PEAKS_PER_SECOND);
+  const total = Math.round(seconds * rate);
+  const quiet = pauses.map(([a, b]) => [Math.round(a * rate), Math.round(b * rate)]);
+  const chunk = new Float32Array(rate);
+  for (let at = 0; at < total; at += rate) {
+    const n = Math.min(rate, total - at);
+    for (let i = 0; i < n; i++) {
+      const sample = at + i;
+      chunk[i] = quiet.some(([a, b]) => sample >= a && sample < b) ? 0 : 0.5;
+    }
+    reducer.push([chunk.subarray(0, n)]);
+  }
+  const peaks = reducer.finish();
+  return { peaks, secondsPerPeak: reducer.secondsPerPeak! };
+}
+
+function trackSource(id: string, track: { peaks: WaveformPeak[]; secondsPerPeak: number }, seconds: number, recorded = true): SourceVideo {
+  return {
+    id,
+    name: id,
+    duration: seconds,
+    width: 0,
+    height: 0,
+    frameRate: 0,
+    mimeType: 'audio/webm',
+    size: 1,
+    mediaType: 'audio',
+    hasAudio: true,
+    waveformData: track.peaks,
+    ...(recorded ? { waveformSecondsPerPeak: track.secondsPerPeak } : {}),
+  };
+}
+
+/** Whether every cut lies inside one of the pauses: nothing heard is cut. */
+function insidePauses(cuts: { start: number; end: number }[], pauses: [number, number][]): boolean {
+  return cuts.every((cut) => pauses.some(([a, b]) => cut.start >= a - 1e-9 && cut.end <= b + 1e-9));
+}
+
+describe('findTakeSilences: peak timing at every sample rate (ESCSUITE-403)', () => {
+  // A pause 590–592 s into a ten-minute track. Every rate's peaks last a
+  // different, not-quite-10 ms time; read at the wrong one, this pause moved
+  // by up to 2.5 s and the cut took the speech either side of it.
+  const PAUSE: [number, number] = [590, 592];
+  const cases: [string, number, number][] = [
+    ['44.1 kHz', 44_100, 600.013],
+    ['32 kHz', 32_000, 600.013],
+    ['16 kHz (decodeAudioData resampling to a headset)', 16_000, 600.013],
+    ['48 kHz', 48_000, 600.013],
+    ['48 kHz, a whole number of 10 ms long', 48_000, 600],
+  ];
+
+  for (const [name, rate, seconds] of cases) {
+    it(`places a pause 590 s into a ${name} track within 50 ms, cutting nothing heard`, () => {
+      const track = streamedTrack(rate, seconds, [PAUSE]);
+      const long = trackSource('long', track, seconds);
+      const gaps = findTakeSilences([clip('l', 'long', 0, 0, seconds)], [long], 'l', DEFAULT_SILENCE_OPTIONS);
+      expect(gaps).toHaveLength(1);
+      expect(Math.abs(gaps[0].start - (PAUSE[0] + 0.1))).toBeLessThanOrEqual(TOLERANCE);
+      expect(Math.abs(gaps[0].end - (PAUSE[1] - 0.1))).toBeLessThanOrEqual(TOLERANCE);
+      // The padding is kept on both sides, not only "roughly".
+      expect(gaps[0].start).toBeGreaterThanOrEqual(PAUSE[0] + 0.1 - 1e-9);
+      expect(gaps[0].end).toBeLessThanOrEqual(PAUSE[1] - 0.1 + 1e-9);
+      expect(hasApproximateTiming([clip('l', 'long', 0, 0, seconds)], [long], 'l')).toBe(false);
+    });
+  }
+
+  it('reads peaks the whole-file fallback made the same way', () => {
+    // decodeAudioData's path: `peaksFromPcm` over the whole buffer at the rate it resampled to.
+    const rate = 16_000;
+    const seconds = 300.013;
+    const pcm = new Float32Array(Math.round(seconds * rate)).fill(0.5);
+    pcm.fill(0, 290 * rate, 292 * rate);
+    const peaks = peaksFromPcm(pcm, rate, PEAKS_PER_SECOND);
+    const long = trackSource('long', { peaks, secondsPerPeak: peakSecondsFor(pcm.length, rate, PEAKS_PER_SECOND)! }, seconds);
+    const [gap] = findTakeSilences([clip('l', 'long', 0, 0, seconds)], [long], 'l', DEFAULT_SILENCE_OPTIONS);
+    expect(Math.abs(gap.start - 290.1)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gap.end - 291.9)).toBeLessThanOrEqual(TOLERANCE);
+  });
+
+  describe('peaks with no recorded length (made before ESCSUITE-403)', () => {
+    const EARLY: [number, number] = [10, 12];
+    for (const [name, rate, seconds] of cases) {
+      it(`never cuts into sound at ${name}: an early pause is found, a late one left in`, () => {
+        const track = streamedTrack(rate, seconds, [EARLY, PAUSE]);
+        const legacy = trackSource('legacy', track, seconds, false);
+        const clips = [clip('l', 'legacy', 0, 0, seconds)];
+        const gaps = findTakeSilences(clips, [legacy], 'l', DEFAULT_SILENCE_OPTIONS);
+        expect(insidePauses(gaps, [EARLY, PAUSE])).toBe(true);
+        // Every cut still keeps the padding, at the worst-case timing.
+        for (const gap of gaps) {
+          const pause = [EARLY, PAUSE].find(([a, b]) => gap.start >= a && gap.end <= b)!;
+          expect(gap.start - pause[0]).toBeGreaterThanOrEqual(0.1 - 1e-9);
+          expect(pause[1] - gap.end).toBeGreaterThanOrEqual(0.1 - 1e-9);
+        }
+        expect(gaps).toHaveLength(1);
+        expect(gaps[0].start).toBeLessThan(EARLY[1]);
+        expect(hasApproximateTiming(clips, [legacy], 'l')).toBe(true);
+      });
+    }
+
+    it('reads a recorded length no extractor could write as if it were absent', () => {
+      expect(peakTimingOf({ waveformSecondsPerPeak: 0.02 }).exact).toBe(false);
+      expect(peakTimingOf({ waveformSecondsPerPeak: Number.NaN }).exact).toBe(false);
+      expect(peakTimingOf({}).exact).toBe(false);
+      expect(peakTimingOf({ waveformSecondsPerPeak: 479 / 48_000 })).toEqual({ min: 479 / 48_000, max: 479 / 48_000, estimate: 479 / 48_000, exact: true });
+    });
+  });
+
+  it('certainSilentRuns keeps only what is silent at either end of the timing range', () => {
+    const peaks = [{ min: 0, max: 0.5 }, ...Array.from({ length: 98 }, () => ({ min: 0, max: 0 })), { min: 0, max: 0.5 }];
+    // Buckets 1–98 silent: at 9–11 ms a bucket, certainly silent from 11 ms to 891 ms.
+    const [run] = certainSilentRuns(peaks, { min: 0.009, max: 0.011 }, -40, { start: 0, end: 2 });
+    expect(run.start).toBeCloseTo(0.011, 9);
+    expect(run.end).toBeCloseTo(0.891, 9);
+    expect(certainSilentRuns(peaks, { min: 0, max: 0.01 }, -40, { start: 0, end: 1 })).toEqual([]);
+    expect(certainSilentRuns([], { min: 0.01, max: 0.01 }, -40, { start: 0, end: 1 })).toEqual([]);
+  });
+});
+
+describe('findTakeSilences: every clip the cut touches is listened to (ESCSUITE-403)', () => {
+  // Mic: tone 0–2, silence 2–4, tone 4–6. System audio: tone 0–3, silence 3–6.
+  const mic = source('mic', speech([[2, true], [2, false], [2, true]]));
+  const system = source('system', speech([[3, true], [3, false]]));
+  // Music: tone throughout.
+  const music = source('music', speech([[6, true]]));
+  const screen = source('screen', null, 'video');
+  const options = { ...DEFAULT_SILENCE_OPTIONS, padding: 0 };
+
+  it("hears a music bed on a partner's row where the partner itself is absent", () => {
+    // The system audio (linked) starts at 4 s on row Y; a music clip sits on
+    // row Y before it, 0–2.5 s. Cutting the mic's pause would cut the music too.
+    const clips = [
+      clip('m', 'mic', 0, 0, 6, 'g', 'M'),
+      clip('y', 'system', 4, 0, 2, 'g', 'Y'),
+      clip('b', 'music', 0, 0, 2.5, undefined, 'Y'),
+    ];
+    const gaps = findTakeSilences(clips, [mic, system, music], 'm', options);
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 2.5)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gaps[0].end - 4)).toBeLessThanOrEqual(TOLERANCE);
+    // Speaking through the whole pause, it leaves nothing to cut.
+    const throughout = [...clips.slice(0, 2), clip('b', 'music', 0, 0, 3.9, undefined, 'Y')];
+    expect(findTakeSilences(throughout, [mic, system, music], 'm', options)).toEqual([]);
+  });
+
+  it('hears an unlinked clip on a row only a later piece\'s link reaches', () => {
+    // m (row M) and s (row S) are one group; s2 after s on row S is linked to
+    // m2 on row C, so the cut moves row C as well (`linkedRows`). Music on row
+    // C plays through the mic's pause.
+    const clips = [
+      clip('m', 'mic', 0, 0, 6, 'g1', 'M'),
+      clip('s', 'screen', 0, 0, 6, 'g1', 'S'),
+      clip('s2', 'screen', 6, 6, 8, 'g2', 'S'),
+      clip('m2', 'system', 6, 0, 2, 'g2', 'C'),
+      clip('x', 'music', 1, 0, 4, undefined, 'C'),
+    ];
+    expect(linkedRows(clips, clips[0]).has('C')).toBe(true);
+    expect(findTakeSilences(clips, [mic, screen, system, music], 'm', options)).toEqual([]);
+    // A row no link reaches is not cut, so its music does not stop the cut.
+    const elsewhere = clips.map((c) => (c.id === 'x' ? { ...c, trackId: 'E' } : c));
+    expect(findTakeSilences(elsewhere, [mic, screen, system, music], 'm', options)).toHaveLength(1);
+  });
+
+  it('is not stopped by a silent video-only clip on a touched row', () => {
+    const clips = [clip('m', 'mic', 0, 0, 6, 'g', 'M'), clip('y', 'system', 4, 0, 2, 'g', 'Y'), clip('v', 'screen', 0, 0, 4, undefined, 'Y')];
+    const gaps = findTakeSilences(clips, [mic, system, screen], 'm', options);
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 2)).toBeLessThanOrEqual(TOLERANCE);
+  });
+
+  it('cuts nothing over a clip on a touched row with sound it cannot read', () => {
+    const unread: SourceVideo = { ...source('unread', null), hasAudio: true };
+    const clips = [clip('m', 'mic', 0, 0, 6, 'g', 'M'), clip('y', 'system', 4, 0, 2, 'g', 'Y'), clip('u', 'unread', 1, 0, 3.5, undefined, 'Y')];
+    expect(findTakeSilences(clips, [mic, system, unread], 'm', options)).toEqual([]);
+  });
+
+  it('never cuts where any audible clip on a touched row has sound (property)', () => {
+    // Up to four rows of clips, some linked, each a 10 peaks-a-second source
+    // of random loud and quiet buckets (or no sound, or sound it cannot read).
+    const ROWS = ['A', 'B', 'C', 'D'];
+    const PPS = 100;
+    const level = Math.pow(10, DEFAULT_SILENCE_OPTIONS.thresholdDb / 20);
+    const sourceArb = fc.record({
+      kind: fc.constantFrom('peaks', 'peaks', 'peaks', 'mute', 'unread'),
+      loud: fc.array(fc.boolean(), { minLength: 40, maxLength: 40 }),
+    });
+    const clipArb = fc.record({
+      row: fc.constantFrom(...ROWS),
+      at: fc.integer({ min: 0, max: 60 }).map((n) => n / 10),
+      length: fc.integer({ min: 5, max: 40 }).map((n) => n / 10),
+      group: fc.option(fc.constantFrom('g1', 'g2', 'g3'), { nil: undefined }),
+      source: sourceArb,
+    });
+    let cutSomething = 0;
+    fc.assert(
+      fc.property(fc.array(clipArb, { minLength: 1, maxLength: 8 }), fc.nat(), fc.integer({ min: 0, max: 10 }), (specs, pick, gap) => {
+        const sources: SourceVideo[] = [];
+        const clips: Clip[] = [];
+        const ends = new Map<string, number>();
+        specs.forEach((spec, i) => {
+          // Rows never overlap: each clip starts after the last one on its row.
+          const at = Math.max(spec.at, ends.get(spec.row) ?? 0);
+          ends.set(spec.row, at + spec.length);
+          // Each bucket of 0.1 s of source is loud or quiet, ten peaks a bucket.
+          const peaks = spec.source.loud.flatMap((loud) => Array.from({ length: 10 }, () => (loud ? { min: -0.5, max: 0.5 } : { min: 0, max: 0 })));
+          sources.push({
+            ...source(`src${i}`, null),
+            hasAudio: spec.source.kind !== 'mute',
+            ...(spec.source.kind === 'peaks' ? { waveformData: peaks, waveformSecondsPerPeak: 1 / PPS } : {}),
+          });
+          clips.push(clip(`c${i}`, `src${i}`, at, 0, spec.length, spec.group, spec.row));
+        });
+        const target = clips[pick % clips.length];
+        const options = { thresholdDb: DEFAULT_SILENCE_OPTIONS.thresholdDb, minGap: gap / 10, padding: 0 };
+        const cuts = findTakeSilences(clips, sources, target.id, options);
+        const rows = linkedRows(clips, target);
+        if (cuts.length > 0) cutSomething++;
+        for (const cut of cuts) {
+          expect(cut.start).toBeGreaterThanOrEqual(target.timelinePosition - 1e-9);
+          expect(cut.end).toBeLessThanOrEqual(target.timelinePosition + target.duration + 1e-9);
+          for (const c of clips) {
+            if (!rows.has(c.trackId)) continue;
+            const from = Math.max(cut.start, c.timelinePosition) + 1e-7;
+            const to = Math.min(cut.end, c.timelinePosition + c.duration) - 1e-7;
+            if (to <= from) continue;
+            const src = sources.find((s) => s.id === c.sourceVideoId)!;
+            if (!src.hasAudio) continue;
+            expect(src.waveformData, `cut ${cut.start}–${cut.end} crosses ${c.id}, whose sound is unknown`).toBeDefined();
+            const shift = c.timelinePosition - c.startTime;
+            for (let b = Math.floor((from - shift) * PPS); b < Math.ceil((to - shift) * PPS); b++) {
+              const peak = src.waveformData![b];
+              expect(Math.max(Math.abs(peak.min), Math.abs(peak.max)) < level, `cut ${cut.start}–${cut.end} cuts sound in ${c.id}`).toBe(true);
+            }
+          }
+        }
+      }),
+      { seed: 0x403, numRuns: 300 }
+    );
+    // Not vacuous: a good share of scenarios find something to cut.
+    expect(cutSomething).toBeGreaterThan(60);
   });
 });

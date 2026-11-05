@@ -36,7 +36,7 @@ import { getAllVideoMetadata, getThumbnail, getVideo, storeVideo } from '../core
 import { resolveStoredDuration } from '../core/videoProcessor';
 import { withSeekIndex } from '../core/webmSeekIndex';
 import { isPlaceableRole, orderTakeParts } from '../utils/takeParts';
-import { extractWaveformData } from '../utils/waveform';
+import { extractWaveformData, type WaveformExtraction } from '../utils/waveform';
 import type { SourceVideo, TakeClipPart } from '../store/types';
 
 /** What the handoff produced: what to place, what was lost. */
@@ -77,7 +77,7 @@ async function resolvePartDuration(
 }
 
 /** The two library fields a part's waveform decides, or nothing to change. */
-type PartWaveform = Pick<SourceVideo, 'waveformData' | 'hasAudio'> | undefined;
+type PartWaveform = Pick<SourceVideo, 'waveformData' | 'waveformSecondsPerPeak' | 'hasAudio'> | undefined;
 
 /**
  * The waveform to give a part, and what it says about `hasAudio`.
@@ -121,7 +121,7 @@ async function resolvePartWaveform(
 ): Promise<PartWaveform> {
   if (part.hasAudio === false) return undefined;
 
-  const { peaks } = await extractWaveformData(blob).catch((error) => {
+  const { peaks, secondsPerPeak } = await extractWaveformData(blob).catch((error): Pick<WaveformExtraction, 'peaks' | 'secondsPerPeak'> => {
     console.warn('Could not read the waveform for a take part:', error);
     return { peaks: [] };
   });
@@ -129,7 +129,11 @@ async function resolvePartWaveform(
   // waveform that could not be read from one that is zero samples long.
   if (peaks.length === 0) return undefined;
 
-  return { waveformData: peaks, hasAudio: part.hasAudio ?? peaks.length > 0 };
+  return {
+    waveformData: peaks,
+    ...(secondsPerPeak !== undefined ? { waveformSecondsPerPeak: secondsPerPeak } : {}),
+    hasAudio: part.hasAudio ?? peaks.length > 0,
+  };
 }
 
 /**

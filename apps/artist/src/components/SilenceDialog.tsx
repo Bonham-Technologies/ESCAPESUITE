@@ -4,6 +4,7 @@ import { useEditorStore } from '../store/projectStore';
 import {
   DEFAULT_SILENCE_OPTIONS,
   findTakeSilences,
+  hasApproximateTiming,
   totalLength,
   type SilenceOptions,
 } from '../core/silenceDetection';
@@ -50,6 +51,12 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   const setSilenceReviewClip = useEditorStore((state) => state.setSilenceReviewClip);
   const setSilenceCandidates = useEditorStore((state) => state.setSilenceCandidates);
   const removeTimeRanges = useEditorStore((state) => state.removeTimeRanges);
+  // Peaks from before their length was recorded are placed conservatively,
+  // so a pause late in a long recording can be left in (peakTiming.ts).
+  const approximate = useEditorStore((state) =>
+    state.silenceReview !== null &&
+    hasApproximateTiming(state.project.timeline.clips, state.sourceVideos, state.silenceReview.clipId)
+  );
   const [values, setValues] = useState<Record<keyof SilenceOptions, string>>(() => ({
     thresholdDb: String(DEFAULT_SILENCE_OPTIONS.thresholdDb),
     minGap: String(DEFAULT_SILENCE_OPTIONS.minGap),
@@ -150,6 +157,13 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
           </p>
+
+          {approximate && (
+            <p className={styles.note} data-testid="silence-timing-note">
+              Part of this recording's waveform was made by an earlier version of ESCAPEARTIST, so
+              pauses late in a long recording may be left in rather than risk cutting into speech.
+            </p>
+          )}
 
           {candidates.length > 0 && (
             <ul className={styles.list} aria-label="Pauses to cut" tabIndex={0}>
