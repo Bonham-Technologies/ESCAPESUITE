@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -75,8 +75,9 @@ stop; a steward also leaves no digest, which the fleet counts as a missed run.
   "Autopilot control panel". Only the owner edits that page's **Settings**; no run does.
 - **GitHub**: `gh api` REST only. `gh pr …` and GraphQL (`gh api graphql`) are blocked
   in cloud sessions. In `gh api` paths, `{owner}` and `{repo}` fill in from the
-  current repository. The Claude GitHub App can't read security alerts, so the steward
-  runs its own scanners (**Security sweep**).
+  current repository; the only GitHub MCP tools allowed are `enable_pr_auto_merge` and
+  `disable_pr_auto_merge` (builder step 6). The Claude GitHub App can't read security
+  alerts, so the steward runs its own scanners (**Security sweep**).
 - **No other connector.** A run may be given other connectors, such as Gmail, Google
   Drive, Supabase or Vercel. Never call their tools, for any reason. End every run's
   summary with the list of other connectors whose tools were present, or "none".
@@ -89,7 +90,7 @@ stop; a steward also leaves no digest, which the fleet counts as a missed run.
 
 **Jira statuses.** The projects have only **To Do**, **In Progress** and **Done**. Use
 no other status. Labels are free-form: the class labels, `needs-owner`, `needs-operator`,
-`ap-steward-log`, `ap-asked`, `ap-scout`, `ap-security`, `ap-ignore` and `ap-feature-<slug>`
+`ap-steward-log`, `ap-asked`, `ap-scout`, `ap-security`, `ap-ignore`, `ap-merging` and `ap-feature-<slug>`
 need no setup; a feature label groups a feature's tickets and never replaces a class label.
 
 **The GitHub label `needs-owner`** may not exist yet. Before you first apply it in a
@@ -104,8 +105,7 @@ It is the only GitHub label this policy uses; every other label here is a Jira l
 
 ## Ticket classes
 
-Every ticket carries exactly one class label. The steward log ticket is the only
-exception.
+Every ticket carries exactly one class label. The steward log ticket is the only exception.
 
 | Label | Meaning | Who acts |
 |---|---|---|
@@ -127,8 +127,7 @@ exception.
 - the autopilot's own setup: anything under `.claude/`, such as
   `.claude/rules/autopilot.local.md`, the agents, hooks and settings.
 
-It also applies if the diff exceeds about 800 changed lines, or the reviewer or QC
-raises a concern it can't resolve.
+It also applies if the diff exceeds about 800 changed lines, or the reviewer or QC raises a concern it can't resolve.
 
 **`ap-decision`** if the ticket asks for:
 - a new capability outside the product's current scope;
@@ -164,22 +163,21 @@ When unsure between two classes, pick the stricter one.
 **Legacy `needs-operator`.** Tickets from before autopilot may carry `needs-operator`:
 operator-only work. So do the fleet role's owner-action tickets (`fleet.md`), which
 carry it in place of a class label. Treat them like `ap-decision`. Never build them, and never relabel
-them, even if they also carry another class label. The steward lists them under
-**Waiting on you**.
+them, even if they also carry another class label. The steward lists them under **Waiting on you**.
 
 ## Reconcile
 
 At the start of every run, after **Main must stay green**:
 
-- Find the tickets waiting on an owner merge:
-  `project = ESCSUITE AND labels = needs-owner AND statusCategory != Done`.
+- Find the tickets waiting on an owner merge or on auto-merge:
+  `project = ESCSUITE AND labels in (needs-owner, ap-merging) AND statusCategory != Done`.
 - For each one, read the PR linked in its comments:
-  `gh api repos/{owner}/{repo}/pulls/{n} --jq '{state, merged_at}'`.
-  - **Merged:** remove the Jira label `needs-owner`, comment that the PR merged, and
-    move the ticket to Done.
+  `gh api repos/{owner}/{repo}/pulls/{n} --jq '{state, merged_at, auto_merge}'`.
+  - **Merged:** remove the Jira label `needs-owner` or `ap-merging`, comment that the PR
+    merged, and move the ticket to Done.
   - **Closed without merging:** comment that once on the ticket, and leave it for the
     owner. The steward lists it under **Waiting on you**.
-  - **Still open:** leave it.
+  - **Still open:** leave it; the builder checks `ap-merging` ones (**Auto-merge pending**).
 
 ## Models
 
@@ -218,13 +216,15 @@ At the start of every run:
 
 ## Always
 
-- Never push to `main`; never force-push a branch you didn't create; never merge `ap-decision` work or anything labelled `needs-owner`.
+- Never push to `main`; never force-push a branch you didn't create; never merge, or turn on auto-merge for, `ap-decision` work or anything labelled `needs-owner`.
+- Merge only on a **fresh green**: `ci-status` passed on the PR's head, and `gh api repos/{owner}/{repo}/compare/main...<head sha> --jq .behind_by` is 0. If it's behind, `gh api -X PUT repos/{owner}/{repo}/pulls/{n}/update-branch` (a merge of `main`, never a rebase) and wait for the new run.
+  This holds for every merge, a refresh PR's or one the owner asks a thread to make, whoever's go-ahead it has. Recheck the next PR after each merge. Auto-merge (builder step 6) needs `main`'s ruleset to require a strict `ci-status`: GitHub then merges it on a fresh green alone.
 - Never build or relabel `ap-decision`, `ap-watch` or `needs-operator` tickets. The
   exceptions are adding the `ap-asked` marker, and a thread started from the Project
   conversation because the owner approved or rejected a named ticket there.
 - Never add or edit a `## Memory` section on a Confluence page, and never create a
   project's page tree.
-- Use only the Atlassian connector for Jira and `gh api` for GitHub; never call another connector's tools.
+- Use only the Atlassian connector for Jira and `gh api` for GitHub, plus the two auto-merge tools (**Tools and access**); never call another connector's tools.
 - Missing access, credentials or a service you can't reach: say exactly what is missing on the ticket and stop. Never mock it.
 - Follow `.claude/rules/subagent-routing.md` for every subagent.
 - Keep CLAUDE.md files indexes; put detail in `docs/`.

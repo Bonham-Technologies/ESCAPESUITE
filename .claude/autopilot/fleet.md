@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -32,7 +32,7 @@ For each project, read:
    - decisions answered: the `ap-asked` query under **Decision Log**, with `updated >= -7d`;
 5. the ready backlog, split `ap-auto` / `ap-owner-merge` / `ap-feature-*` (a feature
    ticket counts only under feature):
-   `project = <jiraKey> AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge) AND labels not in (needs-owner, needs-operator, ap-decision, ap-watch, ap-triage)`;
+   `project = <jiraKey> AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge) AND labels not in (needs-owner, needs-operator, ap-decision, ap-watch, ap-triage, ap-merging)`;
 6. **its repo's `main`, read directly.** Attach the repo read-only (`add_repo`), then
    read the `policy v<N>` header line of `.claude/rules/autopilot.md`
    (`gh api 'repos/<repo>/contents/.claude/rules/autopilot.md?ref=main' --jq .content | base64 -d | head -1`)
@@ -89,8 +89,10 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   invisible from here: write only "no trace of the <role> run since <date>".
 - **Setup:** a table of each project's policy version on `main` (input 6, or "not
   read") and its digest-reported instructions version against `fleet.json`, an agents
-  column (`vendored` or `fallback`, from the digest's Setup line), and a Refresh PR
-  column (its open `autopilot/refresh-v*` PR, linked, else the propagation log's).
+  column (`vendored` or `fallback`, from the digest's Setup line), a Refresh PR
+  column (its open `autopilot/refresh-v*` PR, linked, else the propagation log's), and
+  a Strict column: `main-protection`'s `strict_required_status_checks_policy`, and
+  an Auto-merge column: `gh api repos/{owner}/{repo} --jq .allow_auto_merge`.
 - **Capacity:** one row per project. Columns: Project · Policy on main · Ready (auto /
   owner-merge / feature) · Waiting on you · Runs/week × budget · Capacity/week · Weeks to
   clear · Paused (builder / steward / scout) · Last run per task + result · Drift (`none` or the ticket's link).
