@@ -54,10 +54,12 @@
   2.019 s for a 3.0 s Firefox microphone take). The same `writeKeyframeCues()` walk notes the
   latest block timestamp on any track (SimpleBlock or BlockGroup) and, when the library's Duration
   is below it, rewrites the float in place at its own width; audio-only takes, whose Cues it
-  otherwise leaves alone, get the same floor. A Duration at or past the last block is kept. Only
-  the file header was short: CRAFT's library and ARTIST use the recorder's own clock for an
-  audio-only take, so another player opening the downloaded file was where it showed. Pinned by
-  `webmRepair.test.ts` (the real library) and `webmCues.test.ts`.
+  otherwise leaves alone, get the same floor. A Duration at or past the last block is kept. The
+  short header showed in CRAFT's own player too: `VideoPlayer` takes the length from
+  `video.duration` once it is finite, and Chromium and Firefox both report the header's Duration
+  on `loadedmetadata`, so a 3 s take read 0:02. Pinned by `webmRepair.test.ts` (the real
+  library), `webmCues.test.ts`, and `apps/e2e/tests/regressions/ESCSUITE-395.spec.ts` (the
+  playback dialog, over `apps/e2e/fixtures/last-cluster-one-block/`).
 - **The import of `webm-duration-fix` is resolved by hand**, and has to be. The library is
   CommonJS: `lib/index.js` ends `exports.default = fixWebmDuration` and sets `__esModule`, so
   what a default import binds to is a toolchain decision — esbuild's `__toESM(mod, 0)` (Vite 7
