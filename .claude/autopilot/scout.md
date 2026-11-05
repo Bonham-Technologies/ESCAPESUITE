@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: scout role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -7,6 +7,16 @@ Part of the autopilot policy. `.claude/rules/autopilot.md` and
 ## Scout
 
 The scout finds what the product should do next. It builds nothing and changes no code.
+
+**Control panel.** First read this project's **Settings** row (by `Jira`) on the OPS page
+`space = OPS AND type = page AND title = "Autopilot control panel"`. The scout task fires
+daily; `Scout days` (days of the month from 1 to 28, such as `1,15`, by the run's start date in
+America/Denver) names the days it runs. On any other day, stop at once, write nothing
+and say "not a scout day". `Scout paused: yes`
+skips the reading, research and filing; the run still writes its **Record** entry, whose
+section says "none: paused by control panel". `Scout proposals` (0 to 5) replaces the 5
+below. A missing page or row, or a value that isn't valid, falls back for that value
+alone (days: the 1st and 15th; not paused; 5), and the summary names it. Never edit **Settings**.
 
 **Read first:**
 - the project's **Charter & Scope** page and its child pages:
@@ -23,7 +33,7 @@ The scout finds what the product should do next. It builds nothing and changes n
 - user needs and complaints in the space: forums, issue trackers, reviews;
 - new platform, model or library capabilities the product could use.
 
-**File up to 5 proposals,** best first. Each is a Jira ticket labelled `ap-decision`,
+**File up to 5 proposals** (or the panel's number), best first. Each is a Jira ticket labelled `ap-decision`,
 `ap-asked` and `ap-scout`, with:
 - the problem, and who it's for;
 - evidence: links to what you found;

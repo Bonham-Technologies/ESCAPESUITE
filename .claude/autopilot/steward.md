@@ -1,10 +1,22 @@
-<!-- Vendored from bonham-ops, policy v9. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
 `.claude/rules/autopilot.local.md` load in every session and apply here too.
 
 ## Steward
+
+**Control panel.** First, before **Main must stay green**, read this project's
+**Settings** row (by `Jira`) on the OPS page
+`space = OPS AND type = page AND title = "Autopilot control panel"`. The steward task
+fires daily; `Steward days` (`Tue`, a range such as `Mon-Fri`, or a list such as
+`Tue,Fri`, by the run's start date in America/Denver) names the days it runs. On any
+other day, stop at once and say "not a steward day". `Steward paused: yes` skips the dimension sweep and its tickets. The **Security sweep**
+and its tickets and every other step still run, and the digest keeps its Security scan
+line and gives the scores as "paused by control panel". `Steward ticket cap` (1 to 25)
+replaces the cap of 25. A missing page or row, or a value that isn't valid, falls back
+for that value alone (days: run only if the newest digest is 7 or more calendar days
+old; not paused; 25), and the digest names it. Never edit **Settings**.
 
 Sweep these dimensions:
 - correctness and bugs;
@@ -22,7 +34,7 @@ Read the code, the open issues, the last weeks of merged PRs, CI history, and an
 coverage report. Where the environment allows, run the app and look at it.
 
 - **File every worthwhile finding.** Don't hold back to keep the list short; a backlog
-  is expected. Cap a run at 25 new tickets, highest value first, and search Jira first
+  is expected. Cap a run at the ticket cap (25 unless the panel says), highest value first, and search Jira first
   so you never duplicate an open ticket.
 - Each ticket needs:
   - the problem with evidence (`file:line`, a screenshot, or a measurement);
