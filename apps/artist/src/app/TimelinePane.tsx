@@ -1,5 +1,7 @@
 import { Timeline } from '../components/Timeline/Timeline';
 import type { TimeRange } from '../components/Timeline/timelineGeometry';
+import { TranscribeControl } from '../components/Timeline/TranscribeControl';
+import type { ShowNotification } from './useNotification';
 import styles from '../App.module.css';
 
 interface TimelinePaneProps {
@@ -15,17 +17,20 @@ interface TimelinePaneProps {
   onZoomOut: () => void;
   /** Export just the selected range. */
   onExportSelection: (timeRange: TimeRange) => void;
+  /** The editor's notice, for "Transcribe to captions"'s outcome (ESCSUITE-404). */
+  showNotification: ShowNotification;
 }
 
 /**
  * The bottom pane: the timeline's own controls (add track, zoom out, the zoom
- * readout, zoom in) above the timeline itself.
+ * readout, zoom in, and — only where the browser can recognise speech on this
+ * device — "Transcribe to captions") above the timeline itself.
  *
  * Deliberately not memoised — `App.rerender.test.tsx` counts how often
  * `Timeline` renders, and a memo here would make that pass for the wrong
  * reason and hide a future `currentTime` subscription.
  */
-export function TimelinePane({ height, zoom, onAddTrack, onZoomIn, onZoomOut, onExportSelection }: TimelinePaneProps) {
+export function TimelinePane({ height, zoom, onAddTrack, onZoomIn, onZoomOut, onExportSelection, showNotification }: TimelinePaneProps) {
   return (
     <footer className={styles.footer} style={{ height }}>
       <div className={styles.timelineControls}>
@@ -55,6 +60,7 @@ export function TimelinePane({ height, zoom, onAddTrack, onZoomIn, onZoomOut, on
             <line x1="8" y1="11" x2="14" y2="11" />
           </svg>
         </button>
+        <TranscribeControl showNotification={showNotification} />
       </div>
       <Timeline onExportSelection={onExportSelection} />
     </footer>

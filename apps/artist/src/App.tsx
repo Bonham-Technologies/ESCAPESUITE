@@ -298,6 +298,7 @@ function App() {
         onZoomIn={handleZoomIn}
         onZoomOut={handleZoomOut}
         onExportSelection={(timeRange) => { setExportTimeRange(timeRange); setShowExport(true); }}
+        showNotification={showNotification}
       />
 
       {/* Export dialog */}
