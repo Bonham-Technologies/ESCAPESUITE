@@ -6,7 +6,6 @@ import {
   installLocalLanguagePack,
   probeLocalRecognition,
   transcriptionLanguage,
-  type LocalSpeechAvailability,
 } from '../../core/speechRecognitionLocal';
 import styles from './TranscribeControl.module.css';
 
@@ -33,11 +32,15 @@ function clock(seconds: number): string {
 /**
  * "Transcribe to captions" (ESCSUITE-404), in the timeline's controls.
  *
- * Renders **nothing** unless the browser can recognise speech on this device:
- * a `SpeechRecognition` with the on-device mode, whose `available()` — asked
- * with `processLocally: true` for the browser's language — answers anything
- * but `unavailable`. The transcription itself (`core/transcribe.ts`) is a
- * dynamic `import()` on the first click.
+ * Renders **nothing** unless the browser has the on-device mode, decided by
+ * static detection alone (`getLocalRecognitionCtor`): nothing on the API is
+ * called until the user presses the button. `available()` must not run on
+ * mount, because in a bare Chromium embedder it kills the page's renderer and
+ * the whole editor with it, for people who never asked to transcribe. On the
+ * press, `available()` is asked with `processLocally: true` for the browser's
+ * language; `unavailable` hides the control for good and says so. The
+ * transcription itself (`core/transcribe.ts`) is a dynamic `import()` on the
+ * first click.
  *
  * A `downloadable` answer shows `LANGUAGE_PACK_NOTICE` first, and the browser
  * downloads the pack only when the user presses "Download language pack". The
@@ -46,7 +49,10 @@ function clock(seconds: number): string {
  */
 export function TranscribeControl({ showNotification }: TranscribeControlProps) {
   const lang = transcriptionLanguage();
-  const [availability, setAvailability] = useState<LocalSpeechAvailability | null>(null);
+  // Static detection only: calls nothing on the API (see above).
+  const [supported] = useState(() => getLocalRecognitionCtor() !== null);
+  // Set when a press finds on-device recognition unavailable for this language.
+  const [hidden, setHidden] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const abortRef = useRef<AbortController | null>(null);
   // One run at a time: a second press while the first is still asking the
@@ -94,16 +100,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     };
   }, []);
 
-  useEffect(() => {
-    let live = true;
-    void probeLocalRecognition(lang).then((answer) => {
-      if (live) setAvailability(answer);
-    });
-    return () => {
-      live = false;
-      abortRef.current?.abort();
-    };
-  }, [lang]);
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   const transcribe = useCallback(async () => {
     const Recognition = getLocalRecognitionCtor();
@@ -177,7 +174,6 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
       showNotification('The speech language pack could not be installed.', 'error');
       return;
     }
-    setAvailability('available');
     await transcribe();
   }, [lang, showNotification, transcribe]);
 
@@ -187,14 +183,17 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
       showNotification('The Captions track is locked, so no captions were added.', 'error');
       return;
     }
-    // Asked again: a pack may have been installed, or removed, since the editor opened.
+    // The first call on the API, only ever on a press, and asked on every
+    // press: a pack may have been installed, or removed, since the last one.
     const answer = await probeLocalRecognition(lang);
     if (!mountedRef.current) return;
-    setAvailability(answer);
     if (answer === 'available') await transcribe();
     else if (answer === 'downloadable') setPhase({ kind: 'consent' });
     else if (answer === 'downloading') await install();
-    else showNotification('On-device speech recognition is not available in this browser.', 'info');
+    else {
+      setHidden(true);
+      showNotification('On-device speech recognition is not available in this browser.', 'info');
+    }
   }, [install, lang, showNotification, transcribe]);
 
   const runOnce = useCallback(async (task: () => Promise<void>) => {
@@ -207,7 +206,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     }
   }, []);
 
-  if (availability === null || availability === 'unavailable') return null;
+  if (!supported || hidden) return null;
 
   const busy = phase.kind === 'mixing' || phase.kind === 'listening';
   // A live region that is always there, so each new phase is announced; the

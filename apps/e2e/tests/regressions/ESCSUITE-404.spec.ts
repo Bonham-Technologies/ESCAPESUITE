@@ -15,8 +15,16 @@ import { timelineClips } from '../../utils/timeline'
  * microphone), and answers with scripted words on its own clock. The timeline
  * holds a 10 s synthesised tone, which every browser here decodes.
  *
- * What it pins: no control where on-device recognition is missing or
- * `unavailable`; the recogniser is never started without
+ * The stub also presents a Google Chrome brand in `navigator.userAgentData`:
+ * the editor hides the feature in a bare Chromium embedder (a `Chromium`
+ * brand and no vendor brand), which Playwright's headless shell is, because
+ * there `available()` kills the page's renderer.
+ *
+ * What it pins: no control where on-device recognition is missing or in a
+ * bare Chromium embedder; nothing asked of the API until the button is
+ * pressed, and the control hiding itself when the press finds it
+ * `unavailable`; the real headless shell opening the editor without
+ * crashing; the recogniser is never started without
  * `processLocally: true`; the stub's words become caption clips, undone in one
  * step and written by the .srt / .vtt sidecar; the app makes no fetch or XHR
  * of its own while it transcribes; and a `downloadable` language pack is
@@ -28,6 +36,18 @@ const NOTICE = 'Your browser will download a speech language pack once. Your aud
 const WORDS = ['hello from the stub', 'captions made on this device']
 
 type StubMode = { api: 'none' } | { api: 'no-local' } | { api: 'local'; answer: string }
+type Brand = { brand: string; version: string }
+
+const CHROME_BRANDS: Brand[] = [
+  { brand: 'Google Chrome', version: '139' },
+  { brand: 'Not;A=Brand', version: '99' },
+  { brand: 'Chromium', version: '139' },
+]
+const CHROMIUM_ONLY_BRANDS: Brand[] = [
+  { brand: 'Chromium', version: '139' },
+  { brand: 'Not;A=Brand', version: '99' },
+]
+const UNAVAILABLE_NOTICE = 'On-device speech recognition is not available in this browser.'
 
 interface StubRecord {
   available: unknown[]
@@ -37,10 +57,14 @@ interface StubRecord {
   maxLevel: number
 }
 
-async function installSpeechStub(page: Page, mode: StubMode): Promise<void> {
+async function installSpeechStub(page: Page, mode: StubMode, brands: Brand[] = CHROME_BRANDS): Promise<void> {
   await page.addInitScript(
-    ({ mode, words }) => {
+    ({ mode, words, brands }) => {
       const w = window as unknown as Record<string, unknown>
+      Object.defineProperty(navigator, 'userAgentData', {
+        configurable: true,
+        get: () => ({ brands, mobile: false, platform: 'Linux' }),
+      })
       const record = { available: [] as unknown[], install: [] as unknown[], starts: [] as unknown[], constructed: 0, maxLevel: 0 }
       w.__speechStub = record
       w.webkitSpeechRecognition = undefined
@@ -121,7 +145,7 @@ async function installSpeechStub(page: Page, mode: StubMode): Promise<void> {
       }
       w.SpeechRecognition = StubRecognition
     },
-    { mode, words: WORDS }
+    { mode, words: WORDS, brands }
   )
 }
 
@@ -137,21 +161,50 @@ async function openWithTone(page: Page): Promise<void> {
 test.describe('ESCSUITE-404: transcribe to captions on this device', () => {
   test.describe.configure({ timeout: 90_000 })
 
-  for (const [label, mode] of [
-    ['no SpeechRecognition (Firefox, Safari)', { api: 'none' }],
-    ['a recogniser with no on-device mode', { api: 'no-local' }],
-    ['available() answers unavailable', { api: 'local', answer: 'unavailable' }],
+  for (const [label, mode, brands] of [
+    ['no SpeechRecognition (Firefox, Safari)', { api: 'none' }, CHROME_BRANDS],
+    ['a recogniser with no on-device mode', { api: 'no-local' }, CHROME_BRANDS],
+    ['a bare Chromium embedder (Electron, the headless shell)', { api: 'local', answer: 'available' }, CHROMIUM_ONLY_BRANDS],
   ] as const) {
     test(`no transcribe control with ${label}`, async ({ page }) => {
-      await installSpeechStub(page, mode)
+      await installSpeechStub(page, mode, [...brands])
       await openWithTone(page)
-      // The probe has had its answer by the time the editor has a clip on it.
       await expect(page.getByText(/^1 clip/).first()).toBeVisible()
       await page.waitForTimeout(500)
       await expect(transcribeButton(page)).toHaveCount(0)
       await expect(page.getByText('Transcribe', { exact: false })).toHaveCount(0)
+      expect((await stubRecord(page)).available).toEqual([])
     })
   }
+
+  test('asks available() only when pressed, and hides the control when it answers unavailable', async ({ page }) => {
+    await installSpeechStub(page, { api: 'local', answer: 'unavailable' })
+    await openWithTone(page)
+    await expect(transcribeButton(page)).toBeVisible()
+    expect((await stubRecord(page)).available, 'opening the editor asks the browser nothing').toEqual([])
+
+    await transcribeButton(page).click()
+    await expect(page.getByText(UNAVAILABLE_NOTICE)).toBeVisible()
+    await expect(transcribeButton(page)).toHaveCount(0)
+    const record = await stubRecord(page)
+    expect(record.available).toEqual([{ langs: [expect.any(String)], processLocally: true }])
+    expect(record.install).toEqual([])
+    expect(record.constructed).toBe(0)
+  })
+
+  test('the real headless shell opens the editor without its renderer crashing, and shows no control', async ({ page, browserName }) => {
+    // No stub: the browser's own API. In Playwright's Chromium headless shell
+    // available() kills the renderer, so the editor must never call it on its
+    // own. The brand gate hides the control there.
+    test.skip(browserName !== 'chromium', 'the crash is a Chromium embedder one')
+    let crashed = false
+    page.on('crash', () => { crashed = true })
+    await openWithTone(page)
+    await expect(page.getByText(/^1 clip/).first()).toBeVisible()
+    await page.waitForTimeout(500)
+    await expect(transcribeButton(page)).toHaveCount(0)
+    expect(crashed, 'the page crashed').toBe(false)
+  })
 
   test('the stub’s words become caption clips, on device only, with no request of the app’s own, one undo step, and the sidecar carries them', async ({ page }) => {
     await installSpeechStub(page, { api: 'local', answer: 'available' })
@@ -215,6 +268,7 @@ test.describe('ESCSUITE-404: transcribe to captions on this device', () => {
   test('a downloadable language pack is downloaded only after the notice, on device', async ({ page }) => {
     await installSpeechStub(page, { api: 'local', answer: 'downloadable' })
     await openWithTone(page)
+    expect((await stubRecord(page)).available, 'opening the editor asks the browser nothing').toEqual([])
 
     await transcribeButton(page).click()
     await expect(page.getByText(NOTICE, { exact: true })).toBeVisible()

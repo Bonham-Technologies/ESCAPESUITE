@@ -66,15 +66,58 @@ export interface SpeechRecognitionCtor {
   readonly prototype: object;
 }
 
-type SpeechWindow = { SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
+interface UserAgentBrand {
+  readonly brand: string;
+  readonly version?: string;
+}
+
+type SpeechWindow = {
+  SpeechRecognition?: unknown;
+  webkitSpeechRecognition?: unknown;
+  navigator?: { userAgentData?: { brands?: readonly UserAgentBrand[] } };
+};
+
+/**
+ * The Chromium browsers that ship the browser-side half of on-device speech
+ * recognition. A `Chromium` brand with none of these is a bare content
+ * embedder (Electron, CEF, content_shell, Playwright's headless shell, which
+ * reports `HeadlessChrome`).
+ */
+const SPEECH_SERVICE_BRANDS = ['Google Chrome', 'Microsoft Edge', 'Opera', 'Brave'];
+
+/**
+ * Whether this is a bare Chromium embedder, which must never be asked
+ * `available()`.
+ *
+ * Blink's `OnDeviceWebSpeechAvailable` feature puts `available()`, `install()`
+ * and `processLocally` on the page, but the browser-side binder that answers
+ * them lives in Chrome's own browser process. A content embedder that ships
+ * the Blink half without it kills the page's renderer ("Target crashed") the
+ * moment the page calls `available()`, which takes the whole editor with it.
+ * Such embedders report a `Chromium` brand and no vendor brand (Electron and
+ * Playwright's headless shell do; GREASE brands such as `Not_A Brand` never
+ * count either way). With no `userAgentData` (Firefox, Safari, or a
+ * non-secure context) there is nothing to read, so nothing is gated here; the
+ * control still asks `available()` only when pressed.
+ */
+function isBareChromiumEmbedder(win: SpeechWindow): boolean {
+  const brands = win.navigator?.userAgentData?.brands;
+  if (!Array.isArray(brands)) return false;
+  const names = brands.map((entry) => entry?.brand);
+  return names.includes('Chromium') && !names.some((name) => SPEECH_SERVICE_BRANDS.includes(name));
+}
 
 /**
  * The browser's `SpeechRecognition` constructor, but only when it supports the
  * on-device mode: a static `available()` and `install()` and a
  * `processLocally` property. `null` anywhere else — Safari's prefixed
- * recogniser, which has none of these, included.
+ * recogniser, which has none of these, included — and `null` in a bare
+ * Chromium embedder, whose renderer `available()` would kill
+ * (`isBareChromiumEmbedder`). This is static detection only: it calls
+ * nothing on the API, so it is safe on mount.
  */
 export function getLocalRecognitionCtor(win: SpeechWindow = globalThis as SpeechWindow): SpeechRecognitionCtor | null {
+  if (isBareChromiumEmbedder(win)) return null;
   for (const candidate of [win.SpeechRecognition, win.webkitSpeechRecognition]) {
     if (typeof candidate !== 'function') continue;
     const ctor = candidate as SpeechRecognitionCtor;

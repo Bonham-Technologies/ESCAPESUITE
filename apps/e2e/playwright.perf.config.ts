@@ -1,6 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
 import { PERF_LAUNCH_ARGS } from './utils/perf'
-import { CHROMIUM_TEST_ARGS } from './utils/chromiumLaunch'
 
 /**
  * Playwright configuration for the performance benchmarks (`pnpm perf`).
@@ -44,8 +43,7 @@ export default defineConfig({
 
   use: {
     ...devices['Desktop Chrome'],
-    // CHROMIUM_TEST_ARGS: see utils/chromiumLaunch.ts (ESCSUITE-404).
-    launchOptions: { args: [...PERF_LAUNCH_ARGS, ...CHROMIUM_TEST_ARGS] },
+    launchOptions: { args: PERF_LAUNCH_ARGS },
     trace: 'off',
     video: 'off',
     screenshot: 'off',

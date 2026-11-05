@@ -44,6 +44,53 @@ describe('getLocalRecognitionCtor (ESCSUITE-404)', () => {
   });
 });
 
+describe('getLocalRecognitionCtor: the brand gate (ESCSUITE-404)', () => {
+  // A bare Chromium embedder (Electron, CEF, Playwright's headless shell) has
+  // the API in Blink but not Chrome's browser-side service, and available()
+  // kills its renderer, so it must not see the on-device mode at all.
+  const GREASE = { brand: 'Not_A Brand', version: '8' };
+  const withBrands = (brands: Array<{ brand: string; version: string }> | undefined) => ({
+    SpeechRecognition: makeCtor({ available: vi.fn(), install: vi.fn() }),
+    navigator: brands === undefined ? {} : { userAgentData: { brands } },
+  });
+
+  it.each([
+    ['Google Chrome', [{ brand: 'Google Chrome', version: '139' }, GREASE, { brand: 'Chromium', version: '139' }]],
+    ['Microsoft Edge', [{ brand: 'Chromium', version: '139' }, { brand: 'Microsoft Edge', version: '139' }, GREASE]],
+    ['Opera', [GREASE, { brand: 'Chromium', version: '139' }, { brand: 'Opera', version: '123' }]],
+    ['Brave', [{ brand: 'Brave', version: '139' }, { brand: 'Chromium', version: '139' }, GREASE]],
+  ])('allows %s', (_label, brands) => {
+    const win = withBrands(brands);
+    expect(getLocalRecognitionCtor(win)).toBe(win.SpeechRecognition);
+  });
+
+  it.each([
+    ['Electron or full Chromium (Chromium only)', [{ brand: 'Chromium', version: '139' }, GREASE]],
+    ["Playwright's headless shell (HeadlessChrome)", [{ brand: 'HeadlessChrome', version: '153' }, GREASE, { brand: 'Chromium', version: '153' }]],
+  ])('is null in %s, and never touches the API', (_label, brands) => {
+    const win = withBrands(brands);
+    const ctor = win.SpeechRecognition as unknown as { available: ReturnType<typeof vi.fn> };
+    expect(getLocalRecognitionCtor(win)).toBeNull();
+    expect(ctor.available).not.toHaveBeenCalled();
+  });
+
+  it('does not gate without userAgentData (Firefox, Safari, a non-secure context) or without a Chromium brand', () => {
+    const absent = withBrands(undefined);
+    expect(getLocalRecognitionCtor(absent)).toBe(absent.SpeechRecognition);
+    const greaseOnly = withBrands([GREASE]);
+    expect(getLocalRecognitionCtor(greaseOnly)).toBe(greaseOnly.SpeechRecognition);
+  });
+
+  it('makes probe and install answer as if there were no API, without calling it', async () => {
+    const win = withBrands([{ brand: 'Chromium', version: '139' }, GREASE]);
+    const ctor = win.SpeechRecognition as unknown as { available: ReturnType<typeof vi.fn>; install: ReturnType<typeof vi.fn> };
+    await expect(probeLocalRecognition('en-US', win)).resolves.toBe('unavailable');
+    await expect(installLocalLanguagePack('en-US', win)).resolves.toBe(false);
+    expect(ctor.available).not.toHaveBeenCalled();
+    expect(ctor.install).not.toHaveBeenCalled();
+  });
+});
+
 describe('probeLocalRecognition (ESCSUITE-404)', () => {
   it('asks available() for the one language, on device only', async () => {
     const available = vi.fn().mockResolvedValue('downloadable');

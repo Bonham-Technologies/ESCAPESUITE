@@ -117,7 +117,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   (see `vercel-deployment.md`, "Security headers"). ARTIST's "Transcribe to captions"
   (ESCSUITE-404) uses the `on-device-speech-recognition` Permissions-Policy feature, whose default
   allowlist is `self`: a cross-origin host framing a self-hosted build must delegate it with
-  `allow="on-device-speech-recognition"`, or the control stays hidden (`on-device-transcription.md`).
+  `allow="on-device-speech-recognition"`, or the control hides on its first press. A host that
+  is a bare Chromium embedder (Electron, CEF: a `Chromium` brand and no vendor brand) gets no
+  control at all, because there `available()` would kill the renderer (`on-device-transcription.md`).
 - **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
   one host page keep a saved session each (ESCSUITE-332). **Every host should pass one — a page that
   frames a single editor included — and a different one to each frame** when it frames several: every same-origin frame of a page shares the top-level

@@ -35,26 +35,51 @@ anything else anywhere.
 
 ## Which browsers offer it
 
-The control is shown only when the browser itself says it can recognise speech on this
-device. That needs a `SpeechRecognition` (or `webkitSpeechRecognition`) constructor with static
-`available()` and `install()` and a `processLocally` property, and `available()` must answer
-anything but `unavailable` for the browser's language. Anywhere else **no control is
-rendered**. MDN's compatibility data, read on 2026-11-05, lists:
+**Opening the editor asks the browser nothing.** Whether the control is rendered is decided
+by static detection alone (`getLocalRecognitionCtor`): a `SpeechRecognition` (or
+`webkitSpeechRecognition`) constructor with static `available()` and `install()` and a
+`processLocally` property, in a browser that is not a bare Chromium embedder (below). Without
+these **no control is rendered**. `available()` is first asked when the user presses
+**Transcribe to captions**, and again on every press. If it answers `unavailable` for the
+browser's language, the control **hides itself on that first press** and says "On-device
+speech recognition is not available in this browser." (AC1, refined: where the API exists but
+no language pack can be had, the control is visible until the first press.)
+
+**Why nothing is asked on load, and the brand gate.** Blink's `OnDeviceWebSpeechAvailable`
+feature puts `available()`, `install()` and `processLocally` on the page, but the browser-side
+binder that answers them is part of Chrome's own browser process. A Chromium content embedder
+that ships the Blink half without it (Electron, CEF, content_shell, Playwright's Chromium
+headless shell) **kills the page's renderer** ("Target crashed") the moment the page calls
+`available()`, and the whole editor goes with it. ARTIST can be framed by such hosts
+(`docs/reference/integration-api.md`), so:
+
+- `available()` and `install()` are only ever called from a press, never on mount; and
+- `getLocalRecognitionCtor` answers `null` (no control) when `navigator.userAgentData.brands`
+  has a `Chromium` brand and none of `Google Chrome`, `Microsoft Edge`, `Opera` or `Brave`.
+  Electron and full Chromium report only `Chromium`; the headless shell reports `Chromium` and
+  `HeadlessChrome`. GREASE brands (`Not_A Brand`, `Not;A=Brand`, …) count neither way. Where
+  there is no `userAgentData` (Firefox, Safari, and any non-secure context, where browsers do
+  not expose it) nothing is gated, and the press-only rule is what keeps the editor safe.
+  Chromium browsers that hide their brand (Vivaldi, for one, reports only `Chromium`) lose the
+  control; that is the price of not crashing embedders.
+
+MDN's compatibility data, read on 2026-11-05, lists:
 
 | Browser | On-device recognition |
 |---|---|
 | Chrome desktop (Windows, macOS, Linux) | From 139. Audio-track input (`start(track)`) from 135. |
-| Edge, Opera desktop | Listed as following Chrome. Not verified here. |
+| Edge, Opera, Brave desktop | Listed as following Chrome. Not verified here. |
+| Electron, CEF, other bare Chromium embedders (a `Chromium` brand only) | No: hidden by the brand gate, because `available()` would kill the renderer. |
 | Firefox desktop | Listed from 160 (in beta on the date above). Not verified here. |
 | Safari (macOS, iOS), Chrome on Android, Android WebView, Firefox for Android | No. The control is hidden. |
-| ChromeOS | The ticket reports `available()` answers `unavailable`, so the control is hidden. Not verified here. |
+| ChromeOS | The ticket reports `available()` answers `unavailable`, so the control hides on the first press. Not verified here. |
 
 `available()` and `install()` are governed by the `on-device-speech-recognition`
 Permissions-Policy feature, whose default allowlist is `self`. The hosted `vercel.json`
 `Permissions-Policy` header does not name it, so the suite's own origin may use it. A host
 that embeds ARTIST in a **cross-origin** iframe has to delegate it with
 `allow="on-device-speech-recognition"`. Otherwise `available()` fails, which reads as
-`unavailable`, and the control stays hidden. No microphone is used, so the header's
+`unavailable`, and the control hides on the first press. No microphone is used, so the header's
 `microphone=(self)` does not matter here.
 
 ## What it does
@@ -102,8 +127,8 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   transcribe.`; `No speech was heard, so no captions were added.`; `The Captions track is
   locked, so no captions were added.` (checked before listening and again at the end);
   `Transcription stopped. No captions were added.`; the recogniser's errors in words
-  (`describeRecognitionError`). If a fresh `available()` answers `unavailable` on the click,
-  the control hides itself and says so.
+  (`describeRecognitionError`). If `available()` answers `unavailable` on a press, the control
+  hides itself and says "On-device speech recognition is not available in this browser."
 
 ## Bundle
 
@@ -119,25 +144,28 @@ on demand.
 
 ## Tests
 
-- `core/speechRecognitionLocal.test.ts`: which constructors count, and that `available()` and
-  `install()` are always asked with `processLocally: true`.
+- `core/speechRecognitionLocal.test.ts`: which constructors count, the brand gate (Chrome,
+  Edge, Opera, Brave and no `userAgentData` allowed; Chromium-only and `HeadlessChrome` refused
+  without touching the API), and that `available()` and `install()` are always asked with
+  `processLocally: true`.
 - `core/transcribe.test.ts`: the recogniser is refused without `processLocally === true`, is
   started on the mix's track (never with no argument), and every start, restarts included, is
   on device. Also results into cues, stop, errors and the timing rules.
-- `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or
-  `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the
+- `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a
+  Chromium-only brand; no `available()` or `install()` call on mount; hidden after a press
+  that finds `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the
   sidecar text.
 - `apps/e2e/tests/regressions/ESCSUITE-404.spec.ts` (Chromium, API stubbed with
-  `page.addInitScript`): no control where unavailable; every `start()` on device with a live
+  `page.addInitScript`, with a Google Chrome brand in `navigator.userAgentData`): no control
+  with no API, no on-device mode or a Chromium-only brand, and no `available()` call; nothing
+  asked on load, and the control hides when a press finds `unavailable`; the real headless
+  shell, unstubbed, opens the editor without "Target crashed" and shows no control; every `start()` on device with a live
   audio track carrying the timeline's sound; the stub's words become caption clips and appear
   in the downloaded `.srt` and `.vtt`; one Ctrl+Z removes them; no fetch or XHR while
   transcribing; a `downloadable` pack is installed only after the notice.
-- **Every Chromium e2e project turns the real API off.** Playwright's Chromium headless shell
-  (what `chromium.launch()` runs headless, in CI too) kills the page's renderer ("Target
-  crashed") when a page calls `SpeechRecognition.available()`: it has the API in Blink but not
-  the browser-side speech service. The editor asks `available()` when it opens, so every
-  Chromium project in every `apps/e2e/playwright*.config.ts` passes
-  `--disable-blink-features=OnDeviceWebSpeechAvailable` (`apps/e2e/utils/chromiumLaunch.ts`).
-  With it the editor sees no on-device mode and shows no control. A new Chromium project or
-  config must pass it too. Full Chromium (`channel: 'chromium'`) answers `downloadable` and
-  does not crash.
+- **No launch flag is needed.** Playwright's Chromium headless shell (what `chromium.launch()`
+  runs headless, in CI too) is a bare embedder: `available()` kills its renderer. The editor
+  never calls it on load, and the brand gate hides the control there, so every e2e project
+  runs the browser's real API untouched. A test that wants the feature in Chromium must stub
+  `SpeechRecognition` *and* present a vendor brand, as `ESCSUITE-404.spec.ts` does; stubbing
+  the brand alone would hand the real `available()` to the first press.

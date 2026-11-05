@@ -75,21 +75,43 @@ describe('TranscribeControl: where it is offered (ESCSUITE-404)', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
-  it('renders nothing when available() answers unavailable (Chrome on Android, ChromeOS)', async () => {
+  it('renders nothing in a bare Chromium embedder (Electron, the headless shell), even with the API', async () => {
     installRecognition();
-    available.mockResolvedValue('unavailable');
+    vi.stubGlobal('navigator', {
+      ...navigator,
+      language: navigator.language,
+      userAgentData: { brands: [{ brand: 'Chromium', version: '139' }, { brand: 'Not_A Brand', version: '8' }] },
+    });
     const { container } = renderControl();
-    await waitFor(() => expect(available).toHaveBeenCalled());
     await act(async () => {});
     expect(container).toBeEmptyDOMElement();
-    expect(available).toHaveBeenCalledWith({ langs: [navigator.language], processLocally: true });
+    expect(available).not.toHaveBeenCalled();
   });
 
-  it.each(['available', 'downloadable', 'downloading'])('is offered when available() answers %s', async (answer) => {
+  it('is offered on static detection alone, and asks the browser nothing until pressed', async () => {
+    // available() kills the renderer in a bare Chromium embedder, so opening
+    // the editor must never call it: only a press does.
     installRecognition();
-    available.mockResolvedValue(answer);
+    available.mockResolvedValue('available');
     renderControl();
-    expect(await screen.findByRole('button', { name: 'Transcribe to captions' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Transcribe to captions' })).toBeEnabled();
+    await act(async () => {});
+    expect(available).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('asks available() on the press, on device, and hides itself when it answers unavailable (Chrome on Android, ChromeOS)', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('unavailable');
+    const { container, showNotification } = renderControl();
+    await user.click(screen.getByRole('button', { name: 'Transcribe to captions' }));
+    expect(available).toHaveBeenCalledTimes(1);
+    expect(available).toHaveBeenCalledWith({ langs: [navigator.language], processLocally: true });
+    expect(showNotification).toHaveBeenCalledWith('On-device speech recognition is not available in this browser.', 'info');
+    expect(container).toBeEmptyDOMElement();
+    expect(install).not.toHaveBeenCalled();
+    expect(transcribeTimeline).not.toHaveBeenCalled();
   });
 
   it('loads no transcription code until it is pressed', async () => {
@@ -263,7 +285,6 @@ describe('TranscribeControl: one run at a time (ESCSUITE-404)', () => {
   it('starts one transcription however often it is pressed while the browser is asked', async () => {
     const user = userEvent.setup();
     installRecognition();
-    available.mockResolvedValueOnce('available');
     let answer!: (value: string) => void;
     available.mockImplementationOnce(() => new Promise((resolve) => { answer = resolve; }));
     transcribeTimeline.mockImplementation(() => new Promise(() => {}));
@@ -274,7 +295,7 @@ describe('TranscribeControl: one run at a time (ESCSUITE-404)', () => {
     await user.click(transcribeButton);
     await act(async () => answer('available'));
     await screen.findByRole('button', { name: 'Stop transcribing' });
-    expect(available).toHaveBeenCalledTimes(2);
+    expect(available).toHaveBeenCalledTimes(1);
     expect(transcribeTimeline).toHaveBeenCalledTimes(1);
   });
 
@@ -373,12 +394,16 @@ describe('TranscribeControl: the language pack (ESCSUITE-404)', () => {
     expect(transcribeTimeline).not.toHaveBeenCalled();
   });
 
-  it('hides itself when the browser has since become unable to transcribe', async () => {
+  it('asks again on every press, and hides itself when the browser has since become unable to transcribe', async () => {
     const user = userEvent.setup();
     installRecognition();
     available.mockResolvedValueOnce('available').mockResolvedValueOnce('unavailable');
+    transcribeTimeline.mockResolvedValue([]);
     const { showNotification } = renderControl();
-    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await user.click(screen.getByRole('button', { name: 'Transcribe to captions' }));
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith('No speech was heard, so no captions were added.', 'info'));
+    await user.click(button()!);
+    expect(available).toHaveBeenCalledTimes(2);
     expect(showNotification).toHaveBeenCalledWith('On-device speech recognition is not available in this browser.', 'info');
     expect(button()).toBeNull();
   });
