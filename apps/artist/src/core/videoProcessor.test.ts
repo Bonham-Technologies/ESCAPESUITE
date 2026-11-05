@@ -1068,6 +1068,8 @@ describe('videoProcessor', () => {
 
       expect(audio.decodeCalls).toHaveLength(0)
       expect(metadata.waveformData).toHaveLength(100)
+      // ESCSUITE-403: stored with each peak's length, a whole 480 samples for exactly a second.
+      expect(metadata.waveformSecondsPerPeak).toBe(480 / 48000)
       expect(metadata.hasAudio).toBe(true)
       expect(metadata.thumbnailUrl).toBe(lastObjectUrl())
     })

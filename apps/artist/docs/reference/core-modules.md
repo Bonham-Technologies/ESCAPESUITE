@@ -562,7 +562,8 @@
   and, since ESCSUITE-97, a `meta?: SourceVideoMeta` beside them — the live `SourceVideo`'s own
   `duration`/`width`/`height`/`frameRate` plus whatever of `frameRateSource` (ESCSUITE-276),
   `mediaType`, `source`, `recordedAt`,
-  `waveformData`, `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
+  `waveformData`, `waveformSecondsPerPeak` (ESCSUITE-403, additive: each peak's length,
+  see `remove-silences.md`), `hasAudio`, `takeId`, `role`, `startOffset`, `overlayPlacement` and
   `hasWebcam` it had (`id`/`name`/`mimeType` are already the entry's own top-level fields, and
   `size` is always the restored blob's). `saveProject` writes it from the `SourceVideo` it was
   given, **omitting** a `duration` that is not a finite number above 0 and a `width` or `height`

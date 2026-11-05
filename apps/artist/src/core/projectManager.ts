@@ -150,6 +150,8 @@ export async function saveProject(
       source: video.source,
       recordedAt: video.recordedAt,
       waveformData: video.waveformData,
+      // ESCSUITE-403, additive: an older build loads the file and ignores it.
+      waveformSecondsPerPeak: video.waveformSecondsPerPeak,
       hasAudio: video.hasAudio,
       takeId: video.takeId,
       role: video.role,
@@ -301,6 +303,9 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
   const stored = existing?.metadata;
   if (stored?.waveformData?.length) {
     metadata.waveformData = stored.waveformData;
+    // The timing goes with the peaks it describes, or not at all.
+    if (stored.waveformSecondsPerPeak !== undefined) metadata.waveformSecondsPerPeak = stored.waveformSecondsPerPeak;
+    else delete metadata.waveformSecondsPerPeak;
     metadata.hasAudio = metadata.hasAudio === true || stored.hasAudio;
     return;
   }
@@ -317,11 +322,13 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
     console.warn(`Could not rebuild the waveform for "${metadata.name}":`, error);
     return;
   }
-  const { peaks, hasAudio } = decoded;
+  const { peaks, hasAudio, secondsPerPeak } = decoded;
   if (peaks.length === 0) {
     metadata.waveformUnavailable = true;
   } else {
     metadata.waveformData = peaks;
+    if (secondsPerPeak !== undefined) metadata.waveformSecondsPerPeak = secondsPerPeak;
+    else delete metadata.waveformSecondsPerPeak;
     // A rebuilt waveform never downgrades a `true` already recorded: a decode's
     // `hasAudio` is only a silence check (a quiet take still has audio; see takeImport.ts).
     metadata.hasAudio = metadata.hasAudio === true || hasAudio;
@@ -330,7 +337,11 @@ async function restoreWaveform(metadata: SourceVideo, blob: Blob, existing: Stor
   const writeBack =
     peaks.length === 0
       ? { waveformUnavailable: true }
-      : { waveformData: peaks, hasAudio: stored?.hasAudio === true || hasAudio };
+      : {
+          waveformData: peaks,
+          ...(secondsPerPeak !== undefined ? { waveformSecondsPerPeak: secondsPerPeak } : {}),
+          hasAudio: stored?.hasAudio === true || hasAudio,
+        };
   await storeRebuiltWaveform(metadata.id, writeBack).catch((error) => {
     console.warn(`Could not store the rebuilt waveform for "${metadata.name}":`, error);
   });

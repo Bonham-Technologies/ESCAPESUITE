@@ -298,6 +298,8 @@ describe('extractWaveformData', () => {
       { min: -0.875, max: 0.125 },
     ]);
     expect(result.hasAudio).toBe(true);
+    // Each peak's length (ESCSUITE-403): 2 samples at 4 Hz.
+    expect(result.secondsPerPeak).toBe(0.5);
     // The blob really was read and the context really was closed.
     expect(audio.decodeCalls).toHaveLength(1);
     expect(audio.closed).toBe(1);
@@ -387,6 +389,8 @@ describe('extractWaveformData, streamed (ESCSUITE-338)', () => {
     expect(audio.decodeCalls).toHaveLength(1);
     expect(audio.created).toBe(1);
     expect(streamed.peaks).toHaveLength(601);
+    // Not 10 ms: 479 samples a peak (ESCSUITE-403), the same on both paths.
+    expect(streamed.secondsPerPeak).toBe(479 / 48000);
     expect(streamed).toEqual(whole);
     expect(streamed.hasAudio).toBe(true);
   });

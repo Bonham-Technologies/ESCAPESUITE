@@ -26,6 +26,7 @@ calls whatever it is handed, so the five answers are the five arguments:
 | `KeyboardShortcuts` | `onClose` | the sheet holds no state and destroys nothing, so dismissing it is free |
 | `ProjectLoadDialog` | `onCancel` | the other two answers both replace the current timeline; cancelling is the only one that leaves the editor as the user left it |
 | `ResolutionPicker`'s confirm | `handleCancel` | confirming rewrites the project's resolution, which "may affect overlay positions and scaling" and cannot be undone automatically; cancelling costs nothing, and the select is controlled by the store's resolution so it snaps back to the preset still in force |
+| `SilenceDialog` (ESCSUITE-403) | its Cancel | nothing is cut until "Remove all", so dismissing costs nothing; it is a sixth modal, opened from the inspector, whose open flag is the store's `silenceReview` (App reads `silenceReview !== null` into `modalOpen`), rendered only while open like `SessionRestorePrompt`. See [`remove-silences.md`](remove-silences.md) |
 | `SessionRestorePrompt` | **nothing** — a module-level `swallowEscape()` no-op | `useSessionRestore`'s `handleDeclineSession` calls `clearSessionState()` on this tab's own slot or the legacy row, so "Start Fresh" **deletes** this tab's own or the legacy session, and leaves another tab's (ESCSUITE-306) — not offered here again until that tab saves newer work. Escape is the key people press to dismiss a thing; routing it to either button would either discard work or silently accept it. The hook still claims the key (so the editor's cascades behind the prompt never see it) and then does nothing: the prompt stays up, focus stays trapped, and the only two ways out are the two buttons — the right shape for a question that must be answered |
 
 **The fifth modal is the odd one out in exactly one way: its open flag is not `App`'s own
@@ -102,7 +103,7 @@ dialogs, so only the topmost instance's `onClose` runs if two were ever open tog
 
 **While a modal is up, the editor behind it takes no key at all.** `App` computes one flag —
 `const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog ||
-resolutionConfirmOpen`
+resolutionConfirmOpen || silenceReviewOpen`
 — and hands it to *both* of the app's `window` cascades: `useAppKeyboardShortcuts` and
 `PlaybackControls` (which owns Space, the arrows, Home and End). Each returns from its handler immediately when it is true,
 below the typing check and above every other branch — the same shape, and the same

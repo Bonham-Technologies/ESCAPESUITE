@@ -23,6 +23,11 @@ interface ActionsSectionProps {
    */
   onUnlink?: () => void;
   /**
+   * Open the "Remove silences" review (ESCSUITE-403). The button shows only
+   * when this is given — the clip, or a clip linked to it, has a waveform.
+   */
+  onFindSilences?: () => void;
+  /**
    * Freeze the two editing actions — the clip's track is locked
    * (ESCSUITE-84). "Go to" only moves the playhead, so it stays live; that
    * is why this section carries the flag on its own buttons instead of
@@ -33,14 +38,15 @@ interface ActionsSectionProps {
 
 /**
  * The "Actions" section of the clip inspector: go to, duplicate, — only for
- * video and audio clips — split, and — only for a linked clip — unlink.
+ * video and audio clips — split, — only for a linked clip — unlink, and —
+ * only where there is sound to read — find silences.
  *
  * Split is the one control here that depends on the playhead, so it is its own
  * component and subscribes for itself — see `SplitButton`. This section takes
  * the clip's position and duration rather than a `timeInClip` its parent would
  * have had to recompute on every playback tick.
  */
-export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, onUnlink, disabled }: ActionsSectionProps) {
+export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, onUnlink, onFindSilences, disabled }: ActionsSectionProps) {
   return (
     <CollapsibleSection title="Actions">
       <div className={styles.actions}>
@@ -91,6 +97,21 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
               <line x1="3" y1="3" x2="21" y2="21" />
             </svg>
             Unlink
+          </button>
+        )}
+
+        {onFindSilences && (
+          <button
+            className={styles.actionButton}
+            onClick={onFindSilences}
+            disabled={disabled}
+            title="Find the pauses in this clip's sound and cut them out, with every linked part"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M2 12h3l2-6 3 12 2-6h2" />
+              <line x1="16" y1="12" x2="22" y2="12" strokeDasharray="2 2" />
+            </svg>
+            Find silences
           </button>
         )}
       </div>

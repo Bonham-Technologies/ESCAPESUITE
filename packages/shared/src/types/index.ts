@@ -86,6 +86,16 @@ export interface SourceVideo {
   source?: MediaSource
   recordedAt?: number
   waveformData?: WaveformPeak[]
+  /**
+   * How long each of `waveformData`'s peaks lasts, in seconds of source
+   * (ESCSUITE-403): the extractor's bucket over the rate it decoded at, which
+   * is near 0.01 but not it (479 samples at 48 kHz, 159 at 16 kHz). Written
+   * with the peaks by every writer of them since that ticket, and saved in a
+   * project file's `meta` with them. Absent on peaks made before it, whose
+   * timing is only known to within a range (`utils/peakTiming.ts`).
+   * Additive: older code ignores it.
+   */
+  waveformSecondsPerPeak?: number
   hasAudio?: boolean
   /**
    * Set when ESCAPEARTIST's load-time waveform rebuild (ESCSUITE-347) decoded

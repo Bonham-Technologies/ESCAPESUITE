@@ -93,6 +93,7 @@ import type {
 } from '../../store/types';
 import { croppedSourceRect, cropUpdateFor } from '../../core/clipCrop';
 import { cropCompensatesCentre, cropWriteFor } from '../../core/cropDrag';
+import { DEFAULT_SILENCE_OPTIONS, clipHasPeaks, findTakeSilences } from '../../core/silenceDetection';
 import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration } from './clipEditorModel';
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
@@ -143,6 +144,11 @@ export interface ClipEditorActions {
   handleDeleteClip: () => void;
   /** Unlink the selected clip, or `undefined` when it is linked to nothing (ESCSUITE-355). */
   handleUnlinkClip: (() => void) | undefined;
+  /**
+   * Open the "Remove silences" review on the selected clip (ESCSUITE-403), or
+   * `undefined` when neither it nor a clip linked to it has a waveform to read.
+   */
+  handleFindSilences: (() => void) | undefined;
   handleGoToClip: () => void;
   handleTransformChange: (key: 'x' | 'y' | 'scaleX' | 'scaleY' | 'opacity', value: number) => void;
   handleDuplicate: () => void;
@@ -290,6 +296,24 @@ export function useClipEditorActions(): ClipEditorActions {
     if (selectedClip) unlinkClip(selectedClip.id);
   }, [selectedClip, unlinkClip]);
   const handleUnlinkClip = isLinked ? unlinkSelected : undefined;
+
+  // ESCSUITE-403: a take's screen part may carry no sound of its own while its
+  // microphone does, so a linked partner's waveform is enough.
+  const canFindSilences = useEditorStore((state) => {
+    if (!selectedClip || selectedClip.overlayType) return false;
+    const clips = state.project.timeline.clips;
+    const members = selectedClip.linkGroupId ? clips.filter((c) => c.linkGroupId === selectedClip.linkGroupId) : [selectedClip];
+    return members.some((c) => clipHasPeaks(c, state.sourceVideos));
+  });
+  const findSilences = useCallback(() => {
+    if (!selectedClip) return;
+    const state = useEditorStore.getState();
+    state.setSilenceReviewClip(selectedClip.id);
+    state.setSilenceCandidates(
+      findTakeSilences(state.project.timeline.clips, state.sourceVideos, selectedClip.id, DEFAULT_SILENCE_OPTIONS)
+    );
+  }, [selectedClip]);
+  const handleFindSilences = canFindSilences ? findSilences : undefined;
 
   const handleGoToClip = useCallback(() => {
     if (!selectedClip) return;
@@ -658,6 +682,7 @@ export function useClipEditorActions(): ClipEditorActions {
     handleSplitAtPlayhead,
     handleDeleteClip,
     handleUnlinkClip,
+    handleFindSilences,
     handleGoToClip,
     handleTransformChange,
     handleDuplicate,

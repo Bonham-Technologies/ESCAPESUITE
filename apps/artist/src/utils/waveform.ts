@@ -5,7 +5,7 @@
 
 import { ALL_FORMATS, AudioSampleSink, BlobSource, Input, type InputAudioTrack } from 'mediabunny';
 import type { WaveformPeak } from '../store/types';
-import { PeakReducer, mixToMono, peaksFromPcm } from './waveformPeaks';
+import { PeakReducer, mixToMono, peakSecondsFor, peaksFromPcm } from './waveformPeaks';
 import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } from './audioPlacement';
 
 /**
@@ -31,22 +31,39 @@ import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } fro
  * same hundredth of a second. Measured differences are in the "Audio Waveform
  * Visibility" reference doc.
  *
+ * `secondsPerPeak` is how long each peak really lasts (ESCSUITE-403): the
+ * bucket `peaksFromPcm` chose over the rate it decoded at, which is close to
+ * but not 1 / samplesPerSecond (`peakBuckets`). Absent when there are no
+ * peaks. Callers store it beside the peaks as `SourceVideo.waveformSecondsPerPeak`.
+ *
  * @param blob - The media file blob
  * @param samplesPerSecond - Number of peaks per second of audio (default: 100)
- * @returns Object containing peaks array and hasAudio flag
+ * @returns Object containing peaks array, hasAudio flag and each peak's length
  */
 export async function extractWaveformData(
   blob: Blob,
   samplesPerSecond: number = 100
-): Promise<{ peaks: WaveformPeak[]; hasAudio: boolean }> {
-  let streamed: WaveformPeak[] | null = null;
+): Promise<WaveformExtraction> {
+  let streamed: { peaks: WaveformPeak[]; secondsPerPeak?: number } | null = null;
   try {
     streamed = await streamWaveformPeaks(blob, samplesPerSecond);
   } catch (error) {
     console.warn('Streamed waveform decode failed; decoding the whole file instead:', error);
   }
-  if (streamed) return { peaks: streamed, hasAudio: hasAudibleContent(streamed) };
+  if (streamed) return withTiming(streamed.peaks, hasAudibleContent(streamed.peaks), streamed.secondsPerPeak);
   return decodeWholeFileWaveform(blob, samplesPerSecond);
+}
+
+/** What `extractWaveformData` answers. */
+export interface WaveformExtraction {
+  peaks: WaveformPeak[];
+  hasAudio: boolean;
+  /** Seconds each peak covers; absent with no peaks. */
+  secondsPerPeak?: number;
+}
+
+function withTiming(peaks: WaveformPeak[], hasAudio: boolean, secondsPerPeak: number | undefined): WaveformExtraction {
+  return peaks.length > 0 && secondsPerPeak !== undefined ? { peaks, hasAudio, secondsPerPeak } : { peaks, hasAudio };
 }
 
 /** Whether any peak rises above silence (a heuristic `hasAudio` has always used). */
@@ -56,14 +73,15 @@ function hasAudibleContent(peaks: WaveformPeak[]): boolean {
 
 /**
  * The streamed path: the peaks of the file's primary audio track, decoded and
- * reduced a chunk at a time. `[]` for a container with no audio track (or one
- * with no samples); `null` when this path cannot read the file at all, so the
- * caller falls back to the whole-file decode.
+ * reduced a chunk at a time, with how long each lasts. No peaks for a
+ * container with no audio track (or one with no samples); `null` when this
+ * path cannot read the file at all, so the caller falls back to the
+ * whole-file decode.
  */
 async function streamWaveformPeaks(
   blob: Blob,
   samplesPerSecond: number
-): Promise<WaveformPeak[] | null> {
+): Promise<{ peaks: WaveformPeak[]; secondsPerPeak?: number } | null> {
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
   try {
     let track: InputAudioTrack | null;
@@ -73,7 +91,7 @@ async function streamWaveformPeaks(
       // No demuxer recognises the bytes; decodeAudioData may still.
       return null;
     }
-    if (!track) return [];
+    if (!track) return { peaks: [] };
     // MP3 is left to decodeAudioData: mediabunny does not apply the encoder
     // delay and padding a LAME/Xing header declares, which decodeAudioData
     // trims, so streamed peaks would sit ~25 ms late against the old ones.
@@ -130,7 +148,9 @@ async function streamWaveformPeaks(
     } finally {
       await clock?.close();
     }
-    return reducer ? reducer.finish() : [];
+    if (!reducer) return { peaks: [] };
+    const peaks = reducer.finish();
+    return { peaks, secondsPerPeak: reducer.secondsPerPeak };
   } finally {
     input.dispose();
   }
@@ -155,7 +175,7 @@ function pushSilence(reducer: PeakReducer, frames: number): void {
 async function decodeWholeFileWaveform(
   blob: Blob,
   samplesPerSecond: number
-): Promise<{ peaks: WaveformPeak[]; hasAudio: boolean }> {
+): Promise<WaveformExtraction> {
   try {
     const arrayBuffer = await blob.arrayBuffer();
     const audioContext = new AudioContext();
@@ -186,7 +206,8 @@ async function decodeWholeFileWaveform(
 
     await audioContext.close();
 
-    return { peaks, hasAudio: hasAudibleContent(peaks) };
+    // The rate decodeAudioData resampled to (the output device's), not the file's.
+    return withTiming(peaks, hasAudibleContent(peaks), peakSecondsFor(audioData.length, audioBuffer.sampleRate, samplesPerSecond));
   } catch (error) {
     console.warn('Failed to extract waveform data:', error);
     return { peaks: [], hasAudio: false };

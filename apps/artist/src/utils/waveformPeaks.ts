@@ -38,9 +38,7 @@ export function peaksFromPcm(
   sampleRate: number,
   samplesPerSecond: number
 ): WaveformPeak[] {
-  const duration = audioData.length / sampleRate;
-  const totalSamples = Math.ceil(duration * samplesPerSecond);
-  const samplesPerPeak = Math.floor(audioData.length / totalSamples);
+  const { totalSamples, samplesPerPeak } = peakBuckets(audioData.length, sampleRate, samplesPerSecond);
 
   const peaks: WaveformPeak[] = [];
 
@@ -61,6 +59,39 @@ export function peaksFromPcm(
   }
 
   return peaks;
+}
+
+/**
+ * How `peaksFromPcm` (and so `PeakReducer`) buckets a track `length` samples
+ * long: `totalSamples` peaks of `samplesPerPeak` samples each.
+ *
+ * The bucket is not 1 / samplesPerSecond: with q = sampleRate / samplesPerSecond
+ * it is q − 1 samples for a track that is not a whole number of buckets long
+ * and q for one that is (q's floor, either way, for a rate q does not divide),
+ * so how long a peak lasts depends on the sample rate and the exact length.
+ * Read as 10 ms, 48 kHz peaks drift 2.1 ms a second, 16 kHz ones 6.3 ms
+ * (ESCSUITE-403). One formula, so the bucketing and the timing it reports
+ * cannot drift apart.
+ */
+export function peakBuckets(
+  length: number,
+  sampleRate: number,
+  samplesPerSecond: number
+): { totalSamples: number; samplesPerPeak: number } {
+  const duration = length / sampleRate;
+  const totalSamples = Math.ceil(duration * samplesPerSecond);
+  const samplesPerPeak = Math.floor(length / totalSamples);
+  return { totalSamples, samplesPerPeak };
+}
+
+/**
+ * How long one of `peaksFromPcm`'s peaks lasts, in seconds, for a track
+ * `length` samples long: its bucket over the sample rate. `undefined` for a
+ * track with no samples, which has no peaks to time.
+ */
+export function peakSecondsFor(length: number, sampleRate: number, samplesPerSecond: number): number | undefined {
+  if (!(length > 0) || !(sampleRate > 0)) return undefined;
+  return peakBuckets(length, sampleRate, samplesPerSecond).samplesPerPeak / sampleRate;
 }
 
 /**
@@ -173,6 +204,7 @@ export class PeakReducer {
   private length = 0;
   private scratch = new Float32Array(0);
   private finished = false;
+  private timing: number | undefined;
 
   constructor(
     private readonly sampleRate: number,
@@ -229,17 +261,24 @@ export class PeakReducer {
     this.heldLength = 0;
   }
 
+  /**
+   * How long each of `finish`'s peaks lasts, in seconds (`peakSecondsFor`):
+   * `undefined` before `finish`, or when nothing was pushed.
+   */
+  get secondsPerPeak(): number | undefined {
+    return this.timing;
+  }
+
   /** The peaks of everything pushed. The reducer takes no more chunks after. */
   finish(): WaveformPeak[] {
     this.finished = true;
+    this.timing = peakSecondsFor(this.length, this.sampleRate, this.samplesPerSecond);
     if (!this.sets) {
       const held = this.held!.subarray(0, this.heldLength);
       this.held = null;
       return clampToFullScale(peaksFromPcm(held, this.sampleRate, this.samplesPerSecond));
     }
-    const duration = this.length / this.sampleRate;
-    const totalSamples = Math.ceil(duration * this.samplesPerSecond);
-    const samplesPerPeak = Math.floor(this.length / totalSamples);
+    const { totalSamples, samplesPerPeak } = peakBuckets(this.length, this.sampleRate, this.samplesPerSecond);
     // Always found, by the bound in the module comment, so there is no branch
     // for a miss (ESCSUITE-110 / 118: no guard nothing can reach). Were it ever
     // missed, `.peaks` would throw, and `extractWaveformData` answers a throw
