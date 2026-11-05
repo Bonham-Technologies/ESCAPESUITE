@@ -197,6 +197,38 @@ describe('findTakeSilences', () => {
     expect(Math.abs(gaps[0].end - 4)).toBeLessThanOrEqual(TOLERANCE);
   });
 
+  it('places a pause minutes into a recording where it is, not where 100 peaks a second would put it', () => {
+    // A recording that is not a whole number of 10 ms buckets long, as no real
+    // one is: its peaks are 479 samples each at 48 kHz, not 480, so reading
+    // them as 10 ms each put this pause 0.2 s late — past the padding, into
+    // the word after it.
+    const seconds = 120.013;
+    const pcm = new Float32Array(Math.round(seconds * RATE));
+    for (let i = 0; i < pcm.length; i++) {
+      const t = i / RATE;
+      if (t < 100 || t >= 102) pcm[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / RATE);
+    }
+    const long = source('long', pcm);
+    const gaps = findTakeSilences([clip('l', 'long', 0, 0, seconds)], [long], 'l', options);
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 100)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gaps[0].end - 102)).toBeLessThanOrEqual(TOLERANCE);
+  });
+
+  it('cuts nothing where a part has sound it cannot read', () => {
+    // The system audio has sound but no waveform (its decode failed): what it
+    // says during the mic's pause is unknown, so the pause is not cut there.
+    const unread: SourceVideo = { ...source('unread', null), hasAudio: true };
+    const clips = [clip('m', 'mic', 0, 0, 6, 'g'), clip('u', 'unread', 0, 0, 6, 'g')];
+    expect(findTakeSilences(clips, [mic, unread], 'm', options)).toEqual([]);
+    // Where that part has no clip, the mic alone decides.
+    const later = [clip('m', 'mic', 0, 0, 6, 'g'), clip('u', 'unread', 4, 0, 2, 'g')];
+    const gaps = findTakeSilences(later, [mic, unread], 'm', options);
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 2)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gaps[0].end - 4)).toBeLessThanOrEqual(TOLERANCE);
+  });
+
   it('finds nothing in a take with no sound to listen to, or for a clip that is not there', () => {
     expect(findTakeSilences([clip('s', 'screen', 0, 0, 6)], [screen], 's', options)).toEqual([]);
     expect(findTakeSilences([], [mic], 'missing', options)).toEqual([]);

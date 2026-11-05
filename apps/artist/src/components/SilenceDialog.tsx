@@ -55,7 +55,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
     minGap: String(DEFAULT_SILENCE_OPTIONS.minGap),
     padding: String(DEFAULT_SILENCE_OPTIONS.padding),
   }));
-  const [refused, setRefused] = useState(false);
+  // Why "Remove all" cut nothing, or null. The dialog is modal, but a host
+  // page can still replace the project under it (integration API).
+  const [refused, setRefused] = useState<'locked' | 'gone' | null>(null);
   const titleId = useId();
 
   const close = () => setSilenceReviewClip(null);
@@ -73,7 +75,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   const handleChange = (key: keyof SilenceOptions, raw: string) => {
     const next = { ...values, [key]: raw };
     setValues(next);
-    setRefused(false);
+    setRefused(null);
     const options = {} as SilenceOptions;
     for (const field of FIELDS) {
       const value = parsed(field.key, next[field.key]);
@@ -90,7 +92,8 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
 
   const handleRemoveAll = () => {
     if (!removeTimeRanges(review.clipId, candidates)) {
-      setRefused(true);
+      const there = useEditorStore.getState().project.timeline.clips.some((c) => c.id === review.clipId);
+      setRefused(there ? 'locked' : 'gone');
       return;
     }
     const count = candidates.length;
@@ -171,7 +174,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
 
           {refused && (
             <p className={styles.error} role="alert">
-              Nothing was cut: a track this take sits on is locked. Unlock it and try again.
+              {refused === 'locked'
+                ? 'Nothing was cut: a track this take sits on is locked. Unlock it and try again.'
+                : 'Nothing was cut: the clip is no longer on the timeline.'}
             </p>
           )}
 

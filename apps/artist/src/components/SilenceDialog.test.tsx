@@ -10,11 +10,15 @@ import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { peaksFromPcm } from '../utils/waveformPeaks'
 import type { SourceVideo } from '../store/types'
 
-const RATE = 8000
+// 48 kHz and not a whole number of 10 ms buckets long, like a real recording,
+// so its peaks are 479 samples each, as detection reads them. A pause is found
+// from the first bucket wholly in it to the last, so each edge reads up to one
+// bucket (≈ 10 ms) inside the true one: 2–3 s is found as 2.0058–2.9938 s.
+const RATE = 48_000
 
 /** Tone 0–2 s, silence 2–3 s, tone 3–5 s, a quiet murmur (−46 dBFS) 5–6 s, tone 6–7 s. */
 function micPeaks() {
-  const pcm = new Float32Array(7 * RATE)
+  const pcm = new Float32Array(7 * RATE + 123)
   for (let i = 0; i < pcm.length; i++) {
     const t = i / RATE
     const level = t >= 2 && t < 3 ? 0 : t >= 5 && t < 6 ? 0.005 : 0.8
@@ -92,14 +96,15 @@ describe('Remove silences', () => {
     expect(within(dialog).getByLabelText('Threshold (dBFS)')).toHaveValue(-40)
     expect(within(dialog).getByLabelText('Minimum gap (s)')).toHaveValue(0.7)
     expect(within(dialog).getByLabelText('Padding (s)')).toHaveValue(0.1)
-    // 2–3 s less 0.1 s each side; the murmur at 5–6 s is quieter than −40 dBFS too.
+    // 2–3 s (found as 2.0058–2.9938) less 0.1 s each side; the murmur at 5–6 s
+    // is quieter than −40 dBFS too.
     expect(pauses()).toHaveLength(2)
-    expect(pauses()[0]).toHaveTextContent('0:02.10 – 0:02.90')
-    expect(screen.getByRole('status')).toHaveTextContent('2 pauses found · 1.60 s will be cut')
+    expect(pauses()[0]).toHaveTextContent('0:02.11 – 0:02.89')
+    expect(screen.getByRole('status')).toHaveTextContent('2 pauses found · 1.58 s will be cut')
     const bands = screen.getAllByTestId('silence-band')
     expect(bands).toHaveLength(2)
-    expect(bands[0].style.left).toBe('105px')
-    expect(parseFloat(bands[0].style.width)).toBeCloseTo(40, 6)
+    expect(parseFloat(bands[0].style.left)).toBeCloseTo(105.29, 2)
+    expect(parseFloat(bands[0].style.width)).toBeCloseTo(39.4, 2)
   })
 
   it('finds again when a setting changes, and waits while a field does not read', async () => {
@@ -135,7 +140,7 @@ describe('Remove silences', () => {
     await user.click(screen.getByRole('button', { name: 'Find silences' }))
     rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
 
-    await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
+    await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.11' }))
     expect(pauses()).toHaveLength(1)
     expect(store().silenceReview!.candidates).toHaveLength(1)
 
@@ -143,12 +148,12 @@ describe('Remove silences', () => {
     await user.click(screen.getByRole('button', { name: 'Remove all' }))
 
     expect(store().silenceReview).toBeNull()
-    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back.')
+    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.79 s). Ctrl+Z puts them back.')
     const rowOf = (trackId: string) =>
       store().project.timeline.clips.filter((c) => c.trackId === trackId).map((c) => [c.timelinePosition, c.startTime, c.endTime].map((n) => +n.toFixed(6)))
-    expect(rowOf(part.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])
-    expect(rowOf(micClip.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])
-    expect(store().project.timeline.duration).toBeCloseTo(6.2, 9)
+    expect(rowOf(part.trackId)).toEqual([[0, 0, 2.105813], [2.105813, 2.89375, 7]])
+    expect(rowOf(micClip.trackId)).toEqual([[0, 0, 2.105813], [2.105813, 2.89375, 7]])
+    expect(store().project.timeline.duration).toBeCloseTo(6.2120625, 9)
 
     store().undo()
     expect(JSON.stringify(store().project)).toBe(before)
@@ -167,6 +172,21 @@ describe('Remove silences', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('a track this take sits on is locked')
     expect(onRemoved).not.toHaveBeenCalled()
     expect(store().project.timeline.clips).toHaveLength(2)
+  })
+
+  it('says the clip is gone, and cuts nothing, when the project changed under the dialog', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    // A host page replacing the project (integration API) is not stopped by the modal.
+    store().removeClipFromTimeline(part.id)
+
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('the clip is no longer on the timeline')
+    expect(onRemoved).not.toHaveBeenCalled()
   })
 
   it('closes on Cancel and on Escape, cutting nothing', async () => {

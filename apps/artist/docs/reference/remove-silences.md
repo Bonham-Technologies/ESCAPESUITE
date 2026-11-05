@@ -49,11 +49,20 @@ source, `utils/waveform.ts`):
 - `findTakeSilences(clips, sources, clipId, options)` maps each linked part's
   silent runs onto the timeline, inside the chosen clip's span, and keeps only
   where **every** part with sound is silent (where a part has no clip it counts
-  as silent). The minimum gap applies to that shared silence. A part whose
-  source has no peaks (`hasAudio: false`, or no waveform yet) is not consulted.
+  as silent). The minimum gap applies to that shared silence. A part with no
+  sound (`hasAudio` not true) is not consulted; a part with sound but no peaks
+  (its waveform could not be decoded) is never silent within its clip, so
+  nothing is cut there.
 
-Peaks are min/max, not RMS, so a single click inside a pause keeps it. Accuracy
-is a bucket (10 ms) plus whatever the codec smears at the pause's edges.
+Peaks are min/max, not RMS, so a single click inside a pause keeps it. A peak
+is read as `SECONDS_PER_PEAK` (479 samples at 48 kHz), not `duration /
+peaks.length`: `peaksFromPcm` buckets a track that is not a whole number of
+10 ms long in q − 1 samples (q = sampleRate / 100), and reading them as 10 ms
+drifted a pause 0.2 s late 100 s in, past the padding. At 44.1 kHz the residue
+is ≈ 20 ms per 100 s. Accuracy is then a bucket (10 ms) plus whatever the codec
+smears at the pause's edges. The timeline's drawn waveform (`getPeaksForRange`)
+still reads `duration / peaks.length`, so over a long recording it sits up to
+0.2 % late against the bands.
 
 ## The cut (`store/rippleRanges.ts`, `removeTimeRanges`)
 
@@ -76,7 +85,8 @@ Rows no link reaches are left where they are, as a clip's ripple delete leaves
 them; markers and in/out points do not move either. The cut is refused whole
 (`false`, nothing written, no history) when one of those rows is locked, the
 clip is gone, no range holds any time, or nothing on the rows would change. The
-dialog then says a track is locked.
+dialog then says a track is locked, or that the clip is no longer on the
+timeline (a host page can replace the project under the modal).
 
 ## Tests
 

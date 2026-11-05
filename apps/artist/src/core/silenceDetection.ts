@@ -36,6 +36,21 @@ export const DEFAULT_SILENCE_OPTIONS: SilenceOptions = {
 const EPSILON = 1e-9;
 
 /**
+ * How long one peak of a library waveform lasts, in seconds of source.
+ *
+ * `extractWaveformData` makes 100 peaks a second nominally, but its bucketing
+ * (`peaksFromPcm`, which the streamed reducer equals) puts
+ * `floor(length / ceil(length / q))` samples in a bucket, q = sampleRate / 100.
+ * For any track not an exact multiple of q long and over ~5 s that is q − 1
+ * samples: 479 at 48 kHz, 0.2 % short of 10 ms. Read as
+ * `peaks.length / duration` (≈ 10 ms) the peaks drift late by 2 ms a second,
+ * so a pause 100 s in sat 0.2 s late — twice the default padding, and the cut
+ * clipped the next word. 48 kHz is Opus's only rate (every CRAFT WebM) and the
+ * usual AAC one; a 44.1 kHz track is left 0.02 % out (≈ 20 ms per 100 s).
+ */
+export const SECONDS_PER_PEAK = 0.01 - 1 / 48_000;
+
+/**
  * The silent runs in `peaks`, in the peaks' own seconds, clipped to `within`.
  * Bucket `i` covers `[i, i + 1) / peaksPerSecond`.
  */
@@ -113,8 +128,8 @@ export function detectSilences(
 /** The peaks a clip's waveform is drawn from, if its source has any. */
 function peaksOfSource(source: SourceVideo | undefined): { peaks: WaveformPeak[]; perSecond: number } | null {
   const peaks = source?.waveformData;
-  if (!source || !source.hasAudio || !peaks?.length || !(source.duration > 0)) return null;
-  return { peaks, perSecond: peaks.length / source.duration };
+  if (!source || !source.hasAudio || !peaks?.length) return null;
+  return { peaks, perSecond: 1 / SECONDS_PER_PEAK };
 }
 
 /** Whether a clip's source carries peaks that silence detection can read. */
@@ -128,9 +143,12 @@ export function clipHasPeaks(clip: Clip, sources: readonly SourceVideo[]): boole
  * A take recorded as separate tracks has its sound on more than one clip (the
  * microphone, the system audio, a screen part with sound), so a stretch is a
  * pause only where **every** clip linked to `clipId` that has sound is silent;
- * where a part has no clip at all it is silent by definition. Detection runs
- * on the silent runs, before the minimum gap and the padding apply, so a pause
- * both parts share is judged by its shared length.
+ * where a part has no clip at all it is silent by definition. A part whose
+ * source has sound (`hasAudio`) but no peaks to read (its waveform could not
+ * be decoded) is never silent within its clip: what it says there is unknown,
+ * so nothing there is cut. Detection runs on the silent runs, before the
+ * minimum gap and the padding apply, so a pause both parts share is judged by
+ * its shared length.
  */
 export function findTakeSilences(
   clips: readonly Clip[],
@@ -146,15 +164,16 @@ export function findTakeSilences(
   let silent: TimeRange[] | null = null;
   for (const member of members) {
     if (member.overlayType) continue;
-    const audio = peaksOfSource(sources.find((s) => s.id === member.sourceVideoId));
-    if (!audio) continue;
+    const source = sources.find((s) => s.id === member.sourceVideoId);
+    const audio = peaksOfSource(source);
+    if (!audio && !source?.hasAudio) continue;
     // Source time to timeline time for this clip.
     const shift = member.timelinePosition - member.startTime;
     const from = Math.max(span.start, member.timelinePosition);
     const to = Math.min(span.end, member.timelinePosition + member.duration);
     const runs: TimeRange[] = [];
     if (from > span.start) runs.push({ start: span.start, end: Math.min(from, span.end) });
-    if (to > from) {
+    if (to > from && audio) {
       for (const run of silentRuns(audio.peaks, audio.perSecond, options.thresholdDb, { start: from - shift, end: to - shift })) {
         runs.push({ start: run.start + shift, end: run.end + shift });
       }
