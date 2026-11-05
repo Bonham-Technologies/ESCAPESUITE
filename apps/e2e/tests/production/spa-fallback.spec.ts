@@ -39,6 +39,15 @@ test.describe('production: vercel.json rewrite parity (ESCSUITE-196)', () => {
     expect(response.status()).toBe(200)
   })
 
+  // ESCSUITE-402: the Known limitations page is a hub route like /privacy, served
+  // by the same catch-all rewrite rather than a file of its own.
+  test('/limitations reaches the hub SPA with a 200', async ({ request }) => {
+    const response = await request.get('http://localhost:5190/limitations')
+    expect(response.status()).toBe(200)
+    const indexResponse = await request.get('http://localhost:5190/')
+    expect(await response.text()).toBe(await indexResponse.text())
+  })
+
   // Review round 1, finding 1: pin a look-alike path end to end against the
   // real production layout too, not just the unit-level regression test in
   // serve-dist.test.mjs. `/artist-guide` only shares a word-prefix with

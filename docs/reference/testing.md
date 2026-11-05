@@ -52,6 +52,13 @@
   the one document too (temporary, 307, so no browser caches it and a future real sub-route stays reachable), since neither app has client-side routes. Paths ending in a file extension
   are excluded so `/artist/decodeWorker-<hash>.js` is still served as itself
   (`tests/production/slashless-redirect.spec.ts`).
+  ESCSUITE-402: `tests/production/network-silence.spec.ts` drives the hosted record → edit →
+  export path (hub CTA, a synthetic CRAFT take, the same-origin hand-off, a text overlay, WebM
+  and, where H.264 encodes, MP4 export) and fails on any request — or any attempt the CSP blocks —
+  to a host other than the origin and `ANALYTICS_ALLOWED_HOSTS` (`apps/e2e/utils/networkSilence.ts`,
+  which also aborts every off-origin request so the run sends nothing out). Its negative cases
+  inject a `fetch` to another host and prove the check throws. The standalone suites use the same
+  helper with an empty allow-list. The hub's `/limitations` page links to this spec.
   ESCSUITE-406: `tests/production/analytics-strip-query.spec.ts` is the one spec that needs the
   network: it fetches Vercel's live Web Analytics script from `va.vercel-scripts.com` (Vercel
   publishes it under no licence, so it is not committed) and fails if the CDN is unreachable.

@@ -10,6 +10,7 @@ import {
 } from '../../utils/media-mocks'
 import { canConvertToMp4 } from '../../utils/webcodecs'
 import { waitForAppReady } from '../../utils/ready'
+import { assertNetworkSilence, trackNetworkSilence } from '../../utils/networkSilence'
 import { openFloatingControls, startTake } from '../../utils/floatControls'
 
 /**
@@ -136,14 +137,8 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
       'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
     )
 
-    const externalCalls: string[] = []
-
-    page.on('request', (request) => {
-      const url = request.url()
-      if (!url.startsWith('data:') && !url.startsWith('blob:') && !url.includes('localhost:5184')) {
-        externalCalls.push(url)
-      }
-    })
+    // The offline build may reach nothing at all: no allow-listed hosts.
+    const network = await trackNetworkSilence(page.context(), { origin: CRAFT_URL, allowHosts: [] })
 
     // Real synthetic capture, so a take actually starts and the app runs its
     // own `analytics.recordingStarted()` — an idle page proves only that
@@ -176,7 +171,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     await page.waitForTimeout(2000)
 
     // The offline build is air-gapped: no auth, no analytics, no phoning home
-    expect(externalCalls).toHaveLength(0)
+    assertNetworkSilence(network)
 
     // And the reason is stronger than "the call was made and went nowhere":
     // the analytics runtime is not in the bundle at all, so there is no queue
@@ -199,13 +194,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
       'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
     )
 
-    const externalCalls: string[] = []
-    page.on('request', (request) => {
-      const url = request.url()
-      if (!url.startsWith('data:') && !url.startsWith('blob:') && !url.includes('localhost:5184')) {
-        externalCalls.push(url)
-      }
-    })
+    const network = await trackNetworkSilence(page.context(), { origin: CRAFT_URL, allowHosts: [] })
 
     await mockSyntheticMedia(page)
     await grantMediaPermissions(page)
@@ -242,7 +231,7 @@ test.describe('ESCAPECRAFT Standalone - No External Dependencies', () => {
     const download = await downloadPromise
     expect(download.suggestedFilename()).toMatch(/\.mp4$/)
 
-    expect(externalCalls).toHaveLength(0)
+    assertNetworkSilence(network)
   })
 
   // ESCSUITE-400: the "Float controls" window is a second document, and its

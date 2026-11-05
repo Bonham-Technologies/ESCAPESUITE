@@ -43,6 +43,13 @@ describe('App routes', () => {
     expect(screen.getByRole('heading', { level: 1, name: 'Terms of Service' })).toBeInTheDocument()
   })
 
+  it('renders Known limitations at "/limitations"', () => {
+    renderApp('/limitations')
+    expect(
+      screen.getByRole('heading', { level: 1, name: /known limitations/i })
+    ).toBeInTheDocument()
+  })
+
   it('redirects an unmatched path to "/"', () => {
     renderApp('/does-not-exist')
     expect(screen.getByRole('button', { name: /start recording/i })).toBeInTheDocument()

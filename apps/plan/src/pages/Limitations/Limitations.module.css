@@ -1,0 +1,25 @@
+/* Layout, type and colours come from ../Legal/Legal.module.css; this only adds
+   what the Legal pages have no use for. */
+
+/* Links sit inside running text here, so colour alone must not be what marks
+   them (WCAG 1.4.1; axe's link-in-text-block). */
+.content a:any-link {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.content code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.875em;
+  color: var(--text-primary);
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  overflow-wrap: anywhere;
+}
+
+.content .sources {
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}

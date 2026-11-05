@@ -91,6 +91,7 @@ test.describe('Per-route SEO', () => {
     { path: '/', canonical: `${CANONICAL_ORIGIN}/`, title: /free, open-source/i },
     { path: '/privacy', canonical: `${CANONICAL_ORIGIN}/privacy`, title: /privacy policy/i },
     { path: '/terms', canonical: `${CANONICAL_ORIGIN}/terms`, title: /terms of service/i },
+    { path: '/limitations', canonical: `${CANONICAL_ORIGIN}/limitations`, title: /known limitations/i },
   ]
 
   for (const route of routes) {

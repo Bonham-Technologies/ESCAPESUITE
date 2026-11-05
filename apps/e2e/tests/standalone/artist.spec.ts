@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { readFileSync } from 'node:fs'
 import { seedTextClip } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
+import { assertNetworkSilence, trackNetworkSilence } from '../../utils/networkSilence'
 
 /**
  * Smoke tests for the ESCAPEARTIST offline build.
@@ -144,14 +145,8 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
     // comfortably exceeds the default 30s test budget without headroom.
     test.setTimeout(120_000)
 
-    const externalCalls: string[] = []
-
-    page.on('request', (request) => {
-      const url = request.url()
-      if (!url.startsWith('data:') && !url.startsWith('blob:') && !url.includes('localhost:5185')) {
-        externalCalls.push(url)
-      }
-    })
+    // The offline build may reach nothing at all: no allow-listed hosts.
+    const network = await trackNetworkSilence(page.context(), { origin: ARTIST_URL, allowHosts: [] })
 
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
@@ -169,7 +164,7 @@ test.describe('ESCAPEARTIST Standalone - No External Dependencies', () => {
     await page.waitForTimeout(2000)
 
     // The offline build is air-gapped: no auth, no analytics, no phoning home
-    expect(externalCalls).toHaveLength(0)
+    assertNetworkSilence(network)
 
     // And the reason is stronger than "the call was made and went nowhere":
     // the analytics runtime is not in the bundle at all, so there is no

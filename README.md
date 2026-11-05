@@ -23,6 +23,8 @@ Hosted free at [escapesuite.io](https://escapesuite.io) — no account, no sign-
 
 Or download the offline build from [Releases](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest) — a single HTML file that runs air-gapped, no internet required.
 
+What it can't do yet, what the hosted site sends, and how to check for yourself that nothing leaves your machine: [Known limitations](https://www.escapesuite.io/limitations).
+
 Check a download before you use it: every release lists each file's SHA-256 in `SHA256SUMS.txt` and carries a GitHub build-provenance attestation for it. [Verify your download](docs/VERIFY.md) gives the steps for Linux, macOS and Windows. The `-latest.html` files are replaced with every release, so check one against the `SHA256SUMS.txt` from the same release.
 
 ## Features
@@ -50,7 +52,7 @@ Check a download before you use it: every release lists each file's SHA-256 in `
 
 ### ESCAPEPLAN - Landing page & hub
 - Landing page with links to ESCAPECRAFT and ESCAPEARTIST
-- Privacy and terms pages
+- Privacy and terms pages, and a [known limitations](https://www.escapesuite.io/limitations) page
 - No accounts, no sign-in, no tracking of personal data
 
 ## Quick start (development)
