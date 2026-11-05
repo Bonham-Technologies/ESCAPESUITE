@@ -37,8 +37,8 @@
  * the final Cluster holds one block, the block before it is in the previous
  * Cluster, with a larger relative timecode, so the gap is negative and the
  * Duration falls about one Cluster short. A Duration below the last block's
- * timestamp (any track) is raised to it, in place and at the same width, for
- * audio-only takes too; one at or past it is left as the library wrote it.
+ * timestamp (any track) is raised to it, in place (the library's 8-byte float),
+ * for audio-only takes too; one at or past it is left as the library wrote it.
  */
 
 const ID = {
@@ -257,7 +257,8 @@ async function readCluster(
           else if (part.id === ID.REFERENCE_BLOCK) referenced = true
           j = part.end
         }
-        if (block !== NO_BLOCK) seen(block)
+        // A group with no Block reads as NO_BLOCK, the Cluster's own time: no later than its content.
+        seen(block)
         // A BlockGroup is a keyframe exactly when it references nothing.
         if (!referenced && videoTracks.has(block.track)) note(block, i)
         break
@@ -279,29 +280,25 @@ async function readDuration(reader: ByteWindow, info: EbmlElement): Promise<Dura
   for (let i = info.dataStart; i < info.end; ) {
     const field = await readElement(reader, i)
     if (field.id === ID.DURATION) {
-      const length = field.end - field.dataStart
-      if (length !== 4 && length !== 8) return undefined
-      const bytes = await reader.at(field.dataStart, length)
-      const view = new DataView(bytes.buffer, bytes.byteOffset, length)
-      return {
-        start: field.dataStart,
-        end: field.end,
-        value: length === 4 ? view.getFloat32(0) : view.getFloat64(0),
-      }
+      // The library always writes an 8-byte float; any other width is left as it is.
+      if (field.end - field.dataStart !== 8) return undefined
+      const bytes = await reader.at(field.dataStart, 8)
+      return { start: field.dataStart, end: field.end, value: new DataView(bytes.buffer, bytes.byteOffset, 8).getFloat64(0) }
     }
     i = field.end
   }
   return undefined
 }
 
-/** The Duration's new bytes when it falls short of the last block, at its own width; else null. */
-function flooredDuration(duration: DurationField | undefined, lastBlockTime: number): Uint8Array<ArrayBuffer> | null {
-  if (!duration || !(duration.value < lastBlockTime)) return null
-  const out = new Uint8Array(duration.end - duration.start)
-  const view = new DataView(out.buffer)
-  if (out.length === 4) view.setFloat32(0, lastBlockTime)
-  else view.setFloat64(0, lastBlockTime)
-  return out
+/**
+ * The blob with its Duration raised to the last block when it falls short, else
+ * the blob itself. The float keeps its width, so no other byte moves.
+ */
+function withDurationFloor(blob: Blob, duration: DurationField | undefined, lastBlockTime: number): Blob {
+  if (!duration || !(duration.value < lastBlockTime)) return blob
+  const bytes = new Uint8Array(8)
+  new DataView(bytes.buffer).setFloat64(0, lastBlockTime)
+  return new Blob([blob.slice(0, duration.start), bytes, blob.slice(duration.end)], { type: blob.type })
 }
 
 // --- writing -------------------------------------------------------------------
@@ -371,7 +368,7 @@ export async function writeKeyframeCues(
         furthestSeek = Math.max(furthestSeek, await readFurthestSeek(reader, element))
         break
       case ID.INFO:
-        duration = (await readDuration(reader, element)) ?? duration
+        duration = await readDuration(reader, element)
         break
       case ID.TRACKS:
         await readVideoTracks(reader, element, videoTracks)
@@ -387,11 +384,9 @@ export async function writeKeyframeCues(
     position = element.end
   }
 
-  const durationBytes = flooredDuration(duration, last.time)
-  if (videoTracks.size === 0) {
-    if (!durationBytes || !duration) return blob
-    return new Blob([blob.slice(0, duration.start), durationBytes, blob.slice(duration.end)], { type: blob.type })
-  }
+  // Same size as the input, so every offset read above holds for it.
+  const source = withDurationFloor(blob, duration, last.time)
+  if (videoTracks.size === 0) return source
   if (!cues) throw new Error('The repaired WebM has no Cues element to index its keyframes into')
   // The layout the positions below are computed for (see the header comment).
   if (segment.end !== Infinity) {
@@ -410,10 +405,5 @@ export async function writeKeyframeCues(
   const { start, end } = cues
   const grownBy = CUES_HEADER_BYTES + keyframes.length * CUE_POINT_BYTES - (end - start)
   const encoded = encodeCues(keyframes, (k) => k.clusterStart - segment.dataStart + grownBy)
-  // The library writes Info ahead of the Cues; a Duration anywhere else is left alone.
-  const head =
-    durationBytes && duration && duration.end <= start
-      ? [blob.slice(0, duration.start), durationBytes, blob.slice(duration.end, start)]
-      : [blob.slice(0, start)]
-  return new Blob([...head, encoded, blob.slice(end)], { type: blob.type })
+  return new Blob([source.slice(0, start), encoded, source.slice(end)], { type: blob.type })
 }

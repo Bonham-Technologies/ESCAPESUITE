@@ -199,6 +199,14 @@ describe('writeKeyframeCues', () => {
       expect(readCues(out).duration).toBe(6000)
     })
 
+    it('leaves a take with no Duration, or a Duration not 8 bytes wide, as it came', async () => {
+      const none = buildWebM({ ...pastDuration(AUDIO_SPEC, 1, 4000), duration: null })
+      expect(await writeKeyframeCues(none.blob)).toBe(none.blob)
+      // A 4-byte float 3000.0: not what the library writes, so not rewritten.
+      const narrow = buildWebM({ ...pastDuration(AUDIO_SPEC, 1, 4000), duration: [0x45, 0x3b, 0x80, 0x00] })
+      expect(await writeKeyframeCues(narrow.blob)).toBe(narrow.blob)
+    })
+
     it('reads the same through a window smaller than one element', async () => {
       const fixture = buildWebM(pastDuration(AUDIO_SPEC, 1, 4000))
       const whole = await bytesOf(await writeKeyframeCues(fixture.blob))
