@@ -321,6 +321,8 @@ export interface CuesRead {
   /** SeekPosition of the SeekHead's Cues entry, relative to the Segment data. */
   seekHeadCuesPosition?: number
   hasDuration: boolean
+  /** The Info element's Duration, in TimecodeScale units, if there is one. */
+  duration?: number
   points: CuePointRead[]
 }
 
@@ -336,7 +338,12 @@ export function readCues(bytes: Uint8Array): CuesRead {
     const e = readElement(bytes, at)
     if (e.id === CLUSTER_ID) break
     if (e.id === 0x1549a966) {
-      result.hasDuration = children(bytes, e).some((c) => c.id === 0x4489)
+      const duration = children(bytes, e).find((c) => c.id === 0x4489)
+      result.hasDuration = duration !== undefined
+      if (duration) {
+        const view = new DataView(bytes.buffer, bytes.byteOffset + duration.dataStart, duration.end - duration.dataStart)
+        result.duration = view.byteLength === 4 ? view.getFloat32(0) : view.getFloat64(0)
+      }
     }
     if (e.id === 0x114d9b74) {
       for (const seek of children(bytes, e)) {
