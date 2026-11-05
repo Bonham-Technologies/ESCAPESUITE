@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v11. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -7,12 +7,12 @@ Part of the autopilot policy. `.claude/rules/autopilot.md` and
 ## Builder
 
 Take ready tickets: those labelled `ap-auto` or `ap-owner-merge`, with no open PR, and
-never one labelled `ap-decision`, `ap-watch`, `needs-operator`, `needs-owner` or
-`ap-triage`:
+never one labelled `ap-decision`, `ap-watch`, `needs-operator`, `needs-owner`,
+`ap-triage` or `ap-merging`:
 
 ```
 project = ESCSUITE AND statusCategory != Done AND labels in (ap-auto, ap-owner-merge)
-  AND labels not in (ap-decision, ap-watch, needs-operator, needs-owner, ap-triage)
+  AND labels not in (ap-decision, ap-watch, needs-operator, needs-owner, ap-triage, ap-merging)
 ```
 
 **Control panel.** First read the **Settings** row whose `Jira` is this project's key on
@@ -68,18 +68,35 @@ budget, or after two failures in a row. For each ticket:
    ticket, lists each acceptance criterion with how it is verified, and states the
    class and any risk. Comment the PR link on the ticket.
 6. **Merging:**
-   - `ap-auto`: wait for `ci-status` to be green on the PR's head commit, rebase if
-     `main` moved, then merge:
+   - `ap-auto`: if `gh api repos/{owner}/{repo} --jq .allow_auto_merge` is true and
+     `gh api repos/{owner}/{repo}/rules/branches/main` requires `ci-status` with
+     `strict_required_status_checks_policy` true, bring the branch up to date (policy,
+     **Always**) and enable auto-merge with the GitHub MCP `enable_pr_auto_merge`
+     (`mergeMethod: SQUASH`). Otherwise, if those tools aren't present or fail without
+     reaching GitHub, or if GitHub answers that it is already mergeable (clean status), merge it on a **fresh green** (**Always**):
      `gh api -X PUT repos/{owner}/{repo}/pulls/{n}/merge -f merge_method=squash`.
-     Merge one PR at a time. Move the ticket to Done.
+     Merge one PR at a time. Move the ticket to Done once merged; while auto-merge is
+     pending, give its ticket, if any, the Jira label `ap-merging` and a comment linking
+     the PR with its `Head:` sha, and **Reconcile** finishes it.
+   - **New commits.** Before you push to a PR with auto-merge on, turn it off with
+     `disable_pr_auto_merge`; enable it again once steps 3 and 4 pass on the new head.
+     An update-branch merge of `main` is not a new commit.
+   - **Auto-merge pending.** After **Reconcile**, for each open PR of an `ap-merging`
+     ticket: bring it up to date (**Always**). If its head moved off the comment's `Head:`
+     sha by anything but an update-branch merge of `main`, turn auto-merge off
+     (`disable_pr_auto_merge`). If its `auto_merge` is null, someone turned it off, and if
+     `ci-status` failed or the update conflicts, it is stuck: either way label the PR
+     `needs-owner`, swap the ticket's `ap-merging` for `needs-owner`, and say so on both.
    - `ap-owner-merge`: label the PR `needs-owner` on GitHub. The ticket **stays In
      Progress**: add the Jira label `needs-owner` and a comment linking the PR, and
      leave it. **Reconcile** moves it to Done once the owner merges.
-   - **Merge refused.** If the session's permission check refuses the merge call (it
-     never reached GitHub), don't retry it or work around it: label the PR `needs-owner`
-     and comment on the PR with the first line `<!-- autopilot:merge-refused -->` and the
-     refusal. Its ticket, if any, goes as `ap-owner-merge` above, saying the merge was
-     refused; Reconcile moves it to Done once the owner merges.
+   - **Merge refused.** If the session's permission check refuses the merge call or
+     `enable_pr_auto_merge` (it never reached GitHub), don't retry it or try the other
+     route: label the PR `needs-owner` and comment on the PR with the first line
+     `<!-- autopilot:merge-refused -->` and the refusal; the comment names the call that
+     was refused and whether the repo allows auto-merge. Its ticket, if any, goes as
+     `ap-owner-merge` above, saying the merge was refused; Reconcile moves it to Done
+     once the owner merges.
 7. If a ticket turns out ambiguous, bigger than described, or of a stricter class,
    relabel it, comment on what you found, move it back to To Do, and move on.
 8. If you stop on a ticket without a PR, move it back to To Do with a comment saying
@@ -90,8 +107,9 @@ budget, or after two failures in a row. For each ticket:
 `gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[] | select(.head.ref | startswith("autopilot/refresh-v")) | .number'`.
 Merge one under the `ap-auto` rules, with no ticket, when all of these hold: every file
 in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
-listed in it; `.claude/rules/autopilot.local.md` is not among them; `ci-status` is
-green on the head. Otherwise label it `needs-owner` and comment which condition failed.
+listed in it; `.claude/rules/autopilot.local.md` is not among them; the head has a
+fresh green, or auto-merge waits for one. Otherwise label it `needs-owner` and comment
+which condition failed.
 A refused merge goes as step 6's **Merge refused**.
 This is the one `.claude/` change that isn't owner-merged: the owner approved it when
 it merged in bonham-ops.
