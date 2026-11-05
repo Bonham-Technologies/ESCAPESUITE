@@ -113,7 +113,10 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   cue read back is one that was written, in order, and only an SRT file whose tag-shaped text was all
   it had may come back refused — with exact tally floors on the committed seeds (SRT
   416 / 584, WebVTT 449 / 551 since review round 1).
-- **Out of scope, and why:** automatic captioning (no speech model runs in the browser here);
+- **Automatic captioning** (ESCSUITE-404) is the browser's own on-device speech recognition,
+  never a model ESCAPESUITE ships or fetches. Its cues arrive through `addCaptionCues` like a
+  file's; see `on-device-transcription.md`.
+- **Out of scope, and why:** a speech model of ESCAPESUITE's own, or any cloud recognition;
   SCC, CEA-608/708 and TTML (broadcast formats no browser tool of this kind is asked for, each a
   parser of its own); captions muxed into the MP4/WebM as a text track (Mediabunny's output path
   here writes video and audio only, and burn-in plus a sidecar covers both uses); and a caption

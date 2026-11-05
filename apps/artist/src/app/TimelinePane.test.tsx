@@ -26,6 +26,7 @@ function renderPane(overrides: Partial<ComponentProps<typeof TimelinePane>> = {}
     onZoomIn: vi.fn(),
     onZoomOut: vi.fn(),
     onExportSelection: vi.fn(),
+    showNotification: vi.fn(),
   };
   const merged = { ...props, ...overrides };
   const view = render(<TimelinePane {...merged} />);
@@ -44,6 +45,22 @@ describe('TimelinePane', () => {
 
     expect(screen.getByText('Add Track')).toBeInTheDocument();
     expect(screen.getByText('Track 1')).toBeInTheDocument();
+  });
+
+  it('offers "Transcribe to captions" only where the browser can recognise speech on this device (ESCSUITE-404)', async () => {
+    renderPane();
+    expect(screen.queryByRole('button', { name: 'Transcribe to captions' })).not.toBeInTheDocument();
+
+    function SpeechRecognition() {}
+    Object.defineProperty(SpeechRecognition.prototype, 'processLocally', { value: false, writable: true });
+    Object.assign(SpeechRecognition, { available: vi.fn().mockResolvedValue('available'), install: vi.fn() });
+    vi.stubGlobal('SpeechRecognition', SpeechRecognition);
+    try {
+      renderPane();
+      expect(await screen.findByRole('button', { name: 'Transcribe to captions' })).toBeInTheDocument();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it('adds a track with no arguments', async () => {

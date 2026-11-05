@@ -62,6 +62,7 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Build Configuration | [`build-configuration.md`](docs/reference/build-configuration.md) |
 | Overlay System | [`overlay-system.md`](docs/reference/overlay-system.md) |
 | Captions (`src/core/captions.ts`, ESCSUITE-293) | [`captions.md`](docs/reference/captions.md) |
+| On-device transcription (`src/core/transcribe.ts`, `src/core/speechRecognitionLocal.ts`, ESCSUITE-404) | [`on-device-transcription.md`](docs/reference/on-device-transcription.md) |
 | Keyframe Animation System (`src/utils/animation.ts`) | [`keyframe-animation-system.md`](docs/reference/keyframe-animation-system.md) |
 | Keyframe Panel (`src/components/KeyframePanel/`) | [`keyframe-panel.md`](docs/reference/keyframe-panel.md) |
 | Preview (`src/components/Preview/`) | [`preview.md`](docs/reference/preview.md) |

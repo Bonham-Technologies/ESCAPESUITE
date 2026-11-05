@@ -1,0 +1,78 @@
+/* "Transcribe to captions" in the timeline's controls (ESCSUITE-404). */
+.transcribe {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.button,
+.primary {
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.button {
+  background: var(--bg-hover);
+  color: var(--text-secondary);
+}
+
+.button:hover:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.primary {
+  background: var(--accent-primary);
+  color: var(--accent-on-fill);
+}
+
+.primary:hover {
+  background: var(--accent-hover, #3a7bc8);
+}
+
+.status {
+  font-size: 11px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Opens downwards, over the tracks: the timeline pane clips anything above its controls. */
+.notice {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: var(--z-dropdown, 100);
+  width: min(320px, calc(100vw - 32px));
+  padding: var(--spacing-sm);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.noticeText {
+  margin: 0 0 var(--spacing-sm);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.noticeActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-xs);
+}
