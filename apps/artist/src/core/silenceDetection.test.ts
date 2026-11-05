@@ -259,9 +259,13 @@ function streamedTrack(rate: number, seconds: number, pauses: [number, number][]
   const chunk = new Float32Array(rate);
   for (let at = 0; at < total; at += rate) {
     const n = Math.min(rate, total - at);
-    for (let i = 0; i < n; i++) {
-      const sample = at + i;
-      chunk[i] = quiet.some(([a, b]) => sample >= a && sample < b) ? 0 : 0.5;
+    // Whole-range fills, not a test per sample: ten minutes at 48 kHz is 29
+    // million samples, which a per-sample closure took past the 5 s timeout.
+    chunk.fill(0.5, 0, n);
+    for (const [a, b] of quiet) {
+      const from = Math.max(a, at) - at;
+      const to = Math.min(b, at + n) - at;
+      if (to > from) chunk.fill(0, from, to);
     }
     reducer.push([chunk.subarray(0, n)]);
   }
@@ -291,7 +295,9 @@ function insidePauses(cuts: { start: number; end: number }[], pauses: [number, n
   return cuts.every((cut) => pauses.some(([a, b]) => cut.start >= a - 1e-9 && cut.end <= b + 1e-9));
 }
 
-describe('findTakeSilences: peak timing at every sample rate (ESCSUITE-403)', () => {
+// Each case streams ten minutes of PCM through the real PeakReducer: about 2 s
+// under coverage here, more on a shared CI runner, so these get 20 s each.
+describe('findTakeSilences: peak timing at every sample rate (ESCSUITE-403)', { timeout: 20_000 }, () => {
   // A pause 590–592 s into a ten-minute track. Every rate's peaks last a
   // different, not-quite-10 ms time; read at the wrong one, this pause moved
   // by up to 2.5 s and the cut took the speech either side of it.
