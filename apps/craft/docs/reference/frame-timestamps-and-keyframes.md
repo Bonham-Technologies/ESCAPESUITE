@@ -10,14 +10,40 @@
   screen capture routinely delivers 5-15 frames a second, and counting frames made N of them span
   N x 33.3 ms however long they really took. A 60 s take at 15 fps came out as a 30 s video track
   against 60 s of audio — playback at 2x, with the audio lagging
-- **Strictly increasing**: a computed timestamp that does not advance on the previous frame's
-  becomes previous + 1 us — two frames inside one tick of a coarse or frozen clock would
-  otherwise be stamped the same. This is an **encoder-level** guard, not a container-level one:
-  `VideoEncoder` is fed a monotonically increasing presentation timeline and a zero-delta frame
-  is a meaningless presentation. Mediabunny itself throws only when a timestamp is below the
-  largest of the *previous GOP*, and its WebM muxer rounds each timestamp to a whole millisecond
-  (`Math.round(1e3 * chunk.timestamp)`), so 1 us apart and identical land on the same block
-  timecode either way
+- **One 30 fps slot per frame (ESCSUITE-417)**, in `core/frameTiming.ts` (`stampFrame()`).
+  `createVideoOutput()` declares the capture rate to Mediabunny (`addVideoTrack(…, { frameRate })`),
+  and its WebM muxer snaps every timestamp to that grid (`roundToDivisor(t, 30)`, then
+  `Math.round(1e3 * t)` ms). Two frames captured inside one 33 ms slot used to land on one block
+  timecode. When the second was a key frame the muxer could not start a Cluster on it — the
+  Cluster in progress already held that timecode — so it sat mid-Cluster with no cue, and
+  Chromium never completes a seek past such a frame (`seeked` never fires, `seeking` stays true,
+  `readyState` stays 1; ESCSUITE-412, `apps/e2e/fixtures/seek-wedge/README.md`). Measured against
+  that take's own packets in Chromium: a key frame mid-Cluster with a timecode of its own seeks,
+  and so do two deltas sharing one; only a key frame on its delta's timecode wedges. So, per
+  encoder (`FrameTiming.lastSlot`):
+  - a frame whose own slot (`frameSlot()`, Mediabunny's rounding) is past the last one used keeps
+    its own capture time;
+  - a frame in the **same** slot as the last goes into the next slot, stamped at that slot's own
+    time — shown one slot (33 ms) late, never more, so its picture is never ahead of its capture;
+  - a frame whose slot is **behind** the last one used is **dropped** (`stampFrame()` returns
+    `null`; the track-processor path closes the source frame, the two fallback paths draw and
+    encode nothing). Moving it on as well would let a run of collisions — a source faster than
+    30 fps, the clock pulled back by a refresh (below) — push the video ever further ahead of its
+    sound; a 30 fps track has no room for it anyway. A frame is thus stamped at most one slot past
+    the slot it was captured in, and the lead cannot build: the property
+    `frameTiming.test.ts` pins under jitter at 24–120 fps.
+
+  Distinct slots are distinct millisecond timecodes, so no two frames of a take share one, and
+  timestamps stay strictly increasing, which `VideoEncoder` and Mediabunny need (this replaced
+  the old previous + 1 us guard, whose frames 1 us apart landed on one timecode anyway). The
+  container keeps its nominal 30 fps (`DefaultDuration`), which ARTIST's frame-rate probe reads.
+  The audio is untouched: it is stamped from its own samples, and a moved frame is a picture
+  shown up to 33 ms late, inside the muxer's own ±16.7 ms rounding plus one slot.
+  `webcodecsRecorder.timecodes.test.ts` drives it through the track-processor path (a collision
+  on a key frame, 20 s at 36 fps, the webcam companion) and muxes a jittered take's packets
+  through the real Mediabunny to read back that every key frame opens its Cluster's video with
+  a cue; `apps/e2e/tests/regressions/ESCSUITE-417.spec.ts` records a real take with the collision
+  forced on every second and seeks every frame of it in Chromium
 - **A keyframe once per elapsed second** — `keyFrame = timestamp >= nextKeyFrameUs`, then
   `nextKeyFrameUs = timestamp + 1_000_000`, the first frame always a keyframe. The count-based
   rule it replaced (`frameCount % frameRate`) only meant one a second while the source really ran
@@ -41,11 +67,10 @@
 
 **One clock, one bookkeeping record per encoder.** `nextFrameTiming(timing, now)` reads the
 recorder's shared `startTime` and `pausedDuration` — which is what makes two pipelines' frames
-one timeline — while the strictly-increasing guard and the once-a-second keyframe rule live in a
-per-pipeline `FrameTiming` (`newFrameTiming()`: one for the screen, one for the companion, both
-reset by `start()`). Sharing those two numbers would have interleaved pipelines pushing each
-other's timestamps forward and handing the second stream only the keyframes the first did not
-claim. `webcodecs-recorder.test.ts` pins the property directly — "stamps both encoders from the
+one timeline — while the slot rule and the once-a-second keyframe rule live in a per-pipeline
+`FrameTiming` (`frameTiming.ts`'s `newFrameTiming()`: one for the screen, one for the companion,
+both reset by `start()`). Sharing those two numbers would have interleaved pipelines taking each
+other's slots and handing the second stream only the keyframes the first did not claim. `webcodecs-recorder.test.ts` pins the property directly — "stamps both encoders from the
 one clock — same tick, same timestamp": two frames captured at one clock reading carry the same
 timestamp, each stream's first frame is a keyframe, and a pause is excluded from both.
 
@@ -112,14 +137,14 @@ ignored the 48 kHz request was stamped and labelled as 48 kHz anyway. Three fixe
    usable (present, finite, non-zero), every frame is stamped with the context seconds elapsed
    since `start()`, extrapolated on `performance.now()` from that pairing and re-read every
    `CONTEXT_CLOCK_REFRESH_MS` (2 s) on the frame path and at every resume, pause time excluded in
-   context seconds; `start()` logs which clock the take uses. The strictly-increasing and keyframe
+   context seconds; `start()` logs which clock the take uses. The slot and keyframe
    rules above are unchanged. No `getOutputTimestamp()`, zeros (a context that is not running), or
    a non-finite reading gives the whole take today's `performance.now()` stamps; an unusable
    *refresh* keeps the last good anchor. If the render clock stalls mid-take (context time frozen
    while the wall clock runs), the frames extrapolated across the stall run ahead of it, and the
-   first refresh after it pulls the clock back: the next frames are stamped 1 µs apart until the
-   video is back with the audio — the picture over that stretch is effectively lost, rather than
-   the old permanent step. `getDuration()` stays on `performance.now()`: the primary's stored
+   first refresh after it pulls the clock back: the frames captured before the video is back with
+   the audio have no slot left and are dropped (ESCSUITE-417; they used to be stamped 1 µs apart,
+   on one timecode) — the picture over that stretch is lost, rather than the old permanent step. `getDuration()` stays on `performance.now()`: the primary's stored
    duration is probed from its file, but a companion's is the recorder's wall-clock length, off
    from its muxed length by ε·T (about a third of a second an hour at 100 ppm).
 3. **The context's real rate** — `audioContext.sampleRate`, read once after it is built, with one

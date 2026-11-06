@@ -150,9 +150,19 @@ describe('WebCodecsRecorder work ceilings', () => {
     return onAudioLevels.mock.calls.length - before
   }
 
-  /** Capture `seconds` worth of frames through the setTimeout capture loop. */
+  /**
+   * Capture `seconds` worth of frames through the setTimeout capture loop,
+   * moving the recording clock on with each one. The clock and the timers
+   * are separate fakes; frames captured on a frozen clock would all fall in
+   * one 30 fps slot, and the recorder drops all but two of those
+   * (ESCSUITE-417). 34 ms is past the 33.3 ms timer and short of the one after
+   * it, so exactly one frame lands per step.
+   */
   function captureSeconds(seconds: number): void {
-    vi.advanceTimersByTime(seconds * 1000)
+    for (let frame = 0; frame < seconds * CAPTURE_FPS; frame++) {
+      now += 1000 / CAPTURE_FPS
+      vi.advanceTimersByTime(Math.ceil(1000 / CAPTURE_FPS))
+    }
   }
 
   /** Frames the capture loop actually drew — one drawImage per captured frame. */
