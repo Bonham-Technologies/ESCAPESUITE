@@ -31,7 +31,12 @@
     30 fps, the clock pulled back by a refresh (below) — push the video ever further ahead of its
     sound; a 30 fps track has no room for it anyway. A frame is thus stamped at most one slot past
     the slot it was captured in, and the lead cannot build: the property
-    `frameTiming.test.ts` pins under jitter at 24–120 fps.
+    `frameTiming.test.ts` pins under jitter at 24–120 fps. Bounded is not zero: a source that
+    stays faster than 30 fps (60 fps through the `requestVideoFrameCallback` fallback, say) settles
+    into keeping about one frame a slot, nearly every one of them moved, so its picture runs a
+    steady slot behind the grid (about 44 ms behind capture at 60 fps). Constant, so it is not
+    drift; capture asks for `ideal: 30`, and the track-processor path's throttle caps a Chromium
+    source at 37.5 fps, so this is the uncommon case.
 
   Distinct slots are distinct millisecond timecodes, so no two frames of a take share one, and
   timestamps stay strictly increasing, which `VideoEncoder` and Mediabunny need (this replaced
