@@ -10,10 +10,11 @@ import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { peakSecondsFor, peaksFromPcm } from '../utils/waveformPeaks'
 import type { SourceVideo } from '../store/types'
 
-// 48 kHz and not a whole number of 10 ms buckets long, like a real recording,
-// so its peaks are 479 samples each, as detection reads them. A pause is found
-// from the first bucket wholly in it to the last, so each edge reads up to one
-// bucket (≈ 10 ms) inside the true one: 2–3 s is found as 2.0058–2.9938 s.
+// 48 kHz and not a whole number of 10 ms buckets long, like a real recording.
+// Its peaks are exactly 10 ms each (480 samples; ESCSUITE-418, where they were
+// 479 before), as detection reads them. A pause is found from the first bucket
+// wholly in it to the last, so each edge reads up to one bucket (10 ms) inside
+// the true one; 2–3 s sits on bucket edges, so it is found as exactly 2–3 s.
 const RATE = 48_000
 
 const MIC_SAMPLES = 7 * RATE + 123
@@ -99,15 +100,15 @@ describe('Remove silences', () => {
     expect(within(dialog).getByLabelText('Threshold (dBFS)')).toHaveValue(-40)
     expect(within(dialog).getByLabelText('Minimum gap (s)')).toHaveValue(0.7)
     expect(within(dialog).getByLabelText('Padding (s)')).toHaveValue(0.1)
-    // 2–3 s (found as 2.0058–2.9938) less 0.1 s each side; the murmur at 5–6 s
+    // 2–3 s less 0.1 s each side; the murmur at 5–6 s
     // is quieter than −40 dBFS too.
     expect(pauses()).toHaveLength(2)
-    expect(pauses()[0]).toHaveTextContent('0:02.11 – 0:02.89')
-    expect(screen.getByRole('status')).toHaveTextContent('2 pauses found · 1.58 s will be cut')
+    expect(pauses()[0]).toHaveTextContent('0:02.10 – 0:02.90')
+    expect(screen.getByRole('status')).toHaveTextContent('2 pauses found · 1.60 s will be cut')
     const bands = screen.getAllByTestId('silence-band')
     expect(bands).toHaveLength(2)
-    expect(parseFloat(bands[0].style.left)).toBeCloseTo(105.29, 2)
-    expect(parseFloat(bands[0].style.width)).toBeCloseTo(39.4, 2)
+    expect(parseFloat(bands[0].style.left)).toBeCloseTo(105, 2)
+    expect(parseFloat(bands[0].style.width)).toBeCloseTo(40, 2)
   })
 
   it('says when a waveform predates exact peak timing, and still cuts only inside the pause', async () => {
@@ -171,7 +172,7 @@ describe('Remove silences', () => {
     await user.click(screen.getByRole('button', { name: 'Find silences' }))
     rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
 
-    await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.11' }))
+    await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
     expect(pauses()).toHaveLength(1)
     expect(store().silenceReview!.candidates).toHaveLength(1)
 
@@ -179,12 +180,12 @@ describe('Remove silences', () => {
     await user.click(screen.getByRole('button', { name: 'Remove all' }))
 
     expect(store().silenceReview).toBeNull()
-    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.79 s). Ctrl+Z puts them back.')
+    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back.')
     const rowOf = (trackId: string) =>
       store().project.timeline.clips.filter((c) => c.trackId === trackId).map((c) => [c.timelinePosition, c.startTime, c.endTime].map((n) => +n.toFixed(6)))
-    expect(rowOf(part.trackId)).toEqual([[0, 0, 2.105813], [2.105813, 2.89375, 7]])
-    expect(rowOf(micClip.trackId)).toEqual([[0, 0, 2.105813], [2.105813, 2.89375, 7]])
-    expect(store().project.timeline.duration).toBeCloseTo(6.2120625, 9)
+    expect(rowOf(part.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])
+    expect(rowOf(micClip.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])
+    expect(store().project.timeline.duration).toBeCloseTo(6.2, 9)
 
     store().undo()
     expect(JSON.stringify(store().project)).toBe(before)

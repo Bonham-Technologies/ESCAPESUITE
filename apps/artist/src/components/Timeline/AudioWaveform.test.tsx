@@ -1116,4 +1116,55 @@ describe('AudioWaveform', () => {
       })
     })
   })
+
+  describe('ESCSUITE-418 — the peaks are placed by their own length', () => {
+    // 100 peaks of 10 ms, each its index / 100 loud, over a source that runs
+    // 2 % past the last peak (a container outlasting its audio, say).
+    const peaks: WaveformPeak[] = Array.from({ length: 100 }, (_, i) => ({ min: 0, max: i / 100 }))
+    const duration = 1.02
+
+    function drawnMaxima(secondsPerPeak: number | undefined, startTime: number, endTime: number): number[] {
+      mockCtx.fillRect.mockClear()
+      const { unmount } = render(
+        <AudioWaveform
+          peaks={peaks}
+          sourceDuration={duration}
+          secondsPerPeak={secondsPerPeak}
+          startTime={startTime}
+          endTime={endTime}
+          width={Math.round((endTime - startTime) * 1000)}
+          height={40}
+        />
+      )
+      const centerY = 20
+      const amplitude = 20 * 0.85
+      // `fillRect(x, minY, …)` with `minY = centerY - max * amplitude`.
+      const maxima = mockCtx.fillRect.mock.calls.map((call) => +((centerY - (call[1] as number)) / amplitude).toFixed(6))
+      unmount()
+      return maxima
+    }
+
+    it('draws a window from the peaks its time covers at secondsPerPeak, not duration / peaks.length', () => {
+      // 0.5–0.6 s is peaks 50–59 at 10 ms; spread over 1.02 s it would start at peak 49.
+      expect(drawnMaxima(0.01, 0.5, 0.6)).toEqual([0.5, 0.51, 0.52, 0.53, 0.54, 0.55, 0.56, 0.57, 0.58, 0.59])
+      expect(drawnMaxima(undefined, 0.5, 0.6)[0]).toBe(0.49)
+    })
+
+    it('draws silence past the last peak instead of stretching the peaks over the clip', () => {
+      // The whole source: 100 peaks then 2 silent ones, so peak 99 is drawn at 0.99 s, not at the end.
+      const maxima = drawnMaxima(0.01, 0, duration)
+      expect(maxima).toHaveLength(102)
+      expect(maxima.slice(98)).toEqual([0.98, 0.99, 0, 0])
+    })
+
+    it('resamples again when the timing changes', () => {
+      const resampleSpy = vi.spyOn(waveformUtils, 'resamplePeaks')
+      const props = { peaks, sourceDuration: duration, startTime: 0, endTime: 0.5, width: 500, height: 40 }
+      const { rerender } = render(<AudioWaveform {...props} />)
+      expect(resampleSpy).toHaveBeenCalledTimes(1)
+      rerender(<AudioWaveform {...props} secondsPerPeak={0.01} />)
+      expect(resampleSpy).toHaveBeenCalledTimes(2)
+      resampleSpy.mockRestore()
+    })
+  })
 })

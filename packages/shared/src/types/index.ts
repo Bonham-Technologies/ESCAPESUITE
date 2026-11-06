@@ -88,9 +88,10 @@ export interface SourceVideo {
   waveformData?: WaveformPeak[]
   /**
    * How long each of `waveformData`'s peaks lasts, in seconds of source
-   * (ESCSUITE-403): the extractor's bucket over the rate it decoded at, which
-   * is near 0.01 but not it (479 samples at 48 kHz, 159 at 16 kHz). Written
-   * with the peaks by every writer of them since that ticket, and saved in a
+   * (ESCSUITE-403): the extractor's bucket over the rate it decoded at.
+   * 0.01 exactly for peaks made since ESCSUITE-418; one sample short of it on
+   * most tracks before (479 samples at 48 kHz, 159 at 16 kHz). Written
+   * with the peaks by every writer of them since ESCSUITE-403, and saved in a
    * project file's `meta` with them. Absent on peaks made before it, whose
    * timing is only known to within a range (`utils/peakTiming.ts`).
    * Additive: older code ignores it.

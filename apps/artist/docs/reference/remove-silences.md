@@ -71,20 +71,23 @@ Peaks are min/max, not RMS, so a single click inside a pause keeps it.
 
 ### Peak timing (`utils/peakTiming.ts`)
 
-A peak is not 10 ms. `peaksFromPcm` / `PeakReducer` bucket a track of L
-samples as `floor(L / ceil(L / q))` samples a peak, q = sampleRate / 100
-(`peakBuckets`): q − 1 for a length that is not a whole number of buckets, q
-for one that is. So a peak lasts `0.01 − 1/sampleRate` or `0.01` s depending
-on the rate and the exact length. Read at one fixed length, the peaks drift:
-the first version read every track as 48 kHz's 479 samples, which put a pause
-at 44.1 kHz 0.18 ms/s late (padding gone after ~9 minutes), at 32 kHz 1 ms/s
-(~96 s), at 16 kHz 4.2 ms/s (~24 s; `decodeAudioData` resamples to the output
-device's rate, which a headset can set to 16 kHz), and a 48 kHz track an exact
-number of buckets long 2.1 ms/s early.
+Since ESCSUITE-418 a peak is exactly 10 ms: `peaksFromPcm` / `PeakReducer` put
+peak i over samples `[floor(i · q), floor((i + 1) · q))`, q = sampleRate / 100
+(`bucketStart`), with a shorter last peak for the track's remainder, so peak i
+starts within a sample of i × 10 ms at any rate and length (`waveformPeaks.ts`).
+Before it a peak was `floor(L / ceil(L / q))` samples: q − 1 for a length that
+is not a whole number of buckets, q for one that is, so it lasted
+`0.01 − 1/sampleRate` or `0.01` s depending on the rate and the exact length.
+Read at one fixed length, those peaks drift: the first version of this feature
+read every track as 48 kHz's 479 samples, which put a pause at 44.1 kHz
+0.18 ms/s late (padding gone after ~9 minutes), at 32 kHz 1 ms/s (~96 s), at
+16 kHz 4.2 ms/s (~24 s; `decodeAudioData` resamples to the output device's
+rate, which a headset can set to 16 kHz), and a 48 kHz track an exact number of
+buckets long 2.1 ms/s early. Such peaks are still in caches and project files.
 
 So the extractors report each peak's length (`extractWaveformData`'s
-`secondsPerPeak` = `samplesPerPeak / sampleRate` at the rate actually decoded
-at, `peakSecondsFor`), and every writer of `waveformData` stores it beside the
+`secondsPerPeak`, `peakSecondsFor`: 0.01 since ESCSUITE-418, the old bucket
+over the rate actually decoded at before it), and every writer of `waveformData` stores it beside the
 peaks as `SourceVideo.waveformSecondsPerPeak`: the importers
 (`videoProcessor.ts`), the take handoff (`takeImport.ts`), the load-time
 rebuild and its write-back (`projectManager.ts` `restoreWaveform`,
@@ -112,9 +115,13 @@ length outside 9–10.1 ms (no extractor writes one; a hand-edited file could)
 is read as absent.
 
 `peakTimingOf` is the one place peak timing is decided. Its `estimate` (exact
-when recorded, 479/48000 otherwise) is for drawing: the timeline's waveform
-(`getPeaksForRange`) still reads `duration / peaks.length` and is left to
-ESCSUITE-418, which should read `peakTimingOf` too.
+when recorded, 479/48000 otherwise) is what the timeline draws by
+(ESCSUITE-418): `TimelineTrack` passes `drawnSecondsPerPeak(source)` to
+`AudioWaveform`, and `getPeaksForRange` maps peak i to `i × secondsPerPeak`
+rather than spreading the peaks over the source's duration, so the waveform's
+quiet stretches sit where these cuts and their bands are. Legacy peaks are
+drawn at the estimate only while it accounts for the source's duration (within
+1 %; extractor peaks are ~100 a second), and spread over the duration otherwise.
 
 ### File format (additive)
 
