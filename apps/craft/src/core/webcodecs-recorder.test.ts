@@ -627,21 +627,28 @@ describe('WebCodecsRecorder', () => {
       expect(timestamps()).toEqual([0, 66667, 133333])
     })
 
-    it('keeps timestamps strictly increasing when the clock does not move', () => {
+    it('gives frames on a clock that does not move slots of their own, and drops the rest', () => {
       // Mediabunny rejects a packet that does not advance on the one before
-      // it, so a coarse or frozen clock must not be allowed to stall the mux.
+      // it, and snaps every timestamp to the 30 fps grid the recorder
+      // declares, so frames on a coarse or frozen clock must neither stall the
+      // mux nor share a timecode (ESCSUITE-417). These were stamped 0, 1 and
+      // 2 us, which all land in the first slot: the second now takes the next
+      // slot, and the third, with no slot left within one of its own, is not
+      // drawn or encoded at all.
       recorder.start()
 
       presentFrame()
       presentFrame()
       presentFrame()
 
-      expect(timestamps()).toEqual([0, 1, 2])
+      expect(timestamps()).toEqual([0, 33333])
       expect(lastVideoEncoder().encodes.map(e => e.options)).toEqual([
         { keyFrame: true },
         { keyFrame: false },
-        { keyFrame: false },
       ])
+      expect(getCreatedFrames('VideoFrame')).toHaveLength(2)
+      // The callback loop goes on regardless.
+      expect(frameCallbacks).toHaveLength(1)
     })
 
     it('emits a keyframe once per elapsed second however few frames arrive', () => {
