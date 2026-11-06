@@ -248,7 +248,12 @@ test.describe('ESCSUITE-417: a CRAFT take captured with jitter seeks every frame
     expect(lines).toContain('Video stamped in performance.now() time (no usable audio-context clock)')
     const jitter = await page.evaluate(() => (window as unknown as { __jitter: { pairs: number; keyedPairs: number } }).__jitter)
     expect(jitter.pairs, 'forced collisions').toBeGreaterThanOrEqual(4)
-    expect(jitter.keyedPairs, 'forced collisions whose second frame was the key frame').toBe(jitter.pairs)
+    // One pair may miss: when the frame before a forced pair was itself pushed
+    // into the pair's slot, that frame becomes the key and the forced one is
+    // dropped, so the pair never reaches the encoder as a key frame.
+    expect(jitter.keyedPairs, 'forced collisions whose second frame was the key frame').toBeGreaterThanOrEqual(
+      Math.max(3, jitter.pairs - 1),
+    )
 
     const layout = readWebmLayout(await storedTakeBytes(page))
     expect(layout.videoBlocks.length).toBeGreaterThan(120)

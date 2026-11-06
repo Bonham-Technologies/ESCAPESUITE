@@ -16,8 +16,9 @@
  *
  * - a frame whose own slot is free keeps its own timestamp;
  * - a frame captured inside the slot of the frame before it goes into the
- *   next slot, stamped at that slot's own time — it is shown one slot (33 ms)
- *   late, never more;
+ *   next slot, stamped at that slot's own time — it is shown at most one and a
+ *   half slots (50 ms) late: one slot, plus the half slot of the muxer's own
+ *   rounding;
  * - a frame whose own slot is behind the last one used is **dropped**: the
  *   slot after the last one is more than one slot past its capture, and
  *   moving it there would let a run of collisions (a source faster than
