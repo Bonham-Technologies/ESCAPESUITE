@@ -110,6 +110,39 @@ test.describe('ESCAPEPLAN Known limitations Accessibility', () => {
   })
 })
 
+// ESCSUITE-413: the legal pages are running text full of links, like
+// /limitations, and no audit visited them, so a link drawn in the button
+// accent (2.96:1 on the dark background) shipped unnoticed. Both themes, every
+// rule axe runs by default, zero violations allowed.
+test.describe('ESCAPEPLAN legal pages Accessibility', () => {
+  const pages = [
+    { path: '/privacy', heading: /privacy policy/i },
+    { path: '/terms', heading: /terms of service/i },
+  ] as const
+  for (const { path, heading } of pages) {
+    for (const theme of ['dark', 'light'] as const) {
+      test(`${path} passes axe-core audit (${theme} theme)`, async ({ page }) => {
+        await page.goto(`http://localhost:5173${path}?theme=${theme}`)
+        await waitForAppReady(page, 'plan')
+        if (theme === 'light') {
+          await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+        } else {
+          await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'light')
+        }
+        // Anchor on the real page and on its in-text links: an empty page, or
+        // one whose links failed to render, has no violations either.
+        await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+        await expect(
+          page.getByRole('main').getByRole('link', { name: 'Bonham Technologies, LLC' }),
+        ).toBeVisible()
+
+        const results = await runAxeCheck(page, {})
+        expect(results.violations).toEqual([])
+      })
+    }
+  }
+})
+
 test.describe('ESCAPECRAFT Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await mockGetUserMedia(page)
