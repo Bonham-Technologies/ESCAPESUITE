@@ -13,7 +13,7 @@ import { waveformCanvas } from '../../utils/mediaHealth'
  * cut into speech.
  *
  * The clip is a WAV generated here, two minutes of 16 kHz tone with a 0.6 s
- * gap at 100 s, made a whole sample over a whole number of 10 ms long so the
+ * gap at 100 s, made 3 ms over a whole number of 10 ms long so the
  * old bucketing shows. At the timeline's highest zoom (500 px a second, so a
  * 10 ms peak is 5 px) the waveform's gap must be drawn where the audio's gap
  * is, to within two peaks; before the fix it was drawn ~0.63 s (~310 px) late.
