@@ -212,6 +212,17 @@ describe('storage', () => {
       expect(mocked.isStorageUnavailable(error)).toBe(false)
     })
 
+    // Storage that works but is full keeps the quota sentence, not "blocked".
+    it('does not count a QuotaExceededError as storage that cannot be opened', async () => {
+      const full = new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      openDB.mockImplementationOnce(() => Promise.reject(full))
+
+      const error = await mocked.getDB().catch((e: unknown) => e)
+
+      expect(error).toBe(full)
+      expect(mocked.isStorageUnavailable(error)).toBe(false)
+    })
+
     it('ignores a refusal that is not an object', async () => {
       openDB.mockImplementationOnce(() => Promise.reject('refused'))
 

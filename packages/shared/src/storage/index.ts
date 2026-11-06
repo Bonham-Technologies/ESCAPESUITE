@@ -148,12 +148,18 @@ async function connect(): Promise<IDBPDatabase<VideoEditorDB>> {
 const openFailures = new WeakSet<object>()
 
 /**
- * Remember `error` as a refused open. `VersionError` is not one: storage
- * works, and a newer tab has upgraded the database (see `getDB`).
+ * Errors an open can fail with that are not storage being refused, so the
+ * apps keep their own sentence for each: `VersionError`, storage works and a
+ * newer tab has upgraded the database (see `getDB`); `QuotaExceededError`,
+ * storage works and is full, which the apps already say as such.
  */
+const NOT_REFUSED = new Set(['VersionError', 'QuotaExceededError'])
+
+/** Remember `error` as a refused open, unless it is one of `NOT_REFUSED`. */
 function rememberOpenFailure(error: unknown): void {
   if (typeof error !== 'object' || error === null) return
-  if ((error as { name?: unknown }).name === 'VersionError') return
+  const name = (error as { name?: unknown }).name
+  if (typeof name === 'string' && NOT_REFUSED.has(name)) return
   openFailures.add(error)
 }
 

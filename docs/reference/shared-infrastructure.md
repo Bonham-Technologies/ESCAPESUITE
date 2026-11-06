@@ -15,7 +15,7 @@
   remember history", storage denied by policy or to an embed), `indexedDB.open` throws or its
   request fails; `getDB()` remembers that error, so `isStorageUnavailable(error)` (read through
   `error.cause ?? error`) tells a refused open from a read or write that failed once open. A
-  `VersionError` is not counted. Nothing is cached, so the next call asks again (ESCSUITE-414).
+  `VersionError` or `QuotaExceededError` is not counted. Nothing is cached, so the next call asks again (ESCSUITE-414).
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
   (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)
