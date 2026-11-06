@@ -114,6 +114,73 @@ test.describe('ESCAPECRAFT Tablet Layout', () => {
   })
 })
 
+// ESCSUITE-344: a narrow desktop window, split screen or embed at 390 px. The
+// preview used to be squeezed to 62 px between the source and recording lists
+// and the record bar, clipping its own placeholder, and the header's back link
+// wrapped "← / ESCAPE / Suite" onto three lines into the title.
+test.describe('ESCAPECRAFT Narrow Window (390 px)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockGetUserMedia(page)
+    await mockMediaRecorder(page)
+    await grantMediaPermissions(page)
+    await page.goto('http://localhost:5174')
+    await waitForAppReady(page, 'craft')
+  })
+
+  test('preview keeps a usable height and its placeholder is not clipped', async ({ page }) => {
+    const preview = page.locator('[class*="previewContainer"]').first()
+    await expect(preview).toBeVisible()
+    const box = (await preview.boundingBox())!
+    // At least 180 px tall, or 16:9 of its full width if that is smaller.
+    expect(box.height).toBeGreaterThanOrEqual(Math.min(180, Math.floor((box.width * 9) / 16)))
+
+    const placeholder = page.locator('[class*="previewPlaceholder"]').first()
+    await expect(placeholder).toBeVisible()
+    const inner = (await placeholder.boundingBox())!
+    expect(inner.y).toBeGreaterThanOrEqual(box.y - 0.5)
+    expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height + 0.5)
+    await expect(placeholder.getByText(/click record to start/i)).toBeVisible()
+
+    // The bigger preview must not push the record bar out of the recorder's
+    // `overflow: hidden` box: .content keeps its natural height and the page
+    // scrolls, so the record button can be scrolled to and sits in the viewport.
+    const content = page.locator('main > [class*="content"]').first()
+    const clipped = await content.evaluate((el) => el.scrollHeight - el.clientHeight)
+    expect(clipped).toBeLessThanOrEqual(1)
+    const record = page.getByRole('button', { name: 'Start recording' })
+    await record.scrollIntoViewIfNeeded()
+    const recordBox = (await record.boundingBox())!
+    const contentBox = (await content.boundingBox())!
+    expect(recordBox.y + recordBox.height).toBeLessThanOrEqual(contentBox.y + contentBox.height + 0.5)
+    expect(recordBox.y + recordBox.height).toBeLessThanOrEqual(844 + 0.5)
+  })
+
+  test('back link stays on one line and clear of the title and Help button', async ({ page }) => {
+    const back = page.getByRole('link', { name: '← ESCAPE Suite', exact: true })
+    await expect(back).toBeVisible()
+    const link = (await back.boundingBox())!
+    // One line of text: the content box (height less its vertical padding) is
+    // under one and a half line-heights. Three wrapped lines measured 58 px.
+    const lines = await back.evaluate((el) => {
+      const cs = getComputedStyle(el)
+      const lineHeight = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.5
+      const content =
+        el.getBoundingClientRect().height - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom)
+      return content / lineHeight
+    })
+    expect(lines).toBeLessThan(1.5)
+
+    const title = (await page.getByRole('heading', { level: 1 }).first().boundingBox())!
+    const help = (await page.getByRole('button', { name: /help/i }).first().boundingBox())!
+    const overlaps = (a: typeof link, b: typeof link) =>
+      a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+    expect(overlaps(link, title)).toBe(false)
+    expect(overlaps(title, help)).toBe(false)
+    expect(overlaps(link, help)).toBe(false)
+  })
+})
+
 test.describe('ESCAPECRAFT Recording List Responsive', () => {
   test('recording list stacks on mobile', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 667 })
