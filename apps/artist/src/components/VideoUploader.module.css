@@ -472,3 +472,21 @@
   font-size: 12px;
   color: var(--text-muted);
 }
+
+/*
+ * ESCSUITE-414: storage the browser will not open. The text is the theme's own
+ * --text-primary, so its contrast is the panel's in either theme; the warning
+ * accent only tints the box and marks its edge.
+ */
+.storageBlocked {
+  margin: var(--spacing-sm) 0 0;
+  padding: var(--spacing-sm);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--accent-warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-warning) 40%, transparent);
+  border-left-width: 3px;
+  border-left-color: var(--accent-warning);
+  border-radius: var(--radius-sm);
+}
