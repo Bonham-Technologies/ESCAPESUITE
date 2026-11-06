@@ -375,8 +375,8 @@ describe('extractWaveformData, streamed (ESCSUITE-338)', () => {
   });
 
   it('gives exactly the whole-file decode\'s peaks for the same PCM, without decodeAudioData', async () => {
-    // Six seconds of 48 kHz stereo: past the point where the reducer stops
-    // holding samples, so the bucketing is the streamed one.
+    // Six seconds of 48 kHz stereo, not a whole number of 10 ms long, so the
+    // last peak is a short one on both paths.
     const left = signal(48000 * 6 + 123, 0);
     const right = signal(48000 * 6 + 123, 1.7);
 
@@ -389,8 +389,8 @@ describe('extractWaveformData, streamed (ESCSUITE-338)', () => {
     expect(audio.decodeCalls).toHaveLength(1);
     expect(audio.created).toBe(1);
     expect(streamed.peaks).toHaveLength(601);
-    // Not 10 ms: 479 samples a peak (ESCSUITE-403), the same on both paths.
-    expect(streamed.secondsPerPeak).toBe(479 / 48000);
+    // 10 ms: 480 samples a peak (ESCSUITE-418; it was 479 before), the same on both paths.
+    expect(streamed.secondsPerPeak).toBe(0.01);
     expect(streamed).toEqual(whole);
     expect(streamed.hasAudio).toBe(true);
   });

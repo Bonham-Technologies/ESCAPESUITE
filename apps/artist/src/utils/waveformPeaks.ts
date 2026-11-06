@@ -1,97 +1,91 @@
 /**
- * Waveform peak reduction (ESCSUITE-338).
+ * Waveform peak reduction (ESCSUITE-338, ESCSUITE-418).
  *
- * `peaksFromPcm` is the bucketing `extractWaveformData` has always used, over a
- * whole decoded track. `PeakReducer` gives exactly the same peaks from the same
- * PCM fed in chunks of any size, without holding the track: a decoder's output
- * is reduced as it arrives and dropped, so an hour of 48 kHz stereo costs a few
- * MB of peaks rather than the ~1.4 GB of Float32 a whole-file decode holds.
+ * `peaksFromPcm` reduces a whole decoded track to min/max peaks; `PeakReducer`
+ * gives exactly the same peaks from the same PCM fed in chunks of any size,
+ * without holding the track: a decoder's output is reduced as it arrives and
+ * dropped, so an hour of 48 kHz stereo costs a few MB of peaks rather than the
+ * ~1.4 GB of Float32 a whole-file decode holds.
  *
- * The one thing that makes streaming awkward is that the bucket size depends on
- * the track's final length, which is not known until the last chunk:
+ * **Peak i is the track's i-th 1 / samplesPerSecond of time** (ESCSUITE-418):
+ * samples `[bucketStart(i), bucketStart(i + 1))`, with
+ * `bucketStart(i) = floor(i · sampleRate / samplesPerSecond)`, and the last
+ * peak holding whatever of the track is left (so it may be shorter). That is
+ * exactly q = sampleRate / 100 samples a peak at every rate q is whole for
+ * (48 kHz: 480, 44.1 kHz: 441, 16 kHz: 160) and q's floor or ceiling, by
+ * absolute index, at a rate it is not (22.05 kHz: 220 and 221 in turn), so
+ * peak i starts within one sample of i / samplesPerSecond at any rate and any
+ * length, and the peaks cover every sample. Nothing depends on the track's
+ * final length, so the reducer streams from the first sample.
  *
- *   totalSamples   = ceil(length / sampleRate * samplesPerSecond)
- *   samplesPerPeak = floor(length / totalSamples)
- *
- * With q = sampleRate / samplesPerSecond, once totalSamples >= q the bucket size
- * can only be floor(q) - 2 .. floor(q) + 1 (length / totalSamples lies in
- * (q - q / totalSamples, q], and the float `ceil` can move totalSamples by one
- * either way). So the reducer holds samples only until the track is certain to
- * be that long (`streamingThreshold`: ~4.8 s at 48 kHz), then reduces into one
- * set of buckets per candidate size at once, and `finish` keeps the set whose
- * size the real length picks. Buckets are by absolute sample index in every
- * set, so the result equals `peaksFromPcm` by construction, not approximately.
+ * The bucketing before ESCSUITE-418 was `floor(length / ceil(duration · 100))`
+ * samples a peak: one sample short of 10 ms on any track not a whole number of
+ * 10 ms long (479 at 48 kHz), which drew the waveform ~0.2 % off the sound.
+ * Peaks made that way are still read correctly by the length stored beside
+ * them (`SourceVideo.waveformSecondsPerPeak`, ESCSUITE-403), or estimated when
+ * none was (`utils/peakTiming.ts`); they are never rebucketed.
  */
 
 import type { WaveformPeak } from '../store/types';
 
 /**
- * Min/max peaks over a whole mono track — the bucketing `extractWaveformData`
- * has always used, kept verbatim so the streaming path has something to equal.
- *
- * `totalSamples = ceil(duration * samplesPerSecond)` buckets of
- * `floor(length / totalSamples)` samples each, by absolute sample index; every
- * bucket's min and max start at 0; samples past the last bucket are dropped.
+ * The first sample of peak `index`: `floor(index · sampleRate / samplesPerSecond)`.
+ * Exact in floating point for any realistic track (the product is an integer
+ * well under 2^53, and a quotient that is a whole number comes out whole).
+ */
+export function bucketStart(index: number, sampleRate: number, samplesPerSecond: number): number {
+  return Math.floor((index * sampleRate) / samplesPerSecond);
+}
+
+/** Whether a rate pair can bucket at all (a bucket of no time would never end). */
+function canBucket(sampleRate: number, samplesPerSecond: number): boolean {
+  return sampleRate > 0 && samplesPerSecond > 0 && Number.isFinite(sampleRate / samplesPerSecond);
+}
+
+/**
+ * Min/max peaks over a whole mono track: peak i over samples
+ * `[bucketStart(i), bucketStart(i + 1))`, the last one cut at the track's end
+ * (see the module comment). Every peak's min and max start at 0.
  */
 export function peaksFromPcm(
   audioData: Float32Array,
   sampleRate: number,
   samplesPerSecond: number
 ): WaveformPeak[] {
-  const { totalSamples, samplesPerPeak } = peakBuckets(audioData.length, sampleRate, samplesPerSecond);
-
   const peaks: WaveformPeak[] = [];
+  if (!canBucket(sampleRate, samplesPerSecond)) return peaks;
+  const length = audioData.length;
 
-  for (let i = 0; i < totalSamples; i++) {
-    const startSample = i * samplesPerPeak;
-    const endSample = Math.min(startSample + samplesPerPeak, audioData.length);
+  for (let i = 0, start = 0; start < length; i++) {
+    const end = Math.min(bucketStart(i + 1, sampleRate, samplesPerSecond), length);
 
     let min = 0;
     let max = 0;
 
-    for (let j = startSample; j < endSample; j++) {
+    for (let j = start; j < end; j++) {
       const sample = audioData[j];
       if (sample < min) min = sample;
       if (sample > max) max = sample;
     }
 
     peaks.push({ min, max });
+    start = end;
   }
 
   return peaks;
 }
 
 /**
- * How `peaksFromPcm` (and so `PeakReducer`) buckets a track `length` samples
- * long: `totalSamples` peaks of `samplesPerPeak` samples each.
- *
- * The bucket is not 1 / samplesPerSecond: with q = sampleRate / samplesPerSecond
- * it is q − 1 samples for a track that is not a whole number of buckets long
- * and q for one that is (q's floor, either way, for a rate q does not divide),
- * so how long a peak lasts depends on the sample rate and the exact length.
- * Read as 10 ms, 48 kHz peaks drift 2.1 ms a second, 16 kHz ones 6.3 ms
- * (ESCSUITE-403). One formula, so the bucketing and the timing it reports
- * cannot drift apart.
- */
-export function peakBuckets(
-  length: number,
-  sampleRate: number,
-  samplesPerSecond: number
-): { totalSamples: number; samplesPerPeak: number } {
-  const duration = length / sampleRate;
-  const totalSamples = Math.ceil(duration * samplesPerSecond);
-  const samplesPerPeak = Math.floor(length / totalSamples);
-  return { totalSamples, samplesPerPeak };
-}
-
-/**
  * How long one of `peaksFromPcm`'s peaks lasts, in seconds, for a track
- * `length` samples long: its bucket over the sample rate. `undefined` for a
- * track with no samples, which has no peaks to time.
+ * `length` samples long: 1 / samplesPerSecond, whatever the rate and the
+ * length (the module comment). `undefined` for a track with no samples, which
+ * has no peaks to time. Stored beside the peaks as
+ * `SourceVideo.waveformSecondsPerPeak`, so they are read by their own timing
+ * and not mistaken for peaks bucketed the old way.
  */
 export function peakSecondsFor(length: number, sampleRate: number, samplesPerSecond: number): number | undefined {
-  if (!(length > 0) || !(sampleRate > 0)) return undefined;
-  return peakBuckets(length, sampleRate, samplesPerSecond).samplesPerPeak / sampleRate;
+  if (!(length > 0) || !canBucket(sampleRate, samplesPerSecond)) return undefined;
+  return 1 / samplesPerSecond;
 }
 
 /**
@@ -116,37 +110,51 @@ export function mixToMono(
 }
 
 /**
- * How many samples the reducer holds before it starts reducing: enough that the
- * final `totalSamples` is at least q = sampleRate / samplesPerSecond whatever
- * else arrives, so the bucket size is one of the four candidates.
+ * Reduces a track to `peaksFromPcm`'s peaks as its PCM arrives, in chunks of
+ * any size. It holds no samples: each bucket's bounds are known from its index
+ * alone, so a chunk is folded into the open bucket (closing it, and any that
+ * follow, at their boundaries) and dropped.
  */
-export function streamingThreshold(sampleRate: number, samplesPerSecond: number): number {
-  const q = sampleRate / samplesPerSecond;
-  return Math.ceil(q * q) + Math.ceil(q);
-}
-
-/** One candidate bucket size's running buckets. */
-class BucketSet {
-  /** Closed buckets' minima and maxima. */
+export class PeakReducer {
+  /** Closed peaks' minima and maxima. */
   private mins = new Float32Array(1024);
   private maxs = new Float32Array(1024);
   private closed = 0;
-  /** The open bucket. */
+  /** The open peak's running min and max. */
   private min = 0;
   private max = 0;
-  /** Absolute sample index the open bucket ends at (exclusive). */
+  /** Absolute sample index the open peak ends at (exclusive). */
   private boundary: number;
+  private length = 0;
+  private scratch = new Float32Array(0);
+  private finished = false;
+  private timing: number | undefined;
 
-  constructor(readonly size: number) {
-    this.boundary = size;
+  constructor(
+    private readonly sampleRate: number,
+    private readonly samplesPerSecond: number
+  ) {
+    // A rate pair that cannot bucket never closes a peak: one that would
+    // otherwise run forever has its first boundary at the end of time.
+    this.boundary = canBucket(sampleRate, samplesPerSecond) ? this.startOf(1) : Infinity;
   }
 
-  /** Reduce `mono`, whose first sample has absolute index `start`. */
-  push(mono: Float32Array, start: number): void {
-    const length = mono.length;
+  private startOf(index: number): number {
+    return bucketStart(index, this.sampleRate, this.samplesPerSecond);
+  }
+
+  /** One chunk of planar PCM: one array per channel, all the same length. */
+  push(channels: readonly Float32Array[]): void {
+    if (this.finished) throw new Error('PeakReducer: push after finished');
+    const frames = channels[0].length;
+    if (frames === 0) return;
+    if (this.scratch.length < frames) this.scratch = new Float32Array(frames);
+    const mono = mixToMono(channels, frames, this.scratch);
+
+    const start = this.length;
     let i = 0;
-    while (i < length) {
-      const end = Math.min(length, this.boundary - start);
+    while (i < frames) {
+      const end = Math.min(frames, this.boundary - start);
       let min = this.min;
       let max = this.max;
       for (let j = i; j < end; j++) {
@@ -159,6 +167,7 @@ class BucketSet {
       i = end;
       if (start + i === this.boundary) this.close();
     }
+    this.length += frames;
   }
 
   private close(): void {
@@ -175,90 +184,7 @@ class BucketSet {
     this.closed += 1;
     this.min = 0;
     this.max = 0;
-    this.boundary += this.size;
-  }
-
-  /**
-   * The first `count` buckets. `count * size` never exceeds the samples pushed
-   * (that is how `finish` picks the size), so every one of them has closed.
-   */
-  peaks(count: number): WaveformPeak[] {
-    const peaks: WaveformPeak[] = new Array(count);
-    for (let i = 0; i < count; i++) {
-      peaks[i] = { min: this.mins[i], max: this.maxs[i] };
-    }
-    return peaks;
-  }
-}
-
-/**
- * Reduces a track to `peaksFromPcm`'s peaks as its PCM arrives, in chunks of any
- * size, holding at most `streamingThreshold` samples (see the module comment).
- */
-export class PeakReducer {
-  private readonly threshold: number;
-  /** Mono samples held until the threshold, or null once reducing. */
-  private held: Float32Array | null;
-  private heldLength = 0;
-  private sets: BucketSet[] | null = null;
-  private length = 0;
-  private scratch = new Float32Array(0);
-  private finished = false;
-  private timing: number | undefined;
-
-  constructor(
-    private readonly sampleRate: number,
-    private readonly samplesPerSecond: number
-  ) {
-    this.threshold = streamingThreshold(sampleRate, samplesPerSecond);
-    this.held = new Float32Array(Math.min(this.threshold, 1 << 16));
-  }
-
-  /** Mono samples currently held (0 once the reducer is streaming). */
-  get heldSamples(): number {
-    return this.held ? this.heldLength : 0;
-  }
-
-  /** One chunk of planar PCM: one array per channel, all the same length. */
-  push(channels: readonly Float32Array[]): void {
-    if (this.finished) throw new Error('PeakReducer: push after finished');
-    const frames = channels[0].length;
-    if (frames === 0) return;
-    if (this.scratch.length < frames) this.scratch = new Float32Array(frames);
-    const mono = mixToMono(channels, frames, this.scratch);
-
-    if (this.sets) {
-      for (const set of this.sets) set.push(mono, this.length);
-    } else {
-      this.hold(mono);
-      if (this.heldLength >= this.threshold) this.startStreaming();
-    }
-    this.length += frames;
-  }
-
-  private hold(mono: Float32Array): void {
-    let held = this.held!;
-    const needed = this.heldLength + mono.length;
-    if (needed > held.length) {
-      const grown = new Float32Array(Math.max(needed, held.length * 2));
-      grown.set(held.subarray(0, this.heldLength));
-      held = grown;
-      this.held = grown;
-    }
-    held.set(mono, this.heldLength);
-    this.heldLength = needed;
-  }
-
-  private startStreaming(): void {
-    const q = Math.floor(this.sampleRate / this.samplesPerSecond);
-    const sets: BucketSet[] = [];
-    // Never a size below one, which would never close a bucket.
-    for (let size = Math.max(1, q - 2); size <= q + 1; size++) sets.push(new BucketSet(size));
-    const held = this.held!.subarray(0, this.heldLength);
-    for (const set of sets) set.push(held, 0);
-    this.sets = sets;
-    this.held = null;
-    this.heldLength = 0;
+    this.boundary = this.startOf(this.closed + 1);
   }
 
   /**
@@ -273,19 +199,13 @@ export class PeakReducer {
   finish(): WaveformPeak[] {
     this.finished = true;
     this.timing = peakSecondsFor(this.length, this.sampleRate, this.samplesPerSecond);
-    if (!this.sets) {
-      const held = this.held!.subarray(0, this.heldLength);
-      this.held = null;
-      return clampToFullScale(peaksFromPcm(held, this.sampleRate, this.samplesPerSecond));
+    // The last peak is whatever the track left after the last boundary.
+    if (this.length > this.startOf(this.closed) && this.boundary !== Infinity) this.close();
+    const peaks: WaveformPeak[] = new Array(this.closed);
+    for (let i = 0; i < this.closed; i++) {
+      peaks[i] = { min: this.mins[i], max: this.maxs[i] };
     }
-    const { totalSamples, samplesPerPeak } = peakBuckets(this.length, this.sampleRate, this.samplesPerSecond);
-    // Always found, by the bound in the module comment, so there is no branch
-    // for a miss (ESCSUITE-110 / 118: no guard nothing can reach). Were it ever
-    // missed, `.peaks` would throw, and `extractWaveformData` answers a throw
-    // here with its whole-file decode rather than a guessed bucketing.
-    const set = this.sets.find((candidate) => candidate.size === samplesPerPeak)!;
-    this.sets = null;
-    return clampToFullScale(set.peaks(totalSamples));
+    return clampToFullScale(peaks);
   }
 }
 

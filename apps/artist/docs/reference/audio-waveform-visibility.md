@@ -17,12 +17,23 @@ chunk into min/max peaks and drops it. Peak memory is the peaks plus one decoder
 the whole track as Float32 (a ten-minute 48 kHz stereo Opus file: renderer peak RSS +101 MB
 streamed against +473 MB through `decodeAudioData`; numbers in
 [`performance-benchmarks.md`](../../../../docs/reference/performance-benchmarks.md)). The reducer
-buckets exactly as the old whole-buffer code (`peaksFromPcm`, kept verbatim) — mono is
-`(L+R)/2` in Float32, `ceil(duration × 100)` buckets of `floor(length / buckets)` samples by
-absolute index, min/max from 0, `hasAudio` = any peak past 0.001 — so for the same PCM the peaks
-are identical whatever the chunking (`waveformPeaks.test.ts`). It holds samples only for the first
-`streamingThreshold` (~4.8 s at 48 kHz), because the bucket size depends on the final length;
-after that it runs the four bucket sizes that length can still pick and keeps the right one.
+buckets exactly as the whole-buffer code (`peaksFromPcm`) — mono is `(L+R)/2` in Float32, peak i
+over samples `[floor(i · sampleRate / 100), floor((i + 1) · sampleRate / 100))` by absolute index
+with a shorter last peak for the remainder, min/max from 0, `hasAudio` = any peak past 0.001 — so
+for the same PCM the peaks are identical whatever the chunking (`waveformPeaks.test.ts`). The
+bucket bounds depend only on the index, so the reducer holds no samples at all.
+
+**Every peak is exactly 10 ms** (ESCSUITE-418): 480 samples at 48 kHz, 441 at 44.1 kHz, 220 and
+221 in turn at 22.05 kHz, and the extractor records `secondsPerPeak` = 0.01. Until then the bucket
+was `floor(length / ceil(duration × 100))` samples, one short of 10 ms on any track not a whole
+number of 10 ms long, while `getPeaksForRange` drew the peaks spread over the source's duration:
+the waveform drifted ~0.2 % of the clip off the sound at 48 kHz (0.6 s at five minutes, 2 s at
+17 minutes; 0.6 % at 16 kHz) and dropped the track's last ~0.2 %. The timeline now draws each
+source's peaks by their own timing (`drawnSecondsPerPeak`, `utils/peakTiming.ts`, the timing
+silence detection reads), so peaks cached or saved with the old bucketing, which carry their real
+length in `waveformSecondsPerPeak` since ESCSUITE-403, are drawn where they belong too, and a
+window past the last peak is drawn silent rather than stretching the peaks over the clip. Nothing
+persisted changed shape: the peaks and `waveformSecondsPerPeak` are stored and saved as before.
 Frames before timestamp zero (codec priming an MP4 edit list declares) are dropped, as
 `decodeAudioData` drops them.
 
@@ -95,8 +106,9 @@ What still differs from the old peaks, measured in Chromium 141:
   early. An engine whose `AudioDecoder` did not trim it would show peaks 6.5 ms late.
 - **`DiscardPadding`.** An ffmpeg-muxed WebM whose last Opus block carries `DiscardPadding`
   (mediabunny's muxer and MediaRecorder write none) streams up to one frame longer, because
-  mediabunny does not apply it. The old bucketing's `floor(length / buckets)` can then move from
-  480 to 479 samples (or back), and the peaks drift by one sample per bucket against the old ones.
+  mediabunny does not apply it. The bucketing before ESCSUITE-418 (`floor(length / buckets)`) could
+  then move from 480 to 479 samples (or back), and the peaks drift by one sample per bucket
+  against the old ones; since ESCSUITE-418 the extra frame only adds to the last peak.
 - **AAC priming** in an MP4 is dropped only because mediabunny hands the edit list's priming frames
   over with negative timestamps, which the streamed path skips; a file whose priming is not
   expressed that way keeps it (~21 ms of leading frames). Unmeasured here: this Chromium build
