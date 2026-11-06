@@ -200,6 +200,98 @@ describe('storage', () => {
       await mocked.getDB()
       expect(warn).not.toHaveBeenCalled()
     })
+
+    // ESCSUITE-414: a newer tab's upgrade is not blocked storage.
+    it('does not count a VersionError as storage that cannot be opened', async () => {
+      const newer = new DOMException('The requested version is less than the existing version.', 'VersionError')
+      openDB.mockImplementationOnce(() => Promise.reject(newer))
+
+      const error = await mocked.getDB().catch((e: unknown) => e)
+
+      expect(error).toBe(newer)
+      expect(mocked.isStorageUnavailable(error)).toBe(false)
+    })
+
+    it('ignores a refusal that is not an object', async () => {
+      openDB.mockImplementationOnce(() => Promise.reject('refused'))
+
+      const error = await mocked.getDB().catch((e: unknown) => e)
+
+      expect(error).toBe('refused')
+      expect(mocked.isStorageUnavailable(error)).toBe(false)
+    })
+  })
+
+  // ESCSUITE-414: Firefox with site data blocked, "Never remember history",
+  // storage denied by policy or to an embed.
+  describe('a browser that will not open the database', () => {
+    const insecure = () => new DOMException('The operation is insecure.', 'SecurityError')
+
+    it('recognises the error indexedDB.open throws, on every call that reaches storage', async () => {
+      const open = vi.spyOn(globalThis.indexedDB, 'open').mockImplementation(() => {
+        throw insecure()
+      })
+
+      for (const call of [
+        () => storage.getDB(),
+        () => storage.getAllVideoMetadata(),
+        () => storage.storeVideo('a', new Blob(['a']), createMockMetadata({ id: 'a' })),
+        () => storage.setSetting('k', 1),
+        () => storage.listSettings('session:'),
+      ]) {
+        const error = await call().catch((e: unknown) => e)
+        expect(error).toBeInstanceOf(DOMException)
+        expect(storage.isStorageUnavailable(error)).toBe(true)
+      }
+      // Never cached: each call asked the browser again.
+      expect(open).toHaveBeenCalledTimes(5)
+    })
+
+    it('recognises the error a failed open request rejects with', async () => {
+      const real = globalThis.indexedDB.open.bind(globalThis.indexedDB)
+      vi.spyOn(globalThis.indexedDB, 'open').mockImplementation((_name: string, version?: number) => {
+        // A real request whose upgrade is aborted before idb hears of it.
+        const request = real('escsuite-414-refused', version)
+        request.addEventListener('upgradeneeded', (event) => {
+          event.stopImmediatePropagation()
+          request.transaction!.abort()
+        })
+        return request
+      })
+
+      const error = await storage.getAllVideoMetadata().catch((e: unknown) => e)
+
+      expect((error as DOMException).name).toBe('AbortError')
+      expect(storage.isStorageUnavailable(error)).toBe(true)
+      // Wrapped as a cause by a caller that adds context.
+      expect(storage.isStorageUnavailable(new Error('could not import', { cause: error }))).toBe(true)
+    })
+
+    it('opens normally once the browser allows it again', async () => {
+      vi.spyOn(globalThis.indexedDB, 'open').mockImplementationOnce(() => {
+        throw insecure()
+      })
+
+      await expect(storage.getDB()).rejects.toThrow('insecure')
+      await storage.setSetting('k', 1)
+
+      expect(await storage.getSetting('k')).toBe(1)
+    })
+
+    it('does not count a failed write in an open database', async () => {
+      await storage.getDB()
+      const quota = new DOMException('full', 'QuotaExceededError')
+      vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(() => {
+        throw quota
+      })
+
+      const error = await storage.setSetting('k', 1).catch((e: unknown) => e)
+
+      expect(error).toBe(quota)
+      expect(storage.isStorageUnavailable(error)).toBe(false)
+      expect(storage.isStorageUnavailable(null)).toBe(false)
+      expect(storage.isStorageUnavailable(undefined)).toBe(false)
+    })
   })
 
   describe('video operations', () => {
