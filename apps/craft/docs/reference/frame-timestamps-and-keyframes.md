@@ -24,7 +24,8 @@
   - a frame whose own slot (`frameSlot()`, Mediabunny's rounding) is past the last one used keeps
     its own capture time;
   - a frame in the **same** slot as the last goes into the next slot, stamped at that slot's own
-    time — shown one slot (33 ms) late, never more, so its picture is never ahead of its capture;
+    time — shown at most one and a half slots (50 ms) late (one slot plus the muxer's half-slot
+    rounding), so its picture is never ahead of its capture;
   - a frame whose slot is **behind** the last one used is **dropped** (`stampFrame()` returns
     `null`; the track-processor path closes the source frame, the two fallback paths draw and
     encode nothing). Moving it on as well would let a run of collisions — a source faster than
