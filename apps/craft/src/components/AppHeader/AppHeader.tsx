@@ -53,7 +53,10 @@ export function AppHeader({ state, notice, onOpenHelp }: AppHeaderProps) {
       <div className={styles.headerLeft}>
         {!isStandaloneMode() && (
           <a href="/" className={styles.dashboardLink} title="Back to ESCAPE Suite">
-            ← ESCAPE Suite
+            {/* The words are hidden visually (not from assistive tech) in a narrow
+                window, so the link stays one arrow wide and its name stays
+                "← ESCAPE Suite" (ESCSUITE-344). */}
+            ←<span className={styles.dashboardLinkLabel}> ESCAPE Suite</span>
           </a>
         )}
         <h1 className={styles.logo}>ESCAPECRAFT</h1>
