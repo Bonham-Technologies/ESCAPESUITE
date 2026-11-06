@@ -20,6 +20,7 @@ import {
   type SessionAutosaveDeps,
 } from './useSessionAutosave'
 import { clearSessionState, saveSessionState } from '../core/storage'
+import { getDB } from '@escapesuite/shared/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, video } from '../test/fixtures/projectStore'
 import { AUTO_SAVE_DELAY } from './appConstants'
@@ -255,6 +256,56 @@ describe('useSessionAutosave', () => {
   })
 })
 
+/**
+ * A real refusal (ESCSUITE-414): the error `getDB` rejects with when the
+ * browser will not open the database. `../core/storage` is a double here, so
+ * nothing in this file has opened it and the open really is attempted.
+ */
+async function refusedOpen(): Promise<unknown> {
+  const open = vi.spyOn(indexedDB, 'open').mockImplementation(() => {
+    throw new DOMException('The operation is insecure.', 'SecurityError')
+  })
+  try {
+    return await getDB().catch((error: unknown) => error)
+  } finally {
+    open.mockRestore()
+  }
+}
+
+// ESCSUITE-414: storage the browser will not open fails every tick, and the
+// media library's notice already says why.
+describe('storage the browser will not open', () => {
+  it('is logged once and raises no toast, however many ticks fail', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const refused = await refusedOpen()
+    vi.mocked(saveSessionState)
+      .mockRejectedValueOnce(refused)
+      .mockRejectedValueOnce(refused)
+      .mockRejectedValueOnce(refused)
+    mountAutosave()
+
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    movePlayhead(1)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+    movePlayhead(2)
+    await vi.advanceTimersByTimeAsync(AUTO_SAVE_DELAY)
+
+    expect(saveSessionState).toHaveBeenCalledTimes(3)
+    expect(deps.showNotification).not.toHaveBeenCalled()
+    expect(consoleError).toHaveBeenCalledTimes(1)
+    expect(consoleError.mock.calls[0][1]).toBe(refused)
+
+    // A clear that is refused too adds nothing.
+    vi.mocked(clearSessionState).mockRejectedValueOnce(refused)
+    mountAutosave().result.current.clearSession()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(clearSessionState).toHaveBeenCalled()
+    expect(consoleError).toHaveBeenCalledTimes(1)
+
+    consoleError.mockRestore()
+  })
+})
+
 describe('autosaveFailureNotice', () => {
   it('reads the quota sentence from a bare DOMException', () => {
     expect(autosaveFailureNotice(new DOMException('full', 'QuotaExceededError'))).toBe(
@@ -398,7 +449,7 @@ describe('clearSession (ESCSUITE-274)', () => {
 
     result.current.clearSession()
 
-    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith(error))
+    await vi.waitFor(() => expect(consoleError).toHaveBeenCalledWith('Failed to clear the session:', error))
     consoleError.mockRestore()
   })
 

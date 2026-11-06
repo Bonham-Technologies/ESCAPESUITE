@@ -19,3 +19,19 @@ error and can be dismissed (and the object URL is revoked once). The end-seek du
 its own 5 s timer, armed after `loadedmetadata`. Images load through `Image` and are untouched. The
 media test double's `silent` script flag (`src/test/doubles/media.ts`) models an element that fires
 nothing.
+
+## Storage the browser will not open (ESCSUITE-414)
+
+Where `getDB()` is refused (`isStorageUnavailable`, `@escapesuite/shared/storage`; re-exported by
+`core/storageErrors.ts`), the uploader shows a notice under the drop zone from load, in
+ESCAPECRAFT's wording family: "Your media library could not be opened — storage may be blocked in
+this browser. Allow this site to store data, then reload." (`STORAGE_BLOCKED_NOTICE`,
+`role="status"`, `#storage-blocked-notice`). It stays up, unlike the toast; the mount's library
+read raises it, as does an import that is refused, and a read or an import that gets through takes
+it down. A refused import's row reads `STORAGE_BLOCKED_IMPORT_MESSAGE` ("Storage is blocked in this
+browser, so this file could not be imported. …") instead of the browser's sentence, and a project
+load that cannot store a source says "… could not be stored: Storage is blocked in this browser."
+The refusal is logged once for the page through `logStorageFailure` (the library read, the session
+check, imports, the autosave and `clearSession` all go through it); the autosave raises no toast
+for it, because "storage may be full" would not be true and the notice already says why. Any other
+storage failure is logged as before. Regression: `apps/e2e/tests/regressions/ESCSUITE-414.spec.ts`.
