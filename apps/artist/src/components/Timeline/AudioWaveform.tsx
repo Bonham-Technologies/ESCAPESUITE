@@ -184,6 +184,13 @@ interface AudioWaveformProps {
   peaks: WaveformPeak[];
   /** Total duration of the source media (seconds) */
   sourceDuration: number;
+  /**
+   * How long each peak lasts, in seconds of source: the source's own timing,
+   * `drawnSecondsPerPeak(source)` (ESCSUITE-418), so the waveform sits where
+   * the sound is however long the clip. Omitted, the peaks are read as spread
+   * evenly over `sourceDuration` (`getPeaksForRange`).
+   */
+  secondsPerPeak?: number;
   /** Start time within source (for trimmed clips) */
   startTime: number;
   /** End time within source (for trimmed clips) */
@@ -252,6 +259,7 @@ function readDevicePixelRatio(): number {
 export function AudioWaveform({
   peaks,
   sourceDuration,
+  secondsPerPeak,
   startTime,
   endTime,
   width,
@@ -314,14 +322,14 @@ export function AudioWaveform({
     // the clip's source media, and the cache is thrown away — not patched —
     // the moment that reference changes, so a clip that gets new waveform
     // data never reads a stale resample back. `startTime`/`endTime`/
-    // `sourceDuration` are in the key (not just the window's own pixels)
-    // because they are what `getPeaksForRange` actually reads — a trim that
-    // changes them without moving the clip's pixel window must still miss.
+    // `sourceDuration`/`secondsPerPeak` are in the key (not just the window's
+    // own pixels) because they are what `getPeaksForRange` actually reads — a
+    // trim that changes them without moving the clip's pixel window must still miss.
     if (!cacheRef.current || cacheRef.current.peaksRef !== peaks) {
       cacheRef.current = { peaksRef: peaks, entries: new Map(), totalSamples: 0, freeBuffers: [] };
     }
     const cache = cacheRef.current;
-    const cacheKey = `${Math.round(fullWidthPx)}:${Math.round(offsetPx)}-${Math.round(offsetPx + visibleWidthPx)}:${dpr}:${startTime}:${endTime}:${sourceDuration}`;
+    const cacheKey = `${Math.round(fullWidthPx)}:${Math.round(offsetPx)}-${Math.round(offsetPx + visibleWidthPx)}:${dpr}:${startTime}:${endTime}:${sourceDuration}:${secondsPerPeak}`;
 
     const cached = cache.entries.get(cacheKey);
     if (cached) {
@@ -332,7 +340,7 @@ export function AudioWaveform({
       return cached;
     }
 
-    const windowPeaks = getPeaksForRange(peaks, sourceDuration, windowStartTime, windowEndTime);
+    const windowPeaks = getPeaksForRange(peaks, sourceDuration, windowStartTime, windowEndTime, secondsPerPeak);
     const targetSamples = targetSamplesFor(visibleWidthPx, dpr, windowPeaks.length);
 
     const buffer = cache.freeBuffers.pop() ?? [];
@@ -367,7 +375,7 @@ export function AudioWaveform({
     }
 
     return resampled;
-  }, [peaks, sourceDuration, startTime, endTime, fullWidthPx, offsetPx, visibleWidthPx, dpr]);
+  }, [peaks, sourceDuration, secondsPerPeak, startTime, endTime, fullWidthPx, offsetPx, visibleWidthPx, dpr]);
 
   // Draw waveform on canvas
   useEffect(() => {
