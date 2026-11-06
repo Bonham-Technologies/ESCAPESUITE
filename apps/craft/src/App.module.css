@@ -31,6 +31,7 @@
 }
 
 .dashboardLink {
+  white-space: nowrap;
   color: var(--text-secondary);
   text-decoration: none;
   font-size: 13px;
@@ -1129,6 +1130,35 @@
     width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border);
+  }
+
+  /* The stacked sidebar takes most of a narrow window, and .content used to
+     shrink to whatever was left, squeezing the preview to a sliver that clipped
+     its own placeholder (ESCSUITE-344). Keep the recorder at its natural size
+     and the preview at 16:9 of the full width; .main scrolls instead. */
+  .content {
+    flex-shrink: 0;
+    padding: 1rem;
+  }
+
+  .previewContainer {
+    flex: none;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+  }
+
+  /* Arrow only: "← / ESCAPE / Suite" wrapped onto three lines into the title.
+     The words stay in the accessible name (same technique as .srOnly). */
+  .dashboardLinkLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .headerButton {
