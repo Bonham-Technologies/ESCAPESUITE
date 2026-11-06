@@ -1,5 +1,8 @@
 # ESCAPE Suite Open-Source Retool Implementation Plan
 
+> **Licence note (2026-11-06):** ESCAPESUITE moved from MIT to the Apache License 2.0
+> (ESCSUITE-419). The MIT references below record the decision as it was made at the time.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Strip all monetization/auth/licensing/watermark code from ESCAPE Suite, relicense as MIT, rework the landing page into a free "Use now" front door, move offline builds to GitHub Releases, and then sweep dependencies current.

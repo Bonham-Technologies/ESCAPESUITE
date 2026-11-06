@@ -1,5 +1,8 @@
 # Headless ARTIST — Server-Side Render Service — Design
 
+> **Licence note (2026-11-06):** ESCAPESUITE moved from MIT to the Apache License 2.0
+> (ESCSUITE-419). The MIT references below record the decision as it was made at the time.
+
 Status: **Draft v3 (for review)** · Date: 2026-06-07 · Amended: 2026-08-19, 2026-09-08 · Owner: Bonham Technologies
 
 > v2 changes (post-review): input is now the customer's plug too — we provide a
