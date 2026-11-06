@@ -66,7 +66,7 @@ test.describe('ESCAPECRAFT Mobile Layout', () => {
   // `.toggle`, App.module.css) are exactly 44x24, clearing AA by their
   // height alone and falling short of AAA — see
   // `ESCAPECRAFT VideoPlayer Responsive`'s "VideoPlayer controls accessible
-  // on mobile" below for the one control already known to miss AAA too.
+  // on mobile" below, which pins the player's controls at AAA's 44x44.
   test('controls have touch-friendly size', async ({ page }) => {
     const startButton = page.getByRole('button', { name: 'Start recording' })
     await expect(startButton).toBeVisible()
@@ -194,16 +194,25 @@ test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
   test('VideoPlayer controls accessible on mobile', async ({ page }) => {
     await recordAndOpenPlayback(page)
 
-    // "Accessible" here means reachable and operable at this viewport, not a
-    // WCAG touch-target claim: `VideoPlayer.module.css`'s own
-    // `@media (max-width: 640px)` rule shrinks `.controlButton` to 32x32,
-    // which clears AA 2.5.8's 24x24 minimum but misses AAA 2.5.5's 44x44 —
-    // a real, pre-existing gap this ticket does not fix (see
-    // report-201.md). Assert what is actually true: the button is there,
-    // enabled, and clicking it still works.
+    // Reachable, operable, and touch-sized: under 640 px every player control
+    // is at least 44x44 CSS px, WCAG 2.2 AAA 2.5.5 (Target Size, Enhanced) —
+    // the level this suite pins for the player, the one CRAFT surface a
+    // phone-sized window taps. It used to shrink to 32x32 (ESCSUITE-211). The
+    // row must still fit the viewport at that size.
     const playButton = page.getByTitle(/^(Play|Pause) \(Space\)$/)
     await expect(playButton).toBeVisible()
     await expect(playButton).toBeEnabled()
+
+    const controls = page.locator('[class*="controlsRow"] [class*="controlButton"]')
+    expect(await controls.count()).toBeGreaterThan(0)
+    for (const control of await controls.all()) {
+      if (!(await control.isVisible())) continue
+      const box = (await control.boundingBox())!
+      expect(box.width).toBeGreaterThanOrEqual(44)
+      expect(box.height).toBeGreaterThanOrEqual(44)
+      expect(box.x).toBeGreaterThanOrEqual(0)
+      expect(box.x + box.width).toBeLessThanOrEqual(375)
+    }
 
     const initialTitle = await playButton.getAttribute('title')
     await playButton.click()
