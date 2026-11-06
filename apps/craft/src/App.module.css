@@ -1130,14 +1130,18 @@
     width: 100%;
     border-right: none;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
 
   /* The stacked sidebar takes most of a narrow window, and .content used to
      shrink to whatever was left, squeezing the preview to a sliver that clipped
-     its own placeholder (ESCSUITE-344). Keep the recorder at its natural size
-     and the preview at 16:9 of the full width; .main scrolls instead. */
+     its own placeholder (ESCSUITE-344). Keep the sidebar and the recorder at
+     their natural size and the preview at 16:9 of the full width; .main
+     scrolls instead. `flex: none`, not only `flex-shrink: 0`: the base
+     `flex: 1` has a zero basis, which still sizes .content to the leftover
+     space and clips the record bar under its `overflow: hidden`. */
   .content {
-    flex-shrink: 0;
+    flex: none;
     padding: 1rem;
   }
 

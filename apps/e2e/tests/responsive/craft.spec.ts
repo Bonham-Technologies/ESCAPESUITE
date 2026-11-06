@@ -141,10 +141,23 @@ test.describe('ESCAPECRAFT Narrow Window (390 px)', () => {
     expect(inner.y).toBeGreaterThanOrEqual(box.y - 0.5)
     expect(inner.y + inner.height).toBeLessThanOrEqual(box.y + box.height + 0.5)
     await expect(placeholder.getByText(/click record to start/i)).toBeVisible()
+
+    // The bigger preview must not push the record bar out of the recorder's
+    // `overflow: hidden` box: .content keeps its natural height and the page
+    // scrolls, so the record button can be scrolled to and sits in the viewport.
+    const content = page.locator('main > [class*="content"]').first()
+    const clipped = await content.evaluate((el) => el.scrollHeight - el.clientHeight)
+    expect(clipped).toBeLessThanOrEqual(1)
+    const record = page.getByRole('button', { name: 'Start recording' })
+    await record.scrollIntoViewIfNeeded()
+    const recordBox = (await record.boundingBox())!
+    const contentBox = (await content.boundingBox())!
+    expect(recordBox.y + recordBox.height).toBeLessThanOrEqual(contentBox.y + contentBox.height + 0.5)
+    expect(recordBox.y + recordBox.height).toBeLessThanOrEqual(844 + 0.5)
   })
 
   test('back link stays on one line and clear of the title and Help button', async ({ page }) => {
-    const back = page.getByRole('link', { name: /escape suite/i }).first()
+    const back = page.getByRole('link', { name: '← ESCAPE Suite', exact: true })
     await expect(back).toBeVisible()
     const link = (await back.boundingBox())!
     // One line of text: the content box (height less its vertical padding) is
