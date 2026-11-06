@@ -342,10 +342,26 @@
     height: 44px;
   }
 
+  /* Room for five 44 px buttons and the time readout: at 375 px they need
+     300 px, and the row had 291 (the time spilled past it), less 14 for the
+     gap before the empty right-hand group. Narrower still (320 px), the
+     readout wraps under the buttons instead of being clipped by
+     .playerContainer's overflow: hidden. */
+  .controls {
+    padding-left: 0.5rem;
+    padding-right: 0.5rem;
+  }
+
+  .controlsLeft {
+    flex-wrap: wrap;
+  }
+
   .timeDisplay {
     font-size: 0.75rem;
   }
 
+  /* The title is its only content, and it is hidden here. */
+  .controlsRight,
   .title {
     display: none;
   }

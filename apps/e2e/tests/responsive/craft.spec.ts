@@ -198,21 +198,32 @@ test.describe('ESCAPECRAFT VideoPlayer Responsive', () => {
     // is at least 44x44 CSS px, WCAG 2.2 AAA 2.5.5 (Target Size, Enhanced) —
     // the level this suite pins for the player, the one CRAFT surface a
     // phone-sized window taps. It used to shrink to 32x32 (ESCSUITE-211). The
-    // row must still fit the viewport at that size.
+    // row must still hold the buttons and the time readout at that size: the
+    // player clips anything that spills out of it (overflow: hidden).
     const playButton = page.getByTitle(/^(Play|Pause) \(Space\)$/)
     await expect(playButton).toBeVisible()
     await expect(playButton).toBeEnabled()
 
-    const controls = page.locator('[class*="controlsRow"] [class*="controlButton"]')
+    const row = page.locator('[class*="controlsRow"]').first()
+    const rowBox = (await row.boundingBox())!
+    const inRow = (box: { x: number; width: number }) => {
+      expect(box.x).toBeGreaterThanOrEqual(rowBox.x - 0.5)
+      expect(box.x + box.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 0.5)
+    }
+    expect(await row.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+
+    const controls = row.locator('[class*="controlButton"]')
     expect(await controls.count()).toBeGreaterThan(0)
     for (const control of await controls.all()) {
       if (!(await control.isVisible())) continue
       const box = (await control.boundingBox())!
       expect(box.width).toBeGreaterThanOrEqual(44)
       expect(box.height).toBeGreaterThanOrEqual(44)
-      expect(box.x).toBeGreaterThanOrEqual(0)
-      expect(box.x + box.width).toBeLessThanOrEqual(375)
+      inRow(box)
     }
+    const time = row.locator('[class*="timeDisplay"]')
+    await expect(time).toBeVisible()
+    inRow((await time.boundingBox())!)
 
     const initialTitle = await playButton.getAttribute('title')
     await playButton.click()
