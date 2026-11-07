@@ -26,7 +26,6 @@ import {
   revokeSourceThumbnails,
   type SessionState,
 } from '../core/storage';
-import { logStorageFailure } from '../core/storageErrors';
 import { repairEditorBlockForProject } from '../store/projectMigration';
 import { timelineWithoutSources } from '../store/projectFactory';
 import { sessionSourcesLeftOutMessage } from './appFormat';
@@ -413,9 +412,7 @@ export function useSessionRestore({
           setSessionRestored(true);
         }
       } catch (error) {
-        // Storage the browser will not open is logged once for the page
-        // (ESCSUITE-414): the media library's notice says why.
-        logStorageFailure('Failed to check session:', error);
+        console.error('Failed to check session:', error);
         setSessionRestored(true);
       }
     };

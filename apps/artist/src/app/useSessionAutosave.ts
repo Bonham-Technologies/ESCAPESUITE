@@ -14,12 +14,7 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/projectStore';
 import { clearSessionState, saveSessionState, type SessionState } from '../core/storage';
-import {
-  STORAGE_QUOTA_MESSAGE,
-  isQuotaExceeded,
-  isStorageUnavailable,
-  logStorageFailure,
-} from '../core/storageErrors';
+import { STORAGE_QUOTA_MESSAGE, isQuotaExceeded } from '../core/storageErrors';
 import { AUTO_SAVE_DELAY } from './appConstants';
 import { buildSessionSnapshot, isEmptySession } from './sessionSnapshot';
 import { holdTabLock } from './sessionLock';
@@ -127,14 +122,6 @@ export function useSessionAutosave({
             hasReportedFailureRef.current = false;
           },
           (error: unknown) => {
-            // Storage the browser will not open (ESCSUITE-414) fails every
-            // tick: logged once for the page, and no toast, because the media
-            // library's notice already says why and "storage may be full"
-            // would not be true.
-            if (isStorageUnavailable(error)) {
-              logStorageFailure('Failed to save the session:', error);
-              return;
-            }
             console.error(error);
             if (!hasReportedFailureRef.current) {
               hasReportedFailureRef.current = true;
@@ -179,7 +166,7 @@ export function useSessionAutosave({
   const clearSession = useCallback(() => {
     if (suppressRestore) return;
     // Not awaited: New Project lands now whatever storage does about it.
-    clearSessionState(tabId).catch((error: unknown) => logStorageFailure('Failed to clear the session:', error));
+    clearSessionState(tabId).catch(console.error);
   }, [suppressRestore, tabId]);
 
   return { clearSession };

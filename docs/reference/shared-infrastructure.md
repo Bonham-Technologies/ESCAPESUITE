@@ -11,11 +11,6 @@
   context), as `bytes: ArrayBuffer` plus `type` (ESCSUITE-397). Read a row through `getVideo`,
   `getThumbnail` or `storedBlob()`/`storedBlobSize()`, never `row.blob`, and write one through
   `storeVideo`, `storeThumbnail` or `writeStoredBlob()`.
-  Where the browser will not open the database at all (site data blocked, Firefox's "Never
-  remember history", storage denied by policy or to an embed), `indexedDB.open` throws or its
-  request fails; `getDB()` remembers that error, so `isStorageUnavailable(error)` (read through
-  `error.cause ?? error`) tells a refused open from a read or write that failed once open. A
-  `VersionError` or `QuotaExceededError` is not counted. Nothing is cached, so the next call asks again (ESCSUITE-414).
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
   (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)

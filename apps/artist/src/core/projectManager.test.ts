@@ -32,7 +32,6 @@ import {
   storeThumbnail,
   storeVideo,
 } from './storage'
-import { isStorageUnavailable } from './storageErrors'
 import type { EditorBlock, Project, SourceVideo } from '../store/types'
 import { DEFAULT_TEXT_OVERLAY_DATA } from '../store/types'
 import { extractWaveformData } from '../utils/waveform'
@@ -55,14 +54,6 @@ vi.mock('./storage', async (importOriginal) => {
   }
 })
 
-// A pass-through spy, so a case can name a rejection as storage the browser
-// would not open (ESCSUITE-414): this file's database is already open, so a
-// real refusal cannot be had here (the shared storage suite has those).
-vi.mock('./storageErrors', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./storageErrors')>()
-  return { ...actual, isStorageUnavailable: vi.fn(actual.isStorageUnavailable) }
-})
-
 // No AudioContext under jsdom, so the real decode would only ever answer no
 // peaks. Stubbed to that same answer by default; ESCSUITE-347's cases script it.
 vi.mock('../utils/waveform', () => ({
@@ -72,7 +63,6 @@ vi.mock('../utils/waveform', () => ({
 // The real functions behind the spies, for a test that lets one call through
 // and fails the next.
 const actualStorage = await vi.importActual<typeof import('./storage')>('./storage')
-const actualStorageErrors = await vi.importActual<typeof import('./storageErrors')>('./storageErrors')
 
 let idCounter = 0
 const uniqueId = (prefix: string) => `${prefix}-${Date.now()}-${idCounter++}`
@@ -2490,23 +2480,6 @@ describe('a load that fails after the file is read names the source and the caus
       expect(error.message).toBe('videos[1] ("clip.mp4") could not be stored')
       expect(error.cause).toBe(failure)
       expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
-    })
-
-    it('storage the browser will not open is "Storage is blocked in this browser.", with the error as its cause', async () => {
-      const { first, file } = twoSources(true)
-      const refused = new DOMException('The operation is insecure.', 'SecurityError')
-      vi.mocked(storeVideo).mockImplementationOnce(actualStorage.storeVideo).mockRejectedValueOnce(refused)
-      vi.mocked(isStorageUnavailable).mockImplementation((error) => error === refused)
-
-      try {
-        const error = await refusal(file)
-
-        expect(error.message).toBe('videos[1] ("clip.mp4") could not be stored: Storage is blocked in this browser.')
-        expect(error.cause).toBe(refused)
-        expect(vi.mocked(deleteVideo).mock.calls).toEqual([[first]])
-      } finally {
-        vi.mocked(isStorageUnavailable).mockImplementation(actualStorageErrors.isStorageUnavailable)
-      }
     })
 
     it('a quota error from storeThumbnail is the quota sentence, and its own video rolled back', async () => {
