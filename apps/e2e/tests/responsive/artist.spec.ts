@@ -4,6 +4,8 @@ import {
   openExportDialog,
   openExportAdvancedOptions,
   inspector,
+  mobileInspectorToggle,
+  openMobileInspector,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -46,6 +48,9 @@ test.describe('ESCAPEARTIST Tablet Layout', () => {
   })
 
   test('panels fit within tablet width', async ({ page }) => {
+    // 768px is below the 900px breakpoint, so the inspector starts shut
+    // (ESCSUITE-345): open it to measure it.
+    await openMobileInspector(page)
     const mediaSidebar = page.locator('aside').filter({ has: page.locator('#media-library-title') })
 
     for (const panel of [mediaSidebar, inspector(page)]) {
@@ -88,22 +93,35 @@ test.describe('ESCAPEARTIST Inspector Panel Responsive', () => {
     await waitForAppReady(page, 'artist')
   })
 
+  test('inspector starts collapsed on mobile', async ({ page }) => {
+    // ESCSUITE-345: below 900px the slide-out inspector would cover the
+    // preview, media library and most of the timeline, so it starts shut and
+    // the floating toggle offers to show it.
+    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+    await expect(inspector(page)).toHaveClass(/inspectorCollapsed/)
+    await expect(mobileInspectorToggle(page)).toBeVisible()
+    await expect(mobileInspectorToggle(page)).toHaveAttribute('aria-label', 'Show inspector')
+    await expect(page.getByRole('button', { name: 'Add Text' })).toHaveCount(0)
+  })
+
   test('inspector slides out on mobile', async ({ page }) => {
     // `MobileInspectorToggle` — the floating round button shown only below
-    // the 900px breakpoint — toggles the slide-out panel shut and back open.
-    const toggle = page.getByRole('button', { name: /^(Hide|Show) inspector$/ })
+    // the 900px breakpoint — toggles the slide-out panel open and back shut.
+    const toggle = mobileInspectorToggle(page)
     await expect(toggle).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-label', 'Show inspector')
+
+    await toggle.click()
     await expect(toggle).toHaveAttribute('aria-label', 'Hide inspector')
+    await expect(inspector(page)).not.toHaveClass(/inspectorCollapsed/)
 
     await toggle.click()
     await expect(toggle).toHaveAttribute('aria-label', 'Show inspector')
     await expect(inspector(page)).toHaveClass(/inspectorCollapsed/)
-
-    await toggle.click()
-    await expect(toggle).toHaveAttribute('aria-label', 'Hide inspector')
   })
 
   test('inspector full width on mobile', async ({ page }) => {
+    await openMobileInspector(page)
     await expect(inspector(page)).toBeVisible()
     // The slide-out panel is a fixed ~300px width (plus border), not the
     // 375px viewport's — it overlays the editor rather than reflowing to
@@ -173,11 +191,13 @@ test.describe('ESCAPEARTIST Overlay Tools Responsive', () => {
     await page.setViewportSize({ width: 375, height: 667 })
     await page.goto('http://localhost:5175')
     await waitForAppReady(page, 'artist')
+    // The slide-out inspector starts shut at a phone width (ESCSUITE-345).
+    await openMobileInspector(page)
   })
 
   test('overlay tools accessible on mobile', async ({ page }) => {
-    // The inspector's empty-state overlay buttons, visible on screen (the
-    // slide-out panel defaults open) at a phone width.
+    // The inspector's empty-state overlay buttons, visible on screen once
+    // the slide-out panel is opened at a phone width.
     await expect(page.getByRole('button', { name: 'Add Text' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Rectangle' })).toBeVisible()
   })
