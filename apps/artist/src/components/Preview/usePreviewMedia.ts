@@ -239,6 +239,7 @@ export function usePreviewMedia(): PreviewMedia {
     };
 
     loadAllMedia();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the id strings above on purpose: `clips` and `sourceVideos` change identity on every edit, and the URL maps are this effect's own output, so listing them would reload media on each edit and loop on its own writes
   }, [clipSourceIds, sourceVideoIds]);
 
   // Create/update video elements

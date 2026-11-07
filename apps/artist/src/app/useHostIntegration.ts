@@ -408,6 +408,7 @@ export function useHostIntegration({
       cancelled = true;
       cleanup();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only by design (see the header): the message handler is installed once and the URL parameters are acted on once; listing the deps would re-run the startup import and re-install the handler
   }, []);
 
   // The session question, answered. Runs on mount too, where it is pending and
