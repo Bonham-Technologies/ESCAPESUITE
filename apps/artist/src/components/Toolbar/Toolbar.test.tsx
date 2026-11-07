@@ -304,4 +304,13 @@ describe('Toolbar', () => {
 
     expect(onShowShortcuts).toHaveBeenCalledTimes(1)
   })
+
+  it('is a landmark named "Editing tools" that holds every tool (ESCSUITE-415)', () => {
+    renderToolbar()
+
+    const region = screen.getByRole('region', { name: 'Editing tools' })
+    expect(region).toHaveClass(styles.toolbar)
+    expect(region).toContainElement(button(/Selection Tool/))
+    expect(region).toContainElement(screen.getByRole('button', { name: /Shortcuts/ }))
+  })
 })

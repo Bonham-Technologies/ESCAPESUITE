@@ -110,6 +110,39 @@ test.describe('ESCAPEPLAN Known limitations Accessibility', () => {
   })
 })
 
+// ESCSUITE-413: the legal pages are running text full of links, like
+// /limitations, and no audit visited them, so a link drawn in the button
+// accent (2.96:1 on the dark background) shipped unnoticed. Both themes, every
+// rule axe runs by default, zero violations allowed.
+test.describe('ESCAPEPLAN legal pages Accessibility', () => {
+  const pages = [
+    { path: '/privacy', heading: /privacy policy/i },
+    { path: '/terms', heading: /terms of service/i },
+  ] as const
+  for (const { path, heading } of pages) {
+    for (const theme of ['dark', 'light'] as const) {
+      test(`${path} passes axe-core audit (${theme} theme)`, async ({ page }) => {
+        await page.goto(`http://localhost:5173${path}?theme=${theme}`)
+        await waitForAppReady(page, 'plan')
+        if (theme === 'light') {
+          await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+        } else {
+          await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'light')
+        }
+        // Anchor on the real page and on its in-text links: an empty page, or
+        // one whose links failed to render, has no violations either.
+        await expect(page.getByRole('heading', { level: 1, name: heading })).toBeVisible()
+        await expect(
+          page.getByRole('main').getByRole('link', { name: 'Bonham Technologies, LLC' }),
+        ).toBeVisible()
+
+        const results = await runAxeCheck(page, {})
+        expect(results.violations).toEqual([])
+      })
+    }
+  }
+})
+
 test.describe('ESCAPECRAFT Accessibility', () => {
   test.beforeEach(async ({ page }) => {
     await mockGetUserMedia(page)
@@ -386,25 +419,57 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     await waitForAppReady(page, 'artist')
   })
 
-  test('editor UI passes axe-core audit', async ({ page }) => {
-    // ESCSUITE-202 K-7: an axe audit is a pure negative, satisfied by a page
-    // with nothing in it. Prove the idle editor shell actually rendered
-    // before trusting zero violations — the dialog/keyframe/clip-inspector
-    // audits elsewhere in this describe cover the states this one does not
-    // reach.
-    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+  // ESCSUITE-415: both themes, and `region` (moderate) is asserted on its own:
+  // the toolbar sat between the header and <main>, in no landmark, so a
+  // screen-reader user moving by landmark skipped every editing tool. The
+  // serious/critical filter below never saw it. `?theme=` is the app's own
+  // override and does not persist.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`editor UI passes axe-core audit (${theme} theme)`, async ({ page }) => {
+      await page.goto(`http://localhost:5175?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      // Dark *removes* data-theme, so the attribute alone also holds before
+      // initTheme has run. window.ESCAPE_THEME is exposed only after the theme
+      // is applied, so polling it proves this page really resolved `theme`.
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+              null
+          )
+        )
+        .toBe(theme)
+      if (theme === 'light') {
+        await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+      } else {
+        await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'light')
+      }
+      // ESCSUITE-202 K-7: an axe audit is a pure negative, satisfied by a page
+      // with nothing in it. Prove the idle editor shell actually rendered
+      // before trusting zero violations — the dialog/keyframe/clip-inspector
+      // audits elsewhere in this describe cover the states this one does not
+      // reach.
+      await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+      await expect(page.getByTitle('Selection Tool (V)')).toBeVisible()
 
-    const results = await runAxeCheck(page, {
-      // Disable color-contrast for canvas-based timeline
-      disableRules: ['color-contrast'],
+      const results = await runAxeCheck(page, {
+        // Disable color-contrast for canvas-based timeline
+        disableRules: ['color-contrast'],
+      })
+
+      const outsideLandmarks = results.violations
+        .filter((v) => v.id === 'region')
+        .map((v) => ({ nodes: v.nodes, first: v.firstNode?.target }))
+      expect(outsideLandmarks, 'content outside any landmark').toEqual([])
+
+      const seriousViolations = results.violations.filter(
+        (v) => v.impact === 'serious' || v.impact === 'critical'
+      )
+
+      expect(seriousViolations).toHaveLength(0)
     })
-
-    const seriousViolations = results.violations.filter(
-      (v) => v.impact === 'serious' || v.impact === 'critical'
-    )
-
-    expect(seriousViolations).toHaveLength(0)
-  })
+  }
 
   test('the open File menu passes axe-core audit (ESCSUITE-216)', async ({ page }) => {
     // Red before ESCSUITE-216 and never seen by any audit, because no audit
@@ -675,10 +740,11 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 
   // ESCSUITE-369: the sheet's footer (the `?` tip and the version line) is
   // --text-muted, whose light value was 3.74:1 on the sheet's --bg-secondary.
-  // `?theme=` is the app's own override and does not persist. The group
-  // headings are left out: they are --accent-primary, 2.56:1 on the light
-  // background, a light-palette failure that predates this sheet's footer
-  // and is not fixed here.
+  // `?theme=` is the app's own override and does not persist.
+  // ESCSUITE-405: the group headings ("Tools", "Playback", ...) are audited
+  // too. They were --accent-primary, #4a9eff at 2.56:1 on the light
+  // --bg-secondary; they are now --accent-text, whose light value is a darker
+  // blue that clears 4.5:1.
   test('keyboard shortcuts sheet passes axe-core audit (light theme)', async ({ page }) => {
     await page.goto('http://localhost:5175?suppressRestore=1&theme=light')
     await waitForAppReady(page, 'artist')
@@ -690,10 +756,11 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     await expect(sheet.getByText(/^ESCAPEARTIST v/)).toBeVisible()
     await waitForAnimationsToFinish(sheet)
 
-    const results = await runAxeCheck(page, {
-      includeSelector: '[role="dialog"]',
-      excludeSelector: '[role="dialog"] h3',
-    })
+    // The headings are in the audited subtree: prove it, so a markup change
+    // that drops them cannot make this pass by auditing less.
+    await expect(sheet.getByRole('heading', { level: 3, name: 'Tools' })).toBeVisible()
+
+    const results = await runAxeCheck(page, { includeSelector: '[role="dialog"]' })
     expect(results.passes).toBeGreaterThan(0)
     expect(
       results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')

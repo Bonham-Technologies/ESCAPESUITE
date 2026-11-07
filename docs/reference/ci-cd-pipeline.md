@@ -7,7 +7,7 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
-| `lint-and-typecheck` | Security audit + ESLint + TypeScript (shared, plan, craft, artist, headless-artist, e2e) | PRs and pushes |
+| `lint-and-typecheck` | Security audit + ESLint (`--max-warnings 0`: a warning fails it, ESCSUITE-346) + TypeScript (shared, plan, craft, artist, headless-artist, e2e) | PRs and pushes |
 | `test` | Unit tests with coverage | PRs and pushes |
 | `build` | Production builds, bundle size report, packs + uploads the headless-artist kit | PRs and pushes |
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes |

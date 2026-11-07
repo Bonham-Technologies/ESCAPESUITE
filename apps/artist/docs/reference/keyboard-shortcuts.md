@@ -40,3 +40,12 @@ Ctrl/Cmd chord the cascade binds, redo's Shift spelling as its own entry; the sh
 each entry is claimed. The sheet and the menu once showed `Ctrl+N` for New Project, which nothing bound and
 which Chromium/Edge keep for a new window (a page cannot claim it), so both lost it; the menu item keeps its
 label and shows no hint. Add a chord to the table when you bind one, and never one the browser reserves.
+
+**The sheet's colours meet AA in both themes.** The group headings use `--accent-text`, the accent
+as text: `#4a9eff` (= `--accent-primary`) in the dark theme and `#155fb8` in the light one, where
+`#4a9eff` was 2.56:1 on `--bg-secondary` (ESCSUITE-405; now 5.82:1). Use `--accent-text`, never
+`--accent-primary`, for accent-coloured text anywhere in ARTIST: the inspector's clip type, the
+toolbar's multi-select label, the export dialog's phase line and advanced Download button, and
+the storage buttons' hover take it too (so does `App.module.css`' `.tabButton.activeTab`, a rule
+no component uses today). The footer's `--text-muted` override is ESCSUITE-369's.
+`tests/accessibility/core.spec.ts` audits the sheet in the light theme, headings included.

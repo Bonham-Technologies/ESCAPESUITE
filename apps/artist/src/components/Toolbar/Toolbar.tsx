@@ -59,8 +59,14 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
     addMarker(useEditorStore.getState().currentTime);
   }, [addMarker]);
 
+  // A named region landmark (ESCSUITE-415): the toolbar sits between the
+  // header (banner) and <main>, so without one a screen-reader user moving by
+  // landmark skips every editing tool. A <section>, not role="toolbar": that
+  // role promises one Tab stop with arrow keys between the buttons, which
+  // would change the tab order; and not <nav>: these tools edit, they do not
+  // navigate. The element is styled by class only, so the layout is the same.
   return (
-    <div className={styles.toolbar}>
+    <section className={styles.toolbar} aria-label="Editing tools">
       {/* Tool selection group */}
       <div className={styles.toolGroup}>
         <span className={styles.groupLabel}>Tools</span>
@@ -301,6 +307,6 @@ export function Toolbar({ onShowShortcuts }: ToolbarProps) {
         </svg>
         Shortcuts
       </button>
-    </div>
+    </section>
   );
 }

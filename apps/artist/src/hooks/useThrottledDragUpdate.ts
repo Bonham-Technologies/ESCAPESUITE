@@ -175,10 +175,13 @@ export function useMultiThrottledDragUpdate() {
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount. `channelsRef.current` is one Map for the hook's life
+  // (only ever mutated, never reassigned), so the copy is the same Map the
+  // cleanup would have read.
   useEffect(() => {
+    const channels = channelsRef.current;
     return () => {
-      channelsRef.current.forEach((state) => {
+      channels.forEach((state) => {
         if (state.frameId) {
           cancelAnimationFrame(state.frameId);
         }

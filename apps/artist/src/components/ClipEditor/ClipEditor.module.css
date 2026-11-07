@@ -577,7 +577,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--accent-primary);
+  color: var(--accent-text);
 }
 
 /* Text overlay styles */

@@ -13,7 +13,7 @@ import {
   revokeSourceThumbnails,
 } from './storage';
 import { loadMediaDuration, resolveStoredDuration } from './videoProcessor';
-import { STORAGE_QUOTA_MESSAGE, isQuotaExceeded } from './storageErrors';
+import { STORAGE_BLOCKED_MESSAGE, STORAGE_QUOTA_MESSAGE, isQuotaExceeded, isStorageUnavailable } from './storageErrors';
 import { parseProject } from '../store/projectMigration';
 import { extractWaveformData } from '../utils/waveform';
 import {
@@ -448,8 +448,10 @@ async function restoreSource(
 
     // A write that rejects is refused by name (ESCSUITE-302): a quota error,
     // read through `error.cause ?? error`, in the media library's own quota
-    // sentence; anything else as "could not be stored". The write's own error
-    // is the cause, and `restoreSources` still rolls back what was written.
+    // sentence; storage the browser will not open as "Storage is blocked in
+    // this browser." (ESCSUITE-414); anything else as "could not be stored".
+    // The write's own error is the cause, and `restoreSources` still rolls
+    // back what was written.
     try {
       await storeVideo(entry.id, blob, metadata);
       // Recorded as soon as the row exists, so a thumbnail write that fails
@@ -460,10 +462,12 @@ async function restoreSource(
         metadata.thumbnailUrl = await resolveThumbnailUrl(entry.id);
       }
     } catch (error) {
-      throw new ProjectFileError(
-        isQuotaExceeded(error) ? `${at} could not be stored: ${STORAGE_QUOTA_MESSAGE}` : `${at} could not be stored`,
-        { cause: error }
-      );
+      const reason = isQuotaExceeded(error)
+        ? `: ${STORAGE_QUOTA_MESSAGE}`
+        : isStorageUnavailable(error)
+          ? `: ${STORAGE_BLOCKED_MESSAGE}`
+          : '';
+      throw new ProjectFileError(`${at} could not be stored${reason}`, { cause: error });
     }
   }
 
@@ -794,13 +798,23 @@ export async function extractMetadataFromBlob(
 }
 
 /**
+ * The part of the File System Access API `showOpenProjectDialog` uses. The DOM
+ * lib does not declare `showOpenFilePicker` (Chromium only), so it is typed here.
+ */
+interface WindowWithOpenFilePicker extends Window {
+  showOpenFilePicker(options: {
+    types: { description: string; accept: Record<string, string[]> }[];
+  }): Promise<{ getFile(): Promise<File> }[]>;
+}
+
+/**
  * Show native file picker for loading project
  */
 export async function showOpenProjectDialog(): Promise<File | null> {
   // Try File System Access API first (modern browsers)
   if ('showOpenFilePicker' in window) {
     try {
-      const [handle] = await (window as any).showOpenFilePicker({
+      const [handle] = await (window as WindowWithOpenFilePicker).showOpenFilePicker({
         types: [
           {
             description: 'Video Editor Project',

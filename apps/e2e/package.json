@@ -29,7 +29,7 @@
     "report:production": "playwright show-report playwright-report-production",
     "report:journeys": "playwright show-report playwright-report-journeys",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint . --max-warnings 0"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.14.0",
