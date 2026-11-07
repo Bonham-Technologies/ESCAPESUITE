@@ -1,5 +1,15 @@
 # @escapesuite/shared
 
+## 1.4.10
+
+### Patch Changes
+
+- e435a66: Importing media into ESCAPEARTIST, reopening a project and saving a take in ESCAPECRAFT now work
+  in Safari Private Browsing. Safari refuses to store files there the usual way, so the suite
+  stores their bytes instead and reads them back as the same file.
+- 6051aba: The hosted site's analytics no longer send the page's query string. When a website embedded ESCAPECRAFT or ESCAPEARTIST, anything it put in the app's address (a video's address, a project title, a whole project, its own address or a window name) used to be sent to Vercel Web Analytics with every page view and event. Each record now carries only the page's path, such as `/artist/`. The offline build is unchanged: it sends nothing at all.
+- d3889ef: When the browser won't let ESCAPEARTIST store anything (site data blocked, Firefox's "Never remember history", or storage turned off for an embedded editor), the media library now says so as soon as the editor opens: "Your media library could not be opened — storage may be blocked in this browser. Allow this site to store data, then reload." The notice stays up. A file you then try to import says "Storage is blocked in this browser, so this file could not be imported" instead of a technical error message, and the editor no longer shows the misleading "storage may be full" warning when it can't save your session.
+
 ## 1.4.9
 
 ### Patch Changes

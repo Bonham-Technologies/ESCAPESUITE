@@ -1,5 +1,18 @@
 # @escapesuite/plan
 
+## 2.19.0
+
+### Patch Changes
+
+- eef71d2: You can now check an offline download before it goes onto your network. Every release lists each file's SHA-256 checksum in `SHA256SUMS.txt` and carries a GitHub build-provenance attestation for each file. Under the download buttons on escapesuite.io, "verify your download" links to the steps for Linux, macOS and Windows.
+- 76f8eda: The hub has a new Known limitations page, linked from the footer. It lists what ESCAPE Suite cannot do yet (MP4 without sound in Firefox, system audio in Chrome and Edge only, Safari exports that need the tab in front, the 3-hour export limit, browser storage limits, Safari Private Browsing, no phones or tablets), says exactly what the hosted site's analytics send, and shows how to check for yourself that nothing else leaves your device.
+- 6051aba: The hosted site's analytics no longer send the page's query string. When a website embedded ESCAPECRAFT or ESCAPEARTIST, anything it put in the app's address (a video's address, a project title, a whole project, its own address or a window name) used to be sent to Vercel Web Analytics with every page view and event. Each record now carries only the page's path, such as `/artist/`. The offline build is unchanged: it sends nothing at all.
+- 2eec2be: Links on the Privacy Policy and Terms of Service pages are now underlined and drawn in the lighter link colour, so they are easy to read and easy to tell apart from the text around them in both the dark and light themes.
+- Updated dependencies [e435a66]
+- Updated dependencies [6051aba]
+- Updated dependencies [d3889ef]
+  - @escapesuite/shared@1.4.10
+
 ## 2.18.27
 
 ### Patch Changes
