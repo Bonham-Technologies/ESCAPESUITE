@@ -842,6 +842,7 @@ export function usePreviewRenderLoop({
         setCurrentTime(frameTime);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `currentTime` is only the playback start point; the loop runs on its own clock and writes the store itself, so listing it would restart the loop on every one of its own writes
   }, [isPlaying, clips, tracks, timelineDuration, setIsPlaying, setCurrentTime, drawFrame, sourceVideos, videoElementsRef, extraVideoElementsRef, elementSlotsRef, slotAssigner, audioElementsRef, isPlayingRef, publishDisplayTime, forEachVideo]);
 
   return useMemo(
