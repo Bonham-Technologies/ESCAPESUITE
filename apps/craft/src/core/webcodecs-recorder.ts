@@ -22,6 +22,7 @@ import type {
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
+import { newFrameTiming, stampFrame, type FrameTiming } from './frameTiming';
 import { createAudioCapture, type AudioCapture, type AudioCaptureOptions } from './audioWorkletCapture';
 import { startAudioContext } from './audioContextStart';
 import { openFrameCaptureVideo, releaseFrameCaptureVideo, type FrameCaptureVideo } from './frameCaptureVideo';
@@ -83,29 +84,16 @@ const AUDIO_LEVEL_INTERVAL_MS = 80;
  */
 const CONTEXT_CLOCK_REFRESH_MS = 2000;
 
-/**
- * One encoder's presentation bookkeeping.
- *
- * The recording **clock** is shared — one `startTime`, one `pausedDuration`,
- * read by `nextFrameTiming()` for every pipeline — and that shared clock is
- * what makes a separate-tracks take's two blobs aligned by construction rather
- * than by measurement. These two numbers are per encoder, because each encoder
- * is fed its own monotonically increasing presentation timeline and owes its
- * own viewer a keyframe once a second; sharing them would have two interleaved
- * pipelines pushing each other's timestamps forward and handing the second
- * pipeline only the keyframes the first did not claim.
- */
-interface FrameTiming {
-  /** Microsecond timestamp of the last frame handed to this encoder; -1 before
-   *  the first, so a take that starts on the clock's own zero still stamps 0. */
-  lastFrameTimestampUs: number;
-  /** Recording-clock microsecond mark at which this encoder's next keyframe is due. */
-  nextKeyFrameUs: number;
-}
-
-function newFrameTiming(): FrameTiming {
-  return { lastFrameTimestampUs: -1, nextKeyFrameUs: 0 };
-}
+// One encoder's presentation bookkeeping (`FrameTiming`) lives in
+// `frameTiming.ts`, with the rule that gives every frame a 30 fps slot of its
+// own (ESCSUITE-417). The recording **clock** is shared — one `startTime`, one
+// `pausedDuration`, read by `nextFrameTiming()` for every pipeline — and that
+// shared clock is what makes a separate-tracks take's two blobs aligned by
+// construction rather than by measurement. The bookkeeping is per encoder,
+// because each encoder is fed its own monotonically increasing presentation
+// timeline and owes its own viewer a keyframe once a second; sharing it would
+// have two interleaved pipelines taking each other's slots and handing the
+// second pipeline only the keyframes the first did not claim.
 
 /**
  * What every companion pipeline has, whatever it is recording: its own
@@ -1317,16 +1305,15 @@ export class WebCodecsRecorder {
    * 60 s take at 15fps came out as a 30 s video track against 60 s of audio:
    * playback at 2x with the audio lagging.
    *
-   * Two rules on top of the clock:
-   * - **Strictly increasing.** Two frames inside one tick of a coarse or
-   *   frozen `performance.now()` would otherwise be stamped the same, so the
-   *   second takes previous + 1us. This is an **encoder-level** guard:
-   *   `VideoEncoder` is fed a monotonically increasing presentation timeline
-   *   and a zero-delta frame is a meaningless presentation. It is not a
-   *   container-level one — Mediabunny only throws when a timestamp is below
-   *   the largest of the *previous GOP*, and its WebM muxer rounds each
-   *   timestamp to a whole millisecond anyway, so 1us apart and identical land
-   *   on the same block timecode.
+   * Two rules on top of the clock, both `stampFrame()`'s (`frameTiming.ts`):
+   * - **One 30 fps slot per frame (ESCSUITE-417).** Mediabunny snaps every
+   *   timestamp to the frame rate `createVideoOutput()` declares, so two
+   *   frames inside one slot would share a WebM timecode, and a key frame on
+   *   its delta's timecode is one Chromium cannot seek past. A frame captured
+   *   inside the slot of the one before goes into the next slot; one with no
+   *   slot left within one of its own is dropped (`null`), so a run of
+   *   collisions cannot push the video ahead of the sound. This also keeps
+   *   the timeline strictly increasing, as `VideoEncoder` needs.
    * - **A keyframe once per elapsed second**, not once per 30 frames. The
    *   count-based rule only meant one a second while the source really ran at
    *   30fps; at 10fps it was one every three seconds, and seeking suffered
@@ -1346,21 +1333,11 @@ export class WebCodecsRecorder {
   private nextFrameTiming(
     timing: FrameTiming,
     now = performance.now()
-  ): { timestamp: number; keyFrame: boolean } {
+  ): { timestamp: number; keyFrame: boolean } | null {
     const elapsedMs = this.clockContext
       ? (this.contextNow(now) - this.contextStart - this.pausedContextSeconds) * 1000
       : now - this.startTime - this.pausedDuration;
-    const elapsedUs = Math.round(elapsedMs * 1000);
-    const timestamp =
-      elapsedUs > timing.lastFrameTimestampUs ? elapsedUs : timing.lastFrameTimestampUs + 1;
-    timing.lastFrameTimestampUs = timestamp;
-
-    const keyFrame = timestamp >= timing.nextKeyFrameUs;
-    if (keyFrame) {
-      timing.nextKeyFrameUs = timestamp + 1_000_000;
-    }
-
-    return { timestamp, keyFrame };
+    return stampFrame(timing, elapsedMs * 1000, this.frameRate);
   }
 
   /**
@@ -1459,8 +1436,14 @@ export class WebCodecsRecorder {
         if (encoder && encoder.state !== 'closed') {
           try {
             // Re-stamp the frame with the recording clock (see nextFrameTiming),
-            // reusing the reading the throttle above already took.
-            const { timestamp, keyFrame } = this.nextFrameTiming(timing, now);
+            // reusing the reading the throttle above already took. A frame
+            // with no 30 fps slot left to it is dropped (ESCSUITE-417).
+            const stamp = this.nextFrameTiming(timing, now);
+            if (!stamp) {
+              sourceFrame.close();
+              continue;
+            }
+            const { timestamp, keyFrame } = stamp;
             const frame = new VideoFrame(sourceFrame, { timestamp });
             // Close source frame immediately - we've copied the data we need
             sourceFrame.close();
@@ -1500,23 +1483,27 @@ export class WebCodecsRecorder {
 
         if (!this.isPausedState && this.videoElement && this.ctx && this.canvas && this.videoEncoder) {
           try {
-            // Draw current video frame to canvas
-            this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
+            // Stamped with the recording clock (see nextFrameTiming); a frame
+            // with no 30 fps slot left to it is not drawn or encoded at all
+            // (ESCSUITE-417).
+            const stamp = this.nextFrameTiming(this.screenTiming);
+            if (stamp) {
+              // Draw current video frame to canvas
+              this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
 
-            // Create VideoFrame from canvas, stamped with the recording clock
-            // (see nextFrameTiming). `duration` stays nominal: the muxer
-            // derives the real packet durations from the timestamps.
-            const { timestamp, keyFrame } = this.nextFrameTiming(this.screenTiming);
-            const frame = new VideoFrame(this.canvas, {
-              timestamp,
-              duration: frameDurationUs,
-            });
+              // Create VideoFrame from canvas. `duration` stays nominal: the
+              // muxer derives the real packet durations from the timestamps.
+              const frame = new VideoFrame(this.canvas, {
+                timestamp: stamp.timestamp,
+                duration: frameDurationUs,
+              });
 
-            this.videoEncoder.encode(frame, { keyFrame });
-            // Close frame after encoding - encoder copies data synchronously
-            frame.close();
+              this.videoEncoder.encode(frame, { keyFrame: stamp.keyFrame });
+              // Close frame after encoding - encoder copies data synchronously
+              frame.close();
 
-            this.frameCount++;
+              this.frameCount++;
+            }
           } catch (e) {
             console.error('Frame capture error:', e);
           }
@@ -1541,23 +1528,27 @@ export class WebCodecsRecorder {
 
         if (!this.isPausedState && this.videoElement && this.ctx && this.canvas && this.videoEncoder) {
           try {
-            // Draw current video frame to canvas
-            this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
+            // Stamped with the recording clock (see nextFrameTiming); a frame
+            // with no 30 fps slot left to it is not drawn or encoded at all
+            // (ESCSUITE-417).
+            const stamp = this.nextFrameTiming(this.screenTiming);
+            if (stamp) {
+              // Draw current video frame to canvas
+              this.ctx.drawImage(this.videoElement, 0, 0, this.width, this.height);
 
-            // Create VideoFrame from canvas, stamped with the recording clock
-            // (see nextFrameTiming). `duration` stays nominal: the muxer
-            // derives the real packet durations from the timestamps.
-            const { timestamp, keyFrame } = this.nextFrameTiming(this.screenTiming);
-            const frame = new VideoFrame(this.canvas, {
-              timestamp,
-              duration: frameDurationUs,
-            });
+              // Create VideoFrame from canvas. `duration` stays nominal: the
+              // muxer derives the real packet durations from the timestamps.
+              const frame = new VideoFrame(this.canvas, {
+                timestamp: stamp.timestamp,
+                duration: frameDurationUs,
+              });
 
-            this.videoEncoder.encode(frame, { keyFrame });
-            // Close frame after encoding - encoder copies data synchronously
-            frame.close();
+              this.videoEncoder.encode(frame, { keyFrame: stamp.keyFrame });
+              // Close frame after encoding - encoder copies data synchronously
+              frame.close();
 
-            this.frameCount++;
+              this.frameCount++;
+            }
           } catch (e) {
             console.error('Frame capture error:', e);
           }
