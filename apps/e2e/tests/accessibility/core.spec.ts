@@ -419,25 +419,45 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     await waitForAppReady(page, 'artist')
   })
 
-  test('editor UI passes axe-core audit', async ({ page }) => {
-    // ESCSUITE-202 K-7: an axe audit is a pure negative, satisfied by a page
-    // with nothing in it. Prove the idle editor shell actually rendered
-    // before trusting zero violations — the dialog/keyframe/clip-inspector
-    // audits elsewhere in this describe cover the states this one does not
-    // reach.
-    await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+  // ESCSUITE-415: both themes, and `region` (moderate) is asserted on its own:
+  // the toolbar sat between the header and <main>, in no landmark, so a
+  // screen-reader user moving by landmark skipped every editing tool. The
+  // serious/critical filter below never saw it. `?theme=` is the app's own
+  // override and does not persist.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`editor UI passes axe-core audit (${theme} theme)`, async ({ page }) => {
+      await page.goto(`http://localhost:5175?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      if (theme === 'light') {
+        await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+      } else {
+        await expect(page.locator('html')).not.toHaveAttribute('data-theme', 'light')
+      }
+      // ESCSUITE-202 K-7: an axe audit is a pure negative, satisfied by a page
+      // with nothing in it. Prove the idle editor shell actually rendered
+      // before trusting zero violations — the dialog/keyframe/clip-inspector
+      // audits elsewhere in this describe cover the states this one does not
+      // reach.
+      await expect(page.getByRole('button', { name: 'Export video' })).toBeVisible()
+      await expect(page.getByTitle('Selection Tool (V)')).toBeVisible()
 
-    const results = await runAxeCheck(page, {
-      // Disable color-contrast for canvas-based timeline
-      disableRules: ['color-contrast'],
+      const results = await runAxeCheck(page, {
+        // Disable color-contrast for canvas-based timeline
+        disableRules: ['color-contrast'],
+      })
+
+      const outsideLandmarks = results.violations
+        .filter((v) => v.id === 'region')
+        .map((v) => ({ nodes: v.nodes, first: v.firstNode?.target }))
+      expect(outsideLandmarks, 'content outside any landmark').toEqual([])
+
+      const seriousViolations = results.violations.filter(
+        (v) => v.impact === 'serious' || v.impact === 'critical'
+      )
+
+      expect(seriousViolations).toHaveLength(0)
     })
-
-    const seriousViolations = results.violations.filter(
-      (v) => v.impact === 'serious' || v.impact === 'critical'
-    )
-
-    expect(seriousViolations).toHaveLength(0)
-  })
+  }
 
   test('the open File menu passes axe-core audit (ESCSUITE-216)', async ({ page }) => {
     // Red before ESCSUITE-216 and never seen by any audit, because no audit
