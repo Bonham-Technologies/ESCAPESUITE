@@ -19,13 +19,7 @@ import {
   wrapCaptionText,
   type ParsedCaptions,
 } from '../core/captions';
-import {
-  STORAGE_BLOCKED_IMPORT_MESSAGE,
-  STORAGE_BLOCKED_NOTICE,
-  STORAGE_QUOTA_MESSAGE,
-  isStorageUnavailable,
-  logStorageFailure,
-} from '../core/storageErrors';
+import { STORAGE_QUOTA_MESSAGE } from '../core/storageErrors';
 import styles from './VideoUploader.module.css';
 
 /**
@@ -147,12 +141,6 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
   const [showStorageWarning, setShowStorageWarning] = useState(false);
-  /**
-   * The browser would not open storage at all (ESCSUITE-414): the library read
-   * at mount, or an import, was refused. Shown as a notice that stays, and
-   * cleared by a read or an import that gets through.
-   */
-  const [storageBlocked, setStorageBlocked] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   /**
    * The "remove from the list" timers still armed, one per finished upload.
@@ -239,11 +227,9 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
   const refreshOrphans = useCallback(async () => {
     try {
       const rows = await getAllVideoMetadata();
-      setStorageBlocked(false);
       setOrphans(orphanedImports(rows, await referencedSourceIds()));
     } catch (e) {
-      if (isStorageUnavailable(e)) setStorageBlocked(true);
-      logStorageFailure('Failed to read stored files:', e);
+      console.error('Failed to read stored files:', e);
     }
   }, []);
 
@@ -486,7 +472,6 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
         const metadata = await processMediaFile(file);
         addSourceVideo(metadata);
         analytics.videoImported(metadata.mediaType ?? 'video');
-        setStorageBlocked(false);
 
         setUploads((prev) =>
           prev.map((u) =>
@@ -515,16 +500,11 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
         }, 2000);
         timers.add(id);
       } catch (error) {
-        logStorageFailure('Failed to process media:', error);
+        console.error('Failed to process media:', error);
 
-        // Provide more helpful error message for quota errors, and plain
-        // words for storage that cannot be opened at all (ESCSUITE-414) in
-        // place of the browser's own sentence.
+        // Provide more helpful error message for quota errors
         let errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        if (isStorageUnavailable(error)) {
-          errorMessage = STORAGE_BLOCKED_IMPORT_MESSAGE;
-          setStorageBlocked(true);
-        } else if (errorMessage.includes('QuotaExceeded') || errorMessage.includes('quota')) {
+        if (errorMessage.includes('QuotaExceeded') || errorMessage.includes('quota')) {
           errorMessage = STORAGE_QUOTA_MESSAGE;
         }
 
@@ -619,17 +599,6 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
           aria-label="Add media files"
         />
       </div>
-
-      {/*
-        ESCSUITE-414: role="status", as the import rows below: it is news when
-        it appears, not an interruption, and it stays up rather than timing
-        out like the toast.
-      */}
-      {storageBlocked && (
-        <p id="storage-blocked-notice" className={styles.storageBlocked} role="status">
-          {STORAGE_BLOCKED_NOTICE}
-        </p>
-      )}
 
       {/* Storage management bar */}
       {storageInfo && (
