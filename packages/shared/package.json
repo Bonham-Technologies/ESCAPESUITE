@@ -21,7 +21,7 @@
   "types": "./src/index.ts",
   "scripts": {
     "build": "echo 'No build needed for shared package'",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",

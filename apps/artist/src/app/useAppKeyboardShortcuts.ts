@@ -514,6 +514,7 @@ export function useAppKeyboardShortcuts({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the deps are carried verbatim from the inline effect: `clips.length` rather than `clips` (the Ctrl+B staleness the header documents), and the stable `setShowExport` / `setShowShortcuts` setters left out; adding `clips` would rebind the listener on every timeline edit
   }, [
     canUndo, canRedo, undo, redo, selectedClipId, removeClipFromTimeline, rippleDeleteClip, activeTool,
     duplicateClip, handleSaveProject, handleLoadProject, clips.length,

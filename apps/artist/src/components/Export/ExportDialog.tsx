@@ -645,6 +645,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // inside, for the same reason as the line above.
       clearLiveExport(abortController);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `progress` (read only for the failure analytics) is left out so the callback is not rebuilt on every progress tick; listing it would not change what a run reports either, since a run keeps the closure it started with
   }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange]);
 
   const handleCancel = useCallback(() => {
