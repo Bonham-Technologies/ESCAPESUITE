@@ -77,24 +77,10 @@ let dbPromise: Promise<IDBPDatabase<VideoEditorDB>> | null = null
  * already let go of can still be force-closed (and fire `terminated`) after a
  * newer open has replaced it, and must not drop the newer one.
  *
- * - **Refused** — the browser would not open the database at all: site data
- *   blocked, Firefox's "Never remember history", storage denied by policy or
- *   to an embed. `indexedDB.open` throws or its request fails; the error is
- *   remembered, so a caller can tell it from a read or a write that failed
- *   (`isStorageUnavailable`, ESCSUITE-414). The next call tries again.
- *
  * Never `close()` the returned connection: it is shared, and a regular close
  * is not reported back here, so the cache would keep handing it out.
  */
-export function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
-  return connect().catch((error: unknown) => {
-    rememberOpenFailure(error)
-    throw error
-  })
-}
-
-/** `getDB`'s cached open; async, so an `indexedDB.open` that throws rejects instead. */
-async function connect(): Promise<IDBPDatabase<VideoEditorDB>> {
+export async function getDB(): Promise<IDBPDatabase<VideoEditorDB>> {
   if (dbPromise) return dbPromise
 
   const opening = openDB<VideoEditorDB>(DB_NAME, DB_VERSION, {
@@ -140,41 +126,6 @@ async function connect(): Promise<IDBPDatabase<VideoEditorDB>> {
   })
 
   return opening
-}
-
-// Storage that cannot be opened (ESCSUITE-414)
-
-/** Every error an open of the database was refused with, while it is still referenced. */
-const openFailures = new WeakSet<object>()
-
-/**
- * Errors an open can fail with that are not storage being refused, so the
- * apps keep their own sentence for each: `VersionError`, storage works and a
- * newer tab has upgraded the database (see `getDB`); `QuotaExceededError`,
- * storage works and is full, which the apps already say as such.
- */
-const NOT_REFUSED = new Set(['VersionError', 'QuotaExceededError'])
-
-/** Remember `error` as a refused open, unless it is one of `NOT_REFUSED`. */
-function rememberOpenFailure(error: unknown): void {
-  if (typeof error !== 'object' || error === null) return
-  const name = (error as { name?: unknown }).name
-  if (typeof name === 'string' && NOT_REFUSED.has(name)) return
-  openFailures.add(error)
-}
-
-/**
- * Whether a rejected storage call failed because the browser would not open
- * the database at all (`getDB`'s **Refused**), rather than in a read or a write
- * once it was open. Read through `error.cause ?? error`, so a caller that wraps
- * the rejection as `cause` is still recognised. While the browser refuses,
- * every call that reaches storage rejects this way, which is how the apps say
- * "storage is blocked" instead of showing the browser's own text.
- */
-export function isStorageUnavailable(error: unknown): boolean {
-  const refused = (candidate: unknown): boolean =>
-    typeof candidate === 'object' && candidate !== null && openFailures.has(candidate)
-  return refused(error) || refused((error as { cause?: unknown } | null | undefined)?.cause)
 }
 
 // Blob records (ESCSUITE-397)
