@@ -798,13 +798,23 @@ export async function extractMetadataFromBlob(
 }
 
 /**
+ * The part of the File System Access API `showOpenProjectDialog` uses. The DOM
+ * lib does not declare `showOpenFilePicker` (Chromium only), so it is typed here.
+ */
+interface WindowWithOpenFilePicker extends Window {
+  showOpenFilePicker(options: {
+    types: { description: string; accept: Record<string, string[]> }[];
+  }): Promise<{ getFile(): Promise<File> }[]>;
+}
+
+/**
  * Show native file picker for loading project
  */
 export async function showOpenProjectDialog(): Promise<File | null> {
   // Try File System Access API first (modern browsers)
   if ('showOpenFilePicker' in window) {
     try {
-      const [handle] = await (window as any).showOpenFilePicker({
+      const [handle] = await (window as WindowWithOpenFilePicker).showOpenFilePicker({
         types: [
           {
             description: 'Video Editor Project',

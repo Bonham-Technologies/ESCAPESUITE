@@ -22,7 +22,7 @@ export default defineConfig([
     rules: {
       // Relax rules for existing codebase - can tighten over time
       '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+      '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
       'no-async-promise-executor': 'warn',
       'no-case-declarations': 'warn',
       // These react-compiler/hooks rules are very strict for existing code

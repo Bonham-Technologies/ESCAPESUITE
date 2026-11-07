@@ -180,6 +180,14 @@ function repairExtendableClipPairs(project: Project): Project {
   return { ...project, timeline: { ...project.timeline, clips, duration: calculateTimelineDuration(clips) } };
 }
 
+/**
+ * The multi-track fields as a project saved before tracks existed may hold
+ * them: any of them can be missing, which `ensureTimelineHasTracks` fills in.
+ */
+type LegacyClipFields = Partial<
+  Pick<Clip, 'trackId' | 'timelinePosition' | 'blendMode' | 'transform' | 'effects' | 'transition'>
+>;
+
 // Ensure timeline has tracks and overlays arrays (migration helper)
 function ensureTimelineHasTracks(project: Project): Project {
   // Ensure resolution exists (migration for older projects)
@@ -223,18 +231,21 @@ function ensureTimelineHasTracks(project: Project): Project {
   let position = 0;
 
   const migratedClips = timeline.clips.map(clip => {
+    // `Clip` says these fields are always there, but a pre-tracks file may
+    // lack any of them, so read them through the legacy shape.
+    const legacy: LegacyClipFields = clip;
     const migrated: Clip = {
       ...clip,
-      trackId: (clip as any).trackId || defaultTrack.id,
-      timelinePosition: (clip as any).timelinePosition ?? position,
-      blendMode: (clip as any).blendMode || 'normal',
-      transform: (clip as any).transform || { ...DEFAULT_TRANSFORM },
-      effects: (clip as any).effects || { ...DEFAULT_EFFECTS },
-      transition: (clip as any).transition || { ...DEFAULT_TRANSITION },
+      trackId: legacy.trackId || defaultTrack.id,
+      timelinePosition: legacy.timelinePosition ?? position,
+      blendMode: legacy.blendMode || 'normal',
+      transform: legacy.transform || { ...DEFAULT_TRANSFORM },
+      effects: legacy.effects || { ...DEFAULT_EFFECTS },
+      transition: legacy.transition || { ...DEFAULT_TRANSITION },
     };
 
     // If no timelinePosition was set, calculate from sequential order
-    if ((clip as any).timelinePosition === undefined) {
+    if (legacy.timelinePosition === undefined) {
       position += clip.duration;
     }
 
