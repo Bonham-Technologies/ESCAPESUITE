@@ -428,6 +428,18 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     test(`editor UI passes axe-core audit (${theme} theme)`, async ({ page }) => {
       await page.goto(`http://localhost:5175?suppressRestore=1&theme=${theme}`)
       await waitForAppReady(page, 'artist')
+      // Dark *removes* data-theme, so the attribute alone also holds before
+      // initTheme has run. window.ESCAPE_THEME is exposed only after the theme
+      // is applied, so polling it proves this page really resolved `theme`.
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+              null
+          )
+        )
+        .toBe(theme)
       if (theme === 'light') {
         await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
       } else {
