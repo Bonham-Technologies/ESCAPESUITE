@@ -146,7 +146,7 @@
   transition: all var(--transition-fast);
   background: var(--bg-tertiary);
   border: 1px solid var(--accent-primary);
-  color: var(--accent-primary);
+  color: var(--accent-text);
 }
 
 .advancedExportButton:hover:not(:disabled) {
@@ -277,7 +277,7 @@
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: var(--accent-primary);
+  color: var(--accent-text);
   margin-bottom: var(--spacing-xs);
 }
 

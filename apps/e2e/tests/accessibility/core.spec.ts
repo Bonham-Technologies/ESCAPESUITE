@@ -740,10 +740,11 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 
   // ESCSUITE-369: the sheet's footer (the `?` tip and the version line) is
   // --text-muted, whose light value was 3.74:1 on the sheet's --bg-secondary.
-  // `?theme=` is the app's own override and does not persist. The group
-  // headings are left out: they are --accent-primary, 2.56:1 on the light
-  // background, a light-palette failure that predates this sheet's footer
-  // and is not fixed here.
+  // `?theme=` is the app's own override and does not persist.
+  // ESCSUITE-405: the group headings ("Tools", "Playback", ...) are audited
+  // too. They were --accent-primary, #4a9eff at 2.56:1 on the light
+  // --bg-secondary; they are now --accent-text, whose light value is a darker
+  // blue that clears 4.5:1.
   test('keyboard shortcuts sheet passes axe-core audit (light theme)', async ({ page }) => {
     await page.goto('http://localhost:5175?suppressRestore=1&theme=light')
     await waitForAppReady(page, 'artist')
@@ -755,10 +756,11 @@ test.describe('ESCAPEARTIST Accessibility', () => {
     await expect(sheet.getByText(/^ESCAPEARTIST v/)).toBeVisible()
     await waitForAnimationsToFinish(sheet)
 
-    const results = await runAxeCheck(page, {
-      includeSelector: '[role="dialog"]',
-      excludeSelector: '[role="dialog"] h3',
-    })
+    // The headings are in the audited subtree: prove it, so a markup change
+    // that drops them cannot make this pass by auditing less.
+    await expect(sheet.getByRole('heading', { level: 3, name: 'Tools' })).toBeVisible()
+
+    const results = await runAxeCheck(page, { includeSelector: '[role="dialog"]' })
     expect(results.passes).toBeGreaterThan(0)
     expect(
       results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')

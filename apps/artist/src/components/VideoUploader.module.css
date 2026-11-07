@@ -312,7 +312,7 @@
 
 .storageClearButton:hover {
   border-color: var(--accent-primary);
-  color: var(--accent-primary);
+  color: var(--accent-text);
   background: rgba(66, 133, 244, 0.1);
 }
 
@@ -397,7 +397,7 @@
 
 .clearCacheButton:hover {
   border-color: var(--accent-primary);
-  color: var(--accent-primary);
+  color: var(--accent-text);
   background: rgba(66, 133, 244, 0.1);
 }
 

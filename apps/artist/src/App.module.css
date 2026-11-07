@@ -599,7 +599,7 @@
 }
 
 .tabButton.activeTab {
-  color: var(--accent-primary);
+  color: var(--accent-text);
   border-bottom-color: var(--accent-primary);
   background: transparent;
 }
