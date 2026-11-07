@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "build:standalone": "cross-env-shell VITE_BUILD_MODE=standalone \"tsc -b && vite build\"",
     "build:headless": "cross-env VITE_HEADLESS=true vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b --noEmit",
     "preview": "vite preview",
     "test": "vitest",

@@ -45,8 +45,19 @@ const BLOCKS = {
 const NOTICE = 'Your media library could not be opened — storage may be blocked in this browser.'
 const IMPORT_ROW = 'Storage is blocked in this browser, so this file could not be imported.'
 
-/** Every console error the page logs, from now on. */
-function collectConsoleErrors(page: Page): string[] {
+/**
+ * Every console error the page logs, from now on.
+ *
+ * In dev, Vercel Analytics loads its debug script from `va.vercel-scripts.com`
+ * (see `utils/networkSilence.ts`). That CDN answered the nightly's WebKit with
+ * a 403, and the browser logged "Failed to load resource … 403" as a console
+ * error, which this count is not about. So the script is served empty here,
+ * and the count sees only what ARTIST itself logs.
+ */
+async function collectConsoleErrors(page: Page): Promise<string[]> {
+  await page.route('https://va.vercel-scripts.com/**', (route) =>
+    route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }),
+  )
   const errors: string[] = []
   page.on('console', (message) => {
     if (message.type() === 'error') errors.push(message.text())
@@ -67,7 +78,7 @@ test.describe('ESCSUITE-414: ARTIST explains blocked browser storage', () => {
   for (const [how, block] of Object.entries(BLOCKS)) {
     test(`says so at load and on the import row (${how})`, async ({ page }) => {
       await page.addInitScript(block)
-      const errors = collectConsoleErrors(page)
+      const errors = await collectConsoleErrors(page)
       await page.goto(ARTIST_URL)
       await waitForAppReady(page, 'artist')
 

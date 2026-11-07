@@ -26,7 +26,7 @@
     "build": "node scripts/assemble-kit.mjs",
     "pack:kit": "node scripts/assemble-kit.mjs && npm pack --pack-destination dist",
     "render": "tsx src/cli.ts render",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run --exclude '**/*.chromium.test.ts' --exclude '**/*.bench.test.ts'",
