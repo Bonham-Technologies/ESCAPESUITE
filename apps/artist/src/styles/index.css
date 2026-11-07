@@ -18,6 +18,10 @@
      added with their focus traps caught both); any accent-filled button still
      on white is a remaining #275 follow-up. */
   --accent-on-fill: #0b1220;
+  /* The accent as text (headings, labels, the active tab) rather than as a
+     fill or border. On the dark surfaces it is --accent-primary itself; the
+     light theme darkens it (ESCSUITE-405). */
+  --accent-text: #4a9eff;
   --accent-secondary: #7c4dff;
   --accent-success: #4caf50;
   --accent-warning: #ff9800;
@@ -90,6 +94,10 @@
 
   /* Keep accent colors consistent */
   --accent-primary: #4a9eff;
+  /* #4a9eff as text is 2.57:1 on --bg-secondary here, under WCAG AA. This is
+     the same hue, darkened: 6.25:1 on --bg-primary, 5.82:1 on --bg-secondary,
+     5.27:1 on --bg-tertiary, 4.84:1 on --bg-hover (ESCSUITE-405). */
+  --accent-text: #155fb8;
   --accent-secondary: #7c4dff;
   --accent-success: #22c55e;
   --accent-warning: #f59e0b;
