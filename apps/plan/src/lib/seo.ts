@@ -11,7 +11,7 @@ export const SITE_URL = 'https://www.escapesuite.io'
 export const DEFAULT_TITLE =
   'ESCAPE Suite — Free, open-source screen recording & video editing in your browser'
 export const DEFAULT_DESCRIPTION =
-  'Record your screen and edit video entirely in the browser — free, MIT-licensed, and private by design. Nothing is uploaded. Run it hosted, self-host it, or download a single-file offline build for air-gapped networks.'
+  'Record your screen and edit video entirely in the browser — free, open source (Apache-2.0), and private by design. Nothing is uploaded. Run it hosted, self-host it, or download a single-file offline build for air-gapped networks.'
 
 interface SeoOptions {
   /** Full <title> for the route. */

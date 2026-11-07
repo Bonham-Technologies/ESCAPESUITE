@@ -4,7 +4,7 @@
   "version": "0.7.5",
   "description": "Render ESCAPEARTIST projects server-side in headless Chromium — one-shot CLI + kit",
   "type": "module",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Bonham-Technologies/ESCAPESUITE.git",
@@ -19,6 +19,7 @@
     "dist/kit.json",
     "README.md",
     "LICENSE",
+    "NOTICE",
     "Dockerfile",
     "examples"
   ],

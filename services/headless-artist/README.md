@@ -12,7 +12,7 @@ Playwright. A file that renders in the editor renders identically here.
 Nothing leaves the machine. The driver aborts every `http:` and `https:` request the page makes
 (the bundle is fully inline and needs none), so a render touches only the files you pointed it
 at and the ones it writes. Install it on a box with more cores or a GPU than a laptop has, on a
-network segment with no egress at all, and it behaves the same. Free and MIT-licensed, like the
+network segment with no egress at all, and it behaves the same. Free and Apache-2.0-licensed, like the
 rest of ESCAPE Suite — see <https://github.com/Bonham-Technologies/ESCAPESUITE>.
 
 ## Quick start

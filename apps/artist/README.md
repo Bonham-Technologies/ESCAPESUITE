@@ -252,7 +252,7 @@ Typical storage quota: 50GB+ (Chrome), 10GB+ (Firefox)
 
 ## License
 
-MIT — see the root [LICENSE](../../LICENSE) for details.
+Apache License 2.0 — see the root [LICENSE](../../LICENSE) for details.
 
 ## Acknowledgments
 

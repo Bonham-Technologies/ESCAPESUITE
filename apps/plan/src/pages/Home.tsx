@@ -155,7 +155,7 @@ export default function Home() {
       <section className={styles.cta}>
         <h2>Free &amp; open source</h2>
         <p>
-          ESCAPE Suite is MIT-licensed. Use the hosted apps right here, self-host the
+          ESCAPE Suite is open source under the Apache License 2.0. Use the hosted apps right here, self-host the
           static build, or grab the offline single-file build for air-gapped networks.
         </p>
         <div className={styles.heroCta}>

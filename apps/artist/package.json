@@ -24,7 +24,7 @@
     "webcodecs"
   ],
   "author": "Bonham Technologies, LLC",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@escapesuite/shared": "workspace:*",
     "@vercel/analytics": "^2.0.1",

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The ESCAPE Suite is a collection of free, open-source (MIT), privacy-first, client-side media
+The ESCAPE Suite is a collection of free, open-source (Apache-2.0), privacy-first, client-side media
 creation tools that run entirely in the browser. The suite consists of:
 
 | App | Purpose | Port (Dev) |
@@ -284,7 +284,7 @@ account or purchase needed to download them.
 
 ## License
 
-ESCAPE Suite is MIT-licensed — see [LICENSE](LICENSE) for the full text.
+ESCAPE Suite is licensed under the Apache License 2.0 — see [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE). Releases published before the change remain MIT.
 
 ---
 
