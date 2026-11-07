@@ -36,6 +36,9 @@ export const ARTIST_FIXTURE_MP4 = resolvePath(
  * media to decode, one click creates both the clip and the track holding it.
  */
 export async function seedTextClip(page: ArtistScope): Promise<void> {
+  // "Add Text" lives in the inspector, which starts collapsed below 900px
+  // (ESCSUITE-345).
+  await openMobileInspector(page)
   await page.getByRole('button', { name: 'Add Text' }).click()
   await expect(page.getByText(/^1 clip · 1 track$/)).toBeVisible({ timeout: 15_000 })
 }
@@ -139,4 +142,28 @@ export function keyframePanel(page: ArtistScope) {
 /** The clip inspector's sidebar. */
 export function inspector(page: ArtistScope) {
   return page.locator('aside[aria-labelledby="inspector-title"]')
+}
+
+/**
+ * The floating inspector toggle (`MobileInspectorToggle`), shown only below
+ * the 900px breakpoint. Its accessible name says what a click does: "Show
+ * inspector" while the slide-out panel is shut, "Hide inspector" while open.
+ */
+export function mobileInspectorToggle(page: ArtistScope) {
+  return page.getByRole('button', { name: /^(Show|Hide) inspector$/ })
+}
+
+/**
+ * Open the slide-out inspector with its floating toggle if it is shut. Below
+ * 900px the inspector starts collapsed (ESCSUITE-345); at wider viewports the
+ * toggle is not displayed and this does nothing.
+ */
+export async function openMobileInspector(page: ArtistScope): Promise<void> {
+  const toggle = mobileInspectorToggle(page)
+  if (!(await toggle.isVisible())) return
+  if ((await toggle.getAttribute('aria-label')) === 'Show inspector') {
+    await toggle.click()
+  }
+  await expect(toggle).toHaveAttribute('aria-label', 'Hide inspector')
+  await expect(inspector(page)).not.toHaveClass(/inspectorCollapsed/)
 }

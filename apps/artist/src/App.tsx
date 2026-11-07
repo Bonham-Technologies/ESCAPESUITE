@@ -27,6 +27,7 @@ import { useTimelineZoom } from './app/useTimelineZoom';
 import { useAppKeyboardShortcuts } from './app/useAppKeyboardShortcuts';
 import { useTimelineHeight } from './app/useTimelineHeight';
 import { useHostIntegration } from './app/useHostIntegration';
+import { useInspectorCollapsed } from './app/useInspectorCollapsed';
 import styles from './App.module.css';
 
 function App() {
@@ -34,7 +35,9 @@ function App() {
   const [exportTimeRange, setExportTimeRange] = useState<{ start: number; end: number } | undefined>(undefined);
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  // Starts shut below the 900px breakpoint, where it is a slide-out panel
+  // over the editor (ESCSUITE-345).
+  const { collapsed: inspectorCollapsed, toggle: toggleInspector } = useInspectorCollapsed();
   const [showShortcuts, setShowShortcuts] = useState(false);
   // The media library's resolution-change confirm, reported up from
   // `ResolutionPicker` through `MediaLibrarySidebar`. It is the one modal whose
@@ -277,13 +280,13 @@ function App() {
         {/* Right sidebar - Clip Inspector */}
         <InspectorSidebar
           collapsed={inspectorCollapsed}
-          onToggle={() => setInspectorCollapsed(!inspectorCollapsed)}
+          onToggle={toggleInspector}
         />
 
         {/* Mobile inspector toggle button */}
         <MobileInspectorToggle
           collapsed={inspectorCollapsed}
-          onToggle={() => setInspectorCollapsed(!inspectorCollapsed)}
+          onToggle={toggleInspector}
         />
       </main>
 
