@@ -1,5 +1,31 @@
 # Changelog
 
+## 2.19.0
+
+### Patch Changes
+
+- a7f05cc: In a narrow window, the playback dialog's buttons (play, mute, fullscreen and the rest) are now 44 × 44 pixels instead of shrinking to 32, so they are easier to hit with a finger or on a touch screen. Nothing changes in a normal-sized window.
+- 0f6ae30: A recording that cannot start now says which source failed. When the camera is refused after you have already chosen what to share, ESCAPECRAFT used to say "The browser refused the capture", which read as if the screen share had failed; a camera that was missing or in use by another app got only "The recording could not be started." The notice now names the camera, the screen or the microphone, and says whether permission was refused or the device was not found or in use — for example, "The camera could not be opened (not found, or in use by another app) — nothing was recorded."
+- 49a1f2d: If the camera can't be opened when you press Start, ESCAPECRAFT now records your screen (and microphone) without it and tells you the camera isn't in the recording, instead of stopping and throwing away the screen share you just granted. A camera-only recording still stops, since it would have no picture.
+- 49a1f2d: A source that can't be recorded (no microphone, a blocked camera, or no system-audio support in this browser) now shows as off, and screen readers announce why. It used to look switched on while the recording quietly left it out. Your choice is kept and comes back when the device is available.
+- 92ce7f3: In a narrow ESCAPECRAFT window (a split screen, a small embed, about 390 px wide), the recording preview now keeps a proper 16:9 size instead of shrinking to a thin strip, and the "← ESCAPE Suite" link in the header shrinks to just the arrow so it no longer wraps onto three lines over the app's title. The page scrolls to reach the record button when it doesn't fit.
+- a5e2271: ESCAPECRAFT and ESCAPEARTIST now show which version you are running. In ESCAPECRAFT it is at the foot of Recording Tips (the Help button); in ESCAPEARTIST it is at the foot of the keyboard shortcuts sheet (press `?`). The offline download also says "offline file", so you can tell an old downloaded copy from the hosted app. Include that line when you report a problem.
+- 49a1f2d: Start no longer hangs at 00:00 when the computer has no working sound output. After 5 seconds the recording fails with a message about the audio, and ESCAPECRAFT is ready to try again instead of needing a reload.
+- 49a1f2d: A microphone-only recording in Firefox now stops and saves. Pressing Stop used to freeze the timer and the take never reached your library.
+- 732d97c: A WebM recording no longer shows a length about a second short, in the playback window or in other players after download. This happened when the last part of a recording held a single frame, most often on short Firefox microphone takes.
+- e435a66: Importing media into ESCAPEARTIST, reopening a project and saving a take in ESCAPECRAFT now work
+  in Safari Private Browsing. Safari refuses to store files there the usual way, so the suite
+  stores their bytes instead and reads them back as the same file.
+- d9984d9: Recording in Safari no longer hangs at Start. The recorder now reads the picture from a video
+  element Safari will actually play (falling back to the on-screen preview), and if no picture
+  arrives within a few seconds the take fails with a notice instead of waiting forever.
+- b22a1bd: ESCAPECRAFT can float its recorder controls. In Chrome and Edge, "Float controls" (next to the keyboard shortcuts under the record button) opens a small always-on-top window with the timer, the microphone and system-audio level meters, and Pause/Resume, Stop and Cancel, so you can record another app full screen and still see and stop the take without switching back. R, P and S work in that window too, and closing it leaves the recording running. It needs no network, so it works in the offline file as well.
+- 6051aba: The hosted site's analytics no longer send the page's query string. When a website embedded ESCAPECRAFT or ESCAPEARTIST, anything it put in the app's address (a video's address, a project title, a whole project, its own address or a window name) used to be sent to Vercel Web Analytics with every page view and event. Each record now carries only the page's path, such as `/artist/`. The offline build is unchanged: it sends nothing at all.
+- Updated dependencies [e435a66]
+- Updated dependencies [6051aba]
+- Updated dependencies [d3889ef]
+  - @escapesuite/shared@1.4.10
+
 ## 2.18.27
 
 ### Patch Changes
