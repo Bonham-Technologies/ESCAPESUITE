@@ -44,7 +44,11 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: var(--text-muted);
+  /* The dark palette's --text-muted, in both themes: the placeholder sits on
+     .videoWrapper's #111 whatever the theme is, so the light --text-muted
+     (a grey tuned for near-white surfaces) would be 3.10:1 here. 5.95:1
+     (ESCSUITE-421). */
+  color: #8f8fa2;
   gap: var(--spacing-md);
   padding: var(--spacing-lg);
   text-align: center;

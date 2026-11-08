@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test'
+import AxeBuilder from '@axe-core/playwright'
 import {
   mockGetUserMedia,
   mockMediaRecorder,
@@ -13,7 +14,17 @@ import {
   checkFormLabels,
   checkLinkText,
 } from '../../utils/accessibility'
-import { ARTIST_URL, ARTIST_FIXTURE_MP4, seedTextClip, keyframePanel } from '../../utils/artist'
+import {
+  ARTIST_URL,
+  ARTIST_FIXTURE_MP4,
+  seedTextClip,
+  keyframePanel,
+  importMediaAndAddToTimeline,
+  inspector,
+  openMobileInspector,
+  openExportDialog,
+  openExportAdvancedOptions,
+} from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
 test.describe('ESCAPEPLAN Accessibility', () => {
@@ -740,6 +751,8 @@ test.describe('ESCAPEARTIST Accessibility', () => {
 
   // ESCSUITE-369: the sheet's footer (the `?` tip and the version line) is
   // --text-muted, whose light value was 3.74:1 on the sheet's --bg-secondary.
+  // The sheet's local override is gone since ESCSUITE-421 darkened the token
+  // itself (5.68:1 there), so this audit now also guards the token.
   // `?theme=` is the app's own override and does not persist.
   // ESCSUITE-405: the group headings ("Tools", "Playback", ...) are audited
   // too. They were --accent-primary, #4a9eff at 2.56:1 on the light
@@ -1245,4 +1258,141 @@ test.describe('Color Contrast', () => {
     const contrastViolations = results.violations.filter((v) => v.id === 'color-contrast')
     expect(contrastViolations).toHaveLength(0)
   })
+
+  /**
+   * Every colour-contrast failure axe finds under `include` (the whole page
+   * when omitted), one line per node, so a failure names each place and its
+   * ratio instead of a count and the first node. The canvas timeline is left
+   * out for the same reason as the audit above: axe cannot compute its
+   * contrast.
+   */
+  async function contrastFailures(page: Page, include?: string): Promise<string[]> {
+    let builder = new AxeBuilder({ page }).withRules(['color-contrast']).exclude('canvas')
+    if (include) builder = builder.include(include)
+    const results = await builder.analyze()
+    // Prove the rule had text in front of it: zero failures over zero nodes
+    // would pass too.
+    const checked = [...results.passes, ...results.violations].flatMap((r) => r.nodes).length
+    expect(checked, `color-contrast nodes checked under ${include ?? 'the page'}`).toBeGreaterThan(0)
+    return results.violations.flatMap((v) =>
+      v.nodes.map((n) => {
+        const data = n.any[0]?.data as
+          | { fgColor?: string; bgColor?: string; contrastRatio?: number }
+          | undefined
+        const text = n.html.replace(/\s+/g, ' ').slice(0, 80)
+        return `${n.target.join(' ')} ${data?.fgColor} on ${data?.bgColor} = ${data?.contrastRatio}:1 ${text}`
+      })
+    )
+  }
+
+  // ESCSUITE-421: a light-theme survey found the light --text-muted (#718096)
+  // under 4.5:1 on every surface but white (3.74:1 on --bg-secondary, 3.38:1
+  // on --bg-tertiary, 3.10:1 on --bg-hover) and the header Export button's
+  // white label at 2.75:1 on its --accent-primary fill. The idle-editor audit
+  // above never sees either: Export is only enabled with a clip, most muted
+  // text lives in the inspector's selected state and the media library, and
+  // that audit runs in the dark theme. This one runs with a real clip
+  // imported, selected and showing in the inspector, then over the hovered
+  // library row and the export dialog's advanced options. The Export button's
+  // hover state is the next test's, in both themes.
+  test('ESCAPEARTIST has adequate color contrast in the light theme with a clip selected (ESCSUITE-421)', async ({
+    page,
+    browserName,
+  }) => {
+    test.setTimeout(120_000)
+    // Same limitation as "the clip inspector's controls have associated
+    // labels": the import stores a Blob in IndexedDB.
+    test.skip(
+      browserName === 'webkit',
+      'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+    )
+
+    await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=light`)
+    await waitForAppReady(page, 'artist')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+
+    // Before the import: the empty preview's placeholder sits on a #111 box
+    // in both themes, so a darker light --text-muted must not reach it.
+    await test.step('the empty editor', async () => {
+      await expect(page.getByText('Add clips to the timeline to preview')).toBeVisible()
+      await expect(page.getByText('Select a clip to edit')).toBeVisible()
+      await waitForAnimationsToFinish(page.locator('#root'))
+      expect(await contrastFailures(page), 'light-theme contrast failures, empty editor').toEqual([])
+    })
+
+    await test.step('editor with a clip selected', async () => {
+      await importMediaAndAddToTimeline(page)
+      await openMobileInspector(page)
+      await page.locator('[data-clip-id]').first().click()
+      // The inspector shows the clip, not its "Select a clip to edit" state.
+      await expect(page.getByRole('button', { name: 'Transform', exact: true })).toBeVisible()
+      await expect(inspector(page)).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Export video' })).toBeEnabled()
+      await page.mouse.move(0, 0)
+      await waitForAnimationsToFinish(page.locator('#root'))
+
+      expect(await contrastFailures(page), 'light-theme contrast failures, clip selected').toEqual([])
+    })
+
+    await test.step('the hovered media library row', async () => {
+      const row = page.locator('[class*="videoItem"]').first()
+      await row.hover()
+      await waitForAnimationsToFinish(row)
+      expect(
+        await contrastFailures(page, '[class*="videoItem"]'),
+        'light-theme contrast failures, library row hovered'
+      ).toEqual([])
+    })
+
+    await test.step('the export dialog with advanced options open', async () => {
+      await openExportDialog(page)
+      await openExportAdvancedOptions(page)
+      await page.mouse.move(0, 0)
+      await waitForAnimationsToFinish(page.locator('[role="dialog"]').first())
+      expect(
+        await contrastFailures(page, '[role="dialog"]'),
+        'light-theme contrast failures, export dialog'
+      ).toEqual([])
+    })
+  })
+
+  // ESCSUITE-421: the header Export button's label was white on the
+  // --accent-primary fill, 2.75:1 in both themes. On hover the more specific
+  // .headerButton:hover rule turned it --text-primary, which the dark theme
+  // draws at 2.72:1 on the hover fill. Both states, both themes; a text clip is
+  // the cheapest way to enable the button.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`the header Export button's label meets AA, hovered too (${theme} theme, ESCSUITE-421)`, async ({
+      page,
+    }) => {
+      await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+              null
+          )
+        )
+        .toBe(theme)
+      await seedTextClip(page)
+
+      const exportButton = page.getByRole('button', { name: 'Export video' })
+      await expect(exportButton).toBeEnabled()
+      await page.mouse.move(0, 0)
+      await waitForAnimationsToFinish(exportButton)
+      expect(
+        await contrastFailures(page, 'button[aria-label="Export video"]'),
+        `${theme}-theme Export button contrast failures`
+      ).toEqual([])
+
+      await exportButton.hover()
+      await waitForAnimationsToFinish(exportButton)
+      expect(
+        await contrastFailures(page, 'button[aria-label="Export video"]'),
+        `${theme}-theme Export button contrast failures, hovered`
+      ).toEqual([])
+    })
+  }
 })
