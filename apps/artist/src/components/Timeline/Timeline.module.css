@@ -239,6 +239,8 @@
 .trackControlBtn.active {
   background: var(--accent-primary);
   color: var(--accent-on-fill);
+  /* See Toolbar.module.css' .toolButton.active (ESCSUITE-422). */
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
 .trackDeleteBtn:hover:not(:disabled) {
@@ -398,42 +400,45 @@
   background: #4a6a9a;
 }
 
+/* The ring is --accent-ring: --accent-primary in the dark theme, and in the
+   light one a darker blue at 3:1 or more on the track (#4a9eff was 2.57:1 on
+   --timeline-track-bg, under WCAG 1.4.11; ESCSUITE-422). */
 .clipSelected {
   background: var(--timeline-clip-selected);
-  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-md);
 }
 
 .clipMultiSelected {
   background: var(--timeline-clip-selected);
-  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-md);
   outline: 2px dashed rgba(255, 255, 255, 0.5);
   outline-offset: -4px;
 }
 
 .clipAudio.clipMultiSelected {
   background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
-  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-md);
   outline: 2px dashed rgba(255, 255, 255, 0.5);
   outline-offset: -4px;
 }
 
 .clipImage.clipMultiSelected {
   background: linear-gradient(135deg, #6ee7b7 0%, #10b981 100%);
-  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-md);
   outline: 2px dashed rgba(255, 255, 255, 0.5);
   outline-offset: -4px;
 }
 
 .clipText.clipMultiSelected {
   background: linear-gradient(135deg, #fcd34d 0%, #f59e0b 100%);
-  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-md);
   outline: 2px dashed rgba(255, 255, 255, 0.5);
   outline-offset: -4px;
 }
 
 .clipShape.clipMultiSelected {
   background: linear-gradient(135deg, #f9a8d4 0%, #ec4899 100%);
-  box-shadow: 0 0 0 2px var(--accent-primary), var(--shadow-md);
+  box-shadow: 0 0 0 2px var(--accent-ring), var(--shadow-md);
   outline: 2px dashed rgba(255, 255, 255, 0.5);
   outline-offset: -4px;
 }
@@ -447,7 +452,7 @@
 
 .clipPreview {
   background: rgba(74, 144, 226, 0.3);
-  border: 2px dashed var(--accent-primary);
+  border: 2px dashed var(--accent-ring);
   pointer-events: none;
 }
 

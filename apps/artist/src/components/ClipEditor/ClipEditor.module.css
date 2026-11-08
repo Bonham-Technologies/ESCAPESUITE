@@ -76,7 +76,7 @@
 .addOverlayButton:hover {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .header {
@@ -260,7 +260,7 @@
 .setButton:hover:not(:disabled) {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .setButton:disabled {
@@ -376,8 +376,11 @@
    attribute is already the state. */
 .resetButton[aria-pressed='true'] {
   background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
+  /* --accent-ring is --accent-primary in the dark theme (no change) and a
+     darker blue in the light one, where the fill alone is 2.3-2.6:1 on the
+     inspector and a pressed button needs an edge at 3:1 (ESCSUITE-422). */
+  border-color: var(--accent-ring);
+  color: var(--accent-on-fill);
 }
 
 .resetButton:disabled {
@@ -528,8 +531,11 @@
 
 .lockButton.locked {
   background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
+  /* --accent-ring is --accent-primary in the dark theme (no change) and a
+     darker blue in the light one, where the fill alone is 2.3-2.6:1 on the
+     inspector and a pressed button needs an edge at 3:1 (ESCSUITE-422). */
+  border-color: var(--accent-ring);
+  color: var(--accent-on-fill);
 }
 
 /* Transition controls */
@@ -667,8 +673,11 @@
 
 .styleButton.active {
   background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
+  /* --accent-ring is --accent-primary in the dark theme (no change) and a
+     darker blue in the light one, where the fill alone is 2.3-2.6:1 on the
+     inspector and a pressed button needs an edge at 3:1 (ESCSUITE-422). */
+  border-color: var(--accent-ring);
+  color: var(--accent-on-fill);
 }
 
 .colorInput {
@@ -735,8 +744,11 @@
 
 .noFillButton.active {
   background: var(--accent-primary);
-  color: white;
-  border-color: var(--accent-primary);
+  /* --accent-ring is --accent-primary in the dark theme (no change) and a
+     darker blue in the light one, where the fill alone is 2.3-2.6:1 on the
+     inspector and a pressed button needs an edge at 3:1 (ESCSUITE-422). */
+  border-color: var(--accent-ring);
+  color: var(--accent-on-fill);
 }
 
 /* Animation section styles */
@@ -774,7 +786,7 @@
   letter-spacing: 0.5px;
   padding: 2px 6px;
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
   border-radius: var(--radius-sm);
 }
 
@@ -805,8 +817,11 @@
 
 .keyframeButton.active {
   background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
+  /* --accent-ring is --accent-primary in the dark theme (no change) and a
+     darker blue in the light one, where the fill alone is 2.3-2.6:1 on the
+     inspector and a pressed button needs an edge at 3:1 (ESCSUITE-422). */
+  border-color: var(--accent-ring);
+  color: var(--accent-on-fill);
 }
 
 .keyframeButton svg {
@@ -823,7 +838,7 @@
   font-size: 10px;
   font-weight: 600;
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
   border-radius: 9px;
   margin-left: auto;
 }
