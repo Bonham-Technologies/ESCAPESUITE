@@ -9,7 +9,8 @@
  *   node scripts/dco-check.mjs <base-sha> <head-sha>
  *
  * Exits 1 and lists each commit that is missing its sign-off. Runs in
- * `.github/workflows/dco.yml`; unit tests in `scripts/dco-check.test.mjs`.
+ * `.github/workflows/dco.yml`, for pull requests from forks only (ESCSUITE-424);
+ * unit tests in `scripts/dco-check.test.mjs`.
  */
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
