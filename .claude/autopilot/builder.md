@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v14. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -68,6 +68,8 @@ budget, or after two failures in a row. For each ticket:
    ticket, lists each acceptance criterion with how it is verified, and states the
    class and any risk. Comment the PR link on the ticket.
 6. **Merging:**
+   - **Public repo:** merge, or enable auto-merge, only when the PR's head is a branch
+     of this repo and its author the owner or Dependabot (`public-repos.md`).
    - `ap-auto`: if `gh api repos/{owner}/{repo} --jq .allow_auto_merge` is true and
      `gh api repos/{owner}/{repo}/rules/branches/main` requires `ci-status` with
      `strict_required_status_checks_policy` true, bring the branch up to date (policy,
@@ -104,7 +106,7 @@ budget, or after two failures in a row. For each ticket:
 
 **A refresh PR** is one bonham-ops's propagation workflow opened on a branch
 `autopilot/refresh-v<N>`. Before taking tickets, find them:
-`gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[] | select(.head.ref | startswith("autopilot/refresh-v")) | .number'`.
+`gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[] | select(.head.repo.full_name == .base.repo.full_name and (.head.ref | startswith("autopilot/refresh-v"))) | .number'`.
 Merge one under the `ap-auto` rules, with no ticket, when all of these hold: every file
 in `gh api repos/{owner}/{repo}/pulls/{n}/files` is `.claude/.vendored-manifest` or is
 listed in it; `.claude/rules/autopilot.local.md` is not among them; the head has a
