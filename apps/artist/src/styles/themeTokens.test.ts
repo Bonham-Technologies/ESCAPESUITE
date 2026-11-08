@@ -15,7 +15,12 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-const css = readFileSync(join(process.cwd(), 'src/styles/index.css'), 'utf8')
+// Comments are stripped first: the token comments name other tokens, and one
+// written as `--name: ...` must not read as a declaration.
+const css = readFileSync(join(process.cwd(), 'src/styles/index.css'), 'utf8').replace(
+  /\/\*[\s\S]*?\*\//g,
+  ''
+)
 
 const DARK = ':root'
 const LIGHT = ':root[data-theme="light"]'
@@ -69,6 +74,16 @@ describe('ESCAPEARTIST theme tokens', () => {
         expect(
           contrastRatio(muted, token(palette, surface)),
           `${palette} --text-muted on ${surface}`
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+    })
+
+    it(`keeps --accent-text at 4.5:1 on every surface (${palette})`, () => {
+      const accentText = token(palette, '--accent-text')
+      for (const surface of SURFACES) {
+        expect(
+          contrastRatio(accentText, token(palette, surface)),
+          `${palette} --accent-text on ${surface}`
         ).toBeGreaterThanOrEqual(4.5)
       }
     })
