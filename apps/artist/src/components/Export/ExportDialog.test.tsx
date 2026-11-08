@@ -1726,6 +1726,40 @@ describe('ExportDialog', () => {
       }
     })
 
+    it('reports the progress the export had reached when it failed (ESCSUITE-420)', async () => {
+      // The figure exists to tell a failure at the start from one near the
+      // end, so it must be the run's last report, not the progress captured
+      // in the callback's closure before the run began (always 0 here).
+      let report: (p: ExportProgress) => void = () => {}
+      let rejectExport: (e: unknown) => void = () => {}
+      mockExportToWebM.mockImplementation(
+        (...args: unknown[]) =>
+          new Promise((_resolve, reject) => {
+            report = args[3] as (p: ExportProgress) => void
+            rejectExport = reject
+          })
+      )
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        render(<ExportDialog isOpen={true} onClose={onClose} />)
+
+        fireEvent.click(primaryExport())
+        await waitFor(() => expect(mockExportToWebM).toHaveBeenCalled())
+        act(() => report({ phase: 'encoding', progress: 40, message: 'Encoding frame 120/300' }))
+        act(() => report({ phase: 'encoding', progress: 73, message: 'Encoding frame 219/300' }))
+
+        rejectExport(new Error('Encoder crashed'))
+
+        await waitFor(() =>
+          expect(screen.getByRole('alert')).toHaveTextContent('Export failed: Encoder crashed')
+        )
+        expect(mockAnalytics.exportFailed).toHaveBeenCalledTimes(1)
+        expect(mockAnalytics.exportFailed).toHaveBeenCalledWith('webm', 'Error', 0.73)
+      } finally {
+        errorLog.mockRestore()
+      }
+    })
+
     it('describes a thrown non-Error as a plain export failure', async () => {
       mockExportToWebM.mockRejectedValue('kaboom')
       const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})

@@ -144,10 +144,17 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
 
-  // Use prop timeRange if provided, otherwise derive from in/out points
-  const timeRange = timeRangeProp ?? (inPoint !== null && outPoint !== null
-    ? { start: Math.min(inPoint, outPoint), end: Math.max(inPoint, outPoint) }
-    : undefined);
+  // Use prop timeRange if provided, otherwise derive from in/out points.
+  // Memoised so handleExport, which lists it as a dependency, is not rebuilt
+  // on every render.
+  const timeRange = useMemo(
+    () =>
+      timeRangeProp ??
+      (inPoint !== null && outPoint !== null
+        ? { start: Math.min(inPoint, outPoint), end: Math.max(inPoint, outPoint) }
+        : undefined),
+    [timeRangeProp, inPoint, outPoint]
+  );
 
   const [advancedOptions, setAdvancedOptions] = useState<ExportOptions>({
     format: 'webm',
@@ -498,8 +505,15 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       setProgress(p);
     };
 
+    // This run's own last reported progress, read by the failure analytics
+    // (ESCSUITE-420). A local rather than the `progress` state: this callback
+    // keeps the closure it started with, so `progress` here would still be
+    // the value from before the run began, never where the run failed.
+    let lastProgress = 0;
+
     try {
       const onProgress = (p: ExportProgress) => {
+        lastProgress = p.progress;
         if (isCurrentRun()) report(p);
       };
 
@@ -591,7 +605,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
 
       const errorMessage = err instanceof Error ? err.message : 'Export failed';
       const errorType = err instanceof ExportError ? 'ExportError' : (err instanceof Error ? err.name : 'unknown');
-      const failProgress = progress ? progress.progress / 100 : 0;
+      const failProgress = lastProgress / 100;
 
       console.error('Export failed:', err);
       if (err instanceof ExportError) {
@@ -645,7 +659,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // inside, for the same reason as the line above.
       clearLiveExport(abortController);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `progress` (read only for the failure analytics) is left out so the callback is not rebuilt on every progress tick. Listing it would not fix that read: a run keeps the closure it started with, so `failProgress` is the progress before the run began, not at the failure (needs a ref, not a dep)
   }, [clips, tracks, sourceVideos, advancedOptions, projectName, projectResolution, mp4Supported, projectHasAudio, onClose, timeRange]);
 
   const handleCancel = useCallback(() => {
