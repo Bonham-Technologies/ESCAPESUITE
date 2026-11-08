@@ -22,6 +22,11 @@
      fill or border. On the dark surfaces it is --accent-primary itself; the
      light theme darkens it (ESCSUITE-405). */
   --accent-text: #4a9eff;
+  /* The accent as a focus indicator: the border or outline a focused field
+     or menu row draws (WCAG 1.4.11 asks 3:1 of it against what is next to
+     it). --accent-primary itself on the dark surfaces; the light theme
+     darkens it (ESCSUITE-421). */
+  --accent-ring: #4a9eff;
   --accent-secondary: #7c4dff;
   --accent-success: #4caf50;
   --accent-warning: #ff9800;
@@ -90,7 +95,12 @@
 
   --text-primary: #1a1a2e;
   --text-secondary: #4a5568;
-  --text-muted: #718096;
+  /* #718096 was under WCAG AA on every light surface but white (3.74:1 on
+     --bg-secondary, 3.38:1 on --bg-tertiary, 3.11:1 on --bg-hover). This is
+     the same hue and saturation, darker: 6.09:1 on --bg-primary, 5.68:1 on
+     --bg-secondary, 5.13:1 on --bg-tertiary, 4.72:1 on --bg-hover, and still
+     lighter than --text-secondary (ESCSUITE-421). */
+  --text-muted: #576375;
 
   /* Keep accent colors consistent */
   --accent-primary: #4a9eff;
@@ -98,6 +108,12 @@
      the same hue, darkened: 6.25:1 on --bg-primary, 5.82:1 on --bg-secondary,
      5.27:1 on --bg-tertiary, 4.84:1 on --bg-hover (ESCSUITE-405). */
   --accent-text: #155fb8;
+  /* #4a9eff as a focus border is 2.75:1 on --bg-primary and 2.57:1 on
+     --bg-secondary here, under WCAG 1.4.11's 3:1. The same hue, darkened, but
+     lighter than --accent-text so a ring still reads as the accent: 4.42:1 on
+     --bg-primary, 4.12:1 on --bg-secondary, 3.73:1 on --bg-tertiary (the
+     fields' own fill), 3.42:1 on --bg-hover (a focused menu row). */
+  --accent-ring: #2378d8;
   --accent-secondary: #7c4dff;
   --accent-success: #22c55e;
   --accent-warning: #f59e0b;
@@ -300,7 +316,7 @@ input[type='text']:focus,
 input[type='number']:focus,
 select:focus {
   outline: none;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 /* Drop zone styles */

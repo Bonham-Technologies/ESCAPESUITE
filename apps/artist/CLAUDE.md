@@ -88,4 +88,5 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Media type is decided by a probe, once (ESCSUITE-255) | [`media-type-is-decided-by-a-probe-once.md`](docs/reference/media-type-is-decided-by-a-probe-once.md) |
 | Seek index repair at import (ESCSUITE-305) | [`seek-index-repair-at-import.md`](docs/reference/seek-index-repair-at-import.md) |
 | Keyboard shortcuts (ESCSUITE-247) | [`keyboard-shortcuts.md`](docs/reference/keyboard-shortcuts.md) |
+| Theme colour tokens and their contrast (`src/styles/index.css`, ESCSUITE-421) | [`theme-colours.md`](docs/reference/theme-colours.md) |
 | Import rows, the refusal notice and the metadata deadline (ESCSUITE-249) | [`import-rows-the-refusal-notice-and-the-metadata-deadline.md`](docs/reference/import-rows-the-refusal-notice-and-the-metadata-deadline.md) |

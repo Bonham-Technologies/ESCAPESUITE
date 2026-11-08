@@ -151,14 +151,6 @@
   text-align: center;
 }
 
-/* ESCSUITE-369: the light --text-muted (#718096) is 3.74:1 on this sheet's
-   --bg-secondary (#f5f7fa), under WCAG AA for the footer's 12px tip and
-   version line. The footer takes the darker value CRAFT's light palette uses
-   for the same reason (ESCSUITE-177): 4.90:1 here. Dark is 5.01:1 already. */
-:global(:root[data-theme='light']) .footer {
-  --text-muted: #606d80;
-}
-
 .tip {
   font-size: 12px;
   color: var(--text-muted);
