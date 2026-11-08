@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v15. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward's security sweep
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -179,6 +179,15 @@ later command that uses `$SCAN`.
   open one first, and add only the fingerprints it doesn't already list. A fingerprint
   that a Done allowlist ticket lists but `.gitleaksignore` lacks was rejected by the
   owner: treat it as real. When unsure, treat the finding as real.
+
+**Public repos.** On a public repo (`public-repos.md`), also run the
+items of bonham-ops's `docs/open-source/checklist.md` tagged _should within 30 days of
+public_: a `v*` tag ruleset (`gh api repos/{owner}/{repo}/rulesets`), CodeQL default
+setup (`code-scanning/default-setup`), issue and PR templates, and `SHA256SUMS`,
+attestations and an SBOM on the latest release. File each failure as a security
+ticket, classed by **Ticket classes**. List each open PR from a fork or another author,
+`gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' --jq '.[] | select(.head.repo.full_name != .base.repo.full_name or ((.user.login | IN("mrbonha", "dependabot[bot]")) | not)) | "#\(.number)\(if .auto_merge then " (auto-merge on)" else "" end)"'`,
+under **Waiting on you** as "outside PR: #n", with "(auto-merge on)" as the jq adds it.
 
 ### Security tickets
 

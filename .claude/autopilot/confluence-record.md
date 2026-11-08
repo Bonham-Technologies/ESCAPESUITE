@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v15. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: the Confluence record (steward and scout)
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
