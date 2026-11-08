@@ -1,5 +1,8 @@
 # ESCAPE Suite Open-Source Retool — Design Spec
 
+> **Licence note (2026-11-06):** ESCAPESUITE moved from MIT to the Apache License 2.0
+> (ESCSUITE-419). The MIT references below record the decision as it was made at the time.
+
 **Date:** 2026-08-18
 **Status:** Approved by Matt (design review in session); implementation pending
 **Branch:** `feat/open-source-retool` (off `main`)

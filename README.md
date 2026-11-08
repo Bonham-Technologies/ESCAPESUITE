@@ -5,7 +5,7 @@
 [![Latest release](https://img.shields.io/github/v/release/Bonham-Technologies/ESCAPESUITE)](https://github.com/Bonham-Technologies/ESCAPESUITE/releases/latest)
 [![Sponsor](https://img.shields.io/badge/sponsor-Bonham%20Technologies-f59e0b?logo=githubsponsors)](https://github.com/sponsors/Bonham-Technologies)
 
-Free, open-source (MIT), privacy-first media creation tools that run entirely in the browser. Nothing you record or edit ever leaves your machine.
+Free, open-source (Apache-2.0), privacy-first media creation tools that run entirely in the browser. Nothing you record or edit ever leaves your machine.
 
 ![ESCAPE Suite demo](docs/media/demo.gif)
 
@@ -138,7 +138,9 @@ hours with the maintainer each month.
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). Releases published before the change remain available under the MIT License they shipped with.
+
+Contributions are accepted under the same licence with a DCO sign-off; see [CONTRIBUTING.md](CONTRIBUTING.md#developer-certificate-of-origin).
 
 ---
 

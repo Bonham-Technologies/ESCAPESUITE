@@ -5,7 +5,7 @@ export default function Terms() {
   useSeo({
     title: 'Terms of Service — ESCAPE Suite',
     description:
-      'ESCAPE Suite terms of service. The software is MIT-licensed and free to use; you own everything you record and edit with it.',
+      'ESCAPE Suite terms of service. The software is open source under the Apache License 2.0 and free to use; you own everything you record and edit with it.',
     canonicalPath: '/terms',
   })
 
@@ -13,7 +13,7 @@ export default function Terms() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Terms of Service</h1>
-        <p className={styles.lastUpdated}>Last updated: August 18, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: November 6, 2026</p>
       </header>
 
       <div className={styles.content}>
@@ -32,13 +32,13 @@ export default function Terms() {
           have permission to access our services.
         </p>
         <p>
-          The ESCAPE Suite software is open source under the MIT License; these terms govern use of the
+          The ESCAPE Suite software is open source under the Apache License, Version 2.0; these terms govern use of the
           hosted service at escapesuite.io.
         </p>
 
         <h2>2. Description of Services</h2>
         <p>
-          ESCAPE Suite provides free, MIT-licensed, browser-based video creation tools, offered both as
+          ESCAPE Suite provides free, open-source (Apache-2.0), browser-based video creation tools, offered both as
           a hosted web application and as downloadable offline builds:
         </p>
         <ul>
@@ -73,7 +73,7 @@ export default function Terms() {
         <h3>3.2 Our Content</h3>
         <p>
           The ESCAPE Suite applications, including all software, design, logos, and documentation,
-          are owned by Bonham Technologies, LLC and made available under the MIT License. You may
+          are owned by Bonham Technologies, LLC and made available under the Apache License, Version 2.0. You may
           copy, modify, and distribute our software in accordance with that license.
         </p>
 

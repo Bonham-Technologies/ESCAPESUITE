@@ -1,5 +1,8 @@
 # Headless ARTIST — Render Service & Kit (Plan 2, v2) Implementation Plan
 
+> **Licence note (2026-11-06):** ESCAPESUITE moved from MIT to the Apache License 2.0
+> (ESCSUITE-419). The MIT references below record the decision as it was made at the time.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 > **Supersedes** `2026-06-07-headless-artist-service.md` (kept for history). Revised 2026-09-07 after Plan 1 merged (PR #250) and a stress pass found that the Plan‑1 contract moves media across the Chromium boundary as base64 strings, which caps outputs at roughly 400 MB (V8 string length) and makes multi‑GB sources impractical. This plan replaces that transfer with two streaming primitives that were spiked in real headless Chromium on 2026‑09‑07: **sources in** via Playwright `setInputFiles` on a hidden `<input type=file>` (50 MB seeded into IndexedDB in 72 ms, no JS-heap copy), **output out** via the browser **download** event + `download.saveAs()` (50 MB in 258 ms, sha256 identical). Also updated: Node 24 / vitest 5 / Playwright 1.62.1 baseline, CI wiring, and kit distribution on GitHub Releases.
