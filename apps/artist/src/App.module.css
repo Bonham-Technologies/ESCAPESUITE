@@ -76,7 +76,7 @@
 .projectName:focus {
   outline: none;
   background: var(--bg-tertiary);
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 .headerButton {
@@ -113,11 +113,17 @@
 .exportButton {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
-  color: white;
+  /* White on this fill is 2.75:1 in both themes — see --accent-on-fill in
+     styles/index.css: 6.80:1 here (ESCSUITE-421). */
+  color: var(--accent-on-fill);
 }
 
+/* The hover colour must be restated: .headerButton:hover:not(:disabled) is the
+   more specific rule and turns the label --text-primary, which in the dark
+   theme is #e8e8e8 at 2.72:1 on this fill. The ink stays 5.61:1 here. */
 .exportButton:hover:not(:disabled) {
   background: #3a8eef;
+  color: var(--accent-on-fill);
 }
 
 /* Menu dropdown styles */
@@ -168,7 +174,7 @@
   /* ESCSUITE-216: the menu has one tab stop and the arrows move focus
      between items, so the focus ring is how a keyboard user reads where
      they are. Drawn inside the row — the dropdown clips at its own edge. */
-  outline: 2px solid var(--accent-primary);
+  outline: 2px solid var(--accent-ring);
   outline-offset: -2px;
   background: var(--bg-hover);
 }

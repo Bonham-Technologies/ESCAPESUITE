@@ -242,7 +242,7 @@
 
 .input:focus {
   outline: none;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 .setButton {
@@ -481,7 +481,7 @@
 
 .select:focus {
   outline: none;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 .select option {
@@ -596,7 +596,7 @@
 
 .textarea:focus {
   outline: none;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 .row {
@@ -642,7 +642,7 @@
 
 .numberInput:focus {
   outline: none;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 .styleButton {
@@ -846,7 +846,7 @@
 
 .selectSmall:focus {
   outline: none;
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
 }
 
 .selectSmall option {

@@ -47,5 +47,7 @@ as text: `#4a9eff` (= `--accent-primary`) in the dark theme and `#155fb8` in the
 `--accent-primary`, for accent-coloured text anywhere in ARTIST: the inspector's clip type, the
 toolbar's multi-select label, the export dialog's phase line and advanced Download button, and
 the storage buttons' hover take it too (so does `App.module.css`' `.tabButton.activeTab`, a rule
-no component uses today). The footer's `--text-muted` override is ESCSUITE-369's.
+no component uses today). The footer (the `?` tip and the version line) is `--text-muted`; it
+carried a local `#606d80` override for the light theme (ESCSUITE-369) until ESCSUITE-421 darkened the
+token itself, so it takes the shared value now (see [`theme-colours.md`](theme-colours.md)).
 `tests/accessibility/core.spec.ts` audits the sheet in the light theme, headings included.
