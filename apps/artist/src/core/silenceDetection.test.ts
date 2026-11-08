@@ -211,9 +211,11 @@ describe('findTakeSilences', () => {
   });
 
   it('places a pause minutes into a recording where it is, not where 100 peaks a second would put it', () => {
-    // A recording that is not a whole number of 10 ms buckets long: its peaks
-    // are 479 samples each at 48 kHz, not 480, so reading them as 10 ms each
-    // put this pause 0.2 s late — past the padding, into the word after it.
+    // A recording that is not a whole number of 10 ms buckets long. Its peaks
+    // were 479 samples each at 48 kHz before ESCSUITE-418 (480 since), and
+    // reading those as 10 ms each put this pause 0.2 s late — past the
+    // padding, into the word after it. Read by their recorded length, either
+    // bucketing places it.
     const seconds = 120.013;
     const pcm = new Float32Array(Math.round(seconds * RATE));
     for (let i = 0; i < pcm.length; i++) {
