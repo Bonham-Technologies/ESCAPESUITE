@@ -104,12 +104,6 @@
   cursor: not-allowed;
 }
 
-.headerButton.active {
-  background: var(--accent-primary);
-  border-color: var(--accent-primary);
-  color: white;
-}
-
 .exportButton {
   background: var(--accent-primary);
   border-color: var(--accent-primary);
@@ -278,24 +272,6 @@
   color: var(--text-primary);
 }
 
-.addButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--accent-primary);
-  color: white;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.addButton:hover {
-  background: #3a8eef;
-}
-
 .uploaderContainer {
   padding: var(--spacing-sm);
   border-bottom: 1px solid var(--border-color);
@@ -421,7 +397,10 @@
 }
 
 .addTrackButton:hover {
-  background: var(--accent-hover, #3a7bc8);
+  /* Was var(--accent-hover, #3a7bc8): no --accent-hover exists, and the ink
+     is 4.32:1 on #3a7bc8. The hover fill every other accent button uses keeps
+     it at 5.61:1 (ESCSUITE-422). */
+  background: #3a8eef;
   transform: scale(1.02);
 }
 
@@ -606,7 +585,7 @@
 
 .tabButton.activeTab {
   color: var(--accent-text);
-  border-bottom-color: var(--accent-primary);
+  border-bottom-color: var(--accent-ring);
   background: transparent;
 }
 
@@ -635,7 +614,8 @@
   border-radius: 50%;
   background: var(--accent-primary);
   border: none;
-  color: white;
+  /* The icon on this fill: white is 2.75:1, under 1.4.11's 3:1 (ESCSUITE-422). */
+  color: var(--accent-on-fill);
   cursor: pointer;
   z-index: var(--z-modal);
   box-shadow: var(--shadow-lg);

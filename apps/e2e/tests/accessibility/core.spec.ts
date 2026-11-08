@@ -1,4 +1,4 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import {
   mockGetUserMedia,
@@ -1393,6 +1393,155 @@ test.describe('Color Contrast', () => {
         await contrastFailures(page, 'button[aria-label="Export video"]'),
         `${theme}-theme Export button contrast failures, hovered`
       ).toEqual([])
+    })
+  }
+
+  type Rgb = [number, number, number]
+
+  /** WCAG 2 contrast ratio between two opaque colours. */
+  function contrast(a: Rgb, b: Rgb): number {
+    const lum = ([r, g, b]: Rgb) =>
+      [r, g, b]
+        .map((v) => v / 255)
+        .map((v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+        .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0)
+    const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x)
+    return Math.round(((hi + 0.05) / (lo + 0.05)) * 100) / 100
+  }
+
+  /**
+   * The colours one control is painted with, read from the computed style:
+   * its label ink, its own fill, the edge that outlines it (its border when it
+   * has one, else the first box-shadow colour, else its fill) and the surface
+   * it sits on (its parent's background, translucent layers composited down to
+   * the first opaque one). axe judges text only, so this is how an icon label
+   * (WCAG 1.4.11, 3:1) and a pressed state's edge are measured.
+   */
+  async function paintOf(target: Locator) {
+    return target.evaluate((el) => {
+      type Rgba = [number, number, number, number]
+      const parse = (c: string): Rgba | null => {
+        const m = c.match(/rgba?\(([^)]+)\)/)
+        if (!m) return null
+        const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number)
+        return [p[0], p[1], p[2], p[3] ?? 1]
+      }
+      const over = (top: Rgba, bottom: Rgba): Rgba => [
+        ...([0, 1, 2].map((i) => top[i] * top[3] + bottom[i] * (1 - top[3])) as [number, number, number]),
+        1,
+      ]
+      const backgroundFrom = (start: Element | null): Rgba => {
+        const layers: Rgba[] = []
+        for (let n = start; n; n = n.parentElement) {
+          const c = parse(getComputedStyle(n).backgroundColor)
+          if (c && c[3] > 0) {
+            layers.push(c)
+            if (c[3] === 1) break
+          }
+        }
+        return layers.reverse().reduce((acc, layer) => over(layer, acc), [255, 255, 255, 1] as Rgba)
+      }
+      const rgb = (c: Rgba) => [c[0], c[1], c[2]] as [number, number, number]
+      const cs = getComputedStyle(el)
+      const fill = backgroundFrom(el)
+      const ink = over(parse(cs.color) as Rgba, fill)
+      const shadow = parse(cs.boxShadow)
+      const edge =
+        parseFloat(cs.borderTopWidth) >= 1
+          ? over(parse(cs.borderTopColor) as Rgba, fill)
+          : shadow
+            ? over(shadow, fill)
+            : fill
+      return { ink: rgb(ink), fill: rgb(fill), edge: rgb(edge), surface: rgb(backgroundFrom(el.parentElement)) }
+    })
+  }
+
+  // ESCSUITE-422: accent-filled controls drew white labels on --accent-primary
+  // (#4a9eff), 2.75:1 in both themes: the preview's play button (an icon, so
+  // 3:1 applies, still short) and the inspector's pressed style buttons among
+  // them. In the light theme the pressed state's edge and the selected clip's
+  // ring were --accent-primary too, 2.1-2.75:1 on the surfaces they sit on,
+  // under WCAG 1.4.11's 3:1. Both themes: the dark one must keep passing.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`accent-filled controls keep their labels and edges readable (${theme} theme, ESCSUITE-422)`, async ({
+      page,
+    }) => {
+      await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+              null
+          )
+        )
+        .toBe(theme)
+      // A text clip: it is selected on creation, enables the play button and
+      // opens the inspector's Text Content section with its B / I buttons.
+      await seedTextClip(page)
+
+      await test.step('the play button', async () => {
+        const play = page.getByRole('button', { name: 'Play (Space)' })
+        await expect(play).toBeEnabled()
+        await page.mouse.move(0, 0)
+        await waitForAnimationsToFinish(play)
+        const idle = await paintOf(play)
+        expect(contrast(idle.ink, idle.fill), `${theme} play icon on its fill`).toBeGreaterThanOrEqual(3)
+
+        await play.hover()
+        await waitForAnimationsToFinish(play)
+        const hovered = await paintOf(play)
+        expect(contrast(hovered.ink, hovered.fill), `${theme} play icon on its hover fill`).toBeGreaterThanOrEqual(3)
+      })
+
+      await test.step('a pressed style button', async () => {
+        const bold = page.getByRole('button', { name: 'B', exact: true })
+        await bold.click()
+        await expect(bold).toHaveAttribute('aria-pressed', 'true')
+        await page.mouse.move(0, 0)
+        await waitForAnimationsToFinish(bold)
+
+        const pressed = await paintOf(bold)
+        expect(contrast(pressed.ink, pressed.fill), `${theme} pressed B label on its fill`).toBeGreaterThanOrEqual(4.5)
+        // The pressed state is told apart from the surface by its fill or by
+        // its edge; one of them has to reach 3:1.
+        expect(
+          Math.max(contrast(pressed.edge, pressed.surface), contrast(pressed.fill, pressed.surface)),
+          `${theme} pressed B edge or fill on its surface`
+        ).toBeGreaterThanOrEqual(3)
+
+        await bold.hover()
+        await waitForAnimationsToFinish(bold)
+        const hovered = await paintOf(bold)
+        expect(contrast(hovered.ink, hovered.fill), `${theme} pressed B label, hovered`).toBeGreaterThanOrEqual(4.5)
+      })
+
+      await test.step('the active tool', async () => {
+        // A borderless pressed button: its edge is the inset ring.
+        const select = page.getByTitle('Selection Tool (V)')
+        await expect(select).toHaveClass(/active/)
+        await page.mouse.move(0, 0)
+        await waitForAnimationsToFinish(select)
+        const active = await paintOf(select)
+        expect(contrast(active.ink, active.fill), `${theme} active tool icon on its fill`).toBeGreaterThanOrEqual(3)
+        expect(
+          Math.max(contrast(active.edge, active.surface), contrast(active.fill, active.surface)),
+          `${theme} active tool edge or fill on its group`
+        ).toBeGreaterThanOrEqual(3)
+      })
+
+      await test.step("the selected clip's ring", async () => {
+        const clip = page.locator('[data-clip-id]').first()
+        await expect(clip).toHaveClass(/clipSelected/)
+        await page.mouse.move(0, 0)
+        await waitForAnimationsToFinish(clip)
+        const selected = await paintOf(clip)
+        expect(
+          contrast(selected.edge, selected.surface),
+          `${theme} selected clip ring on the track`
+        ).toBeGreaterThanOrEqual(3)
+      })
     })
   }
 })

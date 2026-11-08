@@ -21,7 +21,9 @@
 
 .dropZone:hover,
 .dragOver {
-  border-color: var(--accent-primary);
+  /* The drop target's edge: --accent-ring keeps it at 3:1 on the light
+     surfaces (ESCSUITE-422); dark is unchanged. */
+  border-color: var(--accent-ring);
   background: rgba(74, 158, 255, 0.1);
 }
 
@@ -220,7 +222,7 @@
 
 .addButton {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .addButton:hover {
@@ -462,6 +464,8 @@
 
 .audioBadge {
   background: rgba(74, 158, 255, 0.9);
+  /* White is under 3:1 on this fill; see --accent-on-fill (ESCSUITE-422). */
+  color: var(--accent-on-fill);
 }
 
 /* Files from earlier sessions (ESCSUITE-268): the line beside Clear Unused / Clear All. */

@@ -59,6 +59,10 @@
 .toolButton.active {
   background: var(--accent-primary);
   color: var(--accent-on-fill);
+  /* An inset edge in --accent-ring: invisible in the dark theme (same colour as
+     the fill), 3:1 or more on the light surfaces, where the fill alone is
+     2.3:1 on --bg-tertiary (ESCSUITE-422). */
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
 .toggleButton {
@@ -71,6 +75,7 @@
 .toggleButton.active {
   background: var(--accent-primary);
   color: var(--accent-on-fill);
+  box-shadow: inset 0 0 0 1px var(--accent-ring);
 }
 
 .divider {

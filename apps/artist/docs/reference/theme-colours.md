@@ -13,8 +13,8 @@ Every pair below is pinned numerically in `src/styles/themeTokens.test.ts`, in b
 |---|---|---|---|---|
 | `--text-muted` | The quietest text: labels, metadata, hints | `#8f8fa2` | `#576375` | 4.5:1 on all four surfaces |
 | `--accent-text` | Accent-coloured text (headings, the active tab) | `#4a9eff` | `#155fb8` | 4.5:1 (see `keyboard-shortcuts.md`) |
-| `--accent-ring` | A focused field's border, a focused menu row's outline | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces (WCAG 1.4.11) |
-| `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill |
+| `--accent-ring` | An edge that carries meaning: focus, a pressed button, the selected clip, a drop target | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces and both timeline surfaces (WCAG 1.4.11) |
+| `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill and on the `#3a8eef` hover fill |
 | `--accent-primary` | Fills, and borders that only decorate | `#4a9eff` | `#4a9eff` | None as text or as a focus indicator |
 
 The four surfaces are `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-hover`.
@@ -31,16 +31,31 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
 
 ## Rules
 
-- **Text on an accent fill takes `--accent-on-fill`, never white.** White is 2.75:1 on
-  `#4a9eff`. The header Export button took it in ESCSUITE-421, and restates it under `:hover`:
-  `.headerButton:hover:not(:disabled)` is the more specific rule and would otherwise turn the label
-  `--text-primary`, which is `#e8e8e8` at 2.72:1 on the dark theme's hover fill. Other
-  white-on-accent states (the inspector's active style buttons such as `.styleButton.active`,
-  for example) remain #275 follow-ups.
-- **A focus indicator takes `--accent-ring`.** Every `:focus`/`:focus-visible` border or outline
-  in the themed UI uses it, and so does the timeline's inline track-name field (shown only while
-  editing). Borders that mark a hover, a drag target, a selected clip or a pressed button still use
-  `--accent-primary` and are under 3:1 on the light surfaces; they are not covered yet.
+- **Text or an icon on an accent fill takes `--accent-on-fill`, never white, in both themes.**
+  White is 2.75:1 on `#4a9eff`, under 4.5:1 for text and 3:1 for an icon. Since ESCSUITE-422 no
+  rule in ARTIST's stylesheets draws white on an accent fill: the play button, the pressed
+  inspector buttons (B / I, lock, no-fill, keyframe editor, reset), their badges, the media
+  library's Add and audio badge, the mobile inspector toggle and the hover fills of Add overlay
+  and Set all take it. `themeTokens.test.ts` reads every rule and fails on a white label beside an
+  accent fill. Where a more specific `:hover` rule would repaint the label (`.headerButton:hover`,
+  `.controlButton:hover`), the accent button restates its ink under `:hover`. The one hover fill
+  is `#3a8eef` (5.61:1); `var(--accent-hover, #3a7bc8)` named a token that does not exist and
+  put the ink at 4.32:1, so it is gone.
+- **An edge that carries meaning takes `--accent-ring`.** That is every `:focus`/`:focus-visible`
+  border or outline, the timeline's inline track-name field, the selected and multi-selected
+  clip's 2px ring, the timeline's drop preview, the media library's drop zone while a file is
+  dragged over it, and the edge of a pressed button: a 1px border on the inspector's pressed
+  buttons, an inset 1px ring on the borderless toolbar tools and track controls. In the dark theme
+  `--accent-ring` is `--accent-primary`, so none of this changes there; in the light one the fill
+  alone is 2.3–2.6:1 on the surfaces it sits on, and the edge reaches 3.4–4.1:1.
+- **Left on `--accent-primary`, judged decorative or out of scope.** Hover borders that are never
+  the only sign of anything (the resolution select, the keyframe editor button, the media
+  library's storage buttons, Add overlay and Set, whose label and fill change too) and the export
+  dialog's advanced Download button outline (its `--accent-text` label names it). The drop zone's
+  plain hover shares the drag-over rule, so it takes the ring too. Not done: the
+  progress fills (upload, storage, export), the spinners and the slider thumbs and range fills,
+  which are graphical objects or native controls at 2.1–2.75:1 on light tracks; they need their
+  own look at what they sit on.
 - **A surface that is dark in both themes does not read theme text tokens.** The preview's empty
   and loading placeholder sits on `.videoWrapper`'s `#111`, so it hard-codes the dark `--text-muted`
   (`#8f8fa2`, 5.95:1); the light value would be 3.10:1 there. The keyframe panel is painted dark
@@ -55,3 +70,7 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   dialog with its advanced options open, in the light theme. Only the canvas timeline is excluded.
 - The same file's "the header Export button's label meets AA, hovered too": both themes, both
   states.
+- The same file's "accent-filled controls keep their labels and edges readable (ESCSUITE-422)":
+  both themes, from computed styles (axe judges text only): the play icon on its fill and hover
+  fill (3:1), the pressed B button's label (4.5:1, hovered too) and its edge or fill on its
+  surface (3:1), the active tool's icon and edge, and the selected clip's ring on its track.

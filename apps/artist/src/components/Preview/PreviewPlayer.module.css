@@ -144,10 +144,13 @@
   height: 36px;
   border-radius: 50%;
   background: var(--accent-primary);
-  color: white;
+  /* The play/pause icon: white is 2.75:1 on this fill, under 1.4.11's 3:1.
+     6.80:1 here, 5.61:1 on hover (ESCSUITE-422). */
+  color: var(--accent-on-fill);
 }
 
+/* Restated: .controlButton:hover:not(:disabled) would turn it --text-primary. */
 .playButton:hover:not(:disabled) {
   background: #3a8eef;
-  color: white;
+  color: var(--accent-on-fill);
 }
