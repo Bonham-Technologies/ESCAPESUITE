@@ -11,6 +11,9 @@
   own `FrameTiming`, and an `AudioEncoder` and its own Opus-only output for each audio source the
   take really has — all of them on that same clock, and none of them taking the mixed audio off
   the primary
+- `frameTiming.ts`: `stampFrame()` — one encoder's `FrameTiming`: the 30 fps slot each frame is
+  stamped in, so no two frames share a WebM timecode, and its once-a-second key frame (see "Frame
+  timestamps and keyframes", ESCSUITE-417)
 - `audioWorkletCapture.ts`: `createAudioCapture()` — how every audio pipeline of a WebCodecs take
   (the mix and each audio companion) takes its audio off the graph: an AudioWorklet where the
   browser has one, the ScriptProcessorNode and ESCSUITE-296's gap filler where it does not (see
