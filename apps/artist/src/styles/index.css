@@ -243,7 +243,7 @@ body {
 
 .btn-primary {
   background: var(--accent-primary);
-  color: white;
+  color: var(--accent-on-fill);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -331,7 +331,7 @@ select:focus {
 
 .drop-zone:hover,
 .drop-zone.drag-over {
-  border-color: var(--accent-primary);
+  border-color: var(--accent-ring);
   background: rgba(74, 158, 255, 0.1);
 }
 
