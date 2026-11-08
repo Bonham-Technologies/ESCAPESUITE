@@ -31,10 +31,10 @@ import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } fro
  * same hundredth of a second. Measured differences are in the "Audio Waveform
  * Visibility" reference doc.
  *
- * `secondsPerPeak` is how long each peak really lasts (ESCSUITE-403): the
- * bucket `peaksFromPcm` chose over the rate it decoded at, which is close to
- * but not 1 / samplesPerSecond (`peakBuckets`). Absent when there are no
- * peaks. Callers store it beside the peaks as `SourceVideo.waveformSecondsPerPeak`.
+ * `secondsPerPeak` is how long each peak lasts (ESCSUITE-403): 1 /
+ * samplesPerSecond at any rate since ESCSUITE-418 (`peakSecondsFor`), where
+ * the bucketing before it made it a sample short of that. Absent when there
+ * are no peaks. Callers store it beside the peaks as `SourceVideo.waveformSecondsPerPeak`.
  *
  * @param blob - The media file blob
  * @param samplesPerSecond - Number of peaks per second of audio (default: 100)
@@ -297,20 +297,45 @@ export function resamplePeaks(
  * Get peak data for a specific time range
  * Used when rendering clips with trim points
  *
+ * The slice is drawn stretched across `[startTime, endTime]`, so each peak's
+ * place in it must be its time. With `secondsPerPeak` (the source's own peak
+ * timing, `peakTimingOf(source).estimate`, ESCSUITE-418) peak i is
+ * `[i, i + 1) · secondsPerPeak` of source, whatever `duration` says; where
+ * the range runs past the last peak (peaks bucketed before ESCSUITE-418
+ * dropped the track's last ~0.2 %, and a container can outlast its audio) it
+ * is filled with silent peaks, up to `duration`, rather than the peaks there
+ * are being stretched over it. Without it the peaks are read as spread evenly
+ * over `duration`, as they always were.
+ *
  * @param peaks - Full peak data
  * @param duration - Total duration the peaks represent (seconds)
  * @param startTime - Start time of the range (seconds)
  * @param endTime - End time of the range (seconds)
+ * @param secondsPerPeak - How long each peak lasts (seconds), when known
  * @returns Peak data for the specified range
  */
 export function getPeaksForRange(
   peaks: WaveformPeak[],
   duration: number,
   startTime: number,
-  endTime: number
+  endTime: number,
+  secondsPerPeak?: number
 ): WaveformPeak[] {
   if (peaks.length === 0 || duration <= 0) {
     return [];
+  }
+
+  if (secondsPerPeak !== undefined && secondsPerPeak > 0 && Number.isFinite(secondsPerPeak)) {
+    // A hair of slack either way, so a time on a peak boundary (290 / 0.01
+    // is 28999.999…) is read as that boundary, not a peak to one side of it.
+    const first = (time: number) => Math.floor(time / secondsPerPeak + 1e-9);
+    const after = (time: number) => Math.ceil(time / secondsPerPeak - 1e-9);
+    const last = Number.isFinite(duration) ? Math.max(peaks.length, after(duration)) : peaks.length;
+    const startIndex = Math.max(0, first(startTime));
+    const endIndex = Math.min(last, after(endTime));
+    const slice = peaks.slice(startIndex, endIndex);
+    for (let i = Math.max(startIndex, peaks.length); i < endIndex; i++) slice.push({ min: 0, max: 0 });
+    return slice;
   }
 
   const peaksPerSecond = peaks.length / duration;

@@ -3,6 +3,7 @@ import type { Clip, SourceVideo, Track } from '../../store/types';
 import { clamp, formatTime, timeToPixels } from '../../utils/timeUtils';
 import { ClipKeyframeDiamonds } from './ClipKeyframeDiamonds';
 import { AudioWaveform } from './AudioWaveform';
+import { drawnSecondsPerPeak } from '../../utils/peakTiming';
 import { CLIP_THUMB_ASPECT, maskClipPathFor } from '../../utils/maskClipPath';
 import { pruneVisibleRangeCache } from './visibleRangeCache';
 import type { DragState, TrimState } from './types';
@@ -282,6 +283,8 @@ export const TimelineTrack = React.memo(function TimelineTrack({
               <AudioWaveform
                 peaks={sourceMedia.waveformData!}
                 sourceDuration={sourceMedia.duration}
+                // The peaks' own length, the one silence detection reads too (ESCSUITE-418).
+                secondsPerPeak={drawnSecondsPerPeak(sourceMedia)}
                 startTime={clip.startTime}
                 endTime={clip.endTime}
                 width={clipWidth}
