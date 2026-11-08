@@ -43,6 +43,35 @@ test('every page keeps its Content-Security-Policy and X-Frame-Options', () => {
   assert.equal(headers.get('x-frame-options'), 'SAMEORIGIN');
 });
 
+/** Parses a Content-Security-Policy value into directive → source list. */
+function parseCsp(value) {
+  return new Map(
+    value
+      .split(';')
+      .map((directive) => directive.trim())
+      .filter(Boolean)
+      .map((directive) => {
+        const [name, ...sources] = directive.split(/\s+/);
+        return [name.toLowerCase(), sources.join(' ')];
+      })
+  );
+}
+
+test("every CSP pins base-uri and form-action to 'self' (ESCSUITE-416)", () => {
+  // Neither directive falls back to default-src, so without them an injected
+  // <base href> could re-point relative loads and a form could post anywhere.
+  const policies = vercelConfig.headers.flatMap(({ source, headers }) =>
+    headers
+      .filter(({ key }) => key.toLowerCase() === 'content-security-policy')
+      .map(({ value }) => ({ source, csp: parseCsp(value) }))
+  );
+  assert.ok(policies.length > 0, 'vercel.json sets no Content-Security-Policy');
+  for (const { source, csp } of policies) {
+    assert.equal(csp.get('base-uri'), "'self'", `${source}: base-uri should be 'self'`);
+    assert.equal(csp.get('form-action'), "'self'", `${source}: form-action should be 'self'`);
+  }
+});
+
 test('every page sends X-Content-Type-Options: nosniff', () => {
   assert.equal(siteWideHeaders().get('x-content-type-options'), 'nosniff');
 });
