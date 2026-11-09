@@ -24,7 +24,7 @@ The nightly (`.github/workflows/nightly.yml`, ESCSUITE-353) is a third workflow,
 |-----|---------|---------|
 | `nightly.yml` / `nightly` | Full e2e in Chromium, Firefox and WebKit + the soak at 200 cycles / 30 reloads + the timeline property tests at 5,000 runs | 11:00 UTC daily (`schedule`, on `main`) and `workflow_dispatch` |
 
-The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, also outside `ci-status`. Its job `DCO / sign-off` runs `node scripts/dco-check.mjs <base> <head>` on every PR and fails if a non-merge commit lacks a `Signed-off-by:` trailer matching its author email; commits by `[bot]` authors (Dependabot, the changesets bot) are exempt. It is informational until the owner adds it to `main`'s ruleset. Contributors' rules are in `CONTRIBUTING.md`.
+The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, also outside `ci-status`. Its job `DCO / sign-off` runs `node scripts/dco-check.mjs <base> <head>` on every PR from a fork and fails if a non-merge commit lacks a `Signed-off-by:` trailer matching its author email; commits by `[bot]` authors (Dependabot, the changesets bot) are exempt. PRs from branches in this repository skip the job (it shows as skipped): only people with write access can push here, so this matches the fleet's `members: false` DCO rule (ESCSUITE-424). It is informational until the owner adds it to `main`'s ruleset. Contributors' rules are in `CONTRIBUTING.md`.
 
 **Nightly** (ESCSUITE-353):
 - **What it runs**, one job, in order:

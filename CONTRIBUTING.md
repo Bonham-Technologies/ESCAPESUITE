@@ -24,7 +24,7 @@ pnpm test:e2e   # Playwright (Chromium); needs `pnpm build` first
 
 ## Developer Certificate of Origin
 
-Every commit in a pull request must be signed off under the
+Every commit in a pull request from a fork must be signed off under the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/): a
 `Signed-off-by:` trailer with your real name and the same email as the commit's
 author. Git adds it for you with `-s`:
@@ -35,8 +35,9 @@ git commit -s -m "fix: describe the change"
 
 To sign off commits you have already made on your branch, run
 `git rebase --signoff origin/main` and force-push the branch. The **DCO** check on
-each pull request lists any commit that is missing its sign-off. Commits made by
-bots (Dependabot, the changesets release bot) are exempt.
+each pull request from a fork lists any commit that is missing its sign-off.
+Commits made by bots (Dependabot, the changesets release bot) are exempt, and so are
+branches maintainers push to this repository itself.
 
 By signing off you certify the DCO, which says, in short, that you wrote the
 change or otherwise have the right to submit it under the project's licence.
