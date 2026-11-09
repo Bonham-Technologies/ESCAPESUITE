@@ -267,6 +267,47 @@ describe('the storage-nearly-full warning', () => {
     })
   }
 
+  // ESCSUITE-426: the bar's buttons. Clear All / Remove hover paints its
+  // label --danger-ink on a rgba(244, 67, 54, 0.1) tint, over the plain bar
+  // (--bg-tertiary) or over the warning tint; on the warning tint the labels
+  // at rest take --text-secondary.
+  it('paints the Clear All hover with --danger-ink and the warning-state labels with --text-secondary', () => {
+    const sheet = moduleCss(UPLOADER)
+    expect(declaration(sheet, '.storageClearButton.clearAll:hover', 'color')).toBe('var(--danger-ink)')
+    expect(declaration(sheet, '.storageClearButton.clearAll:hover', 'background')).toBe('rgba(244, 67, 54, 0.1)')
+    expect(
+      declaration(sheet, '.storageWarning .storageClearButton,\n.storageWarning .orphanedImports', 'color')
+    ).toBe('var(--text-secondary)')
+  })
+
+  for (const palette of [DARK, LIGHT]) {
+    it(`keeps the storage bar's button labels at 4.5:1, hovered too (${palette})`, () => {
+      const danger = token(palette, '--danger-ink')
+      const plainBar = token(palette, '--bg-tertiary')
+      expect(contrastRatio(danger, over('#f44336', 0.1, plainBar)), `${palette} Clear All hover, plain bar`).toBeGreaterThanOrEqual(4.5)
+      expect(contrastRatio(token(palette, '--text-muted'), plainBar), `${palette} labels at rest, plain bar`).toBeGreaterThanOrEqual(4.5)
+      expect(
+        contrastRatio(token(palette, '--warning-ink'), over('#ff9800', 0.1, plainBar)),
+        `${palette} Clear Unused hover, plain bar`
+      ).toBeGreaterThanOrEqual(4.5)
+      for (const surface of ['--bg-primary', '--bg-secondary', '--bg-tertiary']) {
+        const panel = over('#ff9800', 0.15, token(palette, surface))
+        expect(
+          contrastRatio(token(palette, '--text-secondary'), panel),
+          `${palette} labels at rest on the warning tint over ${surface}`
+        ).toBeGreaterThanOrEqual(4.5)
+        expect(
+          contrastRatio(danger, over('#f44336', 0.1, panel)),
+          `${palette} Clear All hover on the warning tint over ${surface}`
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+    })
+  }
+
+  it('measured --text-muted under 4.5:1 on the dark warning tint, which is why it is swapped', () => {
+    expect(contrastRatio(token(DARK, '--text-muted'), over('#ff9800', 0.15, token(DARK, '--bg-secondary')))).toBeLessThan(4.5)
+  })
+
   it('keeps the dark theme as it was', () => {
     expect(token(DARK, '--warning-ink')).toBe('#ff9800')
   })

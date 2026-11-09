@@ -24,6 +24,7 @@ import {
   openMobileInspector,
   openExportDialog,
   openExportAdvancedOptions,
+  makeToneWav,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 
@@ -1724,5 +1725,77 @@ test.describe('Color Contrast', () => {
       // paintOf's `surface` is the fill's parent: the bar's track.
       expect(contrast(paint.fill, paint.surface), `${theme} storage warning fill on its track`).toBeGreaterThanOrEqual(3)
     })
+  }
+
+  // ESCSUITE-426: the storage bar's buttons. With storage nearly full the
+  // dark theme's --text-muted labels were 3.90:1 on the orange tint, and the
+  // Clear All / Remove hover painted its label --accent-danger: 3.05:1 dark,
+  // 3.58:1 light. The ESCSUITE-425 case above never sees the buttons enabled:
+  // with no media imported Clear All is disabled and Clear Unused is absent.
+  // Here one imported file that is not on the timeline enables Clear All and
+  // shows Clear Unused, on the plain bar and the warning bar, in both themes.
+  for (const theme of ['dark', 'light'] as const) {
+    for (const nearlyFull of [false, true]) {
+      test(`the storage bar's buttons stay readable, hovered too (${theme} theme, ${nearlyFull ? 'storage nearly full' : 'plenty of storage'}, ESCSUITE-426)`, async ({
+        page,
+        browserName,
+      }) => {
+        test.setTimeout(90_000)
+        // Same limitation as the light-theme audit with a clip selected: the
+        // import stores a Blob in IndexedDB.
+        test.skip(
+          browserName === 'webkit',
+          'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+        )
+        await page.addInitScript((usedMb: number) => {
+          const MB = 1024 * 1024
+          Object.defineProperty(navigator.storage, 'estimate', {
+            configurable: true,
+            value: async () => ({ usage: usedMb * MB, quota: 1000 * MB }),
+          })
+        }, nearlyFull ? 950 : 50)
+        await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=${theme}`)
+        await waitForAppReady(page, 'artist')
+        await expect
+          .poll(() =>
+            page.evaluate(
+              () =>
+                (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+                null
+            )
+          )
+          .toBe(theme)
+
+        // One file in the library and none on the timeline: unused.
+        await page
+          .locator('input[type="file"]')
+          .setInputFiles({ name: 'tone.wav', mimeType: 'audio/wav', buffer: makeToneWav(1) })
+        await expect(page.getByRole('button', { name: 'Add to timeline' })).toBeVisible({ timeout: 30_000 })
+
+        const bar = page.locator('[class*="storageBar"]')
+        await expect(bar).toHaveClass(nearlyFull ? /storageWarning/ : /storageBar/)
+        if (!nearlyFull) await expect(bar).not.toHaveClass(/storageWarning/)
+        const clearAll = bar.getByRole('button', { name: 'Clear All' })
+        const clearUnused = bar.getByRole('button', { name: /^Clear Unused/ })
+        await expect(clearAll).toBeEnabled()
+        await expect(clearUnused).toBeVisible()
+
+        const label = `${theme}, ${nearlyFull ? 'nearly full' : 'plenty'}`
+        await page.mouse.move(0, 0)
+        await waitForAnimationsToFinish(bar)
+        expect.soft(await contrastFailures(page, '[class*="storageBar"]'), `${label}, at rest`).toEqual([])
+
+        for (const [name, button] of [
+          ['Clear All', clearAll],
+          ['Clear Unused', clearUnused],
+        ] as const) {
+          await button.hover()
+          await waitForAnimationsToFinish(bar)
+          expect
+            .soft(await contrastFailures(page, '[class*="storageBar"]'), `${label}, ${name} hovered`)
+            .toEqual([])
+        }
+      })
+    }
   }
 })
