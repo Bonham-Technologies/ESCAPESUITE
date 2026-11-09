@@ -1,7 +1,10 @@
 name: DCO
 
-# Every commit in a pull request must be signed off under the Developer
-# Certificate of Origin (CONTRIBUTING.md, ESCSUITE-419). Bot commits are exempt.
+# Every commit in a pull request from a fork must be signed off under the
+# Developer Certificate of Origin (CONTRIBUTING.md, ESCSUITE-419). Bot commits are
+# exempt. Branches pushed to this repository (the owner's, the autopilot's,
+# Dependabot's, the changesets bot's) skip the job: only people with write access
+# can push here, which is the fleet's `members: false` rule (ESCSUITE-424).
 # This is its own check ("DCO / sign-off"), not part of ci-status: the owner
 # decides whether `main`'s ruleset requires it.
 on:
@@ -17,6 +20,7 @@ permissions:
 
 jobs:
   sign-off:
+    if: github.event.pull_request.head.repo.full_name != github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
