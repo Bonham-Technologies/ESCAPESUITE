@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v13. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v16. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and `.claude/rules/autopilot.local.md` load in every session and apply here too.
@@ -20,12 +20,12 @@ updates too.
 
 ```
 gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' \
-  --jq '.[] | select(.user.login == "dependabot[bot]") | .number'
+  --jq '.[] | select(.user.login == "dependabot[bot]" and .head.repo.full_name == .base.repo.full_name) | .number'
 ```
 
 **Skip the triaged ones.** A PR is triaged when one of its comments starts with the
-marker line `<!-- autopilot:dependabot-triage -->`. Comments post as the owner, so the
-marker is the only reliable sign; never judge by author. The one exception: a triaged
+marker line `<!-- autopilot:dependabot-triage -->` and was posted by the owner (`mrbonha`),
+as autopilot's comments are; no other author counts. The one exception: a triaged
 PR whose verdict is `merge`, that is still open with no `needs-owner` label, and whose
 head is still the comment's `Head:` sha was waiting on CI or on auto-merge. Bring it
 up to date and, unless its auto-merge is on, merge it under the rules below once it has
@@ -35,7 +35,7 @@ Check for the marker with:
 
 ```
 gh api 'repos/{owner}/{repo}/issues/{n}/comments?per_page=100' \
-  --jq '[.[] | select(.body | startswith("<!-- autopilot:dependabot-triage -->"))] | length'
+  --jq '[.[] | select(.user.login == "mrbonha" and (.body | startswith("<!-- autopilot:dependabot-triage -->")))] | length'
 ```
 
 For each untriaged PR:
