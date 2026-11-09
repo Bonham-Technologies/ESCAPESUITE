@@ -16,6 +16,7 @@ Every pair below is pinned numerically in `src/styles/themeTokens.test.ts`, in b
 | `--accent-ring` | An edge that carries meaning: focus, a pressed button, the selected clip, a drop target | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces and both timeline surfaces (WCAG 1.4.11) |
 | `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill and on the `#3a8eef` hover fill |
 | `--accent-primary` | Fills, and borders that only decorate | `#4a9eff` | `#4a9eff` | None as text or as a focus indicator |
+| `--warning-ink` | The warning colour as text or a state graphic: the storage-nearly-full text and fill, the Clear Unused hover | `#ff9800` | `#924600` | 4.5:1 as text on the orange-tinted warning panel, 3:1 on `--border-color` |
 
 The four surfaces are `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-hover`.
 
@@ -56,6 +57,14 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   progress fills (upload, storage, export), the spinners and the slider thumbs and range fills,
   which are graphical objects or native controls at 2.1–2.75:1 on light tracks; they need their
   own look at what they sit on.
+- **Warning text or a warning fill takes `--warning-ink`** (ESCSUITE-425). When storage is nearly
+  full (under 100 MB left) the media library's storage bar tints its panel
+  `rgba(255, 152, 0, 0.15)` and drew its text and fill in a hard-coded `#ff9800`: 1.8:1 as text on
+  the light panel (`#f7e9d5` over `--bg-secondary`) and 1.46:1 as a fill on the light
+  `--border-color` track. The light `#924600` is the same hue, darker: 5.17:1 on the tint over
+  `--bg-tertiary`, 4.60:1 on the track. The tints and the panel's border stay on the raw orange:
+  they decorate, and the words carry the state. `--accent-warning` keeps its own uses (the
+  timeline's warning rings and the import notice's edge).
 - **A surface that is dark in both themes does not read theme text tokens.** The preview's empty
   and loading placeholder sits on `.videoWrapper`'s `#111`, so it hard-codes the dark `--text-muted`
   (`#8f8fa2`, 5.95:1); the light value would be 3.10:1 there. The keyframe panel is painted dark
@@ -74,3 +83,6 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   both themes, from computed styles (axe judges text only): the play icon on its fill and hover
   fill (3:1), the pressed B button's label (4.5:1, hovered too) and its edge or fill on its
   surface (3:1), the active tool's icon and edge, and the selected clip's ring on its track.
+- The same file's "the storage-nearly-full warning stays readable (ESCSUITE-425)": both themes,
+  with `navigator.storage.estimate` reporting 950 MB used of 1000 MB. axe `color-contrast` over
+  the storage bar, and the warning fill on its track from computed styles.

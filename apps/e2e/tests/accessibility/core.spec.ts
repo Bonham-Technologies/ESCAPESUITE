@@ -1544,4 +1544,49 @@ test.describe('Color Contrast', () => {
       })
     })
   }
+
+  // ESCSUITE-425: when browser storage is nearly full (under 100 MB left) the
+  // media library's storage bar turns orange: its text and its fill were a
+  // hard-coded #ff9800, 1.8:1 on the tinted light panel and 1.46:1 on the
+  // light track. No other audit sees this state, so this one forces it by
+  // reporting 950 MB used of a 1000 MB quota. Both themes: the dark one must
+  // keep passing.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`the storage-nearly-full warning stays readable (${theme} theme, ESCSUITE-425)`, async ({ page }) => {
+      await page.addInitScript(() => {
+        const MB = 1024 * 1024
+        Object.defineProperty(navigator.storage, 'estimate', {
+          configurable: true,
+          value: async () => ({ usage: 950 * MB, quota: 1000 * MB }),
+        })
+      })
+      await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+              null
+          )
+        )
+        .toBe(theme)
+
+      const bar = page.locator('[class*="storageWarning"]')
+      await expect(bar).toBeVisible()
+      await expect(bar).toContainText('950')
+      await page.mouse.move(0, 0)
+      await waitForAnimationsToFinish(bar)
+
+      expect.soft(
+        await contrastFailures(page, '[class*="storageWarning"]'),
+        `${theme} contrast failures, storage warning`
+      ).toEqual([])
+
+      const fill = bar.locator('[class*="storageProgressFill"]')
+      const paint = await paintOf(fill)
+      // paintOf's `surface` is the fill's parent: the bar's track.
+      expect(contrast(paint.fill, paint.surface), `${theme} storage warning fill on its track`).toBeGreaterThanOrEqual(3)
+    })
+  }
 })
