@@ -30,6 +30,11 @@
   --accent-secondary: #7c4dff;
   --accent-success: #4caf50;
   --accent-warning: #ff9800;
+  /* The warning colour as text or as a state graphic: the media library's
+     storage bar when storage is nearly full (its text, its fill) and the
+     Clear Unused button's hover. --accent-warning itself on the dark
+     surfaces; the light theme darkens it (ESCSUITE-425). */
+  --warning-ink: #ff9800;
   --accent-danger: #f44336;
 
   --border-color: #2a2a4a;
@@ -117,6 +122,11 @@
   --accent-secondary: #7c4dff;
   --accent-success: #22c55e;
   --accent-warning: #f59e0b;
+  /* #ff9800 was 1.8:1 as the storage warning's text on its orange-tinted
+     panel and 1.46:1 as its fill on the --border-color track. The same hue,
+     darkened: 5.17:1 on the tint over --bg-tertiary, 6.78:1 on white and
+     4.60:1 on --border-color (ESCSUITE-425). */
+  --warning-ink: #924600;
   --accent-danger: #dc2626;
 
   --border-color: #d1d5db;

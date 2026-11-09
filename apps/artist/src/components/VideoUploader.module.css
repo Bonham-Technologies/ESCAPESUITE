@@ -277,7 +277,9 @@
 }
 
 .storageWarning .storageInfo {
-  color: #ff9800;
+  /* --warning-ink, not a hard-coded #ff9800: that was 1.8:1 on this panel in
+     the light theme (ESCSUITE-425). */
+  color: var(--warning-ink);
 }
 
 .storageProgress {
@@ -297,7 +299,8 @@
 }
 
 .storageWarning .storageProgressFill {
-  background: #ff9800;
+  /* 3:1 on the --border-color track in both themes (ESCSUITE-425). */
+  background: var(--warning-ink);
 }
 
 .storageActions {
@@ -325,8 +328,8 @@
 }
 
 .storageClearButton.clearUnused:hover {
-  border-color: #ff9800;
-  color: #ff9800;
+  border-color: var(--warning-ink);
+  color: var(--warning-ink);
   background: rgba(255, 152, 0, 0.1);
 }
 

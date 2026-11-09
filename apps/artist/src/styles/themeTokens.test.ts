@@ -221,6 +221,57 @@ describe('progress fills and slider thumbs', () => {
   })
 })
 
+/**
+ * ESCSUITE-425: when storage is nearly full the media library's storage bar
+ * tints its panel orange (rgba(255, 152, 0, 0.15) over the surface behind it)
+ * and drew its text and fill in a hard-coded #ff9800: 1.8:1 as text on the
+ * light panel, 1.46:1 as a fill on the light --border-color track. Both take
+ * --warning-ink now.
+ */
+describe('the storage-nearly-full warning', () => {
+  const UPLOADER = 'src/components/VideoUploader.module.css'
+
+  /** `top` at `alpha` composited over the opaque `bottom`. */
+  function over(top: string, alpha: number, bottom: string): string {
+    const channel = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16)
+    return `#${[0, 1, 2]
+      .map((i) => Math.round(channel(top, i) * alpha + channel(bottom, i) * (1 - alpha)))
+      .map((v) => v.toString(16).padStart(2, '0'))
+      .join('')}`
+  }
+
+  it('paints the warning text, fill and Clear Unused hover with --warning-ink', () => {
+    const sheet = moduleCss(UPLOADER)
+    expect(declaration(sheet, '.storageWarning .storageInfo', 'color')).toBe('var(--warning-ink)')
+    expect(declaration(sheet, '.storageWarning .storageProgressFill', 'background')).toBe('var(--warning-ink)')
+    expect(declaration(sheet, '.storageClearButton.clearUnused:hover', 'color')).toBe('var(--warning-ink)')
+    expect(declaration(sheet, '.storageWarning', 'background')).toBe('rgba(255, 152, 0, 0.15)')
+  })
+
+  for (const palette of [DARK, LIGHT]) {
+    it(`keeps --warning-ink at 4.5:1 as text on the tinted panel and 3:1 on its track (${palette})`, () => {
+      const ink = token(palette, '--warning-ink')
+      // The bar sits in the media library panel (--bg-secondary); the other
+      // two are the surfaces a panel can be. Not --bg-hover: nothing hovers
+      // under it.
+      for (const surface of ['--bg-primary', '--bg-secondary', '--bg-tertiary']) {
+        const panel = over('#ff9800', 0.15, token(palette, surface))
+        expect(contrastRatio(ink, panel), `${palette} --warning-ink on the tint over ${surface}`).toBeGreaterThanOrEqual(4.5)
+        // The Clear Unused hover adds a 0.1 tint on top of the panel.
+        expect(
+          contrastRatio(ink, over('#ff9800', 0.1, panel)),
+          `${palette} --warning-ink on the Clear Unused hover over ${surface}`
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+      expect(contrastRatio(ink, token(palette, '--border-color')), `${palette} --warning-ink on its track`).toBeGreaterThanOrEqual(3)
+    })
+  }
+
+  it('keeps the dark theme as it was', () => {
+    expect(token(DARK, '--warning-ink')).toBe('#ff9800')
+  })
+})
+
 /** A stylesheet's text with its comments removed. */
 function moduleCss(file: string): string {
   return readFileSync(file.startsWith('/') ? file : join(process.cwd(), file), 'utf8').replace(

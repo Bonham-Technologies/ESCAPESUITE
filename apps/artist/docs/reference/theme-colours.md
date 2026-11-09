@@ -16,6 +16,7 @@ Every pair below is pinned numerically in `src/styles/themeTokens.test.ts`, in b
 | `--accent-ring` | An edge that carries meaning: focus, a pressed button, the selected clip, a drop target; and a graphical object that shows state: a progress fill, a slider thumb | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces, both timeline surfaces and `--border-color` (WCAG 1.4.11) |
 | `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill and on the `#3a8eef` hover fill |
 | `--accent-primary` | Fills, and borders that only decorate | `#4a9eff` | `#4a9eff` | None as text or as a focus indicator |
+| `--warning-ink` | The warning colour as text or a state graphic: the storage-nearly-full text and fill, the Clear Unused hover | `#ff9800` | `#924600` | 4.5:1 as text on the orange-tinted warning panel, 3:1 on `--border-color` |
 
 The four surfaces are `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-hover`.
 
@@ -64,13 +65,21 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   bar takes the ring too, for consistency, but it is not a measure: its fill is always 100% wide
   and pulses down to 50% opacity (1.70:1 on its track at the dip) beside a "Processing..." status,
   which carries the state, as with the spinners below. The storage bar's warning state
-  (`#ff9800`) is a separate colour and is not covered here (ESCSUITE-425).
+  has its own token, `--warning-ink` (below).
 - **The spinners are decorative and stay on `--accent-primary`.** The preview's spinner sits
   beside "Loading videos..." and the project-load overlay's beside "Loading project..." (that one
   is `aria-hidden`), so the words carry the state and the spinner adds no information WCAG 1.4.11
   asks to be perceivable. The overlay's spinner sits on an 80% black scrim, where `--accent-ring`
   would be darker against it than the fill it has now. `index.css`'s global `.spinner` is not used
   by any component.
+- **Warning text or a warning fill takes `--warning-ink`** (ESCSUITE-425). When storage is nearly
+  full (under 100 MB left) the media library's storage bar tints its panel
+  `rgba(255, 152, 0, 0.15)` and drew its text and fill in a hard-coded `#ff9800`: 1.8:1 as text on
+  the light panel (`#f7e9d5` over `--bg-secondary`) and 1.46:1 as a fill on the light
+  `--border-color` track. The light `#924600` is the same hue, darker: 5.17:1 on the tint over
+  `--bg-tertiary`, 4.60:1 on the track. The tints and the panel's border stay on the raw orange:
+  they decorate, and the words carry the state. `--accent-warning` keeps its own uses (the
+  timeline's warning rings and the import notice's edge).
 - **A surface that is dark in both themes does not read theme text tokens.** The preview's empty
   and loading placeholder sits on `.videoWrapper`'s `#111`, so it hard-codes the dark `--text-muted`
   (`#8f8fa2`, 5.95:1); the light value would be 3.10:1 there. The keyframe panel is painted dark
@@ -94,3 +103,6 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   `getComputedStyle` cannot read, so the test resolves the stylesheet rule that paints it in the
   live theme. `themeTokens.test.ts` pins each fill and thumb to `--accent-ring` and the ring on
   every track they run on.
+- The same file's "the storage-nearly-full warning stays readable (ESCSUITE-425)": both themes,
+  with `navigator.storage.estimate` reporting 950 MB used of 1000 MB. axe `color-contrast` over
+  the storage bar, and the warning fill on its track from computed styles.
