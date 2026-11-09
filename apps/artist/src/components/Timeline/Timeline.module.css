@@ -255,7 +255,7 @@
   min-height: 30px;
   max-height: 50px;
   cursor: pointer;
-  accent-color: var(--accent-primary);
+  accent-color: var(--accent-ring);
   -webkit-appearance: none;
   appearance: none;
   writing-mode: vertical-lr;
@@ -270,7 +270,12 @@
   width: 12px;
   height: 8px;
   border-radius: 2px;
-  background: var(--accent-primary);
+  /* --accent-ring, not --accent-primary: in the light theme #4a9eff is 1.87-2.32:1
+     on the tracks a fill or thumb sits on, under WCAG 1.4.11's 3:1 for a
+     graphical object that shows state; the ring colour is 3:1 or more there
+     (docs/reference/theme-colours.md).
+     Dark theme: the two are the same colour (ESCSUITE-423). */
+  background: var(--accent-ring);
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
@@ -285,7 +290,7 @@
   width: 12px;
   height: 8px;
   border-radius: 2px;
-  background: var(--accent-primary);
+  background: var(--accent-ring);
   border: none;
   cursor: pointer;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
