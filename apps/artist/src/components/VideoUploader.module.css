@@ -303,6 +303,15 @@
   background: var(--warning-ink);
 }
 
+/* On the dark theme's orange warning tint --text-muted is 3.9:1; the
+   buttons' labels and the earlier-sessions note take --text-secondary there,
+   4.7:1 or more (ESCSUITE-426). Their hover colours still win: those rules
+   are more specific. */
+.storageWarning .storageClearButton,
+.storageWarning .orphanedImports {
+  color: var(--text-secondary);
+}
+
 .storageActions {
   display: flex;
   gap: 4px;
@@ -334,8 +343,10 @@
 }
 
 .storageClearButton.clearAll:hover {
-  border-color: var(--accent-danger);
-  color: var(--accent-danger);
+  /* --danger-ink, not --accent-danger: that was 3.05:1 (dark) and 3.58:1
+     (light) as this label on its own tint (ESCSUITE-426). */
+  border-color: var(--danger-ink);
+  color: var(--danger-ink);
   background: rgba(244, 67, 54, 0.1);
 }
 

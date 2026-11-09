@@ -17,6 +17,7 @@ Every pair below is pinned numerically in `src/styles/themeTokens.test.ts`, in b
 | `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill and on the `#3a8eef` hover fill |
 | `--accent-primary` | Fills, and borders that only decorate | `#4a9eff` | `#4a9eff` | None as text or as a focus indicator |
 | `--warning-ink` | The warning colour as text or a state graphic: the storage-nearly-full text and fill, the Clear Unused hover | `#ff9800` | `#924600` | 4.5:1 as text on the orange-tinted warning panel, 3:1 on `--border-color` |
+| `--danger-ink` | The danger colour as text: the storage bar's Clear All / Remove hover | `#ff8a80` | `#a81b1b` | 4.5:1 on the hover's red tint, over the plain bar and the warning tint |
 
 The four surfaces are `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-hover`.
 
@@ -80,6 +81,12 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   `--bg-tertiary`, 4.60:1 on the track. The tints and the panel's border stay on the raw orange:
   they decorate, and the words carry the state. `--accent-warning` keeps its own uses (the
   timeline's warning rings and the import notice's edge).
+- **Danger as text takes `--danger-ink`; `--accent-danger` stays for fills** (ESCSUITE-426). The
+  storage bar's Clear All / Remove hover painted its label `--accent-danger` on a
+  `rgba(244, 67, 54, 0.1)` tint: 3.05:1 in the dark theme on the warning tint, 3.58:1 in the light
+  one. `--danger-ink` is lighter in the dark theme and darker in the light one. On the dark
+  theme's orange warning tint `--text-muted` is 3.9:1, so in the warning state the bar's button
+  labels and the earlier-sessions note take `--text-secondary` (4.7:1 or more).
 - **A surface that is dark in both themes does not read theme text tokens.** The preview's empty
   and loading placeholder sits on `.videoWrapper`'s `#111`, so it hard-codes the dark `--text-muted`
   (`#8f8fa2`, 5.95:1); the light value would be 3.10:1 there. The keyframe panel is painted dark
@@ -106,3 +113,6 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
 - The same file's "the storage-nearly-full warning stays readable (ESCSUITE-425)": both themes,
   with `navigator.storage.estimate` reporting 950 MB used of 1000 MB. axe `color-contrast` over
   the storage bar, and the warning fill on its track from computed styles.
+- The same file's "the storage bar's buttons stay readable, hovered too (ESCSUITE-426)": both
+  themes, plain and nearly full, with one imported file not on the timeline so Clear All is
+  enabled and Clear Unused shows; axe `color-contrast` at rest and with each button hovered.

@@ -35,6 +35,10 @@
      Clear Unused button's hover. --accent-warning itself on the dark
      surfaces; the light theme darkens it (ESCSUITE-425). */
   --warning-ink: #ff9800;
+  /* The danger colour as text: the storage bar's Clear All / Remove hover.
+     --accent-danger (#f44336) is 3.05:1 there on the warning tint, so the
+     dark theme lightens it, unlike --accent-danger's fills (ESCSUITE-426). */
+  --danger-ink: #ff8a80;
   --accent-danger: #f44336;
 
   --border-color: #2a2a4a;
@@ -127,6 +131,10 @@
      darkened: 5.17:1 on the tint over --bg-tertiary, 6.78:1 on white and
      4.60:1 on --border-color (ESCSUITE-425). */
   --warning-ink: #924600;
+  /* The light --accent-danger (#dc2626) as text is 3.58:1 on the Clear All
+     hover tint; the same hue, darkened, is 5.0:1 or more there, on the
+     warning tint too (ESCSUITE-426). */
+  --danger-ink: #a81b1b;
   --accent-danger: #dc2626;
 
   --border-color: #d1d5db;
