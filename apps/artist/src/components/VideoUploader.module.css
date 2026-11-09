@@ -104,7 +104,12 @@
 
 .progressFill {
   height: 100%;
-  background: var(--accent-primary);
+  /* --accent-ring, not --accent-primary: in the light theme #4a9eff is 1.87-2.32:1
+     on the tracks a fill or thumb sits on, under WCAG 1.4.11's 3:1 for a
+     graphical object that shows state; the ring colour is 3:1 or more there
+     (docs/reference/theme-colours.md).
+     Dark theme: the two are the same colour (ESCSUITE-423). */
+  background: var(--accent-ring);
   animation: pulse 1.5s ease-in-out infinite;
 }
 
@@ -286,7 +291,8 @@
 
 .storageProgressFill {
   height: 100%;
-  background: var(--accent-primary);
+  /* --accent-ring: see .progressFill (ESCSUITE-423). */
+  background: var(--accent-ring);
   transition: width var(--transition-normal);
 }
 

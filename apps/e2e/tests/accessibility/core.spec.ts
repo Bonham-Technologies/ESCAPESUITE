@@ -1544,4 +1544,140 @@ test.describe('Color Contrast', () => {
       })
     })
   }
+
+  /**
+   * The colour a range input's thumb is painted with, and the track it runs
+   * on. A thumb is a pseudo-element in the browser's own shadow tree, and
+   * `getComputedStyle(input, '::-webkit-slider-thumb')` hands back the input's
+   * style instead, so this finds the stylesheet rules that style this input's
+   * thumb (`::-webkit-slider-thumb` or `::-moz-range-thumb`, whichever the
+   * browser kept), and resolves their `background` through a probe element
+   * beside the input, so `var(--accent-ring)` takes the live theme's value.
+   * The track is the input's own computed background; the surface is what the
+   * input sits on.
+   */
+  async function thumbPaintOf(slider: Locator) {
+    return slider.evaluate((el) => {
+      type Rgba = [number, number, number, number]
+      const parse = (c: string): Rgba | null => {
+        const m = c.match(/rgba?\(([^)]+)\)/)
+        if (!m) return null
+        const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number)
+        return [p[0], p[1], p[2], p[3] ?? 1]
+      }
+      const over = (top: Rgba, bottom: Rgba): Rgba => [
+        ...([0, 1, 2].map((i) => top[i] * top[3] + bottom[i] * (1 - top[3])) as [number, number, number]),
+        1,
+      ]
+      const backgroundFrom = (start: Element | null): Rgba => {
+        const layers: Rgba[] = []
+        for (let n = start; n; n = n.parentElement) {
+          const c = parse(getComputedStyle(n).backgroundColor)
+          if (c && c[3] > 0) {
+            layers.push(c)
+            if (c[3] === 1) break
+          }
+        }
+        return layers.reverse().reduce((acc, layer) => over(layer, acc), [255, 255, 255, 1] as Rgba)
+      }
+      const thumbBackgrounds: string[] = []
+      const visit = (rules: CSSRuleList) => {
+        for (const rule of Array.from(rules)) {
+          if ('cssRules' in rule && (rule as CSSGroupingRule).cssRules && !(rule instanceof CSSStyleRule)) {
+            visit((rule as CSSGroupingRule).cssRules)
+            continue
+          }
+          if (!(rule instanceof CSSStyleRule)) continue
+          for (const selector of rule.selectorText.split(',')) {
+            const m = selector.trim().match(/^(.*)::-(?:webkit-slider|moz-range)-thumb$/)
+            if (!m) continue
+            let matches: boolean
+            try {
+              matches = el.matches(m[1])
+            } catch {
+              // A selector this engine cannot parse styles nothing here.
+              matches = false
+            }
+            const value = rule.style.backgroundColor || rule.style.background
+            if (matches && value) thumbBackgrounds.push(value)
+          }
+        }
+      }
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          visit(sheet.cssRules)
+        } catch {
+          // A cross-origin sheet: ARTIST loads none of its own.
+        }
+      }
+      const value = thumbBackgrounds.at(-1)
+      if (!value) return null
+      const probe = document.createElement('span')
+      el.parentElement?.appendChild(probe)
+      probe.style.backgroundColor = value
+      const thumb = parse(getComputedStyle(probe).backgroundColor) as Rgba
+      probe.remove()
+      const surface = backgroundFrom(el.parentElement)
+      const track = backgroundFrom(el)
+      const rgb = (c: Rgba) => [c[0], c[1], c[2]] as [number, number, number]
+      return { thumb: rgb(over(thumb, track)), track: rgb(track), surface: rgb(surface) }
+    })
+  }
+
+  // ESCSUITE-423: ESCSUITE-422 left the progress fills and slider thumbs on
+  // --accent-primary (#4a9eff), 2.1-2.75:1 in the light theme against the
+  // tracks and surfaces they sit on, under WCAG 1.4.11's 3:1 for a graphical
+  // object that shows state (how far an export has got, where a slider is).
+  // Both themes: the dark one must keep passing.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`the export progress fill and the inspector's slider thumbs stand out from their tracks (${theme} theme, ESCSUITE-423)`, async ({
+      page,
+    }) => {
+      test.setTimeout(120_000)
+      await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () =>
+              (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ??
+              null
+          )
+        )
+        .toBe(theme)
+      await seedTextClip(page)
+
+      await test.step("a Transform slider's thumb", async () => {
+        const posX = page.getByLabel('Pos X', { exact: true })
+        if (!(await posX.isVisible())) {
+          await page.getByRole('button', { name: 'Transform', exact: true }).click()
+        }
+        await expect(posX).toBeVisible()
+        const paint = await thumbPaintOf(posX)
+        expect(paint, 'no stylesheet rule paints the Pos X thumb').not.toBeNull()
+        const { thumb, track, surface } = paint as NonNullable<typeof paint>
+        expect.soft(contrast(thumb, track), `${theme} Pos X thumb on its track`).toBeGreaterThanOrEqual(3)
+        expect.soft(contrast(thumb, surface), `${theme} Pos X thumb on the inspector`).toBeGreaterThanOrEqual(3)
+      })
+
+      await test.step('the export progress fill', async () => {
+        // The same export as screen-reader.spec.ts's "announces export
+        // progress": the progress view only exists while an export runs.
+        await openExportDialog(page)
+        await openExportAdvancedOptions(page)
+        await page.getByRole('radio', { name: /MP4/ }).check()
+        await page.getByRole('button', { name: 'Download MP4' }).first().click()
+
+        const bar = page.getByRole('dialog').getByRole('progressbar', { name: 'Export progress' })
+        await expect(bar).toBeVisible({ timeout: 30_000 })
+        const fill = bar.locator('> div').first()
+        const paint = await paintOf(fill)
+        // paintOf's `fill` is the fill composited over the bar; its `surface`
+        // is the bar's own track colour.
+        expect.soft(contrast(paint.fill, paint.surface), `${theme} export progress fill on its track`).toBeGreaterThanOrEqual(
+          3
+        )
+      })
+    })
+  }
 })
