@@ -177,6 +177,51 @@ describe('accent fills across the stylesheets', () => {
 })
 
 /**
+ * ESCSUITE-423: the progress fills and slider thumbs are graphical objects
+ * that show state (how far an export or upload has got, where a slider is),
+ * so WCAG 1.4.11 asks 3:1 of them against what they sit on. --accent-primary
+ * was 1.87-2.32:1 on the light tracks; they take --accent-ring, which is the
+ * same colour in the dark theme.
+ */
+describe('progress fills and slider thumbs', () => {
+  // [stylesheet, selector, the track token it runs on]
+  const PARTS: [string, string, string][] = [
+    ['src/components/VideoUploader.module.css', '.progressFill', '--border-color'],
+    ['src/components/VideoUploader.module.css', '.storageProgressFill', '--border-color'],
+    ['src/components/Export/ExportDialog.module.css', '.progressFill', '--bg-tertiary'],
+    ['src/styles/index.css', '.progress-bar-fill', '--bg-tertiary'],
+    ['src/components/Timeline/Timeline.module.css', '.trackVolumeSlider::-webkit-slider-thumb', '--bg-hover'],
+    ['src/components/Timeline/Timeline.module.css', '.trackVolumeSlider::-moz-range-thumb', '--bg-hover'],
+    ['src/components/ClipEditor/ClipEditor.module.css', '.transformRow input[type="range"]::-webkit-slider-thumb', '--bg-tertiary'],
+    ['src/components/ClipEditor/ClipEditor.module.css', '.transformRow input[type="range"]::-moz-range-thumb', '--bg-tertiary'],
+  ]
+
+  for (const [file, selector] of PARTS) {
+    it(`paints ${selector} in ${file.split('/').pop()} with --accent-ring`, () => {
+      expect(declaration(moduleCss(file), selector, 'background')).toBe('var(--accent-ring)')
+    })
+  }
+
+  for (const palette of [DARK, LIGHT]) {
+    it(`keeps --accent-ring at 3:1 on every track they run on (${palette})`, () => {
+      const ring = token(palette, '--accent-ring')
+      for (const track of new Set(PARTS.map(([, , t]) => t))) {
+        expect(contrastRatio(ring, token(palette, track)), `${palette} --accent-ring on ${track}`).toBeGreaterThanOrEqual(3)
+      }
+    })
+  }
+
+  it('pins the light pairs it was measured at', () => {
+    const ring = token(LIGHT, '--accent-ring')
+    expect(contrastRatio(ring, token(LIGHT, '--border-color'))).toBeCloseTo(3.0, 2)
+    expect(contrastRatio(ring, token(LIGHT, '--bg-tertiary'))).toBeCloseTo(3.73, 2)
+    expect(contrastRatio(ring, token(LIGHT, '--bg-hover'))).toBeCloseTo(3.42, 2)
+    // What they were on --accent-primary.
+    expect(contrastRatio(token(LIGHT, '--accent-primary'), token(LIGHT, '--border-color'))).toBeLessThan(3)
+  })
+})
+
+/**
  * ESCSUITE-425: when storage is nearly full the media library's storage bar
  * tints its panel orange (rgba(255, 152, 0, 0.15) over the surface behind it)
  * and drew its text and fill in a hard-coded #ff9800: 1.8:1 as text on the

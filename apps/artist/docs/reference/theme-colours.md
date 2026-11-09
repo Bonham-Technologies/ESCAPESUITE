@@ -13,7 +13,7 @@ Every pair below is pinned numerically in `src/styles/themeTokens.test.ts`, in b
 |---|---|---|---|---|
 | `--text-muted` | The quietest text: labels, metadata, hints | `#8f8fa2` | `#576375` | 4.5:1 on all four surfaces |
 | `--accent-text` | Accent-coloured text (headings, the active tab) | `#4a9eff` | `#155fb8` | 4.5:1 (see `keyboard-shortcuts.md`) |
-| `--accent-ring` | An edge that carries meaning: focus, a pressed button, the selected clip, a drop target | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces and both timeline surfaces (WCAG 1.4.11) |
+| `--accent-ring` | An edge that carries meaning: focus, a pressed button, the selected clip, a drop target; and a graphical object that shows state: a progress fill, a slider thumb | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces, both timeline surfaces and `--border-color` (WCAG 1.4.11) |
 | `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill and on the `#3a8eef` hover fill |
 | `--accent-primary` | Fills, and borders that only decorate | `#4a9eff` | `#4a9eff` | None as text or as a focus indicator |
 | `--warning-ink` | The warning colour as text or a state graphic: the storage-nearly-full text and fill, the Clear Unused hover | `#ff9800` | `#924600` | 4.5:1 as text on the orange-tinted warning panel, 3:1 on `--border-color` |
@@ -53,10 +53,25 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   the only sign of anything (the resolution select, the keyframe editor button, the media
   library's storage buttons, Add overlay and Set, whose label and fill change too) and the export
   dialog's advanced Download button outline (its `--accent-text` label names it). The drop zone's
-  plain hover shares the drag-over rule, so it takes the ring too. Not done: the
-  progress fills (upload, storage, export), the spinners and the slider thumbs and range fills,
-  which are graphical objects or native controls at 2.1–2.75:1 on light tracks; they need their
-  own look at what they sit on.
+  plain hover shares the drag-over rule, so it takes the ring too.
+- **A progress fill or a slider thumb takes `--accent-ring`** (ESCSUITE-423). They show state (how
+  far an export has got, how full storage is, where a slider is), so WCAG 1.4.11 asks 3:1 against
+  the track and the surface. `#4a9eff` was 1.87:1 on the media library's storage track
+  (`--border-color`, `#d1d5db`), 2.32:1 on the export dialog's track and the inspector sliders'
+  (`--bg-tertiary`) and 2.13:1 at the light end of the track volume slider's gradient
+  (`--bg-hover`). `#2378d8` is 3.00:1, 3.73:1 and 3.42:1 there. That covers the storage and
+  export fills, the global `.progress-bar-fill`, the track volume slider's thumb (and its
+  `accent-color`) and the thumb of every inspector slider inside a `.transformRow`. The upload
+  bar takes the ring too, for consistency, but it is not a measure: its fill is always 100% wide
+  and pulses down to 50% opacity (1.70:1 on its track at the dip) beside a "Processing..." status,
+  which carries the state, as with the spinners below. The storage bar's warning state
+  has its own token, `--warning-ink` (below).
+- **The spinners are decorative and stay on `--accent-primary`.** The preview's spinner sits
+  beside "Loading videos..." and the project-load overlay's beside "Loading project..." (that one
+  is `aria-hidden`), so the words carry the state and the spinner adds no information WCAG 1.4.11
+  asks to be perceivable. The overlay's spinner sits on an 80% black scrim, where `--accent-ring`
+  would be darker against it than the fill it has now. `index.css`'s global `.spinner` is not used
+  by any component.
 - **Warning text or a warning fill takes `--warning-ink`** (ESCSUITE-425). When storage is nearly
   full (under 100 MB left) the media library's storage bar tints its panel
   `rgba(255, 152, 0, 0.15)` and drew its text and fill in a hard-coded `#ff9800`: 1.8:1 as text on
@@ -83,6 +98,11 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   both themes, from computed styles (axe judges text only): the play icon on its fill and hover
   fill (3:1), the pressed B button's label (4.5:1, hovered too) and its edge or fill on its
   surface (3:1), the active tool's icon and edge, and the selected clip's ring on its track.
+- The same file's "the export progress fill and the inspector's slider thumbs stand out from
+  their tracks (ESCSUITE-423)": both themes, from computed styles. The thumb is a pseudo-element
+  `getComputedStyle` cannot read, so the test resolves the stylesheet rule that paints it in the
+  live theme. `themeTokens.test.ts` pins each fill and thumb to `--accent-ring` and the ring on
+  every track they run on.
 - The same file's "the storage-nearly-full warning stays readable (ESCSUITE-425)": both themes,
   with `navigator.storage.estimate` reporting 950 MB used of 1000 MB. axe `color-contrast` over
   the storage bar, and the warning fill on its track from computed styles.

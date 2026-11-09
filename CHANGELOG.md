@@ -7,3 +7,4 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - ESCAPEARTIST: in the light theme, the warning that browser storage is nearly full is a darker orange, so it is easier to read.
+- ESCAPEARTIST: in the light theme, progress bars and slider handles are a darker blue, so they stand out from their tracks.
