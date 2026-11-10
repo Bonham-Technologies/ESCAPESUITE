@@ -1,5 +1,11 @@
 # @escapesuite/headless-artist
 
+## 0.7.6
+
+### Patch Changes
+
+- 05deacd: Licence changed from MIT to the Apache License 2.0 from this release; earlier releases remain MIT. The site footer, home page, Terms of Service and the apps' "about" text now say Apache License 2.0, and contributions need a DCO sign-off (see CONTRIBUTING.md).
+
 ## 0.7.5
 
 ### Patch Changes
