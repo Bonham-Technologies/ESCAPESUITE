@@ -64,9 +64,9 @@ export default function Privacy() {
           </li>
         </ul>
         <p>
-          Vercel works out your approximate location, and a visitor count that resets daily, from
-          your IP address and other details of the request when it arrives, and says it does not
-          store the IP address.
+          Vercel works out your approximate location, and a visitor identifier that is discarded
+          after 24 hours, from your IP address and other details of the request when it arrives,
+          and says it does not store the IP address.
           Vercel Web Analytics does not use cookies, we do not create detailed user profiles, and
           events are not tied to any account or identity, since none exist.
         </p>
@@ -79,7 +79,7 @@ export default function Privacy() {
           <li><strong>Camera/microphone streams</strong> - Media streams are processed locally, never transmitted</li>
           <li><strong>Account or payment information</strong> - There is no account to create, so we never collect names, emails, or payment details</li>
           <li><strong>Precise location</strong> - We never ask for your device's location; the only location recorded is the approximate city described in 2.1</li>
-          <li><strong>Browsing history</strong> - We don't track your activity outside our applications</li>
+          <li><strong>Browsing history</strong> - We don't track your activity outside our applications; the only other site recorded is the one that sent you or shows the app, as described in 2.1</li>
         </ul>
 
         <h2>3. How We Use Your Information</h2>
@@ -126,7 +126,7 @@ export default function Privacy() {
             <tr>
               <td>Vercel</td>
               <td>Hosting &amp; Analytics</td>
-              <td>Anonymous usage events, page views</td>
+              <td>Anonymous usage events and page views, with the details listed in 2.1</td>
             </tr>
           </tbody>
         </table>
