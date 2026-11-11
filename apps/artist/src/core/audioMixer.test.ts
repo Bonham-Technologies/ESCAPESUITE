@@ -16,7 +16,13 @@
 // case below is the guarantee the worker used to threaten.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { Input } from 'mediabunny'
-import { extractAndMixAudio, SourceAudioError, WHOLE_FILE_DECODE_MAX_BYTES } from './audioMixer'
+import {
+  extractAndMixAudio,
+  extractSpeechMix,
+  SourceAudioError,
+  SPEECH_MIX_SAMPLE_RATE,
+  WHOLE_FILE_DECODE_MAX_BYTES,
+} from './audioMixer'
 import { storeVideo } from './storage'
 import {
   createAudioBufferDouble,
@@ -412,5 +418,87 @@ describe('extractAndMixAudio', () => {
 
     expect(offline.constructions).toHaveLength(0)
     expect(offline.decodeCalls).toHaveLength(0)
+  })
+
+  describe('the speech mix (ESCSUITE-433)', () => {
+    it('is the export mix downmixed to one channel and averaged down to 16 kHz', async () => {
+      // Not the shared fixture: its channels are exact opposites, which a downmix cancels.
+      stereo = createAudioBufferDouble([ramp(480), loudRamp(480)], SAMPLE_RATE)
+      const clips = [
+        makeClip({ timelinePosition: 0.002, startTime: 0.001, duration: 0.005, endTime: 0.006 }),
+        makeClip({
+          id: 'clip2',
+          duration: 0.003,
+          endTime: 0.003,
+          animation: makeAnimation({
+            keyframes: {
+              volume: [
+                { time: 0, value: 1, easing: 'linear' },
+                { time: 0.003, value: 0, easing: 'linear' },
+              ],
+            },
+          }),
+        }),
+      ]
+      const tracks = [makeTrack({ volume: 0.8 })]
+
+      const stereoMix = (await extractAndMixAudio(clips, tracks, TOTAL_DURATION, vi.fn()))!
+      const speech = (await extractSpeechMix(clips, tracks, TOTAL_DURATION))!
+
+      expect(SPEECH_MIX_SAMPLE_RATE).toBe(16000)
+      expect(speech).toHaveLength(160)
+      for (let k = 0; k < speech.length; k++) {
+        let sum = 0
+        for (let i = 3 * k; i < 3 * k + 3; i++) sum += stereoMix[0][i] + stereoMix[1][i]
+        expect(speech[k]).toBeCloseTo(sum / 6, 6)
+      }
+      expect(speech.some((v) => v !== 0)).toBe(true)
+    })
+
+    it('copies a mono source into the one channel at full level', async () => {
+      stereo = createAudioBufferDouble([ramp(480)], SAMPLE_RATE)
+      const speech = (await extractSpeechMix([makeClip({ duration: 0.01, endTime: 0.01 })], [makeTrack()], TOTAL_DURATION))!
+      const mono = stereo.getChannelData(0)
+      expect(speech[5]).toBeCloseTo((mono[15] + mono[16] + mono[17]) / 3, 6)
+    })
+
+    it('is null with no sound, and for a timeline with no samples asks for no plane', async () => {
+      const allocate = vi.fn((frames: number) => new Float32Array(frames))
+      await expect(extractSpeechMix([makeClip({ sourceVideoId: 'missing' })], [makeTrack()], TOTAL_DURATION, allocate)).resolves.toBeNull()
+      expect(allocate).toHaveBeenCalledTimes(1)
+      await expect(extractSpeechMix([], [], 0, allocate)).resolves.toBeNull()
+      expect(allocate).toHaveBeenCalledTimes(1)
+    })
+
+    // Allocates its real 230 MB plane and normalises it: an explicit timeout for CI.
+    it('mixes an hour with one 16 kHz plane, from the caller, and nothing else of any size: under 300 MB', { timeout: 30_000 }, async () => {
+      const HOUR = 3600
+      const Real = Float32Array
+      const allocate = vi.fn((frames: number) => new Real(frames))
+      // Every Float32Array the mixer makes for itself while it runs, by length.
+      const own: number[] = []
+      class Counting extends Real {
+        constructor(...args: unknown[]) {
+          super(...(args as [number]))
+          if (typeof args[0] === 'number') own.push(args[0])
+        }
+      }
+      vi.stubGlobal('Float32Array', Counting)
+      let speech: Float32Array | null
+      try {
+        speech = await extractSpeechMix([makeClip({ duration: 0.005, endTime: 0.005 })], [makeTrack()], HOUR, allocate)
+      } finally {
+        vi.unstubAllGlobals()
+      }
+
+      expect(allocate).toHaveBeenCalledTimes(1)
+      expect(allocate).toHaveBeenCalledWith(HOUR * 16000)
+      expect(speech).toBe(allocate.mock.results[0].value)
+      const planeBytes = HOUR * 16000 * Real.BYTES_PER_ELEMENT
+      const ownBytes = own.reduce((a, b) => a + b, 0) * Real.BYTES_PER_ELEMENT
+      // The export's stereo 48 kHz mix of the same hour would be 1.38 GB.
+      expect(ownBytes).toBeLessThan(1e6)
+      expect(planeBytes + ownBytes).toBeLessThan(300 * 1e6)
+    })
   })
 })
