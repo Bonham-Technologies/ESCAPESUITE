@@ -101,6 +101,15 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   "Transcribing on this device… m:ss / m:ss". **Stop transcribing** ends it and adds nothing.
   Edits made during the run do not change what is heard: the mix was taken at the start.
   One run at a time: presses while the browser is still being asked are ignored.
+- **One project (ESCSUITE-432).** A run belongs to the project it was started in: it records
+  that project's `id` and watches the store. When another project takes its place (New
+  Project, Open, a host's `LOAD_PROJECT`, a session restore: anything that changes
+  `project.id`) the run stops at once, says "Transcription stopped. No captions were added.",
+  and the button reads **Transcribe to captions** again. Open always passes through New
+  Project's fresh id, so reopening a file of the same project stops it too; a host
+  `LOAD_PROJECT` carrying the open project's own `id` counts as the same project. The id is
+  checked again just before the cues are added, so `addCaptionCues` never runs on another
+  project. Ordinary edits, a rename and undo keep the id, and the run finishes as before.
 - **Keyboard and screen readers:** the button is one element that reads **Transcribe to
   captions** or **Stop transcribing**, so focus stays on it. When the notice closes, or a pack
   finishes installing and listening starts, focus returns to it, unless the user has moved
@@ -154,9 +163,13 @@ on demand.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a
   Chromium-only brand; no `available()` or `install()` call on mount; hidden after a press
   that finds `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the
-  sidecar text.
+  sidecar text; a run stopped, adding nothing, when New Project or another project replaces the
+  open one, even when the swap and the words arrive together, and finishing after a rename, a
+  track change and an undo (ESCSUITE-432).
+- `apps/e2e/tests/regressions/ESCSUITE-432.spec.ts`: File > New Project mid-run stops the
+  transcription at once and the new project stays empty past the old clip's end.
 - `apps/e2e/tests/regressions/ESCSUITE-404.spec.ts` (Chromium, API stubbed with
-  `page.addInitScript`, with a Google Chrome brand in `navigator.userAgentData`): no control
+  `page.addInitScript` by `apps/e2e/utils/speechStub.ts`, with a Google Chrome brand in `navigator.userAgentData`): no control
   with no API, no on-device mode or a Chromium-only brand, and no `available()` call; nothing
   asked on load, and the control hides when a press finds `unavailable`; the real headless
   shell, unstubbed, opens the editor without "Target crashed" and shows no control; every `start()` on device with a live
