@@ -432,6 +432,13 @@
   `DedicatedWorker`, so `getWorkerSupport()` always resolved `false` and the worker path never
   ran in production. Every export already went through the main-thread mixer; deleting the dead
   path just stops paying for the Worker spin-up and probe on every export.
+- `audioMixer.ts`, `extractSpeechMix` (ESCSUITE-433): the same mix for on-device
+  transcription, written as one channel at 16 kHz (`SPEECH_MIX_SAMPLE_RATE`) into a plane the
+  caller allocates. Every write in `mixChunk` is `+=`, so summing both channels of each 48 kHz
+  frame into `plane[floor(frame / 3)]`, scaled by 1/6, is exactly the stereo mix downmixed and
+  averaged, without the stereo mix being built. Export calls are unchanged (`step` 1). A
+  `signal` stops it between decoded chunks and sources with an `AbortError`, so a stopped
+  transcription does not mix on in the background; exports pass none.
 - `outputTransform.ts`: the one place project space is carried onto an output raster —
   `projectToOutputScale`, `setOutputTransform` and `openOutputFrame`, called by the preview and
   by both exporters. See "Export Resolution" below
