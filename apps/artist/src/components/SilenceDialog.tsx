@@ -47,9 +47,14 @@ function leftBehindText(left: LeftBehind, moveEverything: boolean, verb: string)
     count(left.media, 'media clip', 'media clips'),
   ].filter((k) => !k.startsWith('0 '));
   const clips = left.blur + left.captions + left.textOrShapes + left.media;
+  // With the box on only a lock holds a clip back: its own track's, or that of
+  // a clip it is linked to.
+  const where = !moveEverything
+    ? 'on other tracks'
+    : `on ${clips === 1 ? 'a locked track' : 'locked tracks'}${left.linkedToLocked > 0 ? ' or linked to one' : ''}`;
   const sentences: string[] = [];
   if (clips > 0) {
-    sentences.push(`${count(clips, 'clip', 'clips')} on ${moveEverything ? 'locked' : 'other'} tracks ${verb}: ${kinds.join(', ')}.`);
+    sentences.push(`${count(clips, 'clip', 'clips')} ${where} ${verb}: ${kinds.join(', ')}.`);
   }
   if (left.markers > 0) sentences.push(`${count(left.markers, 'marker', 'markers')} ${verb}.`);
   return sentences.join(' ');

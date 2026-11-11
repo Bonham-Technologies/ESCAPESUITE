@@ -9,6 +9,7 @@ import { TimelineSilenceBands } from './Timeline/TimelineSilenceBands'
 import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { peakSecondsFor, peaksFromPcm } from '../utils/waveformPeaks'
 import { captionStyleFor } from '../core/captions'
+import { useEditorStore } from '../store/projectStore'
 import type { SourceVideo } from '../store/types'
 
 // 48 kHz and not a whole number of 10 ms buckets long, like a real recording.
@@ -273,11 +274,29 @@ describe('Remove silences', () => {
       store().addMarker(6)
       const { user, onRemoved } = await openOnTake(part)
 
-      expect(warning()).toHaveTextContent('1 clip on locked tracks will not move: 1 blur.')
+      expect(warning()).toHaveTextContent('1 clip on a locked track will not move: 1 blur.')
       expect(warning()).not.toHaveTextContent('marker')
       await user.click(screen.getByRole('button', { name: 'Remove all' }))
-      expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back. 1 clip on locked tracks did not move: 1 blur.')
+      expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back. 1 clip on a locked track did not move: 1 blur.')
       expect(store().project.timeline.clips.find((c) => c.id === blur.id)!.timelinePosition).toBe(4)
+    })
+
+    it('with the box on, names a clip held back by a link to a locked track', async () => {
+      const { screen: part } = placeTake()
+      store().addClipToTimeline({ id: 'b-roll', sourceVideoId: video.id, name: 'b-roll', startTime: 0, endTime: 2, duration: 2 }, undefined, 4)
+      store().addClipToTimeline({ id: 'b-sound', sourceVideoId: mic.id, name: 'b-sound', startTime: 0, endTime: 2, duration: 2 }, undefined, 4)
+      useEditorStore.setState((state) => ({
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            clips: state.project.timeline.clips.map((c) => (c.name.startsWith('b-') ? { ...c, linkGroupId: 'pair' } : c)),
+          },
+        },
+      }))
+      store().updateTrack(store().project.timeline.clips.find((c) => c.id === 'b-sound')!.trackId, { locked: true })
+      await openOnTake(part)
+      expect(warning()).toHaveTextContent('2 clips on locked tracks or linked to one will not move: 2 media clips.')
     })
 
     it('shows no warning, and no description, when nothing is left behind', async () => {

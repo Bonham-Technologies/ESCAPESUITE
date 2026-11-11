@@ -214,7 +214,9 @@ move that overlaps or follows the first cut, counted by kind (blur, captions —
 any clip on the Captions track —, text or shapes, media), and the markers at
 or after the first cut. Which rows the cut will not move follows the box: with
 it cleared, every row outside the take, and the markers; with it on, only a
-locked row outside the take (the markers move). For example: "2 clips on other
+locked row outside the take or a row linked to one (`rowsToMove`, which the cut
+itself reads; the markers move), and the sentence says "on a locked track" /
+"on locked tracks", adding "or linked to one" when a link holds any of them. For example: "2 clips on other
 tracks will not move: 1 blur, 1 media clip. 1 marker will not move. They may
 fall out of step with the take." The sentence is the dialog's accessible
 description (`aria-describedby`), and the notice after **Remove all** repeats
