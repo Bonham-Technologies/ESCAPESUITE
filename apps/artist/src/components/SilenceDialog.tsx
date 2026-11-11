@@ -8,6 +8,7 @@ import {
   totalLength,
   type SilenceOptions,
 } from '../core/silenceDetection';
+import { leftBehind, type LeftBehind } from '../store/rippleRanges';
 import styles from './SilenceDialog.module.css';
 
 interface SilenceDialogProps {
@@ -31,6 +32,29 @@ function clock(t: number): string {
   return `${minutes}:${((ms % 60_000) / 1000).toFixed(2).padStart(5, '0')}`;
 }
 
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * What the cut leaves where it is, in words (ESCSUITE-431): the clips by kind,
+ * then the markers. `verb` is "will not move" in the dialog, "did not move" in
+ * the notice.
+ */
+function leftBehindText(left: LeftBehind, moveEverything: boolean, verb: string): string {
+  const kinds = [
+    count(left.blur, 'blur', 'blurs'),
+    count(left.captions, 'caption', 'captions'),
+    count(left.textOrShapes, 'text or shape', 'texts or shapes'),
+    count(left.media, 'media clip', 'media clips'),
+  ].filter((k) => !k.startsWith('0 '));
+  const clips = left.blur + left.captions + left.textOrShapes + left.media;
+  const sentences: string[] = [];
+  if (clips > 0) {
+    sentences.push(`${count(clips, 'clip', 'clips')} on ${moveEverything ? 'locked' : 'other'} tracks ${verb}: ${kinds.join(', ')}.`);
+  }
+  if (left.markers > 0) sentences.push(`${count(left.markers, 'marker', 'markers')} ${verb}.`);
+  return sentences.join(' ');
+}
+
 /**
  * "Remove silences" (ESCSUITE-403): find the pauses in a clip's sound — every
  * linked part's, for a take recorded as separate tracks — list them for
@@ -43,7 +67,9 @@ function clock(t: number): string {
  * dialog is up. Nothing is cut until "Remove all", which calls
  * `removeTimeRanges` once: one Ctrl+Z puts every pause back. "Move everything
  * after each cut" (on as it opens, ESCSUITE-434) moves the other rows, the
- * markers and the in/out points with it.
+ * markers and the in/out points with it. Whatever it would leave where it
+ * is, overlapping or after the first cut, the dialog counts by kind and the
+ * notice repeats (ESCSUITE-431).
  *
  * Detection reads the waveform peaks already in the library, so it costs no
  * decode and needs no network. Escape cancels, as the Cancel button does.
@@ -70,6 +96,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   // ESCSUITE-434: move every other unlocked row, the markers and the in/out
   // points with the cut, so overlays and captions stay on what they cover.
   const [moveEverything, setMoveEverything] = useState(true);
+  const clips = useEditorStore((state) => state.project.timeline.clips);
+  const tracks = useEditorStore((state) => state.project.timeline.tracks);
+  const markers = useEditorStore((state) => state.markers);
   const titleId = useId();
 
   const close = () => setSilenceReviewClip(null);
@@ -77,6 +106,8 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
 
   if (!review) return null;
   const candidates = review.candidates;
+  const left = leftBehind(clips, tracks, markers, review.clipId, candidates, moveEverything);
+  const warningId = `${titleId}-left-behind`;
 
   const parsed = (key: keyof SilenceOptions, raw: string): number | null => {
     const field = FIELDS.find((f) => f.key === key)!;
@@ -108,8 +139,8 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
       setRefused(there ? 'locked' : 'gone');
       return;
     }
-    const count = candidates.length;
-    onRemoved(`Removed ${count} ${count === 1 ? 'pause' : 'pauses'} (${seconds(totalLength(candidates))}). Ctrl+Z puts them back.`);
+    const removed = `Removed ${count(candidates.length, 'pause', 'pauses')} (${seconds(totalLength(candidates))}). Ctrl+Z puts them back.`;
+    onRemoved(left ? `${removed} ${leftBehindText(left, moveEverything, 'did not move')}` : removed);
     close();
   };
 
@@ -124,6 +155,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={left ? warningId : undefined}
       >
         <div className={styles.header}>
           <h2 className={styles.title} id={titleId}>Remove silences</h2>
@@ -181,6 +213,12 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
                 : 'Only this take\'s tracks close up.'}
             </span>
           </div>
+
+          {left && (
+            <p className={styles.warning} id={warningId} data-testid="silence-left-behind">
+              {leftBehindText(left, moveEverything, 'will not move')} They may fall out of step with the take.
+            </p>
+          )}
 
           {approximate && (
             <p className={styles.note} data-testid="silence-timing-note">

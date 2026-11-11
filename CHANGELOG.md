@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Remove silences says how many clips on other tracks and markers it will leave where they are, before the cut and in the message after it.
 - ESCAPEARTIST: Remove silences can move everything after each cut (on by default), so overlays, captions, markers and in/out points stay in step with the take; one undo puts it all back.
 - ESCAPEARTIST: the media library's Clear All, Clear Unused and Remove buttons are easier to read, at rest and when you point at them, in both themes.
 - ESCAPEARTIST: in the light theme, the warning that browser storage is nearly full is a darker orange, so it is easier to read.

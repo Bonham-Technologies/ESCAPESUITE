@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { audioSource } from '../test/renderPreview'
 import { captionStyleFor } from '../core/captions'
-import { cutEditorBlock, normaliseRanges } from './rippleRanges'
+import { cutEditorBlock, leftBehind, normaliseRanges } from './rippleRanges'
 import { scrubRemovedSources } from './storeHistory'
 import { useEditorStore } from './projectStore'
 import type { Clip } from './types'
@@ -388,6 +388,16 @@ describe('removeTimeRanges, moving everything after each cut (ESCSUITE-434)', ()
     const [scrubbed] = scrubRemovedSources({ past: [entry], future: [] }, [audioSource.id]).past
     expect(scrubbed).not.toBe(entry)
     expect(scrubbed.editor).toEqual(entry.editor)
+  })
+})
+
+describe('leftBehind (ESCSUITE-431)', () => {
+  it('counts nothing without the clip or without a range, and nothing on the take\'s own rows', () => {
+    const { screen, mic } = placeTake()
+    const { clips, tracks } = store().project.timeline
+    expect(leftBehind(clips, tracks, [], 'missing', [{ start: 1, end: 2 }], false)).toBeNull()
+    expect(leftBehind(clips, tracks, [], screen.id, [], false)).toBeNull()
+    expect(leftBehind(clips, tracks, [], mic.id, [{ start: 1, end: 2 }], false)).toBeNull()
   })
 })
 

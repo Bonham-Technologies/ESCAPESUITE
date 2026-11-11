@@ -206,6 +206,21 @@ them: what is on them stays put and is left behind.
 The detection is unchanged: it listens only to the take's rows, since the other
 rows are shortened, never cut through.
 
+### What the cut leaves behind (ESCSUITE-431)
+
+The dialog says what the cut will leave where it is while the rest closes up
+(`leftBehind` in `store/rippleRanges.ts`): every clip on a row the cut will not
+move that overlaps or follows the first cut, counted by kind (blur, captions —
+any clip on the Captions track —, text or shapes, media), and the markers at
+or after the first cut. Which rows the cut will not move follows the box: with
+it cleared, every row outside the take, and the markers; with it on, only a
+locked row outside the take (the markers move). For example: "2 clips on other
+tracks will not move: 1 blur, 1 media clip. 1 marker will not move. They may
+fall out of step with the take." The sentence is the dialog's accessible
+description (`aria-describedby`), and the notice after **Remove all** repeats
+the count ("… did not move"). Nothing is shown, and the dialog has no
+description, when nothing is left behind.
+
 ## Tests
 
 - `src/core/silenceDetection.test.ts`: tone separated by 2 s of digital silence
@@ -237,7 +252,10 @@ rows are shortened, never cut through.
   in/out points moved, and one undo restoring them.
 - `src/components/SilenceDialog.test.tsx`: the inspector action, the dialog's
   fields, Keep, Remove all, Escape, the timeline bands, the note for legacy
-  peaks, and the "Move everything after each cut" box both ways.
+  peaks, the "Move everything after each cut" box both ways, and the
+  left-behind warning: every kind counted with the box cleared, only a locked
+  row with it on, none when nothing is left behind, the accessible
+  description and the notice.
 - `apps/e2e/tests/regressions/ESCSUITE-403.spec.ts`: the A/V fixture seeded as
   a separate-tracks take; the pause found, both rows shortened by it and in
   step, Ctrl+Z and Ctrl+Y, and the WebM export decoded to check the pause is
@@ -246,3 +264,6 @@ rows are shortened, never cut through.
   across the pause, a Blur, a marker and an out point after it; with the box on
   the first Blur is shortened and stays one clip, the rest move left by the
   pause, and one Ctrl+Z puts all of it back.
+- `apps/e2e/tests/regressions/ESCSUITE-431.spec.ts`: a Blur after the pause; no
+  warning with the box on, the warning (and description) with it cleared, the
+  notice repeating it, and the Blur where it was after Remove all.
