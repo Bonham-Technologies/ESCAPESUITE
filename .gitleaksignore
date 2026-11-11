@@ -1,4 +1,4 @@
-# gitleaks false positives, all test fixtures in files no longer in the tree (ESCSUITE-380).
+# gitleaks false positives, all test fixtures (ESCSUITE-380, ESCSUITE-427).
 # Add a line here only for a finding someone has checked by hand, and name its ticket.
 # Mock Supabase anon key (JWT-shaped) for the intercepted e2e mock project (#247).
 cfff55f62f93aaa2ddb364d29805ebe25a688d76:apps/e2e/utils/auth.ts:jwt:28
