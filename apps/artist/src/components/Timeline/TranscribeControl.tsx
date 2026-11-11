@@ -59,6 +59,11 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
   const [hidden, setHidden] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const abortRef = useRef<AbortController | null>(null);
+  // A stopped run lets go of the button at once (ESCSUITE-432), but the sound
+  // it was mixing is mixed to the end before the core sees the stop. This
+  // settles when that run has: the next run waits for it, so two mixes never
+  // hold the timeline's sound in memory at once.
+  const settlingRef = useRef<Promise<void> | null>(null);
   // One run at a time: a second press while the first is still asking the
   // browser (before the button turns into "Stop transcribing") is ignored.
   const runningRef = useRef(false);
@@ -131,6 +136,9 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     stopped.catch(() => {});
     try {
       const { transcribeTimeline } = await import('../../core/transcribe');
+      // A run stopped while it mixed may still be mixing: wait for it first.
+      const previous = settlingRef.current;
+      if (previous) await Promise.race([previous, stopped]);
       if (controller.signal.aborted) throw stoppedError();
       const { clips, tracks } = timeline;
       const run = transcribeTimeline({
@@ -143,6 +151,14 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
           if (controller.signal.aborted) return;
           setPhase(stage === 'mixing' ? { kind: 'mixing' } : { kind: 'listening', played, total });
         },
+      });
+      const settling = run.then(
+        () => {},
+        () => {}
+      );
+      settlingRef.current = settling;
+      void settling.then(() => {
+        if (settlingRef.current === settling) settlingRef.current = null;
       });
       const cues = await Promise.race([run, stopped]);
       // Checked again here, not only by the subscription: nothing is ever

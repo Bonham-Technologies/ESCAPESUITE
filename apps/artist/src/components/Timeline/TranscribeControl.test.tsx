@@ -350,6 +350,24 @@ describe('TranscribeControl: the project it was started in (ESCSUITE-432)', () =
     expect(captionClips()).toHaveLength(0);
   });
 
+  it('mixes nothing new until a run stopped mid-mix has finished mixing, so two mixes never run at once', async () => {
+    const { finish, showNotification } = await startRun();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Stop transcribing' }));
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(STOPPED, 'info'));
+
+    // Pressed again while the stopped run's mix (which ignores its signal) runs on.
+    transcribeTimeline.mockImplementation(async () => STUB_WORDS);
+    await user.click(button()!);
+    expect(await screen.findByText('Preparing the sound…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop transcribing' })).toBeEnabled();
+    expect(transcribeTimeline).toHaveBeenCalledTimes(1);
+
+    await finish();
+    await waitFor(() => expect(transcribeTimeline).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(captionClips()).toHaveLength(2));
+  });
+
   it('still finishes after ordinary edits to the same project: a rename, a track change, an undo', async () => {
     const { finish, seen, showNotification } = await startRun();
     const project = useEditorStore.getState().project;

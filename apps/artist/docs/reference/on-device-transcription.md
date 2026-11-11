@@ -110,6 +110,9 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   `LOAD_PROJECT` carrying the open project's own `id` counts as the same project. The id is
   checked again just before the cues are added, so `addCaptionCues` never runs on another
   project. Ordinary edits, a rename and undo keep the id, and the run finishes as before.
+  A run stopped this way, or with **Stop transcribing**, while its sound is being mixed frees
+  the button at once, but the mix runs on until it is done; a new run shows "Preparing the
+  sound…" and waits for it before mixing, so two mixes never hold memory at once.
 - **Keyboard and screen readers:** the button is one element that reads **Transcribe to
   captions** or **Stop transcribing**, so focus stays on it. When the notice closes, or a pack
   finishes installing and listening starts, focus returns to it, unless the user has moved
@@ -165,7 +168,7 @@ on demand.
   that finds `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the
   sidecar text; a run stopped, adding nothing, when New Project or another project replaces the
   open one, even when the swap and the words arrive together, and finishing after a rename, a
-  track change and an undo (ESCSUITE-432).
+  track change and an undo; a new run mixing nothing until a stopped run's mix is done (ESCSUITE-432).
 - `apps/e2e/tests/regressions/ESCSUITE-432.spec.ts`: File > New Project mid-run stops the
   transcription at once and the new project stays empty past the old clip's end.
 - `apps/e2e/tests/regressions/ESCSUITE-404.spec.ts` (Chromium, API stubbed with
