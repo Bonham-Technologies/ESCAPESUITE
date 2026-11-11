@@ -3,22 +3,22 @@ import { test, expect, type Page } from '@playwright/test'
 import { ARTIST_URL, importMediaAndAddToTimeline, makeToneWav, openExportDialog } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
 import { timelineClips } from '../../utils/timeline'
+import {
+  CHROME_BRANDS,
+  CHROMIUM_ONLY_BRANDS,
+  STUB_WORDS,
+  installSpeechStub,
+  stubRecord,
+  transcribeButton,
+} from '../../utils/speechStub'
 
 /**
  * ESCSUITE-404: "Transcribe to captions" with the browser's on-device speech
  * recognition.
  *
- * The Web Speech API is replaced by a stub (page.addInitScript) so the run
- * does not depend on a language pack being installed in the test browser.
- * The stub records how it was created and started, meters the audio track it
- * is handed (so the test knows the timeline's own sound reached it, not a
- * microphone), and answers with scripted words on its own clock. The timeline
- * holds a 10 s synthesised tone, which every browser here decodes.
- *
- * The stub also presents a Google Chrome brand in `navigator.userAgentData`:
- * the editor hides the feature in a bare Chromium embedder (a `Chromium`
- * brand and no vendor brand), which Playwright's headless shell is, because
- * there `available()` kills the page's renderer.
+ * The Web Speech API is replaced by the stub in `utils/speechStub.ts`, which
+ * also presents a Google Chrome brand (see there). The timeline holds a 10 s
+ * synthesised tone, which every browser here decodes.
  *
  * What it pins: no control where on-device recognition is missing or in a
  * bare Chromium embedder; nothing asked of the API until the button is
@@ -33,124 +33,8 @@ import { timelineClips } from '../../utils/timeline'
 
 const CLIP_SECONDS = 10
 const NOTICE = 'Your browser will download a speech language pack once. Your audio never leaves this device.'
-const WORDS = ['hello from the stub', 'captions made on this device']
-
-type StubMode = { api: 'none' } | { api: 'no-local' } | { api: 'local'; answer: string }
-type Brand = { brand: string; version: string }
-
-const CHROME_BRANDS: Brand[] = [
-  { brand: 'Google Chrome', version: '139' },
-  { brand: 'Not;A=Brand', version: '99' },
-  { brand: 'Chromium', version: '139' },
-]
-const CHROMIUM_ONLY_BRANDS: Brand[] = [
-  { brand: 'Chromium', version: '139' },
-  { brand: 'Not;A=Brand', version: '99' },
-]
+const WORDS = STUB_WORDS
 const UNAVAILABLE_NOTICE = 'On-device speech recognition is not available in this browser.'
-
-interface StubRecord {
-  available: unknown[]
-  install: unknown[]
-  starts: Array<{ processLocally: unknown; isTrack: boolean; kind: string | null; readyState: string | null }>
-  constructed: number
-  maxLevel: number
-}
-
-async function installSpeechStub(page: Page, mode: StubMode, brands: Brand[] = CHROME_BRANDS): Promise<void> {
-  await page.addInitScript(
-    ({ mode, words, brands }) => {
-      const w = window as unknown as Record<string, unknown>
-      Object.defineProperty(navigator, 'userAgentData', {
-        configurable: true,
-        get: () => ({ brands, mobile: false, platform: 'Linux' }),
-      })
-      const record = { available: [] as unknown[], install: [] as unknown[], starts: [] as unknown[], constructed: 0, maxLevel: 0 }
-      w.__speechStub = record
-      w.webkitSpeechRecognition = undefined
-      if (mode.api === 'none') {
-        w.SpeechRecognition = undefined
-        return
-      }
-
-      class StubRecognition {
-        lang = ''
-        continuous = false
-        interimResults = false
-        onresult: ((e: unknown) => void) | null = null
-        onerror: ((e: unknown) => void) | null = null
-        onend: (() => void) | null = null
-        private local = false
-        private timers: number[] = []
-        constructor() {
-          record.constructed++
-        }
-        start(track?: MediaStreamTrack) {
-          record.starts.push({
-            processLocally: (this as { processLocally?: unknown }).processLocally,
-            isTrack: track instanceof MediaStreamTrack,
-            kind: track?.kind ?? null,
-            readyState: track?.readyState ?? null,
-          })
-          if (track instanceof MediaStreamTrack) {
-            // Meter what it is handed.
-            const ac = new AudioContext()
-            void ac.resume()
-            const analyser = ac.createAnalyser()
-            ac.createMediaStreamSource(new MediaStream([track])).connect(analyser)
-            const data = new Float32Array(analyser.fftSize)
-            const meter = window.setInterval(() => {
-              analyser.getFloatTimeDomainData(data)
-              for (const v of data) record.maxLevel = Math.max(record.maxLevel, Math.abs(v))
-            }, 50)
-            this.timers.push(meter)
-          }
-          const say = (index: number, transcript: string, isFinal: boolean) => {
-            const result = Object.assign([{ transcript, confidence: 0.9 }], { isFinal })
-            const results: unknown[] = []
-            results[index] = result
-            this.onresult?.({ resultIndex: index, results })
-          }
-          const at = (ms: number, fn: () => void) => this.timers.push(window.setTimeout(fn, ms))
-          at(1000, () => say(0, words[0].split(' ')[0], false))
-          at(2500, () => say(0, words[0], true))
-          at(5000, () => say(1, words[1].split(' ')[0], false))
-          at(7000, () => say(1, words[1], true))
-        }
-        private finish() {
-          for (const t of this.timers) { clearTimeout(t); clearInterval(t) }
-          this.timers = []
-          setTimeout(() => this.onend?.(), 20)
-        }
-        stop() { this.finish() }
-        abort() { this.finish() }
-      }
-      if (mode.api === 'local') {
-        Object.defineProperty(StubRecognition.prototype, 'processLocally', {
-          get() { return (this as { local: boolean }).local },
-          set(v: boolean) { (this as { local: boolean }).local = v },
-          configurable: true,
-        })
-        Object.assign(StubRecognition, {
-          available: async (options: unknown) => {
-            record.available.push(options)
-            return mode.answer
-          },
-          install: async (options: unknown) => {
-            record.install.push(options)
-            mode.answer = 'available'
-            return true
-          },
-        })
-      }
-      w.SpeechRecognition = StubRecognition
-    },
-    { mode, words: WORDS, brands }
-  )
-}
-
-const stubRecord = (page: Page) => page.evaluate(() => (window as unknown as { __speechStub: StubRecord }).__speechStub)
-const transcribeButton = (page: Page) => page.getByRole('button', { name: 'Transcribe to captions' })
 
 async function openWithTone(page: Page): Promise<void> {
   await page.goto(ARTIST_URL)

@@ -281,6 +281,109 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
   });
 });
 
+describe('TranscribeControl: the project it was started in (ESCSUITE-432)', () => {
+  const STOPPED = 'Transcription stopped. No captions were added.';
+
+  /**
+   * A transcription that resolves with `STUB_WORDS` only when told to, and
+   * ignores its signal: the core finishing regardless, so the control alone
+   * must keep the words out of a project they were not heard in.
+   */
+  function heldTranscription() {
+    let finish!: () => void;
+    const seen: { signal?: AbortSignal } = {};
+    transcribeTimeline.mockImplementation(({ signal }) => {
+      seen.signal = signal;
+      return new Promise((resolve) => { finish = () => resolve(STUB_WORDS); });
+    });
+    return { finish: () => act(async () => finish()), seen };
+  }
+
+  async function startRun() {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    const held = heldTranscription();
+    const view = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await screen.findByRole('button', { name: 'Stop transcribing' });
+    return { ...held, ...view };
+  }
+
+  it('stops at once when New Project replaces the project, and adds nothing to the new one', async () => {
+    const { finish, seen, showNotification } = await startRun();
+    store().resetProject();
+    const fresh = useEditorStore.getState().project;
+
+    expect(seen.signal?.aborted).toBe(true);
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(STOPPED, 'info'));
+    expect(button()).toBeEnabled();
+    await finish();
+    expect(captionClips()).toHaveLength(0);
+    expect(useEditorStore.getState().project).toBe(fresh);
+    expect(showNotification).not.toHaveBeenCalledWith(expect.stringMatching(/^Transcribed/), 'success');
+  });
+
+  it('stops when Open or a host LOAD_PROJECT puts another project in its place', async () => {
+    const { finish, seen, showNotification } = await startRun();
+    const other = { ...useEditorStore.getState().project, id: 'another-project' };
+    store().setProject(other);
+
+    expect(seen.signal?.aborted).toBe(true);
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(STOPPED, 'info'));
+    await finish();
+    expect(captionClips()).toHaveLength(0);
+  });
+
+  it('adds nothing even when the project changed the instant the words came back', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    // The swap and the answer in the same tick: no chance to abort first.
+    transcribeTimeline.mockImplementation(async () => {
+      useEditorStore.setState({ project: { ...useEditorStore.getState().project, id: 'swapped' } });
+      return STUB_WORDS;
+    });
+    const { showNotification } = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(STOPPED, 'info'));
+    expect(captionClips()).toHaveLength(0);
+  });
+
+  it('mixes nothing new until a run stopped mid-mix has finished mixing, so two mixes never run at once', async () => {
+    const { finish, showNotification } = await startRun();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Stop transcribing' }));
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith(STOPPED, 'info'));
+
+    // Pressed again while the stopped run's mix (which ignores its signal) runs on.
+    transcribeTimeline.mockImplementation(async () => STUB_WORDS);
+    await user.click(button()!);
+    expect(await screen.findByText('Preparing the sound…')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop transcribing' })).toBeEnabled();
+    expect(transcribeTimeline).toHaveBeenCalledTimes(1);
+
+    await finish();
+    await waitFor(() => expect(transcribeTimeline).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(captionClips()).toHaveLength(2));
+  });
+
+  it('still finishes after ordinary edits to the same project: a rename, a track change, an undo', async () => {
+    const { finish, seen, showNotification } = await startRun();
+    const project = useEditorStore.getState().project;
+    store().setProject({ ...project, name: 'Renamed', modified: Date.now() });
+    store().addTrack('Extra');
+    store().undo();
+
+    expect(seen.signal?.aborted).toBe(false);
+    await finish();
+    expect(captionClips()).toHaveLength(2);
+    expect(useEditorStore.getState().project.name).toBe('Renamed');
+    expect(showNotification).toHaveBeenCalledWith('Transcribed 2 captions onto the Captions track.', 'success');
+    expect(showNotification).not.toHaveBeenCalledWith(STOPPED, 'info');
+  });
+});
+
 describe('TranscribeControl: one run at a time (ESCSUITE-404)', () => {
   it('starts one transcription however often it is pressed while the browser is asked', async () => {
     const user = userEvent.setup();
