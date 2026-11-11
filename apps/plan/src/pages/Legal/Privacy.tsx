@@ -65,7 +65,8 @@ export default function Privacy() {
         </ul>
         <p>
           Vercel works out your approximate location, and a visitor count that resets daily, from
-          your IP address when the request arrives, and says it does not store the IP address.
+          your IP address and other details of the request when it arrives, and says it does not
+          store the IP address.
           Vercel Web Analytics does not use cookies, we do not create detailed user profiles, and
           events are not tied to any account or identity, since none exist.
         </p>
