@@ -10,10 +10,13 @@ import {
   cuesFromSegments,
   describeRecognitionError,
   splitCueText,
+  TRANSCRIBE_MAX_SECONDS,
+  TRANSCRIBE_TOO_LONG_MESSAGE,
   transcribeChannels,
   transcribeTimeline,
   type TranscribeAudioContext,
 } from './transcribe';
+import { makeClip, makeTrack } from '../test/fixtures/clipFixtures';
 import type {
   SpeechErrorEventLike,
   SpeechRecognitionCtor,
@@ -21,8 +24,8 @@ import type {
   SpeechResultEventLike,
 } from './speechRecognitionLocal';
 
-vi.mock('./audioMixer', () => ({ extractAndMixAudio: vi.fn() }));
-import { extractAndMixAudio } from './audioMixer';
+vi.mock('./audioMixer', () => ({ extractSpeechMix: vi.fn(), SPEECH_MIX_SAMPLE_RATE: 16000 }));
+import { extractSpeechMix } from './audioMixer';
 
 // --- Doubles -----------------------------------------------------------------
 
@@ -403,9 +406,25 @@ describe('transcribeChannels (ESCSUITE-404)', () => {
   });
 });
 
+/** A stand-in `AudioBuffer` that records its size and holds `data` as its one channel. */
+function fakeBuffer(numberOfChannels: number, length: number, sampleRate: number, data = new Float32Array(0)) {
+  return { numberOfChannels, length, sampleRate, duration: length / sampleRate, getChannelData: () => data } as unknown as AudioBuffer;
+}
+
+/** The mixer as the real one calls its seam: one plane of the 16 kHz length, then the mix. */
+function mixesAtSpeechRate() {
+  vi.mocked(extractSpeechMix).mockImplementation(async (_clips, _tracks, duration, allocate) =>
+    allocate!(Math.ceil(Math.ceil(duration * 48000) / 3))
+  );
+}
+
 describe('transcribeTimeline (ESCSUITE-404)', () => {
+  beforeEach(() => {
+    vi.mocked(extractSpeechMix).mockReset();
+  });
+
   it('is null when the timeline has no sound', async () => {
-    vi.mocked(extractAndMixAudio).mockResolvedValue(null);
+    vi.mocked(extractSpeechMix).mockResolvedValue(null);
     const phases: string[] = [];
     await expect(
       transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition, onProgress: (p) => phases.push(p) })
@@ -416,19 +435,119 @@ describe('transcribeTimeline (ESCSUITE-404)', () => {
 
   it('stops after mixing when aborted meanwhile', async () => {
     const controller = new AbortController();
-    vi.mocked(extractAndMixAudio).mockImplementation(async () => {
+    vi.mocked(extractSpeechMix).mockImplementation(async (_c, _t, _d, allocate) => {
       controller.abort();
-      return TEN_SECONDS;
+      return allocate!(160_000);
     });
     await expect(
-      transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition, signal: controller.signal })
+      transcribeTimeline({
+        clips: [],
+        tracks: [],
+        lang: 'en-US',
+        Recognition,
+        signal: controller.signal,
+        createBuffer: (c, l, r) => fakeBuffer(c, l, r),
+      })
     ).rejects.toMatchObject({ name: 'AbortError' });
     expect(FakeRecognition.instances).toHaveLength(0);
   });
 
   it('transcribes the mix the export would make', async () => {
-    vi.mocked(extractAndMixAudio).mockResolvedValue([new Float32Array(0)]);
-    await expect(transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition })).resolves.toEqual([]);
-    expect(extractAndMixAudio).toHaveBeenLastCalledWith([], [], 0, expect.any(Function));
+    vi.mocked(extractSpeechMix).mockResolvedValue(null);
+    await expect(transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition })).resolves.toBeNull();
+    expect(extractSpeechMix).toHaveBeenLastCalledWith([], [], 0, expect.any(Function));
+  });
+});
+
+describe('transcribeTimeline: memory and length (ESCSUITE-433)', () => {
+  beforeEach(() => {
+    vi.mocked(extractSpeechMix).mockReset();
+  });
+
+  it('mixes an hour into one 16 kHz channel, the buffer that plays it: under 300 MB, with no copy', async () => {
+    mixesAtSpeechRate();
+    const allocated: number[] = [];
+    let created: AudioBuffer | null = null;
+    const { ctx, source } = makeContext();
+    const hour = [makeClip({ duration: 3600, endTime: 3600 })];
+    const run = transcribeTimeline({
+      clips: hour,
+      tracks: [makeTrack()],
+      lang: 'en-US',
+      Recognition,
+      createAudioContext: () => ctx,
+      createBuffer: (channels, length, rate) => {
+        allocated.push(channels * length * Float32Array.BYTES_PER_ELEMENT);
+        return (created = fakeBuffer(channels, length, rate));
+      },
+    });
+    await flush();
+
+    // One channel at 16 kHz: 230.4 MB, where the stereo 48 kHz mix and its
+    // copy into an AudioBuffer were 2.76 GB.
+    expect(allocated).toEqual([3600 * 16000 * 4]);
+    expect(allocated.reduce((a, b) => a + b, 0)).toBeLessThan(300 * 1e6);
+    // The mix was written straight into the buffer that plays: nothing is copied.
+    expect(source.buffer).toBe(created);
+    expect(ctx.createBuffer).not.toHaveBeenCalled();
+    source.onended?.();
+    await expect(run).resolves.toEqual([]);
+  });
+
+  it('keeps cue times on the fixture within 50 ms of the 48 kHz stereo run', async () => {
+    mixesAtSpeechRate();
+    const { ctx, source } = makeContext();
+    const run = transcribeTimeline({
+      clips: [makeClip({ duration: 10, endTime: 10 })],
+      tracks: [makeTrack()],
+      lang: 'en-US',
+      Recognition,
+      createAudioContext: () => ctx,
+      createBuffer: (c, l, r) => fakeBuffer(c, l, r),
+    });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    ctx.currentTime = 1;
+    recognition.say(0, 'the quick', false);
+    ctx.currentTime = 3;
+    recognition.say(0, 'the quick brown fox', true);
+    ctx.currentTime = 5;
+    recognition.say(1, 'jumps over', false);
+    ctx.currentTime = 7;
+    recognition.say(1, 'jumps over the lazy dog', true);
+    ctx.currentTime = 10;
+    source.onended?.();
+    const cues = (await run)!;
+    // The same cues `transcribeChannels` gives the 48 kHz stereo fixture above.
+    const expected = [
+      { start: 0.7, end: 3, text: 'the quick brown fox' },
+      { start: 4.7, end: 7, text: 'jumps over the lazy dog' },
+    ];
+    expect(cues).toHaveLength(expected.length);
+    cues.forEach((cue, i) => {
+      expect(cue.text).toBe(expected[i].text);
+      expect(Math.abs(cue.start - expected[i].start)).toBeLessThan(0.05);
+      expect(Math.abs(cue.end - expected[i].end)).toBeLessThan(0.05);
+    });
+  });
+
+  it('refuses a timeline over the limit before mixing anything, naming the limit and suggesting a section', async () => {
+    const createBuffer = vi.fn(fakeBuffer);
+    const tooLong = [makeClip({ duration: 10, endTime: 10, timelinePosition: TRANSCRIBE_MAX_SECONDS - 9 })];
+    const run = transcribeTimeline({ clips: tooLong, tracks: [makeTrack()], lang: 'en-US', Recognition, createBuffer });
+    await expect(run).rejects.toBeInstanceOf(TranscriptionError);
+    await expect(run).rejects.toThrow(TRANSCRIBE_TOO_LONG_MESSAGE);
+    expect(TRANSCRIBE_TOO_LONG_MESSAGE).toMatch(/3 hours/);
+    expect(TRANSCRIBE_TOO_LONG_MESSAGE).toMatch(/section/);
+    expect(extractSpeechMix).not.toHaveBeenCalled();
+    expect(createBuffer).not.toHaveBeenCalled();
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('mixes a timeline exactly at the limit', async () => {
+    vi.mocked(extractSpeechMix).mockResolvedValue(null);
+    const atLimit = [makeClip({ duration: 10, endTime: 10, timelinePosition: TRANSCRIBE_MAX_SECONDS - 10 })];
+    await expect(transcribeTimeline({ clips: atLimit, tracks: [makeTrack()], lang: 'en-US', Recognition })).resolves.toBeNull();
+    expect(extractSpeechMix).toHaveBeenCalledTimes(1);
   });
 });

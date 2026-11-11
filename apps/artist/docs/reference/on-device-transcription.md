@@ -93,9 +93,18 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   refuses ("This browser cannot transcribe on this device."), before any sound plays. There
   is **no cloud fallback**: the server-based mode (the API's default, which sends audio to the
   browser vendor) is never used.
-- **What it hears:** the export's own mix (`extractAndMixAudio`), the whole timeline, at
-  48 kHz. Muted and hidden tracks are left out, as in an export. An In/Out range does not
-  limit it. The mix plays in real time into a `MediaStreamAudioDestinationNode`, never the
+- **What it hears:** the export's own mix, the whole timeline, downmixed to **one channel at
+  16 kHz** (`extractSpeechMix`, ESCSUITE-433): the export mix with both channels summed and
+  every three 48 kHz frames averaged, written by the mixer straight into the `AudioBuffer`
+  that plays it, so it is never copied and the stereo 48 kHz mix is never built. An hour of
+  timeline holds 230 MB, where it used to hold 1.38 GB twice. The playback context and the
+  track the recogniser hears stay at 48 kHz; the source node resamples the buffer. Muted and
+  hidden tracks are left out, as in an export. An In/Out range does not limit it.
+- **How long:** at most `TRANSCRIBE_MAX_SECONDS`, the export's own 3 hours
+  (`EXPORT_MAX_SECONDS`). A longer timeline is refused before anything is mixed: "Cannot
+  transcribe more than 3 hours at once. Save a copy of the project, cut it down to a section
+  of up to 3 hours, and transcribe that." (It used to be mixed anyway, and the allocation
+  failing read only "Could not transcribe the timeline.") The mix plays in real time into a `MediaStreamAudioDestinationNode`, never the
   speakers, and that node's audio track goes to `recognition.start(track)`. **The microphone
   is never opened.** A 10-minute timeline takes about 10 minutes. The status line reads
   "Transcribing on this device… m:ss / m:ss". **Stop transcribing** ends it and adds nothing.
@@ -162,7 +171,15 @@ on demand.
   `processLocally: true`.
 - `core/transcribe.test.ts`: the recogniser is refused without `processLocally === true`, is
   started on the mix's track (never with no argument), and every start, restarts included, is
-  on device. Also results into cues, stop, errors and the timing rules.
+  on device. Also results into cues, stop, errors and the timing rules; an hour mixed into one
+  16 kHz buffer (230.4 MB through the `createBuffer` seam, under 300 MB) that is the buffer
+  played, cue times within 50 ms of the 48 kHz fixture, and a timeline over 3 hours refused
+  before mixing (ESCSUITE-433).
+- `core/audioMixer.test.ts` ("the speech mix"): `extractSpeechMix` is the export mix summed
+  and averaged to 16 kHz sample for sample, and an hour allocates only the caller's one plane
+  (every other `Float32Array` the mixer makes is counted: under 1 MB).
+- `apps/e2e/tests/regressions/ESCSUITE-433.spec.ts`: a 4-hour timeline is refused with the
+  notice above, and the recogniser is never constructed.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a
   Chromium-only brand; no `available()` or `install()` call on mount; hidden after a press
   that finds `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the

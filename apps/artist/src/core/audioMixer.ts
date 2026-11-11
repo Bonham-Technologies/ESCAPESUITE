@@ -33,6 +33,29 @@ const SAMPLE_RATE = 48000;
 const CHANNELS = 2;
 
 /**
+ * The rate of {@link extractSpeechMix}: one channel at a third of the export's
+ * rate, which is what speech recognisers listen at (ESCSUITE-433).
+ */
+export const SPEECH_MIX_SAMPLE_RATE = 16000;
+const SPEECH_STEP = SAMPLE_RATE / SPEECH_MIX_SAMPLE_RATE;
+
+/**
+ * Where a mix is written. Every write is `+=` (`mixChunk`), so the mix is
+ * linear in it: summing each 48 kHz frame of both channels into
+ * `planes[0][floor(frame / step)]`, scaled by `1 / (channels * step)`, gives
+ * exactly the stereo mix downmixed and averaged down to `48000 / step` Hz,
+ * without the stereo mix ever existing.
+ */
+interface MixTarget {
+  /** One plane per export channel (`step` 1), or the one plane of a downmix. */
+  planes: Float32Array[];
+  /** 48 kHz frames per written frame: 1, or `SPEECH_STEP`. */
+  step: number;
+  /** The mix's length in 48 kHz frames: what placements are clipped to. */
+  frames: number;
+}
+
+/**
  * The largest source the whole-file fallback reads into one ArrayBuffer.
  * Chromium 141 allocates 1.99 GiB and refuses 1.999 GiB; this stays under it
  * with room for the browser's own bookkeeping.
@@ -93,7 +116,49 @@ export async function extractAndMixAudio(
   if (!(frameCount >= 1)) return null;
 
   const output = Array.from({ length: CHANNELS }, () => new Float32Array(frameCount));
+  const target: MixTarget = { planes: output, step: 1, frames: frameCount };
+  if (!(await mixInto(clips, tracks, first, target, onProgress))) return null;
+  normalise(output);
+  return output;
+}
 
+/**
+ * The whole timeline's sound as {@link extractAndMixAudio} mixes it for an
+ * export, downmixed to one channel at {@link SPEECH_MIX_SAMPLE_RATE}, for
+ * on-device transcription (ESCSUITE-433), or `null` when no clip has
+ * decodable audio. The stereo 48 kHz mix is never built: an hour of it is
+ * 1.38 GB, an hour of this 230 MB. `allocate` is asked once for the mix's one
+ * plane, so a caller can hand over an `AudioBuffer`'s own channel and play
+ * it with no copy.
+ */
+export async function extractSpeechMix(
+  clips: Clip[],
+  tracks: Track[],
+  totalDuration: number,
+  allocate: (frames: number) => Float32Array = (frames) => new Float32Array(frames)
+): Promise<Float32Array | null> {
+  const frameCount = Math.ceil(totalDuration * SAMPLE_RATE);
+  if (!(frameCount >= 1)) return null;
+  const plane = allocate(Math.ceil(frameCount / SPEECH_STEP));
+  const target: MixTarget = { planes: [plane], step: SPEECH_STEP, frames: frameCount };
+  if (!(await mixInto(clips, tracks, 0, target, () => {}))) return null;
+  normalise([plane]);
+  return plane;
+}
+
+/**
+ * Mix every audible clip into `target`, which covers 48 kHz frames `first`
+ * to `first + target.frames` of the timeline. `true` when any clip had
+ * decodable audio.
+ */
+async function mixInto(
+  clips: Clip[],
+  tracks: Track[],
+  first: number,
+  target: MixTarget,
+  onProgress: (percent: number) => void
+): Promise<boolean> {
+  const frameCount = target.frames;
   // Every audible clip, grouped by source in timeline order, so a source cut
   // into many clips is decoded once.
   const bySource = new Map<string, Placement[]>();
@@ -136,12 +201,12 @@ export async function extractAndMixAudio(
     try {
       const blob = await getVideoBlob(sourceId);
       if (blob) {
-        let hasAudio = await streamSourceInto(blob, audible, output, name);
+        let hasAudio = await streamSourceInto(blob, audible, target, name);
         // A file too large for the fallback whose clips all miss the range
         // adds nothing to the mix, so it need not be read at all.
         const skip = audible.length === 0 && blob.size > WHOLE_FILE_DECODE_MAX_BYTES;
         if (hasAudio === null && !skip) {
-          hasAudio = await decodeWholeSourceInto(blob, audible, output, name, getOfflineCtx);
+          hasAudio = await decodeWholeSourceInto(blob, audible, target, name, getOfflineCtx);
         }
         if (hasAudio) hasAnyAudio = true;
       }
@@ -154,11 +219,11 @@ export async function extractAndMixAudio(
     onProgress(done / bySource.size * 100);
   }
 
-  if (!hasAnyAudio) {
-    return null;
-  }
+  return hasAnyAudio;
+}
 
-  // Normalize to prevent clipping
+/** Scale the mix back under full scale when it clips. */
+function normalise(output: readonly Float32Array[]): void {
   let maxSample = 0;
   for (const channel of output) {
     for (let i = 0; i < channel.length; i++) {
@@ -174,8 +239,6 @@ export async function extractAndMixAudio(
       }
     }
   }
-
-  return output;
 }
 
 /** Whether any of a placement's frames land inside an output of `frameCount` frames. */
@@ -193,9 +256,11 @@ function mixChunk(
   chunkStart: number,
   count: number,
   placements: readonly Placement[],
-  output: readonly Float32Array[]
+  target: MixTarget
 ): void {
-  const outLength = output[0].length;
+  const { planes: output, step, frames: outLength } = target;
+  // The downmix: both channels into one plane, averaged over `step` frames.
+  const downmixGain = 1 / (CHANNELS * step);
   for (const p of placements) {
     // Source frames the clip reads, within this chunk, that land in the output.
     const lo = Math.max(p.srcStart, chunkStart, p.srcStart - p.outStart);
@@ -209,8 +274,14 @@ function mixChunk(
       const combinedVolume = p.trackVolume * clipVolume;
       const at = p.outStart + s;
       const from = src - chunkStart;
-      for (let ch = 0; ch < output.length; ch++) {
-        output[ch][at] += planes[Math.min(ch, planes.length - 1)][from] * combinedVolume;
+      if (step === 1) {
+        for (let ch = 0; ch < output.length; ch++) {
+          output[ch][at] += planes[Math.min(ch, planes.length - 1)][from] * combinedVolume;
+        }
+      } else {
+        let sum = 0;
+        for (let ch = 0; ch < CHANNELS; ch++) sum += planes[Math.min(ch, planes.length - 1)][from];
+        output[0][Math.floor(at / step)] += sum * combinedVolume * downmixGain;
       }
     }
   }
@@ -240,7 +311,7 @@ function neededEnd(placements: readonly Placement[]): number {
 async function streamSourceInto(
   blob: Blob,
   placements: readonly Placement[],
-  output: readonly Float32Array[],
+  target: MixTarget,
   name: string
 ): Promise<boolean | null> {
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
@@ -302,7 +373,7 @@ async function streamSourceInto(
             sample.copyTo(plane, { planeIndex: c, format: 'f32-planar', frameOffset: priming + skip, frameCount: frames });
             chunk.push(plane);
           }
-          mixChunk(chunk, at, frames, placements, output);
+          mixChunk(chunk, at, frames, placements, target);
         } finally {
           sample.close();
         }
@@ -332,7 +403,7 @@ async function streamSourceInto(
 async function decodeWholeSourceInto(
   blob: Blob,
   placements: readonly Placement[],
-  output: readonly Float32Array[],
+  target: MixTarget,
   name: string,
   getOfflineCtx: () => OfflineAudioContext
 ): Promise<boolean> {
@@ -360,11 +431,11 @@ async function decodeWholeSourceInto(
   // timestamps leave holes, place them by those instead (ESCSUITE-368).
   const runs = await placeDecodedFile(blob, audioBuffer.length, SAMPLE_RATE);
   if (!runs) {
-    mixChunk(planes, 0, audioBuffer.length, placements, output);
+    mixChunk(planes, 0, audioBuffer.length, placements, target);
     return true;
   }
   for (const [from, frames, at] of runs) {
-    mixChunk(planes.map((plane) => plane.subarray(from, from + frames)), at, frames, placements, output);
+    mixChunk(planes.map((plane) => plane.subarray(from, from + frames)), at, frames, placements, target);
   }
   return true;
 }
