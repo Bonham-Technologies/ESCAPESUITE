@@ -10,7 +10,7 @@
 // every sample where the old path did.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AudioSample, AudioSampleSink, Input, InputAudioTrack } from 'mediabunny'
-import { extractAndMixAudio, SourceAudioError } from './audioMixer'
+import { extractAndMixAudio, extractSpeechMix, SourceAudioError } from './audioMixer'
 import { storeVideo } from './storage'
 import {
   createAudioBufferDouble,
@@ -127,6 +127,42 @@ describe('extractAndMixAudio, streamed', () => {
     expect(samples).toHaveBeenCalledTimes(1)
     expect(Math.max(...closed)).toBeLessThan(1)
     close.mockRestore()
+  })
+
+  // ESCSUITE-433: a stopped transcription must not keep mixing (and holding
+  // its plane) in the background until the whole timeline is decoded.
+  it('stops the speech mix after the chunk being mixed when its signal is aborted', async () => {
+    const controller = new AbortController()
+    const closed: number[] = []
+    vi.spyOn(AudioSample.prototype, 'close').mockImplementation(function (this: AudioSample) {
+      closed.push(this.timestamp)
+      controller.abort()
+    })
+    await store('long', floatWav([signal(480_000, 0), signal(480_000, 1)]))
+    await store('other', floatWav([left, right]))
+    const clips = [
+      makeClip({ id: 'a', sourceVideoId: 'long', duration: 10, endTime: 10 }),
+      makeClip({ id: 'b', sourceVideoId: 'other', duration: 0.1, endTime: 0.1 }),
+    ]
+    const samples = vi.spyOn(AudioSampleSink.prototype, 'samples')
+
+    await expect(extractSpeechMix(clips, [makeTrack()], 10, undefined, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    // One chunk of the first source, no fallback decode, and the next source never opened.
+    expect(closed).toHaveLength(1)
+    expect(samples).toHaveBeenCalledTimes(1)
+    expect(offline.decodeCalls).toHaveLength(0)
+  })
+
+  it('asks for no plane when the speech mix is stopped before it starts', async () => {
+    const allocate = vi.fn((frames: number) => new Float32Array(frames))
+    const controller = new AbortController()
+    controller.abort()
+    await expect(extractSpeechMix([makeClip()], [makeTrack()], 1, allocate, controller.signal)).rejects.toMatchObject({
+      name: 'AbortError',
+    })
+    expect(allocate).not.toHaveBeenCalled()
   })
 
   it('reads a source whose clips all lie outside the range as audio, without decoding it', async () => {

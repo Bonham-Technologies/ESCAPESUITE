@@ -7,8 +7,9 @@
 // has no top-level side effects, and a build that splits chunks would load it
 // on demand with no change here.
 //
-// How: the export's own mixer (`extractAndMixAudio`) renders the timeline to
-// PCM; that buffer plays, in real time, into a `MediaStreamAudioDestinationNode`
+// How: the export's own mixer renders the timeline to PCM, downmixed to one
+// channel at 16 kHz (`extractSpeechMix`, ESCSUITE-433) straight into the
+// `AudioBuffer` that plays it; that buffer plays, in real time, into a `MediaStreamAudioDestinationNode`
 // — never the speakers — and the destination's audio track goes to
 // `recognition.start(track)` (the Web Speech API's MediaStreamTrack input), so
 // no microphone is opened. The recogniser is created with
@@ -24,8 +25,8 @@
 
 import type { Clip, Track } from '../store/types';
 import type { CaptionCue } from './captions';
-import { extractAndMixAudio } from './audioMixer';
-import { calculateTimelineDuration, EXPORT_AUDIO_SAMPLE_RATE } from './exportTypes';
+import { extractSpeechMix, SPEECH_MIX_SAMPLE_RATE } from './audioMixer';
+import { calculateTimelineDuration, EXPORT_AUDIO_SAMPLE_RATE, EXPORT_MAX_SECONDS } from './exportTypes';
 import type {
   SpeechErrorEventLike,
   SpeechRecognitionCtor,
@@ -41,6 +42,14 @@ export const MIN_CUE_SECONDS = 1;
 export const MAX_CUE_CHARS = 84;
 /** How often progress is reported while the sound plays, in ms. */
 const PROGRESS_INTERVAL_MS = 250;
+/**
+ * The longest timeline transcribed at once (ESCSUITE-433): the export's own
+ * limit. Its 16 kHz mono mix is 64,000 bytes a second, 691 MB at the limit.
+ */
+export const TRANSCRIBE_MAX_SECONDS = EXPORT_MAX_SECONDS;
+/** Why a timeline longer than {@link TRANSCRIBE_MAX_SECONDS} is refused, and what to do instead. */
+export const TRANSCRIBE_TOO_LONG_MESSAGE =
+  'Cannot transcribe more than 3 hours at once. Save a copy of the project, cut it down to a section of up to 3 hours, and transcribe that.';
 /** Recogniser errors that only mean "nothing was said" and do not end a transcription. */
 const BENIGN_ERRORS = new Set(['no-speech', 'aborted']);
 
@@ -179,8 +188,31 @@ export function describeRecognitionError(error: string): string {
  * heard. Takes as long as the mix is long: the recogniser listens in real time.
  */
 export function transcribeChannels(options: TranscribeOptions): Promise<CaptionCue[]> {
-  const { channels, sampleRate, lang, Recognition, signal, onProgress } = options;
+  const { channels, sampleRate } = options;
   const frames = channels[0]?.length ?? 0;
+  return listen({
+    ...options,
+    frames,
+    contextRate: sampleRate,
+    makeBuffer: (ctx) => {
+      const buffer = ctx.createBuffer(channels.length, frames, sampleRate);
+      channels.forEach((data, c) => buffer.copyToChannel(data as Float32Array<ArrayBuffer>, c));
+      return buffer;
+    },
+  });
+}
+
+interface ListenOptions extends Omit<TranscribeOptions, 'channels'> {
+  /** The mix's length, in frames at `sampleRate`. */
+  frames: number;
+  /** The playback context's rate; the buffer may be at another, which the source resamples. */
+  contextRate: number;
+  /** The buffer that plays: built in the context, or handed over already filled. */
+  makeBuffer: (ctx: TranscribeAudioContext) => AudioBuffer;
+}
+
+function listen(options: ListenOptions): Promise<CaptionCue[]> {
+  const { frames, sampleRate, contextRate, makeBuffer, lang, Recognition, signal, onProgress } = options;
   const duration = frames / sampleRate;
   if (signal?.aborted) return Promise.reject(abortError());
   if (frames === 0) return Promise.resolve([]);
@@ -191,7 +223,7 @@ export function transcribeChannels(options: TranscribeOptions): Promise<CaptionC
     options.createAudioContext ?? ((rate: number) => new AudioContext({ sampleRate: rate }) as TranscribeAudioContext);
 
   return new Promise<CaptionCue[]>((resolve, reject) => {
-    const ctx = createContext(sampleRate);
+    const ctx = createContext(contextRate);
     let startedAt = 0;
     let settled = false;
     let playbackEnded = false;
@@ -261,8 +293,7 @@ export function transcribeChannels(options: TranscribeOptions): Promise<CaptionC
 
     void (async () => {
       try {
-        const buffer = ctx.createBuffer(channels.length, frames, sampleRate);
-        channels.forEach((data, c) => buffer.copyToChannel(data as Float32Array<ArrayBuffer>, c));
+        const buffer = makeBuffer(ctx);
         source = ctx.createBufferSource();
         source.buffer = buffer;
         const destination = ctx.createMediaStreamDestination();
@@ -309,25 +340,56 @@ export interface TranscribeTimelineOptions {
   signal?: AbortSignal;
   /** `'mixing'` while the sound is rendered, then `'listening'` with seconds played. */
   onProgress?: (phase: 'mixing' | 'listening', played: number, total: number) => void;
+  /** Defaults to `new AudioBuffer(…)`: the one buffer the mix is written into and played from. */
+  createBuffer?: (numberOfChannels: number, length: number, sampleRate: number) => AudioBuffer;
+  /** Defaults to `new AudioContext({ sampleRate })`. */
+  createAudioContext?: (sampleRate: number) => TranscribeAudioContext;
 }
 
 /**
  * The whole timeline's sound, as the export mixes it, transcribed on this
  * device. `null` when the timeline has no sound to transcribe.
+ *
+ * ESCSUITE-433: the recogniser hears one channel at 16 kHz, mixed straight
+ * into the buffer that plays it, so an hour of timeline holds 230 MB rather
+ * than the export's 1.38 GB stereo 48 kHz mix and a second copy of it. A
+ * timeline longer than {@link TRANSCRIBE_MAX_SECONDS} is refused before
+ * anything is mixed.
  */
 export async function transcribeTimeline(options: TranscribeTimelineOptions): Promise<CaptionCue[] | null> {
   const { clips, tracks, lang, Recognition, signal, onProgress } = options;
   const duration = calculateTimelineDuration(clips);
+  if (duration > TRANSCRIBE_MAX_SECONDS) throw new TranscriptionError(TRANSCRIBE_TOO_LONG_MESSAGE);
+  const createBuffer =
+    options.createBuffer ??
+    ((numberOfChannels: number, length: number, sampleRate: number) =>
+      new AudioBuffer({ numberOfChannels, length, sampleRate }));
   onProgress?.('mixing', 0, duration);
-  const mix = await extractAndMixAudio(clips, tracks, duration, () => {});
+  let buffer: AudioBuffer | null = null;
+  // The signal stops the mix itself, so a stopped run frees its memory at once.
+  const mix = await extractSpeechMix(
+    clips,
+    tracks,
+    duration,
+    (frames) => {
+      buffer = createBuffer(1, frames, SPEECH_MIX_SAMPLE_RATE);
+      return buffer.getChannelData(0);
+    },
+    signal
+  );
   if (signal?.aborted) throw abortError();
-  if (!mix) return null;
-  return transcribeChannels({
-    channels: mix,
-    // `extractAndMixAudio` mixes at the export's rate.
-    sampleRate: EXPORT_AUDIO_SAMPLE_RATE,
+  if (!mix || !buffer) return null;
+  const filled: AudioBuffer = buffer;
+  return listen({
+    frames: filled.length,
+    sampleRate: SPEECH_MIX_SAMPLE_RATE,
+    // The stream the recogniser hears stays at the export's rate, as before;
+    // the source node resamples the 16 kHz buffer into it.
+    contextRate: EXPORT_AUDIO_SAMPLE_RATE,
+    makeBuffer: () => filled,
     lang,
     Recognition,
+    createAudioContext: options.createAudioContext,
     signal,
     onProgress: (played, total) => onProgress?.('listening', played, total),
   });
