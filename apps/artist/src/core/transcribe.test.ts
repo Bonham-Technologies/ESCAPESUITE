@@ -455,7 +455,7 @@ describe('transcribeTimeline (ESCSUITE-404)', () => {
   it('transcribes the mix the export would make', async () => {
     vi.mocked(extractSpeechMix).mockResolvedValue(null);
     await expect(transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition })).resolves.toBeNull();
-    expect(extractSpeechMix).toHaveBeenLastCalledWith([], [], 0, expect.any(Function));
+    expect(extractSpeechMix).toHaveBeenLastCalledWith([], [], 0, expect.any(Function), undefined);
   });
 });
 
@@ -542,6 +542,19 @@ describe('transcribeTimeline: memory and length (ESCSUITE-433)', () => {
     expect(extractSpeechMix).not.toHaveBeenCalled();
     expect(createBuffer).not.toHaveBeenCalled();
     expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('hands its signal to the mixer, so a stopped run stops mixing rather than mixing on in the background', async () => {
+    const controller = new AbortController();
+    vi.mocked(extractSpeechMix).mockImplementation(async (_c, _t, _d, _allocate, signal) => {
+      controller.abort();
+      if (signal?.aborted) throw new DOMException('Mix stopped', 'AbortError');
+      return null;
+    });
+    await expect(
+      transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition, signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(vi.mocked(extractSpeechMix).mock.calls[0][4]).toBe(controller.signal);
   });
 
   it('mixes a timeline exactly at the limit', async () => {

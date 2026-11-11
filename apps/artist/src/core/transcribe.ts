@@ -366,10 +366,17 @@ export async function transcribeTimeline(options: TranscribeTimelineOptions): Pr
       new AudioBuffer({ numberOfChannels, length, sampleRate }));
   onProgress?.('mixing', 0, duration);
   let buffer: AudioBuffer | null = null;
-  const mix = await extractSpeechMix(clips, tracks, duration, (frames) => {
-    buffer = createBuffer(1, frames, SPEECH_MIX_SAMPLE_RATE);
-    return buffer.getChannelData(0);
-  });
+  // The signal stops the mix itself, so a stopped run frees its memory at once.
+  const mix = await extractSpeechMix(
+    clips,
+    tracks,
+    duration,
+    (frames) => {
+      buffer = createBuffer(1, frames, SPEECH_MIX_SAMPLE_RATE);
+      return buffer.getChannelData(0);
+    },
+    signal
+  );
   if (signal?.aborted) throw abortError();
   if (!mix || !buffer) return null;
   const filled: AudioBuffer = buffer;

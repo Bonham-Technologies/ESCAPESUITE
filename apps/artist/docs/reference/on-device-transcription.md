@@ -120,8 +120,9 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   checked again just before the cues are added, so `addCaptionCues` never runs on another
   project. Ordinary edits, a rename and undo keep the id, and the run finishes as before.
   A run stopped this way, or with **Stop transcribing**, while its sound is being mixed frees
-  the button at once, but the mix runs on until it is done; a new run shows "Preparing the
-  sound…" and waits for it before mixing, so two mixes never hold memory at once.
+  the button at once. The mixer sees the same signal and stops after the chunk it is mixing
+  (ESCSUITE-433); a new run still shows "Preparing the sound…" and waits for the stopped mix
+  to end before mixing, so two mixes never hold memory at once.
 - **Keyboard and screen readers:** the button is one element that reads **Transcribe to
   captions** or **Stop transcribing**, so focus stays on it. When the notice closes, or a pack
   finishes installing and listening starts, focus returns to it, unless the user has moved
@@ -178,6 +179,9 @@ on demand.
 - `core/audioMixer.test.ts` ("the speech mix"): `extractSpeechMix` is the export mix summed
   and averaged to 16 kHz sample for sample, and an hour allocates only the caller's one plane
   (every other `Float32Array` the mixer makes is counted: under 1 MB).
+  `core/audioMixer.streamed.test.ts`: an aborted speech mix stops after the chunk being
+  mixed, opens no further source and no fallback decode, and allocates nothing when aborted
+  before it starts.
 - `apps/e2e/tests/regressions/ESCSUITE-433.spec.ts`: a 4-hour timeline is refused with the
   notice above, and the recogniser is never constructed.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a

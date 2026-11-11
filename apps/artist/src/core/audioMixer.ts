@@ -53,6 +53,16 @@ interface MixTarget {
   step: number;
   /** The mix's length in 48 kHz frames: what placements are clipped to. */
   frames: number;
+  /**
+   * Stops the mix between decoded chunks and sources with an `AbortError`.
+   * Only the speech mix has one: a stopped transcription must not keep
+   * mixing in the background (ESCSUITE-432/433). An export never does.
+   */
+  signal?: AbortSignal;
+}
+
+function throwIfStopped(target: MixTarget): void {
+  if (target.signal?.aborted) throw new DOMException('Mix stopped', 'AbortError');
 }
 
 /**
@@ -129,18 +139,21 @@ export async function extractAndMixAudio(
  * decodable audio. The stereo 48 kHz mix is never built: an hour of it is
  * 1.38 GB, an hour of this 230 MB. `allocate` is asked once for the mix's one
  * plane, so a caller can hand over an `AudioBuffer`'s own channel and play
- * it with no copy.
+ * it with no copy. Aborting `signal` stops the mix after the chunk being
+ * mixed and rejects with an `AbortError`.
  */
 export async function extractSpeechMix(
   clips: Clip[],
   tracks: Track[],
   totalDuration: number,
-  allocate: (frames: number) => Float32Array = (frames) => new Float32Array(frames)
+  allocate: (frames: number) => Float32Array = (frames) => new Float32Array(frames),
+  signal?: AbortSignal
 ): Promise<Float32Array | null> {
   const frameCount = Math.ceil(totalDuration * SAMPLE_RATE);
   if (!(frameCount >= 1)) return null;
+  if (signal?.aborted) throw new DOMException('Mix stopped', 'AbortError');
   const plane = allocate(Math.ceil(frameCount / SPEECH_STEP));
-  const target: MixTarget = { planes: [plane], step: SPEECH_STEP, frames: frameCount };
+  const target: MixTarget = { planes: [plane], step: SPEECH_STEP, frames: frameCount, signal };
   if (!(await mixInto(clips, tracks, 0, target, () => {}))) return null;
   normalise([plane]);
   return plane;
@@ -193,6 +206,7 @@ async function mixInto(
   let done = 0;
 
   for (const [sourceId, placements] of bySource) {
+    throwIfStopped(target);
     const name = placements[0].clip.name || sourceId;
     // Only the placements that reach into the range need any decoding; the
     // rest still count towards whether the timeline has audio at all, as they
@@ -205,7 +219,7 @@ async function mixInto(
         // A file too large for the fallback whose clips all miss the range
         // adds nothing to the mix, so it need not be read at all.
         const skip = audible.length === 0 && blob.size > WHOLE_FILE_DECODE_MAX_BYTES;
-        if (hasAudio === null && !skip) {
+        if (hasAudio === null && !skip && !target.signal?.aborted) {
           hasAudio = await decodeWholeSourceInto(blob, audible, target, name, getOfflineCtx);
         }
         if (hasAudio) hasAnyAudio = true;
@@ -219,6 +233,7 @@ async function mixInto(
     onProgress(done / bySource.size * 100);
   }
 
+  throwIfStopped(target);
   return hasAnyAudio;
 }
 
@@ -377,8 +392,9 @@ async function streamSourceInto(
         } finally {
           sample.close();
         }
-        // Nothing past the last frame any clip reads is needed.
-        if (placer.position >= stopAt) break;
+        // Nothing past the last frame any clip reads is needed; nothing at
+        // all once the mix is stopped (`mixInto` then throws).
+        if (placer.position >= stopAt || target.signal?.aborted) break;
       }
     } catch (error) {
       // Nothing mixed yet: the whole-file path may still read it.
