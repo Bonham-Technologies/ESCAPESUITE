@@ -24,6 +24,10 @@ interface TranscribeControlProps {
   showNotification: (message: string, type: 'error' | 'success' | 'info') => void;
 }
 
+function stoppedError(): DOMException {
+  return new DOMException('Transcription stopped', 'AbortError');
+}
+
 function clock(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
@@ -55,6 +59,11 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
   const [hidden, setHidden] = useState(false);
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   const abortRef = useRef<AbortController | null>(null);
+  // A stopped run lets go of the button at once (ESCSUITE-432), but the sound
+  // it was mixing is mixed to the end before the core sees the stop. This
+  // settles when that run has: the next run waits for it, so two mixes never
+  // hold the timeline's sound in memory at once.
+  const settlingRef = useRef<Promise<void> | null>(null);
   // One run at a time: a second press while the first is still asking the
   // browser (before the button turns into "Stop transcribing") is ignored.
   const runningRef = useRef(false);
@@ -108,10 +117,31 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase({ kind: 'mixing' });
+    // ESCSUITE-432: the run belongs to the project it was started in. The
+    // control lives in the always-mounted timeline, so nothing else ends it:
+    // New Project, Open, a host's LOAD_PROJECT or a session restore putting
+    // another project in its place (a different `project.id`; Open passes
+    // through New Project's fresh id even for a file of this same project)
+    // aborts it at once. Ordinary edits, a rename and undo keep the id.
+    const { id: projectId, timeline } = useEditorStore.getState().project;
+    const unsubscribe = useEditorStore.subscribe((state) => {
+      if (state.project.id !== projectId) controller.abort();
+    });
+    // Settles the moment the run is stopped, so the button and the notice do
+    // not wait for the core to notice (it cannot while the sound is mixed).
+    const stopped = new Promise<never>((_, reject) => {
+      controller.signal.addEventListener('abort', () => reject(stoppedError()), { once: true });
+    });
+    // Handled even when the run ends before `stopped` is raced (an abort while loading).
+    stopped.catch(() => {});
     try {
       const { transcribeTimeline } = await import('../../core/transcribe');
-      const { clips, tracks } = useEditorStore.getState().project.timeline;
-      const cues = await transcribeTimeline({
+      // A run stopped while it mixed may still be mixing: wait for it first.
+      const previous = settlingRef.current;
+      if (previous) await Promise.race([previous, stopped]);
+      if (controller.signal.aborted) throw stoppedError();
+      const { clips, tracks } = timeline;
+      const run = transcribeTimeline({
         clips,
         tracks,
         lang,
@@ -122,7 +152,20 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
           setPhase(stage === 'mixing' ? { kind: 'mixing' } : { kind: 'listening', played, total });
         },
       });
-      if (controller.signal.aborted) return;
+      const settling = run.then(
+        () => {},
+        () => {}
+      );
+      settlingRef.current = settling;
+      void settling.then(() => {
+        if (settlingRef.current === settling) settlingRef.current = null;
+      });
+      const cues = await Promise.race([run, stopped]);
+      // Checked again here, not only by the subscription: nothing is ever
+      // added to a project the sound was not heard in.
+      if (controller.signal.aborted || useEditorStore.getState().project.id !== projectId) {
+        throw stoppedError();
+      }
       if (cues === null) {
         showNotification('There is no sound on the timeline to transcribe.', 'info');
         return;
@@ -160,6 +203,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
         showNotification('Could not transcribe the timeline.', 'error');
       }
     } finally {
+      unsubscribe();
       if (abortRef.current === controller) abortRef.current = null;
       setPhase({ kind: 'idle' });
     }
