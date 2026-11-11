@@ -55,6 +55,8 @@ const scenario = fc.record({
   /** ESCSUITE-434: the dialog's box, a lock on the row of its own, markers and in/out points. */
   moveEverything: fc.boolean(),
   lockElsewhere: fc.boolean(),
+  /** A part linked to `elsewhere` on a row of its own, this far from it (QC of ESCSUITE-434). */
+  partner: fc.option(fc.integer({ min: -100, max: 100 }).map((n) => n / 100), { nil: undefined }),
   markers: fc.array(time(16), { maxLength: 3 }),
   inOut: fc.option(fc.tuple(time(8), time(8)), { nil: undefined }),
   ranges: fc.array(fc.tuple(time(16), fc.integer({ min: 1, max: 300 }).map((n) => n / 100)), { minLength: 1, maxLength: 6 }),
@@ -97,6 +99,22 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
           state().addTrack()
           const free = state().project.timeline.tracks.find((t) => !rows.has(t.id))!
           state().addClipToTimeline({ id: 'elsewhere', sourceVideoId: OTHER.id, name: 'elsewhere', startTime: 0, endTime: OTHER.duration, duration: OTHER.duration }, free.id, s.elsewhere)
+          if (s.partner !== undefined) {
+            state().addTrack()
+            const own = state().project.timeline.tracks.find((t) => !rows.has(t.id) && t.id !== free.id)!
+            state().addClipToTimeline({ id: 'partner', sourceVideoId: MIC.id, name: 'partner', startTime: 0, endTime: MIC.duration, duration: MIC.duration }, own.id, Math.max(0, s.elsewhere + s.partner))
+            useEditorStore.setState((st) => ({
+              project: {
+                ...st.project,
+                timeline: {
+                  ...st.project.timeline,
+                  clips: st.project.timeline.clips.map((c) => (c.id === 'elsewhere' || c.id === 'partner' ? { ...c, linkGroupId: 'elsewhere-pair' } : c)),
+                },
+              },
+            }))
+            // A lock on one part holds its partner's row too.
+            if (s.lockElsewhere) state().updateTrack(own.id, { locked: true })
+          }
           if (s.lockElsewhere) state().updateTrack(free.id, { locked: true })
         }
         for (const t of s.markers) state().addMarker(t)
@@ -112,6 +130,11 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
         const target = take[s.target % take.length]
         const ranges = s.ranges.map(([start, length]) => ({ start, end: start + length }))
         const cuts = normaliseRanges(ranges)
+        // On a moved row a link group moves as one, by the time cut before its earliest start.
+        const shiftOf = (c: Clip) => {
+          const start = Math.min(...before.filter((o) => (c.linkGroupId ? o.linkGroupId === c.linkGroupId && !rows.has(o.trackId) : o.id === c.id)).map((o) => o.timelinePosition))
+          return removedBefore(cuts, start)
+        }
         const projectBefore = JSON.stringify(state().project)
         const depth = state().history.past.length
 
@@ -137,12 +160,12 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
               expect(was, 'a row outside the take, or a locked one, is untouched').toEqual(piece)
               continue
             }
-            // Moved by the time cut before it, shortened by the time cut within it, one clip still.
+            // Moved by the time cut before it (or its link group), ended where its out point lands, one clip still.
             expect(was, `clip ${piece.id} on another row is the clip it was, not a new piece`).toBeDefined()
             const from = was!.timelinePosition
             const to = from + was!.duration
-            expect(piece.timelinePosition).toBeCloseTo(cutTime(cuts, from), 6)
-            expect(piece.duration).toBeCloseTo(cutTime(cuts, to) - cutTime(cuts, from), 6)
+            expect(piece.timelinePosition).toBeCloseTo(from - shiftOf(was!), 6)
+            expect(piece.duration).toBeCloseTo(cutTime(cuts, to) - (from - shiftOf(was!)), 6)
             expect(piece.startTime).toBe(was!.startTime)
             continue
           }
@@ -179,9 +202,15 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
         if (s.moveEverything) {
           for (const was of before) {
             if (rows.has(was.trackId) || locked.has(was.trackId) || after.some((c) => c.id === was.id)) continue
-            const length = cutTime(cuts, was.timelinePosition + was.duration) - cutTime(cuts, was.timelinePosition)
+            const length = cutTime(cuts, was.timelinePosition + was.duration) - (was.timelinePosition - shiftOf(was))
             expect(length, `clip ${was.id} left another row only because a cut covered it`).toBeLessThan(0.002)
           }
+        }
+        // A linked pair on another row keeps its parts' offset: they play in step.
+        const pair = ['elsewhere', 'partner'].map((id) => [before.find((c) => c.id === id), after.find((c) => c.id === id)] as const)
+        if (pair.every(([was, now]) => was && now)) {
+          const anchor = (c: Clip) => c.timelinePosition - c.startTime
+          expect(anchor(pair[1][1]!) - anchor(pair[0][1]!), 'a linked pair on another row stays in step').toBeCloseTo(anchor(pair[1][0]!) - anchor(pair[0][0]!), 6)
         }
         // The markers and points move with the box on, and stay put with it off.
         const moved = (t: number) => (s.moveEverything ? cutTime(cuts, t) : t)

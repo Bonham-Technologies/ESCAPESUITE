@@ -166,11 +166,22 @@ export function cutTimeRanges(
   ranges: readonly TimeRange[],
   moveRows: ReadonlySet<string> = new Set()
 ): readonly Clip[] {
+  // A link group on the moved rows moves as one: every member by the time cut
+  // before the group's earliest start, so the members keep their offsets and
+  // play in step, as they do when nothing moves.
+  const groupStart = new Map<string, number>();
+  for (const c of clips) {
+    if (!c.linkGroupId || !moveRows.has(c.trackId)) continue;
+    groupStart.set(c.linkGroupId, Math.min(c.timelinePosition, groupStart.get(c.linkGroupId) ?? Infinity));
+  }
   const placed: { clip: Clip; slot: number }[] = [];
   let changed = false;
   for (const clip of clips) {
     if (!trackIds.has(clip.trackId)) {
-      const moved = moveRows.has(clip.trackId) ? shortenClip(clip, sourceVideos, ranges) : clip;
+      const start = clip.linkGroupId ? groupStart.get(clip.linkGroupId) : undefined;
+      const moved = moveRows.has(clip.trackId)
+        ? shortenClip(clip, sourceVideos, ranges, removedBefore(ranges, start ?? clip.timelinePosition))
+        : clip;
       if (moved !== clip) changed = true;
       // Slot -1: its link group, if any, is left as it is.
       if (moved) placed.push({ clip: moved, slot: -1 });
@@ -224,14 +235,15 @@ export function cutTimeRanges(
 
 /**
  * `clip` on a row the cut moves but does not cut (ESCSUITE-434): moved left by
- * the time `ranges` remove before it and shortened by the time they remove
- * within it, off its out point, so it stays one clip; null when nothing of it
- * is left. Its keyframes keep their place in what is left (`shortenAnimation`).
+ * `before` (the time `ranges` remove before it, or before its link group's
+ * earliest start) and ended where its out point lands after the cut, cut off
+ * its out point, so it stays one clip and never reaches what follows it on its
+ * row; null when nothing of it is left. Its keyframes keep their place in what
+ * is left (`shortenAnimation`).
  */
-function shortenClip(clip: Clip, sourceVideos: readonly SourceVideo[], ranges: readonly TimeRange[]): Clip | null {
+function shortenClip(clip: Clip, sourceVideos: readonly SourceVideo[], ranges: readonly TimeRange[], before: number): Clip | null {
   const from = clip.timelinePosition;
   const to = from + clip.duration;
-  const before = removedBefore(ranges, from);
   const within = removedBefore(ranges, to) - before;
   if (within === 0) return before === 0 ? clip : { ...clip, timelinePosition: from - before };
   const duration = clip.duration - within;

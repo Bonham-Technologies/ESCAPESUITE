@@ -178,7 +178,10 @@ not to cut (`shortenClip`):
   later one moves left by the time removed before it in the clip, and the
   presets are capped to the new length as a trim caps them;
 - one a range covers whole is removed, as it is on the take's rows;
-- link groups on those rows are left as they are.
+- a link group there (another take's parts) moves as one: every member by the
+  time removed before the group's earliest start, each ending where its own
+  out point lands, so the parts keep their offsets and play in step; their
+  group ids are left as they are.
 
 The markers and the in/out points move the same way (`cutEditorBlock`): each by
 the time removed before it, so one inside a pause lands where the pause closes
@@ -222,14 +225,16 @@ rows are shortened, never cut through.
   its own offset, link groups per slot, one undo, locks; with everything moved,
   other rows moved and shortened, overlays not split, captions, keyframes,
   markers and in/out points (a swallowed range cleared), a locked other row and
-  a linked pair half on one, one undo and redo, markers added after the cut or
-  between undo and redo kept, and the block kept by a storage-clear scrub.
+  a linked pair half on one, a linked pair on other rows kept in step, one undo
+  and redo, markers added after the cut or between undo and redo kept, and the
+  block kept by a storage-clear scrub.
 - `src/store/__tests__/silenceRemoval.property.test.ts`: fast-check over takes,
   splits, neighbours and random cuts, with the ESCSUITE-349 `checkInvariants`
   (no overlap among them) and undo/redo identity, plus alignment of every piece
   with its source and one undo restoring the project; with the box on, every
-  clip on another unlocked row moved and shortened (never split), a locked row
-  untouched, the markers and in/out points moved, and one undo restoring them.
+  clip on another unlocked row moved and shortened (never split), a linked pair
+  there keeping its parts' offset, a locked row untouched, the markers and
+  in/out points moved, and one undo restoring them.
 - `src/components/SilenceDialog.test.tsx`: the inspector action, the dialog's
   fields, Keep, Remove all, Escape, the timeline bands, the note for legacy
   peaks, and the "Move everything after each cut" box both ways.

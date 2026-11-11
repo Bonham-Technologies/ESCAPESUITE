@@ -347,6 +347,26 @@ describe('removeTimeRanges, moving everything after each cut (ESCSUITE-434)', ()
     expect(span('b-sound')).toEqual([5, 0, 2])
   })
 
+  it('moves a linked pair on other rows as one, so its parts stay in step', () => {
+    const { screen } = placeTake()
+    store().addClipToTimeline({ id: 'b-roll', sourceVideoId: video.id, name: 'b-roll', startTime: 0, endTime: 10, duration: 10 }, undefined, 0)
+    store().addClipToTimeline({ id: 'b-sound', sourceVideoId: audioSource.id, name: 'b-sound', startTime: 0, endTime: 9.4, duration: 9.4 }, undefined, 0.6)
+    useEditorStore.setState((state) => ({
+      project: {
+        ...state.project,
+        timeline: {
+          ...state.project.timeline,
+          clips: state.project.timeline.clips.map((c) => (c.id === 'b-roll' || c.id === 'b-sound' ? { ...c, linkGroupId: 'pair' } : c)),
+        },
+      },
+    }))
+    expect(store().removeTimeRanges(screen.id, [{ start: 0.2, end: 0.5 }], true)).toBe(true)
+    // The cut lies before the sound starts but inside the pair: both keep their
+    // place and offset (source time 0 at 0 s and 0.6 s), and end where 10 s now lands.
+    expect(span('b-roll')).toEqual([0, 0, 9.7])
+    expect(span('b-sound')).toEqual([0.6, 0, 9.1])
+  })
+
   it('keeps a marker added after the cut when the cut is undone, and one added after the undo when it is redone', () => {
     const { screen } = placeTake()
     store().addMarker(6, 'before the cut')
