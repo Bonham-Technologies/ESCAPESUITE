@@ -182,15 +182,23 @@ not to cut (`shortenClip`):
 
 The markers and the in/out points move the same way (`cutEditorBlock`): each by
 the time removed before it, so one inside a pause lands where the pause closes
-up. They live outside `Project` (ESCSUITE-245) and outside the undo history, so
-this edit's history entry carries them (`UndoableState.editor`, taken only when
-they moved): undo and redo across it restore them with the clips, one Ctrl+Z
-for everything. No other entry carries them, so undoing any other edit leaves
-them as it always has.
+up (never below 0). An in/out range a pause swallows whole would close up to
+nothing, which the export refuses and a saved file cannot hold, so it is
+cleared instead. They live outside `Project` (ESCSUITE-245) and outside the undo
+history, so this edit's history entry carries them (`UndoableState.editor`,
+taken only when they moved): undo and redo across it restore them with the
+clips, one Ctrl+Z for everything. The points come back as the entry has them.
+Markers are not edits, so the entry's list is not written over the live one:
+each marker it holds goes back to its time there, and a marker added or removed
+since (after the cut, or between an undo and a redo) stays added or removed. No
+other entry carries them, so undoing any other edit leaves them as it always
+has. A storage clear that scrubs a source out of the history keeps the block.
 
 **Locks.** A lock on one of the take's own rows still refuses the whole cut. A
-locked row anywhere else is not moved (a lock means "don't touch"), and the cut
-goes ahead around it: what is on it stays put and is left behind.
+locked row anywhere else is not moved (a lock means "don't touch"), nor is any
+row linked to one (`rowsToMove`): moving the picture of a linked pair without
+its locked sound would put the pair out of step. The cut goes ahead around
+them: what is on them stays put and is left behind.
 
 The detection is unchanged: it listens only to the take's rows, since the other
 rows are shortened, never cut through.
@@ -213,7 +221,9 @@ rows are shortened, never cut through.
 - `src/store/rippleRanges.test.ts`: both rows cut and closed, a late part cut at
   its own offset, link groups per slot, one undo, locks; with everything moved,
   other rows moved and shortened, overlays not split, captions, keyframes,
-  markers and in/out points, a locked other row, one undo and redo.
+  markers and in/out points (a swallowed range cleared), a locked other row and
+  a linked pair half on one, one undo and redo, markers added after the cut or
+  between undo and redo kept, and the block kept by a storage-clear scrub.
 - `src/store/__tests__/silenceRemoval.property.test.ts`: fast-check over takes,
   splits, neighbours and random cuts, with the ESCSUITE-349 `checkInvariants`
   (no overlap among them) and undo/redo identity, plus alignment of every piece

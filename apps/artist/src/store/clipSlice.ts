@@ -15,7 +15,7 @@ import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './p
 import { clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock';
 import { deletableWithLinks, linkedPartners, withoutLink } from './linkedClips';
 import { pruneSelection } from './selectionPrune';
-import { cutEditorBlock, cutTimeRanges, linkedRows, normaliseRanges } from './rippleRanges';
+import { cutEditorBlock, cutTimeRanges, linkedRows, normaliseRanges, rowsToMove } from './rippleRanges';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
 import { startsAtOrAfter } from './timelineSnapping';
@@ -396,7 +396,8 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // cut, as it refuses a linked ripple delete.
   //
   // ESCSUITE-434: `moveEverything` moves every other row too, bar a locked one
-  // (it stays put, as a lock asks), and the markers and in/out points; the
+  // and any row linked to one (they stay put, as a lock asks), and the markers
+  // and in/out points; the
   // undo entry then carries those, so one Ctrl+Z restores them with the clips.
   removeTimeRanges: (clipId, ranges, moveEverything = false) => {
     const { clips, tracks } = get().project.timeline;
@@ -406,9 +407,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const rows = linkedRows(clips, clip);
     if ([...rows].some((id) => isTrackLocked(tracks, id))) return false;
 
-    const moveRows = new Set(
-      moveEverything ? clips.map((c) => c.trackId).filter((id) => !rows.has(id) && !isTrackLocked(tracks, id)) : []
-    );
+    const moveRows = moveEverything ? rowsToMove(clips, tracks, rows) : new Set<string>();
     const result = cutTimeRanges(clips, get().sourceVideos, rows, cuts, moveRows);
     const { inPoint, outPoint, markers } = get();
     const editor = moveEverything ? cutEditorBlock({ inPoint, outPoint, markers }, cuts) : null;

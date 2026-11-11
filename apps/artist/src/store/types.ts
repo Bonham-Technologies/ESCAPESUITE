@@ -531,8 +531,9 @@ export interface UndoableState {
   /**
    * The in/out points and markers, on the entry of an edit that moved them
    * ("Remove silences" with "Move everything after each cut", ESCSUITE-434):
-   * undo and redo across that entry restore them too. Absent on every other
-   * entry, which leaves them as they are.
+   * undo and redo across that entry restore the points, and put each marker
+   * it holds back at its time there (a marker added or removed since stays
+   * so). Absent on every other entry, which leaves them as they are.
    */
   editor?: EditorBlock;
 }
@@ -760,7 +761,7 @@ export interface EditorState {
    * `moveEverything` (ESCSUITE-434) also moves every other unlocked row, the
    * markers and the in/out points by the time cut before them; a clip there
    * that a range crosses is shortened, not split. A locked row other than the
-   * take's stays put. Still one undo step, markers and points included.
+   * take's, and any row linked to one, stays put. Still one undo step, markers and points included.
    */
   removeTimeRanges: (clipId: string, ranges: readonly TimeRange[], moveEverything?: boolean) => boolean;
   /**

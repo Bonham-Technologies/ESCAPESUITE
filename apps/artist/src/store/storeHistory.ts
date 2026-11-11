@@ -125,6 +125,9 @@ export function scrubRemovedSources(
       (c) => !c.sourceVideoId || !removed.has(c.sourceVideoId)
     );
     return {
+      // Keep the rest of the entry, the markers and points it may carry
+      // (ESCSUITE-434) among it.
+      ...snapshot,
       project: {
         ...snapshot.project,
         timeline: {

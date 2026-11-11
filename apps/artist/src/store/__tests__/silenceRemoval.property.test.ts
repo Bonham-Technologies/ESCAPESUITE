@@ -28,6 +28,7 @@ import fc from 'fast-check'
 import { useEditorStore } from '../projectStore'
 import { SOURCES, checkInvariants, checkUndoRedoIdentity, resetModel } from '../../test/timelineModel'
 import { cutTime, normaliseRanges } from '../rippleRanges'
+import { KEYFRAME_TIME_EPSILON } from '../../utils/animation'
 import type { Clip } from '../types'
 import type { TimeRange } from '../../core/silenceDetection'
 
@@ -185,8 +186,14 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
         // The markers and points move with the box on, and stay put with it off.
         const moved = (t: number) => (s.moveEverything ? cutTime(cuts, t) : t)
         const markersBefore = (JSON.parse(editorBefore) as [number | null, number | null, { time: number }[]])
-        expect(state().markers.map((m) => m.time)).toEqual(markersBefore[2].map((m) => moved(m.time)))
-        expect([state().inPoint, state().outPoint]).toEqual([markersBefore[0], markersBefore[1]].map((t) => (t === null ? null : moved(t))))
+        expect(state().markers.map((m) => m.time)).toEqual(markersBefore[2].map((m) => Math.max(0, moved(m.time))))
+        // A range the cut swallows whole goes rather than closing up to nothing,
+        // which a saved block cannot hold; no time lands below 0.
+        let [inAfter, outAfter] = [markersBefore[0], markersBefore[1]].map((t) => (t === null ? null : Math.max(0, moved(t))))
+        const empty = (a: number | null, b: number | null) => a !== null && b !== null && b - a <= KEYFRAME_TIME_EPSILON
+        if (s.moveEverything && empty(inAfter, outAfter) && !empty(markersBefore[0], markersBefore[1])) [inAfter, outAfter] = [null, null]
+        expect([state().inPoint, state().outPoint]).toEqual([inAfter, outAfter])
+        expect(state().markers.every((m) => m.time >= 0)).toBe(true)
 
         checkUndoRedoIdentity()
         state().undo()

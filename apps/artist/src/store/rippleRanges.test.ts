@@ -6,6 +6,8 @@ import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { audioSource } from '../test/renderPreview'
 import { captionStyleFor } from '../core/captions'
 import { cutEditorBlock, normaliseRanges } from './rippleRanges'
+import { scrubRemovedSources } from './storeHistory'
+import { useEditorStore } from './projectStore'
 import type { Clip } from './types'
 
 /** Each clip on a row as `[timelinePosition, startTime, endTime]`, in time order. */
@@ -309,6 +311,63 @@ describe('removeTimeRanges, moving everything after each cut (ESCSUITE-434)', ()
   it('cutEditorBlock answers null when nothing moves', () => {
     expect(cutEditorBlock({ inPoint: 1, outPoint: null, markers: [{ id: 'a', time: 0.5, label: '', color: '#fff' }] }, [{ start: 2, end: 3 }])).toBeNull()
     expect(cutEditorBlock({ inPoint: null, outPoint: 4, markers: [] }, [{ start: 2, end: 3 }])).toEqual({ inPoint: null, outPoint: 3, markers: [] })
+  })
+
+  it('drops an in/out range a cut swallows whole rather than closing it up to nothing', () => {
+    // An empty range is one a saved block cannot hold: restoring it would drop the markers too.
+    expect(cutEditorBlock({ inPoint: 2.2, outPoint: 2.8, markers: [] }, [{ start: 2, end: 3 }])).toEqual({ inPoint: null, outPoint: null, markers: [] })
+    const { screen } = placeTake()
+    store().setInPoint(2.2)
+    store().setOutPoint(2.8)
+    store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }], true)
+    expect([store().inPoint, store().outPoint]).toEqual([null, null])
+    store().undo()
+    expect([store().inPoint, store().outPoint]).toEqual([2.2, 2.8])
+  })
+
+  it('leaves a linked pair together when one of its rows is locked', () => {
+    const { screen } = placeTake()
+    store().addClipToTimeline({ id: 'b-roll', sourceVideoId: video.id, name: 'b-roll', startTime: 0, endTime: 2, duration: 2 }, undefined, 5)
+    store().addClipToTimeline({ id: 'b-sound', sourceVideoId: audioSource.id, name: 'b-sound', startTime: 0, endTime: 2, duration: 2 }, undefined, 5)
+    useEditorStore.setState((state) => ({
+      project: {
+        ...state.project,
+        timeline: {
+          ...state.project.timeline,
+          clips: state.project.timeline.clips.map((c) => (c.id === 'b-roll' || c.id === 'b-sound' ? { ...c, linkGroupId: 'pair' } : c)),
+        },
+      },
+    }))
+    const soundRow = store().project.timeline.clips.find((c) => c.id === 'b-sound')!.trackId
+    expect(store().project.timeline.clips.find((c) => c.id === 'b-roll')!.trackId).not.toBe(soundRow)
+    store().updateTrack(soundRow, { locked: true })
+    expect(store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }], true)).toBe(true)
+    // Moving the picture without its locked sound would put the pair out of step.
+    expect(span('b-roll')).toEqual([5, 0, 2])
+    expect(span('b-sound')).toEqual([5, 0, 2])
+  })
+
+  it('keeps a marker added after the cut when the cut is undone, and one added after the undo when it is redone', () => {
+    const { screen } = placeTake()
+    store().addMarker(6, 'before the cut')
+    store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }], true)
+    store().addMarker(8, 'after the cut')
+    store().undo()
+    expect(store().markers.map((m) => [m.label, m.time])).toEqual([['before the cut', 6], ['after the cut', 8]])
+    store().addMarker(1, 'after the undo')
+    store().redo()
+    expect(store().markers.map((m) => [m.label, m.time])).toEqual([['after the undo', 1], ['before the cut', 5], ['after the cut', 8]])
+  })
+
+  it('keeps the markers and points on the entry when a storage clear scrubs it', () => {
+    const { screen } = placeTake()
+    store().addClipToTimeline({ id: 'gone', sourceVideoId: audioSource.id, name: 'gone', startTime: 0, endTime: 1, duration: 1 }, undefined, 12)
+    store().addMarker(6)
+    store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }], true)
+    const entry = store().history.past[store().history.past.length - 1]
+    const [scrubbed] = scrubRemovedSources({ past: [entry], future: [] }, [audioSource.id]).past
+    expect(scrubbed).not.toBe(entry)
+    expect(scrubbed.editor).toEqual(entry.editor)
   })
 })
 

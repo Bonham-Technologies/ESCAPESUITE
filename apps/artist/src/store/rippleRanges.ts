@@ -18,7 +18,7 @@
 // what makes the whole cut one undo step.
 
 import { v4 as uuidv4 } from 'uuid';
-import type { Clip, ClipAnimation, EditorBlock, Keyframe, SourceVideo } from './types';
+import type { Clip, ClipAnimation, EditorBlock, Keyframe, SourceVideo, Track } from './types';
 import { DEFAULT_ANIMATION } from './types';
 import type { TimeRange } from '../core/silenceDetection';
 import { cloneClip } from '../utils/deepClone';
@@ -55,7 +55,11 @@ export function normaliseRanges(ranges: readonly TimeRange[]): TimeRange[] {
  * step. A row no link reaches is not moved, as a ripple delete leaves it.
  */
 export function linkedRows(clips: readonly Clip[], clip: Clip): Set<string> {
-  const rows = new Set([clip.trackId]);
+  return withLinkedRows(clips, new Set([clip.trackId]));
+}
+
+/** `rows` and, round again until nothing is added, every row a link reaches from them. */
+function withLinkedRows(clips: readonly Clip[], rows: Set<string>): Set<string> {
   const groups = new Set<string>();
   for (let grew = true; grew; ) {
     grew = false;
@@ -72,6 +76,18 @@ export function linkedRows(clips: readonly Clip[], clip: Clip): Set<string> {
     }
   }
   return rows;
+}
+
+/**
+ * The rows "Move everything after each cut" moves besides the take's own
+ * `rows` (ESCSUITE-434): every other row on the timeline bar a locked one and
+ * any row a link reaches from a locked one. Moving one part of a linked pair
+ * while its partner's row is locked would put the pair out of step, so the
+ * whole linked set stays put with the lock.
+ */
+export function rowsToMove(clips: readonly Clip[], tracks: readonly Track[], rows: ReadonlySet<string>): Set<string> {
+  const held = withLinkedRows(clips, new Set(tracks.filter((t) => t.locked).map((t) => t.id)));
+  return new Set(clips.map((c) => c.trackId).filter((id) => !rows.has(id) && !held.has(id)));
 }
 
 /** How much of `ranges` lies before `time`. */
@@ -97,7 +113,9 @@ export function cutTime(ranges: readonly TimeRange[], time: number): number {
 export function cutEditorBlock(block: EditorBlock, ranges: readonly TimeRange[]): EditorBlock | null {
   let moved = false;
   const at = (time: number) => {
-    const to = cutTime(ranges, time);
+    // Never below 0: float sums over several ranges can land a hair under it,
+    // and a saved block with a negative time is refused whole on restore.
+    const to = Math.max(0, cutTime(ranges, time));
     if (to !== time) moved = true;
     return to;
   };
@@ -105,8 +123,16 @@ export function cutEditorBlock(block: EditorBlock, ranges: readonly TimeRange[])
     const time = at(m.time);
     return time === m.time ? m : { ...m, time };
   });
-  const inPoint = block.inPoint === null ? null : at(block.inPoint);
-  const outPoint = block.outPoint === null ? null : at(block.outPoint);
+  let inPoint = block.inPoint === null ? null : at(block.inPoint);
+  let outPoint = block.outPoint === null ? null : at(block.outPoint);
+  // A range a cut swallows whole closes up to nothing. An empty range is one
+  // the export refuses and a saved block cannot hold (`validateEditorBlock`
+  // drops the markers with it), so it goes, as a clamp drops one.
+  const empty = (a: number | null, b: number | null) => a !== null && b !== null && b - a <= PIECE_EPSILON;
+  if (empty(inPoint, outPoint) && !empty(block.inPoint, block.outPoint)) {
+    inPoint = null;
+    outPoint = null;
+  }
   return moved ? { inPoint, outPoint, markers } : null;
 }
 
