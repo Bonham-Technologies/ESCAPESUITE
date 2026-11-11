@@ -191,6 +191,40 @@ describe('Remove silences', () => {
     expect(JSON.stringify(store().project)).toBe(before)
   })
 
+  it('moves everything after each cut unless the box is cleared (ESCSUITE-434)', async () => {
+    const { screen: part } = placeTake()
+    const blur = store().addShapeOverlayClip({ type: 'blur' }, undefined, 4, 2)!
+    store().addMarker(4)
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    const open = async () => {
+      await user.click(screen.getByRole('button', { name: 'Find silences' }))
+      rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+      await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
+    }
+    const blurAt = () => store().project.timeline.clips.find((c) => c.id === blur.id)!.timelinePosition
+
+    await open()
+    const box = screen.getByRole('checkbox', { name: 'Move everything after each cut' })
+    expect(box).toBeChecked()
+    expect(box).toHaveAccessibleDescription(/Other tracks, markers and in\/out points close up too/)
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(blurAt()).toBeCloseTo(3.2, 9)
+    expect(store().markers[0].time).toBeCloseTo(3.2, 9)
+
+    store().undo()
+    expect(blurAt()).toBe(4)
+    expect(store().markers[0].time).toBe(4)
+    store().setSelectedClipId(part.id)
+    await open()
+    await user.click(screen.getByRole('checkbox', { name: 'Move everything after each cut' }))
+    expect(screen.getByRole('checkbox', { name: 'Move everything after each cut' })).toHaveAccessibleDescription("Only this take's tracks close up.")
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(blurAt()).toBe(4)
+    expect(store().markers[0].time).toBe(4)
+  })
+
   it('says so and cuts nothing when one of the take\'s tracks is locked', async () => {
     const { screen: part, mic: micClip } = placeTake()
     store().setSelectedClipId(part.id)

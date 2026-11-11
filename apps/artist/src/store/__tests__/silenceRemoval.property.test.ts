@@ -16,11 +16,18 @@
 // - the pieces linked to each other sit between the same two cuts;
 // - rows outside the take are untouched;
 // - one undo restores the project exactly.
+//
+// With "Move everything after each cut" (ESCSUITE-434) the rows outside the
+// take, bar a locked one, move instead: every clip there by the time cut
+// before it, shortened by the time cut within it and never split (gone only
+// when a cut covers it whole); the markers and in/out points move the same
+// way; a locked row stays put; and one undo restores the markers and points
+// with the project.
 import { beforeEach, describe, expect, it } from 'vitest'
 import fc from 'fast-check'
 import { useEditorStore } from '../projectStore'
 import { SOURCES, checkInvariants, checkUndoRedoIdentity, resetModel } from '../../test/timelineModel'
-import { normaliseRanges } from '../rippleRanges'
+import { cutTime, normaliseRanges } from '../rippleRanges'
 import type { Clip } from '../types'
 import type { TimeRange } from '../../core/silenceDetection'
 
@@ -44,6 +51,11 @@ const scenario = fc.record({
   tail: fc.option(time(6), { nil: undefined }),
   elsewhere: fc.option(time(10), { nil: undefined }),
   target: fc.nat({ max: 20 }),
+  /** ESCSUITE-434: the dialog's box, a lock on the row of its own, markers and in/out points. */
+  moveEverything: fc.boolean(),
+  lockElsewhere: fc.boolean(),
+  markers: fc.array(time(16), { maxLength: 3 }),
+  inOut: fc.option(fc.tuple(time(8), time(8)), { nil: undefined }),
   ranges: fc.array(fc.tuple(time(16), fc.integer({ min: 1, max: 300 }).map((n) => n / 100)), { minLength: 1, maxLength: 6 }),
 })
 
@@ -84,7 +96,15 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
           state().addTrack()
           const free = state().project.timeline.tracks.find((t) => !rows.has(t.id))!
           state().addClipToTimeline({ id: 'elsewhere', sourceVideoId: OTHER.id, name: 'elsewhere', startTime: 0, endTime: OTHER.duration, duration: OTHER.duration }, free.id, s.elsewhere)
+          if (s.lockElsewhere) state().updateTrack(free.id, { locked: true })
         }
+        for (const t of s.markers) state().addMarker(t)
+        if (s.inOut) {
+          state().setInPoint(s.inOut[0])
+          state().setOutPoint(s.inOut[1])
+        }
+        const locked = new Set(state().project.timeline.tracks.filter((t) => t.locked).map((t) => t.id))
+        const editorBefore = JSON.stringify([state().inPoint, state().outPoint, state().markers])
 
         const before = state().project.timeline.clips.map((c) => ({ ...c }))
         const take = before.filter((c) => rows.has(c.trackId) && c.linkGroupId)
@@ -94,9 +114,10 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
         const projectBefore = JSON.stringify(state().project)
         const depth = state().history.past.length
 
-        if (!state().removeTimeRanges(target.id, ranges)) {
-          // Every range fell past the take's rows: nothing to cut, nothing recorded.
+        if (!state().removeTimeRanges(target.id, ranges, s.moveEverything)) {
+          // Every range fell past what the cut moves: nothing to cut, nothing recorded.
           expect(JSON.stringify(state().project)).toBe(projectBefore)
+          expect(JSON.stringify([state().inPoint, state().outPoint, state().markers])).toBe(editorBefore)
           expect(state().history.past.length).toBe(depth)
           return
         }
@@ -110,7 +131,18 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
         // is a window on the same anchor, `startTime - timelinePosition`).
         for (const piece of after) {
           if (!rows.has(piece.trackId)) {
-            expect(before.find((c) => c.id === piece.id), 'a row outside the take is untouched').toEqual(piece)
+            const was = before.find((c) => c.id === piece.id)
+            if (!s.moveEverything || locked.has(piece.trackId)) {
+              expect(was, 'a row outside the take, or a locked one, is untouched').toEqual(piece)
+              continue
+            }
+            // Moved by the time cut before it, shortened by the time cut within it, one clip still.
+            expect(was, `clip ${piece.id} on another row is the clip it was, not a new piece`).toBeDefined()
+            const from = was!.timelinePosition
+            const to = from + was!.duration
+            expect(piece.timelinePosition).toBeCloseTo(cutTime(cuts, from), 6)
+            expect(piece.duration).toBeCloseTo(cutTime(cuts, to) - cutTime(cuts, from), 6)
+            expect(piece.startTime).toBe(was!.startTime)
             continue
           }
           const origin = before.find(
@@ -142,9 +174,24 @@ describe('Remove silences (property-based, ESCSUITE-403)', () => {
         }
         for (const [group, slots] of groups) expect(slots.size, `group ${group} spans one slot between cuts`).toBe(1)
 
+        // On another unlocked row a clip is gone only when a cut covered it whole.
+        if (s.moveEverything) {
+          for (const was of before) {
+            if (rows.has(was.trackId) || locked.has(was.trackId) || after.some((c) => c.id === was.id)) continue
+            const length = cutTime(cuts, was.timelinePosition + was.duration) - cutTime(cuts, was.timelinePosition)
+            expect(length, `clip ${was.id} left another row only because a cut covered it`).toBeLessThan(0.002)
+          }
+        }
+        // The markers and points move with the box on, and stay put with it off.
+        const moved = (t: number) => (s.moveEverything ? cutTime(cuts, t) : t)
+        const markersBefore = (JSON.parse(editorBefore) as [number | null, number | null, { time: number }[]])
+        expect(state().markers.map((m) => m.time)).toEqual(markersBefore[2].map((m) => moved(m.time)))
+        expect([state().inPoint, state().outPoint]).toEqual([markersBefore[0], markersBefore[1]].map((t) => (t === null ? null : moved(t))))
+
         checkUndoRedoIdentity()
         state().undo()
         expect(JSON.stringify(state().project), 'one undo restores everything the cut took').toBe(projectBefore)
+        expect(JSON.stringify([state().inPoint, state().outPoint, state().markers]), 'and the markers and points').toBe(editorBefore)
         expect(state().history.past.length).toBe(depth)
       }),
       { seed: 0x5eed0403, numRuns: 150 }

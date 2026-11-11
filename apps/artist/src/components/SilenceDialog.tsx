@@ -41,7 +41,9 @@ function clock(t: number): string {
  * finds the pauses again; "Keep" drops one from the list. The list lives in
  * the store's `silenceReview`, so the timeline draws it as bands while the
  * dialog is up. Nothing is cut until "Remove all", which calls
- * `removeTimeRanges` once: one Ctrl+Z puts every pause back.
+ * `removeTimeRanges` once: one Ctrl+Z puts every pause back. "Move everything
+ * after each cut" (on as it opens, ESCSUITE-434) moves the other rows, the
+ * markers and the in/out points with it.
  *
  * Detection reads the waveform peaks already in the library, so it costs no
  * decode and needs no network. Escape cancels, as the Cancel button does.
@@ -65,6 +67,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   // Why "Remove all" cut nothing, or null. The dialog is modal, but a host
   // page can still replace the project under it (integration API).
   const [refused, setRefused] = useState<'locked' | 'gone' | null>(null);
+  // ESCSUITE-434: move every other unlocked row, the markers and the in/out
+  // points with the cut, so overlays and captions stay on what they cover.
+  const [moveEverything, setMoveEverything] = useState(true);
   const titleId = useId();
 
   const close = () => setSilenceReviewClip(null);
@@ -98,7 +103,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   };
 
   const handleRemoveAll = () => {
-    if (!removeTimeRanges(review.clipId, candidates)) {
+    if (!removeTimeRanges(review.clipId, candidates, moveEverything)) {
       const there = useEditorStore.getState().project.timeline.clips.some((c) => c.id === review.clipId);
       setRefused(there ? 'locked' : 'gone');
       return;
@@ -157,6 +162,25 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
           </p>
+
+          <div className={styles.option}>
+            <input
+              id={`${titleId}-move`}
+              type="checkbox"
+              checked={moveEverything}
+              aria-describedby={`${titleId}-move-hint`}
+              onChange={(e) => {
+                setMoveEverything(e.target.checked);
+                setRefused(null);
+              }}
+            />
+            <label htmlFor={`${titleId}-move`}>Move everything after each cut</label>
+            <span className={styles.hint} id={`${titleId}-move-hint`}>
+              {moveEverything
+                ? 'Other tracks, markers and in/out points close up too. Locked tracks stay put.'
+                : 'Only this take\'s tracks close up.'}
+            </span>
+          </div>
 
           {approximate && (
             <p className={styles.note} data-testid="silence-timing-note">
