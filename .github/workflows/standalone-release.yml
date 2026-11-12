@@ -161,6 +161,40 @@ jobs:
           echo "ESCAPEARTIST size: ${ARTIST_SIZE}"
           echo "Headless-artist kit size: ${KIT_SIZE}"
 
+      # An SPDX SBOM of each build's production dependency tree, read from this
+      # commit's lockfile (ESCSUITE-430). Only for a push to main, the one run
+      # that publishes a release, so no pull request's code (perhaps a fork's)
+      # runs in this job. --ignore-scripts: nothing is built here, so no
+      # dependency's install script needs to run.
+      - name: Setup pnpm
+        if: steps.check.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+
+      - name: Setup Node.js
+        if: steps.check.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies (no install scripts)
+        if: steps.check.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Generate an SPDX SBOM for each build
+        if: steps.check.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CRAFT_VERSION: ${{ steps.version.outputs.craft_version }}
+          ARTIST_VERSION: ${{ steps.version.outputs.artist_version }}
+        run: |
+          set -euo pipefail
+          node scripts/generate-sbom.mjs --build "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.html" --package @escapesuite/craft --output "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.spdx.json"
+          node scripts/generate-sbom.mjs --build "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" --package @escapesuite/artist --output "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.spdx.json"
+          # The kit's headless.html inlines ESCAPEARTIST's render bundle, so its
+          # SBOM lists that tree next to the CLI's own (playwright).
+          node scripts/generate-sbom.mjs --build "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" --package @escapesuite/headless-artist --package @escapesuite/artist --output "dist/kit/escapesuite-headless-artist-${VERSION}.spdx.json"
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -223,7 +257,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # contents: write creates the release. id-token and attestations sign and
-    # store the build-provenance attestation over every asset (ESCSUITE-401).
+    # store the build-provenance attestation over every asset (ESCSUITE-401)
+    # and the SBOM attestation over every build (ESCSUITE-430).
     # No other job in this workflow gets them, and this one never runs for a
     # pull request.
     permissions:
@@ -281,7 +316,8 @@ jobs:
 
       # Every file the release carries goes through release-assets/, so
       # SHA256SUMS.txt and the attestation below cover exactly what is
-      # uploaded, the -latest aliases included (ESCSUITE-401).
+      # uploaded, the -latest aliases and the SBOMs included (ESCSUITE-401,
+      # ESCSUITE-430).
       - name: Stage release assets and write SHA256SUMS.txt
         if: steps.decide.outputs.publish == 'true'
         env:
@@ -296,6 +332,9 @@ jobs:
              "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.html" \
              "dist/artist/ESCAPEARTIST-latest.html" \
              "dist/kit/escapesuite-headless-artist-${VERSION}.tgz" \
+             "dist/craft/ESCAPECRAFT-${CRAFT_VERSION}.spdx.json" \
+             "dist/artist/ESCAPEARTIST-${ARTIST_VERSION}.spdx.json" \
+             "dist/kit/escapesuite-headless-artist-${VERSION}.spdx.json" \
              release-assets/
           cd release-assets
           # Written outside the directory first, so the sums never list themselves.
@@ -308,6 +347,30 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release-assets/*
+
+      # One SBOM attestation per build, over the build's own digest
+      # (ESCSUITE-430). A -latest.html alias has the same bytes as its
+      # versioned file, so `gh attestation verify` finds it for both.
+      - name: Attest the ESCAPECRAFT SBOM
+        if: steps.decide.outputs.publish == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: release-assets/ESCAPECRAFT-${{ needs.prepare.outputs.craft_version }}.html
+          sbom-path: release-assets/ESCAPECRAFT-${{ needs.prepare.outputs.craft_version }}.spdx.json
+
+      - name: Attest the ESCAPEARTIST SBOM
+        if: steps.decide.outputs.publish == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: release-assets/ESCAPEARTIST-${{ needs.prepare.outputs.artist_version }}.html
+          sbom-path: release-assets/ESCAPEARTIST-${{ needs.prepare.outputs.artist_version }}.spdx.json
+
+      - name: Attest the headless render kit SBOM
+        if: steps.decide.outputs.publish == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: release-assets/escapesuite-headless-artist-${{ needs.prepare.outputs.version }}.tgz
+          sbom-path: release-assets/escapesuite-headless-artist-${{ needs.prepare.outputs.version }}.spdx.json
 
       - name: Create release with attached builds
         id: publish
@@ -326,17 +389,21 @@ jobs:
             "release-assets/ESCAPEARTIST-${ARTIST_VERSION}.html" \
             "release-assets/ESCAPEARTIST-latest.html" \
             "release-assets/escapesuite-headless-artist-${VERSION}.tgz" \
+            "release-assets/ESCAPECRAFT-${CRAFT_VERSION}.spdx.json" \
+            "release-assets/ESCAPEARTIST-${ARTIST_VERSION}.spdx.json" \
+            "release-assets/escapesuite-headless-artist-${VERSION}.spdx.json" \
             release-assets/SHA256SUMS.txt \
             --repo "${REPO}" \
             --target "${COMMIT}" \
             --title "ESCAPE Suite v${VERSION}" \
             --latest \
-            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. The \`*-latest.html\` files are stable download links that always point at this release's build (used by escapesuite.io's own download buttons); the versioned files are kept for anyone who wants to pin a specific release. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports. Verify your download: \`SHA256SUMS.txt\` lists the SHA-256 of every file here, and each file has a GitHub build-provenance attestation. Steps: https://github.com/${REPO}/blob/main/docs/VERIFY.md"
+            --notes "Offline single-file builds. Download, open in Chrome/Edge, done — no install, no account, no internet. The \`*-latest.html\` files are stable download links that always point at this release's build (used by escapesuite.io's own download buttons); the versioned files are kept for anyone who wants to pin a specific release. Headless render kit: render ARTIST projects on a server or GPU box — unpack and read the README inside. This tarball is versioned to match this suite release; the kit's own package version is independent and is what \`headless-artist --version\` reports. Verify your download: \`SHA256SUMS.txt\` lists the SHA-256 of every file here, and each file has a GitHub build-provenance attestation. Each build also has an SPDX SBOM, \`<build name>.spdx.json\` (the \`-latest.html\` files share their versioned build's), listing the dependencies inside it, with an SBOM attestation tying it to the build. Steps: https://github.com/${REPO}/blob/main/docs/VERIFY.md"
           echo "created=true" >> "$GITHUB_OUTPUT"
 
   # Downloads the release the job above just published, as a user would, and
   # checks every asset against SHA256SUMS.txt and its build-provenance
-  # attestation (ESCSUITE-401). Red here means users cannot verify the
+  # attestation (ESCSUITE-401), and every build for its SBOM and SBOM
+  # attestation (ESCSUITE-430). Red here means users cannot verify the
   # published release; see "For maintainers: if a release's verify job fails"
   # in docs/VERIFY.md.
   verify-release:

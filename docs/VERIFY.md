@@ -10,10 +10,14 @@ release that carries them also carries:
   statement from GitHub that this repository's release workflow produced that exact file, and
   from which commit. Signing uses [Sigstore](https://www.sigstore.dev/) through
   [GitHub artifact attestations](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations).
+- **An SBOM for every build** (`<build name>.spdx.json`, e.g. `ESCAPEARTIST-<version>.spdx.json`):
+  a machine-readable [SPDX 2.3](https://spdx.dev/) list of the open-source packages inside that
+  build, with versions, licences and package URLs, and an **SBOM attestation** that ties it to
+  the build's exact bytes. See [step 4](#4-check-the-sbom).
 
 Check both before you copy a build onto an isolated network. Releases published before this
 check existed (v2.18.27 and earlier) carry neither: if a release has no `SHA256SUMS.txt`, use
-a newer one.
+a newer one. Releases published before the SBOMs existed carry no `.spdx.json` files.
 
 ## 1. Download the file and its `SHA256SUMS.txt` from the same release
 
@@ -111,6 +115,35 @@ gh attestation verify ESCAPEARTIST-<version>.html -R Bonham-Technologies/ESCAPES
   --bundle sha256:<digest>.jsonl --custom-trusted-root trusted_root.jsonl
 ```
 
+## 4. Check the SBOM
+
+Each build's SBOM sits next to it on the same release: `ESCAPECRAFT-<version>.spdx.json`,
+`ESCAPEARTIST-<version>.spdx.json` and `escapesuite-headless-artist-<version>.spdx.json`. A
+`-latest.html` file has the same bytes as the versioned build on that release, so it uses that
+build's SBOM. The SBOM lists the production dependencies only (what can end up inside the
+build, such as React, Mediabunny and zustand), never the tools used to build or test it. The
+headless kit's SBOM lists both the CLI's dependencies and those of the ESCAPEARTIST render
+bundle its `headless.html` contains. The CLI's dependencies are Playwright and, marked as an
+optional dependency (`OPTIONAL_DEPENDENCY_OF`), `@aws-sdk/client-s3` with its own dependencies:
+a plain `npm install` of the kit installs it unless you pass `--omit=optional`.
+
+The `.spdx.json` file is in `SHA256SUMS.txt` and has its own build-provenance attestation, so
+steps 2 and 3 check it like any other file. To check that it is the SBOM this repository's
+release workflow published **for your build**, verify the build's SBOM attestation:
+
+```bash
+gh attestation verify ESCAPEARTIST-<version>.html -R Bonham-Technologies/ESCAPESUITE \
+  --predicate-type https://spdx.dev/Document/v2.3
+```
+
+It ends with `✓ Verification succeeded!`. To print the attested SBOM and compare it with the
+`.spdx.json` file, add `--format json --jq '.[].verificationResult.statement.predicate'`.
+`--signer-workflow` works here as in step 3.
+
+Any SPDX tool reads the file, for example `pyspdxtools -i ESCAPEARTIST-<version>.spdx.json`
+from [spdx-tools](https://github.com/spdx/tools-python) to validate it, or a vulnerability
+scanner such as `grype sbom:ESCAPEARTIST-<version>.spdx.json`.
+
 ## What this does not cover
 
 - The builds are not code-signed with a certificate, and the builds are not reproducible: the
@@ -123,7 +156,8 @@ gh attestation verify ESCAPEARTIST-<version>.html -R Bonham-Technologies/ESCAPES
 Both release workflows check what they have just published:
 `standalone-release.yml` (job **Verify Published Release**) and `release.yml` (the last step of
 **Attach Standalone Builds**) run `scripts/verify-release-assets.sh`, which downloads the
-release and runs both checks above on every asset. A red result means users cannot verify
+release and runs both checks above on every asset, then checks that every build has its
+`.spdx.json` and an SBOM attestation (step 4). A red result means users cannot verify
 that release. Read the job log: it names the file and the check that failed. A transient
 failure (GitHub not serving the new release or attestation yet) passes on a re-run of the
 failed job. Otherwise fix the cause, delete the release, and re-run the workflow:
