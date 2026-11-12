@@ -15,7 +15,7 @@ import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './p
 import { clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock';
 import { deletableWithLinks, linkedPartners, withoutLink } from './linkedClips';
 import { pruneSelection } from './selectionPrune';
-import { cutTimeRanges, linkedRows, normaliseRanges } from './rippleRanges';
+import { cutEditorBlock, cutTimeRanges, linkedRows, normaliseRanges, rowsToMove } from './rippleRanges';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
 import { startsAtOrAfter } from './timelineSnapping';
@@ -394,7 +394,12 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
   // ESCSUITE-403: "Remove silences". Every row of the take moves by the same
   // time at the same timeline time, so a lock on any of them refuses the whole
   // cut, as it refuses a linked ripple delete.
-  removeTimeRanges: (clipId, ranges) => {
+  //
+  // ESCSUITE-434: `moveEverything` moves every other row too, bar a locked one
+  // and any row linked to one (they stay put, as a lock asks), and the markers
+  // and in/out points; the
+  // undo entry then carries those, so one Ctrl+Z restores them with the clips.
+  removeTimeRanges: (clipId, ranges, moveEverything = false) => {
     const { clips, tracks } = get().project.timeline;
     const clip = clips.find((c) => c.id === clipId);
     const cuts = normaliseRanges(ranges);
@@ -402,12 +407,16 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const rows = linkedRows(clips, clip);
     if ([...rows].some((id) => isTrackLocked(tracks, id))) return false;
 
-    const result = cutTimeRanges(clips, get().sourceVideos, rows, cuts);
-    if (result === clips) return false; // nothing on those rows to cut or move
+    const moveRows = moveEverything ? rowsToMove(clips, tracks, rows) : new Set<string>();
+    const result = cutTimeRanges(clips, get().sourceVideos, rows, cuts, moveRows);
+    const { inPoint, outPoint, markers } = get();
+    const editor = moveEverything ? cutEditorBlock({ inPoint, outPoint, markers }, cuts) : null;
+    if (result === clips && !editor) return false; // nothing to cut or move
     const newClips = [...result];
     set((state) => {
       const pruned = pruneSelection(newClips, state.selectedClipId, state.selectedClipIds);
       return {
+        ...(editor ?? {}),
         project: {
           ...state.project,
           modified: Date.now(),
@@ -419,7 +428,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         },
         selectedClipId: pruned.selectedClipId,
         selectedClipIds: pruned.selectedClipIds,
-        history: pushToHistory(state),
+        history: pushToHistory(state, editor !== null),
       };
     });
     return true;

@@ -31,8 +31,11 @@ until every field reads. Each listed pause has a **Keep** button
 (`Keep the pause at m:ss.cc`) that drops it from the list. While the dialog is
 open the timeline draws each listed pause as a hatched band through the track
 stack (`components/Timeline/TimelineSilenceBands.tsx`, decorative; the list is
-the accessible form). **Remove all** cuts what is listed and closes the dialog
-with a notice; **Cancel** and Escape cut nothing.
+the accessible form). **Move everything after each cut** (a checkbox, on each
+time the dialog opens, ESCSUITE-434) decides whether the rest of the timeline
+moves with the cut (below); its hint, its `aria-describedby`, says which.
+**Remove all** cuts what is listed and closes the dialog with a notice;
+**Cancel** and Escape cut nothing.
 
 The dialog is a modal like the others in [`dialogs.md`](dialogs.md):
 `useDialogBehaviour`, `role="dialog"`, `aria-modal`, labelled by its `<h2>`,
@@ -172,12 +175,75 @@ later pieces' partners move too. On those rows `cutTimeRanges`:
 - keeps link groups segments, as `splitClip` does: in each group, the clips in
   its earliest slot between cuts keep the id, each later slot shares a fresh one.
 
-Rows no link reaches are left where they are, as a clip's ripple delete leaves
-them; markers and in/out points do not move either. The cut is refused whole
+With the box cleared, rows no link reaches are left where they are, as a
+clip's ripple delete leaves them, and markers and in/out points do not move
+either. The cut is refused whole
 (`false`, nothing written, no history) when one of those rows is locked, the
 clip is gone, no range holds any time, or nothing on the rows would change. The
 dialog then says a track is locked, or that the clip is no longer on the
 timeline (a host page can replace the project under the modal).
+
+### Moving everything after each cut (ESCSUITE-434)
+
+Cutting the take's rows alone left a Blur, a text or shape overlay, the
+Captions track, markers and in/out points on other rows where they were, so
+everything after the first pause drifted out of step with what it was placed
+on. With the box on (the default), `removeTimeRanges(clipId, ranges, true)`
+also passes every **other unlocked row** to `cutTimeRanges` as a row to move,
+not to cut (`shortenClip`):
+
+- a clip there moves left by the time removed before it;
+- one a range crosses is **shortened** by the time removed within it, off its
+  out point, and stays one clip (same id): an overlay or a caption is not
+  split, a media clip keeps its in point and plays on continuously. Its
+  keyframes keep their place in what is left: one inside a range goes, each
+  later one moves left by the time removed before it in the clip, and the
+  presets are capped to the new length as a trim caps them;
+- one a range covers whole is removed, as it is on the take's rows;
+- a link group there (another take's parts) moves as one: every member by the
+  time removed before the group's earliest start, each ending where its own
+  out point lands, so the parts keep their offsets and play in step; their
+  group ids are left as they are.
+
+The markers and the in/out points move the same way (`cutEditorBlock`): each by
+the time removed before it, so one inside a pause lands where the pause closes
+up (never below 0). An in/out range a pause swallows whole would close up to
+nothing, which the export refuses and a saved file cannot hold, so it is
+cleared instead. They live outside `Project` (ESCSUITE-245) and outside the undo
+history, so this edit's history entry carries them (`UndoableState.editor`,
+taken only when they moved): undo and redo across it restore them with the
+clips, one Ctrl+Z for everything. The points come back as the entry has them.
+Markers are not edits, so the entry's list is not written over the live one:
+each marker it holds goes back to its time there, and a marker added or removed
+since (after the cut, or between an undo and a redo) stays added or removed. No
+other entry carries them, so undoing any other edit leaves them as it always
+has. A storage clear that scrubs a source out of the history keeps the block.
+
+**Locks.** A lock on one of the take's own rows still refuses the whole cut. A
+locked row anywhere else is not moved (a lock means "don't touch"), nor is any
+row linked to one (`rowsToMove`): moving the picture of a linked pair without
+its locked sound would put the pair out of step. The cut goes ahead around
+them: what is on them stays put and is left behind.
+
+The detection is unchanged: it listens only to the take's rows, since the other
+rows are shortened, never cut through.
+
+### What the cut leaves behind (ESCSUITE-431)
+
+The dialog says what the cut will leave where it is while the rest closes up
+(`leftBehind` in `store/rippleRanges.ts`): every clip on a row the cut will not
+move that overlaps or follows the first cut, counted by kind (blur, captions —
+any clip on the Captions track —, text or shapes, media), and the markers at
+or after the first cut. Which rows the cut will not move follows the box: with
+it cleared, every row outside the take, and the markers; with it on, only a
+locked row outside the take or a row linked to one (`rowsToMove`, which the cut
+itself reads; the markers move), and the sentence says "on a locked track" /
+"on locked tracks", adding "or linked to one" when a link holds any of them. For example: "2 clips on other
+tracks will not move: 1 blur, 1 media clip. 1 marker will not move. They may
+fall out of step with the take." The sentence is the dialog's accessible
+description (`aria-describedby`), and the notice after **Remove all** repeats
+the count ("… did not move"). Nothing is shown, and the dialog has no
+description, when nothing is left behind.
 
 ## Tests
 
@@ -198,20 +264,38 @@ timeline (a host page can replace the project under the modal).
   `videoProcessor.test.ts`, `takeImport.test.ts`: every writer stores it, a
   save round-trips it, a rebuild and a stored row carry their own.
 - `src/store/rippleRanges.test.ts`: both rows cut and closed, a late part cut at
-  its own offset, link groups per slot, one undo, locks.
+  its own offset, link groups per slot, one undo, locks; with everything moved,
+  other rows moved and shortened, overlays not split, captions, keyframes,
+  markers and in/out points (a swallowed range cleared), a locked other row and
+  a linked pair half on one, a linked pair on other rows kept in step, one undo
+  and redo, markers added after the cut or between undo and redo kept, and the
+  block kept by a storage-clear scrub.
 - `src/store/__tests__/silenceRemoval.property.test.ts`: fast-check over takes,
   splits, neighbours and random cuts, with the ESCSUITE-349 `checkInvariants`
   (no overlap among them) and undo/redo identity, plus alignment of every piece
-  with its source and one undo restoring the project.
+  with its source and one undo restoring the project; with the box on, every
+  clip on another unlocked row moved and shortened (never split), a linked pair
+  there keeping its parts' offset, a locked row untouched, the markers and
+  in/out points moved, and one undo restoring them.
 - `src/components/SilenceDialog.test.tsx`: the inspector action, the dialog's
-  fields, Keep, Remove all, Escape, the timeline bands, and the note for
-  legacy peaks; ESCSUITE-435: a three-part take whose system audio row, muted
-  or hidden, is not heard but is still cut in step, and the "no audible sound"
-  summary.
+  fields, Keep, Remove all, Escape, the timeline bands, the note for legacy
+  peaks, the "Move everything after each cut" box both ways, and the
+  left-behind warning: every kind counted with the box cleared, only a locked
+  row with it on, none when nothing is left behind, the accessible
+  description and the notice; ESCSUITE-435: a three-part take whose system
+  audio row, muted or hidden, is not heard but is still cut in step, and the
+  "no audible sound" summary.
 - `apps/e2e/tests/regressions/ESCSUITE-403.spec.ts`: the A/V fixture seeded as
   a separate-tracks take; the pause found, both rows shortened by it and in
   step, Ctrl+Z and Ctrl+Y, and the WebM export decoded to check the pause is
   gone.
+- `apps/e2e/tests/regressions/ESCSUITE-434.spec.ts`: the same take with a Blur
+  across the pause, a Blur, a marker and an out point after it; with the box on
+  the first Blur is shortened and stays one clip, the rest move left by the
+  pause, and one Ctrl+Z puts all of it back.
+- `apps/e2e/tests/regressions/ESCSUITE-431.spec.ts`: a Blur after the pause; no
+  warning with the box on, the warning (and description) with it cleared, the
+  notice repeating it, and the Blur where it was after Remove all.
 - `apps/e2e/tests/regressions/ESCSUITE-435.spec.ts`: a three-part take whose
   system audio (captured 1.5 s late) covers the microphone's pause; nothing is
   found until its row is muted, then the pause is, and Remove all cuts all

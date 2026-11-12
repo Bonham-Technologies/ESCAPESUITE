@@ -8,6 +8,8 @@ import { SilenceDialog } from './SilenceDialog'
 import { TimelineSilenceBands } from './Timeline/TimelineSilenceBands'
 import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { peakSecondsFor, peaksFromPcm } from '../utils/waveformPeaks'
+import { captionStyleFor } from '../core/captions'
+import { useEditorStore } from '../store/projectStore'
 import type { SourceVideo } from '../store/types'
 
 // 48 kHz and not a whole number of 10 ms buckets long, like a real recording.
@@ -189,6 +191,123 @@ describe('Remove silences', () => {
 
     store().undo()
     expect(JSON.stringify(store().project)).toBe(before)
+  })
+
+  it('moves everything after each cut unless the box is cleared (ESCSUITE-434)', async () => {
+    const { screen: part } = placeTake()
+    const blur = store().addShapeOverlayClip({ type: 'blur' }, undefined, 4, 2)!
+    store().addMarker(4)
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    const open = async () => {
+      await user.click(screen.getByRole('button', { name: 'Find silences' }))
+      rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+      await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
+    }
+    const blurAt = () => store().project.timeline.clips.find((c) => c.id === blur.id)!.timelinePosition
+
+    await open()
+    const box = screen.getByRole('checkbox', { name: 'Move everything after each cut' })
+    expect(box).toBeChecked()
+    expect(box).toHaveAccessibleDescription(/Other tracks, markers and in\/out points close up too/)
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(blurAt()).toBeCloseTo(3.2, 9)
+    expect(store().markers[0].time).toBeCloseTo(3.2, 9)
+
+    store().undo()
+    expect(blurAt()).toBe(4)
+    expect(store().markers[0].time).toBe(4)
+    store().setSelectedClipId(part.id)
+    await open()
+    await user.click(screen.getByRole('checkbox', { name: 'Move everything after each cut' }))
+    expect(screen.getByRole('checkbox', { name: 'Move everything after each cut' })).toHaveAccessibleDescription("Only this take's tracks close up.")
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(blurAt()).toBe(4)
+    expect(store().markers[0].time).toBe(4)
+  })
+
+  describe('what the cut leaves behind (ESCSUITE-431)', () => {
+    const MOVE = 'Move everything after each cut'
+    /** Open the dialog on the take's screen part, with only the pause at 2.1–2.9 s listed. */
+    async function openOnTake(part: { id: string }) {
+      store().setSelectedClipId(part.id)
+      const user = userEvent.setup()
+      const { rerender, onRemoved } = renderEditor()
+      await user.click(screen.getByRole('button', { name: 'Find silences' }))
+      rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+      await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
+      return { user, onRemoved }
+    }
+    const warning = () => screen.queryByTestId('silence-left-behind')
+
+    it('counts each kind on other tracks and the markers with the box cleared, and the notice repeats it', async () => {
+      const { screen: part } = placeTake()
+      store().addShapeOverlayClip({ type: 'blur' }, undefined, 4, 2)
+      store().addShapeOverlayClip({ type: 'rectangle' }, undefined, 1, 2) // overlaps the cut
+      store().addTextOverlayClip({ text: 'Title' }, undefined, 5, 1)
+      store().addCaptionCues([{ start: 3, end: 4, text: 'Hi' }, { start: 4.5, end: 5, text: 'There' }], captionStyleFor({ width: 1920, height: 1080 }))
+      store().addClipToTimeline({ id: 'music', sourceVideoId: mic.id, name: 'music', startTime: 0, endTime: 4, duration: 4 }, undefined, 3)
+      store().addShapeOverlayClip({ type: 'blur' }, undefined, 0, 1) // ends before the cut: not counted
+      store().addMarker(1) // before the cut: not counted
+      store().addMarker(2.5)
+      store().addMarker(6)
+      const { user, onRemoved } = await openOnTake(part)
+
+      expect(warning()).toBeNull() // the box is on: everything moves
+      await user.click(screen.getByRole('checkbox', { name: MOVE }))
+      const text = '6 clips on other tracks will not move: 1 blur, 2 captions, 2 texts or shapes, 1 media clip. 2 markers will not move.'
+      expect(warning()).toHaveTextContent(text)
+      expect(screen.getByRole('dialog')).toHaveAccessibleDescription(`${text} They may fall out of step with the take.`)
+
+      await user.click(screen.getByRole('button', { name: 'Remove all' }))
+      expect(onRemoved).toHaveBeenCalledWith(
+        'Removed 1 pause (0.80 s). Ctrl+Z puts them back. 6 clips on other tracks did not move: 1 blur, 2 captions, 2 texts or shapes, 1 media clip. 2 markers did not move.'
+      )
+    })
+
+    it('with the box on, counts only what sits on a locked track', async () => {
+      const { screen: part } = placeTake()
+      const blur = store().addShapeOverlayClip({ type: 'blur' }, undefined, 4, 2)!
+      store().addTextOverlayClip({ text: 'Title' }, undefined, 5, 1)
+      store().updateTrack(blur.trackId, { locked: true })
+      store().addMarker(6)
+      const { user, onRemoved } = await openOnTake(part)
+
+      expect(warning()).toHaveTextContent('1 clip on a locked track will not move: 1 blur.')
+      expect(warning()).not.toHaveTextContent('marker')
+      await user.click(screen.getByRole('button', { name: 'Remove all' }))
+      expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back. 1 clip on a locked track did not move: 1 blur.')
+      expect(store().project.timeline.clips.find((c) => c.id === blur.id)!.timelinePosition).toBe(4)
+    })
+
+    it('with the box on, names a clip held back by a link to a locked track', async () => {
+      const { screen: part } = placeTake()
+      store().addClipToTimeline({ id: 'b-roll', sourceVideoId: video.id, name: 'b-roll', startTime: 0, endTime: 2, duration: 2 }, undefined, 4)
+      store().addClipToTimeline({ id: 'b-sound', sourceVideoId: mic.id, name: 'b-sound', startTime: 0, endTime: 2, duration: 2 }, undefined, 4)
+      useEditorStore.setState((state) => ({
+        project: {
+          ...state.project,
+          timeline: {
+            ...state.project.timeline,
+            clips: state.project.timeline.clips.map((c) => (c.name.startsWith('b-') ? { ...c, linkGroupId: 'pair' } : c)),
+          },
+        },
+      }))
+      store().updateTrack(store().project.timeline.clips.find((c) => c.id === 'b-sound')!.trackId, { locked: true })
+      await openOnTake(part)
+      expect(warning()).toHaveTextContent('2 clips on locked tracks or linked to one will not move: 2 media clips.')
+    })
+
+    it('shows no warning, and no description, when nothing is left behind', async () => {
+      const { screen: part } = placeTake()
+      store().addShapeOverlayClip({ type: 'blur' }, undefined, 0, 1)
+      store().addMarker(1)
+      const { user } = await openOnTake(part)
+      await user.click(screen.getByRole('checkbox', { name: MOVE }))
+      expect(warning()).toBeNull()
+      expect(screen.getByRole('dialog')).not.toHaveAttribute('aria-describedby')
+    })
   })
 
   it('says so and cuts nothing when one of the take\'s tracks is locked', async () => {

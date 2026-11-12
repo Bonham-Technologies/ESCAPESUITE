@@ -528,6 +528,14 @@ export interface Project {
 export interface UndoableState {
   project: Project;
   sourceVideos: SourceVideo[];
+  /**
+   * The in/out points and markers, on the entry of an edit that moved them
+   * ("Remove silences" with "Move everything after each cut", ESCSUITE-434):
+   * undo and redo across that entry restore the points, and put each marker
+   * it holds back at its time there (a marker added or removed since stays
+   * so). Absent on every other entry, which leaves them as they are.
+   */
+  editor?: EditorBlock;
 }
 
 // Keyframe panel UI state
@@ -749,8 +757,13 @@ export interface EditorState {
    * as a ripple delete leaves them. Refused whole (`false`, nothing written)
    * when any of those rows is locked, the clip is not there, or no range
    * holds any time. See `store/rippleRanges.ts`.
+   *
+   * `moveEverything` (ESCSUITE-434) also moves every other unlocked row, the
+   * markers and the in/out points by the time cut before them; a clip there
+   * that a range crosses is shortened, not split. A locked row other than the
+   * take's, and any row linked to one, stays put. Still one undo step, markers and points included.
    */
-  removeTimeRanges: (clipId: string, ranges: readonly TimeRange[]) => boolean;
+  removeTimeRanges: (clipId: string, ranges: readonly TimeRange[], moveEverything?: boolean) => boolean;
   /**
    * **A refused write says so** (ESCSUITE-87).
    *

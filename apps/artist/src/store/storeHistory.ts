@@ -1,7 +1,7 @@
 // Undo/redo history for the editor store: the snapshot taken before a change and
 // the cap on how many are kept. Every mutating action pushes through here.
 
-import type { EditorState, SourceVideo, UndoableState } from './types';
+import type { EditorBlock, EditorState, SourceVideo, UndoableState } from './types';
 import { createUndoableSnapshot } from '../utils/deepClone';
 import { calculateTimelineDuration } from './projectFactory';
 import { sameSourceVideo } from './sourceVideoEquality';
@@ -9,14 +9,21 @@ import { sameSourceVideo } from './sourceVideoEquality';
 // Maximum history size to prevent memory issues
 const MAX_HISTORY_SIZE = 50;
 
-// Helper to get undoable state snapshot
-function getUndoableState(state: EditorState): UndoableState {
-  return createUndoableSnapshot(state.project, state.sourceVideos);
+/**
+ * The undoable state as it stands. `withEditor` adds the in/out points and the
+ * markers (ESCSUITE-434): only an edit that moves them takes them, so undoing
+ * any other edit leaves them alone, as it always has.
+ */
+function getUndoableState(state: EditorState, withEditor = false): UndoableState {
+  const snapshot = createUndoableSnapshot(state.project, state.sourceVideos);
+  if (!withEditor) return snapshot;
+  const editor: EditorBlock = { inPoint: state.inPoint, outPoint: state.outPoint, markers: structuredClone(state.markers) };
+  return { ...snapshot, editor };
 }
 
 // Helper to push state to history (call before making changes)
-function pushToHistory(state: EditorState): { past: UndoableState[]; future: UndoableState[] } {
-  const snapshot = getUndoableState(state);
+function pushToHistory(state: EditorState, withEditor = false): { past: UndoableState[]; future: UndoableState[] } {
+  const snapshot = getUndoableState(state, withEditor);
   const newPast = [...state.history.past, snapshot];
 
   // Limit history size
@@ -118,6 +125,9 @@ export function scrubRemovedSources(
       (c) => !c.sourceVideoId || !removed.has(c.sourceVideoId)
     );
     return {
+      // Keep the rest of the entry, the markers and points it may carry
+      // (ESCSUITE-434) among it.
+      ...snapshot,
       project: {
         ...snapshot.project,
         timeline: {
