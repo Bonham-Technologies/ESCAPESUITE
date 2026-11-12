@@ -182,18 +182,27 @@ function listenedClips(
   sources: readonly SourceVideo[],
   target: Clip
 ): { clip: Clip; source: SourceVideo }[] {
+  return clipsWithSound(clips, sources, target).filter(({ clip }) => plays(tracks, clip));
+}
+
+/** `listenedClips` before the muted and hidden rows are left out. */
+function clipsWithSound(clips: readonly Clip[], sources: readonly SourceVideo[], target: Clip): { clip: Clip; source: SourceVideo }[] {
   const rows = linkedRows(clips, target);
   const spanEnd = target.timelinePosition + target.duration;
-  const listened: { clip: Clip; source: SourceVideo }[] = [];
+  const withSound: { clip: Clip; source: SourceVideo }[] = [];
   for (const clip of clips) {
     if (!rows.has(clip.trackId) || clip.overlayType) continue;
-    const track = tracks.find((t) => t.id === clip.trackId);
-    if (!track || track.muted || !isVisibleTrack(track)) continue;
     if (clip.timelinePosition >= spanEnd || clip.timelinePosition + clip.duration <= target.timelinePosition) continue;
     const source = sources.find((s) => s.id === clip.sourceVideoId);
-    if (source?.hasAudio) listened.push({ clip, source });
+    if (source?.hasAudio) withSound.push({ clip, source });
   }
-  return listened;
+  return withSound;
+}
+
+/** Whether the export mixes `clip`'s sound: its row exists, is not muted and is not hidden (`mixInto`). */
+function plays(tracks: readonly Track[], clip: Clip): boolean {
+  const track = tracks.find((t) => t.id === clip.trackId);
+  return isVisibleTrack(track) && !track.muted;
 }
 
 /**
@@ -217,9 +226,9 @@ export function hasApproximateTiming(
 
 /**
  * Whether `clipId` is on the timeline but nothing `findTakeSilences` would
- * listen to plays: every clip with sound the cut touches is on a muted or a
- * hidden row (ESCSUITE-435). There is then no audible sound to judge, and
- * nothing is found.
+ * listen to plays: there is a clip with sound the cut touches, and every
+ * such clip is on a muted or a hidden row (ESCSUITE-435). There is then no
+ * audible sound to judge, and nothing is found.
  */
 export function nothingAudible(
   clips: readonly Clip[],
@@ -228,7 +237,11 @@ export function nothingAudible(
   clipId: string
 ): boolean {
   const target = clips.find((c) => c.id === clipId);
-  return target !== undefined && listenedClips(clips, tracks, sources, target).length === 0;
+  if (!target) return false;
+  // Only when something with sound is there to be silenced: a span with no
+  // sound at all is "no pauses", not "muted or hidden".
+  const withSound = clipsWithSound(clips, sources, target);
+  return withSound.length > 0 && !withSound.some(({ clip }) => plays(tracks, clip));
 }
 
 /**

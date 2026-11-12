@@ -78,9 +78,10 @@ its microphone's pauses found, where before the muted sound, silent in the
 export, kept every pause. Such a clip is still cut and moved with the take
 (the cut works on rows, not on what is heard), so it stays in step if it is
 unmuted later. A muted clip with no readable peaks no longer blocks a cut
-either. `nothingAudible` answers whether the clip is on the timeline but
-nothing it would listen to plays; the dialog then says there is no audible
-sound to judge, and nothing is found. A track's volume is not consulted: a
+either. `nothingAudible` answers whether the clip is on the timeline, some
+clip with sound overlaps it on a row the cut moves, and none of those plays;
+the dialog then says there is no audible sound to judge, and nothing is found.
+A span with no sound at all still reads "No pauses to cut". A track's volume is not consulted: a
 track turned down to 0 % but not muted is still listened to. Peaks on a muted
 track do not raise the legacy-timing note (`hasApproximateTiming`).
 
@@ -186,8 +187,8 @@ timeline (a host page can replace the project under the modal).
   silent video clip and an unreadable clip; and a fast-check property that no
   cut crosses sound in any audible clip on any row the cut touches, with rows
   randomly muted or hidden. ESCSUITE-435: a muted, a hidden and a missing row
-  not heard, a muted unreadable clip not blocking, `nothingAudible`, and no
-  legacy-timing note for a muted row.
+  not heard, a muted unreadable clip not blocking, `nothingAudible` (and not
+  for a span with no sound at all), and no legacy-timing note for a muted row.
 - `src/utils/waveformPeaks.test.ts`, `src/utils/waveform.test.ts`: the
   reported peak length on both extraction paths. `projectManager.test.ts`,
   `videoProcessor.test.ts`, `takeImport.test.ts`: every writer stores it, a

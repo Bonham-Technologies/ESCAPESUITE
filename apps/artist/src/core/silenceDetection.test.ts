@@ -569,6 +569,16 @@ describe('findTakeSilences: only what the export plays is listened to (ESCSUITE-
     expect(nothingAudible(clips, silenced, sources, 'missing')).toBe(false);
   });
 
+  it('does not blame muting when nothing the cut touches has sound at all', () => {
+    // The take's sound starts after the screen part ends, so nothing is muted:
+    // there is no sound in the span to judge, which is "no pauses", not "muted".
+    const screen: SourceVideo = { ...source('screen', null), hasAudio: false };
+    const late = [clip('s', 'screen', 0, 0, 4, 'g', 'S'), clip('y', 'music', 5, 0, 6, 'g', 'Y')];
+    expect(nothingAudible(late, [track('S'), track('Y')], [screen, music], 's')).toBe(false);
+    expect(nothingAudible(late, [track('S'), track('Y', { muted: true })], [screen, music], 's')).toBe(false);
+    expect(nothingAudible([late[0]], [track('S')], [screen], 's')).toBe(false);
+  });
+
   it('does not flag approximate timing for legacy peaks on a muted row', () => {
     const legacy: SourceVideo = { ...music };
     delete legacy.waveformSecondsPerPeak;
