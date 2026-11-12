@@ -250,3 +250,81 @@ describe('Remove silences', () => {
     expect(store().silenceReview).toBeNull()
   })
 })
+
+describe('Remove silences: muted and hidden rows (ESCSUITE-435)', () => {
+  beforeEach(() => resetStoreForTest())
+
+  // A system-audio part with tone throughout, as music under a talk would be.
+  const MUSIC_SAMPLES = 7 * RATE
+  const music: SourceVideo = (() => {
+    const pcm = new Float32Array(MUSIC_SAMPLES)
+    for (let i = 0; i < pcm.length; i++) pcm[i] = 0.5 * Math.sin((2 * Math.PI * 440 * i) / RATE)
+    return {
+      id: 'music-src', name: 'system.webm', duration: 7, width: 0, height: 0, frameRate: 0,
+      mimeType: 'audio/webm', size: 1, mediaType: 'audio', hasAudio: true, waveformData: peaksFromPcm(pcm, RATE, 100),
+      waveformSecondsPerPeak: peakSecondsFor(MUSIC_SAMPLES, RATE, 100),
+    }
+  })()
+
+  /** Screen, microphone and system audio, linked, each on its own row. */
+  function placeThreePartTake() {
+    store().addSourceVideo(mic)
+    store().addSourceVideo(music)
+    store().placeTakeOnTimeline([
+      { sourceVideoId: video.id, name: 'screen', duration: 7, startOffset: 0, width: 1920, height: 1080 },
+      { sourceVideoId: mic.id, name: 'mic', duration: 7, startOffset: 0, width: 0, height: 0, mediaType: 'audio' },
+      { sourceVideoId: music.id, name: 'system', duration: 7, startOffset: 0, width: 0, height: 0, mediaType: 'audio' },
+    ])
+    const clips = store().project.timeline.clips
+    const named = (name: string) => clips.find((c) => c.name === name)!
+    return { screen: named('screen'), mic: named('mic'), system: named('system') }
+  }
+
+  async function openDialog(clipId: string) {
+    store().setSelectedClipId(clipId)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    return { user, onRemoved }
+  }
+
+  it('hears the system audio while its row plays, so the microphone\'s pauses are kept', async () => {
+    const { screen: part } = placeThreePartTake()
+    await openDialog(part.id)
+    expect(pauses()).toHaveLength(0)
+    expect(screen.getByRole('status')).toHaveTextContent('No pauses to cut with these settings.')
+  })
+
+  it('does not listen to a muted row, and still cuts it in step with the take', async () => {
+    const { screen: part, mic: micClip, system } = placeThreePartTake()
+    store().updateTrack(system.trackId, { muted: true })
+    const { user, onRemoved } = await openDialog(part.id)
+    expect(pauses()).toHaveLength(2)
+    expect(pauses()[0]).toHaveTextContent('0:02.10 – 0:02.90')
+
+    await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back.')
+    const rowOf = (trackId: string) =>
+      store().project.timeline.clips.filter((c) => c.trackId === trackId).map((c) => [c.timelinePosition, c.startTime, c.endTime].map((n) => +n.toFixed(6)))
+    for (const clip of [part, micClip, system]) expect(rowOf(clip.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])
+  })
+
+  it('does not listen to a hidden row either', async () => {
+    const { screen: part, system } = placeThreePartTake()
+    store().updateTrack(system.trackId, { visible: false })
+    await openDialog(part.id)
+    expect(pauses()).toHaveLength(2)
+  })
+
+  it('says there is no audible sound to judge when every row with sound is muted', async () => {
+    const { screen: part, mic: micClip, system } = placeThreePartTake()
+    store().updateTrack(micClip.trackId, { muted: true })
+    store().updateTrack(system.trackId, { muted: true })
+    await openDialog(part.id)
+    expect(pauses()).toHaveLength(0)
+    expect(screen.getByRole('status')).toHaveTextContent('No audible sound to judge: every track with sound here is muted or hidden.')
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeDisabled()
+  })
+})

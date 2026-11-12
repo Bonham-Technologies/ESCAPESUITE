@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { test, expect, type Page, type Locator } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import {
@@ -28,6 +29,8 @@ import {
   makeToneWav,
 } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
+import { AV_FIXTURE_WEBM } from '../../utils/mediaHealth'
+import { installSpeechStub, transcribeButton } from '../../utils/speechStub'
 
 test.describe('ESCAPEPLAN Accessibility', () => {
   test.beforeEach(async ({ page }) => {
@@ -1799,5 +1802,170 @@ test.describe('Color Contrast', () => {
         }
       })
     }
+  }
+
+  /** Wait until the editor runs in `theme`. */
+  async function expectTheme(page: Page, theme: 'dark' | 'light') {
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as { ESCAPE_THEME?: { getResolvedTheme(): string } }).ESCAPE_THEME?.getResolvedTheme() ?? null
+        )
+      )
+      .toBe(theme)
+  }
+
+  /**
+   * A separate-tracks take of the A/V fixture (tone 0–2 s, silence 2–3 s, tone
+   * 3–5 s), seeded into the shared database as `regressions/ESCSUITE-403.spec.ts`
+   * does: the screen part for its picture, the microphone for its sound. Opens
+   * the editor on it in `theme`.
+   */
+  async function openSilenceTake(page: Page, theme: 'dark' | 'light') {
+    const takeId = 'a11y-436-screen'
+    const common = { duration: 5, mimeType: 'video/webm', source: 'recording', takeId, startOffset: 0 }
+    const parts = [
+      { ...common, id: takeId, name: 'Talk', width: 640, height: 360, frameRate: 30, mediaType: 'video', recordedAt: 1_700_000_000_000, hasAudio: false, role: 'screen' },
+      { ...common, id: 'a11y-436-mic', name: 'Talk — microphone', width: 0, height: 0, frameRate: 0, mediaType: 'audio', recordedAt: 1_700_000_000_001, hasAudio: true, role: 'mic' },
+    ]
+    await page.goto(ARTIST_URL)
+    await page.evaluate(
+      ({ parts, base64 }) =>
+        new Promise<void>((resolve, reject) => {
+          const binary = atob(base64)
+          const data = new Uint8Array(binary.length)
+          for (let i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i)
+          // `DB_VERSION` in `packages/shared/src/storage`, whose four stores this builds.
+          const request = indexedDB.open('video-editor-db', 1)
+          request.onupgradeneeded = () => {
+            const db = request.result
+            for (const name of ['videos', 'thumbnails', 'projects']) {
+              if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' })
+            }
+            if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings')
+          }
+          request.onerror = () => reject(new Error(`seed open failed: ${String(request.error)}`))
+          request.onsuccess = () => {
+            const tx = request.result.transaction('videos', 'readwrite')
+            for (const metadata of parts) {
+              const blob = new Blob([data], { type: metadata.mimeType })
+              tx.objectStore('videos').put({ id: metadata.id, blob, metadata: { ...metadata, size: blob.size } })
+            }
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(new Error(`seed write failed: ${String(tx.error)}`))
+          }
+        }),
+      { parts, base64: readFileSync(AV_FIXTURE_WEBM).toString('base64') }
+    )
+    await page.goto(`${ARTIST_URL}?loadVideo=${takeId}&suppressRestore=1&theme=${theme}`)
+    await expect(page.getByText(/^2 clips · 2 tracks$/)).toBeVisible({ timeout: 15_000 })
+    await expectTheme(page, theme)
+  }
+
+  /** The track header button titled `title` on the row `clip` sits on: the header level with it. */
+  async function rowButton(page: Page, clip: Locator, title: string): Promise<Locator> {
+    const row = (await clip.boundingBox())!
+    const middle = row.y + row.height / 2
+    for (const button of await page.getByTitle(title, { exact: true }).all()) {
+      const header = (await button.locator('xpath=ancestor::*[contains(@class, "trackHeader")][1]').boundingBox())!
+      if (middle >= header.y && middle <= header.y + header.height) return button
+    }
+    throw new Error(`no ${title} button level with the clip`)
+  }
+
+  // ESCSUITE-436: "Remove silences" (ESCSUITE-403) painted its refused alert
+  // and an invalid field's border in a hard-coded #f87171: 2.57:1 as text on
+  // the light dialog (--bg-secondary), and as a border 2.3:1 on the field's
+  // light fill. No audit opened the dialog, so this one does, with a track
+  // locked (Remove all is refused and says why) and a field holding a number
+  // out of range, then with Remove all hovered. Both themes: the dark one
+  // must keep passing.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`the Remove silences dialog stays readable, refused and with a field invalid (${theme} theme, ESCSUITE-436)`, async ({
+      page,
+      browserName,
+    }) => {
+      test.setTimeout(90_000)
+      test.skip(
+        browserName === 'webkit',
+        'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+      )
+      await openSilenceTake(page, theme)
+      const screenPart = page.locator('[data-clip-id]').filter({ hasText: /^Talk(?! —)/ }).first()
+      const micPart = page.locator('[data-clip-id]').filter({ hasText: /microphone/ }).first()
+      // A locked track the cut would move: Remove all is refused.
+      await (await rowButton(page, micPart, 'Lock track')).click()
+
+      await screenPart.click()
+      await page.getByRole('button', { name: 'Find silences' }).click()
+      const dialog = page.getByRole('dialog', { name: 'Remove silences' })
+      await expect(dialog.getByRole('status')).toHaveText(/^1 pause found/)
+      const minGap = dialog.getByLabel('Minimum gap (s)')
+      await minGap.fill('99')
+      await expect(minGap).toHaveAttribute('aria-invalid', 'true')
+      await expect(dialog.getByText('Enter a number from 0 to 60.')).toBeVisible()
+      const removeAll = dialog.getByRole('button', { name: 'Remove all' })
+      await removeAll.click()
+      await expect(dialog.getByRole('alert')).toHaveText(/a track this take sits on is locked/)
+
+      await page.mouse.move(0, 0)
+      await waitForAnimationsToFinish(dialog)
+      expect.soft(await contrastFailures(page, '[role="dialog"]'), `${theme} contrast failures, Remove silences`).toEqual([])
+
+      // axe judges text only: the invalid field's border is measured here
+      // (WCAG 1.4.11, 3:1) against the field's fill and the dialog around it.
+      const field = await paintOf(minGap)
+      expect.soft(contrast(field.edge, field.fill), `${theme} invalid border on the field`).toBeGreaterThanOrEqual(3)
+      expect.soft(contrast(field.edge, field.surface), `${theme} invalid border on the dialog`).toBeGreaterThanOrEqual(3)
+
+      await removeAll.hover()
+      await waitForAnimationsToFinish(dialog)
+      expect
+        .soft(await contrastFailures(page, '[role="dialog"]'), `${theme} contrast failures, Remove all hovered`)
+        .toEqual([])
+    })
+  }
+
+  // ESCSUITE-436: the "Transcribe to captions" notice (ESCSUITE-404) before a
+  // language pack downloads. The control only shows where the browser has
+  // on-device recognition and a vendor brand, so the Web Speech API and the
+  // brand are stubbed (`utils/speechStub.ts`, as `regressions/ESCSUITE-404.spec.ts`
+  // does): Playwright's Chromium shell is a bare embedder, and its own
+  // available() kills the renderer.
+  for (const theme of ['dark', 'light'] as const) {
+    test(`the transcribe language-pack notice stays readable, hovered too (${theme} theme, ESCSUITE-436)`, async ({
+      page,
+      browserName,
+    }) => {
+      test.setTimeout(90_000)
+      test.skip(
+        browserName === 'webkit',
+        'WebKit cannot store a Blob in IndexedDB in Playwright (UnknownError: Error preparing Blob/File data to be stored in object store)'
+      )
+      await installSpeechStub(page, { api: 'local', answer: 'downloadable' })
+      await page.goto(`${ARTIST_URL}/?suppressRestore=1&theme=${theme}`)
+      await waitForAppReady(page, 'artist')
+      await expectTheme(page, theme)
+      await importMediaAndAddToTimeline(page, { name: 'speech.wav', mimeType: 'audio/wav', buffer: makeToneWav(2) })
+
+      await transcribeButton(page).click()
+      const notice = page.getByRole('group', { name: 'Speech language pack' })
+      await expect(notice).toBeVisible()
+      await page.mouse.move(0, 0)
+      await waitForAnimationsToFinish(notice)
+      expect
+        .soft(await contrastFailures(page, '[role="group"][aria-label="Speech language pack"]'), `${theme} contrast failures, notice`)
+        .toEqual([])
+
+      await notice.getByRole('button', { name: 'Download language pack' }).hover()
+      await waitForAnimationsToFinish(notice)
+      expect
+        .soft(
+          await contrastFailures(page, '[role="group"][aria-label="Speech language pack"]'),
+          `${theme} contrast failures, Download language pack hovered`
+        )
+        .toEqual([])
+    })
   }
 })

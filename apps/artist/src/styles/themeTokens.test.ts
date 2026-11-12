@@ -145,7 +145,7 @@ describe('ESCAPEARTIST theme tokens', () => {
  * themes, and so is the ink on the one hover fill the stylesheets use.
  */
 describe('accent fills across the stylesheets', () => {
-  const ACCENT_FILL = /background(?:-color)?\s*:\s*(?:var\(--accent-primary\)|#4a9eff|#3a8eef|rgba\(\s*74\s*,\s*158\s*,\s*255)/i
+  const ACCENT_FILL = /background(?:-color)?\s*:\s*(?:var\(--accent-primary\)|var\(--accent-fill-hover\)|#4a9eff|#3a8eef|rgba\(\s*74\s*,\s*158\s*,\s*255)/i
   const WHITE_INK = /(?:^|[;{\s])color\s*:\s*(?:white|#fff(?:fff)?)\s*(?:!important)?\s*(?:;|$)/i
 
   const rules = cssFiles(join(process.cwd(), 'src')).flatMap((file) =>
@@ -172,7 +172,46 @@ describe('accent fills across the stylesheets', () => {
     expect(rules.filter((r) => /--accent-hover/.test(r.body)).map((r) => r.where)).toEqual([])
     for (const palette of [DARK, LIGHT]) {
       expect(contrastRatio(token(palette, '--accent-on-fill'), '#3a8eef')).toBeGreaterThanOrEqual(4.5)
+      // ESCSUITE-436: the hover fill as a token, the same colour in both palettes.
+      expect(token(palette, '--accent-fill-hover')).toBe('#3a8eef')
+      expect(contrastRatio(token(palette, '--accent-on-fill'), token(palette, '--accent-fill-hover'))).toBeGreaterThanOrEqual(4.5)
     }
+  })
+})
+
+/**
+ * ESCSUITE-436: "Remove silences" painted its refused alert and an invalid
+ * field's border in a hard-coded #f87171, 2.57:1 as text on the light dialog
+ * (--bg-secondary) and 2.3:1 as a border on the light field (--bg-tertiary).
+ * Both take --danger-ink. Its Remove all hover and the transcribe notice's
+ * Download hover were a hard-coded #3a8eef; they take --accent-fill-hover.
+ */
+describe('Remove silences and the transcribe notice', () => {
+  const DIALOG = 'src/components/SilenceDialog.module.css'
+  const TRANSCRIBE = 'src/components/Timeline/TranscribeControl.module.css'
+
+  it('paints the refused alert and the invalid border with --danger-ink', () => {
+    expect(declaration(moduleCss(DIALOG), '.error', 'color')).toBe('var(--danger-ink)')
+    expect(declaration(moduleCss(DIALOG), ".input[aria-invalid='true']", 'border-color')).toBe('var(--danger-ink)')
+  })
+
+  it('paints the accent buttons\' hover fills with --accent-fill-hover', () => {
+    expect(declaration(moduleCss(DIALOG), '.removeButton:hover:not(:disabled)', 'background')).toBe('var(--accent-fill-hover)')
+    expect(declaration(moduleCss(TRANSCRIBE), '.primary:hover', 'background')).toBe('var(--accent-fill-hover)')
+  })
+
+  for (const palette of [DARK, LIGHT]) {
+    it(`keeps --danger-ink at 4.5:1 as text on every surface, so 3:1 as the field's edge too (${palette})`, () => {
+      const danger = token(palette, '--danger-ink')
+      for (const surface of SURFACES) {
+        expect(contrastRatio(danger, token(palette, surface)), `${palette} --danger-ink on ${surface}`).toBeGreaterThanOrEqual(4.5)
+      }
+    })
+  }
+
+  it('measured #f87171 under AA on the light dialog and field, which is why it is swapped', () => {
+    expect(contrastRatio('#f87171', token(LIGHT, '--bg-secondary'))).toBeCloseTo(2.58, 2)
+    expect(contrastRatio('#f87171', token(LIGHT, '--bg-tertiary'))).toBeLessThan(3)
   })
 })
 

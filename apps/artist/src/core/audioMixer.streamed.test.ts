@@ -155,6 +155,24 @@ describe('extractAndMixAudio, streamed', () => {
     expect(offline.decodeCalls).toHaveLength(0)
   })
 
+  // ESCSUITE-438: "Preparing the sound…" shows how far the mix has got, even
+  // for a timeline of one file; an export's progress stays one step a source.
+  it('reports the speech mix chunk by chunk, and the export mix once a source', async () => {
+    await store('long', floatWav([signal(480_000, 0), signal(480_000, 1)]))
+    const clips = [makeClip({ id: 'a', sourceVideoId: 'long', duration: 10, endTime: 10 })]
+
+    const speech: number[] = []
+    await extractSpeechMix(clips, [makeTrack()], 10, undefined, undefined, (p) => speech.push(p))
+    expect(speech.length).toBeGreaterThan(2)
+    expect(speech.some((p) => p > 0 && p < 100)).toBe(true)
+    expect(speech).toEqual([...speech].sort((x, y) => x - y))
+    expect(speech[speech.length - 1]).toBe(100)
+
+    const exported: number[] = []
+    await extractAndMixAudio(clips, [makeTrack()], 10, (p) => exported.push(p))
+    expect(exported).toEqual([100])
+  })
+
   it('asks for no plane when the speech mix is stopped before it starts', async () => {
     const allocate = vi.fn((frames: number) => new Float32Array(frames))
     const controller = new AbortController()

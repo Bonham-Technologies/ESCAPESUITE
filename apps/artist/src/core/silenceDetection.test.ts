@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import type { Clip, SourceVideo, WaveformPeak } from '../store/types';
+import type { Clip, SourceVideo, Track, WaveformPeak } from '../store/types';
 import { DEFAULT_EFFECTS, DEFAULT_TRANSFORM, DEFAULT_TRANSITION } from '../store/types';
 import { linkedRows } from '../store/rippleRanges';
 import { PeakReducer, peakSecondsFor, peaksFromPcm } from '../utils/waveformPeaks';
@@ -18,9 +18,10 @@ import {
   certainSilentRuns,
   cutsFromSilences,
   detectSilences,
-  findTakeSilences,
-  hasApproximateTiming,
+  findTakeSilences as findOnTracks,
+  hasApproximateTiming as approximateOnTracks,
   intersectRanges,
+  nothingAudible,
   silentRuns,
   totalLength,
 } from './silenceDetection';
@@ -47,6 +48,21 @@ function speech(stretches: [number, boolean][]): Float32Array {
 }
 
 const peaksOf = (pcm: Float32Array) => peaksFromPcm(pcm, RATE, PEAKS_PER_SECOND);
+
+/** A row of the timeline, shown and playing unless `state` says otherwise. */
+function track(id: string, state: Partial<Track> = {}): Track {
+  return { id, name: id, index: 0, visible: true, locked: false, muted: false, volume: 1, height: 60, ...state };
+}
+
+/** Every row `clips` sit on, all of them audible. */
+const audibleRows = (clips: readonly Clip[]): Track[] => [...new Set(clips.map((c) => c.trackId))].map((id) => track(id));
+
+// Most cases here are about what the sound says, not which rows play: they ask
+// with every row audible. ESCSUITE-435's cases pass their own tracks.
+const findTakeSilences = (clips: readonly Clip[], sources: readonly SourceVideo[], clipId: string, options: Parameters<typeof findOnTracks>[4]) =>
+  findOnTracks(clips, audibleRows(clips), sources, clipId, options);
+const hasApproximateTiming = (clips: readonly Clip[], sources: readonly SourceVideo[], clipId: string) =>
+  approximateOnTracks(clips, audibleRows(clips), sources, clipId);
 
 describe('detectSilences', () => {
   it('finds exactly the 2 s gaps between stretches of tone, within 50 ms', () => {
@@ -440,6 +456,7 @@ describe('findTakeSilences: every clip the cut touches is listened to (ESCSUITE-
   it('never cuts where any audible clip on a touched row has sound (property)', () => {
     // Up to four rows of clips, some linked, each a 10 peaks-a-second source
     // of random loud and quiet buckets (or no sound, or sound it cannot read).
+    // A row plays, or is muted or hidden (ESCSUITE-435): only what plays counts.
     const ROWS = ['A', 'B', 'C', 'D'];
     const PPS = 100;
     const level = Math.pow(10, DEFAULT_SILENCE_OPTIONS.thresholdDb / 20);
@@ -454,9 +471,11 @@ describe('findTakeSilences: every clip the cut touches is listened to (ESCSUITE-
       group: fc.option(fc.constantFrom('g1', 'g2', 'g3'), { nil: undefined }),
       source: sourceArb,
     });
+    const rowStatesArb = fc.array(fc.constantFrom('plays', 'plays', 'plays', 'muted', 'hidden'), { minLength: ROWS.length, maxLength: ROWS.length });
     let cutSomething = 0;
     fc.assert(
-      fc.property(fc.array(clipArb, { minLength: 1, maxLength: 8 }), fc.nat(), fc.integer({ min: 0, max: 10 }), (specs, pick, gap) => {
+      fc.property(fc.array(clipArb, { minLength: 1, maxLength: 8 }), fc.nat(), fc.integer({ min: 0, max: 10 }), rowStatesArb, (specs, pick, gap, rowStates) => {
+        const tracks = ROWS.map((id, i) => track(id, { muted: rowStates[i] === 'muted', visible: rowStates[i] !== 'hidden' }));
         const sources: SourceVideo[] = [];
         const clips: Clip[] = [];
         const ends = new Map<string, number>();
@@ -475,14 +494,14 @@ describe('findTakeSilences: every clip the cut touches is listened to (ESCSUITE-
         });
         const target = clips[pick % clips.length];
         const options = { thresholdDb: DEFAULT_SILENCE_OPTIONS.thresholdDb, minGap: gap / 10, padding: 0 };
-        const cuts = findTakeSilences(clips, sources, target.id, options);
+        const cuts = findOnTracks(clips, tracks, sources, target.id, options);
         const rows = linkedRows(clips, target);
         if (cuts.length > 0) cutSomething++;
         for (const cut of cuts) {
           expect(cut.start).toBeGreaterThanOrEqual(target.timelinePosition - 1e-9);
           expect(cut.end).toBeLessThanOrEqual(target.timelinePosition + target.duration + 1e-9);
           for (const c of clips) {
-            if (!rows.has(c.trackId)) continue;
+            if (!rows.has(c.trackId) || rowStates[ROWS.indexOf(c.trackId)] !== 'plays') continue;
             const from = Math.max(cut.start, c.timelinePosition) + 1e-7;
             const to = Math.min(cut.end, c.timelinePosition + c.duration) - 1e-7;
             if (to <= from) continue;
@@ -501,5 +520,69 @@ describe('findTakeSilences: every clip the cut touches is listened to (ESCSUITE-
     );
     // Not vacuous: a good share of scenarios find something to cut.
     expect(cutSomething).toBeGreaterThan(60);
+  });
+});
+
+describe('findTakeSilences: only what the export plays is listened to (ESCSUITE-435)', () => {
+  // Mic: tone 0–2, silence 2–4, tone 4–6. Music: tone throughout.
+  const mic = source('mic', speech([[2, true], [2, false], [2, true]]));
+  const music = source('music', speech([[6, true]]));
+  const options = { ...DEFAULT_SILENCE_OPTIONS, padding: 0 };
+  // A mic-plus-system-audio take whose system audio is the music.
+  const clips = [clip('m', 'mic', 0, 0, 6, 'g', 'M'), clip('y', 'music', 0, 0, 6, 'g', 'Y')];
+  const sources = [mic, music];
+
+  it('hears the music while its row plays, so the mic\'s pause is not cut', () => {
+    expect(findOnTracks(clips, [track('M'), track('Y')], sources, 'm', options)).toEqual([]);
+  });
+
+  it.each([
+    ['muted', { muted: true }],
+    ['hidden', { visible: false }],
+  ])('does not hear a clip on a %s row, which the export leaves out', (_, state) => {
+    const gaps = findOnTracks(clips, [track('M'), track('Y', state)], sources, 'm', options);
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 2)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gaps[0].end - 4)).toBeLessThanOrEqual(TOLERANCE);
+    // Asked from the muted part itself, it is the same cut.
+    expect(findOnTracks(clips, [track('M'), track('Y', state)], sources, 'y', options)).toEqual(gaps);
+  });
+
+  it('does not hear a clip whose row is gone, as the export does not', () => {
+    expect(findOnTracks(clips, [track('M')], sources, 'm', options)).toHaveLength(1);
+  });
+
+  it('does not let a muted clip it cannot read block the cut', () => {
+    const unread: SourceVideo = { ...source('unread', null), hasAudio: true };
+    const withUnread = [clip('m', 'mic', 0, 0, 6, 'g', 'M'), clip('u', 'unread', 0, 0, 6, 'g', 'U')];
+    expect(findOnTracks(withUnread, [track('M'), track('U')], [mic, unread], 'm', options)).toEqual([]);
+    expect(findOnTracks(withUnread, [track('M'), track('U', { muted: true })], [mic, unread], 'm', options)).toHaveLength(1);
+  });
+
+  it('cuts nothing, and says nothing is audible, when every clip with sound is muted or hidden', () => {
+    const silenced = [track('M', { muted: true }), track('Y', { visible: false })];
+    expect(findOnTracks(clips, silenced, sources, 'm', options)).toEqual([]);
+    expect(nothingAudible(clips, silenced, sources, 'm')).toBe(true);
+    expect(nothingAudible(clips, [track('M', { muted: true }), track('Y')], sources, 'm')).toBe(false);
+    expect(nothingAudible(clips, [track('M'), track('Y')], sources, 'm')).toBe(false);
+    // A clip that is gone has nothing to judge, but that is said elsewhere.
+    expect(nothingAudible(clips, silenced, sources, 'missing')).toBe(false);
+  });
+
+  it('does not blame muting when nothing the cut touches has sound at all', () => {
+    // The take's sound starts after the screen part ends, so nothing is muted:
+    // there is no sound in the span to judge, which is "no pauses", not "muted".
+    const screen: SourceVideo = { ...source('screen', null), hasAudio: false };
+    const late = [clip('s', 'screen', 0, 0, 4, 'g', 'S'), clip('y', 'music', 5, 0, 6, 'g', 'Y')];
+    expect(nothingAudible(late, [track('S'), track('Y')], [screen, music], 's')).toBe(false);
+    expect(nothingAudible(late, [track('S'), track('Y', { muted: true })], [screen, music], 's')).toBe(false);
+    expect(nothingAudible([late[0]], [track('S')], [screen], 's')).toBe(false);
+  });
+
+  it('does not flag approximate timing for legacy peaks on a muted row', () => {
+    const legacy: SourceVideo = { ...music };
+    delete legacy.waveformSecondsPerPeak;
+    expect(approximateOnTracks(clips, [track('M'), track('Y')], [mic, legacy], 'm')).toBe(true);
+    expect(approximateOnTracks(clips, [track('M'), track('Y', { muted: true })], [mic, legacy], 'm')).toBe(false);
   });
 });
