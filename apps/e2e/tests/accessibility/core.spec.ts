@@ -8,6 +8,7 @@ import {
 } from '../../utils/media-mocks'
 import {
   runAxeCheck,
+  settleIdrefsForAxe,
   waitForAnimationsToFinish,
   checkImageAltText,
   checkHeadingHierarchy,
@@ -1268,6 +1269,7 @@ test.describe('Color Contrast', () => {
    * contrast.
    */
   async function contrastFailures(page: Page, include?: string): Promise<string[]> {
+    await settleIdrefsForAxe(page)
     let builder = new AxeBuilder({ page }).withRules(['color-contrast']).exclude('canvas')
     if (include) builder = builder.include(include)
     const results = await builder.analyze()

@@ -68,6 +68,50 @@ export async function waitForAnimationsToFinish(target: Locator): Promise<void> 
 }
 
 /**
+ * The ARIA attributes that take id references. axe-core 4.14 reads each one
+ * through its reflected element property (`ariaLabelledByElements` and so on)
+ * before it falls back to the attribute.
+ */
+const IDREF_ATTRIBUTES = [
+  'aria-activedescendant',
+  'aria-controls',
+  'aria-describedby',
+  'aria-details',
+  'aria-errormessage',
+  'aria-flowto',
+  'aria-labelledby',
+  'aria-owns',
+]
+
+/**
+ * ESCSUITE-453: work around a Firefox 159 crash before axe reads the page.
+ *
+ * In Firefox 159 (Playwright 1.65's build, v1572) reading
+ * `ariaLabelledByElements` on some elements React rendered with
+ * `aria-labelledby` kills the tab ("Page crashed"): the CRAFT help dialog and
+ * the ARIA dialogs in ARTIST all did. axe reads that property for every
+ * id-reference attribute, so seven axe audits and the Float controls audit
+ * crashed instead of reporting. Writing each such attribute back with its own
+ * value makes the read safe, and changes nothing axe audits: the attribute,
+ * its value and the elements it points at stay the same. Firefox 159.0 only
+ * (Firefox 155 and Chromium and WebKit never crashed); drop this once
+ * Playwright ships a Firefox without the crash.
+ */
+export async function settleIdrefsForAxe(page: Page): Promise<void> {
+  const browser = page.context().browser()?.browserType().name()
+  if (browser !== 'firefox') return
+  await page.evaluate((names) => {
+    const selector = names.map((name) => `[${name}]`).join(',')
+    for (const el of document.querySelectorAll(selector)) {
+      for (const name of names) {
+        const value = el.getAttribute(name)
+        if (value !== null) el.setAttribute(name, value)
+      }
+    }
+  }, IDREF_ATTRIBUTES)
+}
+
+/**
  * Run axe-core accessibility audit on a page
  * @param page - Playwright Page object
  * @param options - Optional axe configuration
@@ -83,6 +127,7 @@ export async function runAxeCheck(
     excludeSelector?: string
   }
 ): Promise<AxeResult> {
+  await settleIdrefsForAxe(page)
   let builder = new AxeBuilder({ page })
 
   if (options?.includeTags) {
