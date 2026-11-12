@@ -20,7 +20,11 @@ import type { Page } from '@playwright/test'
 
 export const STUB_WORDS = ['hello from the stub', 'captions made on this device']
 
-export type StubMode = { api: 'none' } | { api: 'no-local' } | { api: 'local'; answer: string }
+/**
+ * `stopNeverEnds` (ESCSUITE-438): `stop()` stops listening but never fires
+ * `onend`, as a recogniser that hangs would.
+ */
+export type StubMode = { api: 'none' } | { api: 'no-local' } | { api: 'local'; answer: string; stopNeverEnds?: boolean }
 export type Brand = { brand: string; version: string }
 
 export const CHROME_BRANDS: Brand[] = [
@@ -101,12 +105,12 @@ export async function installSpeechStub(page: Page, mode: StubMode, brands: Bran
           at(5000, () => say(1, words[1].split(' ')[0], false))
           at(7000, () => say(1, words[1], true))
         }
-        private finish() {
+        private finish(fireEnd = true) {
           for (const t of this.timers) { clearTimeout(t); clearInterval(t) }
           this.timers = []
-          setTimeout(() => this.onend?.(), 20)
+          if (fireEnd) setTimeout(() => this.onend?.(), 20)
         }
-        stop() { this.finish() }
+        stop() { this.finish(!(mode.api === 'local' && mode.stopNeverEnds)) }
         abort() { this.finish() }
       }
       if (mode.api === 'local') {

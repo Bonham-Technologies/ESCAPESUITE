@@ -40,7 +40,7 @@
 
 .primary:hover {
   /* #3a7bc8 (no --accent-hover exists) put the ink at 4.32:1 (ESCSUITE-422). */
-  background: #3a8eef;
+  background: var(--accent-fill-hover);
 }
 
 .status {
