@@ -70,6 +70,13 @@
 - **Cross-browser and `@nightly` e2e**: CI runs Chromium only. `E2E_CROSS_BROWSER=1` adds the
   Firefox and WebKit projects under `CI`, and specs tagged `@nightly` run only when `E2E_NIGHTLY=1`.
   The nightly workflow sets both (ESCSUITE-353, `ci-cd-pipeline.md`).
+- **axe audits in Firefox 159** (ESCSUITE-453): Playwright 1.65's Firefox kills the tab when an
+  element's `ariaLabelledByElements` is read in one JavaScript world after another world read it.
+  axe runs in the page's world and Playwright's named locators (`getByLabel`, `getByRole` with a
+  name) in its utility world, so an audit next to a locator crashed. Run every axe audit through
+  `analyzeWithAxe` (or `runAxeCheck`) in `apps/e2e/utils/accessibility.ts`, which rewrites each
+  id-reference attribute with its own value before and after axe in Firefox; never call
+  `AxeBuilder.analyze()` directly.
 - **Standalone tests**: See [Standalone Test Battery](docs/STANDALONE-TEST-BATTERY.md) for manual testing checklists
 
 Test counts change frequently as coverage grows; run `pnpm test` for the current numbers rather than relying on a count documented here.

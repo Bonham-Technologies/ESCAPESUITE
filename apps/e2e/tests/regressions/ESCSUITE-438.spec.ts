@@ -34,10 +34,22 @@ const SLOW_PIECE_BYTES = 32 * 1024
  * `SLOW_PIECE_BYTES` at a time, each that long after the last. Chromium hands
  * a stored file's whole stream out as one chunk, so delaying chunks alone
  * would hold the mix up once and then let it run to the end at full speed.
+ *
+ * WebKit never streams a stored file: mediabunny's `BlobSource` reads it there
+ * as `blob.slice(a, b).arrayBuffer()`, 64 KiB at a time (its `isWebKit()`
+ * check, for WebKit's `Blob.stream()` bugs). So `arrayBuffer()` is slowed too,
+ * by the same delay for every `SLOW_PIECE_BYTES` it reads: every engine then
+ * reads the 20 s clip in about the same 9 s.
  */
 async function installSlowReads(page: Page): Promise<void> {
   await page.addInitScript((pieceBytes) => {
     const w = window as unknown as { __slowReadsMs?: number }
+    const arrayBuffer = Blob.prototype.arrayBuffer
+    Blob.prototype.arrayBuffer = async function (this: Blob) {
+      const delay = w.__slowReadsMs
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay * Math.ceil(this.size / pieceBytes)))
+      return arrayBuffer.call(this)
+    }
     const stream = Blob.prototype.stream
     Blob.prototype.stream = function (this: Blob) {
       const inner = stream.call(this)

@@ -68,6 +68,73 @@ export async function waitForAnimationsToFinish(target: Locator): Promise<void> 
 }
 
 /**
+ * The ARIA attributes that take id references. axe-core 4.14 and Playwright's
+ * own name computation read them through their reflected element properties
+ * (`ariaLabelledByElements` and so on) before they fall back to the attribute.
+ */
+const IDREF_ATTRIBUTES = [
+  'aria-activedescendant',
+  'aria-controls',
+  'aria-describedby',
+  'aria-details',
+  'aria-errormessage',
+  'aria-flowto',
+  'aria-labelledby',
+  'aria-owns',
+]
+
+/**
+ * ESCSUITE-453: work around a Firefox 159 crash between two JavaScript worlds.
+ *
+ * In Firefox 159 (Playwright 1.65's build, v1572) the tab dies ("Page
+ * crashed") when an element's `ariaLabelledByElements` is read in one
+ * JavaScript world after another world has already read it. axe runs in the
+ * page's own world; Playwright's locators (`getByLabel`, `getByRole` with a
+ * name) run in its separate utility world. So an axe audit after a named
+ * locator crashed, and so did a named locator after an audit: seven axe
+ * audits, the Float controls audit and the clip inspector's `getByLabel` in
+ * the 2026-11-11 Nightly. Reproduced on a bare page with one
+ * `<aside aria-labelledby>`, no app code involved; reading twice from the same
+ * world is fine.
+ *
+ * Writing an id-reference attribute back with its own value drops the cached
+ * element list, so the next read, from either world, starts fresh. The
+ * attribute, its value and the elements it points at stay the same, so this
+ * changes nothing an audit or a locator sees. Firefox only (Firefox 155,
+ * Chromium and WebKit never crashed); drop it once Playwright ships a Firefox
+ * without the crash.
+ */
+async function resetIdrefCaches(page: Page): Promise<void> {
+  const browser = page.context().browser()?.browserType().name()
+  if (browser !== 'firefox') return
+  await page.evaluate((names) => {
+    const selector = names.map((name) => `[${name}]`).join(',')
+    for (const el of document.querySelectorAll(selector)) {
+      for (const name of names) {
+        const value = el.getAttribute(name)
+        if (value !== null) el.setAttribute(name, value)
+      }
+    }
+  }, IDREF_ATTRIBUTES)
+}
+
+/**
+ * `builder.analyze()`, safe in Firefox 159 (ESCSUITE-453): the id-reference
+ * caches are reset before axe reads them, after a locator may have, and again
+ * after, so the test's next locator does not read axe's. Every axe audit in
+ * the e2e suite goes through here.
+ */
+export async function analyzeWithAxe(
+  page: Page,
+  builder: AxeBuilder
+): Promise<Awaited<ReturnType<AxeBuilder['analyze']>>> {
+  await resetIdrefCaches(page)
+  const results = await builder.analyze()
+  await resetIdrefCaches(page)
+  return results
+}
+
+/**
  * Run axe-core accessibility audit on a page
  * @param page - Playwright Page object
  * @param options - Optional axe configuration
@@ -101,7 +168,7 @@ export async function runAxeCheck(
     builder = builder.exclude(options.excludeSelector)
   }
 
-  const results = await builder.analyze()
+  const results = await analyzeWithAxe(page, builder)
 
   return {
     violations: results.violations.map((v) => ({

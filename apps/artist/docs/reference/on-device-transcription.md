@@ -201,7 +201,8 @@ on demand.
   `core/audioMixer.streamed.test.ts`: the speech mix reports chunk by chunk, the export mix
   once a source. `apps/e2e/tests/regressions/ESCSUITE-438.spec.ts`: the percentage moves
   while preparing (a stored file's bytes are handed out 32 KiB at a time, 150 ms apart, so the
-  mix is slow enough to watch),
+  mix is slow enough to watch; `Blob.stream()` in Chromium and Firefox, and `arrayBuffer()` in
+  WebKit, where mediabunny's `BlobSource` reads 64 KiB slices instead of streaming),
   Stop then frees the control within 1 s and nothing is heard or added; and with the stub's
   `stopNeverEnds` mode the 2 captions land within 8 s of the clock reading the clip's end.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a

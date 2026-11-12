@@ -9,6 +9,7 @@ import {
 } from '../../utils/media-mocks'
 import {
   runAxeCheck,
+  analyzeWithAxe,
   waitForAnimationsToFinish,
   checkImageAltText,
   checkHeadingHierarchy,
@@ -1273,7 +1274,7 @@ test.describe('Color Contrast', () => {
   async function contrastFailures(page: Page, include?: string): Promise<string[]> {
     let builder = new AxeBuilder({ page }).withRules(['color-contrast']).exclude('canvas')
     if (include) builder = builder.include(include)
-    const results = await builder.analyze()
+    const results = await analyzeWithAxe(page, builder)
     // Prove the rule had text in front of it: zero failures over zero nodes
     // would pass too.
     const checked = [...results.passes, ...results.violations].flatMap((r) => r.nodes).length
