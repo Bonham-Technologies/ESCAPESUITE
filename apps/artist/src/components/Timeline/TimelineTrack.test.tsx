@@ -525,8 +525,10 @@ describe('TimelineTrack clip thumbnails', () => {
 
     // 0.25 of the thumb's 51px shorter side is 12.75px — the same fraction, of
     // the same shorter side, that `core/clipMask.ts` resolves against the drawn
-    // box.
-    expect(thumbOf(root)).toHaveAttribute('style', 'clip-path: inset(0 round 12.75px);')
+    // box. `toHaveStyle` parses both sides the same way, so it holds whether
+    // the DOM serialises the zero inset as `0` or `0px` (jsdom 31 and browsers
+    // write `0px`).
+    expect(thumbOf(root)).toHaveStyle('clip-path: inset(0 round 12.75px)')
   })
 
   it('leaves an unmasked clip’s thumbnail unclipped', () => {
