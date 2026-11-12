@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: in the light theme, Remove silences' "Nothing was cut" message and the red border of a setting that does not read are a darker red, so they are easier to see.
 - ESCAPEARTIST: transcribing to captions uses far less memory (about 230 MB for an hour of timeline), and a timeline over 3 hours is turned down at once with a message that names the limit and suggests a section.
 - ESCAPEARTIST: starting a new project, opening one, or a host page loading one while a transcription runs now stops it, so the old project's captions are no longer added to the new one.
 - ESCAPEARTIST: the media library's Clear All, Clear Unused and Remove buttons are easier to read, at rest and when you point at them, in both themes.
