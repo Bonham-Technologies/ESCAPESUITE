@@ -219,6 +219,23 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   attached to (`--signer-workflow .../release.yml`). Tests: `scripts/verify-release-assets.test.mjs`
   (the script, against a fake `gh`) and `scripts/release-verification.test.mjs` (the workflow
   wiring), both in `pnpm test:scripts`. Releases up to v2.18.27 predate this and carry neither.
+- **SBOMs** (ESCSUITE-430). Every build ships with an SPDX 2.3 SBOM, `<build name>.spdx.json`,
+  written by `scripts/generate-sbom.mjs` from `pnpm --filter <pkg> list --prod --depth Infinity`:
+  the production dependency tree only, workspace packages included, no dev dependencies. The
+  kit's SBOM covers `@escapesuite/headless-artist` and `@escapesuite/artist`, because its
+  `headless.html` inlines the ARTIST render bundle. In `standalone-release.yml` the `prepare` job
+  generates them (pnpm setup and `pnpm install --frozen-lockfile --ignore-scripts`, only for a
+  push to `main`, so no pull request's code runs there) into the `standalone-release` artifact;
+  the `release` job stages them in `release-assets/` (so `SHA256SUMS.txt` and the provenance
+  attestation cover them), attests each with `actions/attest-sbom` (pinned by commit SHA;
+  `subject-path` the versioned build, `sbom-path` its SBOM) and attaches them. `release.yml`'s
+  `upload-standalone` job writes them to `sboms/` after each build, lists build and SBOM in that
+  release's `SHA256SUMS.txt`, attests the same way and uploads the SBOM with the build. Both
+  release notes mention the SBOM. `scripts/verify-release-assets.sh` then requires every build
+  but a `-latest.html` alias to have its `.spdx.json`, every `.spdx.json` to name a build, and
+  `gh attestation verify --predicate-type https://spdx.dev/Document/v2.3` to pass for every
+  build. Tests: `scripts/generate-sbom.test.mjs` (the document, and the real workspace's craft
+  and kit trees) plus the two test files above. `docs/VERIFY.md` step 4 is the user's side.
 
 **Dependabot** (`.github/dependabot.yml`):
 - Dependabot PRs run every job except `deploy`, browser suites included: `e2e`, `kit-docker`

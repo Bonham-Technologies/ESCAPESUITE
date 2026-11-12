@@ -6,7 +6,8 @@
  * The script talks to GitHub only through `gh`, so each test puts a fake
  * `gh` first on PATH. The fake serves a fixture directory as the release's
  * assets (`gh release download`) and fails `gh attestation verify` for the
- * file names listed in FAKE_UNATTESTED. Checksums run for real.
+ * file names listed in FAKE_UNATTESTED, or, for an SBOM check
+ * (`--predicate-type`, ESCSUITE-430), in FAKE_NO_SBOM. Checksums run for real.
  *
  * Node's built-in runner, no dependencies:
  *
@@ -57,7 +58,11 @@ case "$1 $2" in
     ;;
   "attestation verify")
     name=$(basename "$3")
-    for bad in \${FAKE_UNATTESTED:-}; do
+    bad_list="\${FAKE_UNATTESTED:-}"
+    case " $* " in
+      *" --predicate-type "*) bad_list="\${FAKE_NO_SBOM:-}" ;;
+    esac
+    for bad in $bad_list; do
       if [ "$bad" = "$name" ]; then
         echo "no matching attestations found for $name" >&2
         exit 1
@@ -119,7 +124,33 @@ const ASSETS = {
   'ESCAPEARTIST-9.9.9.html': '<html>artist</html>',
   'ESCAPEARTIST-latest.html': '<html>artist</html>',
   'escapesuite-headless-artist-9.9.9.tgz': 'kit bytes',
+  'ESCAPECRAFT-9.9.9.spdx.json': '{"spdxVersion":"SPDX-2.3"}',
+  'ESCAPEARTIST-9.9.9.spdx.json': '{"spdxVersion":"SPDX-2.3"}',
+  'escapesuite-headless-artist-9.9.9.spdx.json': '{"spdxVersion":"SPDX-2.3"}',
 };
+
+// The builds among ASSETS: each needs an SBOM attestation (ESCSUITE-430).
+const BUILDS = Object.keys(ASSETS).filter((name) => /\.(html|tgz)$/.test(name));
+const SBOM_PREDICATE = 'https://spdx.dev/Document/v2.3';
+
+/** The provenance checks in a fake-gh log: attestation checks without --predicate-type. */
+function provenanceChecks(log) {
+  return log
+    .split('\n')
+    .filter((line) => line.startsWith('attestation verify') && !line.includes('--predicate-type'));
+}
+
+/** The SBOM attestation checks in a fake-gh log. */
+function sbomChecks(log) {
+  return log
+    .split('\n')
+    .filter((line) => line.startsWith('attestation verify') && line.includes('--predicate-type'));
+}
+
+/** ASSETS without the named files. */
+function assetsWithout(...names) {
+  return Object.fromEntries(Object.entries(ASSETS).filter(([name]) => !names.includes(name)));
+}
 
 beforeEach(() => {
   work = mkdtempSync(join(tmpdir(), 'verify-release-assets-'));
@@ -157,9 +188,9 @@ test('passes the signer workflow through to every attestation check when one is 
   const result = run([TAG, REPO, signer]);
   assert.equal(result.status, 0, result.output);
 
-  const checks = result.log.split('\n').filter((line) => line.startsWith('attestation verify'));
+  const checks = provenanceChecks(result.log);
   assert.equal(checks.length, Object.keys(ASSETS).length + 1);
-  for (const line of checks) {
+  for (const line of [...checks, ...sbomChecks(result.log)]) {
     assert.ok(line.endsWith(`--signer-workflow ${signer}`), line);
   }
 });
@@ -212,8 +243,55 @@ test('fails when any asset has no attestation, after checking all of them', () =
   assert.notEqual(result.status, 0);
   assert.match(result.output, /ESCAPECRAFT-9\.9\.9\.html/);
   // One missing attestation does not stop the others from being checked.
-  const checks = result.log.split('\n').filter((line) => line.startsWith('attestation verify'));
-  assert.equal(checks.length, Object.keys(ASSETS).length + 1);
+  assert.equal(provenanceChecks(result.log).length, Object.keys(ASSETS).length + 1);
+});
+
+test('checks every build, -latest aliases included, for an SPDX SBOM attestation', () => {
+  publish(ASSETS);
+  const result = run();
+  assert.equal(result.status, 0, result.output);
+
+  const checks = sbomChecks(result.log);
+  assert.equal(checks.length, BUILDS.length, checks.join('\n'));
+  for (const name of BUILDS) {
+    assert.match(
+      result.log,
+      new RegExp(
+        `^attestation verify \\S*/${name.replace(/\./g, '\\.')} --repo ${REPO} --predicate-type ${SBOM_PREDICATE.replace(/\./g, '\\.')}$`,
+        'm'
+      ),
+      `expected an SBOM attestation check for ${name}`
+    );
+  }
+});
+
+test('fails when a build has no SBOM attestation, after checking all of them', () => {
+  publish(ASSETS);
+  const result = run([TAG, REPO], { FAKE_NO_SBOM: 'ESCAPEARTIST-latest.html' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /no valid SBOM attestation on v9\.9\.9 for: ESCAPEARTIST-latest\.html/);
+  assert.equal(sbomChecks(result.log).length, BUILDS.length);
+});
+
+test('fails when a versioned build has no SBOM file on the release', () => {
+  publish(assetsWithout('escapesuite-headless-artist-9.9.9.spdx.json'));
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /escapesuite-headless-artist-9\.9\.9\.tgz has no escapesuite-headless-artist-9\.9\.9\.spdx\.json/);
+});
+
+test('fails when an SBOM file names no build on the release', () => {
+  publish({ ...ASSETS, 'ESCAPEOTHER-1.0.0.spdx.json': '{}' });
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /ESCAPEOTHER-1\.0\.0\.spdx\.json describes no build/);
+});
+
+test('fails when the release carries no build at all', () => {
+  publish({ 'notes.txt': 'nothing to run' });
+  const result = run();
+  assert.notEqual(result.status, 0);
+  assert.match(result.output, /carries no build/);
 });
 
 test('retries the download while a just-created release is not yet visible', () => {
