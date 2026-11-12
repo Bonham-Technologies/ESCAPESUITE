@@ -7,6 +7,8 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Tests: the test tooling is updated to Playwright 1.65, Vitest 5.1 and jsdom 31, with a workaround for a Firefox 159 crash that stopped the cross-browser accessibility checks from running.
+- ESCAPEARTIST: Remove silences says how many clips on other tracks and markers it will leave where they are, before the cut and in the message after it.
+- ESCAPEARTIST: Remove silences can move everything after each cut (on by default), so overlays, captions, markers and in/out points stay in step with the take; one undo puts it all back.
 - Repository: the secret scanner no longer reports a test marker word in the analytics privacy test as a leaked key.
 - Releases: each offline build and the headless render kit now ship with an SPDX SBOM (`.spdx.json`) listing the open-source packages inside them, and an attestation tying it to the build. [Verify your download](docs/VERIFY.md) shows how to check it.
 - ESCAPEPLAN: the Privacy Policy now lists exactly what the hosted site's analytics records, including the approximate city Vercel works out from your IP address, which Vercel says it does not store.

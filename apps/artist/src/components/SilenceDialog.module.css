@@ -85,10 +85,30 @@
   color: var(--text-muted);
 }
 
+.option {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: var(--spacing-xs);
+  font-size: 13px;
+}
+
+.option .hint {
+  grid-column: 2;
+}
+
 .summary {
   margin: 0;
   font-size: 13px;
   color: var(--text-secondary);
+}
+
+.warning {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-left: 3px solid var(--warning-ink);
+  padding-left: var(--spacing-sm);
 }
 
 .note {

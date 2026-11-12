@@ -8,11 +8,17 @@
 // in step however many ranges are cut. Rows not named are left where they
 // are, as a clip's ripple delete leaves them.
 //
+// "Move everything after each cut" (ESCSUITE-434) names the other rows too,
+// as rows to move rather than to cut: a clip there moves left by the time
+// removed before it, and one a range crosses is shortened by the time removed
+// within it — never split, so an overlay or a caption stays one clip. The
+// markers and in/out points move the same way (`cutEditorBlock`).
+//
 // Pure: `clipSlice`'s `removeTimeRanges` calls it inside one `set`, which is
 // what makes the whole cut one undo step.
 
 import { v4 as uuidv4 } from 'uuid';
-import type { Clip, ClipAnimation, SourceVideo } from './types';
+import type { Clip, ClipAnimation, EditorBlock, Keyframe, Marker, SourceVideo, Track } from './types';
 import { DEFAULT_ANIMATION } from './types';
 import type { TimeRange } from '../core/silenceDetection';
 import { cloneClip } from '../utils/deepClone';
@@ -49,7 +55,11 @@ export function normaliseRanges(ranges: readonly TimeRange[]): TimeRange[] {
  * step. A row no link reaches is not moved, as a ripple delete leaves it.
  */
 export function linkedRows(clips: readonly Clip[], clip: Clip): Set<string> {
-  const rows = new Set([clip.trackId]);
+  return withLinkedRows(clips, new Set([clip.trackId]));
+}
+
+/** `rows` and, round again until nothing is added, every row a link reaches from them. */
+function withLinkedRows(clips: readonly Clip[], rows: Set<string>): Set<string> {
   const groups = new Set<string>();
   for (let grew = true; grew; ) {
     grew = false;
@@ -68,6 +78,70 @@ export function linkedRows(clips: readonly Clip[], clip: Clip): Set<string> {
   return rows;
 }
 
+/**
+ * The rows "Move everything after each cut" moves besides the take's own
+ * `rows` (ESCSUITE-434): every other row on the timeline bar a locked one and
+ * any row a link reaches from a locked one. Moving one part of a linked pair
+ * while its partner's row is locked would put the pair out of step, so the
+ * whole linked set stays put with the lock.
+ */
+export function rowsToMove(clips: readonly Clip[], tracks: readonly Track[], rows: ReadonlySet<string>): Set<string> {
+  const held = withLinkedRows(clips, new Set(tracks.filter((t) => t.locked).map((t) => t.id)));
+  return new Set(clips.map((c) => c.trackId).filter((id) => !rows.has(id) && !held.has(id)));
+}
+
+/** What a cut leaves where it was, by kind (ESCSUITE-431). */
+export interface LeftBehind {
+  blur: number;
+  captions: number;
+  /** Text and shape overlays other than a blur. */
+  textOrShapes: number;
+  media: number;
+  markers: number;
+  /**
+   * How many of the clips counted sit on an unlocked row that stays put only
+   * because it is linked to a locked one (`rowsToMove`).
+   */
+  linkedToLocked: number;
+}
+
+/**
+ * What a cut of `ranges` through `clipId` would leave where it is while what
+ * is around it closes up (ESCSUITE-431): every clip on a row the cut does not
+ * move that overlaps or follows the first range, and every marker at or after
+ * its start when the markers do not move. With `moveEverything` (ESCSUITE-434)
+ * only a locked row outside the take, or a row linked to one, stays put
+ * (`rowsToMove`, what the cut itself reads), and the markers move; without it
+ * every row outside the take stays put. Null when nothing is left behind.
+ */
+export function leftBehind(
+  clips: readonly Clip[],
+  tracks: readonly Track[],
+  markers: readonly Marker[],
+  clipId: string,
+  ranges: readonly TimeRange[],
+  moveEverything: boolean
+): LeftBehind | null {
+  const clip = clips.find((c) => c.id === clipId);
+  const first = normaliseRanges(ranges)[0];
+  if (!clip || !first) return null;
+  const rows = linkedRows(clips, clip);
+  const track = (id: string) => tracks.find((t) => t.id === id);
+  const moving = moveEverything ? rowsToMove(clips, tracks, rows) : new Set<string>();
+  const counts: LeftBehind = { blur: 0, captions: 0, textOrShapes: 0, media: 0, markers: 0, linkedToLocked: 0 };
+  for (const c of clips) {
+    if (rows.has(c.trackId) || moving.has(c.trackId)) continue;
+    if (c.timelinePosition + c.duration <= first.start) continue;
+    if (moveEverything && !track(c.trackId)?.locked) counts.linkedToLocked++;
+    if (track(c.trackId)?.kind === 'captions') counts.captions++;
+    else if (c.shapeData?.type === 'blur') counts.blur++;
+    else if (c.overlayType) counts.textOrShapes++;
+    else counts.media++;
+  }
+  if (!moveEverything) counts.markers = markers.filter((m) => m.time >= first.start).length;
+  return Object.values(counts).some((n) => n > 0) ? counts : null;
+}
+
 /** How much of `ranges` lies before `time`. */
 function removedBefore(ranges: readonly TimeRange[], time: number): number {
   let total = 0;
@@ -76,6 +150,42 @@ function removedBefore(ranges: readonly TimeRange[], time: number): number {
     total += Math.min(time, r.end) - r.start;
   }
   return total;
+}
+
+/** Where the cut puts what stood at timeline `time`: `time` less the time removed before it. */
+export function cutTime(ranges: readonly TimeRange[], time: number): number {
+  return time - removedBefore(ranges, time);
+}
+
+/**
+ * The in/out points and markers moved as `ranges` (normalised) move the
+ * timeline (ESCSUITE-434): each by the time removed before it, so one inside a
+ * range lands where that range closes up. Null when none of them moves.
+ */
+export function cutEditorBlock(block: EditorBlock, ranges: readonly TimeRange[]): EditorBlock | null {
+  let moved = false;
+  const at = (time: number) => {
+    // Never below 0: float sums over several ranges can land a hair under it,
+    // and a saved block with a negative time is refused whole on restore.
+    const to = Math.max(0, cutTime(ranges, time));
+    if (to !== time) moved = true;
+    return to;
+  };
+  const markers = block.markers.map((m) => {
+    const time = at(m.time);
+    return time === m.time ? m : { ...m, time };
+  });
+  let inPoint = block.inPoint === null ? null : at(block.inPoint);
+  let outPoint = block.outPoint === null ? null : at(block.outPoint);
+  // A range a cut swallows whole closes up to nothing. An empty range is one
+  // the export refuses and a saved block cannot hold (`validateEditorBlock`
+  // drops the markers with it), so it goes, as a clamp drops one.
+  const empty = (a: number | null, b: number | null) => a !== null && b !== null && b - a <= PIECE_EPSILON;
+  if (empty(inPoint, outPoint) && !empty(block.inPoint, block.outPoint)) {
+    inPoint = null;
+    outPoint = null;
+  }
+  return moved ? { inPoint, outPoint, markers } : null;
 }
 
 /** How many of `ranges` end at or before `time` (within the piece tolerance). */
@@ -87,8 +197,9 @@ function slotAt(ranges: readonly TimeRange[], time: number): number {
 
 /**
  * `clips` with `ranges` (timeline seconds, normalised) cut out of every clip
- * on `trackIds` and the gaps closed there. The same array when nothing on
- * those rows is touched.
+ * on `trackIds` and the gaps closed there, and every clip on `moveRows`
+ * moved and shortened to match (`shortenClip`). The same array when nothing
+ * on those rows is touched.
  *
  * A clip a range crosses becomes the pieces outside it: the first keeps the
  * clip's id (so a selection of it survives), the rest get new ones. Each piece
@@ -104,13 +215,28 @@ export function cutTimeRanges(
   clips: readonly Clip[],
   sourceVideos: readonly SourceVideo[],
   trackIds: ReadonlySet<string>,
-  ranges: readonly TimeRange[]
+  ranges: readonly TimeRange[],
+  moveRows: ReadonlySet<string> = new Set()
 ): readonly Clip[] {
+  // A link group on the moved rows moves as one: every member by the time cut
+  // before the group's earliest start, so the members keep their offsets and
+  // play in step, as they do when nothing moves.
+  const groupStart = new Map<string, number>();
+  for (const c of clips) {
+    if (!c.linkGroupId || !moveRows.has(c.trackId)) continue;
+    groupStart.set(c.linkGroupId, Math.min(c.timelinePosition, groupStart.get(c.linkGroupId) ?? Infinity));
+  }
   const placed: { clip: Clip; slot: number }[] = [];
   let changed = false;
   for (const clip of clips) {
     if (!trackIds.has(clip.trackId)) {
-      placed.push({ clip, slot: -1 });
+      const start = clip.linkGroupId ? groupStart.get(clip.linkGroupId) : undefined;
+      const moved = moveRows.has(clip.trackId)
+        ? shortenClip(clip, sourceVideos, ranges, removedBefore(ranges, start ?? clip.timelinePosition))
+        : clip;
+      if (moved !== clip) changed = true;
+      // Slot -1: its link group, if any, is left as it is.
+      if (moved) placed.push({ clip: moved, slot: -1 });
       continue;
     }
     const from = clip.timelinePosition;
@@ -157,6 +283,56 @@ export function cutTimeRanges(
     }
     return { ...clip, linkGroupId: id };
   });
+}
+
+/**
+ * `clip` on a row the cut moves but does not cut (ESCSUITE-434): moved left by
+ * `before` (the time `ranges` remove before it, or before its link group's
+ * earliest start) and ended where its out point lands after the cut, cut off
+ * its out point, so it stays one clip and never reaches what follows it on its
+ * row; null when nothing of it is left. Its keyframes keep their place in what
+ * is left (`shortenAnimation`).
+ */
+function shortenClip(clip: Clip, sourceVideos: readonly SourceVideo[], ranges: readonly TimeRange[], before: number): Clip | null {
+  const from = clip.timelinePosition;
+  const to = from + clip.duration;
+  const within = removedBefore(ranges, to) - before;
+  if (within === 0) return before === 0 ? clip : { ...clip, timelinePosition: from - before };
+  const duration = clip.duration - within;
+  if (duration <= PIECE_EPSILON) return null;
+  const extendable = isExtendableClip(clip, sourceVideos.find((v) => v.id === clip.sourceVideoId));
+  return {
+    ...clip,
+    timelinePosition: from - before,
+    duration,
+    ...(extendable ? { startTime: 0, endTime: duration } : { endTime: clip.startTime + duration }),
+    ...(clip.animation ? { animation: shortenAnimation(clip.animation, from, ranges, duration) } : {}),
+  };
+}
+
+/**
+ * A shortened clip's animation: a keyframe inside a range goes with the time
+ * it stood in, every other one moves left by the time removed before it in the
+ * clip (where two then meet, the later one stays), and the presets are capped
+ * to the new length as a trim caps them.
+ */
+function shortenAnimation(animation: ClipAnimation, from: number, ranges: readonly TimeRange[], duration: number): ClipAnimation {
+  const offset = removedBefore(ranges, from);
+  const keyframes: ClipAnimation['keyframes'] = {};
+  for (const [property, track] of Object.entries(animation.keyframes) as [keyof ClipAnimation['keyframes'], Keyframe[] | undefined][]) {
+    if (!track) continue;
+    const kept: Keyframe[] = [];
+    for (const k of [...track].sort((a, b) => a.time - b.time)) {
+      const at = from + k.time;
+      if (ranges.some((r) => at > r.start + PIECE_EPSILON && at < r.end - PIECE_EPSILON)) continue;
+      const time = k.time - (removedBefore(ranges, at) - offset);
+      const last = kept[kept.length - 1];
+      if (last && time - last.time <= PIECE_EPSILON) kept.pop();
+      kept.push({ ...k, time });
+    }
+    keyframes[property] = kept;
+  }
+  return trimAnimation({ ...animation, keyframes }, { start: 0, end: duration });
 }
 
 /** The parts of `[from, to]` outside every range, each longer than the piece tolerance. */
