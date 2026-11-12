@@ -20,7 +20,10 @@ import { installSpeechStub, stubRecord, transcribeButton } from '../../utils/spe
  * bytes a little at a time, switched on only after the import (`__slowReadsMs`).
  */
 
-const CLIP_SECONDS = 6
+// 8 s, not 6: the stub's second interim result fires at 5 s and stop() at the
+// clip's end clears its timers, so a 6 s clip left only 1 s of slack on a busy
+// runner before the second caption was lost.
+const CLIP_SECONDS = 8
 const STOPPED = 'Transcription stopped. No captions were added.'
 const DONE = 'Transcribed 2 captions onto the Captions track.'
 /** With `__slowReadsMs` at 150, the 20 s clip's 1.9 MB take about 9 s to read. */
@@ -110,7 +113,7 @@ test.describe('ESCSUITE-438: stopping while the sound is prepared, and a run tha
     await expect(page.getByText(/Transcribing on this device/)).toBeVisible({ timeout: 15_000 })
     await expect(page.getByText(`0:0${CLIP_SECONDS} / 0:0${CLIP_SECONDS}`)).toBeVisible({ timeout: (CLIP_SECONDS + 5) * 1000 })
 
-    // The ticket saw it still reading 0:06 / 0:06 eleven seconds later.
+    // The ticket saw a 6 s timeline still reading 0:06 / 0:06 eleven seconds later.
     await expect(page.getByText(DONE)).toBeVisible({ timeout: 8_000 })
     await expect(transcribeButton(page)).toBeVisible()
     await expect(page.getByRole('button', { name: 'Stop transcribing' })).toHaveCount(0)
