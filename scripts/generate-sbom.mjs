@@ -22,7 +22,7 @@
  * Tests: scripts/generate-sbom.test.mjs (pnpm test:scripts).
  */
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,9 +65,22 @@ function readPackageJson(path) {
  * @param {string} options.created      ISO 8601 UTC time, no fraction
  * @param {string} options.repo         owner/repo, for the document namespace
  * @param {string} options.tool         e.g. `pnpm-9.15.4`
+ * @param {string} [options.uuid]       makes the document namespace unique to this document, as
+ *                                      SPDX requires: the same build can be on several releases
+ *                                      (an unchanged ESCAPECRAFT on the next umbrella release),
+ *                                      each with its own SBOM. Random by default.
  * @param {(path: string) => {version?: string, license?: unknown}} [options.readManifest]
  */
-export function buildSpdx({ buildName, buildSha256, trees, created, repo, tool, readManifest = readPackageJson }) {
+export function buildSpdx({
+  buildName,
+  buildSha256,
+  trees,
+  created,
+  repo,
+  tool,
+  uuid = randomUUID(),
+  readManifest = readPackageJson,
+}) {
   const packages = new Map(); // name@version -> SPDX package
   const relationships = new Map(); // "from type to" -> relationship
   const usedIds = new Set([BUILD_ID]);
@@ -144,7 +157,7 @@ export function buildSpdx({ buildName, buildSha256, trees, created, repo, tool, 
     dataLicense: 'CC0-1.0',
     SPDXID: 'SPDXRef-DOCUMENT',
     name: buildName,
-    documentNamespace: `https://github.com/${repo}/sbom/${encodeURIComponent(buildName)}-${buildSha256}`,
+    documentNamespace: `https://github.com/${repo}/sbom/${encodeURIComponent(buildName)}-${uuid}`,
     creationInfo: {
       created,
       creators: ['Tool: escapesuite-generate-sbom', `Tool: ${tool}`],

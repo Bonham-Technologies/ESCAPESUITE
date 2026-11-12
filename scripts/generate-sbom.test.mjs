@@ -101,10 +101,13 @@ test('writes an SPDX 2.3 document that describes the build by name and SHA-256',
   assert.equal(doc.dataLicense, 'CC0-1.0');
   assert.equal(doc.SPDXID, 'SPDXRef-DOCUMENT');
   assert.equal(doc.name, 'ESCAPECRAFT-2.19.0.html');
-  assert.equal(
+  // SPDX wants a namespace unique to each document: the same build can be on
+  // two releases, each with its own SBOM.
+  assert.match(
     doc.documentNamespace,
-    `https://github.com/Bonham-Technologies/ESCAPESUITE/sbom/ESCAPECRAFT-2.19.0.html-${SHA}`
+    /^https:\/\/github\.com\/Bonham-Technologies\/ESCAPESUITE\/sbom\/ESCAPECRAFT-2\.19\.0\.html-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
   );
+  assert.notEqual(craftSbom().documentNamespace, doc.documentNamespace, 'each SBOM gets its own namespace');
   assert.equal(doc.creationInfo.created, CREATED);
   assert.ok(doc.creationInfo.creators.includes('Tool: pnpm-9.15.4'));
 
