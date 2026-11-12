@@ -13,7 +13,7 @@ export default function Privacy() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Privacy Policy</h1>
-        <p className={styles.lastUpdated}>Last updated: August 18, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: November 11, 2026</p>
       </header>
 
       <div className={styles.content}>
@@ -45,18 +45,30 @@ export default function Privacy() {
 
         <h3>2.1 Usage Analytics (Hosted Site Only)</h3>
         <p>
-          The hosted site at escapesuite.io uses Vercel Analytics to understand how our applications
-          are used. This includes:
+          The hosted site at escapesuite.io uses Vercel Web Analytics to understand how our
+          applications are used. It records:
         </p>
         <ul>
-          <li>Feature usage events (e.g., "recording started," "export completed")</li>
-          <li>Page views and navigation patterns</li>
-          <li>Browser type and general device information</li>
+          <li>Page views and feature usage events (e.g., "recording started," "export completed")</li>
+          <li>
+            The path of the page you are on, such as /artist/, and never the part of the address
+            after a ? or #
+          </li>
+          <li>
+            The address of the site that sent you or shows the app inside its own page, if there
+            is one
+          </li>
+          <li>
+            Your browser, operating system and device type, and your approximate location, down to
+            the city
+          </li>
         </ul>
         <p>
-          Vercel Analytics does not use cookies and is designed to be privacy-friendly. We do not
-          track your IP address or create detailed user profiles, and events are not tied to any
-          account or identity, since none exist.
+          Vercel works out your approximate location, and a visitor identifier that is discarded
+          after 24 hours, from your IP address and other details of the request when it arrives,
+          and says it does not store the IP address.
+          Vercel Web Analytics does not use cookies, we do not create detailed user profiles, and
+          events are not tied to any account or identity, since none exist.
         </p>
 
         <h3>2.2 Information We Do NOT Collect</h3>
@@ -66,8 +78,8 @@ export default function Privacy() {
           <li><strong>Project files</strong> - Your video editing projects are stored locally in your browser's IndexedDB</li>
           <li><strong>Camera/microphone streams</strong> - Media streams are processed locally, never transmitted</li>
           <li><strong>Account or payment information</strong> - There is no account to create, so we never collect names, emails, or payment details</li>
-          <li><strong>Detailed location data</strong> - We don't track your geographic location</li>
-          <li><strong>Browsing history</strong> - We don't track your activity outside our applications</li>
+          <li><strong>Precise location</strong> - We never ask for your device's location; the only location recorded is the approximate city described in 2.1</li>
+          <li><strong>Browsing history</strong> - We don't track your activity outside our applications; the only other site recorded is the one that sent you or shows the app, as described in 2.1</li>
         </ul>
 
         <h2>3. How We Use Your Information</h2>
@@ -114,7 +126,7 @@ export default function Privacy() {
             <tr>
               <td>Vercel</td>
               <td>Hosting &amp; Analytics</td>
-              <td>Anonymous usage events, page views</td>
+              <td>Anonymous usage events and page views, with the details listed in 2.1</td>
             </tr>
           </tbody>
         </table>
