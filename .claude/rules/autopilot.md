@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v17. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v18. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -38,16 +38,16 @@ from .claude/rules/autopilot.md" means exactly that.
 
 | Role | Read |
 |---|---|
-| steward | `.claude/autopilot/steward.md`, `.claude/autopilot/security-sweep.md` and `.claude/autopilot/confluence-record.md` |
-| builder | `.claude/autopilot/builder.md` |
+| steward | `.claude/autopilot/steward.md`, `.claude/autopilot/security-sweep.md`, `.claude/autopilot/confluence-record.md` and `.claude/autopilot/control-panel.md` |
+| builder | `.claude/autopilot/builder.md` and `.claude/autopilot/control-panel.md` |
 | dependabot | `.claude/autopilot/dependabot.md`, and `.claude/autopilot/builder.md` for the merge rules it follows |
-| scout | `.claude/autopilot/scout.md` and `.claude/autopilot/confluence-record.md` |
+| scout | `.claude/autopilot/scout.md`, `.claude/autopilot/confluence-record.md` and `.claude/autopilot/control-panel.md` |
 | fleet | `.claude/autopilot/fleet.md`, with the steward's files |
 
 A bold section name that isn't in this file is in one of them:
 - **Steward**, **Watch tickets**, **Weekly digest** and **Decision Log**: `steward.md`;
 - **Security sweep** and **Security tickets**: `security-sweep.md`;
-- **Record in Confluence**: `confluence-record.md`;
+- **Record in Confluence**: `confluence-record.md`; **Control panel**: `control-panel.md`;
 - **Fleet digest** and **Policy tickets**: `fleet.md`;
 - **Builder**, **Dependabot** and **Scout**: the role's own file.
 
