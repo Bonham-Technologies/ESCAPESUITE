@@ -131,6 +131,21 @@ const ROTATION_REFUSAL = 'VideoDecoder cannot rotate its output'
  */
 const PARITY_TOLERANCE = 1.5
 
+/**
+ * ESCSUITE-437: this file's readers (`frameAt`,
+ * `compareFrames`) wait for a video frame callback after each seek, not only
+ * for 'seeked'. A paused element can fire 'seeked' before it has the sought
+ * frame to draw, and `drawImage` then paints the frame from before the seek.
+ * On a loaded machine that happened to 12-15 of 1,080 Chromium reads, and the
+ * parity cases failed though the two exports agreed at every frame (checked
+ * frame by frame outside the browser). The callback is registered before the
+ * seek is issued, so it cannot miss the frame. In Chromium and Firefox it
+ * fires once per completed seek, even a seek within the frame already shown,
+ * and with it 0 of 1,080 reads were stale. The deadline only keeps a reader
+ * from hanging if no callback arrives. It is a ceiling, not a delay.
+ */
+const PRESENTED_FRAME_WAIT_MS = 2_000
+
 declare global {
   interface Window {
     __decodeWorker: { framesReady: number; workersStarted: number }
@@ -316,7 +331,7 @@ async function frameAt(
   centre?: { width: number; height: number }
 ): Promise<DecodedFrame> {
   return page.evaluate(
-    async ({ base64, time, centre }) => {
+    async ({ base64, time, centre, presentedFrameWaitMs }) => {
       const binary = atob(base64)
       const array = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i)
@@ -331,10 +346,19 @@ async function frameAt(
         video.onloadeddata = () => resolve()
         video.onerror = () => reject(new Error('the exported MP4 did not load'))
       })
+      // Wait for the sought frame, not only the seek: see PRESENTED_FRAME_WAIT_MS.
+      const presented = new Promise<void>((resolve) => {
+        const fallback = setTimeout(resolve, presentedFrameWaitMs)
+        video.requestVideoFrameCallback(() => {
+          clearTimeout(fallback)
+          resolve()
+        })
+      })
       video.currentTime = time
       await new Promise<void>((resolve) => {
         video.onseeked = () => resolve()
       })
+      await presented
       const canvas = document.createElement('canvas')
       canvas.width = video.videoWidth
       canvas.height = video.videoHeight
@@ -348,7 +372,7 @@ async function frameAt(
       URL.revokeObjectURL(url)
       return { width, height, data }
     },
-    { base64: bytes.toString('base64'), time, centre }
+    { base64: bytes.toString('base64'), time, centre, presentedFrameWaitMs: PRESENTED_FRAME_WAIT_MS }
   )
 }
 
@@ -376,7 +400,7 @@ async function compareFrames(
   centre: { width: number; height: number }
 ): Promise<FrameComparison[]> {
   return page.evaluate(
-    async ({ xBase64, yBase64, pairs, centre }) => {
+    async ({ xBase64, yBase64, pairs, centre, presentedFrameWaitMs }) => {
       const open = async (base64: string) => {
         const binary = atob(base64)
         const array = new Uint8Array(binary.length)
@@ -394,10 +418,19 @@ async function compareFrames(
         return video
       }
       const read = async (video: HTMLVideoElement, time: number) => {
+        // Wait for the sought frame, not only the seek: see PRESENTED_FRAME_WAIT_MS.
+        const presented = new Promise<void>((resolve) => {
+          const fallback = setTimeout(resolve, presentedFrameWaitMs)
+          video.requestVideoFrameCallback(() => {
+            clearTimeout(fallback)
+            resolve()
+          })
+        })
         video.currentTime = time
         await new Promise<void>((resolve) => {
           video.onseeked = () => resolve()
         })
+        await presented
         const canvas = document.createElement('canvas')
         canvas.width = video.videoWidth
         canvas.height = video.videoHeight
@@ -451,7 +484,13 @@ async function compareFrames(
       for (const video of [xVideo, yVideo]) URL.revokeObjectURL(video.src)
       return results
     },
-    { xBase64: x.toString('base64'), yBase64: y.toString('base64'), pairs, centre }
+    {
+      xBase64: x.toString('base64'),
+      yBase64: y.toString('base64'),
+      pairs,
+      centre,
+      presentedFrameWaitMs: PRESENTED_FRAME_WAIT_MS,
+    }
   )
 }
 
