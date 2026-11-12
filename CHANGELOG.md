@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Remove silences no longer listens to muted or hidden tracks, which the export leaves out, so their sound no longer hides a pause; they are still cut in step with the take.
 - ESCAPEARTIST: transcribing to captions shows how much of the sound is prepared, and no longer gets stuck after the sound has played when the browser's speech recognition does not finish.
 - ESCAPEARTIST: in the light theme, Remove silences' "Nothing was cut" message and the red border around a setting that is out of range are a darker red, so they are easier to read and to spot.
 - ESCAPEARTIST: transcribing to captions uses far less memory (about 230 MB for an hour of timeline), and a timeline over 3 hours is turned down at once with a message that names the limit and suggests a section.
