@@ -200,7 +200,8 @@ on demand.
   the mix's progress on as whole percentages; rejects promptly when stopped mid-mix.
   `core/audioMixer.streamed.test.ts`: the speech mix reports chunk by chunk, the export mix
   once a source. `apps/e2e/tests/regressions/ESCSUITE-438.spec.ts`: the percentage moves
-  while preparing (each stored-file chunk read is delayed, so the mix is slow enough to watch),
+  while preparing (a stored file's bytes are handed out 32 KiB at a time, 150 ms apart, so the
+  mix is slow enough to watch),
   Stop then frees the control within 1 s and nothing is heard or added; and with the stub's
   `stopNeverEnds` mode the 2 captions land within 8 s of the clock reading the clip's end.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a

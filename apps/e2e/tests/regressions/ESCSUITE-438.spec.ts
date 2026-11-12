@@ -16,17 +16,24 @@ import { installSpeechStub, stubRecord, transcribeButton } from '../../utils/spe
  *
  * The recogniser is the stub in `utils/speechStub.ts` (with a vendor brand, so
  * the headless shell's real `available()` is never called). The mix is made
- * slow enough to press Stop during it by delaying every chunk read from a
- * stored file, switched on only after the import (`__slowReadsMs`).
+ * slow enough to press Stop during it by handing out every stored file's
+ * bytes a little at a time, switched on only after the import (`__slowReadsMs`).
  */
 
 const CLIP_SECONDS = 6
 const STOPPED = 'Transcription stopped. No captions were added.'
 const DONE = 'Transcribed 2 captions onto the Captions track.'
+/** With `__slowReadsMs` at 150, the 20 s clip's 1.9 MB take about 9 s to read. */
+const SLOW_PIECE_BYTES = 32 * 1024
 
-/** Delays every chunk a `Blob` stream hands out by `window.__slowReadsMs`, once that is set. */
+/**
+ * Once `window.__slowReadsMs` is set, a `Blob` stream hands out at most
+ * `SLOW_PIECE_BYTES` at a time, each that long after the last. Chromium hands
+ * a stored file's whole stream out as one chunk, so delaying chunks alone
+ * would hold the mix up once and then let it run to the end at full speed.
+ */
 async function installSlowReads(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+  await page.addInitScript((pieceBytes) => {
     const w = window as unknown as { __slowReadsMs?: number }
     const stream = Blob.prototype.stream
     Blob.prototype.stream = function (this: Blob) {
@@ -34,17 +41,25 @@ async function installSlowReads(page: Page): Promise<void> {
       const delay = w.__slowReadsMs
       if (!delay) return inner
       const reader = inner.getReader()
+      let pending = new Uint8Array(0)
       return new ReadableStream<Uint8Array>({
         async pull(controller) {
           await new Promise((resolve) => setTimeout(resolve, delay))
-          const { done, value } = await reader.read()
-          if (done) controller.close()
-          else controller.enqueue(value)
+          if (pending.length === 0) {
+            const { done, value } = await reader.read()
+            if (done) {
+              controller.close()
+              return
+            }
+            pending = value
+          }
+          controller.enqueue(pending.slice(0, pieceBytes))
+          pending = pending.subarray(pieceBytes)
         },
         cancel: (reason) => reader.cancel(reason),
       }) as ReturnType<Blob['stream']>
     }
-  })
+  }, SLOW_PIECE_BYTES)
 }
 
 async function openWithClip(page: Page, seconds: number): Promise<void> {
@@ -63,7 +78,7 @@ test.describe('ESCSUITE-438: stopping while the sound is prepared, and a run tha
     await installSlowReads(page)
     await openWithClip(page, 20)
     await page.evaluate(() => {
-      ;(window as unknown as { __slowReadsMs: number }).__slowReadsMs = 300
+      ;(window as unknown as { __slowReadsMs: number }).__slowReadsMs = 150
     })
 
     await transcribeButton(page).click()
