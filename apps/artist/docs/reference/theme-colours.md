@@ -15,9 +15,10 @@ Every pair below is pinned numerically in `src/styles/themeTokens.test.ts`, in b
 | `--accent-text` | Accent-coloured text (headings, the active tab) | `#4a9eff` | `#155fb8` | 4.5:1 (see `keyboard-shortcuts.md`) |
 | `--accent-ring` | An edge that carries meaning: focus, a pressed button, the selected clip, a drop target; and a graphical object that shows state: a progress fill, a slider thumb | `#4a9eff` | `#2378d8` | 3:1 on all four surfaces, both timeline surfaces and `--border-color` (WCAG 1.4.11) |
 | `--accent-on-fill` | Text or icons on an `--accent-primary` fill | `#0b1220` | (inherited) | 4.5:1 on the fill and on the `#3a8eef` hover fill |
+| `--accent-fill-hover` | An `--accent-primary` fill under the pointer | `#3a8eef` | (inherited) | `--accent-on-fill` at 4.5:1 on it |
 | `--accent-primary` | Fills, and borders that only decorate | `#4a9eff` | `#4a9eff` | None as text or as a focus indicator |
 | `--warning-ink` | The warning colour as text or a state graphic: the storage-nearly-full text and fill, the Clear Unused hover | `#ff9800` | `#924600` | 4.5:1 as text on the orange-tinted warning panel, 3:1 on `--border-color` |
-| `--danger-ink` | The danger colour as text: the storage bar's Clear All / Remove hover | `#ff8a80` | `#a81b1b` | 4.5:1 on the hover's red tint, over the plain bar and the warning tint |
+| `--danger-ink` | The danger colour as text: the storage bar's Clear All / Remove hover, Remove silences' refused alert; and the edge of a field that does not read | `#ff8a80` | `#a81b1b` | 4.5:1 on the hover's red tint, over the plain bar and the warning tint; 4.5:1 on all four surfaces |
 
 The four surfaces are `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-hover`.
 
@@ -42,7 +43,9 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   accent fill. Where a more specific `:hover` rule would repaint the label (`.headerButton:hover`,
   `.controlButton:hover`), the accent button restates its ink under `:hover`. The one hover fill
   is `#3a8eef` (5.61:1); `var(--accent-hover, #3a7bc8)` named a token that does not exist and
-  put the ink at 4.32:1, so it is gone.
+  put the ink at 4.32:1, so it is gone. Since ESCSUITE-436 that fill is the token
+  `--accent-fill-hover`, which Remove silences' Remove all and the transcribe notice's Download
+  language pack use; the older rules still spell `#3a8eef` out, and the test reads both forms.
 - **An edge that carries meaning takes `--accent-ring`.** That is every `:focus`/`:focus-visible`
   border or outline, the timeline's inline track-name field, the selected and multi-selected
   clip's 2px ring, the timeline's drop preview, the media library's drop zone while a file is
@@ -87,6 +90,10 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   one. `--danger-ink` is lighter in the dark theme and darker in the light one. On the dark
   theme's orange warning tint `--text-muted` is 3.9:1, so in the warning state the bar's button
   labels and the earlier-sessions note take `--text-secondary` (4.7:1 or more).
+  Remove silences (ESCSUITE-436) painted its refused alert and the border of a field that does
+  not read in a hard-coded `#f87171`: 2.57:1 as text on the light dialog (`--bg-secondary`) and
+  2.33:1 as a border on the light field (`--bg-tertiary`), under WCAG 1.4.11's 3:1. Both take
+  `--danger-ink`: 6.90:1 and 6.24:1 there in the light theme, 6.96:1 and 8.34:1 in the dark one.
 - **A surface that is dark in both themes does not read theme text tokens.** The preview's empty
   and loading placeholder sits on `.videoWrapper`'s `#111`, so it hard-codes the dark `--text-muted`
   (`#8f8fa2`, 5.95:1); the light value would be 3.10:1 there. The keyframe panel is painted dark
@@ -116,3 +123,12 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
 - The same file's "the storage bar's buttons stay readable, hovered too (ESCSUITE-426)": both
   themes, plain and nearly full, with one imported file not on the timeline so Clear All is
   enabled and Clear Unused shows; axe `color-contrast` at rest and with each button hovered.
+- The same file's "the Remove silences dialog stays readable, refused and with a field invalid
+  (ESCSUITE-436)": both themes, a seeded separate-tracks take with its microphone track locked so
+  Remove all is refused and says why, and Minimum gap set out of range; axe `color-contrast` over
+  the dialog at rest and with Remove all hovered, and the invalid border (3:1) against the field
+  and the dialog from computed styles.
+- The same file's "the transcribe language-pack notice stays readable, hovered too
+  (ESCSUITE-436)": both themes, with the Web Speech API and a Chrome brand stubbed
+  (`utils/speechStub.ts`) answering `downloadable`; axe `color-contrast` over the notice at rest
+  and with Download language pack hovered.
