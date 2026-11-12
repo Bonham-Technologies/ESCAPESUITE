@@ -76,7 +76,14 @@ async function openWithClip(page: Page, seconds: number): Promise<void> {
 test.describe('ESCSUITE-438: stopping while the sound is prepared, and a run that cannot hang', () => {
   test.describe.configure({ timeout: 90_000 })
 
-  test('preparing the sound shows its progress, and Stop then frees the control within 1 s, adding nothing', async ({ page }) => {
+  test('preparing the sound shows its progress, and Stop then frees the control within 1 s, adding nothing', async ({ page, browserName }) => {
+    // Safari has no on-device recogniser (`getLocalRecognitionCtor` is null
+    // there), so WebKit users never see this control; the stub fakes Chrome's.
+    // And WebKit's stored-file reads don't go through the `Blob.stream` shim the
+    // way Chromium's and Firefox's do, so the mix isn't held open: in the
+    // 2026-11-12 Nightly it sat at 0% for 15 s, and locally it finished before
+    // Stop, starting the recogniser. Chromium and Firefox still run it.
+    test.skip(browserName === 'webkit', 'No on-device recogniser in Safari, and the slowed-read shim does not hold the mix open in WebKit')
     await installSpeechStub(page, { api: 'local', answer: 'available' })
     await installSlowReads(page)
     await openWithClip(page, 20)
