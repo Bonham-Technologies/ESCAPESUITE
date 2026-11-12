@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: the test tooling is updated to Playwright 1.65, Vitest 5.1 and jsdom 31, with a workaround for a Firefox 159 crash that stopped the cross-browser accessibility checks from running.
 - ESCAPEPLAN: the Privacy Policy now lists exactly what the hosted site's analytics records, including the approximate city Vercel works out from your IP address, which Vercel says it does not store.
 - ESCAPEARTIST: Remove silences no longer listens to muted or hidden tracks, which the export leaves out, so their sound no longer hides a pause; they are still cut in step with the take.
 - ESCAPEARTIST: transcribing to captions shows how much of the sound is prepared, and no longer gets stuck after the sound has played when the browser's speech recognition does not finish.
