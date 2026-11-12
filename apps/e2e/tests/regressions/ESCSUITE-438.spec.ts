@@ -34,10 +34,22 @@ const SLOW_PIECE_BYTES = 32 * 1024
  * `SLOW_PIECE_BYTES` at a time, each that long after the last. Chromium hands
  * a stored file's whole stream out as one chunk, so delaying chunks alone
  * would hold the mix up once and then let it run to the end at full speed.
+ *
+ * WebKit never streams a stored file: mediabunny's `BlobSource` reads it there
+ * as `blob.slice(a, b).arrayBuffer()`, 64 KiB at a time (its `isWebKit()`
+ * check, for WebKit's `Blob.stream()` bugs). So `arrayBuffer()` is slowed too,
+ * by the same delay for every `SLOW_PIECE_BYTES` it reads: every engine then
+ * reads the 20 s clip in about the same 9 s.
  */
 async function installSlowReads(page: Page): Promise<void> {
   await page.addInitScript((pieceBytes) => {
     const w = window as unknown as { __slowReadsMs?: number }
+    const arrayBuffer = Blob.prototype.arrayBuffer
+    Blob.prototype.arrayBuffer = async function (this: Blob) {
+      const delay = w.__slowReadsMs
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay * Math.ceil(this.size / pieceBytes)))
+      return arrayBuffer.call(this)
+    }
     const stream = Blob.prototype.stream
     Blob.prototype.stream = function (this: Blob) {
       const inner = stream.call(this)
@@ -76,14 +88,7 @@ async function openWithClip(page: Page, seconds: number): Promise<void> {
 test.describe('ESCSUITE-438: stopping while the sound is prepared, and a run that cannot hang', () => {
   test.describe.configure({ timeout: 90_000 })
 
-  test('preparing the sound shows its progress, and Stop then frees the control within 1 s, adding nothing', async ({ page, browserName }) => {
-    // Safari has no on-device recogniser (`getLocalRecognitionCtor` is null
-    // there), so WebKit users never see this control; the stub fakes Chrome's.
-    // And WebKit's stored-file reads don't go through the `Blob.stream` shim the
-    // way Chromium's and Firefox's do, so the mix isn't held open: in the
-    // 2026-11-12 Nightly it sat at 0% for 15 s, and locally it finished before
-    // Stop, starting the recogniser. Chromium and Firefox still run it.
-    test.skip(browserName === 'webkit', 'No on-device recogniser in Safari, and the slowed-read shim does not hold the mix open in WebKit')
+  test('preparing the sound shows its progress, and Stop then frees the control within 1 s, adding nothing', async ({ page }) => {
     await installSpeechStub(page, { api: 'local', answer: 'available' })
     await installSlowReads(page)
     await openWithClip(page, 20)
