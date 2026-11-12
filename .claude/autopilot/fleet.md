@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v17. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v18. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -24,8 +24,8 @@ For each project, read:
 2. the open tickets waiting on the owner, with the PR links in their comments:
    `project = <jiraKey> AND statusCategory != Done AND labels in (ap-decision, needs-operator, ap-scout, needs-owner)`;
 3. its Session Log's entries, by role, since each role's last scheduled time: the
-   steward's last panel `Steward days` day, the scout's last panel `Scout days` date
-   (else `fleet.json`'s `stewardDays` and `scoutDays`), and the builder's two most recent scheduled nights
+   steward's and scout's last day by panel `Steward days` and `Scout days` (else
+   `fleet.json`'s `stewardDays` and `scoutDays`), and the builder's two most recent scheduled nights
    (`space = OPS AND type = page AND title = "<record> — Session Log"`);
 4. the week's counts, over the last 7 days:
    - tickets filed: `project = <jiraKey> AND created >= -7d AND (labels is EMPTY OR labels not in (ap-steward-log))`;
@@ -48,8 +48,9 @@ Also read, once per run:
 - **the scheduled tasks:** `list_triggers` with `recurring: true` and `limit: 100`, saved
   as JSON. If the tool isn't present, write "scheduled tasks: not readable" and skip
   **Drift** and the `last_run` half of **Missed runs**;
-- **the control panel:** the **Settings** table of the OPS page "Autopilot control
-  panel" (`bin/fleet render-panel` shows its shape).
+- **the control panel:** the OPS page "Autopilot control panel" as Markdown, saved to a
+  file; `bin/fleet check-panel <file>` prints its `Settings check` line, the cells that
+  break **Control panel** (`control-panel.md`). `bin/fleet render-panel` shows its shape.
 
 From this repo, read the previous fleet digest (the newest earlier comment on this
 project's steward log), for the "two consecutive weeks" signals, the open
@@ -114,11 +115,11 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
 - **Capacity:** one row per project. Columns: Project · Policy on main · Ready (auto /
   owner-merge / feature) · Waiting on you · Runs/week × budget · Capacity/week · Weeks to
   clear · Paused (builder / steward / scout) · Last run per task + result · Drift (`none` or the ticket's link).
-  Runs/week is the days the builder's cron fires that are also panel `Build days`
-  (else every cron day), budget and Paused from the panel (else
+  Runs/week is the days in the next 28 that the builder's cron fires and panel `Build
+  days` allow, ÷ 4; budget and paused from the panel (else
   `fleet.json`'s `builderBudget` and `no`, marked "fallback"), and weeks to clear is ready ÷
-  capacity, one decimal. Then rewrite the panel's **Status** section with the same
-  table and "Last updated <date>", leaving **Settings** untouched: the update sends the
+  capacity, one decimal. Then rewrite the panel's **Status** section with "Last updated
+  <date>", the `Settings check` line, then the same table, leaving **Settings** untouched: the update sends the
   whole page, so copy **Settings** back exactly as read, then re-read it to confirm.
 - **Scoreboard:** one line per project, linking its digest: the ten dimension scores
   ("paused" when the digest says so; that counts as present, not missing),

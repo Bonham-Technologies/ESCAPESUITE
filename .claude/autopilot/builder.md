@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v17. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v18. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -15,19 +15,11 @@ project = ESCSUITE AND statusCategory != Done AND labels in (ap-auto, ap-owner-m
   AND labels not in (ap-decision, ap-watch, needs-operator, needs-owner, ap-triage, ap-merging)
 ```
 
-**Control panel.** First read the **Settings** row whose `Jira` is this project's key on
-the OPS page `space = OPS AND type = page AND title = "Autopilot control panel"`.
-`Paused: yes` means take no tickets this run and say "paused by control panel" in the
-summary; the Dependabot sweep and **Reconcile** still run. `Build days` (`Mon-Sun`, a
-range such as `Mon-Fri`, or a list such as `Mon,Wed,Fri`) names the days, by the run's
-start date in America/Denver, that take tickets; any other day works like Paused and
-says "not a build day". `Builder budget` (0 to 10) replaces the prompt's budget, and
-`Feature cap` is read the same way. A missing page or row, a budget that isn't a whole
-number from 0 to 10, a feature cap that isn't a whole number, or a Paused that isn't
-yes or no falls back to the budget in the prompt (`Fallback ticket budget: N`, or
-`Ticket budget: N` in older prompts) and a feature cap of 8, and `Build days` that don't
-parse fall back to every day; the summary names the fallback and why. Never guess a
-value, and never edit **Settings**: only the owner does.
+**Control panel.** First read this project's settings as **Control panel**
+(`.claude/autopilot/control-panel.md`) says. While `Builder paused`, take no tickets and
+say "paused by control panel"; on a day outside `Build days`, the same with "not a build
+day". The Dependabot sweep and **Reconcile** run every day regardless. `Builder budget`
+replaces the prompt's budget, and `Feature cap` caps feature tickets.
 
 **Feature batches.** A feature is the open tickets sharing one Jira label
 `ap-feature-<slug>`, ordered by their "Blocks" links; each ticket keeps its own class
