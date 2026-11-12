@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 import { audioSource } from '../test/renderPreview'
 import { captionStyleFor } from '../core/captions'
-import { cutEditorBlock, normaliseRanges } from './rippleRanges'
+import { cutEditorBlock, leftBehind, normaliseRanges } from './rippleRanges'
 import { scrubRemovedSources } from './storeHistory'
 import { useEditorStore } from './projectStore'
 import type { Clip } from './types'
@@ -388,6 +388,36 @@ describe('removeTimeRanges, moving everything after each cut (ESCSUITE-434)', ()
     const [scrubbed] = scrubRemovedSources({ past: [entry], future: [] }, [audioSource.id]).past
     expect(scrubbed).not.toBe(entry)
     expect(scrubbed.editor).toEqual(entry.editor)
+  })
+})
+
+describe('leftBehind (ESCSUITE-431)', () => {
+  it('with the box on, counts a clip linked to one on a locked row, as the cut leaves both', () => {
+    const { screen } = placeTake()
+    store().addClipToTimeline({ id: 'b-roll', sourceVideoId: video.id, name: 'b-roll', startTime: 0, endTime: 2, duration: 2 }, undefined, 5)
+    store().addClipToTimeline({ id: 'b-sound', sourceVideoId: audioSource.id, name: 'b-sound', startTime: 0, endTime: 2, duration: 2 }, undefined, 5)
+    useEditorStore.setState((state) => ({
+      project: {
+        ...state.project,
+        timeline: {
+          ...state.project.timeline,
+          clips: state.project.timeline.clips.map((c) => (c.id === 'b-roll' || c.id === 'b-sound' ? { ...c, linkGroupId: 'pair' } : c)),
+        },
+      },
+    }))
+    store().updateTrack(store().project.timeline.clips.find((c) => c.id === 'b-sound')!.trackId, { locked: true })
+    const { clips, tracks } = store().project.timeline
+    expect(leftBehind(clips, tracks, [], screen.id, [{ start: 2, end: 3 }], true)).toEqual({
+      blur: 0, captions: 0, textOrShapes: 0, media: 2, markers: 0, linkedToLocked: 1,
+    })
+  })
+
+  it('counts nothing without the clip or without a range, and nothing on the take\'s own rows', () => {
+    const { screen, mic } = placeTake()
+    const { clips, tracks } = store().project.timeline
+    expect(leftBehind(clips, tracks, [], 'missing', [{ start: 1, end: 2 }], false)).toBeNull()
+    expect(leftBehind(clips, tracks, [], screen.id, [], false)).toBeNull()
+    expect(leftBehind(clips, tracks, [], mic.id, [{ start: 1, end: 2 }], false)).toBeNull()
   })
 })
 

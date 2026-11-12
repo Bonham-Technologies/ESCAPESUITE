@@ -18,7 +18,7 @@
 // what makes the whole cut one undo step.
 
 import { v4 as uuidv4 } from 'uuid';
-import type { Clip, ClipAnimation, EditorBlock, Keyframe, SourceVideo, Track } from './types';
+import type { Clip, ClipAnimation, EditorBlock, Keyframe, Marker, SourceVideo, Track } from './types';
 import { DEFAULT_ANIMATION } from './types';
 import type { TimeRange } from '../core/silenceDetection';
 import { cloneClip } from '../utils/deepClone';
@@ -88,6 +88,58 @@ function withLinkedRows(clips: readonly Clip[], rows: Set<string>): Set<string> 
 export function rowsToMove(clips: readonly Clip[], tracks: readonly Track[], rows: ReadonlySet<string>): Set<string> {
   const held = withLinkedRows(clips, new Set(tracks.filter((t) => t.locked).map((t) => t.id)));
   return new Set(clips.map((c) => c.trackId).filter((id) => !rows.has(id) && !held.has(id)));
+}
+
+/** What a cut leaves where it was, by kind (ESCSUITE-431). */
+export interface LeftBehind {
+  blur: number;
+  captions: number;
+  /** Text and shape overlays other than a blur. */
+  textOrShapes: number;
+  media: number;
+  markers: number;
+  /**
+   * How many of the clips counted sit on an unlocked row that stays put only
+   * because it is linked to a locked one (`rowsToMove`).
+   */
+  linkedToLocked: number;
+}
+
+/**
+ * What a cut of `ranges` through `clipId` would leave where it is while what
+ * is around it closes up (ESCSUITE-431): every clip on a row the cut does not
+ * move that overlaps or follows the first range, and every marker at or after
+ * its start when the markers do not move. With `moveEverything` (ESCSUITE-434)
+ * only a locked row outside the take, or a row linked to one, stays put
+ * (`rowsToMove`, what the cut itself reads), and the markers move; without it
+ * every row outside the take stays put. Null when nothing is left behind.
+ */
+export function leftBehind(
+  clips: readonly Clip[],
+  tracks: readonly Track[],
+  markers: readonly Marker[],
+  clipId: string,
+  ranges: readonly TimeRange[],
+  moveEverything: boolean
+): LeftBehind | null {
+  const clip = clips.find((c) => c.id === clipId);
+  const first = normaliseRanges(ranges)[0];
+  if (!clip || !first) return null;
+  const rows = linkedRows(clips, clip);
+  const track = (id: string) => tracks.find((t) => t.id === id);
+  const moving = moveEverything ? rowsToMove(clips, tracks, rows) : new Set<string>();
+  const counts: LeftBehind = { blur: 0, captions: 0, textOrShapes: 0, media: 0, markers: 0, linkedToLocked: 0 };
+  for (const c of clips) {
+    if (rows.has(c.trackId) || moving.has(c.trackId)) continue;
+    if (c.timelinePosition + c.duration <= first.start) continue;
+    if (moveEverything && !track(c.trackId)?.locked) counts.linkedToLocked++;
+    if (track(c.trackId)?.kind === 'captions') counts.captions++;
+    else if (c.shapeData?.type === 'blur') counts.blur++;
+    else if (c.overlayType) counts.textOrShapes++;
+    else counts.media++;
+  }
+  if (!moveEverything) counts.markers = markers.filter((m) => m.time >= first.start).length;
+  return Object.values(counts).some((n) => n > 0) ? counts : null;
 }
 
 /** How much of `ranges` lies before `time`. */
