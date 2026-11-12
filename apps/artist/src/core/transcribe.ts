@@ -43,6 +43,12 @@ export const MAX_CUE_CHARS = 84;
 /** How often progress is reported while the sound plays, in ms. */
 const PROGRESS_INTERVAL_MS = 250;
 /**
+ * How long, once the sound has finished playing, the recogniser is given to
+ * end (`onend`) before the run finishes with what was heard (ESCSUITE-438). A
+ * recogniser that never ends would otherwise hold the run open for good.
+ */
+export const END_WAIT_MS = 5000;
+/**
  * The longest timeline transcribed at once (ESCSUITE-433): the export's own
  * limit. Its 16 kHz mono mix is 64,000 bytes a second, 691 MB at the limit.
  */
@@ -229,6 +235,7 @@ function listen(options: ListenOptions): Promise<CaptionCue[]> {
     let playbackEnded = false;
     let session = 0;
     let progressTimer: ReturnType<typeof setInterval> | undefined;
+    let endTimer: ReturnType<typeof setTimeout> | undefined;
     const heard = new Map<string, HeardSegment>();
     const finals = new Set<string>();
     let source: AudioBufferSourceNode | null = null;
@@ -237,6 +244,7 @@ function listen(options: ListenOptions): Promise<CaptionCue[]> {
 
     const cleanUp = () => {
       if (progressTimer !== undefined) clearInterval(progressTimer);
+      if (endTimer !== undefined) clearTimeout(endTimer);
       signal?.removeEventListener('abort', onAbort);
       recognition.onresult = null;
       recognition.onerror = null;
@@ -316,7 +324,13 @@ function listen(options: ListenOptions): Promise<CaptionCue[]> {
         source.onended = () => {
           playbackEnded = true;
           onProgress?.(duration, duration);
-          // `stop()` asks for the final results of what it has heard; `onend` follows.
+          // `stop()` asks for the final results of what it has heard; `onend`
+          // follows. If it never does, the run finishes anyway with what was
+          // heard, and the recogniser is let go (ESCSUITE-438).
+          endTimer = setTimeout(() => {
+            finish();
+            try { recognition.abort(); } catch { /* not running */ }
+          }, END_WAIT_MS);
           try { recognition.stop(); } catch { finish(); }
         };
 
@@ -338,7 +352,10 @@ export interface TranscribeTimelineOptions {
   lang: string;
   Recognition: SpeechRecognitionCtor;
   signal?: AbortSignal;
-  /** `'mixing'` while the sound is rendered, then `'listening'` with seconds played. */
+  /**
+   * `'mixing'` while the sound is rendered, with the percentage mixed out of
+   * 100 (each whole percent once), then `'listening'` with seconds played.
+   */
   onProgress?: (phase: 'mixing' | 'listening', played: number, total: number) => void;
   /** Defaults to `new AudioBuffer(…)`: the one buffer the mix is written into and played from. */
   createBuffer?: (numberOfChannels: number, length: number, sampleRate: number) => AudioBuffer;
@@ -364,7 +381,8 @@ export async function transcribeTimeline(options: TranscribeTimelineOptions): Pr
     options.createBuffer ??
     ((numberOfChannels: number, length: number, sampleRate: number) =>
       new AudioBuffer({ numberOfChannels, length, sampleRate }));
-  onProgress?.('mixing', 0, duration);
+  onProgress?.('mixing', 0, 100);
+  let mixed = 0;
   let buffer: AudioBuffer | null = null;
   // The signal stops the mix itself, so a stopped run frees its memory at once.
   const mix = await extractSpeechMix(
@@ -375,7 +393,14 @@ export async function transcribeTimeline(options: TranscribeTimelineOptions): Pr
       buffer = createBuffer(1, frames, SPEECH_MIX_SAMPLE_RATE);
       return buffer.getChannelData(0);
     },
-    signal
+    signal,
+    // The mixer reports after every decoded chunk; the control hears each whole percent once.
+    (percent) => {
+      const whole = Math.min(100, Math.floor(percent));
+      if (whole <= mixed) return;
+      mixed = whole;
+      onProgress?.('mixing', whole, 100);
+    }
   );
   if (signal?.aborted) throw abortError();
   if (!mix || !buffer) return null;

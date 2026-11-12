@@ -22,7 +22,10 @@ the list already filled from the defaults:
 | Minimum gap (s) | 0.7 | Shorter pauses are never cut |
 | Padding (s) | 0.1 | Kept on each side of every cut, so a word is not clipped at its edge |
 
-Changing a setting finds the pauses again. A field that does not hold a number
+Changing a setting finds the pauses again. When every clip it would listen to
+is on a muted or hidden track (below), the summary says so ("No audible sound
+to judge: every track with sound here is muted or hidden.") instead of "No
+pauses to cut". A field that does not hold a number
 in range is marked `aria-invalid` with a hint, and the list stays as it was
 until every field reads. Each listed pause has a **Keep** button
 (`Keep the pause at m:ss.cc`) that drops it from the list. While the dialog is
@@ -47,7 +50,7 @@ second of source, `utils/waveform.ts`):
   `certainSilentRuns` does the same over a peak-length range (below);
 - `cutsFromSilences` keeps runs at least `minGap` long and takes `padding` off
   each end, dropping a run the padding would close up;
-- `findTakeSilences(clips, sources, clipId, options)` maps the silent runs of
+- `findTakeSilences(clips, tracks, sources, clipId, options)` maps the silent runs of
   every clip it listens to onto the timeline, inside the chosen clip's span,
   and keeps only where **all** of them are silent. The minimum gap applies to
   that shared silence.
@@ -66,6 +69,25 @@ peaks (its waveform could not be decoded) is never silent within its span, so
 nothing there is cut. The first version listened only to the link group, so a
 music clip on the microphone partner's row was cut wherever the microphone
 paused.
+
+Only what the export plays is heard (ESCSUITE-435): a clip on a **muted** or
+**hidden** track, or on a track that no longer exists, is not listened to,
+the same test `audioMixer`'s `mixInto` uses to leave it out of the mix. So a
+mic-plus-system-audio take whose system audio (or a music bed) is muted has
+its microphone's pauses found, where before the muted sound, silent in the
+export, kept every pause. Such a clip is still cut and moved with the take
+(the cut works on rows, not on what is heard), so it stays in step if it is
+unmuted later. Where the playing clips cover only part of the span, the rest
+counts as silence, as it already did for a span with no clip there: a muted
+music bed under a mic that stops at 5 s of a 10 s take now offers 5-10 s as a
+pause, cut from every row, because that is what the export plays (listed for
+review, with Keep and one undo). A muted clip with no readable peaks no longer blocks a cut
+either. `nothingAudible` answers whether the clip is on the timeline, some
+clip with sound overlaps it on a row the cut moves, and none of those plays;
+the dialog then says there is no audible sound to judge, and nothing is found.
+A span with no sound at all still reads "No pauses to cut". A track's volume is not consulted: a
+track turned down to 0 % but not muted is still listened to. Peaks on a muted
+track do not raise the legacy-timing note (`hasApproximateTiming`).
 
 Peaks are min/max, not RMS, so a single click inside a pause keeps it.
 
@@ -167,7 +189,10 @@ timeline (a host page can replace the project under the modal).
   the same tracks without a recorded length never cut into sound; a music
   clip on a partner's row, an unlinked clip on a transitively reached row, a
   silent video clip and an unreadable clip; and a fast-check property that no
-  cut crosses sound in any audible clip on any row the cut touches.
+  cut crosses sound in any audible clip on any row the cut touches, with rows
+  randomly muted or hidden. ESCSUITE-435: a muted, a hidden and a missing row
+  not heard, a muted unreadable clip not blocking, `nothingAudible` (and not
+  for a span with no sound at all), and no legacy-timing note for a muted row.
 - `src/utils/waveformPeaks.test.ts`, `src/utils/waveform.test.ts`: the
   reported peak length on both extraction paths. `projectManager.test.ts`,
   `videoProcessor.test.ts`, `takeImport.test.ts`: every writer stores it, a
@@ -180,8 +205,14 @@ timeline (a host page can replace the project under the modal).
   with its source and one undo restoring the project.
 - `src/components/SilenceDialog.test.tsx`: the inspector action, the dialog's
   fields, Keep, Remove all, Escape, the timeline bands, and the note for
-  legacy peaks.
+  legacy peaks; ESCSUITE-435: a three-part take whose system audio row, muted
+  or hidden, is not heard but is still cut in step, and the "no audible sound"
+  summary.
 - `apps/e2e/tests/regressions/ESCSUITE-403.spec.ts`: the A/V fixture seeded as
   a separate-tracks take; the pause found, both rows shortened by it and in
   step, Ctrl+Z and Ctrl+Y, and the WebM export decoded to check the pause is
   gone.
+- `apps/e2e/tests/regressions/ESCSUITE-435.spec.ts`: a three-part take whose
+  system audio (captured 1.5 s late) covers the microphone's pause; nothing is
+  found until its row is muted, then the pause is, and Remove all cuts all
+  three rows in step.
