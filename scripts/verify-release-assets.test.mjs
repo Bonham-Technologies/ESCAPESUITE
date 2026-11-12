@@ -133,6 +133,9 @@ const ASSETS = {
 const BUILDS = Object.keys(ASSETS).filter((name) => /\.(html|tgz)$/.test(name));
 const SBOM_PREDICATE = 'https://spdx.dev/Document/v2.3';
 
+/** Escape every RegExp metacharacter, so a name or URL matches literally. */
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
+
 /** The provenance checks in a fake-gh log: attestation checks without --predicate-type. */
 function provenanceChecks(log) {
   return log
@@ -175,7 +178,7 @@ test('passes when every asset matches SHA256SUMS.txt and has an attestation', ()
   for (const name of [...Object.keys(ASSETS), 'SHA256SUMS.txt']) {
     assert.match(
       result.log,
-      new RegExp(`^attestation verify \\S*/${name.replace(/\./g, '\\.')} --repo ${REPO}$`, 'm'),
+      new RegExp(`^attestation verify \\S*/${escapeRegExp(name)} --repo ${REPO}$`, 'm'),
       `expected an attestation check for ${name}`
     );
   }
@@ -257,7 +260,7 @@ test('checks every build, -latest aliases included, for an SPDX SBOM attestation
     assert.match(
       result.log,
       new RegExp(
-        `^attestation verify \\S*/${name.replace(/\./g, '\\.')} --repo ${REPO} --predicate-type ${SBOM_PREDICATE.replace(/\./g, '\\.')}$`,
+        `^attestation verify \\S*/${escapeRegExp(name)} --repo ${REPO} --predicate-type ${escapeRegExp(SBOM_PREDICATE)}$`,
         'm'
       ),
       `expected an SBOM attestation check for ${name}`
