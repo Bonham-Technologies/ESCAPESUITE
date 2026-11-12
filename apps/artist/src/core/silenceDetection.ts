@@ -9,8 +9,9 @@
 //
 // Pure functions only: the dialog runs them, the store cuts what they find.
 
-import type { Clip, SourceVideo, WaveformPeak } from '../store/types';
+import type { Clip, SourceVideo, Track, WaveformPeak } from '../store/types';
 import { linkedRows } from '../store/rippleRanges';
+import { isVisibleTrack } from '../store/trackVisibility';
 import { peakTimingOf, type PeakTiming } from '../utils/peakTiming';
 
 /** A stretch of time, in seconds; `end` is after `start`. */
@@ -169,18 +170,39 @@ export function clipHasPeaks(clip: Clip, sources: readonly SourceVideo[]): boole
  * link group: a music bed or a voice-over on a partner's row, or a clip on a
  * row a later piece's link reaches, is cut too, so it is listened to too. An
  * overlay, and a clip whose source has no sound, has nothing to listen to.
+ *
+ * Only what the export plays is heard (ESCSUITE-435): a clip on a muted or a
+ * hidden row, or on a row that is gone, is skipped, as `audioMixer`'s
+ * `mixInto` skips it. It is still cut and moved with the take; it just does
+ * not stop a pause being a pause.
  */
-function listenedClips(clips: readonly Clip[], sources: readonly SourceVideo[], target: Clip): { clip: Clip; source: SourceVideo }[] {
+function listenedClips(
+  clips: readonly Clip[],
+  tracks: readonly Track[],
+  sources: readonly SourceVideo[],
+  target: Clip
+): { clip: Clip; source: SourceVideo }[] {
+  return clipsWithSound(clips, sources, target).filter(({ clip }) => plays(tracks, clip));
+}
+
+/** `listenedClips` before the muted and hidden rows are left out. */
+function clipsWithSound(clips: readonly Clip[], sources: readonly SourceVideo[], target: Clip): { clip: Clip; source: SourceVideo }[] {
   const rows = linkedRows(clips, target);
   const spanEnd = target.timelinePosition + target.duration;
-  const listened: { clip: Clip; source: SourceVideo }[] = [];
+  const withSound: { clip: Clip; source: SourceVideo }[] = [];
   for (const clip of clips) {
     if (!rows.has(clip.trackId) || clip.overlayType) continue;
     if (clip.timelinePosition >= spanEnd || clip.timelinePosition + clip.duration <= target.timelinePosition) continue;
     const source = sources.find((s) => s.id === clip.sourceVideoId);
-    if (source?.hasAudio) listened.push({ clip, source });
+    if (source?.hasAudio) withSound.push({ clip, source });
   }
-  return listened;
+  return withSound;
+}
+
+/** Whether the export mixes `clip`'s sound: its row exists, is not muted and is not hidden (`mixInto`). */
+function plays(tracks: readonly Track[], clip: Clip): boolean {
+  const track = tracks.find((t) => t.id === clip.trackId);
+  return isVisibleTrack(track) && !track.muted;
 }
 
 /**
@@ -188,13 +210,38 @@ function listenedClips(clips: readonly Clip[], sources: readonly SourceVideo[], 
  * before their length was recorded (`peakTimingOf`), so pauses late in it may
  * be left in rather than placed exactly.
  */
-export function hasApproximateTiming(clips: readonly Clip[], sources: readonly SourceVideo[], clipId: string): boolean {
+export function hasApproximateTiming(
+  clips: readonly Clip[],
+  tracks: readonly Track[],
+  sources: readonly SourceVideo[],
+  clipId: string
+): boolean {
   const target = clips.find((c) => c.id === clipId);
   if (!target) return false;
-  return listenedClips(clips, sources, target).some(({ source }) => {
+  return listenedClips(clips, tracks, sources, target).some(({ source }) => {
     const audio = peaksOfSource(source);
     return audio !== null && !audio.timing.exact;
   });
+}
+
+/**
+ * Whether `clipId` is on the timeline but nothing `findTakeSilences` would
+ * listen to plays: there is a clip with sound the cut touches, and every
+ * such clip is on a muted or a hidden row (ESCSUITE-435). There is then no
+ * audible sound to judge, and nothing is found.
+ */
+export function nothingAudible(
+  clips: readonly Clip[],
+  tracks: readonly Track[],
+  sources: readonly SourceVideo[],
+  clipId: string
+): boolean {
+  const target = clips.find((c) => c.id === clipId);
+  if (!target) return false;
+  // Only when something with sound is there to be silenced: a span with no
+  // sound at all is "no pauses", not "muted or hidden".
+  const withSound = clipsWithSound(clips, sources, target);
+  return withSound.length > 0 && !withSound.some(({ clip }) => plays(tracks, clip));
 }
 
 /**
@@ -203,7 +250,8 @@ export function hasApproximateTiming(clips: readonly Clip[], sources: readonly S
  * A stretch is a pause only where **every** clip the cut would touch that has
  * sound is silent (`listenedClips`: the take's other parts — the microphone,
  * the system audio, a screen part with sound — and anything else on the rows
- * it moves); where such a clip is absent it does not speak. A clip whose
+ * it moves, on a row that plays); where such a clip is absent, muted or
+ * hidden it does not speak. A clip whose
  * source has sound (`hasAudio`) but no peaks to read (its waveform could not
  * be decoded) is never silent within its span: what it says there is unknown,
  * so nothing there is cut. Peaks are placed by `peakTimingOf`, and only what is
@@ -213,6 +261,7 @@ export function hasApproximateTiming(clips: readonly Clip[], sources: readonly S
  */
 export function findTakeSilences(
   clips: readonly Clip[],
+  tracks: readonly Track[],
   sources: readonly SourceVideo[],
   clipId: string,
   options: SilenceOptions
@@ -222,7 +271,7 @@ export function findTakeSilences(
   const span: TimeRange = { start: target.timelinePosition, end: target.timelinePosition + target.duration };
 
   let silent: TimeRange[] | null = null;
-  for (const { clip, source } of listenedClips(clips, sources, target)) {
+  for (const { clip, source } of listenedClips(clips, tracks, sources, target)) {
     const audio = peaksOfSource(source);
     // Source time to timeline time for this clip.
     const shift = clip.timelinePosition - clip.startTime;

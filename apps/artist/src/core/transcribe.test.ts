@@ -3,6 +3,7 @@
 // microphone), and what it says becomes ordinary caption cues.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+  END_WAIT_MS,
   HEARD_LEAD_SECONDS,
   MAX_CUE_CHARS,
   TranscriptionError,
@@ -455,7 +456,111 @@ describe('transcribeTimeline (ESCSUITE-404)', () => {
   it('transcribes the mix the export would make', async () => {
     vi.mocked(extractSpeechMix).mockResolvedValue(null);
     await expect(transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition })).resolves.toBeNull();
-    expect(extractSpeechMix).toHaveBeenLastCalledWith([], [], 0, expect.any(Function), undefined);
+    expect(extractSpeechMix).toHaveBeenLastCalledWith([], [], 0, expect.any(Function), undefined, expect.any(Function));
+  });
+});
+
+// ESCSUITE-438: Stop is seen while the sound is prepared, preparing shows how
+// far it has got, and a recogniser that never ends cannot hold a run open.
+describe('transcribeTimeline: preparing and ending (ESCSUITE-438)', () => {
+  beforeEach(() => {
+    vi.mocked(extractSpeechMix).mockReset();
+  });
+
+  it("reports the mix's progress as whole percentages, each once", async () => {
+    vi.mocked(extractSpeechMix).mockImplementation(async (_c, _t, _d, _allocate, _signal, onProgress) => {
+      for (const percent of [0.4, 12.5, 12.9, 50, 99.99, 100]) onProgress!(percent);
+      return null;
+    });
+    const seen: Array<[string, number, number]> = [];
+    await transcribeTimeline({
+      clips: [],
+      tracks: [],
+      lang: 'en-US',
+      Recognition,
+      onProgress: (phase, done, total) => seen.push([phase, done, total]),
+    });
+    expect(seen).toEqual([
+      ['mixing', 0, 100],
+      ['mixing', 12, 100],
+      ['mixing', 50, 100],
+      ['mixing', 99, 100],
+      ['mixing', 100, 100],
+    ]);
+  });
+
+  it('rejects at once and listens to nothing when stopped while the sound is prepared', async () => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    // A mix that sees its signal between chunks, as the real one does.
+    vi.mocked(extractSpeechMix).mockImplementation(
+      (_c, _t, _d, _allocate, signal) =>
+        new Promise((_, reject) => {
+          const chunk = setInterval(() => {
+            if (signal?.aborted) {
+              clearInterval(chunk);
+              reject(new DOMException('Mix stopped', 'AbortError'));
+            }
+          }, 50);
+        })
+    );
+    const run = transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition, signal: controller.signal });
+    const settled = vi.fn();
+    run.then(settled, settled);
+    await vi.advanceTimersByTimeAsync(2000);
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(settled).toHaveBeenCalledWith(expect.objectContaining({ name: 'AbortError' }));
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('finishes with what was heard when the recogniser never ends after the sound has played', async () => {
+    vi.useFakeTimers();
+    mixesAtSpeechRate();
+    const { ctx, source } = makeContext();
+    const run = transcribeTimeline({
+      clips: [makeClip({ duration: 6, endTime: 6 })],
+      tracks: [makeTrack()],
+      lang: 'en-US',
+      Recognition,
+      createAudioContext: () => ctx,
+      createBuffer: (c, l, r) => fakeBuffer(c, l, r),
+    });
+    const settled = vi.fn();
+    run.then(settled, settled);
+    await vi.advanceTimersByTimeAsync(0);
+    const [recognition] = FakeRecognition.instances;
+    // stop() is asked for, but this recogniser never fires `onend`.
+    recognition.stop.mockImplementation(() => {});
+    ctx.currentTime = 1;
+    recognition.say(0, 'hello from', false);
+    ctx.currentTime = 2.5;
+    recognition.say(0, 'hello from the stub', true);
+    ctx.currentTime = 6;
+    source.onended?.();
+    expect(recognition.stop).toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(END_WAIT_MS - 1);
+    expect(settled).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toHaveBeenCalledWith([{ start: 0.7, end: 2.5, text: 'hello from the stub' }]);
+    // The recogniser that never ended is let go, and nothing is left running.
+    expect(recognition.abort).toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('finishes as soon as the recogniser ends, and leaves no wait behind', async () => {
+    vi.useFakeTimers();
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await vi.advanceTimersByTimeAsync(0);
+    const [recognition] = FakeRecognition.instances;
+    recognition.say(0, 'done', true);
+    source.onended?.();
+    await expect(run).resolves.toEqual([{ start: 0, end: 1, text: 'done' }]);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(recognition.abort).not.toHaveBeenCalled();
   });
 });
 

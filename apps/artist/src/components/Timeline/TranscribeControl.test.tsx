@@ -210,6 +210,31 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
     expect(await screen.findByText('Preparing the sound…')).toHaveAttribute('aria-live', 'polite');
   });
 
+  it('shows how much of the sound is prepared, outside the live region, and can be stopped then (ESCSUITE-438)', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    let report: ((percent: number) => void) | undefined;
+    transcribeTimeline.mockImplementation(({ onProgress }) => {
+      report = (percent) => onProgress?.('mixing', percent, 100);
+      report(0);
+      // A mix that never notices the stop: the button must not wait for it.
+      return new Promise(() => {});
+    });
+    const { showNotification } = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    expect(await screen.findByText('0%')).not.toHaveAttribute('aria-live');
+    act(() => report!(42));
+    expect(screen.getByText('42%')).not.toHaveAttribute('aria-live');
+    expect(screen.getByText('Preparing the sound…')).toHaveAttribute('aria-live', 'polite');
+
+    await user.click(screen.getByRole('button', { name: 'Stop transcribing' }));
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith('Transcription stopped. No captions were added.', 'info'));
+    expect(button()).toBeEnabled();
+    expect(screen.queryByText(/%$/)).toBeNull();
+    expect(captionClips()).toHaveLength(0);
+  });
+
   it("shows a recogniser's error in its own words, and any other failure generically", async () => {
     const user = userEvent.setup();
     installRecognition();
