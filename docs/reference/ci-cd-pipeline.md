@@ -221,9 +221,12 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   wiring), both in `pnpm test:scripts`. Releases up to v2.18.27 predate this and carry neither.
 - **SBOMs** (ESCSUITE-430). Every build ships with an SPDX 2.3 SBOM, `<build name>.spdx.json`,
   written by `scripts/generate-sbom.mjs` from `pnpm --filter <pkg> list --prod --depth Infinity`:
-  the production dependency tree only, workspace packages included, no dev dependencies. The
-  kit's SBOM covers `@escapesuite/headless-artist` and `@escapesuite/artist`, because its
-  `headless.html` inlines the ARTIST render bundle. In `standalone-release.yml` the `prepare` job
+  the production dependency tree only, workspace packages included, no dev dependencies.
+  Optional dependencies, which pnpm lists under a separate `optionalDependencies` key at every
+  level, are walked too and recorded as `OPTIONAL_DEPENDENCY_OF`. The kit's SBOM covers
+  `@escapesuite/headless-artist` (Playwright, plus the optional `@aws-sdk/client-s3` tree a plain
+  `npm install` of the kit pulls in) and `@escapesuite/artist`, because its `headless.html`
+  inlines the ARTIST render bundle. In `standalone-release.yml` the `prepare` job
   generates them (pnpm setup and `pnpm install --frozen-lockfile --ignore-scripts`, only for a
   push to `main`, so no pull request's code runs there) into the `standalone-release` artifact;
   the `release` job stages them in `release-assets/` (so `SHA256SUMS.txt` and the provenance

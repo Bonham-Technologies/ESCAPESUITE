@@ -3,7 +3,8 @@
  * Writes an SPDX 2.3 JSON SBOM for one shipped build (ESCSUITE-430): the
  * production dependency tree of the workspace package(s) the build is made
  * from, as `pnpm list --prod` resolves it from this checkout's lockfile.
- * Dev dependencies (vite, vitest, eslint…) are not in it.
+ * Optional dependencies are in it, marked OPTIONAL_DEPENDENCY_OF; dev
+ * dependencies (vite, vitest, eslint…) are not.
  *
  * Both release workflows attach the SBOM next to the build and attest it
  * against the build's digest with actions/attest-sbom; docs/VERIFY.md tells
@@ -131,6 +132,12 @@ export function buildSpdx({
 
     for (const [childName, child] of Object.entries(node.dependencies ?? {})) {
       relate(pkg.SPDXID, 'DEPENDS_ON', visit(childName, child));
+    }
+    // pnpm lists optional dependencies under their own key, at every level. A
+    // plain `npm install` still installs them (the kit's @aws-sdk/client-s3),
+    // so they belong in the SBOM, marked optional.
+    for (const [childName, child] of Object.entries(node.optionalDependencies ?? {})) {
+      relate(visit(childName, child), 'OPTIONAL_DEPENDENCY_OF', pkg.SPDXID);
     }
     return pkg.SPDXID;
   };

@@ -170,6 +170,52 @@ test('names workspace packages by their own version, with no purl, and the build
   }
 });
 
+test('walks optionalDependencies at every level, as optional dependencies', () => {
+  const tree = {
+    name: '@escapesuite/headless-artist',
+    version: '1.0.0',
+    path: '/repo/services/headless-artist',
+    dependencies: {
+      playwright: {
+        version: '1.65.0',
+        resolved: 'https://registry.npmjs.org/playwright/-/playwright-1.65.0.tgz',
+        path: '/pw',
+        optionalDependencies: {
+          fsevents: { version: '2.3.2', resolved: 'https://registry.npmjs.org/fsevents/-/fsevents-2.3.2.tgz', path: '/fse' },
+        },
+      },
+    },
+    optionalDependencies: {
+      '@aws-sdk/client-s3': {
+        version: '3.1164.0',
+        resolved: 'https://registry.npmjs.org/@aws-sdk/client-s3/-/client-s3-3.1164.0.tgz',
+        path: '/s3',
+        dependencies: {
+          tslib: { version: '2.8.1', resolved: 'https://registry.npmjs.org/tslib/-/tslib-2.8.1.tgz', path: '/tslib' },
+        },
+      },
+    },
+  };
+  const doc = buildSpdx({
+    buildName: 'escapesuite-headless-artist-1.0.0.tgz',
+    buildSha256: SHA,
+    trees: [tree],
+    created: CREATED,
+    repo: 'Bonham-Technologies/ESCAPESUITE',
+    tool: 'pnpm-9.15.4',
+    readManifest: () => ({}),
+  });
+  const id = (name) => byName(doc, name)[0]?.SPDXID;
+  for (const name of ['@aws-sdk/client-s3', 'tslib', 'fsevents']) assert.ok(id(name), `expected ${name}`);
+  const has = (from, type, to) =>
+    doc.relationships.some(
+      (rel) => rel.spdxElementId === from && rel.relationshipType === type && rel.relatedSpdxElement === to
+    );
+  assert.ok(has(id('@aws-sdk/client-s3'), 'OPTIONAL_DEPENDENCY_OF', id('@escapesuite/headless-artist')));
+  assert.ok(has(id('fsevents'), 'OPTIONAL_DEPENDENCY_OF', id('playwright')));
+  assert.ok(has(id('@aws-sdk/client-s3'), 'DEPENDS_ON', id('tslib')));
+});
+
 test('falls back to NOASSERTION for a licence that is not an SPDX expression', () => {
   assert.equal(spdxLicense('MIT'), 'MIT');
   assert.equal(spdxLicense('(MIT OR Apache-2.0)'), '(MIT OR Apache-2.0)');
@@ -232,6 +278,25 @@ test('the headless kit SBOM lists the CLI and the inlined ESCAPEARTIST tree', ()
   for (const name of ['@escapesuite/headless-artist', '@escapesuite/artist', 'playwright', 'mediabunny', 'mp4box']) {
     assert.ok(names.has(name), `expected ${name} in the kit SBOM`);
   }
+  // An optional dependency: a plain `npm install` of the kit pulls it in, and
+  // pnpm lists it under optionalDependencies, not dependencies.
+  assert.ok(names.has('@aws-sdk/client-s3'), 'expected the optional @aws-sdk/client-s3 in the kit SBOM');
+  const [s3] = byName(doc, '@aws-sdk/client-s3');
+  const [cli] = byName(doc, '@escapesuite/headless-artist');
+  assert.ok(
+    doc.relationships.some(
+      (rel) =>
+        rel.spdxElementId === s3.SPDXID &&
+        rel.relationshipType === 'OPTIONAL_DEPENDENCY_OF' &&
+        rel.relatedSpdxElement === cli.SPDXID
+    ),
+    '@aws-sdk/client-s3 is an optional dependency of the CLI'
+  );
+  // ...and its own tree comes with it.
+  assert.ok(
+    doc.relationships.some((rel) => rel.spdxElementId === s3.SPDXID && rel.relationshipType === 'DEPENDS_ON'),
+    'expected @aws-sdk/client-s3 to list its own dependencies'
+  );
   for (const name of ['vitest', 'esbuild', 'tsx', 'typescript']) {
     assert.ok(!names.has(name), `${name} is a dev dependency and must not be in the SBOM`);
   }

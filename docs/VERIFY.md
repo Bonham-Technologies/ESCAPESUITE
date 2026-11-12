@@ -122,8 +122,10 @@ Each build's SBOM sits next to it on the same release: `ESCAPECRAFT-<version>.sp
 `-latest.html` file has the same bytes as the versioned build on that release, so it uses that
 build's SBOM. The SBOM lists the production dependencies only (what can end up inside the
 build, such as React, Mediabunny and zustand), never the tools used to build or test it. The
-headless kit's SBOM lists both the CLI's dependencies (Playwright) and those of the ESCAPEARTIST
-render bundle its `headless.html` contains.
+headless kit's SBOM lists both the CLI's dependencies and those of the ESCAPEARTIST render
+bundle its `headless.html` contains. The CLI's dependencies are Playwright and, marked as an
+optional dependency (`OPTIONAL_DEPENDENCY_OF`), `@aws-sdk/client-s3` with its own dependencies:
+a plain `npm install` of the kit installs it unless you pass `--omit=optional`.
 
 The `.spdx.json` file is in `SHA256SUMS.txt` and has its own build-provenance attestation, so
 steps 2 and 3 check it like any other file. To check that it is the SBOM this repository's
