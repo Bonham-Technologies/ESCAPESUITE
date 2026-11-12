@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Releases: each offline build and the headless render kit now ship with an SPDX SBOM (`.spdx.json`) listing the open-source packages inside them, and an attestation tying it to the build. [Verify your download](docs/VERIFY.md) shows how to check it.
 - ESCAPEPLAN: the Privacy Policy now lists exactly what the hosted site's analytics records, including the approximate city Vercel works out from your IP address, which Vercel says it does not store.
 - ESCAPEARTIST: Remove silences no longer listens to muted or hidden tracks, which the export leaves out, so their sound no longer hides a pause; they are still cut in step with the take.
 - ESCAPEARTIST: transcribing to captions shows how much of the sound is prepared, and no longer gets stuck after the sound has played when the browser's speech recognition does not finish.
