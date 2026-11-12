@@ -76,7 +76,8 @@
 }
 
 .input[aria-invalid='true'] {
-  border-color: #f87171;
+  /* #f87171 was 2.3:1 on the light field (ESCSUITE-436); WCAG 1.4.11 asks 3:1. */
+  border-color: var(--danger-ink);
 }
 
 .hint {
@@ -146,7 +147,8 @@
 .error {
   margin: 0;
   font-size: 13px;
-  color: #f87171;
+  /* #f87171 was 2.57:1 on the light dialog (ESCSUITE-436). */
+  color: var(--danger-ink);
 }
 
 .actions {
@@ -183,7 +185,7 @@
 }
 
 .removeButton:hover:not(:disabled) {
-  background: #3a8eef;
+  background: var(--accent-fill-hover);
 }
 
 .removeButton:disabled {
