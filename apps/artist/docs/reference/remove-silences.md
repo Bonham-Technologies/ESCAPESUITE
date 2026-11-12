@@ -77,7 +77,11 @@ mic-plus-system-audio take whose system audio (or a music bed) is muted has
 its microphone's pauses found, where before the muted sound, silent in the
 export, kept every pause. Such a clip is still cut and moved with the take
 (the cut works on rows, not on what is heard), so it stays in step if it is
-unmuted later. A muted clip with no readable peaks no longer blocks a cut
+unmuted later. Where the playing clips cover only part of the span, the rest
+counts as silence, as it already did for a span with no clip there: a muted
+music bed under a mic that stops at 5 s of a 10 s take now offers 5-10 s as a
+pause, cut from every row, because that is what the export plays (listed for
+review, with Keep and one undo). A muted clip with no readable peaks no longer blocks a cut
 either. `nothingAudible` answers whether the clip is on the timeline, some
 clip with sound overlaps it on a row the cut moves, and none of those plays;
 the dialog then says there is no audible sound to judge, and nothing is found.
