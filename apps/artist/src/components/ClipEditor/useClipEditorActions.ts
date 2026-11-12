@@ -310,7 +310,7 @@ export function useClipEditorActions(): ClipEditorActions {
     const state = useEditorStore.getState();
     state.setSilenceReviewClip(selectedClip.id);
     state.setSilenceCandidates(
-      findTakeSilences(state.project.timeline.clips, state.sourceVideos, selectedClip.id, DEFAULT_SILENCE_OPTIONS)
+      findTakeSilences(state.project.timeline.clips, state.project.timeline.tracks, state.sourceVideos, selectedClip.id, DEFAULT_SILENCE_OPTIONS)
     );
   }, [selectedClip]);
   const handleFindSilences = canFindSilences ? findSilences : undefined;

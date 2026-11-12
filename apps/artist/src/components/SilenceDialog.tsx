@@ -5,6 +5,7 @@ import {
   DEFAULT_SILENCE_OPTIONS,
   findTakeSilences,
   hasApproximateTiming,
+  nothingAudible,
   totalLength,
   type SilenceOptions,
 } from '../core/silenceDetection';
@@ -88,7 +89,13 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   // so a pause late in a long recording can be left in (peakTiming.ts).
   const approximate = useEditorStore((state) =>
     state.silenceReview !== null &&
-    hasApproximateTiming(state.project.timeline.clips, state.sourceVideos, state.silenceReview.clipId)
+    hasApproximateTiming(state.project.timeline.clips, state.project.timeline.tracks, state.sourceVideos, state.silenceReview.clipId)
+  );
+  // ESCSUITE-435: muted and hidden rows are not listened to, as the export
+  // leaves them out; with every row that has sound muted there is nothing to judge.
+  const inaudible = useEditorStore((state) =>
+    state.silenceReview !== null &&
+    nothingAudible(state.project.timeline.clips, state.project.timeline.tracks, state.sourceVideos, state.silenceReview.clipId)
   );
   const [values, setValues] = useState<Record<keyof SilenceOptions, string>>(() => ({
     thresholdDb: String(DEFAULT_SILENCE_OPTIONS.thresholdDb),
@@ -131,7 +138,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
       options[field.key] = value;
     }
     const { project, sourceVideos } = useEditorStore.getState();
-    setSilenceCandidates(findTakeSilences(project.timeline.clips, sourceVideos, review.clipId, options));
+    setSilenceCandidates(findTakeSilences(project.timeline.clips, project.timeline.tracks, sourceVideos, review.clipId, options));
   };
 
   const handleKeep = (index: number) => {
@@ -195,7 +202,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
           </div>
 
           <p className={styles.summary} role="status" aria-live="polite">
-            {candidates.length === 0
+            {inaudible
+              ? 'No audible sound to judge: every track with sound here is muted or hidden.'
+              : candidates.length === 0
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
           </p>

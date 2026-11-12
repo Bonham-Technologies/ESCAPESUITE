@@ -59,6 +59,14 @@ interface MixTarget {
    * mixing in the background (ESCSUITE-432/433). An export never does.
    */
   signal?: AbortSignal;
+  /**
+   * Also report progress within a source, chunk by chunk, not only as each
+   * source finishes. Only the speech mix asks for it (ESCSUITE-438): a
+   * transcription's "Preparing the sound…" shows how far it has got, where a
+   * one-file timeline would otherwise sit at 0% until it is done. An export's
+   * progress is unchanged.
+   */
+  progressWithinSource?: boolean;
 }
 
 function throwIfStopped(target: MixTarget): void {
@@ -140,21 +148,23 @@ export async function extractAndMixAudio(
  * 1.38 GB, an hour of this 230 MB. `allocate` is asked once for the mix's one
  * plane, so a caller can hand over an `AudioBuffer`'s own channel and play
  * it with no copy. Aborting `signal` stops the mix after the chunk being
- * mixed and rejects with an `AbortError`.
+ * mixed and rejects with an `AbortError`. `onProgress` hears the percentage
+ * mixed, chunk by chunk (ESCSUITE-438).
  */
 export async function extractSpeechMix(
   clips: Clip[],
   tracks: Track[],
   totalDuration: number,
   allocate: (frames: number) => Float32Array = (frames) => new Float32Array(frames),
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress: (percent: number) => void = () => {}
 ): Promise<Float32Array | null> {
   const frameCount = Math.ceil(totalDuration * SAMPLE_RATE);
   if (!(frameCount >= 1)) return null;
   if (signal?.aborted) throw new DOMException('Mix stopped', 'AbortError');
   const plane = allocate(Math.ceil(frameCount / SPEECH_STEP));
-  const target: MixTarget = { planes: [plane], step: SPEECH_STEP, frames: frameCount, signal };
-  if (!(await mixInto(clips, tracks, 0, target, () => {}))) return null;
+  const target: MixTarget = { planes: [plane], step: SPEECH_STEP, frames: frameCount, signal, progressWithinSource: true };
+  if (!(await mixInto(clips, tracks, 0, target, onProgress))) return null;
   normalise([plane]);
   return plane;
 }
@@ -212,10 +222,14 @@ async function mixInto(
     // rest still count towards whether the timeline has audio at all, as they
     // did when the whole timeline was mixed and then sliced.
     const audible = placements.filter((p) => intersects(p, frameCount));
+    const sourcesDone = done;
+    const withinSource = target.progressWithinSource
+      ? (fraction: number) => onProgress(((sourcesDone + fraction) / bySource.size) * 100)
+      : undefined;
     try {
       const blob = await getVideoBlob(sourceId);
       if (blob) {
-        let hasAudio = await streamSourceInto(blob, audible, target, name);
+        let hasAudio = await streamSourceInto(blob, audible, target, name, withinSource);
         // A file too large for the fallback whose clips all miss the range
         // adds nothing to the mix, so it need not be read at all.
         const skip = audible.length === 0 && blob.size > WHOLE_FILE_DECODE_MAX_BYTES;
@@ -322,12 +336,15 @@ function neededEnd(placements: readonly Placement[]): number {
  * `null` when this path cannot read it at all — no demuxer, no decoder, MP3,
  * a rate other than 48 kHz (which `decodeAudioData` resamples), or a decode
  * that failed before anything was mixed — so the caller falls back.
+ * `onFraction`, when given, hears how much of the frames the clips read has
+ * been mixed (0 to 1) after each chunk.
  */
 async function streamSourceInto(
   blob: Blob,
   placements: readonly Placement[],
   target: MixTarget,
-  name: string
+  name: string,
+  onFraction?: (fraction: number) => void
 ): Promise<boolean | null> {
   const input = new Input({ source: new BlobSource(blob), formats: ALL_FORMATS });
   try {
@@ -389,6 +406,7 @@ async function streamSourceInto(
             chunk.push(plane);
           }
           mixChunk(chunk, at, frames, placements, target);
+          onFraction?.(Math.min(1, placer.position / stopAt));
         } finally {
           sample.close();
         }
