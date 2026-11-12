@@ -108,6 +108,10 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   speakers, and that node's audio track goes to `recognition.start(track)`. **The microphone
   is never opened.** A 10-minute timeline takes about 10 minutes. The status line reads
   "Transcribing on this device… m:ss / m:ss". **Stop transcribing** ends it and adds nothing.
+  When the sound has finished playing, the recogniser is asked to `stop()` and its `onend`
+  ends the run. If `onend` has not come `END_WAIT_MS` (5 s) later, the run finishes anyway
+  with what was heard and the recogniser is aborted (ESCSUITE-438): a recogniser that never
+  ended used to leave the control reading "0:06 / 0:06" for good.
   Edits made during the run do not change what is heard: the mix was taken at the start.
   One run at a time: presses while the browser is still being asked are ignored.
 - **One project (ESCSUITE-432).** A run belongs to the project it was started in: it records
@@ -123,12 +127,19 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   the button at once. The mixer sees the same signal and stops after the chunk it is mixing
   (ESCSUITE-433); a new run still shows "Preparing the sound…" and waits for the stopped mix
   to end before mixing, so two mixes never hold memory at once.
+- **Preparing shows progress (ESCSUITE-438).** While the sound is mixed, the control shows
+  "Preparing the sound…" and a percentage. `extractSpeechMix` reports after every decoded
+  chunk of a streamed source (the export mix still reports once per source, unchanged), and
+  `transcribeTimeline` passes each whole percent on once. A source that needs the whole-file
+  `decodeAudioData` fallback (MP3, or a rate other than 48 kHz) is decoded in one step, so its
+  share moves only when it is done.
 - **Keyboard and screen readers:** the button is one element that reads **Transcribe to
   captions** or **Stop transcribing**, so focus stays on it. When the notice closes, or a pack
   finishes installing and listening starts, focus returns to it, unless the user has moved
   focus elsewhere. The phase ("Preparing the sound…", "Transcribing on this device…",
   "Downloading the speech language pack…") is in a polite live region that is always in the
-  page; the running `m:ss / m:ss` clock sits outside it, so it is not read out every second.
+  page; the running `m:ss / m:ss` clock and the preparing percentage sit outside it, so they
+  are not read out at every step.
 - **Language:** the browser's own (`navigator.language`, `en-US` if it has none). There is no
   language picker, no translation and no speaker labels.
 - **Times are estimates.** The recogniser reports words, not times. A cue starts
@@ -184,6 +195,14 @@ on demand.
   before it starts.
 - `apps/e2e/tests/regressions/ESCSUITE-433.spec.ts`: a 4-hour timeline is refused with the
   notice above, and the recogniser is never constructed.
+- ESCSUITE-438: `core/transcribe.test.ts` (fake timers) finishes a run whose recogniser never
+  ends `END_WAIT_MS` after the sound, with what was heard, and leaves no timer behind; passes
+  the mix's progress on as whole percentages; rejects promptly when stopped mid-mix.
+  `core/audioMixer.streamed.test.ts`: the speech mix reports chunk by chunk, the export mix
+  once a source. `apps/e2e/tests/regressions/ESCSUITE-438.spec.ts`: the percentage moves
+  while preparing (each stored-file chunk read is delayed, so the mix is slow enough to watch),
+  Stop then frees the control within 1 s and nothing is heard or added; and with the stub's
+  `stopNeverEnds` mode the 2 captions land within 8 s of the clock reading the clip's end.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a
   Chromium-only brand; no `available()` or `install()` call on mount; hidden after a press
   that finds `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the

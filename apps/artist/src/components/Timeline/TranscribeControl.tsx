@@ -17,7 +17,7 @@ type Phase =
   | { kind: 'idle' }
   | { kind: 'consent' }
   | { kind: 'installing' }
-  | { kind: 'mixing' }
+  | { kind: 'mixing'; percent: number }
   | { kind: 'listening'; played: number; total: number };
 
 interface TranscribeControlProps {
@@ -116,7 +116,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     if (!Recognition || !mountedRef.current) return;
     const controller = new AbortController();
     abortRef.current = controller;
-    setPhase({ kind: 'mixing' });
+    setPhase({ kind: 'mixing', percent: 0 });
     // ESCSUITE-432: the run belongs to the project it was started in. The
     // control lives in the always-mounted timeline, so nothing else ends it:
     // New Project, Open, a host's LOAD_PROJECT or a session restore putting
@@ -149,7 +149,11 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
         signal: controller.signal,
         onProgress: (stage, played, total) => {
           if (controller.signal.aborted) return;
-          setPhase(stage === 'mixing' ? { kind: 'mixing' } : { kind: 'listening', played, total });
+          setPhase(
+            stage === 'mixing'
+              ? { kind: 'mixing', percent: total > 0 ? Math.floor((played / total) * 100) : 0 }
+              : { kind: 'listening', played, total }
+          );
         },
       });
       const settling = run.then(
@@ -254,7 +258,8 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
 
   const busy = phase.kind === 'mixing' || phase.kind === 'listening';
   // A live region that is always there, so each new phase is announced; the
-  // running clock sits outside it so it is not read out every second.
+  // running clock and the mix's percentage sit outside it so they are not read
+  // out at every step.
   const status =
     phase.kind === 'mixing'
       ? 'Preparing the sound…'
@@ -274,6 +279,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
       <span className={styles.status} aria-live="polite" aria-atomic="true">
         {status}
       </span>
+      {phase.kind === 'mixing' && <span className={styles.status}>{`${phase.percent}%`}</span>}
       {phase.kind === 'listening' && (
         <span className={styles.status}>{`${clock(phase.played)} / ${clock(phase.total)}`}</span>
       )}
