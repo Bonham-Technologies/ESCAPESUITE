@@ -178,7 +178,8 @@ jobs:
     if: needs.release.outputs.published == 'true'
     # Replaces the workflow-level permissions for this job: contents: write
     # attaches the builds, id-token and attestations sign and store their
-    # build-provenance attestations (ESCSUITE-401). No pull-requests access.
+    # build-provenance attestations (ESCSUITE-401) and SBOM attestations
+    # (ESCSUITE-430). No pull-requests access.
     permissions:
       contents: write
       id-token: write
@@ -252,12 +253,16 @@ jobs:
       - name: Prepare versioned builds
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         run: |
-          mkdir -p uploads
+          set -euo pipefail
+          # Each build gets an SPDX SBOM of its production dependency tree in
+          # sboms/, named for the build (ESCSUITE-430).
+          mkdir -p uploads sboms
 
           # ESCAPECRAFT
           if [ "${{ steps.check-apps.outputs.craft_released }}" == "true" ]; then
             VERSION="${{ steps.check-apps.outputs.craft_version }}"
             cp apps/craft/dist/index.html "uploads/ESCAPECRAFT-${VERSION}.html"
+            node scripts/generate-sbom.mjs --build "uploads/ESCAPECRAFT-${VERSION}.html" --package @escapesuite/craft --output "sboms/ESCAPECRAFT-${VERSION}.spdx.json"
             echo "Created ESCAPECRAFT build for version $VERSION"
             ls -la uploads/ESCAPECRAFT*
           fi
@@ -266,6 +271,7 @@ jobs:
           if [ "${{ steps.check-apps.outputs.artist_released }}" == "true" ]; then
             VERSION="${{ steps.check-apps.outputs.artist_version }}"
             cp apps/artist/dist/index.html "uploads/ESCAPEARTIST-${VERSION}.html"
+            node scripts/generate-sbom.mjs --build "uploads/ESCAPEARTIST-${VERSION}.html" --package @escapesuite/artist --output "sboms/ESCAPEARTIST-${VERSION}.spdx.json"
             echo "Created ESCAPEARTIST build for version $VERSION"
             ls -la uploads/ESCAPEARTIST*
           fi
@@ -274,28 +280,59 @@ jobs:
           if [ "${{ steps.check-apps.outputs.headless_released }}" == "true" ]; then
             VERSION="${{ steps.check-apps.outputs.headless_version }}"
             cp "services/headless-artist/dist/escapesuite-headless-artist-${VERSION}.tgz" "uploads/escapesuite-headless-artist-${VERSION}.tgz"
+            # The kit's headless.html inlines ESCAPEARTIST's render bundle, so
+            # its SBOM lists that tree next to the CLI's own (playwright).
+            node scripts/generate-sbom.mjs --build "uploads/escapesuite-headless-artist-${VERSION}.tgz" --package @escapesuite/headless-artist --package @escapesuite/artist --output "sboms/escapesuite-headless-artist-${VERSION}.spdx.json"
             echo "Created headless-artist kit for version $VERSION"
             ls -la uploads/escapesuite-headless-artist*
           fi
 
-          # Each per-package release carries one build, so each gets its own
-          # SHA256SUMS.txt naming just that file (ESCSUITE-401). The same file
-          # name can be on the umbrella vX.Y.Z release too, built by another
-          # workflow: check a download against the sums on its own release.
+          # Each per-package release carries one build and its SBOM, so each
+          # gets its own SHA256SUMS.txt naming just those two files
+          # (ESCSUITE-401, ESCSUITE-430). The same file name can be on the
+          # umbrella vX.Y.Z release too, built by another workflow: check a
+          # download against the sums on its own release.
           for file in uploads/*; do
             name=$(basename "$file")
+            sbom="${name%.*}.spdx.json"
             mkdir -p "sums/${name}"
-            (cd uploads && sha256sum -- "$name") > "sums/${name}/SHA256SUMS.txt"
+            {
+              (cd uploads && sha256sum -- "$name")
+              (cd sboms && sha256sum -- "$sbom")
+            } > "sums/${name}/SHA256SUMS.txt"
             cat "sums/${name}/SHA256SUMS.txt"
           done
 
-      - name: Attest build provenance for every build and its SHA256SUMS.txt
+      - name: Attest build provenance for every build, its SBOM and its SHA256SUMS.txt
         if: steps.check-apps.outputs.craft_released == 'true' || steps.check-apps.outputs.artist_released == 'true' || steps.check-apps.outputs.headless_released == 'true'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             uploads/*
+            sboms/*
             sums/*/SHA256SUMS.txt
+
+      # One SBOM attestation per build, over the build's own digest (ESCSUITE-430).
+      - name: Attest the ESCAPECRAFT SBOM
+        if: steps.check-apps.outputs.craft_released == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: uploads/ESCAPECRAFT-${{ steps.check-apps.outputs.craft_version }}.html
+          sbom-path: sboms/ESCAPECRAFT-${{ steps.check-apps.outputs.craft_version }}.spdx.json
+
+      - name: Attest the ESCAPEARTIST SBOM
+        if: steps.check-apps.outputs.artist_released == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: uploads/ESCAPEARTIST-${{ steps.check-apps.outputs.artist_version }}.html
+          sbom-path: sboms/ESCAPEARTIST-${{ steps.check-apps.outputs.artist_version }}.spdx.json
+
+      - name: Attest the headless render kit SBOM
+        if: steps.check-apps.outputs.headless_released == 'true'
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-path: uploads/escapesuite-headless-artist-${{ steps.check-apps.outputs.headless_version }}.tgz
+          sbom-path: sboms/escapesuite-headless-artist-${{ steps.check-apps.outputs.headless_version }}.spdx.json
 
       - name: Attach builds to GitHub Release
         id: attach
@@ -339,15 +376,19 @@ jobs:
             // package's problem never hides the state of the others.
             const missing = [];
             const failed = [];
-            // Releases that got both files, for the verify step below.
+            // Releases that got all three files, for the verify step below.
             const attached = [];
 
             const verifyUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/blob/main/docs/VERIFY.md`;
             const verifyLine =
-              'Verify your download: `SHA256SUMS.txt` lists the SHA-256 of the file here, and the file ' +
-              `has a GitHub build-provenance attestation. Steps: ${verifyUrl}`;
+              'Verify your download: `SHA256SUMS.txt` lists the SHA-256 of the files here, and each file ' +
+              'has a GitHub build-provenance attestation. The build also has an SPDX SBOM ' +
+              '(`.spdx.json`) listing the dependencies inside it, with an SBOM attestation tying it ' +
+              `to the build. Steps: ${verifyUrl}`;
 
             async function attach(tagName, fileName, contentType) {
+              // The build's SPDX SBOM, named for it (ESCSUITE-430).
+              const sbomName = `${fileName.replace(/\.[^.]+$/, '')}.spdx.json`;
               try {
                 const release = await findRelease(tagName);
                 if (!release) {
@@ -363,6 +404,15 @@ jobs:
                   headers: { 'content-type': contentType }
                 });
                 console.log(`Attached ${fileName} to release ${tagName}`);
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release.id,
+                  name: sbomName,
+                  data: fs.readFileSync(`sboms/${sbomName}`),
+                  headers: { 'content-type': 'application/json' }
+                });
+                console.log(`Attached ${sbomName} to release ${tagName}`);
                 // ESCSUITE-401: the build's checksum, and a pointer to the
                 // verification steps under the changelog entry.
                 await github.rest.repos.uploadReleaseAsset({
@@ -431,7 +481,8 @@ jobs:
 
       # Downloads each per-package release the step above attached to, as a
       # user would, and checks its build against SHA256SUMS.txt and the
-      # build-provenance attestation (ESCSUITE-401). Runs for the releases
+      # build-provenance attestation (ESCSUITE-401), and for its SBOM and SBOM
+      # attestation (ESCSUITE-430). Runs for the releases
       # that did get their files even when another package's attach failed.
       - name: Verify checksums and attestations of every attached release
         if: ${{ !cancelled() && steps.attach.outputs.tags != '' }}

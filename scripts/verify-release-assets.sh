@@ -4,7 +4,10 @@
 #   1. SHA256SUMS.txt names exactly the release's other assets, no more, no less;
 #   2. every asset matches its SHA256SUMS.txt entry (sha256sum -c);
 #   3. every asset, SHA256SUMS.txt included, has a build-provenance attestation
-#      from this repository (gh attestation verify).
+#      from this repository (gh attestation verify);
+#   4. every build (*.html, *.tgz) has an SPDX SBOM attestation over its digest,
+#      and every build but a -latest.html alias has its <name>.spdx.json on the
+#      release, while every .spdx.json there names a build (ESCSUITE-430).
 # Exits non-zero if any check fails. Both release workflows run it against the
 # releases they have just published; docs/VERIFY.md gives users the same steps.
 #
@@ -27,6 +30,7 @@ SIGNER_WORKFLOW=${3:-}
 ATTEMPTS=${VERIFY_DOWNLOAD_ATTEMPTS:-6}
 RETRY_SECONDS=${VERIFY_RETRY_SECONDS:-10}
 SUMS=SHA256SUMS.txt
+SBOM_PREDICATE=https://spdx.dev/Document/v2.3
 
 if command -v sha256sum >/dev/null 2>&1; then
   sha256() { sha256sum "$@"; }
@@ -105,4 +109,50 @@ if [ "${#unattested[@]}" -gt 0 ]; then
   exit 1
 fi
 
-echo "Verified $TAG: every asset matches $SUMS and carries a build-provenance attestation from $REPO."
+# 4. Every build ships with an SBOM and an SBOM attestation over the build.
+# A -latest.html alias has the same bytes as its versioned file, so it shares
+# that file's SBOM and attestation instead of carrying its own .spdx.json.
+builds=()
+for f in *; do
+  case "$f" in
+    *.html | *.tgz) builds+=("$f") ;;
+  esac
+done
+if [ "${#builds[@]}" -eq 0 ]; then
+  echo "::error::release $TAG carries no build (*.html or *.tgz)"
+  exit 1
+fi
+sbom_problems=0
+for f in "${builds[@]}"; do
+  case "$f" in
+    *-latest.html) continue ;;
+  esac
+  if [ ! -f "${f%.*}.spdx.json" ]; then
+    echo "::error::$f has no ${f%.*}.spdx.json on $TAG"
+    sbom_problems=1
+  fi
+done
+for f in *.spdx.json; do
+  [ -f "$f" ] || continue
+  stem=${f%.spdx.json}
+  if [ ! -f "$stem.html" ] && [ ! -f "$stem.tgz" ]; then
+    echo "::error::$f describes no build on $TAG (expected $stem.html or $stem.tgz)"
+    sbom_problems=1
+  fi
+done
+no_sbom=()
+for f in "${builds[@]}"; do
+  if ! gh attestation verify "$assets/$f" --repo "$REPO" --predicate-type "$SBOM_PREDICATE" \
+    "${signer_args[@]+"${signer_args[@]}"}"; then
+    no_sbom+=("$f")
+  fi
+done
+if [ "${#no_sbom[@]}" -gt 0 ]; then
+  echo "::error::no valid SBOM attestation on $TAG for: ${no_sbom[*]}"
+  sbom_problems=1
+fi
+if [ "$sbom_problems" -ne 0 ]; then
+  exit 1
+fi
+
+echo "Verified $TAG: every asset matches $SUMS and carries a build-provenance attestation from $REPO, and every build an SBOM and its attestation."
