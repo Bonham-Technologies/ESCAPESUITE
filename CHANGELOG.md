@@ -7,6 +7,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Repository: the secret scanner no longer reports a test marker word in the analytics privacy test as a leaked key.
+- ESCAPEPLAN: the Privacy Policy now lists exactly what the hosted site's analytics records, including the approximate city Vercel works out from your IP address, which Vercel says it does not store.
 - ESCAPEARTIST: Remove silences no longer listens to muted or hidden tracks, which the export leaves out, so their sound no longer hides a pause; they are still cut in step with the take.
 - ESCAPEARTIST: transcribing to captions shows how much of the sound is prepared, and no longer gets stuck after the sound has played when the browser's speech recognition does not finish.
 - ESCAPEARTIST: in the light theme, Remove silences' "Nothing was cut" message and the red border around a setting that is out of range are a darker red, so they are easier to read and to spot.
