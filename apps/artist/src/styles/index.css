@@ -18,6 +18,10 @@
      added with their focus traps caught both); any accent-filled button still
      on white is a remaining #275 follow-up. */
   --accent-on-fill: #0b1220;
+  /* An --accent-primary fill under the pointer: --accent-on-fill is 5.61:1 on
+     it (ESCSUITE-422). Needs no light value: --accent-primary and
+     --accent-on-fill are the same in both palettes (ESCSUITE-436). */
+  --accent-fill-hover: #3a8eef;
   /* The accent as text (headings, labels, the active tab) rather than as a
      fill or border. On the dark surfaces it is --accent-primary itself; the
      light theme darkens it (ESCSUITE-405). */
@@ -35,9 +39,11 @@
      Clear Unused button's hover. --accent-warning itself on the dark
      surfaces; the light theme darkens it (ESCSUITE-425). */
   --warning-ink: #ff9800;
-  /* The danger colour as text: the storage bar's Clear All / Remove hover.
-     --accent-danger (#f44336) is 3.05:1 there on the warning tint, so the
-     dark theme lightens it, unlike --accent-danger's fills (ESCSUITE-426). */
+  /* The danger colour as text: the storage bar's Clear All / Remove hover,
+     Remove silences' refused alert, and the edge of a field that does not
+     read (ESCSUITE-436). --accent-danger (#f44336) is 3.05:1 there on the
+     warning tint, so the dark theme lightens it, unlike --accent-danger's
+     fills (ESCSUITE-426). */
   --danger-ink: #ff8a80;
   --accent-danger: #f44336;
 
