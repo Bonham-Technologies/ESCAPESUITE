@@ -82,3 +82,77 @@
 .status:empty {
   position: absolute;
 }
+
+/* "Replace the existing captions, or add to them?" (ESCSUITE-442): the editor's
+   modal shape, as ProjectLoadDialog draws it. */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: 420px;
+  max-width: 90vw;
+}
+
+.dialogTitle {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dialogMessage {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.dialogActions {
+  display: flex;
+  gap: var(--spacing-sm);
+  justify-content: flex-end;
+}
+
+.dialogButton,
+.dialogPrimary {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.dialogButton {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.dialogButton:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.dialogPrimary {
+  background: var(--accent-primary);
+  color: var(--accent-on-fill);
+  border: none;
+}
+
+.dialogPrimary:hover {
+  background: var(--accent-fill-hover);
+}
