@@ -62,7 +62,7 @@ function clock(seconds: number): string {
  * cues land on the Captions track through `addCaptionCues`: one history
  * entry, so one undo takes the whole transcription back off.
  *
- * When the Captions track already holds clips, a press first asks
+ * When the Captions track already holds text clips, a press first asks
  * `REPLACE_QUESTION` in a modal dialog (ESCSUITE-442): **Replace** has
  * `addCaptionCues` take the old ones off in the same write (so one undo still
  * puts them back), **Add** appends as before, and **Cancel** or Escape asks
@@ -270,7 +270,11 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       return;
     }
     // ESCSUITE-442: captions already there are not stacked on without asking.
-    const existing = captionTrack ? clips.filter((clip) => clip.trackId === captionTrack.id).length : 0;
+    // Text clips only, as Replace removes: a video or audio clip moved onto
+    // the track is not a caption and stays.
+    const existing = captionTrack
+      ? clips.filter((clip) => clip.trackId === captionTrack.id && clip.overlayType === 'text').length
+      : 0;
     if (existing > 0) {
       setPhase({ kind: 'question', existing });
       return;

@@ -157,6 +157,28 @@ describe('addCaptionCues (ESCSUITE-293)', () => {
       expect(state().project.timeline.clips).toHaveLength(2)
     })
 
+    it('keeps a video or audio clip the user moved onto the Captions track', () => {
+      // `moveClipToTrack` does not check the track's kind, so a non-text clip
+      // can sit there. It is not a caption, and Replace must not delete it.
+      const { trackId } = state().addCaptionCues(cues, style)!
+      const [cue] = onCaptions(trackId)
+      const { overlayType: _overlay, textData: _text, ...rest } = cue
+      const audio = { ...rest, id: 'moved-audio', sourceVideoId: 'source-1', name: 'speech.wav' }
+      useEditorStore.setState({
+        project: {
+          ...state().project,
+          timeline: { ...state().project.timeline, clips: [...state().project.timeline.clips, audio] },
+        },
+      })
+
+      state().addCaptionCues(newer, style, { replace: true })
+
+      expect(onCaptions(trackId).map((clip) => clip.id)).toContain('moved-audio')
+      expect(onCaptions(trackId).filter((clip) => clip.overlayType === 'text').map((clip) => clip.name)).toEqual([
+        'A newer take.',
+      ])
+    })
+
     it('drops a removed cue from the selection', () => {
       const { trackId } = state().addCaptionCues(cues, style)!
       const [first, second] = onCaptions(trackId)

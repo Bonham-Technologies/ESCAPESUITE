@@ -883,8 +883,9 @@ export interface EditorState {
    * appended to after. One write and one history entry for the whole file; the
    * selection is left alone. `null`, writing nothing, when that track is locked.
    *
-   * ESCSUITE-442: `replace` first takes every clip off that track, in the same
-   * write and history entry, dropping any removed cue from the selection.
+   * ESCSUITE-442: `replace` first takes every text clip off that track (the
+   * captions; a video or audio clip moved there stays), in the same write and
+   * history entry, dropping any removed cue from the selection.
    */
   addCaptionCues: (
     cues: CaptionCue[],

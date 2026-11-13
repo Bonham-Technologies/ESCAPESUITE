@@ -170,10 +170,13 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   // top the first time. Its lock refuses the whole import (ESCSUITE-84), with
   // ESCSUITE-87's `null`.
   //
-  // ESCSUITE-442: `replace` takes every clip already on the Captions track
-  // off in the same write, so a second transcription can swap the captions
-  // rather than stack a second copy on them, and one undo puts the old ones
-  // back. A removed cue leaves the selection.
+  // ESCSUITE-442: `replace` takes every text clip already on the Captions
+  // track off in the same write, so a second transcription can swap the
+  // captions rather than stack a second copy on them, and one undo puts the
+  // old ones back. Only text clips are captions (the export's sidecar reads
+  // no others): `moveClipToTrack` lets a user drop a video or audio clip on
+  // that track, and Replace must not delete it. A removed cue leaves the
+  // selection.
   addCaptionCues: (cues, style, options) => {
     const state = get();
     const { tracks: currentTracks, clips } = state.project.timeline;
@@ -207,7 +210,9 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
         textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...style, text: cue.text },
       };
     });
-    const kept = options?.replace ? clips.filter((clip) => clip.trackId !== trackId) : clips;
+    const kept = options?.replace
+      ? clips.filter((clip) => !(clip.trackId === trackId && clip.overlayType === 'text'))
+      : clips;
     const newClips = [...kept, ...added];
 
     set({

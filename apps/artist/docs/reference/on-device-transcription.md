@@ -157,11 +157,11 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   (see `captions.md`).
 - **Captions already there** (ESCSUITE-442). A second run used to stack a second copy of every
   caption on the first, and both were drawn and burned in. Now, when the Captions track holds
-  any clip, a press first asks **"Replace the existing captions, or add to them?"** ("The
+  any text clip, a press first asks **"Replace the existing captions, or add to them?"** ("The
   Captions track already has N caption(s).") in a modal dialog built like the editor's others
   (`useDialogBehaviour`, focus on Cancel, Escape cancels, focus back to the button), before
   `available()` is asked anything. **Replace** passes `{ replace: true }` to `addCaptionCues`,
-  which takes the track's clips off in the same write, so one undo still restores them;
+  which takes the track's text clips off (a video or audio clip moved there stays) in the same write, so one undo still restores them;
   **Add** appends as before; **Cancel** asks the browser nothing. The answer carries through
   the language-pack notice. A missing or empty Captions track asks nothing. The control
   reports the dialog through `onDialogOpenChange` → `TimelinePane` → `App`, which counts it in

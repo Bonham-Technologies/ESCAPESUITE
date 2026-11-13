@@ -655,6 +655,59 @@ describe('TranscribeControl: captions already on the track (ESCSUITE-442)', () =
     await waitFor(() => expect(captionClips().map((c) => c.textData?.text)).toEqual(STUB_WORDS.map((cue) => cue.text)));
   });
 
+  it('Replace removes nothing when the new run hears no speech or fails', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    seedCaptions();
+    const before = captionClips();
+    const { showNotification } = renderControl();
+
+    transcribeTimeline.mockResolvedValueOnce([]);
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith('No speech was heard, so no captions were added.', 'info')
+    );
+    expect(captionClips()).toEqual(before);
+
+    transcribeTimeline.mockRejectedValueOnce(new Error('boom'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith('Could not transcribe the timeline.', 'error'));
+    consoleError.mockRestore();
+    expect(captionClips()).toEqual(before);
+    expect(useEditorStore.getState().history.past).toHaveLength(0);
+  });
+
+  it('asks nothing when the only clip on the Captions track is not a caption', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    seedCaptions();
+    const [first, ...others] = captionClips();
+    for (const clip of others) act(() => store().removeClipFromTimeline(clip.id));
+    const { overlayType: _overlay, textData: _text, ...rest } = first;
+    const timeline = useEditorStore.getState().project.timeline;
+    useEditorStore.setState({
+      project: {
+        ...useEditorStore.getState().project,
+        timeline: {
+          ...timeline,
+          clips: timeline.clips.map((clip) => (clip.id === first.id ? { ...rest, sourceVideoId: 'source-1' } : clip)),
+        },
+      },
+    });
+    renderControl();
+
+    await user.click(button()!);
+
+    expect(dialog()).toBeNull();
+    await waitFor(() => expect(captionClips()).toHaveLength(1 + STUB_WORDS.length));
+  });
+
   it('asks nothing when the Captions track is there but empty', async () => {
     const user = userEvent.setup();
     installRecognition();
