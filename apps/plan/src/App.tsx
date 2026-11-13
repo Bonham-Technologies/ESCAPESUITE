@@ -1,19 +1,24 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout/Layout'
 import Home from './pages/Home'
-import { Privacy, Terms } from './pages/Legal'
-import Limitations from './pages/Limitations/Limitations'
+import NotFound from './pages/NotFound/NotFound'
+import { PAGES } from './routes'
 
 function App() {
   return (
     <Routes>
       <Route path="/" element={<Layout />}>
         <Route index element={<Home />} />
-        <Route path="privacy" element={<Privacy />} />
-        <Route path="terms" element={<Terms />} />
-        <Route path="limitations" element={<Limitations />} />
+        {PAGES.map(({ path, Page }) => (
+          <Route key={path} path={path} element={<Page />} />
+        ))}
+        {/* The hub's own document is a real file at /index.html (200 on the hosted
+            site), so it goes home rather than showing a not-found page there. */}
+        <Route path="index.html" element={<Navigate to="/" replace />} />
+        {/* ESCSUITE-455: an unknown path shows the not-found page at its own URL. The
+            hosted site serves the same page (dist/404.html) with status 404. */}
+        <Route path="*" element={<NotFound />} />
       </Route>
-      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }

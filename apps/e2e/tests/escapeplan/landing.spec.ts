@@ -73,11 +73,13 @@ test.describe('ESCAPEPLAN Navigation', () => {
     await expect(page).toHaveURL(/\/terms$/)
   })
 
-  test('unknown routes fall back to the landing page', async ({ page }) => {
+  // ESCSUITE-455: an unknown route shows the not-found page at its own URL
+  // instead of redirecting to the landing page.
+  test('unknown routes show the not-found page', async ({ page }) => {
     await page.goto('http://localhost:5173/nonexistent-page-12345')
     await waitForAppReady(page, 'plan')
 
-    await expect(page).toHaveURL('http://localhost:5173/')
-    await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+    await expect(page).toHaveURL('http://localhost:5173/nonexistent-page-12345')
+    await expect(page.getByRole('heading', { level: 1, name: 'Page not found' })).toBeVisible()
   })
 })

@@ -73,7 +73,9 @@ itself rather than leaving the jump to the browser's fragment navigation (ESCSUI
 | `/terms` | Terms | Terms of use |
 | `/limitations` | Limitations | Known limitations and how to check nothing leaves (ESCSUITE-402; see `docs/reference/escapeplan.md`) |
 
-Any unmatched path redirects to `/`.
+Any other path shows the not-found page (`pages/NotFound`), which links home, CRAFT and ARTIST;
+the hosted site answers it with status 404. `src/routes.ts` is the route list, and `vercel.json`
+must rewrite exactly those paths (ESCSUITE-455; see `docs/reference/vercel-deployment.md`).
 
 ## Tool Integration
 In development, tools run on separate ports:
