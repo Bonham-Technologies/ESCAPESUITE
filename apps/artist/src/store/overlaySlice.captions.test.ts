@@ -123,4 +123,88 @@ describe('addCaptionCues (ESCSUITE-293)', () => {
     expect(state().project).toBe(project)
     expect(state().history.past).toHaveLength(entries)
   })
+
+  // ESCSUITE-442: transcribing a second time used to stack a second copy of
+  // every caption. "Replace" takes the old cues off and puts the new ones on
+  // in the same write, so one undo puts the old ones back.
+  describe('with replace (ESCSUITE-442)', () => {
+    const newer: CaptionCue[] = [{ start: 0.5, end: 2, text: 'A newer take.' }]
+    const onCaptions = (trackId: string) =>
+      state().project.timeline.clips.filter((clip) => clip.trackId === trackId)
+
+    it('takes every clip off the Captions track and adds the new cues, as one undo step', () => {
+      const { trackId } = state().addCaptionCues(cues, style)!
+      const before = onCaptions(trackId)
+      const entries = state().history.past.length
+
+      expect(state().addCaptionCues(newer, style, { replace: true })).toEqual({ trackId, added: 1 })
+
+      expect(onCaptions(trackId).map((clip) => clip.name)).toEqual(['A newer take.'])
+      expect(state().history.past).toHaveLength(entries + 1)
+      expect(state().project.timeline.duration).toBe(2)
+
+      state().undo()
+      expect(onCaptions(trackId)).toEqual(before)
+    })
+
+    it('leaves every other track alone', () => {
+      const title = state().addTextOverlayClip({ text: 'Title' })!
+      state().addCaptionCues(cues, style)
+
+      state().addCaptionCues(newer, style, { replace: true })
+
+      expect(state().project.timeline.clips.map((clip) => clip.id)).toContain(title.id)
+      expect(state().project.timeline.clips).toHaveLength(2)
+    })
+
+    it('keeps a video or audio clip the user moved onto the Captions track', () => {
+      // `moveClipToTrack` does not check the track's kind, so a non-text clip
+      // can sit there. It is not a caption, and Replace must not delete it.
+      const { trackId } = state().addCaptionCues(cues, style)!
+      const [cue] = onCaptions(trackId)
+      const { overlayType: _overlay, textData: _text, ...rest } = cue
+      const audio = { ...rest, id: 'moved-audio', sourceVideoId: 'source-1', name: 'speech.wav' }
+      useEditorStore.setState({
+        project: {
+          ...state().project,
+          timeline: { ...state().project.timeline, clips: [...state().project.timeline.clips, audio] },
+        },
+      })
+
+      state().addCaptionCues(newer, style, { replace: true })
+
+      expect(onCaptions(trackId).map((clip) => clip.id)).toContain('moved-audio')
+      expect(onCaptions(trackId).filter((clip) => clip.overlayType === 'text').map((clip) => clip.name)).toEqual([
+        'A newer take.',
+      ])
+    })
+
+    it('drops a removed cue from the selection', () => {
+      const { trackId } = state().addCaptionCues(cues, style)!
+      const [first, second] = onCaptions(trackId)
+      useEditorStore.setState({ selectedClipId: first.id, selectedClipIds: new Set([first.id, second.id]) })
+
+      state().addCaptionCues(newer, style, { replace: true })
+
+      expect(state().selectedClipId).toBeNull()
+      expect(state().selectedClipIds.size).toBe(0)
+    })
+
+    it('creates the track as an ordinary import does when there is none yet', () => {
+      const result = state().addCaptionCues(newer, style, { replace: true })
+
+      expect(result?.added).toBe(1)
+      expect(state().project.timeline.tracks.filter((track) => track.kind === 'captions')).toHaveLength(1)
+      expect(state().history.past).toHaveLength(1)
+    })
+
+    it('refuses on a locked Captions track, removing nothing', () => {
+      const { trackId } = state().addCaptionCues(cues, style)!
+      state().updateTrack(trackId, { locked: true })
+      const project = state().project
+
+      expect(state().addCaptionCues(newer, style, { replace: true })).toBeNull()
+      expect(state().project).toBe(project)
+    })
+  })
 })

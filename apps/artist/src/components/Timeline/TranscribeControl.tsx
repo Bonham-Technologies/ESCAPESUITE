@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import { captionStyleFor, captionWrapColumns, wrapCaptionText } from '../../core/captions';
 import {
@@ -13,8 +14,12 @@ import styles from './TranscribeControl.module.css';
 export const LANGUAGE_PACK_NOTICE =
   'Your browser will download a speech language pack once. Your audio never leaves this device.';
 
+/** What a press asks when the Captions track already holds captions (ESCSUITE-442). */
+export const REPLACE_QUESTION = 'Replace the existing captions, or add to them?';
+
 type Phase =
   | { kind: 'idle' }
+  | { kind: 'question'; existing: number }
   | { kind: 'consent' }
   | { kind: 'installing' }
   | { kind: 'mixing'; percent: number }
@@ -22,6 +27,12 @@ type Phase =
 
 interface TranscribeControlProps {
   showNotification: (message: string, type: 'error' | 'success' | 'info') => void;
+  /**
+   * Told whenever the "Replace or add" dialog opens or closes (ESCSUITE-442),
+   * so `App` can count it in `modalOpen`, as `ResolutionPicker`'s confirm
+   * does. Optional: the dialog is complete without a listener.
+   */
+  onDialogOpenChange?: (open: boolean) => void;
 }
 
 function stoppedError(): DOMException {
@@ -50,8 +61,15 @@ function clock(seconds: number): string {
  * downloads the pack only when the user presses "Download language pack". The
  * cues land on the Captions track through `addCaptionCues`: one history
  * entry, so one undo takes the whole transcription back off.
+ *
+ * When the Captions track already holds text clips, a press first asks
+ * `REPLACE_QUESTION` in a modal dialog (ESCSUITE-442): **Replace** has
+ * `addCaptionCues` take the old ones off in the same write (so one undo still
+ * puts them back), **Add** appends as before, and **Cancel** or Escape asks
+ * the browser nothing. Before, a second run stacked a second copy of every
+ * caption on the first, and both were drawn and burned into the export.
  */
-export function TranscribeControl({ showNotification }: TranscribeControlProps) {
+export function TranscribeControl({ showNotification, onDialogOpenChange }: TranscribeControlProps) {
   const lang = transcriptionLanguage();
   // Static detection only: calls nothing on the API (see above).
   const [supported] = useState(() => getLocalRecognitionCtor() !== null);
@@ -70,6 +88,9 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
   // Nothing starts listening after the editor has gone, e.g. once a language
   // pack the user asked for finishes installing.
   const mountedRef = useRef(true);
+  // The answer to REPLACE_QUESTION, for the run the answer starts — through
+  // the language-pack notice and its download too, if one is needed.
+  const replaceRef = useRef(false);
   const addCaptionCues = useEditorStore((state) => state.addCaptionCues);
 
   // Keyboard focus. The main button stays one element while it reads
@@ -114,6 +135,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
   const transcribe = useCallback(async () => {
     const Recognition = getLocalRecognitionCtor();
     if (!Recognition || !mountedRef.current) return;
+    const replace = replaceRef.current;
     const controller = new AbortController();
     abortRef.current = controller;
     setPhase({ kind: 'mixing', percent: 0 });
@@ -183,7 +205,8 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
       const columns = captionWrapColumns(resolution, style.fontSize);
       const result = addCaptionCues(
         cues.map((cue) => ({ ...cue, text: wrapCaptionText(cue.text, columns) })),
-        style
+        style,
+        { replace }
       );
       if (!result) {
         showNotification('The Captions track is locked, so no captions were added.', 'error');
@@ -225,12 +248,7 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     await transcribe();
   }, [lang, showNotification, transcribe]);
 
-  const start = useCallback(async () => {
-    const captionTrack = useEditorStore.getState().project.timeline.tracks.find((t) => t.kind === 'captions');
-    if (captionTrack?.locked) {
-      showNotification('The Captions track is locked, so no captions were added.', 'error');
-      return;
-    }
+  const probe = useCallback(async () => {
     // The first call on the API, only ever on a press, and asked on every
     // press: a pack may have been installed, or removed, since the last one.
     const answer = await probeLocalRecognition(lang);
@@ -244,6 +262,27 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
     }
   }, [install, lang, showNotification, transcribe]);
 
+  const start = useCallback(async () => {
+    const { tracks, clips } = useEditorStore.getState().project.timeline;
+    const captionTrack = tracks.find((t) => t.kind === 'captions');
+    if (captionTrack?.locked) {
+      showNotification('The Captions track is locked, so no captions were added.', 'error');
+      return;
+    }
+    // ESCSUITE-442: captions already there are not stacked on without asking.
+    // Text clips only, as Replace removes: a video or audio clip moved onto
+    // the track is not a caption and stays.
+    const existing = captionTrack
+      ? clips.filter((clip) => clip.trackId === captionTrack.id && clip.overlayType === 'text').length
+      : 0;
+    if (existing > 0) {
+      setPhase({ kind: 'question', existing });
+      return;
+    }
+    replaceRef.current = false;
+    await probe();
+  }, [probe, showNotification]);
+
   const runOnce = useCallback(async (task: () => Promise<void>) => {
     if (runningRef.current) return;
     runningRef.current = true;
@@ -253,6 +292,31 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
       runningRef.current = false;
     }
   }, []);
+
+  const cancelQuestion = useCallback(() => setPhase({ kind: 'idle' }), []);
+  const answerQuestion = (replace: boolean) => {
+    replaceRef.current = replace;
+    setPhase({ kind: 'idle' });
+    void runOnce(probe);
+  };
+
+  // The dialog's trap, initial focus (Cancel, the first button), Escape as
+  // Cancel and focus back to the main button, as every editor modal has them.
+  const questionOpen = phase.kind === 'question';
+  const dialogRef = useDialogBehaviour(cancelQuestion, questionOpen);
+
+  // Reported to `App` from the flag itself, with a cleanup, for the reasons
+  // `ResolutionPicker` gives: it cannot drift from what is on screen, and an
+  // unmount with the dialog up still reports it gone.
+  const onDialogOpenChangeRef = useRef(onDialogOpenChange);
+  useEffect(() => {
+    onDialogOpenChangeRef.current = onDialogOpenChange;
+  }, [onDialogOpenChange]);
+  useEffect(() => {
+    if (!questionOpen) return;
+    onDialogOpenChangeRef.current?.(true);
+    return () => onDialogOpenChangeRef.current?.(false);
+  }, [questionOpen]);
 
   if (!supported || hidden) return null;
 
@@ -298,6 +362,36 @@ export function TranscribeControl({ showNotification }: TranscribeControlProps) 
         >
           {busy ? 'Stop transcribing' : 'Transcribe to captions'}
         </button>
+      )}
+      {phase.kind === 'question' && (
+        <div className={styles.overlay}>
+          <div
+            ref={dialogRef}
+            tabIndex={-1}
+            className={styles.dialog}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="transcribe-replace-title"
+          >
+            <h2 className={styles.dialogTitle} id="transcribe-replace-title">
+              {REPLACE_QUESTION}
+            </h2>
+            <p className={styles.dialogMessage}>
+              {`The Captions track already has ${phase.existing} caption${phase.existing !== 1 ? 's' : ''}.`}
+            </p>
+            <div className={styles.dialogActions}>
+              <button type="button" className={styles.dialogButton} onClick={cancelQuestion}>
+                Cancel
+              </button>
+              <button type="button" className={styles.dialogButton} onClick={() => answerQuestion(false)}>
+                Add
+              </button>
+              <button type="button" className={styles.dialogPrimary} onClick={() => answerQuestion(true)}>
+                Replace
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {phase.kind === 'consent' && (
         <div className={styles.notice} role="group" aria-label="Speech language pack">
