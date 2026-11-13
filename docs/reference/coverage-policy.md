@@ -10,15 +10,15 @@ in every package and fails the whole run if any package drops below its floor.
 Every re-measurement since 2026-09-10 is logged in [`coverage-history.md`](coverage-history.md); append new ones there.
 
 Each package's floors are these numbers rounded down to a whole percent, so the floor is
-never above what the suite actually achieves:
+never above what the suite actually achieves. Measured 2026-11-13 (ESCSUITE-439):
 
-| Package | Lines | Statements | Branches | Functions |
-|---------|-------|------------|----------|-----------|
-| `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 |
-| `@escapesuite/craft` | 100.00 | 99.59 | 98.02 | 100.00 |
-| `@escapesuite/artist` | 99.85 | 99.47 | 96.91 | 99.78 |
-| `@escapesuite/shared` | 100.00 | 98.68 | 92.20 | 100.00 |
-| `@escapesuite/headless-artist` | 99.60 | 99.53 | 98.66 | 98.87 |
+| Package | Lines | Statements | Branches | Functions | Floors (L / S / B / F) |
+|---------|-------|------------|----------|-----------|------------------------|
+| `@escapesuite/plan` | 100.00 | 100.00 | 100.00 | 100.00 | 100 / 100 / 100 / 100 |
+| `@escapesuite/craft` | 100.00 | 99.62 | 98.21 | 100.00 | 100 / 99 / 98 / 100 |
+| `@escapesuite/artist` | 99.83 | 99.37 | 96.96 | 99.78 | 99 / 99 / 96 / 99 |
+| `@escapesuite/shared` | 100.00 | 98.85 | 93.51 | 100.00 | 100 / 98 / 93 / 100 |
+| `@escapesuite/headless-artist` | 99.50 | 99.43 | 98.66 | 98.87 | 99 / 99 / 98 / 98 |
 
 - **Thresholds only go up.** A package's floors are its achieved coverage, rounded down
   to a whole percent — so any real regression turns the build red rather than being

@@ -297,6 +297,8 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
     transcribeTimeline.mockResolvedValue([STUB_WORDS[0]]);
     const { showNotification } = renderControl();
     await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    // Captions are already there, so it asks first (ESCSUITE-442).
+    await user.click(screen.getByRole('button', { name: 'Add' }));
     await waitFor(() =>
       expect(showNotification).toHaveBeenCalledWith(
         'Transcribed 1 caption onto the Captions track. The Captions track is hidden.',
@@ -534,5 +536,190 @@ describe('TranscribeControl: the language pack (ESCSUITE-404)', () => {
     expect(available).toHaveBeenCalledTimes(2);
     expect(showNotification).toHaveBeenCalledWith('On-device speech recognition is not available in this browser.', 'info');
     expect(button()).toBeNull();
+  });
+});
+
+// ESCSUITE-442: a second transcription used to stack a second copy of every
+// caption on the track. With captions already there, a press asks first.
+describe('TranscribeControl: captions already on the track (ESCSUITE-442)', () => {
+  const QUESTION = 'Replace the existing captions, or add to them?';
+  const EXISTING: CaptionCue[] = [
+    { start: 0.7, end: 3, text: 'an earlier take' },
+    { start: 4.7, end: 7, text: 'of the same words' },
+  ];
+  const dialog = () => screen.queryByRole('dialog', { name: QUESTION });
+
+  function seedCaptions() {
+    store().addCaptionCues(EXISTING, { fontSize: 40 } as never);
+    useEditorStore.setState({ history: { past: [], future: [] } });
+  }
+
+  it('asks Replace, Add or Cancel before asking the browser anything', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    seedCaptions();
+    const onDialogOpenChange = vi.fn();
+    render(<TranscribeControl showNotification={vi.fn()} onDialogOpenChange={onDialogOpenChange} />);
+
+    await user.click(button()!);
+
+    const asked = dialog()!;
+    expect(asked).toHaveAttribute('aria-modal', 'true');
+    expect(asked).toHaveTextContent('The Captions track already has 2 captions.');
+    const within = (name: string) => screen.getByRole('button', { name });
+    // jsdom lays nothing out, so the hook parks focus on the dialog itself
+    // rather than on Cancel; the e2e spec checks Cancel in a real browser.
+    expect(asked).toContainElement(document.activeElement as HTMLElement);
+    expect(within('Add')).toBeInTheDocument();
+    expect(within('Replace')).toBeInTheDocument();
+    expect(available).not.toHaveBeenCalled();
+    expect(transcribeTimeline).not.toHaveBeenCalled();
+    expect(onDialogOpenChange).toHaveBeenLastCalledWith(true);
+
+    await user.click(within('Cancel'));
+    expect(dialog()).toBeNull();
+    expect(onDialogOpenChange).toHaveBeenLastCalledWith(false);
+    expect(button()).toHaveFocus();
+    expect(available).not.toHaveBeenCalled();
+    expect(captionClips().map((c) => c.textData?.text)).toEqual(EXISTING.map((cue) => cue.text));
+  });
+
+  it('closes on Escape, as Cancel', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    seedCaptions();
+    renderControl();
+
+    await user.click(button()!);
+    expect(dialog()).not.toBeNull();
+    await user.keyboard('{Escape}');
+
+    expect(dialog()).toBeNull();
+    expect(available).not.toHaveBeenCalled();
+  });
+
+  it('Replace swaps the old captions for the new ones, and one undo brings the old ones back', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    seedCaptions();
+    const before = captionClips();
+    const { showNotification } = renderControl();
+
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith('Transcribed 2 captions onto the Captions track.', 'success')
+    );
+    expect(captionClips().map((c) => c.textData?.text)).toEqual(STUB_WORDS.map((cue) => cue.text));
+    expect(useEditorStore.getState().history.past).toHaveLength(1);
+
+    store().undo();
+    expect(captionClips()).toEqual(before);
+  });
+
+  it('Add keeps the old captions and adds the new ones after them', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    seedCaptions();
+    const { showNotification } = renderControl();
+
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith('Transcribed 2 captions onto the Captions track.', 'success')
+    );
+    expect(captionClips().map((c) => c.textData?.text)).toEqual([...EXISTING, ...STUB_WORDS].map((cue) => cue.text));
+  });
+
+  it('Replace survives the language-pack notice', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('downloadable');
+    install.mockResolvedValue(true);
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    seedCaptions();
+    renderControl();
+
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+    await user.click(await screen.findByRole('button', { name: 'Download language pack' }));
+
+    await waitFor(() => expect(captionClips().map((c) => c.textData?.text)).toEqual(STUB_WORDS.map((cue) => cue.text)));
+  });
+
+  it('Replace removes nothing when the new run hears no speech or fails', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    seedCaptions();
+    const before = captionClips();
+    const { showNotification } = renderControl();
+
+    transcribeTimeline.mockResolvedValueOnce([]);
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith('No speech was heard, so no captions were added.', 'info')
+    );
+    expect(captionClips()).toEqual(before);
+
+    transcribeTimeline.mockRejectedValueOnce(new Error('boom'));
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await user.click(button()!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith('Could not transcribe the timeline.', 'error'));
+    consoleError.mockRestore();
+    expect(captionClips()).toEqual(before);
+    expect(useEditorStore.getState().history.past).toHaveLength(0);
+  });
+
+  it('asks nothing when the only clip on the Captions track is not a caption', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    seedCaptions();
+    const [first, ...others] = captionClips();
+    for (const clip of others) act(() => store().removeClipFromTimeline(clip.id));
+    const { overlayType: _overlay, textData: _text, ...rest } = first;
+    const timeline = useEditorStore.getState().project.timeline;
+    useEditorStore.setState({
+      project: {
+        ...useEditorStore.getState().project,
+        timeline: {
+          ...timeline,
+          clips: timeline.clips.map((clip) => (clip.id === first.id ? { ...rest, sourceVideoId: 'source-1' } : clip)),
+        },
+      },
+    });
+    renderControl();
+
+    await user.click(button()!);
+
+    expect(dialog()).toBeNull();
+    await waitFor(() => expect(captionClips()).toHaveLength(1 + STUB_WORDS.length));
+  });
+
+  it('asks nothing when the Captions track is there but empty', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    seedCaptions();
+    for (const clip of captionClips()) act(() => store().removeClipFromTimeline(clip.id));
+    renderControl();
+
+    await user.click(button()!);
+
+    expect(dialog()).toBeNull();
+    await waitFor(() => expect(captionClips()).toHaveLength(2));
   });
 });

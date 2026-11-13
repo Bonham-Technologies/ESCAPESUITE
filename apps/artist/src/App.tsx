@@ -44,6 +44,8 @@ function App() {
   // open flag is not App's own state to begin with; two hops of prop rather than
   // a field in the store's ui slice, which nothing else would read.
   const [resolutionConfirmOpen, setResolutionConfirmOpen] = useState(false);
+  // "Transcribe to captions"'s "Replace or add" dialog (ESCSUITE-442), reported by the control.
+  const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false);
 
   // URL parameters are read once at startup; later URL changes are ignored.
   const [urlParams] = useState(parseUrlParams);
@@ -173,7 +175,8 @@ function App() {
     showSessionPrompt ||
     showProjectLoadDialog ||
     resolutionConfirmOpen ||
-    silenceReviewOpen;
+    silenceReviewOpen ||
+    transcribeDialogOpen;
 
   useAppKeyboardShortcuts({
     canUndo,
@@ -306,6 +309,7 @@ function App() {
         onZoomOut={handleZoomOut}
         onExportSelection={(timeRange) => { setExportTimeRange(timeRange); setShowExport(true); }}
         showNotification={showNotification}
+        onTranscribeDialogOpenChange={setTranscribeDialogOpen}
       />
 
       {/* Export dialog */}

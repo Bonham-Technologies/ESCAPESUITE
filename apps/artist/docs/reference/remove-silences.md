@@ -28,7 +28,23 @@ to judge: every track with sound here is muted or hidden.") instead of "No
 pauses to cut". A field that does not hold a number
 in range is marked `aria-invalid` with a hint, and the list stays as it was
 until every field reads. Each listed pause has a **Keep** button
-(`Keep the pause at m:ss.cc`) that drops it from the list. While the dialog is
+(`Keep the pause at m:ss.cc`) that drops it from the list. Keep moves focus to
+the next row's Keep, else the previous row's, else Cancel, since the pressed
+button goes with its row (ESCSUITE-441); the status line gives the new count.
+Each row also has **Go to** (`Go to the pause at m:ss.cc`), which pauses
+playback and moves the playhead to the pause's start, and **Play** (`Play the
+pause at m:ss.cc`), which plays from 1 s before the pause to 1 s after it and
+then pauses there (ESCSUITE-443); the modal covers the transport, so these are
+how a pause is heard before it is cut. The row last gone to or played is
+marked `aria-current` and scrolled into view (`block: 'nearest'`). On a narrow
+screen the three buttons wrap under the times. Play's stop
+(`pausePlayer` in the dialog) is a timer for the span's length, as the
+preview's loop runs on its own wall clock, with the loop's 200 ms store writes
+as a backstop (a start in a gap jumps ahead, ESCSUITE-280). Another Play
+replaces it (pausing first, flushed, since the loop reads the playhead only as
+playback starts), Go to and the review closing pause it, and it lets go of
+playback once something else pauses or seeks, so it never stops playback it
+did not start. While the dialog is
 open the timeline draws each listed pause as a hatched band through the track
 stack (`components/Timeline/TimelineSilenceBands.tsx`, decorative; the list is
 the accessible form). **Move everything after each cut** (a checkbox, on each
@@ -278,7 +294,9 @@ description, when nothing is left behind.
   there keeping its parts' offset, a locked row untouched, the markers and
   in/out points moved, and one undo restoring them.
 - `src/components/SilenceDialog.test.tsx`: the inspector action, the dialog's
-  fields, Keep, Remove all, Escape, the timeline bands, the note for legacy
+  fields, Keep (and where focus goes after it, ESCSUITE-441), Go to and Play
+  (the span, its stop, and every way it is cancelled, ESCSUITE-443), Remove all,
+  Escape, the timeline bands, the note for legacy
   peaks, the "Move everything after each cut" box both ways, and the
   left-behind warning: every kind counted with the box cleared, only a locked
   row with it on, none when nothing is left behind, the accessible
@@ -296,6 +314,12 @@ description, when nothing is left behind.
 - `apps/e2e/tests/regressions/ESCSUITE-431.spec.ts`: a Blur after the pause; no
   warning with the box on, the warning (and description) with it cleared, the
   notice repeating it, and the Blur where it was after Remove all.
+- `apps/e2e/tests/regressions/ESCSUITE-441.spec.ts`: Enter on the one pause's
+  Keep leaves focus on Cancel, not the page body.
+- `apps/e2e/tests/regressions/ESCSUITE-443.spec.ts`: Go to from the keyboard
+  puts the preview's timecode on the pause start; Play plays and stops 1 s
+  after the pause; Play pressed again mid-play starts over (the flushed pause
+  the real loop needs); at 390 px a row's buttons stay inside the list.
 - `apps/e2e/tests/regressions/ESCSUITE-435.spec.ts`: a three-part take whose
   system audio (captured 1.5 s late) covers the microphone's pause; nothing is
   found until its row is muted, then the pause is, and Remove all cuts all
