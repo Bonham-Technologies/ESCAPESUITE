@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v19. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v20. Edit there and re-run bin/vendor-claude-setup. -->
 # Public repositories
 
 Every role reads this file before it acts on a public repo (policy, **Always**).
