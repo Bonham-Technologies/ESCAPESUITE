@@ -669,3 +669,214 @@ describe('transcribeTimeline: memory and length (ESCSUITE-433)', () => {
     expect(extractSpeechMix).toHaveBeenCalledTimes(1);
   });
 });
+
+// ESCSUITE-439: the paths the cases above leave untested — the defaults the
+// app relies on, results a recogniser can send in odd shapes, and the run
+// settling while another step is still under way.
+describe('transcribeChannels: defaults, odd results and late events (ESCSUITE-439)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('answers no cues for a mix with no channels at all', async () => {
+    await expect(transcribeChannels({ channels: [], sampleRate: 48000, lang: 'en-US', Recognition })).resolves.toEqual([]);
+    expect(FakeRecognition.instances).toHaveLength(0);
+  });
+
+  it('plays through a new AudioContext at the mix rate when none is given', async () => {
+    const { ctx, source } = makeContext();
+    const made: AudioContextOptions[] = [];
+    vi.stubGlobal(
+      'AudioContext',
+      class {
+        constructor(options: AudioContextOptions) {
+          made.push(options);
+          return ctx;
+        }
+      }
+    );
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 44100, lang: 'en-US', Recognition });
+    await flush();
+    source.onended?.();
+    await expect(run).resolves.toEqual([]);
+    expect(made).toEqual([{ sampleRate: 44100 }]);
+  });
+
+  it('settles even when closing the context fails', async () => {
+    const { ctx, source } = makeContext();
+    ctx.close.mockImplementation(() => Promise.reject(new Error('already closed')));
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    FakeRecognition.instances[0].say(0, 'still here', true);
+    source.onended?.();
+    await expect(run).resolves.toEqual([{ start: 0, end: 1, text: 'still here' }]);
+    expect(ctx.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails cleanly when the buffer cannot be made, before any source exists', async () => {
+    const { ctx } = makeContext();
+    ctx.createBuffer.mockImplementation(() => {
+      throw new RangeError('buffer too large');
+    });
+    await expect(
+      transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx })
+    ).rejects.toThrow('Could not start on-device speech recognition.');
+    expect(ctx.createBufferSource).not.toHaveBeenCalled();
+    expect(FakeRecognition.instances[0].abort).toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+  });
+
+  it("rejects with the recogniser's own error when it fails as it starts, not with the start that follows", async () => {
+    class FailsOnStart extends FakeRecognition {
+      start(track?: MediaStreamTrack) {
+        super.start(track);
+        this.onerror?.({ error: 'network' });
+      }
+    }
+    const { ctx, source } = makeContext();
+    // The step after start() fails too, so its catch runs once the run has
+    // already failed: that later error must not replace the recogniser's.
+    // (A real AudioBufferSourceNode would not throw here, since stop() before
+    // start() throws and is swallowed; this case pins fail()'s settled guard.)
+    source.start.mockImplementation(() => {
+      throw new DOMException('stopped', 'InvalidStateError');
+    });
+    await expect(
+      transcribeChannels({
+        channels: TEN_SECONDS,
+        sampleRate: 48000,
+        lang: 'en-US',
+        Recognition: FailsOnStart as unknown as SpeechRecognitionCtor,
+        createAudioContext: () => ctx,
+      })
+    ).rejects.toThrow('On-device speech recognition stopped (network).');
+    expect(ctx.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('finishes once when the recogniser ends inside stop() and stop() then throws', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    recognition.say(0, 'last words', true);
+    recognition.stop.mockImplementation(() => {
+      recognition.onend?.();
+      throw new DOMException('not started', 'InvalidStateError');
+    });
+    source.onended?.();
+    await expect(run).resolves.toEqual([{ start: 0, end: 1, text: 'last words' }]);
+    expect(ctx.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads a result with no alternatives as no words yet', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    ctx.currentTime = 1;
+    recognition.onresult?.({
+      resultIndex: 0,
+      results: [Object.assign([], { isFinal: false })] as unknown as SpeechResultEventLike['results'],
+    });
+    ctx.currentTime = 3;
+    recognition.say(0, 'then words', true);
+    source.onended?.();
+    // The cue starts when the empty result first came, as for any first result.
+    await expect(run).resolves.toEqual([{ start: 0.7, end: 3, text: 'then words' }]);
+  });
+
+  it('ends a cue when its words are final, not when the same interim words repeat', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    ctx.currentTime = 1;
+    recognition.say(0, 'same words', false);
+    ctx.currentTime = 4;
+    recognition.say(0, 'same words', false);
+    ctx.currentTime = 6;
+    recognition.say(0, 'same words', true);
+    source.onended?.();
+    await expect(run).resolves.toEqual([{ start: 0.7, end: 6, text: 'same words' }]);
+  });
+
+  it('keeps a final result past the end of a shorter result list', async () => {
+    const { ctx, source } = makeContext();
+    const run = transcribeChannels({ channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    const event = (results: Array<[string, boolean]>) =>
+      recognition.onresult?.({
+        resultIndex: 0,
+        results: results.map(([transcript, isFinal]) => Object.assign([{ transcript }], { isFinal })) as unknown as SpeechResultEventLike['results'],
+      });
+    ctx.currentTime = 1;
+    event([['first', true], ['second', true]]);
+    ctx.currentTime = 4;
+    event([['first', true]]);
+    source.onended?.();
+    const cues = await run;
+    expect(cues.map((c) => c.text)).toEqual(['first', 'second']);
+  });
+
+  it('starts nothing when stopped while the context is still starting', async () => {
+    const { ctx, source } = makeContext();
+    let resumed!: () => void;
+    ctx.resume.mockReturnValue(new Promise<void>((r) => (resumed = r)));
+    const controller = new AbortController();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, signal: controller.signal,
+    });
+    await flush();
+    controller.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    resumed();
+    await flush();
+    expect(FakeRecognition.instances[0].starts).toEqual([]);
+    expect(source.start).not.toHaveBeenCalled();
+  });
+
+  it('does not listen again when a session ends after the run was stopped', async () => {
+    const { ctx } = makeContext();
+    const controller = new AbortController();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, signal: controller.signal,
+    });
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    // A recogniser that delivers `end` from a handler it read before cleaning up.
+    const onend = recognition.onend!;
+    controller.abort();
+    await expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    onend();
+    expect(recognition.starts).toHaveLength(1);
+  });
+});
+
+describe('transcribeTimeline: the default buffer (ESCSUITE-439)', () => {
+  beforeEach(() => {
+    vi.mocked(extractSpeechMix).mockReset();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('writes the mix into a new one-channel AudioBuffer at the speech rate when none is given', async () => {
+    const made: AudioBufferOptions[] = [];
+    vi.stubGlobal(
+      'AudioBuffer',
+      class {
+        constructor(options: AudioBufferOptions) {
+          made.push(options);
+          return fakeBuffer(options.numberOfChannels!, options.length, options.sampleRate);
+        }
+      }
+    );
+    vi.mocked(extractSpeechMix).mockImplementation(async (_c, _t, _d, allocate) => {
+      allocate!(16_000);
+      return null;
+    });
+    await expect(transcribeTimeline({ clips: [], tracks: [], lang: 'en-US', Recognition })).resolves.toBeNull();
+    expect(made).toEqual([{ numberOfChannels: 1, length: 16_000, sampleRate: 16000 }]);
+  });
+});
