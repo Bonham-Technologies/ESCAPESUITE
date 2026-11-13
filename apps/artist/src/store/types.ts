@@ -882,8 +882,16 @@ export interface EditorState {
    * 'captions'` track — created at the top ("Captions") on the first import,
    * appended to after. One write and one history entry for the whole file; the
    * selection is left alone. `null`, writing nothing, when that track is locked.
+   *
+   * ESCSUITE-442: `replace` first takes every text clip off that track (the
+   * captions; a video or audio clip moved there stays), in the same write and
+   * history entry, dropping any removed cue from the selection.
    */
-  addCaptionCues: (cues: CaptionCue[], style: CaptionStyle) => { trackId: string; added: number } | null;
+  addCaptionCues: (
+    cues: CaptionCue[],
+    style: CaptionStyle,
+    options?: { replace?: boolean }
+  ) => { trackId: string; added: number } | null;
   /** `boolean` for the same reason as the clip actions above (ESCSUITE-87). */
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => boolean;
   updateShapeOverlayData: (clipId: string, shapeData: Partial<ShapeOverlayData>, skipHistory?: boolean) => boolean;
