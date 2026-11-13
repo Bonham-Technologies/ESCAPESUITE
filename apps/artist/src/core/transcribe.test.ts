@@ -734,7 +734,10 @@ describe('transcribeChannels: defaults, odd results and late events (ESCSUITE-43
       }
     }
     const { ctx, source } = makeContext();
-    // The source was stopped by the failure: starting it now throws, as a real one does.
+    // The step after start() fails too, so its catch runs once the run has
+    // already failed: that later error must not replace the recogniser's.
+    // (A real AudioBufferSourceNode would not throw here, since stop() before
+    // start() throws and is swallowed; this case pins fail()'s settled guard.)
     source.start.mockImplementation(() => {
       throw new DOMException('stopped', 'InvalidStateError');
     });

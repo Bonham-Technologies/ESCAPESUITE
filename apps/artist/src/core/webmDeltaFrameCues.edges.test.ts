@@ -172,9 +172,10 @@ describe('dropDeltaFrameCues on hand-built files (ESCSUITE-439)', () => {
 
   describe('the Cues', () => {
     it('answers null when a CuePoint runs past its Cues', async () => {
-      const cues = el(ID.cues, lying(ID.cuePoint, 30, uint(ID.cueTime, 0, 2)))
+      // Before the real, wrong cue: the file would be repaired but for this one.
+      const overflowing = lying(ID.cuePoint, 120, uint(ID.cueTime, 0, 2))
 
-      expect(await dropDeltaFrameCues(webm({ cues, cluster: [timestamp(0), simpleBlock(VIDEO, 0, DELTA)] }))).toBeNull()
+      expect(await dropDeltaFrameCues(webm({ cuesBefore: [overflowing], cluster: [timestamp(0), simpleBlock(VIDEO, 0, DELTA)] }))).toBeNull()
     })
 
     it('keeps a Void and a CuePoint with no CueTime where they are, and drops only the wrong cue', async () => {
@@ -253,7 +254,8 @@ describe('dropDeltaFrameCues on hand-built files (ESCSUITE-439)', () => {
     })
 
     it('keeps the cue when a Block is cut off before its flags', async () => {
-      const blob = webm({ cluster: [timestamp(0), blockGroup(VIDEO, 0, true)] })
+      // The ReferenceBlock first, so the group reads as a delta frame up to the cut.
+      const blob = webm({ cluster: [timestamp(0), el(ID.blockGroup, uint(ID.referenceBlock, 0), el(ID.block, blockData(VIDEO, 0, 0)))] })
 
       expect(await dropDeltaFrameCues(new Blob([(await blob.arrayBuffer()).slice(0, blob.size - 3)]))).toBeNull()
     })
