@@ -62,6 +62,27 @@ test.describe('ESCSUITE-443: Remove silences lets you go to and play a pause bef
     })
   })
 
+  test('Play pressed again while it plays starts over from 1 s before the pause', async ({ page }) => {
+    // The preview's loop reads the playhead only as playback starts and
+    // overwrites a seek made while it runs, so a restart has to reach the loop
+    // as a pause first. Only the real loop shows whether it does.
+    test.setTimeout(90_000)
+    await openSilenceTake(page, 'e2e-443-again')
+    const dialog = await openRemoveSilences(page)
+    const row = dialog.getByRole('listitem')
+    const pause = await pauseOf(row)
+    const play = row.getByRole('button', { name: new RegExp(`^Play the pause at ${AT}$`) })
+
+    await play.focus()
+    await page.keyboard.press('Enter')
+    await expect.poll(() => playheadSeconds(page)).toBeGreaterThan(pause.start + 0.2)
+    await expect(page.getByTitle('Pause (Space)')).toBeAttached()
+    await page.keyboard.press('Enter')
+    await expect.poll(() => playheadSeconds(page), { timeout: 2_000 }).toBeLessThan(pause.start)
+    await expect(page.getByTitle('Play (Space)')).toBeAttached({ timeout: 10_000 })
+    expect(await playheadSeconds(page)).toBeCloseTo(pause.end + 1, 1)
+  })
+
   test('a row keeps its times and all three buttons inside the dialog at 390 px', async ({ page }) => {
     test.setTimeout(90_000)
     await openSilenceTake(page, 'e2e-443-narrow')

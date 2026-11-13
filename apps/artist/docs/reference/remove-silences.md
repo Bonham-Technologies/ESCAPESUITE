@@ -318,7 +318,8 @@ description, when nothing is left behind.
   Keep leaves focus on Cancel, not the page body.
 - `apps/e2e/tests/regressions/ESCSUITE-443.spec.ts`: Go to from the keyboard
   puts the preview's timecode on the pause start; Play plays and stops 1 s
-  after the pause; at 390 px a row's buttons stay inside the list.
+  after the pause; Play pressed again mid-play starts over (the flushed pause
+  the real loop needs); at 390 px a row's buttons stay inside the list.
 - `apps/e2e/tests/regressions/ESCSUITE-435.spec.ts`: a three-part take whose
   system audio (captured 1.5 s late) covers the microphone's pause; nothing is
   found until its row is muted, then the pause is, and Remove all cuts all
