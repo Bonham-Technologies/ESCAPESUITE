@@ -44,7 +44,10 @@
     { "source": "/craft", "destination": "/craft/", "permanent": true },
     { "source": "/craft/((?!.*\\.[A-Za-z0-9]+$).+)", "destination": "/craft/", "permanent": false },
     { "source": "/artist", "destination": "/artist/", "permanent": true },
-    { "source": "/artist/((?!.*\\.[A-Za-z0-9]+$).+)", "destination": "/artist/", "permanent": false }
+    { "source": "/artist/((?!.*\\.[A-Za-z0-9]+$).+)", "destination": "/artist/", "permanent": false },
+    { "source": "/privacy/", "destination": "/privacy", "permanent": true },
+    { "source": "/terms/", "destination": "/terms", "permanent": true },
+    { "source": "/limitations/", "destination": "/limitations", "permanent": true }
   ],
   "rewrites": [
     {

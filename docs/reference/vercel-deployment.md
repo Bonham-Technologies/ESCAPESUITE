@@ -31,8 +31,12 @@ before it, a catch-all sent every unknown path to the hub with status 200, a "so
 is a copy of the hub's page, and the hub's router shows its not-found page, with links home and to
 both tools, for any path it doesn't know.
 
+Each hub page with a trailing slash (`/privacy/`) redirects permanently (308) to its canonical
+path, since the old catch-all served those too. `/index.html` is the hub's own file (200), so the
+hub's router sends it to `/` instead of showing the not-found page there.
+
 The hub's route list is `PAGES` in `apps/plan/src/routes.ts`; `apps/plan/src/routes.test.ts` fails
-when `vercel.json`'s hub rewrites and that list disagree, so **add a hub page's rewrite with the
+when `vercel.json`'s hub rewrites (or its trailing-slash redirects) and that list disagree, so **add a hub page's rewrite and redirect with the
 page**. `apps/e2e/scripts/serve-dist.mjs` resolves requests from `vercel.json` itself, and
 `apps/e2e/tests/production/not-found.spec.ts` checks the statuses against the combined build.
 

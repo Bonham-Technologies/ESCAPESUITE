@@ -24,6 +24,17 @@ describe('vercel.json rewrites and the hub routes (ESCSUITE-455)', () => {
     expect(rewrites).toHaveLength(HUB_PATHS.length + 2)
   })
 
+  // Before ESCSUITE-455 the catch-all also served `/privacy/` (with the slash) as
+  // the page. Without a rewrite for it, it would now 404, breaking any link that
+  // used it; a permanent redirect to the canonical path keeps those links working.
+  it('redirects each hub page with a trailing slash to its canonical path', () => {
+    const redirects: ReadonlyArray<{ source: string; destination: string; permanent?: boolean }> =
+      vercelConfig.redirects
+    for (const path of HUB_PATHS.filter((p) => p !== '/')) {
+      expect(redirects).toContainEqual({ source: `${path}/`, destination: path, permanent: true })
+    }
+  })
+
   it('lists the hub routes as plain paths', () => {
     expect(HUB_PATHS).toEqual(['/', '/privacy', '/terms', '/limitations'])
   })

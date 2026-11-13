@@ -60,6 +60,15 @@ describe('App routes', () => {
     expect(screen.getByText('ESCAPE')).toBeInTheDocument()
   })
 
+  // The hosted site serves the hub's own document as a file at /index.html (200),
+  // so a not-found page there would be a soft 404 at a real URL. It goes home,
+  // as every unmatched path did before ESCSUITE-455.
+  it('sends /index.html to the home page, not the not-found page', () => {
+    renderApp('/index.html')
+    expect(screen.getByRole('button', { name: /start recording/i })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument()
+  })
+
   it('renders every route inside the shared Layout (header present)', () => {
     renderApp('/privacy')
     expect(screen.getByText('ESCAPE')).toBeInTheDocument()

@@ -48,6 +48,26 @@ test.describe('production: unknown paths are real 404s (ESCSUITE-455)', () => {
     })
   }
 
+  // The old catch-all also served each page with a trailing slash. Those links
+  // keep working through a permanent redirect to the canonical path.
+  for (const path of ['/privacy', '/terms', '/limitations']) {
+    test(`${path}/ redirects permanently to ${path}`, async ({ request }) => {
+      const response = await request.get(`${BASE}${path}/?x=1`, { maxRedirects: 0 })
+      expect(response.status()).toBe(308)
+      expect(response.headers()['location']).toBe(`${path}?x=1`)
+    })
+  }
+
+  // The hub's own document is a real file, so it answers 200; the page it
+  // loads goes home instead of showing "Page not found" there.
+  test('/index.html lands on the home page', async ({ page }) => {
+    const response = await page.goto(`${BASE}/index.html`)
+    expect(response?.status()).toBe(200)
+    await expect(page).toHaveURL(`${BASE}/`)
+    await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Page not found' })).toHaveCount(0)
+  })
+
   for (const path of ['/craft/', '/craft/index.html', '/artist/', '/artist/index.html']) {
     test(`app document ${path} answers 200`, async ({ request }) => {
       const response = await request.get(`${BASE}${path}`, { maxRedirects: 0 })
