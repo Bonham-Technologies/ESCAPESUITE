@@ -1,7 +1,7 @@
 // "Remove silences" (ESCSUITE-403): the inspector's Find silences action, the
 // review dialog and its bands on the timeline, and "Remove all" as one undo step.
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { act, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ClipEditor } from './ClipEditor/ClipEditor'
 import { SilenceDialog } from './SilenceDialog'
@@ -191,6 +191,34 @@ describe('Remove silences', () => {
 
     store().undo()
     expect(JSON.stringify(store().project)).toBe(before)
+  })
+
+  it('keeps keyboard focus in the list after Keep: next row, else previous, else Cancel (ESCSUITE-441)', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    // A third row, so Keep in the middle has a row on each side.
+    act(() => store().setSilenceCandidates([{ start: 1, end: 1.5 }, ...store().silenceReview!.candidates]))
+    expect(screen.getByRole('status')).toHaveTextContent('3 pauses found · 2.10 s will be cut')
+
+    act(() => screen.getByRole('button', { name: 'Keep the pause at 0:02.10' }).focus())
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' })).toHaveFocus()
+    expect(screen.getByRole('status')).toHaveTextContent('2 pauses found · 1.30 s will be cut')
+
+    // The last row: focus goes back to the row before it.
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('button', { name: 'Keep the pause at 0:01.00' })).toHaveFocus()
+    expect(screen.getByRole('status')).toHaveTextContent('1 pause found · 0.50 s will be cut')
+
+    // The only row: the list goes, and so does Remove all, so Cancel takes it.
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+    expect(screen.getByRole('status')).toHaveTextContent('No pauses to cut with these settings.')
+    expect(store().silenceReview!.candidates).toHaveLength(0)
   })
 
   it('moves everything after each cut unless the box is cleared (ESCSUITE-434)', async () => {
