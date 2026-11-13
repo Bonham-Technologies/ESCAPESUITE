@@ -121,6 +121,13 @@ describe('FloatingControls', () => {
     expect(timer).toHaveTextContent(/^2$/)
   })
 
+  it('shows the elapsed time, never a 0, if the countdown has no number left', () => {
+    useRecorderStore.setState({ countdownValue: 0, currentDuration: 0 })
+    const { container } = render(floatingFor('countdown'))
+
+    expect(container.querySelector(`.${styles.timer}`)).toHaveTextContent(/^00:00$/)
+  })
+
   it('goes back to the elapsed time once the take is recording', () => {
     useRecorderStore.setState({ countdownValue: 1, currentDuration: 0 })
     const { container } = render(floatingFor('recording'))
@@ -129,7 +136,8 @@ describe('FloatingControls', () => {
   })
 
   it('announces the countdown, recording, paused, saving and saved through a polite live region', () => {
-    useRecorderStore.setState({ countdownValue: 3 })
+    // A library that already holds a take: "Saved" is about the new one on top.
+    useRecorderStore.setState({ countdownValue: 3, recordings: [{ id: 'older-take' } as Recording] })
     const { container, rerender } = render(floatingFor('idle'))
     const region = liveRegion(container)
     expect(region).toHaveAttribute('aria-atomic', 'true')
@@ -147,7 +155,9 @@ describe('FloatingControls', () => {
     rerender(floatingFor('saving'))
     expect(region).toHaveTextContent(/^Saving\.\.\.$/)
 
-    act(() => useRecorderStore.setState({ recordings: [{ id: 'new-take' } as Recording] }))
+    act(() =>
+      useRecorderStore.setState({ recordings: [{ id: 'new-take' } as Recording, { id: 'older-take' } as Recording] })
+    )
     rerender(floatingFor('idle'))
     expect(region).toHaveTextContent(/^Saved$/)
 
