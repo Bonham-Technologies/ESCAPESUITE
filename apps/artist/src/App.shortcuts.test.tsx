@@ -673,6 +673,41 @@ describe('App keyboard shortcuts', () => {
 
       expectNoKeysTaken()
     })
+
+    it('stops them while the transcribe "Replace or add" dialog is open (ESCSUITE-442)', async () => {
+      // Reaches `modalOpen` through a prop, like the resolution confirm:
+      // TranscribeControl reports it to TimelinePane, which hands it up.
+      function SpeechRecognition() {}
+      Object.defineProperty(SpeechRecognition.prototype, 'processLocally', { value: false, writable: true })
+      Object.assign(SpeechRecognition, { available: vi.fn(), install: vi.fn() })
+      // Set and put back by hand: `vi.unstubAllGlobals()` would also take the
+      // setup file's own stubs (ResizeObserver) away from the tests after this.
+      const target = globalThis as { SpeechRecognition?: unknown }
+      const had = 'SpeechRecognition' in target
+      const previous = target.SpeechRecognition
+      target.SpeechRecognition = SpeechRecognition
+      try {
+        const user = userEvent.setup()
+        addClip('clip1', 0, 2)
+        store().addCaptionCues([{ start: 3, end: 4, text: 'existing' }], { fontSize: 40 } as never)
+        store().setSelectedClipId('clip1')
+        await renderApp()
+
+        await user.click(screen.getByRole('button', { name: 'Transcribe to captions' }))
+        expect(screen.getByRole('dialog', { name: 'Replace the existing captions, or add to them?' })).toBeInTheDocument()
+
+        press('Delete')
+        expect(store().project.timeline.clips).toHaveLength(2)
+        press('z', { ctrlKey: true })
+        expect(store().project.timeline.clips).toHaveLength(2)
+        fireEvent.keyDown(window, { code: 'Space' })
+        expect(store().isPlaying).toBe(false)
+        expect(notification()).toBeUndefined()
+      } finally {
+        if (had) target.SpeechRecognition = previous
+        else delete target.SpeechRecognition
+      }
+    })
   })
 
   describe('escape', () => {

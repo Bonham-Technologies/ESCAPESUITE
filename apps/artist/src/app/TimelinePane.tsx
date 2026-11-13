@@ -19,6 +19,12 @@ interface TimelinePaneProps {
   onExportSelection: (timeRange: TimeRange) => void;
   /** The editor's notice, for "Transcribe to captions"'s outcome (ESCSUITE-404). */
   showNotification: ShowNotification;
+  /**
+   * Told when "Transcribe to captions"'s "Replace or add" dialog opens or
+   * closes (ESCSUITE-442), so `App` counts it in `modalOpen`. Required here,
+   * as `MediaLibrarySidebar`'s is, so `App` cannot forget it.
+   */
+  onTranscribeDialogOpenChange: (open: boolean) => void;
 }
 
 /**
@@ -30,7 +36,16 @@ interface TimelinePaneProps {
  * `Timeline` renders, and a memo here would make that pass for the wrong
  * reason and hide a future `currentTime` subscription.
  */
-export function TimelinePane({ height, zoom, onAddTrack, onZoomIn, onZoomOut, onExportSelection, showNotification }: TimelinePaneProps) {
+export function TimelinePane({
+  height,
+  zoom,
+  onAddTrack,
+  onZoomIn,
+  onZoomOut,
+  onExportSelection,
+  showNotification,
+  onTranscribeDialogOpenChange,
+}: TimelinePaneProps) {
   return (
     <footer className={styles.footer} style={{ height }}>
       <div className={styles.timelineControls}>
@@ -60,7 +75,7 @@ export function TimelinePane({ height, zoom, onAddTrack, onZoomIn, onZoomOut, on
             <line x1="8" y1="11" x2="14" y2="11" />
           </svg>
         </button>
-        <TranscribeControl showNotification={showNotification} />
+        <TranscribeControl showNotification={showNotification} onDialogOpenChange={onTranscribeDialogOpenChange} />
       </div>
       <Timeline onExportSelection={onExportSelection} />
     </footer>
