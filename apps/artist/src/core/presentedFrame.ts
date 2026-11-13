@@ -33,7 +33,13 @@
 //   row without a callback inside the ceiling is drawn on 'seeked' for the
 //   rest of its life — today's behaviour — at a one-off cost of that many
 //   ceilings. A callback that arrives starts the count again, so one slow
-//   frame on a loaded machine does not turn the wait off.
+//   frame on a loaded machine does not turn the wait off;
+// - and an element that misses `MISSED_PRESENTATIONS_BUDGET` times in all,
+//   callbacks in between or not, is drawn on 'seeked' from then on too. An
+//   engine that presents only when the picture changes would answer every
+//   other seek of a 15 fps source in a 30 fps export: the run rule alone never
+//   trips there, and the ceiling would be paid every other frame (about 7.5
+//   minutes on a 60 s export). The budget caps that at a few ceilings.
 // A seek that never landed ('seeked' did not fire within the request's waits)
 // has no frame to wait for: its callback is cancelled and nothing is counted;
 // the wedge count (`seekWedge.ts`) deals with it. Nor has a seek that landed
@@ -49,8 +55,20 @@ export const PRESENTED_FRAME_WAIT_MS = 500;
 /** Landed seeks in a row without a callback before an element is drawn on 'seeked' alone. */
 export const MISSED_PRESENTATIONS_LIMIT = 2;
 
-/** Consecutive landed seeks per element whose callback did not arrive within the ceiling. */
-const missedPresentations = new WeakMap<HTMLVideoElement, number>();
+/** Landed seeks in all, per element, without a callback before it is drawn on 'seeked' alone. */
+export const MISSED_PRESENTATIONS_BUDGET = 4;
+
+/** Per element: landed seeks whose callback did not arrive within the ceiling, in a row and in all. */
+const missedPresentations = new WeakMap<HTMLVideoElement, { inARow: number; total: number }>();
+
+/** Whether `video` has missed often enough to be drawn on 'seeked' alone. */
+function givenUpOn(video: HTMLVideoElement): boolean {
+  const missed = missedPresentations.get(video);
+  return (
+    missed !== undefined &&
+    (missed.inARow >= MISSED_PRESENTATIONS_LIMIT || missed.total >= MISSED_PRESENTATIONS_BUDGET)
+  );
+}
 
 /** A frame callback registered before a seek; see the file comment. */
 export interface PresentedFrameWatch {
@@ -79,7 +97,7 @@ export function watchPresentedFrame(video: HTMLVideoElement): PresentedFrameWatc
     typeof video.requestVideoFrameCallback !== 'function' ||
     typeof video.cancelVideoFrameCallback !== 'function' ||
     documentHidden() ||
-    (missedPresentations.get(video) ?? 0) >= MISSED_PRESENTATIONS_LIMIT
+    givenUpOn(video)
   ) {
     return NOTHING_TO_WATCH;
   }
@@ -107,13 +125,17 @@ export function watchPresentedFrame(video: HTMLVideoElement): PresentedFrameWatc
         wake = null;
       }
       if (presented) {
-        missedPresentations.delete(video);
+        const missed = missedPresentations.get(video);
+        if (missed) missed.inARow = 0;
         return;
       }
       video.cancelVideoFrameCallback(handle);
       // A tab hidden while it waited presented nothing: not the element's miss.
       if (seekLanded && moved && !documentHidden()) {
-        missedPresentations.set(video, (missedPresentations.get(video) ?? 0) + 1);
+        const missed = missedPresentations.get(video) ?? { inARow: 0, total: 0 };
+        missed.inARow += 1;
+        missed.total += 1;
+        missedPresentations.set(video, missed);
       }
     },
   };

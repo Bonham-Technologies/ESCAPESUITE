@@ -1,7 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HTMLVideoFrameSource } from './frameSource';
 import { elementSeekTarget } from './elementSeek';
-import { MISSED_PRESENTATIONS_LIMIT, PRESENTED_FRAME_WAIT_MS } from './presentedFrame';
+import {
+  MISSED_PRESENTATIONS_BUDGET,
+  MISSED_PRESENTATIONS_LIMIT,
+  PRESENTED_FRAME_WAIT_MS,
+} from './presentedFrame';
 import { PresentingVideo, type PresentingVideoOptions } from '../test/doubles/presentingVideo';
 
 /**
@@ -110,6 +114,27 @@ describe('HTMLVideoFrameSource waits for the sought frame to be presented (ESCSU
     options.presentAfterMs = PRESENT_AFTER_MS;
     const last = await request(source, video, 4);
     expect(last.shown).toBe(elementSeekTarget(4));
+  });
+
+  it('gives up after a few misses in all, when callbacks come only every other seek', async () => {
+    // An engine that presents only when the picture changes, under a 15 fps
+    // source in a 30 fps export: every other seek is answered. Misses never
+    // come two in a row, so the run rule alone paid the ceiling every other
+    // frame for the whole export.
+    const options: PresentingVideoOptions = { presentAfterMs: PRESENT_AFTER_MS };
+    const { video, source } = sourceOver(options);
+    const elapsed: number[] = [];
+    for (let n = 0; n < 16; n++) {
+      options.presentAfterMs = n % 2 === 0 ? PRESENTED_FRAME_WAIT_MS + 100 : PRESENT_AFTER_MS;
+      elapsed.push((await request(source, video, 1 + n / 30)).elapsedMs);
+    }
+    const ceilings = elapsed.filter((ms) => ms >= PRESENTED_FRAME_WAIT_MS);
+    expect(ceilings).toHaveLength(MISSED_PRESENTATIONS_BUDGET);
+    // Once the budget is spent, nothing more is waited for or registered.
+    const spentAt = 2 * MISSED_PRESENTATIONS_BUDGET - 1;
+    for (const ms of elapsed.slice(spentAt)) expect(ms).toBeLessThanOrEqual(1);
+    expect(video.calls.filter((call) => call === 'rvfc')).toHaveLength(spentAt);
+    expect(video.pending.size).toBe(0);
   });
 
   it('does not wait for, or count against the element, a request past the source’s end, which leaves it where it is', async () => {
