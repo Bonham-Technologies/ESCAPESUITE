@@ -1,7 +1,7 @@
 // "Remove silences" (ESCSUITE-403): the inspector's Find silences action, the
 // review dialog and its bands on the timeline, and "Remove all" as one undo step.
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { act, render, screen, within } from '@testing-library/react'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ClipEditor } from './ClipEditor/ClipEditor'
 import { SilenceDialog } from './SilenceDialog'
@@ -395,6 +395,175 @@ describe('Remove silences', () => {
   it('ignores a list of cuts while the review is closed', () => {
     store().setSilenceCandidates([{ start: 1, end: 2 }])
     expect(store().silenceReview).toBeNull()
+  })
+})
+
+describe('Remove silences: go to and play a pause before cutting it (ESCSUITE-443)', () => {
+  // The two pauses the defaults find: 2.10–2.90 s and 5.10–5.90 s. Play runs
+  // from 1 s before a pause to 1 s after it: 2.8 s of playback for each.
+  const scrollIntoView = vi.fn()
+
+  beforeEach(() => {
+    resetStoreForTest()
+    useEditorStore.setState({ currentTime: 0, isPlaying: false })
+    scrollIntoView.mockClear()
+    Element.prototype.scrollIntoView = scrollIntoView
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    delete (Element.prototype as Partial<Element>).scrollIntoView
+  })
+
+  /**
+   * Open the dialog on the take. With `timers`, setTimeout is faked from then
+   * on, and the test clicks with `press` (fireEvent): user-event's async
+   * wrapper waits on a real setTimeout, which a faked one never runs.
+   */
+  async function openDialog(timers = false) {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    if (timers) vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    return { user, rerender, onRemoved }
+  }
+
+  const press = (name: string) => fireEvent.click(screen.getByRole('button', { name }))
+
+  const advance = (ms: number) => act(() => vi.advanceTimersByTime(ms))
+  const playhead = () => store().currentTime
+
+  it('gives every row Go to and Play, named for the pause, as well as Keep', async () => {
+    await openDialog()
+    const [first, second] = pauses()
+    for (const [row, at] of [[first, '0:02.10'], [second, '0:05.10']] as const) {
+      expect(within(row).getByRole('button', { name: `Go to the pause at ${at}` })).toHaveTextContent('Go to')
+      expect(within(row).getByRole('button', { name: `Play the pause at ${at}` })).toHaveTextContent('Play')
+      expect(within(row).getByRole('button', { name: `Keep the pause at ${at}` })).toBeInTheDocument()
+    }
+  })
+
+  it('Go to moves the playhead to the pause start from the keyboard, and scrolls its row into view', async () => {
+    const { user } = await openDialog()
+    act(() => screen.getByRole('button', { name: 'Go to the pause at 0:05.10' }).focus())
+    await user.keyboard('{Enter}')
+
+    expect(playhead()).toBeCloseTo(5.1, 6)
+    expect(store().isPlaying).toBe(false)
+    const row = pauses()[1]
+    expect(row).toHaveAttribute('aria-current', 'true')
+    expect(pauses()[0]).not.toHaveAttribute('aria-current')
+    expect(scrollIntoView).toHaveBeenCalledTimes(1)
+    expect(scrollIntoView.mock.contexts[0]).toBe(row)
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    // The dialog stays open and the list is untouched: nothing is cut.
+    expect(pauses()).toHaveLength(2)
+  })
+
+  it('Play plays from 1 s before the pause to 1 s after it, then stops there', async () => {
+    await openDialog(true)
+    press('Play the pause at 0:02.10')
+
+    expect(store().isPlaying).toBe(true)
+    expect(playhead()).toBeCloseTo(1.1, 6)
+    expect(pauses()[0]).toHaveAttribute('aria-current', 'true')
+    advance(2790)
+    expect(store().isPlaying).toBe(true)
+    advance(10)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(3.9, 6)
+  })
+
+  it('starts Play at 0 for a pause less than 1 s in', async () => {
+    await openDialog(true)
+    act(() => store().setSilenceCandidates([{ start: 0.4, end: 1.2 }]))
+    press('Play the pause at 0:00.40')
+    expect(playhead()).toBe(0)
+    advance(2200)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(2.2, 6)
+  })
+
+  it('stops as soon as the playhead passes 1 s after the pause, even before the timer', async () => {
+    // The preview's loop can get there early (playback started in a gap jumps
+    // to the next clip, ESCSUITE-280); its store writes are the backstop.
+    await openDialog(true)
+    press('Play the pause at 0:02.10')
+    act(() => store().setCurrentTime(3))
+    expect(store().isPlaying).toBe(true)
+    act(() => store().setCurrentTime(3.95))
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(3.9, 6)
+  })
+
+  it('a second Play replaces the first: it restarts from the new pause and stops at its end', async () => {
+    await openDialog(true)
+    press('Play the pause at 0:02.10')
+    advance(1500)
+    press('Play the pause at 0:05.10')
+    expect(store().isPlaying).toBe(true)
+    expect(playhead()).toBeCloseTo(4.1, 6)
+    expect(pauses()[1]).toHaveAttribute('aria-current', 'true')
+
+    advance(1500) // past where the first Play would have stopped
+    expect(store().isPlaying).toBe(true)
+    expect(playhead()).toBeCloseTo(4.1, 6)
+    advance(1300)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(6.9, 6)
+  })
+
+  it('Go to during Play stops it at the pause start, and the timer does nothing later', async () => {
+    await openDialog(true)
+    press('Play the pause at 0:02.10')
+    advance(1000)
+    press('Go to the pause at 0:05.10')
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(5.1, 6)
+    advance(5000)
+    expect(playhead()).toBeCloseTo(5.1, 6)
+    expect(store().isPlaying).toBe(false)
+  })
+
+  it('closing the dialog stops a Play, and the timer does nothing later', async () => {
+    await openDialog(true)
+    press('Play the pause at 0:02.10')
+    advance(1000)
+    press('Cancel')
+    expect(store().silenceReview).toBeNull()
+    expect(store().isPlaying).toBe(false)
+    act(() => store().seekTo(0.5))
+    advance(5000)
+    expect(playhead()).toBe(0.5)
+  })
+
+  it('lets go of a Play that something else paused or moved', async () => {
+    await openDialog(true)
+    press('Play the pause at 0:02.10')
+    act(() => store().setIsPlaying(false))
+    act(() => store().seekTo(0.5))
+    act(() => store().setIsPlaying(true))
+    advance(5000)
+    // Playback the dialog did not start is not stopped or moved by it.
+    expect(store().isPlaying).toBe(true)
+    expect(playhead()).toBe(0.5)
+  })
+
+  it('leaves playback it did not start alone when it closes', async () => {
+    const { user } = await openDialog()
+    act(() => store().setIsPlaying(true))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(store().isPlaying).toBe(true)
+  })
+
+  it('keeps 441\'s focus order: Keep moves focus to the next row\'s Keep, past its Go to and Play', async () => {
+    const { user } = await openDialog()
+    act(() => screen.getByRole('button', { name: 'Keep the pause at 0:02.10' }).focus())
+    await user.keyboard('{Enter}')
+    expect(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' })).toHaveFocus()
   })
 })
 
