@@ -8,7 +8,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 - ESCAPEARTIST: Keep in Remove silences moves keyboard focus to the next pause (or the previous one, or Cancel) instead of dropping it to the page (ESCSUITE-441).
 - ESCAPEARTIST: transcribing again asks whether to replace the existing captions or add to them, instead of stacking a second copy of every caption (ESCSUITE-442).
-- ESCAPEARTIST: exports no longer sometimes repeat a frame after a cut or trim; WebM and GIF exports, and MP4 exports in Safari, wait for each video frame to be shown before drawing it.
+- ESCAPEARTIST: exports no longer sometimes repeat a frame after a cut or trim; WebM and GIF exports, and MP4 exports in Safari, wait for each video frame to be shown before drawing it (ESCSUITE-454).
 - Tests: the test tooling is updated to Playwright 1.65, Vitest 5.1 and jsdom 31, with a workaround for a Firefox 159 crash that stopped the cross-browser accessibility checks from running.
 - ESCAPEARTIST: Remove silences says how many clips on other tracks and markers it will leave where they are, before the cut and in the message after it.
 - ESCAPEARTIST: Remove silences can move everything after each cut (on by default), so overlays, captions, markers and in/out points stay in step with the take; one undo puts it all back.
