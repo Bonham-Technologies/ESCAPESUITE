@@ -63,6 +63,9 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   whole import with `null` (ESCSUITE-84 / 87); a hidden one still takes it. `findEmptyTrack` never
   hands out the caption track, even emptied, so a title or a video looking for an empty track
   cannot land there and be read as a caption (review M2).
+  `addCaptionCues(cues, style, { replace: true })` (ESCSUITE-442) first takes every clip off
+  the Captions track, in the same `set` and history entry, and drops any of them from the
+  selection; "Transcribe to captions" uses it for its **Replace** answer.
 - **Overlapping cues and the gestures** (ESCSUITE-308). The import keeps overlapping cues where
   the file put them, on the one track, and does not move them apart. The timeline's gestures
   treat such a pair as an overlap they **found**: the long cue's trim handles run past the cue

@@ -27,6 +27,7 @@ function renderPane(overrides: Partial<ComponentProps<typeof TimelinePane>> = {}
     onZoomOut: vi.fn(),
     onExportSelection: vi.fn(),
     showNotification: vi.fn(),
+    onTranscribeDialogOpenChange: vi.fn(),
   };
   const merged = { ...props, ...overrides };
   const view = render(<TimelinePane {...merged} />);
