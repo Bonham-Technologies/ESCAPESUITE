@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../store/projectStore';
 import {
@@ -8,6 +9,7 @@ import {
   nothingAudible,
   totalLength,
   type SilenceOptions,
+  type TimeRange,
 } from '../core/silenceDetection';
 import { leftBehind, type LeftBehind } from '../store/rippleRanges';
 import styles from './SilenceDialog.module.css';
@@ -34,6 +36,66 @@ function clock(t: number): string {
 }
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** How much sound either side of a pause its "Play" lets you hear, in seconds (ESCSUITE-443). */
+const PLAY_MARGIN = 1;
+
+/**
+ * "Play" on a listed pause (ESCSUITE-443): play the timeline from
+ * `PLAY_MARGIN` before the pause to `PLAY_MARGIN` after it, then pause there.
+ * One per dialog, and one Play at a time: another Play replaces it, and `stop`
+ * (Go to, the dialog closing) pauses it where it is.
+ *
+ * The stop is a timer for the span's length, since the preview's loop plays on
+ * its own wall clock. Its 200 ms store writes are a backstop: a playhead past
+ * the end (playback started in a gap jumps to the next clip, ESCSUITE-280)
+ * stops it early. Playback the Play did not start is never stopped by it: once
+ * something else pauses, or seeks, the Play lets go.
+ */
+function pausePlayer() {
+  let running: { timer: ReturnType<typeof setTimeout>; unsubscribe: () => void } | null = null;
+
+  /** Forget the running Play; whether there was one. */
+  const letGo = () => {
+    if (!running) return false;
+    clearTimeout(running.timer);
+    running.unsubscribe();
+    running = null;
+    return true;
+  };
+
+  /** Pause on the end of the span. A pause and a seek in one batch: the loop keeps the seek. */
+  const finish = (until: number) => {
+    letGo();
+    const { setIsPlaying, seekTo } = useEditorStore.getState();
+    setIsPlaying(false);
+    seekTo(until);
+  };
+
+  return {
+    play(range: TimeRange) {
+      letGo();
+      const from = Math.max(0, range.start - PLAY_MARGIN);
+      const until = range.end + PLAY_MARGIN;
+      const { isPlaying, setIsPlaying, seekTo } = useEditorStore.getState();
+      // The loop reads the playhead only as playback starts, and overwrites a
+      // seek made while it plays. So a Play during playback pauses first, and
+      // the pause has to reach the loop before playback starts again.
+      if (isPlaying) flushSync(() => setIsPlaying(false));
+      seekTo(from);
+      setIsPlaying(true);
+      const { seekSequence } = useEditorStore.getState();
+      const unsubscribe = useEditorStore.subscribe((state) => {
+        if (!state.isPlaying || state.seekSequence !== seekSequence) letGo();
+        else if (state.currentTime >= until) finish(until);
+      });
+      running = { timer: setTimeout(() => finish(until), (until - from) * 1000), unsubscribe };
+    },
+    stop() {
+      if (letGo()) useEditorStore.getState().setIsPlaying(false);
+    },
+  };
+}
 
 /**
  * What the cut leaves where it is, in words (ESCSUITE-431): the clips by kind,
@@ -68,7 +130,9 @@ function leftBehindText(left: LeftBehind, moveEverything: boolean, verb: string)
  *
  * Opened from the inspector's Actions section, which has already filled the
  * list with the default settings (`useClipEditorActions`). Changing a setting
- * finds the pauses again; "Keep" drops one from the list. The list lives in
+ * finds the pauses again; "Keep" drops one from the list; "Go to" and "Play"
+ * move the playhead to a pause and play it with a second either side
+ * (ESCSUITE-443). The list lives in
  * the store's `silenceReview`, so the timeline draws it as bands while the
  * dialog is up. Nothing is cut until "Remove all", which calls
  * `removeTimeRanges` once: one Ctrl+Z puts every pause back. "Move everything
@@ -129,6 +193,18 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
     (keepButtons.current[target] ?? cancelButton.current)?.focus();
   });
 
+  // ESCSUITE-443: Go to and Play let a pause be heard before it is cut. The
+  // row last gone to or played is the active one, scrolled into view.
+  // A Play stops when the review closes, however it closes, or unmounts.
+  const [player] = useState(pausePlayer);
+  const open = review !== null;
+  useEffect(() => (open ? () => player.stop() : undefined), [open, player]);
+  const [active, setActive] = useState<TimeRange | null>(null);
+  const activeRow = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    activeRow.current?.scrollIntoView({ block: 'nearest' });
+  }, [active]);
+
   if (!review) return null;
   const candidates = review.candidates;
   const left = leftBehind(clips, tracks, markers, review.clipId, candidates, moveEverything);
@@ -159,6 +235,20 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
     // before it; with no row left, Cancel (Remove all is disabled then).
     focusAfterKeep.current = Math.min(index, candidates.length - 2);
     setSilenceCandidates(candidates.filter((_, i) => i !== index));
+  };
+
+  const handleGoTo = (range: TimeRange) => {
+    player.stop();
+    const { isPlaying, setIsPlaying, seekTo } = useEditorStore.getState();
+    // A seek while playing does not hold (the loop overwrites it): pause too.
+    if (isPlaying) setIsPlaying(false);
+    seekTo(range.start);
+    setActive(range);
+  };
+
+  const handlePlay = (range: TimeRange) => {
+    player.play(range);
+    setActive(range);
   };
 
   const handleRemoveAll = () => {
@@ -259,25 +349,52 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
 
           {candidates.length > 0 && (
             <ul className={styles.list} aria-label="Pauses to cut" tabIndex={0}>
-              {candidates.map((range, i) => (
-                <li key={`${range.start}-${range.end}`} className={styles.item}>
-                  <span className={styles.range}>
-                    {clock(range.start)} – {clock(range.end)}
-                    <span className={styles.length}> · {seconds(range.end - range.start)}</span>
-                  </span>
-                  <button
-                    ref={(el) => {
-                      keepButtons.current[i] = el;
-                    }}
-                    type="button"
-                    className={styles.keepButton}
-                    onClick={() => handleKeep(i)}
-                    aria-label={`Keep the pause at ${clock(range.start)}`}
+              {candidates.map((range, i) => {
+                const isActive = active !== null && active.start === range.start && active.end === range.end;
+                return (
+                  <li
+                    key={`${range.start}-${range.end}`}
+                    ref={isActive ? activeRow : undefined}
+                    className={isActive ? `${styles.item} ${styles.itemActive}` : styles.item}
+                    aria-current={isActive ? 'true' : undefined}
                   >
-                    Keep
-                  </button>
-                </li>
-              ))}
+                    <span className={styles.range}>
+                      {clock(range.start)} – {clock(range.end)}
+                      <span className={styles.length}> · {seconds(range.end - range.start)}</span>
+                    </span>
+                    <span className={styles.rowActions}>
+                      <button
+                        type="button"
+                        className={styles.rowButton}
+                        onClick={() => handleGoTo(range)}
+                        aria-label={`Go to the pause at ${clock(range.start)}`}
+                      >
+                        Go to
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.rowButton}
+                        onClick={() => handlePlay(range)}
+                        aria-label={`Play the pause at ${clock(range.start)}`}
+                        title={`Play from ${PLAY_MARGIN} s before the pause to ${PLAY_MARGIN} s after it`}
+                      >
+                        Play
+                      </button>
+                      <button
+                        ref={(el) => {
+                          keepButtons.current[i] = el;
+                        }}
+                        type="button"
+                        className={styles.rowButton}
+                        onClick={() => handleKeep(i)}
+                        aria-label={`Keep the pause at ${clock(range.start)}`}
+                      >
+                        Keep
+                      </button>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
 
