@@ -13,7 +13,7 @@ The monorepo deploys to Vercel with automatic preview deployments:
 ```
 dist/
 ├── index.html        # ESCAPEPLAN
-├── 404.html          # SPA fallback
+├── 404.html          # Not-found page (status 404)
 ├── craft/index.html  # ESCAPECRAFT (single file)
 └── artist/index.html # ESCAPEARTIST (single file)
 ```
@@ -21,6 +21,20 @@ dist/
 `scripts/build-all.mjs` (`pnpm build:deploy`) refuses to publish: if `turbo build` left any of
 ESCAPEPLAN, ESCAPECRAFT or ESCAPEARTIST with an empty or missing `dist`, it exits non-zero
 naming the app instead of assembling and reporting success on a half-shaped `dist/`.
+
+## Rewrites and the 404 page
+
+`vercel.json` rewrites the hub's own routes (`/`, `/privacy`, `/terms`, `/limitations`) to
+`/index.html`, and everything under `/craft/` and `/artist/` to that app's `index.html`. A path
+that is neither a file nor one of those routes gets `dist/404.html` with status 404 (ESCSUITE-455;
+before it, a catch-all sent every unknown path to the hub with status 200, a "soft 404"). `404.html`
+is a copy of the hub's page, and the hub's router shows its not-found page, with links home and to
+both tools, for any path it doesn't know.
+
+The hub's route list is `PAGES` in `apps/plan/src/routes.ts`; `apps/plan/src/routes.test.ts` fails
+when `vercel.json`'s hub rewrites and that list disagree, so **add a hub page's rewrite with the
+page**. `apps/e2e/scripts/serve-dist.mjs` resolves requests from `vercel.json` itself, and
+`apps/e2e/tests/production/not-found.spec.ts` checks the statuses against the combined build.
 
 ## Security headers
 

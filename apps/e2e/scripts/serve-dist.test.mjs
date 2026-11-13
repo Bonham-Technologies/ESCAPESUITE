@@ -38,8 +38,8 @@ test('matchesSource anchors the pattern at both ends', () => {
   // Anchored at the end too: a pattern that matches only a PREFIX of the path
   // must not match the whole thing, or every header would apply everywhere.
   assert.equal(matchesSource('/craft', '/craft/index.html'), false)
-  // The real catch-all's negative lookahead, exercised the way it is used in
-  // production: everything except the three named prefixes.
+  // A negative lookahead (the shape the hub's old catch-all used before
+  // ESCSUITE-455): everything except the named prefixes.
   assert.equal(
     matchesSource('/((?!craft|artist|assets|favicon).*)', '/legal/privacy'),
     true
@@ -128,12 +128,12 @@ test('a served /assets file keeps vercel.json\'s Cache-Control; other files stay
 
 // ESCSUITE-240: /favicon.ico used to be answered with the hub page (200
 // text/html) because the catch-all excluded only `favicon` the segment.
-test('/favicon.ico is excluded from the SPA catch-all and is a miss when absent', () => {
+// ESCSUITE-455 removed the catch-all: neither is a hub route, so both miss.
+test('/favicon.ico is not rewritten to the hub and is a miss when absent', () => {
   const rewrites = realVercelConfig.rewrites ?? []
   const fileExists = (path) => new Set(['/index.html']).has(path)
   assert.equal(resolveRequestPath('/favicon.ico', rewrites, fileExists), null)
-  // Nothing relies on a /favicon segment; it is an ordinary hub path now.
-  assert.equal(resolveRequestPath('/favicon', rewrites, fileExists), '/index.html')
+  assert.equal(resolveRequestPath('/favicon', rewrites, fileExists), null)
 })
 
 // ESCSUITE-140: `/_vercel/*` (the @vercel/analytics beacon endpoint,
@@ -250,9 +250,9 @@ test('resolveFile agrees with vercel.json\'s own rewrite table for every path (d
     }
     assert.deepEqual(mismatches, [])
 
-    // And the one path in that table that is a genuine miss really is one —
-    // excluded from the catch-all by its `assets/` segment, and not actually
-    // on disk — so the drift guard above isn't vacuously true for it.
+    // And a path in that table that is a genuine miss really is one — claimed
+    // by no rewrite and not on disk — so the drift guard above isn't
+    // vacuously true for it.
     assert.equal(resolveFile('/assets/does-not-exist.js', dir), null)
     assert.equal(expectedPath('/assets/does-not-exist.js'), null)
   } finally {
@@ -272,43 +272,76 @@ test('resolveFile agrees with vercel.json\'s own rewrite table for every path (d
 // catch-all ever regresses to that shape, this test — unlike the drift
 // guard above, which reads vercel.json on both sides and would move with
 // it — keeps expecting the FIXED answer and goes red.
-test('resolveFile reaches the hub SPA for a path that only shares a word-prefix with craft/artist/assets/favicon (regression pin for the pre-fix prefix-test bug)', () => {
+//
+// ESCSUITE-455 changed the answer for these look-alikes: the hub's catch-all is
+// gone, so a path that is not a hub route is a 404 (it is not a page that
+// exists). What still holds from ESCSUITE-196 is the segment boundary: none of
+// them reaches CRAFT or ARTIST.
+test('resolveFile sends a path that only shares a word-prefix with craft/artist/assets/favicon to neither app (regression pin for the pre-fix prefix-test bug)', () => {
   const { dir } = buildTempDist()
   try {
-    const hub = join(dir, 'index.html')
     const craft = join(dir, 'craft', 'index.html')
     const artist = join(dir, 'artist', 'index.html')
 
-    assert.equal(resolveFile('/craftsmanship', dir), hub)
-    assert.equal(resolveFile('/artistry', dir), hub)
-    assert.equal(resolveFile('/artist-guide', dir), hub)
-    assert.equal(resolveFile('/crafting-tips', dir), hub)
-    assert.equal(resolveFile('/assets-licence', dir), hub)
+    assert.equal(resolveFile('/craftsmanship', dir), null)
+    assert.equal(resolveFile('/artistry', dir), null)
+    assert.equal(resolveFile('/artist-guide', dir), null)
+    assert.equal(resolveFile('/crafting-tips', dir), null)
+    assert.equal(resolveFile('/assets-licence', dir), null)
 
     // Real app paths still reach their own app, not the hub.
     assert.equal(resolveFile('/craft/x', dir), craft)
     assert.equal(resolveFile('/artist/', dir), artist)
 
-    // A path genuinely under /assets/ (segment match, not just a
-    // word-prefix) that isn't on disk is still excluded from the catch-all
-    // and still a real miss, not the hub.
+    // A path genuinely under /assets/ that isn't on disk is a real miss,
+    // not the hub.
     assert.equal(resolveFile('/assets/does-not-exist.js', dir), null)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })
 
-test('resolveRequestPath: a path excluded from the catch-all and absent from disk is a miss', () => {
+test('resolveRequestPath: a path no rewrite claims and absent from disk is a miss', () => {
   const rewrites = realVercelConfig.rewrites ?? []
   const fileExists = (path) => new Set(['/index.html', '/craft/index.html', '/artist/index.html']).has(path)
   assert.equal(resolveRequestPath('/assets/does-not-exist.js', rewrites, fileExists), null)
-  // /favicon.ico (ESCSUITE-240) is excluded by name: absent from disk, a real miss.
+  // /favicon.ico (ESCSUITE-240): absent from disk, a real miss.
   assert.equal(resolveRequestPath('/favicon.ico', rewrites, fileExists), null)
-  // The old `/favicon/...` segment exclusion is gone: that path is an ordinary
-  // hub path now, not a miss (nothing relies on a /favicon directory).
-  assert.equal(resolveRequestPath('/favicon/does-not-exist.ico', rewrites, fileExists), '/index.html')
-  // But an ordinary hub-shaped path still resolves to the hub SPA.
-  assert.equal(resolveRequestPath('/about', rewrites, fileExists), '/index.html')
+  assert.equal(resolveRequestPath('/favicon/does-not-exist.ico', rewrites, fileExists), null)
+  // ESCSUITE-455: a hub-shaped path that is not a hub route is a miss too.
+  assert.equal(resolveRequestPath('/about', rewrites, fileExists), null)
+  // A real hub route still resolves to the hub SPA.
+  assert.equal(resolveRequestPath('/privacy', rewrites, fileExists), '/index.html')
+})
+
+// ESCSUITE-455: vercel.json's last rewrite used to send every path outside
+// craft, artist and assets to the hub's index.html, so a made-up URL answered
+// 200 with the home page (a "soft 404"). A HARDCODED pin, not derived from
+// vercel.json: the hub's own routes and everything under /craft/ and /artist/
+// still resolve; a made-up path is a miss, which the server answers with
+// dist/404.html and status 404.
+test('resolveFile: the hub routes and the app fallbacks resolve, a made-up path is a miss (ESCSUITE-455)', () => {
+  const { dir } = buildTempDist()
+  try {
+    const hub = join(dir, 'index.html')
+    const craft = join(dir, 'craft', 'index.html')
+    const artist = join(dir, 'artist', 'index.html')
+
+    for (const path of ['/', '/privacy', '/terms', '/limitations']) {
+      assert.equal(resolveFile(path, dir), hub, path)
+    }
+    for (const path of ['/craft/', '/craft/x', '/craft/deep/link']) {
+      assert.equal(resolveFile(path, dir), craft, path)
+    }
+    for (const path of ['/artist/', '/artist/x', '/artist/deep/link']) {
+      assert.equal(resolveFile(path, dir), artist, path)
+    }
+    for (const path of ['/no-such-page-xyz', '/about', '/privacy/extra', '/terms-of-use', '/a/b/c']) {
+      assert.equal(resolveFile(path, dir), null, path)
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('assertVercelSettingsSupported throws if cleanUrls or trailingSlash is ever set, and passes today\'s config through', () => {
@@ -339,9 +372,14 @@ test('HTTP: a genuine miss serves 404.html with status 404; a hub route serves i
     assert.equal(missResponse.status, 404)
     assert.equal(await missResponse.text(), hubHtml)
 
-    const hitResponse = await fetch(`http://127.0.0.1:${port}/about`)
+    const hitResponse = await fetch(`http://127.0.0.1:${port}/privacy`)
     assert.equal(hitResponse.status, 200)
     assert.equal(await hitResponse.text(), hubHtml)
+
+    // ESCSUITE-455: a made-up hub-shaped path is a real 404 now, not the hub with 200.
+    const madeUp = await fetch(`http://127.0.0.1:${port}/no-such-page-xyz`)
+    assert.equal(madeUp.status, 404)
+    assert.equal(await madeUp.text(), hubHtml)
   } finally {
     server.close()
     rmSync(dir, { recursive: true, force: true })

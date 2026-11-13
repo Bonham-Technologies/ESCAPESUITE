@@ -109,9 +109,8 @@ function fileFor(requestPath, base) {
  * this request path?
  *
  * Vercel's `source` is path-to-regexp-flavoured, but every pattern actually in
- * this repo's `vercel.json` (`/(.*)`, `/craft/(.*)`, `/artist/(.*)`,
- * `/((?!(?:craft|artist|assets|favicon\\.ico)(?:/|$)).*)`) is already a plain regex
- * fragment, so anchoring it at both ends and handing it to `RegExp` matches
+ * this repo's `vercel.json` (`/(.*)`, `/craft/(.*)`, `/artist/(.*)`, and the
+ * hub's literal routes such as `/privacy`) is already a plain regex fragment, so anchoring it at both ends and handing it to `RegExp` matches
  * Vercel's own behaviour exactly, with no new dependency.
  */
 export function matchesSource(source, requestPath) {

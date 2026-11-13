@@ -50,9 +50,14 @@ describe('App routes', () => {
     ).toBeInTheDocument()
   })
 
-  it('redirects an unmatched path to "/"', () => {
+  // ESCSUITE-455: an unmatched path used to redirect to "/", so the hub answered
+  // every made-up URL with its home page. It now shows a not-found page, the same
+  // content the hosted site's 404.html renders, inside the shared Layout.
+  it('renders the not-found page for an unmatched path, not the home page', () => {
     renderApp('/does-not-exist')
-    expect(screen.getByRole('button', { name: /start recording/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 1, name: 'Page not found' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /start recording/i })).not.toBeInTheDocument()
+    expect(screen.getByText('ESCAPE')).toBeInTheDocument()
   })
 
   it('renders every route inside the shared Layout (header present)', () => {

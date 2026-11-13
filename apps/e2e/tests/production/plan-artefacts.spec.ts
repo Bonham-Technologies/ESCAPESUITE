@@ -9,6 +9,9 @@ import { test, expect } from '@playwright/test'
  * `og-image.png` (143 KB), referenced by nothing (every page uses `og.png`).
  * Both are deleted from `apps/plan/public/`.
  *
+ * ESCSUITE-455 removed the catch-all described below: both paths are now real
+ * 404s (the `dist/404.html` page, `text/html`), which is what the tests pin.
+ *
  * Deleting the files does NOT make either path 404: `vercel.json`'s SPA
  * catch-all rewrite (`/((?!(?:craft|artist|assets|favicon\\.ico)(?:/|$)).*)` → `/index.html`)
  * matches both, the same as it matches any typo'd URL, so a request that no
@@ -28,9 +31,9 @@ const BASE_URL = 'http://localhost:5190'
 test.describe('ESCAPEPLAN public/ ships no stray artefacts (ESCSUITE-200)', () => {
   test('CNAME (a GitHub Pages artefact) no longer serves as itself', async ({ request }) => {
     const response = await request.get(`${BASE_URL}/CNAME`)
-    // Falls through to the SPA catch-all (200, text/html) rather than
-    // serving the literal file (which would have been text/plain).
-    expect(response.status()).toBe(200)
+    // A 404 with the not-found page (text/html) rather than the literal file
+    // (which would have been text/plain).
+    expect(response.status()).toBe(404)
     expect(response.headers()['content-type']).toContain('text/html')
     const body = await response.text()
     expect(body).not.toContain('escapesuite.io\n')
@@ -39,9 +42,9 @@ test.describe('ESCAPEPLAN public/ ships no stray artefacts (ESCSUITE-200)', () =
 
   test('og-image.png (unreferenced) no longer serves as itself', async ({ request }) => {
     const response = await request.get(`${BASE_URL}/og-image.png`)
-    // Falls through to the SPA catch-all (200, text/html) rather than
-    // serving the literal image (which would have been image/png).
-    expect(response.status()).toBe(200)
+    // A 404 with the not-found page (text/html) rather than the literal image
+    // (which would have been image/png).
+    expect(response.status()).toBe(404)
     expect(response.headers()['content-type']).toContain('text/html')
   })
 

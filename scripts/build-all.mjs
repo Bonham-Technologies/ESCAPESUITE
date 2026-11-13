@@ -7,7 +7,7 @@
  * Output structure:
  * dist/
  * ├── index.html          (ESCAPEPLAN)
- * ├── 404.html            (SPA fallback)
+ * ├── 404.html            (not-found page: served with status 404)
  * ├── assets/             (ESCAPEPLAN assets)
  * ├── craft/
  * │   └── index.html      (ESCAPECRAFT - single file)
@@ -214,12 +214,14 @@ function main() {
     console.log('  → Copying ESCAPEPLAN to dist/');
     cpSync(planDist, distDir, { recursive: true });
 
-    // Create 404.html for SPA routing
+    // Create 404.html: Vercel serves it, with status 404, for any path that is
+    // neither a file nor one of vercel.json's rewrites (ESCSUITE-455). It is a
+    // copy of the hub's page, whose router shows its not-found page there.
     const indexHtml = join(distDir, 'index.html');
     const notFoundHtml = join(distDir, '404.html');
     if (existsSync(indexHtml)) {
       copyFileSync(indexHtml, notFoundHtml);
-      console.log('  → Created 404.html for SPA routing');
+      console.log('  → Created 404.html (not-found page)');
     }
   } else {
     console.error('  ❌ ESCAPEPLAN dist not found or empty — nothing to publish');
