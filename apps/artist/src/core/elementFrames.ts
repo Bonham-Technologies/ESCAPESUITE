@@ -25,6 +25,7 @@ import { getClipsAtTime } from '../store/projectStore';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
+import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import {
   SourceNotSeekableError,
   WEDGED_SEEK_FRAMES,
@@ -264,8 +265,13 @@ async function syncVideoToTime(
   let issued = false;
   // Skip if already within (a little under) half a frame of the target.
   const frameDuration = 1 / frameRate;
+  // The sought frame's callback, registered before the seek so it cannot miss
+  // it: Chromium can fire 'seeked' while the element still paints the frame
+  // from before the seek (ESCSUITE-454, `presentedFrame.ts`).
+  let presented: PresentedFrameWatch | undefined;
   if (Math.abs(video.currentTime - targetTime) > frameDuration * 0.4) {
     issued = true;
+    presented = watchPresentedFrame(video);
     // Just past the target: a target on a frame's exact start would otherwise
     // show the frame before it a third of the time (ESCSUITE-265).
     video.currentTime = elementSeekTarget(targetTime);
@@ -324,6 +330,8 @@ async function syncVideoToTime(
   if (video.seeking && video.readyState < 2) {
     seekLanded = (await settleSeekInFlight(video)) || seekLanded;
   }
+
+  await presented?.settle(seekLanded);
 
   return { issued, landed: seekLanded, landedPromptly, elapsedMs: performance.now() - started };
 }
