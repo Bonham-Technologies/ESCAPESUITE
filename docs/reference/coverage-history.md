@@ -5094,3 +5094,28 @@ two Add Track cases and CRAFT's twelve M4A cases unable to find the new name. Ou
 `accessibility/core.spec.ts` with the three specs whose locators named the old label ran on Chromium: 69 / 69. Every
 `*.perf.test.ts` and rerender pin is byte-identical. **No floor crossed**; plan's floors stay 100 / 100 / 100 / 100,
 craft's 100 / 99 / 98 / 100 and artist's 99 / 99 / 96 / 99.
+
+All five packages were re-measured 2026-11-13 for ESCSUITE-439 (tests for the untested branches of
+`apps/artist/src/core/transcribe.ts` and `apps/artist/src/core/webmDeltaFrameCues.ts`, and shared's branch
+floor raised to the coverage it already had), on this branch over `main` at `c63fd0a`, with
+`pnpm test:coverage` and `pnpm coverage:report`. The change adds tests only. **Artist**: 99.83 / 99.37 / 96.96 /
+99.78. Lines are 11,488 / 11,507, statements 13,216 / 13,299, branches 7,547 / 7,783 and functions 2,724 / 2,730.
+On `main` the same run measured 99.82 / 99.20 / 96.50 / 99.67 (11,487 lines, 13,193 statements, 7,511 branches and
+2,721 functions covered of the same totals). `transcribe.ts` goes from 65 / 77 branches and 34 / 37 functions to
+77 / 77 and 37 / 37: the default `AudioContext` and `AudioBuffer`, a context whose `close()` rejects, a buffer that
+cannot be made, a result with no alternatives, a repeated interim result, a final result past a shorter list, and
+the run settling while `resume()`, `start()` or `stop()` is still under way, all in new cases in
+`transcribe.test.ts`. `webmDeltaFrameCues.ts` goes from 144 / 168 branches to 168 / 168 with the new
+`webmDeltaFrameCues.edges.test.ts`, which builds WebM files byte by byte for the shapes the muxer-made fixtures
+never produce: other elements between the ones the repair looks for, blocks before the ClusterTimestamp, another
+track's blocks first, a negative block timecode, and damaged or cut-short Tracks, Cues, Clusters and BlockGroups.
+Three of the new cases were checked red against a mutation each: the negative-timecode sign dropped, the
+ClusterTimestamp guard dropped, and `finish()`'s settled guard dropped. **Shared**: 100.00 / 98.85 / 93.51 / 100.00
+(lines 318, statements 344 / 348, branches 173 / 185, functions 97); its branch floor goes from 92 to 93 in
+`packages/shared/vitest.config.ts` and `scripts/coverage-report.mjs`. **Craft**: 100.00 / 99.62 / 98.21 / 100.00
+(lines 2,953, statements 3,184 / 3,196, branches 1,646 / 1,676, functions 566). **Headless-artist**: 99.50 / 99.43 /
+98.66 / 98.87 (lines 1,000 / 1,005, statements 1,061 / 1,067, branches 663 / 672, functions 176 / 178). **Plan**:
+100.00 on all four (lines 96, statements 101, branches 29, functions 34). The coverage-policy table, last written
+2026-10-19, is corrected to these figures. **No other floor crossed**: artist's branches reach 96.96, still under 97,
+so its floors stay 99 / 99 / 96 / 99; craft's stay 100 / 99 / 98 / 100, the kit's 99 / 99 / 98 / 98 and plan's
+100 / 100 / 100 / 100.

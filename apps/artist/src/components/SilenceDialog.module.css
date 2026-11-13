@@ -129,9 +129,10 @@
 
 .item {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs) var(--spacing-sm);
   padding: var(--spacing-xs) var(--spacing-sm);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -139,6 +140,19 @@
 
 .item + .item {
   border-top: 1px solid var(--border-color);
+}
+
+/* The row last gone to or played (ESCSUITE-443). */
+.itemActive {
+  background: var(--bg-tertiary);
+  box-shadow: inset 3px 0 0 var(--accent-primary);
+}
+
+/* Go to, Play and Keep. They wrap under the times on a narrow screen. */
+.rowActions {
+  display: flex;
+  gap: var(--spacing-xs);
+  margin-left: auto;
 }
 
 .range {
@@ -149,7 +163,7 @@
   color: var(--text-muted);
 }
 
-.keepButton {
+.rowButton {
   padding: 2px var(--spacing-sm);
   font-size: 12px;
   background: var(--bg-tertiary);
@@ -159,7 +173,7 @@
   cursor: pointer;
 }
 
-.keepButton:hover {
+.rowButton:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
 }
