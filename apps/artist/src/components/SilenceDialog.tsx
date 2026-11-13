@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../store/projectStore';
 import {
@@ -116,6 +116,19 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   const close = () => setSilenceReviewClip(null);
   const dialogRef = useDialogBehaviour(close);
 
+  // ESCSUITE-441: Keep unmounts its own row, and with it the focused button,
+  // which dropped focus to the page body. Keep records which row's Keep takes
+  // focus once the shorter list is drawn (-1: Cancel, the list being empty).
+  const keepButtons = useRef<(HTMLButtonElement | null)[]>([]);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const focusAfterKeep = useRef<number | null>(null);
+  useEffect(() => {
+    const target = focusAfterKeep.current;
+    if (target === null) return;
+    focusAfterKeep.current = null;
+    (keepButtons.current[target] ?? cancelButton.current)?.focus();
+  });
+
   if (!review) return null;
   const candidates = review.candidates;
   const left = leftBehind(clips, tracks, markers, review.clipId, candidates, moveEverything);
@@ -142,6 +155,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   };
 
   const handleKeep = (index: number) => {
+    // The next row moves up into this one's place; on the last row, the one
+    // before it; with no row left, Cancel (Remove all is disabled then).
+    focusAfterKeep.current = Math.min(index, candidates.length - 2);
     setSilenceCandidates(candidates.filter((_, i) => i !== index));
   };
 
@@ -250,6 +266,9 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
                     <span className={styles.length}> · {seconds(range.end - range.start)}</span>
                   </span>
                   <button
+                    ref={(el) => {
+                      keepButtons.current[i] = el;
+                    }}
                     type="button"
                     className={styles.keepButton}
                     onClick={() => handleKeep(i)}
@@ -271,7 +290,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
           )}
 
           <div className={styles.actions}>
-            <button type="button" className={styles.cancelButton} onClick={close}>
+            <button ref={cancelButton} type="button" className={styles.cancelButton} onClick={close}>
               Cancel
             </button>
             <button

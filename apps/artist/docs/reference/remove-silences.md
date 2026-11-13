@@ -28,7 +28,10 @@ to judge: every track with sound here is muted or hidden.") instead of "No
 pauses to cut". A field that does not hold a number
 in range is marked `aria-invalid` with a hint, and the list stays as it was
 until every field reads. Each listed pause has a **Keep** button
-(`Keep the pause at m:ss.cc`) that drops it from the list. While the dialog is
+(`Keep the pause at m:ss.cc`) that drops it from the list. Keep moves focus to
+the next row's Keep, else the previous row's, else Cancel, since the pressed
+button goes with its row (ESCSUITE-441); the status line gives the new count.
+While the dialog is
 open the timeline draws each listed pause as a hatched band through the track
 stack (`components/Timeline/TimelineSilenceBands.tsx`, decorative; the list is
 the accessible form). **Move everything after each cut** (a checkbox, on each
@@ -278,7 +281,8 @@ description, when nothing is left behind.
   there keeping its parts' offset, a locked row untouched, the markers and
   in/out points moved, and one undo restoring them.
 - `src/components/SilenceDialog.test.tsx`: the inspector action, the dialog's
-  fields, Keep, Remove all, Escape, the timeline bands, the note for legacy
+  fields, Keep (and where focus goes after it, ESCSUITE-441), Remove all,
+  Escape, the timeline bands, the note for legacy
   peaks, the "Move everything after each cut" box both ways, and the
   left-behind warning: every kind counted with the box cleared, only a locked
   row with it on, none when nothing is left behind, the accessible
@@ -296,6 +300,8 @@ description, when nothing is left behind.
 - `apps/e2e/tests/regressions/ESCSUITE-431.spec.ts`: a Blur after the pause; no
   warning with the box on, the warning (and description) with it cleared, the
   notice repeating it, and the Blur where it was after Remove all.
+- `apps/e2e/tests/regressions/ESCSUITE-441.spec.ts`: Enter on the one pause's
+  Keep leaves focus on Cancel, not the page body.
 - `apps/e2e/tests/regressions/ESCSUITE-435.spec.ts`: a three-part take whose
   system audio (captured 1.5 s late) covers the microphone's pause; nothing is
   found until its row is muted, then the pause is, and Remove all cuts all
