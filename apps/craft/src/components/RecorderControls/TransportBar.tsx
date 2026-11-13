@@ -1,5 +1,6 @@
 import type { RecordingState } from '../../store/types';
 import { CloseIcon, PauseIcon, PlayIcon } from '../icons';
+import { CountdownReadout } from './CountdownReadout';
 import { RecordingDurationReadout } from './RecordingDurationReadout';
 import styles from '../../App.module.css';
 
@@ -24,10 +25,17 @@ export interface TransportBarProps {
   blockedReason: string | null;
   /**
    * The id of an element in the same document that says `blockedReason` out
-   * loud, for the record button's `aria-describedby`. The page has one under
-   * its bar; the floating window does not, so it passes none.
+   * loud, for the record button's `aria-describedby`. The page and the
+   * floating window each print one under their bar (ESCSUITE-440).
    */
   blockedReasonId?: string;
+  /**
+   * Draw the countdown digit in the timer's place during `countdown`. The
+   * floating window sets it, because the page's countdown overlay is hidden
+   * behind whatever is being recorded (ESCSUITE-440); the page's own bar,
+   * with the overlay right above it, does not.
+   */
+  showCountdown?: boolean;
 }
 
 /**
@@ -68,6 +76,7 @@ export function TransportBar({
   onCancel,
   blockedReason,
   blockedReasonId,
+  showCountdown = false,
 }: TransportBarProps) {
   const blocked = blockedReason !== null;
 
@@ -88,7 +97,7 @@ export function TransportBar({
       {/* Timer — the number subscribes to the store itself, so the
           once-a-second tick re-renders it and not this bar */}
       <span className={`${styles.timer} ${isRecordingActive ? styles.recording : ''}`}>
-        <RecordingDurationReadout />
+        {showCountdown && state === 'countdown' ? <CountdownReadout /> : <RecordingDurationReadout />}
       </span>
 
       {/* Main record button */}
