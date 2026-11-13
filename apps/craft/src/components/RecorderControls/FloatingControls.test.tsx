@@ -164,6 +164,16 @@ describe('FloatingControls', () => {
     expect(region).toHaveTextContent(/^$/)
   })
 
+  it('does not say Saved when the newest take is deleted during a save that adds nothing', () => {
+    useRecorderStore.setState({ recordings: [{ id: 'newest' } as Recording, { id: 'older' } as Recording] })
+    const { container, rerender } = render(floatingFor('saving'))
+    const region = liveRegion(container)
+
+    act(() => useRecorderStore.setState({ recordings: [{ id: 'older' } as Recording] }))
+    rerender(floatingFor('idle'))
+    expect(region).toHaveTextContent(/^$/)
+  })
+
   it('prints why Record is blocked and describes the button with it', () => {
     render(floatingFor('idle', 'Turn on a source before recording'))
 

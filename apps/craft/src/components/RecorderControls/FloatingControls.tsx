@@ -28,8 +28,8 @@ type FloatingControlsProps = Omit<TransportBarProps, 'blockedReasonId' | 'showCo
  *   page's overlay is usually out of sight;
  * - its own polite, atomic live region, the header's phrases ("Recording
  *   starts in 3", "Recording", "Paused", "Saving...") plus "Saved" once a save
- *   puts a new take at the top of the library — a save that failed leaves the
- *   library's newest take where it was, and says nothing here;
+ *   puts a new take at the top of the library — a save that failed adds no
+ *   take, and says nothing here;
  * - a blocked Record button's reason as visible text, wired to the button
  *   through `aria-describedby` exactly as the page's is.
  */
@@ -41,19 +41,30 @@ export function FloatingControls(transport: FloatingControlsProps) {
   const audioLevels = useRecorderStore((s) => s.audioLevels);
   const systemAudioShared = useRecorderStore((s) => s.systemAudioShared);
   const blockedReasonId = useId();
-  const newestTakeId = useRecorderStore((s) => s.recordings[0]?.id ?? null);
+  const recordings = useRecorderStore((s) => s.recordings);
 
-  // "Saved" is a transition, saving -> idle with a new take on top, so the
-  // last state seen and the newest take when the save began are kept here
-  // (updated during render, as React recommends for state derived from a
-  // prop's previous value).
+  // "Saved" is a transition, saving -> idle with a take on top that was not
+  // in the library when the save began, so the last state seen and the ids
+  // the library held then are kept here (updated during render, as React
+  // recommends for state derived from a prop's previous value). Comparing
+  // against every id, not only the newest one, keeps a take deleted from the
+  // library during a failed save from reading as "Saved".
   const { state } = transport;
-  const [seen, setSeen] = useState({ state, takeBeforeSave: newestTakeId, saved: false });
+  const newestTakeId = recordings[0]?.id ?? null;
+  const [seen, setSeen] = useState(() => ({
+    state,
+    idsBeforeSave: recordings.map((r) => r.id),
+    saved: false,
+  }));
   if (seen.state !== state) {
     setSeen({
       state,
-      takeBeforeSave: state === 'saving' ? newestTakeId : seen.takeBeforeSave,
-      saved: seen.state === 'saving' && state === 'idle' && newestTakeId !== seen.takeBeforeSave,
+      idsBeforeSave: state === 'saving' ? recordings.map((r) => r.id) : seen.idsBeforeSave,
+      saved:
+        seen.state === 'saving' &&
+        state === 'idle' &&
+        newestTakeId !== null &&
+        !seen.idsBeforeSave.includes(newestTakeId),
     });
   }
   const phrase =
