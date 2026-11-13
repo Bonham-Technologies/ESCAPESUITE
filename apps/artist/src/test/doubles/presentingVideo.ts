@@ -9,7 +9,9 @@
 // later (a `setTimeout`, so fake timers drive it) does `shownTime` — what a
 // draw of the element would paint — move to the sought time and the pending
 // frame callbacks fire. A seek issued before the last one was presented
-// replaces it, as a browser presents only the frame it ended up on.
+// replaces it, as a browser presents only the frame it ended up on. A seek
+// that leaves the element where it is (past the end, at the end) presents
+// nothing at all.
 //
 // `frameCallbacks: 'never'` keeps `requestVideoFrameCallback` but never answers
 // it after a paused seek (what WebKit might do: unmeasured), and `'absent'`
@@ -69,10 +71,16 @@ export class PresentingVideo extends EventTarget {
   set currentTime(seconds: number) {
     this.calls.push('seek')
     this.seeks.push(seconds)
-    this.time = seconds
+    // A seek past the end lands on the end. One that leaves the element where
+    // it already is fires 'seeked' and presents nothing, so no frame callback
+    // fires: what Chromium 1243 does (measured).
+    const landing = Math.min(Math.max(seconds, 0), this.duration)
+    const moved = landing !== this.time
+    this.time = landing
     queueMicrotask(() => this.dispatchEvent(new Event('seeked')))
+    if (!moved) return
     clearTimeout(this.presenting)
-    this.presenting = setTimeout(() => this.present(seconds), this.options.presentAfterMs)
+    this.presenting = setTimeout(() => this.present(landing), this.options.presentAfterMs)
   }
 
   pause(): void {}

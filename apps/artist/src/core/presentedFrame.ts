@@ -36,7 +36,12 @@
 //   frame on a loaded machine does not turn the wait off.
 // A seek that never landed ('seeked' did not fire within the request's waits)
 // has no frame to wait for: its callback is cancelled and nothing is counted;
-// the wedge count (`seekWedge.ts`) deals with it.
+// the wedge count (`seekWedge.ts`) deals with it. Nor has a seek that landed
+// where the element already was — a request past the source's end, which lands
+// on the end, frame after frame: Chromium fires 'seeked' for it and presents
+// no frame (measured, Chromium 1243), and the element already shows that
+// frame. Waiting for one there cost the ceiling a frame and, twice in a row,
+// turned the wait off for the rest of the export.
 
 /** The longest a request waits, once 'seeked' has fired, for the sought frame's callback. */
 export const PRESENTED_FRAME_WAIT_MS = 500;
@@ -50,9 +55,10 @@ const missedPresentations = new WeakMap<HTMLVideoElement, number>();
 /** A frame callback registered before a seek; see the file comment. */
 export interface PresentedFrameWatch {
   /**
-   * Once the request's other waits are over: when the seek landed, wait for
-   * the callback, at most {@link PRESENTED_FRAME_WAIT_MS}; then cancel it if it
-   * never came. Never rejects.
+   * Once the request's other waits are over: when the seek landed somewhere
+   * other than where the element was, wait for the callback, at most
+   * {@link PRESENTED_FRAME_WAIT_MS}; then cancel it if it never came. Never
+   * rejects.
    */
   settle(seekLanded: boolean): Promise<void>;
 }
@@ -80,6 +86,7 @@ export function watchPresentedFrame(video: HTMLVideoElement): PresentedFrameWatc
 
   let presented = false;
   let wake: (() => void) | null = null;
+  const from = video.currentTime;
   const handle = video.requestVideoFrameCallback(() => {
     presented = true;
     wake?.();
@@ -87,7 +94,9 @@ export function watchPresentedFrame(video: HTMLVideoElement): PresentedFrameWatc
 
   return {
     async settle(seekLanded: boolean): Promise<void> {
-      if (seekLanded && !presented) {
+      // Landed where it started: no frame is coming, and none is needed.
+      const moved = video.currentTime !== from;
+      if (seekLanded && moved && !presented) {
         await new Promise<void>((resolve) => {
           const fallback = setTimeout(resolve, PRESENTED_FRAME_WAIT_MS);
           wake = () => {
@@ -103,7 +112,7 @@ export function watchPresentedFrame(video: HTMLVideoElement): PresentedFrameWatc
       }
       video.cancelVideoFrameCallback(handle);
       // A tab hidden while it waited presented nothing: not the element's miss.
-      if (seekLanded && !documentHidden()) {
+      if (seekLanded && moved && !documentHidden()) {
         missedPresentations.set(video, (missedPresentations.get(video) ?? 0) + 1);
       }
     },

@@ -112,6 +112,22 @@ describe('HTMLVideoFrameSource waits for the sought frame to be presented (ESCSU
     expect(last.shown).toBe(elementSeekTarget(4));
   });
 
+  it('does not wait for, or count against the element, a request past the source’s end, which leaves it where it is', async () => {
+    // A clip running past its source's end: every request there lands on the
+    // end, and Chromium presents no frame for a seek that does not move the
+    // element. Waiting the ceiling for one cost half a second a frame and, two
+    // in a row, turned the wait off for the rest of the export.
+    const { video, source } = sourceOver({ presentAfterMs: PRESENT_AFTER_MS });
+    video.duration = 2;
+    expect((await request(source, video, 2.1)).shown).toBe(2);
+    const elapsed: number[] = [];
+    for (let n = 1; n <= 4; n++) elapsed.push((await request(source, video, 2.1 + n / 30)).elapsedMs);
+    for (const ms of elapsed) expect(ms).toBeLessThanOrEqual(1);
+    expect(video.pending.size).toBe(0);
+    // Back in range, the element is still waited for.
+    expect((await request(source, video, 1)).shown).toBe(elementSeekTarget(1));
+  });
+
   it('draws at once, as before, from an element with no requestVideoFrameCallback', async () => {
     const { video, source } = sourceOver({ presentAfterMs: PRESENT_AFTER_MS, frameCallbacks: 'absent' });
     const { elapsedMs } = await request(source, video, 1);

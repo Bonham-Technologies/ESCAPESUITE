@@ -121,6 +121,23 @@ describe('element exporters wait for the sought frame to be presented (ESCSUITE-
     expect(element.calls.filter((call) => call === 'rvfc')).toHaveLength(MISSED_PRESENTATIONS_LIMIT)
   })
 
+  it('does not wait for, or count against the element, frames past the source’s end, which leave it where it is', async () => {
+    // The clip runs past its source's end: every frame there lands on the end,
+    // and Chromium presents no frame for a seek that does not move the element.
+    const element = video({ presentAfterMs: PRESENT_AFTER_MS })
+    element.duration = 0.6
+    const { composeFrame, drawn } = composerOver(element)
+    for (let n = 0; n < 4; n++) await compose(composeFrame, n / 30)
+    expect(drawn[drawn.length - 1]).toBe(0.6)
+    const elapsed: number[] = []
+    for (let n = 4; n < 8; n++) elapsed.push(await compose(composeFrame, n / 30))
+    for (const ms of elapsed) expect(ms).toBeLessThanOrEqual(1)
+    expect(element.pending.size).toBe(0)
+    // Back in range, the element is still waited for.
+    await compose(composeFrame, 0)
+    expect(drawn[drawn.length - 1]).toBe(elementSeekTarget(0.5))
+  })
+
   it('draws at once, as before, from an element with no requestVideoFrameCallback', async () => {
     const element = video({ presentAfterMs: PRESENT_AFTER_MS, frameCallbacks: 'absent' })
     const { composeFrame } = composerOver(element)
