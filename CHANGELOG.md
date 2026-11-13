@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: on-device transcription and the repair of WebM seek indexes are tested on more of their edge cases, and the shared package's branch-coverage floor rises to 93% (ESCSUITE-439).
 - Tests: the test tooling is updated to Playwright 1.65, Vitest 5.1 and jsdom 31, with a workaround for a Firefox 159 crash that stopped the cross-browser accessibility checks from running.
 - ESCAPEARTIST: Remove silences says how many clips on other tracks and markers it will leave where they are, before the cut and in the message after it.
 - ESCAPEARTIST: Remove silences can move everything after each cut (on by default), so overlays, captions, markers and in/out points stay in step with the take; one undo puts it all back.
