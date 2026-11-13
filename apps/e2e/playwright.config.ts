@@ -130,6 +130,17 @@ export default defineConfig({
       // trace and video of a failed attempt instead.
       use: { ...devices['Desktop Chrome'], ...chromiumUse, trace: 'retain-on-failure', video: 'retain-on-failure' },
     },
+    // TEMPORARY (ESCSUITE-454): the two decode-worker parity cases that flaked on main,
+    // 20 times each with no retry, as the CI proof for the ticket. Revert before merge.
+    {
+      name: 'decode-worker-repeat',
+      testMatch: '**/export/decode-worker.spec.ts',
+      testIgnore: baseIgnore,
+      grep: /a clip trimmed to start 0\.5 s into its source|a split clip crossfading into itself/,
+      repeatEach: 20,
+      retries: 0,
+      use: { ...devices['Desktop Chrome'], ...chromiumUse, trace: 'retain-on-failure', video: 'retain-on-failure' },
+    },
     // Cross-browser projects run locally, and in CI only when E2E_CROSS_BROWSER is set (the nightly)
     ...(crossBrowser ? crossBrowserProjects : []),
     {
