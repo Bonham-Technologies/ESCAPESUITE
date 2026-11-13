@@ -14,6 +14,7 @@ import { VideoDecodeManager } from './videoDecodeManager';
 import { isMeasuredWorkerDecodeEngine } from './workerDecodeEngine';
 import { elementSeekTarget } from './elementSeek';
 import { countWedgedSeek, settleSeekInFlight, wedgeCountAtStart } from './seekWedge';
+import { watchPresentedFrame, type PresentedFrameWatch } from './presentedFrame';
 import { ExportAbortedError, loadVideoElementFromUrl } from './exportTypes';
 import type { VideoSourceInfo } from '../workers/decodeWorker.types';
 
@@ -324,8 +325,13 @@ export class HTMLVideoFrameSource implements IFrameSource {
     // clip, or the outgoing one fetched twice a frame).
     const needsSeek = Math.abs(diff) > this.seekTolerance;
     if (needsSeek || video.seeking) {
+      // The sought frame's callback, registered before the seek so it cannot
+      // miss it: Chromium can fire 'seeked' while the element still paints the
+      // frame from before the seek (ESCSUITE-454, `presentedFrame.ts`).
+      let presented: PresentedFrameWatch | undefined;
       if (needsSeek) {
         video.pause();
+        presented = watchPresentedFrame(video);
         // Just past the requested time: a request on a frame's exact start would
         // otherwise show the frame before it a third of the time (ESCSUITE-265).
         video.currentTime = elementSeekTarget(timestamp);
@@ -370,6 +376,8 @@ export class HTMLVideoFrameSource implements IFrameSource {
       if (video.seeking && video.readyState < 2) {
         seekLanded = (await settleSeekInFlight(video)) || seekLanded;
       }
+
+      await presented?.settle(seekLanded);
     }
 
     // A request that seeks nothing still counts while an earlier seek is stuck:
