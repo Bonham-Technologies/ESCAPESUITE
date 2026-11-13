@@ -10,6 +10,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_TEXT_OV
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked } from './trackLock';
+import { pruneSelection } from './selectionPrune';
 
 export type OverlaySlice = Pick<
   EditorState,
@@ -168,7 +169,15 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
   // `findEmptyTrack` — an import keeps to its own track — and is made at the
   // top the first time. Its lock refuses the whole import (ESCSUITE-84), with
   // ESCSUITE-87's `null`.
-  addCaptionCues: (cues, style) => {
+  //
+  // ESCSUITE-442: `replace` takes every text clip already on the Captions
+  // track off in the same write, so a second transcription can swap the
+  // captions rather than stack a second copy on them, and one undo puts the
+  // old ones back. Only text clips are captions (the export's sidecar reads
+  // no others): `moveClipToTrack` lets a user drop a video or audio clip on
+  // that track, and Replace must not delete it. A removed cue leaves the
+  // selection.
+  addCaptionCues: (cues, style, options) => {
     const state = get();
     const { tracks: currentTracks, clips } = state.project.timeline;
     const existing = currentTracks.find((track) => track.kind === 'captions');
@@ -201,7 +210,10 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
         textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...style, text: cue.text },
       };
     });
-    const newClips = [...clips, ...added];
+    const kept = options?.replace
+      ? clips.filter((clip) => !(clip.trackId === trackId && clip.overlayType === 'text'))
+      : clips;
+    const newClips = [...kept, ...added];
 
     set({
       project: {
@@ -214,6 +226,7 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
           duration: calculateTimelineDuration(newClips),
         },
       },
+      ...(kept !== clips ? pruneSelection(newClips, state.selectedClipId, state.selectedClipIds) : {}),
       history: pushToHistory(state),
     });
 
