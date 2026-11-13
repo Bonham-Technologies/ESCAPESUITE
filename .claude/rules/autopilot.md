@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v18. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v19. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -90,7 +90,7 @@ stop; a steward also leaves no digest, which the fleet counts as a missed run.
 
 **Jira statuses.** The projects have only **To Do**, **In Progress** and **Done**. Use
 no other status. Labels are free-form: the class labels, `needs-owner`, `needs-operator`,
-`ap-steward-log`, `ap-asked`, `ap-scout`, `ap-security`, `ap-ignore`, `ap-merging`, `ap-site-review` and `ap-feature-<slug>`
+`ap-steward-log`, `ap-asked`, `ap-scout`, `ap-security`, `ap-ignore`, `ap-merging`, `ap-site-review`, `ap-seo` and `ap-feature-<slug>`
 need no setup; a feature label groups a feature's tickets and never replaces a class label.
 
 **The GitHub label `needs-owner`** may not exist yet. Before you first apply it in a
