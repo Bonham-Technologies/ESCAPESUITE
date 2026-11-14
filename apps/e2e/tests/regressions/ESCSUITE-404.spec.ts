@@ -32,7 +32,8 @@ import {
  */
 
 const CLIP_SECONDS = 10
-const NOTICE = 'Your browser will download a speech language pack once. Your audio never leaves this device.'
+// ESCSUITE-444: the notice names the language, here the browser's own (Playwright's default locale).
+const NOTICE = 'Your browser will download a speech language pack for English (United States) once. Your audio never leaves this device.'
 const WORDS = STUB_WORDS
 const UNAVAILABLE_NOTICE = 'On-device speech recognition is not available in this browser.'
 
@@ -71,7 +72,10 @@ test.describe('ESCSUITE-404: transcribe to captions on this device', () => {
     await expect(page.getByText(UNAVAILABLE_NOTICE)).toBeVisible()
     await expect(transcribeButton(page)).toHaveCount(0)
     const record = await stubRecord(page)
-    expect(record.available).toEqual([{ langs: [expect.any(String)], processLocally: true }])
+    // ESCSUITE-444: the select's language, which starts on the browser's own.
+    const chosen = await page.evaluate(() => navigator.language)
+    await expect(page.getByRole('combobox', { name: 'Transcription language' })).toHaveCount(0)
+    expect(record.available).toEqual([{ langs: [chosen], processLocally: true }])
     expect(record.install).toEqual([])
     expect(record.constructed).toBe(0)
   })
@@ -120,7 +124,7 @@ test.describe('ESCSUITE-404: transcribe to captions on this device', () => {
     for (const start of record.starts) {
       expect(start).toEqual({ processLocally: true, isTrack: true, kind: 'audio', readyState: 'live' })
     }
-    expect(record.available).toContainEqual({ langs: [expect.any(String)], processLocally: true })
+    expect(record.available).toEqual([{ langs: [await page.evaluate(() => navigator.language)], processLocally: true }])
     expect(record.maxLevel, 'the timeline’s sound reached the recogniser’s track').toBeGreaterThan(0.01)
 
     // Criterion 3: ordinary caption clips holding the stub's words.
@@ -161,7 +165,7 @@ test.describe('ESCSUITE-404: transcribe to captions on this device', () => {
     await page.getByRole('button', { name: 'Download language pack' }).click()
     await expect(page.getByText('Transcribed 2 captions onto the Captions track.')).toBeVisible({ timeout: 30_000 })
     const record = await stubRecord(page)
-    expect(record.install).toEqual([{ langs: [expect.any(String)], processLocally: true }])
+    expect(record.install).toEqual([{ langs: ['en-US'], processLocally: true }])
     for (const start of record.starts) expect(start.processLocally).toBe(true)
   })
 })

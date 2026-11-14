@@ -7,11 +7,14 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page now explicitly asks browsers to use HTTPS only, for the site's host and any name under it (ESCSUITE-459).
+- ESCAPECRAFT, ESCAPEPLAN: Recording Tips explain Float controls where the browser supports them, and the home page lists Remove silences and captions for ESCAPEARTIST (ESCSUITE-446).
+- Tests: the MP4 export parity checks wait for each sought frame to be shown before reading it, so a slow machine no longer makes them compare the frame from before the seek (ESCSUITE-437).
+- ESCAPEARTIST: Transcribe to captions has a language list beside its button, starting on the browser's language and remembered, so a recording in another language can be transcribed; the language-pack notice names the language (ESCSUITE-444).
+- ESCAPECRAFT: the Float controls window shows the 3-2-1 countdown in place of the timer, announces the take's state to screen readers, and prints why Record is unavailable (ESCSUITE-440).
 - ESCAPEARTIST: each pause in Remove silences has Go to and Play, so you can hear a pause, with a second either side, before deciding to keep or cut it (ESCSUITE-443).
 - ESCAPEARTIST: Keep in Remove silences moves keyboard focus to the next pause (or the previous one, or Cancel) instead of dropping it to the page (ESCSUITE-441).
 - ESCAPEARTIST: transcribing again asks whether to replace the existing captions or add to them, instead of stacking a second copy of every caption (ESCSUITE-442).
 - Tests: on-device transcription and the repair of WebM seek indexes are tested on more of their edge cases, and the shared package's branch-coverage floor rises to 93% (ESCSUITE-439).
-- ESCAPECRAFT: the Float controls window shows the 3-2-1 countdown in place of the timer, announces the take's state to screen readers, and prints why Record is unavailable (ESCSUITE-440).
 - ESCAPEARTIST: exports no longer sometimes repeat a frame after a cut or trim; WebM and GIF exports, and MP4 exports in Safari, wait for each video frame to be shown before drawing it (ESCSUITE-454).
 - ESCAPEPLAN: a link to a page that doesn't exist shows a "Page not found" page, with links home, to ESCAPECRAFT and to ESCAPEARTIST, and the hosted site answers it with a real 404 instead of the home page (ESCSUITE-455).
 - Tests: the test tooling is updated to Playwright 1.65, Vitest 5.1 and jsdom 31, with a workaround for a Firefox 159 crash that stopped the cross-browser accessibility checks from running.
