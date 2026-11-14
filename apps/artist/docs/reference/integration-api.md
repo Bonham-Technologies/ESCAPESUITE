@@ -68,8 +68,8 @@ answer (pinned in `App.session.test.tsx`).
 
 **`LOAD_VIDEO` and `?video=` fetch through the page's own `connect-src` (ESCSUITE-130)**:
 `loadVideoFromUrl` (`utils/integration.ts`) is a plain `fetch(url)`, so both are bound by whatever
-Content-Security-Policy the deployment sets — on the hosted deployment (`connect-src 'self'
-https://api.vercel.com https://vercel.live` in `vercel.json`) that means a **same-origin URL
+Content-Security-Policy the deployment sets — on the hosted deployment (`connect-src 'self'` in
+`vercel.json`) that means a **same-origin URL
 only**; a cross-origin one never leaves the page. The browser throws a bare `TypeError: Failed to
 fetch` for that refusal, a CORS refusal and an ordinary network failure alike, with no way to tell
 them apart from the exception — so `loadVideoFromUrl` catches it, resolves the URL's origin, and

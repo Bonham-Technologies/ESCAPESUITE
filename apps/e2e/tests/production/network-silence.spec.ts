@@ -191,15 +191,18 @@ test.describe('The network-silence check itself (ESCSUITE-402 negative cases)', 
 
     assertNetworkSilence(tracker)
 
-    // `api.vercel.com` is one of the two hosts the hosted CSP's `connect-src`
-    // lets through, so this becomes a real request — which the tracker records
-    // and then aborts, so nothing actually leaves the machine.
-    await page.evaluate(() => fetch('https://api.vercel.com/escsuite-402-probe').catch(() => {}))
+    // The hosted CSP lets no other host through `connect-src` (ESCSUITE-459),
+    // but it doesn't govern a window the page opens, so this becomes a real
+    // request — which the tracker records and then aborts, so nothing
+    // actually leaves the machine.
+    await page.evaluate(() => {
+      window.open('https://example.com/escsuite-402-probe')
+    })
     await expect
       .poll(() => tracker.violations().map((v) => v.via + ' ' + v.url))
-      .toContain('request https://api.vercel.com/escsuite-402-probe')
+      .toContain('request https://example.com/escsuite-402-probe')
 
-    expect(() => assertNetworkSilence(tracker)).toThrow(/api\.vercel\.com\/escsuite-402-probe/)
+    expect(() => assertNetworkSilence(tracker)).toThrow(/example\.com\/escsuite-402-probe/)
 
     await context.close()
   })
@@ -225,6 +228,26 @@ test.describe('The network-silence check itself (ESCSUITE-402 negative cases)', 
     expect(offenders).toContain('example.com')
     expect(offenders).not.toContain('va.vercel-scripts.com')
     expect(() => assertNetworkSilence(tracker)).toThrow(/example\.com/)
+
+    await context.close()
+  })
+
+  test('the CSP refuses the Vercel preview-toolbar hosts (ESCSUITE-459)', async ({ browser }) => {
+    const context = await browser.newContext()
+    const tracker = await trackNetworkSilence(context, { origin: ORIGIN })
+    const page = await context.newPage()
+    await page.goto(`${ORIGIN}/craft/`)
+    await waitForAppReady(page, 'craft')
+
+    await page.evaluate(async () => {
+      await fetch('https://api.vercel.com/escsuite-459-probe').catch(() => {})
+      await fetch('https://vercel.live/escsuite-459-probe').catch(() => {})
+    })
+    await expect
+      .poll(() => tracker.violations().map((v) => v.via + ' ' + new URL(v.url).hostname))
+      .toEqual(['csp-blocked api.vercel.com', 'csp-blocked vercel.live'])
+    // Refused by the policy, so neither ever became a request.
+    expect(tracker.requests().filter((url) => /vercel\.(com|live)\//.test(url))).toEqual([])
 
     await context.close()
   })

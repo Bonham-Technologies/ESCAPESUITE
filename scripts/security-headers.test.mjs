@@ -95,3 +95,27 @@ test('Permissions-Policy turns off features the suite never uses', () => {
     assert.equal(policy.get(feature), '()', `${feature} should be disabled`);
   }
 });
+
+test('the CSP allows no Vercel preview-toolbar host (ESCSUITE-459)', () => {
+  // vercel.live and api.vercel.com serve only Vercel's preview toolbar; the
+  // hosted site's analytics is same-origin (`/_vercel/insights/`).
+  const csp = siteWideHeaders().get('content-security-policy') ?? '';
+  assert.ok(csp, 'vercel.json sends no Content-Security-Policy');
+  for (const host of ['vercel.live', 'api.vercel.com']) {
+    assert.ok(!csp.includes(host), `the CSP should not allow ${host}`);
+  }
+  // Media, workers and scripts built from blob: URLs must keep working.
+  const policy = parseCsp(csp);
+  assert.equal(policy.get('connect-src'), "'self'");
+  assert.equal(policy.get('frame-src'), "'none'");
+  assert.equal(policy.get('worker-src'), "'self' blob:");
+  assert.equal(policy.get('media-src'), "'self' blob:");
+  assert.match(policy.get('script-src') ?? '', /(^| )blob:( |$)/);
+});
+
+test('every page sends Strict-Transport-Security with includeSubDomains, no preload (ESCSUITE-459)', () => {
+  assert.equal(
+    siteWideHeaders().get('strict-transport-security'),
+    'max-age=63072000; includeSubDomains'
+  );
+});
