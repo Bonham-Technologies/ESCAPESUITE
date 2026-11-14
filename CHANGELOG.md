@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEPLAN: the Known limitations page now lists the browser limits of Transcribe to captions and Float controls (ESCSUITE-445).
 - ESCAPECRAFT, ESCAPEPLAN: Recording Tips explain Float controls where the browser supports them, and the home page lists Remove silences and captions for ESCAPEARTIST (ESCSUITE-446).
 - Tests: the MP4 export parity checks wait for each sought frame to be shown before reading it, so a slow machine no longer makes them compare the frame from before the seek (ESCSUITE-437).
 - ESCAPEARTIST: Transcribe to captions has a language list beside its button, starting on the browser's language and remembered, so a recording in another language can be transcribed; the language-pack notice names the language (ESCSUITE-444).
