@@ -17,7 +17,7 @@ import { openFloatingControls, closeFloatingControls } from '../../utils/floatCo
  * No shim: headless Chromium implements `documentPictureInPicture` on a secure
  * origin and the window is a Playwright page of its own. It opens at the
  * context's viewport, so the window is set to the 360x160 the app asks for
- * before checking that everything fits.
+ * before checking that everything fits. Browsers without the API (WebKit) skip.
  */
 
 const CRAFT_URL = 'http://localhost:5174'
@@ -27,6 +27,12 @@ async function openCraft(page: Page): Promise<void> {
   await grantMediaPermissions(page)
   await page.goto(CRAFT_URL)
   await waitForAppReady(page, 'craft')
+  // WebKit has no Document Picture-in-Picture, so CRAFT draws no Float controls
+  // button there; float-controls.spec.ts (ESCSUITE-400) pins that absent case.
+  test.skip(
+    !(await page.evaluate(() => 'documentPictureInPicture' in window)),
+    'No Document Picture-in-Picture in this browser; float-controls.spec.ts covers the absent case'
+  )
   // Capture detection is async; a take started before it answers acquires nothing.
   const screenSource = page.locator('[class*="sourceToggle"]').filter({ hasText: 'Screen' }).last()
   await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
