@@ -90,7 +90,7 @@ export default function Home() {
             <ul className={styles.featureList}>
               <li>Multi-track timeline</li>
               <li>Blur &amp; redaction overlays</li>
-              <li>Keyframe animations</li>
+              <li>Remove silences, add captions</li>
               <li>MP4 &amp; WebM export</li>
             </ul>
             <button className="primary" onClick={() => launchTool('artist')}>

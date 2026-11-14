@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import Home from './Home'
@@ -127,6 +127,18 @@ describe('Home (open-source landing)', () => {
     renderHome()
     await user.click(screen.getByRole('button', { name: /use escapecraft/i }))
     expect(launchTool).toHaveBeenCalledWith('craft')
+  })
+
+  it('lists the editor features on the ESCAPEARTIST card, with silence removal and captions (ESCSUITE-446)', () => {
+    renderHome()
+    const card = screen.getByRole('heading', { name: 'ESCAPEARTIST' }).closest('div') as HTMLElement
+    const items = within(card).getAllByRole('listitem').map((li) => li.textContent)
+    expect(items).toEqual([
+      'Multi-track timeline',
+      'Blur & redaction overlays',
+      'Remove silences, add captions',
+      'MP4 & WebM export',
+    ])
   })
 
   it('launches ESCAPEARTIST from the tools-section "Use ESCAPEARTIST" CTA', async () => {
