@@ -231,4 +231,24 @@ test.describe('The network-silence check itself (ESCSUITE-402 negative cases)', 
 
     await context.close()
   })
+
+  test('the CSP refuses the Vercel preview-toolbar hosts (ESCSUITE-459)', async ({ browser }) => {
+    const context = await browser.newContext()
+    const tracker = await trackNetworkSilence(context, { origin: ORIGIN })
+    const page = await context.newPage()
+    await page.goto(`${ORIGIN}/craft/`)
+    await waitForAppReady(page, 'craft')
+
+    await page.evaluate(async () => {
+      await fetch('https://api.vercel.com/escsuite-459-probe').catch(() => {})
+      await fetch('https://vercel.live/escsuite-459-probe').catch(() => {})
+    })
+    await expect
+      .poll(() => tracker.violations().map((v) => v.via + ' ' + new URL(v.url).hostname))
+      .toEqual(['csp-blocked api.vercel.com', 'csp-blocked vercel.live'])
+    // Refused by the policy, so neither ever became a request.
+    expect(tracker.requests().filter((url) => /vercel\.(com|live)\//.test(url))).toEqual([])
+
+    await context.close()
+  })
 })

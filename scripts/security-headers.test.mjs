@@ -106,6 +106,8 @@ test('the CSP allows no Vercel preview-toolbar host (ESCSUITE-459)', () => {
   }
   // Media, workers and scripts built from blob: URLs must keep working.
   const policy = parseCsp(csp);
+  assert.equal(policy.get('connect-src'), "'self'");
+  assert.equal(policy.get('frame-src'), "'none'");
   assert.equal(policy.get('worker-src'), "'self' blob:");
   assert.equal(policy.get('media-src'), "'self' blob:");
   assert.match(policy.get('script-src') ?? '', /(^| )blob:( |$)/);
