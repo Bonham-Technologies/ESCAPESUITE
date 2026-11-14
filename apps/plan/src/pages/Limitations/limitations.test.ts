@@ -51,7 +51,7 @@ describe('LIMITATIONS', () => {
   // ESCSUITE-445: claim only what ARTIST's own doc and notice claim.
   it('states what the transcription language pack is and that no audio leaves the device', () => {
     const body = LIMITATIONS.find((l) => l.id === 'transcribe-captions')!.body.join(' ')
-    expect(body).toMatch(/Chrome, Edge, Opera and Brave/)
+    expect(body).toMatch(/Chrome on a computer, and Edge, Opera and Brave/)
     expect(body).toMatch(/real time/)
     expect(body).toMatch(/speech language pack/)
     expect(body).toMatch(/download/)
@@ -59,10 +59,20 @@ describe('LIMITATIONS', () => {
     expect(body).not.toMatch(/browser language only/i)
   })
 
-  it('says Float controls need Chromium and a top-level page', () => {
-    const body = LIMITATIONS.find((l) => l.id === 'float-controls')!.body.join(' ')
-    expect(body).toMatch(/Picture-in-Picture/)
-    expect(body).toMatch(/embed/)
+  // ESCSUITE-445: canFloatControls() feature-detects the API, so the entry must
+  // not promise "Chromium only" (some Firefox builds have it).
+  it('says Float controls need Document Picture-in-Picture and a top-level page', () => {
+    const entry = LIMITATIONS.find((l) => l.id === 'float-controls')!
+    const text = [entry.title, ...entry.body].join(' ')
+    expect(text).toMatch(/Document Picture-in-Picture/)
+    expect(text).toMatch(/embed/)
+    expect(text).not.toMatch(/Chromium (browsers )?only|only Chromium/i)
+  })
+
+  it('does not say ESCAPEARTIST picks where the language pack comes from', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'transcribe-captions')!.body.join(' ')
+    expect(body).toMatch(/does not choose, see or pass on that download/)
+    expect(body).not.toMatch(/Firefox, Safari and phones do not/)
   })
 
   it('cites the owner ruling for no mobile support', () => {
