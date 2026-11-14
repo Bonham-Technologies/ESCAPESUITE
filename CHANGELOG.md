@@ -7,6 +7,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Tests: the MP4 export parity checks wait for each sought frame to be shown before reading it, so a slow machine no longer makes them compare the frame from before the seek (ESCSUITE-437).
+- ESCAPEARTIST: Transcribe to captions has a language list beside its button, starting on the browser's language and remembered, so a recording in another language can be transcribed; the language-pack notice names the language (ESCSUITE-444).
 - ESCAPECRAFT: the Float controls window shows the 3-2-1 countdown in place of the timer, announces the take's state to screen readers, and prints why Record is unavailable (ESCSUITE-440).
 - ESCAPEARTIST: each pause in Remove silences has Go to and Play, so you can hear a pause, with a second either side, before deciding to keep or cut it (ESCSUITE-443).
 - ESCAPEARTIST: Keep in Remove silences moves keyboard focus to the next pause (or the previous one, or Cancel) instead of dropping it to the page (ESCSUITE-441).
