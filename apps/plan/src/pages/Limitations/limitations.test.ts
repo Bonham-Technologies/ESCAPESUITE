@@ -55,9 +55,9 @@ describe('LIMITATIONS', () => {
     expect(body).toMatch(/real time/)
     expect(body).toMatch(/speech language pack/)
     expect(body).toMatch(/download/)
-    // ARTIST's notice (TranscribeControl.tsx), word for word; plan cannot import ARTIST.
+    // ARTIST's notice (languagePackNotice in apps/artist/src/core/transcriptionLanguage.ts) for en-US, word for word; plan cannot import ARTIST.
     expect(body).toContain(
-      '“Your browser will download a speech language pack once. Your audio never leaves this device.”'
+      '“Your browser will download a speech language pack for English (United States) once. Your audio never leaves this device.”'
     )
     expect(body).not.toMatch(/browser language only/i)
   })
