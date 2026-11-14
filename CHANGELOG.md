@@ -6,7 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
-- Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page asks browsers to use HTTPS on the site and all its subdomains (ESCSUITE-459).
+- Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page now explicitly asks browsers to use HTTPS only, for the site's host and any name under it (ESCSUITE-459).
 - ESCAPEARTIST: each pause in Remove silences has Go to and Play, so you can hear a pause, with a second either side, before deciding to keep or cut it (ESCSUITE-443).
 - ESCAPEARTIST: Keep in Remove silences moves keyboard focus to the next pause (or the previous one, or Cancel) instead of dropping it to the page (ESCSUITE-441).
 - ESCAPEARTIST: transcribing again asks whether to replace the existing captions or add to them, instead of stacking a second copy of every caption (ESCSUITE-442).
