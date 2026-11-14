@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v19. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v21. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -83,12 +83,17 @@ statusCategory != Done`.
 2. File each inaccurate or stale claim once, unless an open finding has it, in the
    site's Jira key: the claim, the evidence and the corrected wording, labels
    `ap-owner-merge` and `ap-site-review`.
-3. Run `bin/seo-check <site>` (`docs/seo/site-baseline.md`) on each site, with a
-   10-minute command timeout. File one ticket per site and ERROR id, the id in its
-   summary, unless an open `ap-seo` ticket there has that id, in the site's Jira key with
-   the output as evidence, labels `ap-site-review`, `ap-seo` and the class the product's
-   rules give (`site/` is always `ap-owner-merge`; if unsure, the stricter). Warnings go
-   in the digest only; exit 2, a timeout or a crash is "not checked".
+3. Run `bin/seo-check <site>` (`docs/seo/site-baseline.md`) on each site, with a 10-minute
+   command timeout. File one ticket per site and ERROR id, the id in its summary, unless an
+   open `ap-seo` ticket there has that id, in the site's Jira key with the output as
+   evidence, labels `ap-site-review`, `ap-seo` and the class the product's rules give
+   (`site/` is always `ap-owner-merge`; if unsure, the stricter). Warnings go in the digest
+   only; exit 2, a timeout or a crash is "not checked". Add `--psi` when the previous fleet
+   digest is from an earlier calendar month (America/Denver): an SEO-18 ticket names the
+   metric, its p75, the threshold and the PageSpeed report link. On bonham.tech add
+   `--expect-link <site>` for every other site `bin/fleet sites` lists. SITE ids are filed
+   the same way, plus `ap-security` for SITE-1 to 4; SITE-4 (DNS, an owner step) goes to
+   BORG as `needs-operator`, one per domain unless an open BORG ticket names that domain.
 4. BTS has no builder: the owner has its tickets built from a bonham-ops thread on
    request, and the digest lists its open findings under **Waiting on you**, as
    "bonham.tech".
@@ -134,7 +139,8 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   merges in another repo can't be read from here); the security counts; tickets filed
   (input 4) and shipped (the digest's shipped list).
 - **Public sites:** the sites checked with each one's SEO errors and warnings (or "not
-  checked"), the findings filed (linked), and the oldest open
+  checked"), with `--psi` its LCP, INP and CLS (or "no field data" or "not checked"),
+  the findings filed (linked), and the oldest open
   finding (`ap-site-review`) with its age, or "none".
 - **Policy findings filed this run**, linked, or "none".
 - The tail of **Weekly digest** for this repo itself: **Open security alerts**,
