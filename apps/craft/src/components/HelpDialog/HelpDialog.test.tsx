@@ -21,6 +21,7 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreGetClientRects()
+  delete (window as unknown as { documentPictureInPicture?: unknown }).documentPictureInPicture
   document.body.innerHTML = ''
 })
 
@@ -173,5 +174,23 @@ describe('HelpDialog version line', () => {
 
     expect(screen.getByRole('dialog')).toHaveTextContent(`ESCAPECRAFT v${version}`)
     expect(screen.getByText(`ESCAPECRAFT v${version}`)).toHaveClass(styles.helpVersion)
+  })
+})
+
+describe('HelpDialog Float controls line (ESCSUITE-446)', () => {
+  it('names Float controls where Document Picture-in-Picture is available', () => {
+    ;(window as unknown as { documentPictureInPicture: unknown }).documentPictureInPicture = {
+      requestWindow: vi.fn(),
+    }
+    renderDialog()
+
+    expect(screen.getByText('Float controls')).toBeInTheDocument()
+    expect(screen.getByText(/stays on top of whatever you are recording/)).toBeInTheDocument()
+  })
+
+  it('leaves it out where the browser has no Document Picture-in-Picture', () => {
+    renderDialog()
+
+    expect(screen.queryByText('Float controls')).not.toBeInTheDocument()
   })
 })
