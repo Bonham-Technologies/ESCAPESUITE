@@ -5,6 +5,7 @@ import {
   TRANSCRIPTION_LANGUAGES,
   TRANSCRIPTION_LANGUAGE_KEY,
   canonicalLanguageTag,
+  isListedTranscriptionLanguage,
   languageName,
   readStoredTranscriptionLanguage,
   storeTranscriptionLanguage,
@@ -78,6 +79,14 @@ describe('transcriptionLanguageOptions', () => {
     expect(TRANSCRIPTION_LANGUAGES.length).toBeLessThanOrEqual(16);
     for (const tag of TRANSCRIPTION_LANGUAGES) expect(canonicalLanguageTag(tag)).toBe(tag);
     expect(new Set(TRANSCRIPTION_LANGUAGES).size).toBe(TRANSCRIPTION_LANGUAGES.length);
+  });
+});
+
+describe('isListedTranscriptionLanguage', () => {
+  it('says whether a canonical tag is one of the fixed list', () => {
+    expect(isListedTranscriptionLanguage('en-US')).toBe(true);
+    expect(isListedTranscriptionLanguage('ja-JP')).toBe(true);
+    expect(isListedTranscriptionLanguage('sv-SE')).toBe(false);
   });
 });
 

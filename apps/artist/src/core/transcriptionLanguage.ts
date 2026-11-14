@@ -35,6 +35,11 @@ export const TRANSCRIPTION_LANGUAGES = [
   'es-ES',
 ] as const;
 
+/** Whether `tag` is one of `TRANSCRIPTION_LANGUAGES`. */
+export function isListedTranscriptionLanguage(tag: string): boolean {
+  return (TRANSCRIPTION_LANGUAGES as readonly string[]).includes(tag);
+}
+
 /** `value` as a canonical BCP 47 tag (`EN-us` → `en-US`), or `null` when it is not one. */
 export function canonicalLanguageTag(value: unknown): string | null {
   if (typeof value !== 'string' || !value) return null;

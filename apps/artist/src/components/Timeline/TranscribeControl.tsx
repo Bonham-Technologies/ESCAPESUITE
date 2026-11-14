@@ -10,6 +10,7 @@ import {
 } from '../../core/speechRecognitionLocal';
 import {
   canonicalLanguageTag,
+  isListedTranscriptionLanguage,
   languageName,
   languagePackNotice,
   readStoredTranscriptionLanguage,
@@ -59,8 +60,9 @@ function clock(seconds: number): string {
  * press, `available()` is asked with `processLocally: true` for the language
  * chosen in the select beside the button (ESCSUITE-444: the browser's own
  * unless the user picked another, remembered in `localStorage`). `unavailable`
- * for the browser's own language hides the control for good and says so; for
- * another language it says so and stays, so another can be picked. The
+ * for the browser's own language, when it is one the list offers, hides the
+ * control for good and says so; for any other language it says so and stays,
+ * so another can be picked. The
  * transcription itself (`core/transcribe.ts`) is a dynamic `import()` on the
  * first click.
  *
@@ -97,6 +99,10 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
   // One run at a time: a second press while the first is still asking the
   // browser (before the button turns into "Stop transcribing") is ignored.
   const runningRef = useRef(false);
+  // The same, as state for the language select (ESCSUITE-444): the phase is
+  // still idle while `available()` is being asked, and a language changed then
+  // would leave the notice naming one language while another is installed.
+  const [running, setRunning] = useState(false);
   // Nothing starts listening after the editor has gone, e.g. once a language
   // pack the user asked for finishes installing.
   const mountedRef = useRef(true);
@@ -268,12 +274,15 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
     if (answer === 'available') await transcribe();
     else if (answer === 'downloadable') setPhase({ kind: 'consent' });
     else if (answer === 'downloading') await install();
-    else if (lang === browserLanguage) {
+    else if (lang === browserLanguage && isListedTranscriptionLanguage(lang)) {
+      // One of the languages Chrome offers packs for, and the browser's own:
+      // this browser has no on-device recognition worth offering.
       setHidden(true);
       showNotification('On-device speech recognition is not available in this browser.', 'info');
     } else {
-      // Another language than the browser's (ESCSUITE-444): this one cannot be
-      // had, but another may, so the control stays.
+      // Another language than the browser's, or a browser language the list
+      // lacks (ESCSUITE-444): this one cannot be had, but another may, so the
+      // control stays.
       showNotification(`On-device speech recognition is not available for ${languageName(lang)} in this browser.`, 'info');
     }
   }, [browserLanguage, install, lang, showNotification, transcribe]);
@@ -302,10 +311,12 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
   const runOnce = useCallback(async (task: () => Promise<void>) => {
     if (runningRef.current) return;
     runningRef.current = true;
+    setRunning(true);
     try {
       await task();
     } finally {
       runningRef.current = false;
+      setRunning(false);
     }
   }, []);
 
@@ -370,7 +381,7 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
         value={lang}
         // Fixed while anything is under way, so the notice names, and the run
         // hears, the language that was chosen when the button was pressed.
-        disabled={phase.kind !== 'idle'}
+        disabled={running || phase.kind !== 'idle'}
         onChange={(event) => {
           setLang(event.target.value);
           storeTranscriptionLanguage(event.target.value);

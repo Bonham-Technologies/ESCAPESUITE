@@ -43,12 +43,15 @@ by static detection alone (`getLocalRecognitionCtor`): a `SpeechRecognition` (or
 `processLocally` property, in a browser that is not a bare Chromium embedder (below). Without
 these **no control is rendered**. `available()` is first asked when the user presses
 **Transcribe to captions**, and again on every press, for the language chosen in the select
-beside it. If it answers `unavailable` for the **browser's own** language, the control
-**hides itself on that first press** and says "On-device speech recognition is not available
-in this browser." (AC1, refined: where the API exists but no language pack can be had, the
-control is visible until the first press.) If it answers `unavailable` for **another**
-language the user picked, the control stays and says "On-device speech recognition is not
-available for *language* in this browser.", so another can be picked (ESCSUITE-444).
+beside it. If it answers `unavailable` for the **browser's own** language and that language
+is one of the listed ones (`TRANSCRIPTION_LANGUAGES`, for which Chrome offers packs), the
+control **hides itself on that first press** and says "On-device speech recognition is not
+available in this browser." (AC1, refined: where the API exists but no language pack can be
+had, the control is visible until the first press.) If it answers `unavailable` for **any
+other** language (one the user picked, or a browser language the list lacks, such as
+`sv-SE`), the control stays and says "On-device speech recognition is not available for
+*language* in this browser.", so another can be picked (ESCSUITE-444). Hiding stays for the
+session; a reload shows the control again.
 
 **Why nothing is asked on load, and the brand gate.** Blink's `OnDeviceWebSpeechAvailable`
 feature puts `available()`, `install()` and `processLocally` on the page, but the browser-side
@@ -159,8 +162,9 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   like the timeline height and keyframe panel layout; a stored value that is not a BCP 47 tag
   is ignored, a remembered tag the list does not have is still offered, and where storage is
   blocked (a sandboxed frame, some private windows) the choice lasts until the editor closes.
-  Reading it touches storage only, never the speech API. The select is disabled whenever the
-  control is not idle (asking, the notice, downloading, mixing, listening), so the notice names,
+  Reading it touches storage only, never the speech API. The select is disabled from the
+  press until the control is idle again (asking `available()`, the replace question, the
+  notice, downloading, mixing, listening), so the notice names,
   and the run hears, the language chosen when the button was pressed. The button's tooltip
   names it too. There is no translation and no speaker labels.
 - **Times are estimates.** The recogniser reports words, not times. A cue starts
@@ -192,8 +196,10 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   transcribe.`; `No speech was heard, so no captions were added.`; `The Captions track is
   locked, so no captions were added.` (checked before listening and again at the end);
   `Transcription stopped. No captions were added.`; the recogniser's errors in words
-  (`describeRecognitionError`). If `available()` answers `unavailable` on a press, the control
-  hides itself and says "On-device speech recognition is not available in this browser."
+  (`describeRecognitionError`). If `available()` answers `unavailable` on a press for the
+  browser's own, listed language, the control hides itself and says "On-device speech
+  recognition is not available in this browser."; for any other language it stays and says
+  "On-device speech recognition is not available for *language* in this browser."
 
 ## Bundle
 
@@ -244,11 +250,12 @@ on demand.
   language"): the select beside the button on the browser's language with nothing asked on
   mount, the browser's own language first when unlisted, `available()` and `transcribeTimeline`
   given the chosen tag, remembered across a remount, blocked storage, the notice naming the
-  language and `install()` given it, disabled while busy, and an unavailable picked language
-  keeping the control. `apps/e2e/tests/regressions/ESCSUITE-444.spec.ts`: the stub's
+  language and `install()` given it, disabled while busy and while `available()` is being
+  asked, and an unavailable picked (or unlisted browser) language keeping the control. `apps/e2e/tests/regressions/ESCSUITE-444.spec.ts`: the stub's
   `available()` receives `de-DE` after German is picked, the choice survives a reload, the
   notice names "Japanese (Japan)" and `install()` gets `ja-JP`, axe finds nothing on the select,
-  and with a `sv-SE` browser locale Swedish is listed first and asked for.
+  and with a `sv-SE` browser locale Swedish is listed first and asked for, and its
+  `unavailable` keeps the control so English can be asked for next.
   `ESCSUITE-404.spec.ts` now asserts `available()` and `install()` receive the browser's own tag.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a
   Chromium-only brand; no `available()` or `install()` call on mount; hidden after a press

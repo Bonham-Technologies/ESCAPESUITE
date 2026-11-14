@@ -94,7 +94,7 @@ test.describe('ESCSUITE-444: transcribe in the language the user picks', () => {
   test.describe('with a browser language the list does not have', () => {
     test.use({ locale: 'sv-SE' })
 
-    test("offers the browser's own language first, and asks for it on the press", async ({ page }) => {
+    test("offers the browser's own language first, asks for it on the press, and stays when it cannot be had", async ({ page }) => {
       await installSpeechStub(page, { api: 'local', answer: 'unavailable' })
       await openEditor(page)
       await expect(languageSelect(page)).toHaveValue('sv-SE')
@@ -102,11 +102,21 @@ test.describe('ESCSUITE-444: transcribe in the language the user picks', () => {
       await expect(languageSelect(page).locator('option', { hasText: 'English (United States)' })).toHaveCount(1)
 
       await transcribeButton(page).click()
-      // The browser's own language cannot be had: the control hides, as before.
-      await expect(page.getByText('On-device speech recognition is not available in this browser.')).toBeVisible()
-      await expect(transcribeButton(page)).toHaveCount(0)
-      await expect(languageSelect(page)).toHaveCount(0)
+      // Swedish cannot be had, but a listed language may: the control stays,
+      // naming the language, instead of hiding as if the browser had none.
+      await expect(
+        page.getByText('On-device speech recognition is not available for Swedish (Sweden) in this browser.')
+      ).toBeVisible()
+      await expect(transcribeButton(page)).toBeEnabled()
+      await expect(languageSelect(page)).toBeEnabled()
       expect((await stubRecord(page)).available).toEqual([{ langs: ['sv-SE'], processLocally: true }])
+
+      await languageSelect(page).selectOption('en-US')
+      await transcribeButton(page).click()
+      await expect.poll(async () => (await stubRecord(page)).available).toEqual([
+        { langs: ['sv-SE'], processLocally: true },
+        { langs: ['en-US'], processLocally: true },
+      ])
     })
   })
 })

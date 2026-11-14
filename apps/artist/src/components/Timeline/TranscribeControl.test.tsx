@@ -874,6 +874,44 @@ describe('TranscribeControl: the spoken language (ESCSUITE-444)', () => {
     expect(select()).toBeDisabled();
   });
 
+  it('cannot be changed while the browser is being asked, so the answer is for the language shown', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    let answer!: (value: string) => void;
+    available.mockImplementation(() => new Promise<string>((resolve) => (answer = resolve)));
+    install.mockResolvedValue(true);
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    renderControl();
+    await user.selectOptions(select(), 'fr-FR');
+    await user.click(button()!);
+    expect(available).toHaveBeenCalledWith({ langs: ['fr-FR'], processLocally: true });
+    expect(select()).toBeDisabled();
+    await act(async () => answer('downloadable'));
+    expect(screen.getByText(languagePackNotice('French (France)'))).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Download language pack' }));
+    expect(install).toHaveBeenCalledWith({ langs: ['fr-FR'], processLocally: true });
+    await waitFor(() => expect(captionClips()).toHaveLength(2));
+    expect(select()).toBeEnabled();
+  });
+
+  it("stays, and says which language, when the browser's own language is one the list lacks and is unavailable", async () => {
+    // A Swedish browser with no Swedish pack can still transcribe English,
+    // so "not available in this browser" and hiding the control would be wrong.
+    const user = userEvent.setup();
+    installRecognition();
+    vi.stubGlobal('navigator', { ...navigator, language: 'sv-SE' });
+    available.mockResolvedValue('unavailable');
+    const { showNotification } = renderControl();
+    await user.click(button()!);
+    expect(available).toHaveBeenCalledWith({ langs: ['sv-SE'], processLocally: true });
+    expect(showNotification).toHaveBeenCalledWith(
+      'On-device speech recognition is not available for Swedish (Sweden) in this browser.',
+      'info'
+    );
+    expect(button()).toBeEnabled();
+    expect(select()).toBeEnabled();
+  });
+
   it('stays, and says which language, when another language than the browser’s is unavailable', async () => {
     const user = userEvent.setup();
     installRecognition();
