@@ -5,7 +5,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { LANGUAGE_PACK_NOTICE, TranscribeControl } from './TranscribeControl';
+import { TranscribeControl } from './TranscribeControl';
+import { TRANSCRIPTION_LANGUAGE_KEY, languagePackNotice } from '../../core/transcriptionLanguage';
 import { useEditorStore } from '../../store/projectStore';
 import { resetStoreForTest, store } from '../../test/fixtures/projectStore';
 import { serializeCaptions } from '../../core/captions';
@@ -46,8 +47,12 @@ const captionClips = () => {
   return captionTrack ? clips.filter((c) => c.trackId === captionTrack.id) : [];
 };
 
+// jsdom's own language, which the select starts on (ESCSUITE-444).
+const LANGUAGE_PACK_NOTICE = languagePackNotice('English (United States)');
+
 beforeEach(() => {
   resetStoreForTest();
+  localStorage.clear();
   available.mockReset();
   install.mockReset();
   transcribeTimeline.mockReset();
@@ -487,7 +492,7 @@ describe('TranscribeControl: the language pack (ESCSUITE-404)', () => {
     await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
     expect(screen.getByText(LANGUAGE_PACK_NOTICE)).toBeInTheDocument();
     expect(LANGUAGE_PACK_NOTICE).toBe(
-      'Your browser will download a speech language pack once. Your audio never leaves this device.'
+      'Your browser will download a speech language pack for English (United States) once. Your audio never leaves this device.'
     );
     expect(install).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Download language pack' })).toHaveFocus();
@@ -721,5 +726,172 @@ describe('TranscribeControl: captions already on the track (ESCSUITE-442)', () =
 
     expect(dialog()).toBeNull();
     await waitFor(() => expect(captionClips()).toHaveLength(2));
+  });
+});
+
+// ESCSUITE-444: the spoken language used to be the browser's, always, so a
+// recording in any other language could not be transcribed.
+describe('TranscribeControl: the spoken language (ESCSUITE-444)', () => {
+  const select = () => screen.getByRole('combobox', { name: 'Transcription language' });
+  const optionValues = () =>
+    Array.from((select() as HTMLSelectElement).options).map((option) => option.value);
+
+  it("sits beside the button, starting on the browser's language, and asks the browser nothing on mount", async () => {
+    installRecognition();
+    available.mockResolvedValue('available');
+    const { container } = renderControl();
+    await act(async () => {});
+    expect(select()).toHaveValue(navigator.language);
+    expect(select()).toBeEnabled();
+    expect(screen.getByRole('option', { name: 'English (United States)' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Japanese (Japan)' })).toBeInTheDocument();
+    // In the control's own row, just before the button.
+    const row = container.firstElementChild!;
+    expect(row).toContainElement(select());
+    expect(select().compareDocumentPosition(button()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(available).not.toHaveBeenCalled();
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('is not rendered where the control is not', async () => {
+    vi.stubGlobal('SpeechRecognition', undefined);
+    vi.stubGlobal('webkitSpeechRecognition', undefined);
+    renderControl();
+    await act(async () => {});
+    expect(screen.queryByRole('combobox')).toBeNull();
+  });
+
+  it("lists the browser's own language first when the list does not have it", async () => {
+    installRecognition();
+    vi.stubGlobal('navigator', { ...navigator, language: 'sv-SE' });
+    renderControl();
+    expect(select()).toHaveValue('sv-SE');
+    expect(optionValues()[0]).toBe('sv-SE');
+    expect(screen.getByRole('option', { name: 'Swedish (Sweden)' })).toBeInTheDocument();
+    expect(optionValues()).toContain('en-US');
+  });
+
+  it('asks available() on the press for the chosen language only, and transcribes in it', async () => {
+    const user = userEvent.setup();
+    const Recognition = installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    renderControl();
+    await user.selectOptions(select(), 'de-DE');
+    expect(available).not.toHaveBeenCalled();
+
+    await user.click(button()!);
+    expect(available).toHaveBeenCalledTimes(1);
+    expect(available).toHaveBeenCalledWith({ langs: ['de-DE'], processLocally: true });
+    await waitFor(() => expect(captionClips()).toHaveLength(2));
+    expect(transcribeTimeline).toHaveBeenCalledWith(expect.objectContaining({ lang: 'de-DE', Recognition }));
+  });
+
+  it('is remembered for the next time the editor opens', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    const first = renderControl();
+    await user.selectOptions(select(), 'fr-FR');
+    expect(localStorage.getItem(TRANSCRIPTION_LANGUAGE_KEY)).toBe('fr-FR');
+    first.unmount();
+
+    available.mockResolvedValue('unavailable');
+    renderControl();
+    expect(select()).toHaveValue('fr-FR');
+    await user.click(button()!);
+    expect(available).toHaveBeenCalledWith({ langs: ['fr-FR'], processLocally: true });
+  });
+
+  it('keeps a remembered language the list does not have', async () => {
+    installRecognition();
+    localStorage.setItem(TRANSCRIPTION_LANGUAGE_KEY, 'da-DK');
+    renderControl();
+    expect(select()).toHaveValue('da-DK');
+    expect(screen.getByRole('option', { name: 'Danish (Denmark)' })).toBeInTheDocument();
+  });
+
+  it("starts on the browser's language when what is stored is not a language", async () => {
+    installRecognition();
+    localStorage.setItem(TRANSCRIPTION_LANGUAGE_KEY, '<not a tag>');
+    renderControl();
+    expect(select()).toHaveValue(navigator.language);
+  });
+
+  it('still works, unremembered, where storage is blocked', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockResolvedValue([]);
+    vi.spyOn(localStorage, 'getItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('blocked', 'SecurityError');
+    });
+    try {
+      const { showNotification } = renderControl();
+      expect(select()).toHaveValue(navigator.language);
+      await user.selectOptions(select(), 'it-IT');
+      expect(select()).toHaveValue('it-IT');
+      await user.click(button()!);
+      expect(available).toHaveBeenCalledWith({ langs: ['it-IT'], processLocally: true });
+      await waitFor(() => expect(showNotification).toHaveBeenCalledWith('No speech was heard, so no captions were added.', 'info'));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('names the chosen language in the language-pack notice, and installs that one', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('downloadable');
+    install.mockResolvedValue(true);
+    transcribeTimeline.mockResolvedValue(STUB_WORDS);
+    renderControl();
+    await user.selectOptions(select(), 'ja-JP');
+    await user.click(button()!);
+    expect(
+      screen.getByText(
+        'Your browser will download a speech language pack for Japanese (Japan) once. Your audio never leaves this device.'
+      )
+    ).toBeInTheDocument();
+    // Not changeable under the notice, so what it names is what is installed.
+    expect(select()).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Download language pack' }));
+    expect(install).toHaveBeenCalledWith({ langs: ['ja-JP'], processLocally: true });
+    await waitFor(() => expect(captionClips()).toHaveLength(2));
+    expect(transcribeTimeline).toHaveBeenCalledWith(expect.objectContaining({ lang: 'ja-JP' }));
+  });
+
+  it('cannot be changed while a run is going', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    transcribeTimeline.mockImplementation(() => new Promise(() => {}));
+    renderControl();
+    await user.click(button()!);
+    await screen.findByRole('button', { name: 'Stop transcribing' });
+    expect(select()).toBeDisabled();
+  });
+
+  it('stays, and says which language, when another language than the browser’s is unavailable', async () => {
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValueOnce('unavailable').mockResolvedValueOnce('available');
+    transcribeTimeline.mockResolvedValue([]);
+    const { showNotification } = renderControl();
+    await user.selectOptions(select(), 'hi-IN');
+    await user.click(button()!);
+    expect(showNotification).toHaveBeenCalledWith(
+      'On-device speech recognition is not available for Hindi (India) in this browser.',
+      'info'
+    );
+    expect(button()).toBeEnabled();
+    expect(select()).toBeEnabled();
+
+    await user.selectOptions(select(), 'en-US');
+    await user.click(button()!);
+    expect(available).toHaveBeenLastCalledWith({ langs: ['en-US'], processLocally: true });
+    await waitFor(() => expect(showNotification).toHaveBeenCalledWith('No speech was heard, so no captions were added.', 'info'));
   });
 });

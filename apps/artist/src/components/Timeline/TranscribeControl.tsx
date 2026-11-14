@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import { captionStyleFor, captionWrapColumns, wrapCaptionText } from '../../core/captions';
@@ -8,11 +8,15 @@ import {
   probeLocalRecognition,
   transcriptionLanguage,
 } from '../../core/speechRecognitionLocal';
+import {
+  canonicalLanguageTag,
+  languageName,
+  languagePackNotice,
+  readStoredTranscriptionLanguage,
+  storeTranscriptionLanguage,
+  transcriptionLanguageOptions,
+} from '../../core/transcriptionLanguage';
 import styles from './TranscribeControl.module.css';
-
-/** The notice shown before the browser downloads a language pack (ESCSUITE-404). Owner-approved wording. */
-export const LANGUAGE_PACK_NOTICE =
-  'Your browser will download a speech language pack once. Your audio never leaves this device.';
 
 /** What a press asks when the Captions track already holds captions (ESCSUITE-442). */
 export const REPLACE_QUESTION = 'Replace the existing captions, or add to them?';
@@ -52,12 +56,15 @@ function clock(seconds: number): string {
  * called until the user presses the button. `available()` must not run on
  * mount, because in a bare Chromium embedder it kills the page's renderer and
  * the whole editor with it, for people who never asked to transcribe. On the
- * press, `available()` is asked with `processLocally: true` for the browser's
- * language; `unavailable` hides the control for good and says so. The
+ * press, `available()` is asked with `processLocally: true` for the language
+ * chosen in the select beside the button (ESCSUITE-444: the browser's own
+ * unless the user picked another, remembered in `localStorage`). `unavailable`
+ * for the browser's own language hides the control for good and says so; for
+ * another language it says so and stays, so another can be picked. The
  * transcription itself (`core/transcribe.ts`) is a dynamic `import()` on the
  * first click.
  *
- * A `downloadable` answer shows `LANGUAGE_PACK_NOTICE` first, and the browser
+ * A `downloadable` answer shows `languagePackNotice` first, and the browser
  * downloads the pack only when the user presses "Download language pack". The
  * cues land on the Captions track through `addCaptionCues`: one history
  * entry, so one undo takes the whole transcription back off.
@@ -70,7 +77,12 @@ function clock(seconds: number): string {
  * caption on the first, and both were drawn and burned into the export.
  */
 export function TranscribeControl({ showNotification, onDialogOpenChange }: TranscribeControlProps) {
-  const lang = transcriptionLanguage();
+  // ESCSUITE-444: the spoken language, chosen beside the button. Reading the
+  // remembered choice touches storage only, never the speech API.
+  const [browserLanguage] = useState(() => canonicalLanguageTag(transcriptionLanguage()) ?? 'en-US');
+  const [lang, setLang] = useState(() => readStoredTranscriptionLanguage() ?? browserLanguage);
+  const languages = useMemo(() => transcriptionLanguageOptions(lang, browserLanguage), [lang, browserLanguage]);
+  const langName = languageName(lang);
   // Static detection only: calls nothing on the API (see above).
   const [supported] = useState(() => getLocalRecognitionCtor() !== null);
   // Set when a press finds on-device recognition unavailable for this language.
@@ -256,11 +268,15 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
     if (answer === 'available') await transcribe();
     else if (answer === 'downloadable') setPhase({ kind: 'consent' });
     else if (answer === 'downloading') await install();
-    else {
+    else if (lang === browserLanguage) {
       setHidden(true);
       showNotification('On-device speech recognition is not available in this browser.', 'info');
+    } else {
+      // Another language than the browser's (ESCSUITE-444): this one cannot be
+      // had, but another may, so the control stays.
+      showNotification(`On-device speech recognition is not available for ${languageName(lang)} in this browser.`, 'info');
     }
-  }, [install, lang, showNotification, transcribe]);
+  }, [browserLanguage, install, lang, showNotification, transcribe]);
 
   const start = useCallback(async () => {
     const { tracks, clips } = useEditorStore.getState().project.timeline;
@@ -347,6 +363,25 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       {phase.kind === 'listening' && (
         <span className={styles.status}>{`${clock(phase.played)} / ${clock(phase.total)}`}</span>
       )}
+      <select
+        className={styles.language}
+        aria-label="Transcription language"
+        title="The language spoken in the timeline's sound"
+        value={lang}
+        // Fixed while anything is under way, so the notice names, and the run
+        // hears, the language that was chosen when the button was pressed.
+        disabled={phase.kind !== 'idle'}
+        onChange={(event) => {
+          setLang(event.target.value);
+          storeTranscriptionLanguage(event.target.value);
+        }}
+      >
+        {languages.map((tag) => (
+          <option key={tag} value={tag}>
+            {languageName(tag)}
+          </option>
+        ))}
+      </select>
       {phase.kind !== 'installing' && (
         <button
           ref={mainRef}
@@ -357,7 +392,7 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
           title={
             busy
               ? undefined
-              : `Make captions from the timeline's sound with your browser's on-device speech recognition (${lang})`
+              : `Make captions from the timeline's sound with your browser's on-device speech recognition (${langName})`
           }
         >
           {busy ? 'Stop transcribing' : 'Transcribe to captions'}
@@ -395,7 +430,7 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       )}
       {phase.kind === 'consent' && (
         <div className={styles.notice} role="group" aria-label="Speech language pack">
-          <p className={styles.noticeText}>{LANGUAGE_PACK_NOTICE}</p>
+          <p className={styles.noticeText}>{languagePackNotice(langName)}</p>
           <div className={styles.noticeActions}>
             <button type="button" className={styles.button} onClick={() => setPhase({ kind: 'idle' })}>
               Cancel

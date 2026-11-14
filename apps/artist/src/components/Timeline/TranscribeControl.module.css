@@ -43,6 +43,34 @@
   background: var(--accent-fill-hover);
 }
 
+/* The spoken language (ESCSUITE-444): ResolutionPicker's select, at this row's size. */
+.language {
+  min-width: 0;
+  max-width: 180px;
+  padding: 3px 6px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color var(--transition-fast);
+}
+
+.language:hover:not(:disabled) {
+  border-color: var(--accent-primary);
+}
+
+.language:focus {
+  outline: none;
+  border-color: var(--accent-ring);
+}
+
+.language:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .status {
   font-size: 11px;
   color: var(--text-secondary);

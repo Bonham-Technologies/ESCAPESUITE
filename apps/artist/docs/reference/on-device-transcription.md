@@ -16,8 +16,10 @@ anything else anywhere.
   language. It does this only when
   1. `SpeechRecognition.available({ langs: [lang], processLocally: true })` answers
      `downloadable`, and
-  2. the user has read the notice "Your browser will download a speech language pack once.
-     Your audio never leaves this device." and pressed **Download language pack**.
+  2. the user has read the notice "Your browser will download a speech language pack for
+     *language* once. Your audio never leaves this device." (*language* is the chosen one's
+     English name, such as "Japanese (Japan)", ESCSUITE-444) and pressed **Download language
+     pack**.
 
   ESCAPEARTIST then calls `SpeechRecognition.install({ langs: [lang], processLocally: true })`
   and the **browser** downloads the pack from **its own vendor**. Chrome downloads it from
@@ -40,10 +42,13 @@ by static detection alone (`getLocalRecognitionCtor`): a `SpeechRecognition` (or
 `webkitSpeechRecognition`) constructor with static `available()` and `install()` and a
 `processLocally` property, in a browser that is not a bare Chromium embedder (below). Without
 these **no control is rendered**. `available()` is first asked when the user presses
-**Transcribe to captions**, and again on every press. If it answers `unavailable` for the
-browser's language, the control **hides itself on that first press** and says "On-device
-speech recognition is not available in this browser." (AC1, refined: where the API exists but
-no language pack can be had, the control is visible until the first press.)
+**Transcribe to captions**, and again on every press, for the language chosen in the select
+beside it. If it answers `unavailable` for the **browser's own** language, the control
+**hides itself on that first press** and says "On-device speech recognition is not available
+in this browser." (AC1, refined: where the API exists but no language pack can be had, the
+control is visible until the first press.) If it answers `unavailable` for **another**
+language the user picked, the control stays and says "On-device speech recognition is not
+available for *language* in this browser.", so another can be picked (ESCSUITE-444).
 
 **Why nothing is asked on load, and the brand gate.** Blink's `OnDeviceWebSpeechAvailable`
 feature puts `available()`, `install()` and `processLocally` on the page, but the browser-side
@@ -140,8 +145,24 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   "Downloading the speech language pack…") is in a polite live region that is always in the
   page; the running `m:ss / m:ss` clock and the preparing percentage sit outside it, so they
   are not read out at every step.
-- **Language:** the browser's own (`navigator.language`, `en-US` if it has none). There is no
-  language picker, no translation and no speaker labels.
+- **Language (ESCSUITE-444):** a **Transcription language** select (its accessible name; the
+  row has no room for a visible label) sits just before the button. It starts on the
+  browser's own language (`navigator.language`, `en-US` if it has none) and offers, after it,
+  a short fixed list (`TRANSCRIPTION_LANGUAGES` in `core/transcriptionLanguage.ts`): Chinese
+  (China), Dutch, English (UK and US), French, German, Hindi, Italian, Japanese, Korean,
+  Polish, Portuguese (Brazil) and Spanish (Spain), widely spoken languages for which Chrome
+  offers on-device language packs. The browser's own language is listed first when the list
+  does not have it. Options are named in English with `Intl.DisplayNames` ("German
+  (Germany)"), or by their tag where the browser cannot name them. Offering a language
+  promises nothing: whether it can be recognised is `available()`'s answer on the press.
+  The choice is **remembered** in `localStorage` under `escapeartist-transcription-language`,
+  like the timeline height and keyframe panel layout; a stored value that is not a BCP 47 tag
+  is ignored, a remembered tag the list does not have is still offered, and where storage is
+  blocked (a sandboxed frame, some private windows) the choice lasts until the editor closes.
+  Reading it touches storage only, never the speech API. The select is disabled whenever the
+  control is not idle (asking, the notice, downloading, mixing, listening), so the notice names,
+  and the run hears, the language chosen when the button was pressed. The button's tooltip
+  names it too. There is no translation and no speaker labels.
 - **Times are estimates.** The recogniser reports words, not times. A cue starts
   `HEARD_LEAD_SECONDS` (0.3 s) before the first interim result for its words and ends when
   the recogniser settled on them (their final result), both read from the playback clock.
@@ -176,8 +197,9 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
 
 ## Bundle
 
-`core/speechRecognitionLocal.ts` (the feature probe, `available()` / `install()`) and
-`components/Timeline/TranscribeControl.tsx` are imported statically. `core/transcribe.ts` is a
+`core/speechRecognitionLocal.ts` (the feature probe, `available()` / `install()`),
+`core/transcriptionLanguage.ts` (the language list and the remembered choice, ESCSUITE-444)
+and `components/Timeline/TranscribeControl.tsx` are imported statically. `core/transcribe.ts` is a
 dynamic `import()` on the first click. **Every build here sets `inlineDynamicImports: true`**
 (`vite.config.ts`, see `build-configuration.md`), so today that module is inlined into the
 one bundle: a few KB of code that does nothing until the click. It runs no top-level side
@@ -216,6 +238,18 @@ on demand.
   WebKit, where mediabunny's `BlobSource` reads 64 KiB slices instead of streaming),
   Stop then frees the control within 1 s and nothing is heard or added; and with the stub's
   `stopNeverEnds` mode the 2 captions land within 8 s of the clock reading the clip's end.
+- ESCSUITE-444: `core/transcriptionLanguage.test.ts` (tags canonicalised and refused, names
+  and their fallback, the options' order and dedupe, remembered, ignored when not a tag,
+  forgotten quietly where storage throws); `TranscribeControl.test.tsx` ("the spoken
+  language"): the select beside the button on the browser's language with nothing asked on
+  mount, the browser's own language first when unlisted, `available()` and `transcribeTimeline`
+  given the chosen tag, remembered across a remount, blocked storage, the notice naming the
+  language and `install()` given it, disabled while busy, and an unavailable picked language
+  keeping the control. `apps/e2e/tests/regressions/ESCSUITE-444.spec.ts`: the stub's
+  `available()` receives `de-DE` after German is picked, the choice survives a reload, the
+  notice names "Japanese (Japan)" and `install()` gets `ja-JP`, axe finds nothing on the select,
+  and with a `sv-SE` browser locale Swedish is listed first and asked for.
+  `ESCSUITE-404.spec.ts` now asserts `available()` and `install()` receive the browser's own tag.
 - `components/Timeline/TranscribeControl.test.tsx`: hidden with no API, no on-device mode or a
   Chromium-only brand; no `available()` or `install()` call on mount; hidden after a press
   that finds `unavailable`; the notice before `install()`; cues as caption clips in one undo step; the
