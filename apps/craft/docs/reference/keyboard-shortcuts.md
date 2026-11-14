@@ -68,13 +68,6 @@ owns the window.
   kept in step by a `MutationObserver` while the window is open. Nothing is fetched: the
   single-file build's styles are inline, which is why the offline file floats its controls from
   `file://` too. Its content is one `<main>` named by a visually hidden `<h1>`.
-- **It speaks for itself (ESCSUITE-440).** The page is usually behind whatever is being
-  recorded, so during the countdown the window's timer shows the 3-2-1 digit
-  (`TransportBar`'s `showCountdown`, drawn by `CountdownReadout`); the window has its own
-  visually hidden polite, atomic live region saying "Recording starts in N", "Recording",
-  "Paused", "Saving..." and, once a save puts a new take at the top of the library, "Saved"; and
-  a blocked Record button's reason is printed under the bar as its `aria-describedby` target,
-  as on the page. It all still fits 360x160.
 - **Keys.** R / P / S / Esc pressed in the window reach the same handler with the same gates
   (`useKeyboardShortcuts`' `floatingWindow`).
 - **Closing it** (its own close button, the page's toggle) ends only the window: the take keeps
@@ -86,6 +79,4 @@ owns the window.
 
 Tests: `App.floatingControls.test.tsx` and `useFloatingControlsWindow.test.ts` (unit, through
 `src/test/doubles/documentPictureInPicture.ts`), and `apps/e2e/tests/escapecraft/float-controls.spec.ts`
-plus two cases in `tests/standalone/craft.spec.ts` (served and `file://`) in real Chromium; the
-countdown, live region and blocked reason in `FloatingControls.test.tsx` and
-`apps/e2e/tests/regressions/ESCSUITE-440.spec.ts`.
+plus two cases in `tests/standalone/craft.spec.ts` (served and `file://`) in real Chromium.
