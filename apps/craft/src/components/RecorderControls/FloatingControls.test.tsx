@@ -6,28 +6,39 @@
 // by: only while a take is live, Mic only when the microphone is on and
 // capturable, System whenever it was asked for.
 import { describe, it, expect, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { FloatingControls } from './FloatingControls'
 import { useRecorderStore } from '../../store/recorderStore'
-import { defaultConfig, type RecordingConfig } from '../../store/types'
+import { defaultConfig, type Recording, type RecordingConfig, type RecordingState } from '../../store/types'
 import { allCapabilities } from '../../test/appDoubles'
 import styles from '../../App.module.css'
 
 const noop = () => {}
 
-function renderFloating(isRecordingActive = true) {
-  return render(
+function floatingFor(state: RecordingState, blockedReason: string | null = null) {
+  return (
     <FloatingControls
-      state={isRecordingActive ? 'recording' : 'idle'}
-      isRecordingActive={isRecordingActive}
+      state={state}
+      isRecordingActive={state === 'countdown' || state === 'recording' || state === 'paused'}
       onPause={noop}
       onResume={noop}
       onStart={noop}
       onStop={noop}
       onCancel={noop}
-      blockedReason={null}
+      blockedReason={blockedReason}
     />
   )
+}
+
+function renderFloating(isRecordingActive = true) {
+  return render(floatingFor(isRecordingActive ? 'recording' : 'idle'))
+}
+
+/** The window's polite live region: what a screen reader there is told. */
+function liveRegion(container: HTMLElement): HTMLElement {
+  const region = container.querySelector<HTMLElement>('[aria-live="polite"]')
+  if (!region) throw new Error('no polite live region in the floating window')
+  return region
 }
 
 function meterLabels(container: HTMLElement): string[] {
@@ -42,6 +53,8 @@ function setStore(config: Partial<RecordingConfig>, options: { microphone?: bool
     audioLevels: { microphone: 0, system: 0 },
     systemAudioShared: true,
     currentDuration: 0,
+    countdownValue: 0,
+    recordings: [],
   })
 }
 
@@ -93,5 +106,97 @@ describe('FloatingControls', () => {
 
     expect(container.querySelector(`.${styles.audioMeters}`)).toBeNull()
     expect(screen.getByRole('button', { name: 'Start recording' })).toBeInTheDocument()
+  })
+
+  // ESCSUITE-440: the window is what the user is looking at while the page sits
+  // behind the thing being recorded, so it carries the countdown, the state
+  // phrases and the blocked reason itself.
+  it('shows the countdown number in place of the timer during the countdown', () => {
+    useRecorderStore.setState({ countdownValue: 3, currentDuration: 0 })
+    const { container } = render(floatingFor('countdown'))
+
+    const timer = container.querySelector(`.${styles.timer}`)
+    expect(timer).toHaveTextContent(/^3$/)
+    act(() => useRecorderStore.setState({ countdownValue: 2 }))
+    expect(timer).toHaveTextContent(/^2$/)
+  })
+
+  it('shows the elapsed time, never a 0, if the countdown has no number left', () => {
+    useRecorderStore.setState({ countdownValue: 0, currentDuration: 0 })
+    const { container } = render(floatingFor('countdown'))
+
+    expect(container.querySelector(`.${styles.timer}`)).toHaveTextContent(/^00:00$/)
+  })
+
+  it('goes back to the elapsed time once the take is recording', () => {
+    useRecorderStore.setState({ countdownValue: 1, currentDuration: 0 })
+    const { container } = render(floatingFor('recording'))
+
+    expect(container.querySelector(`.${styles.timer}`)).toHaveTextContent(/^00:00$/)
+  })
+
+  it('announces the countdown, recording, paused, saving and saved through a polite live region', () => {
+    // A library that already holds a take: "Saved" is about the new one on top.
+    useRecorderStore.setState({ countdownValue: 3, recordings: [{ id: 'older-take' } as Recording] })
+    const { container, rerender } = render(floatingFor('idle'))
+    const region = liveRegion(container)
+    expect(region).toHaveAttribute('aria-atomic', 'true')
+    expect(region).toHaveTextContent(/^$/)
+
+    rerender(floatingFor('countdown'))
+    expect(region).toHaveTextContent('Recording starts in 3')
+
+    rerender(floatingFor('recording'))
+    expect(region).toHaveTextContent(/^Recording$/)
+
+    rerender(floatingFor('paused'))
+    expect(region).toHaveTextContent(/^Paused$/)
+
+    rerender(floatingFor('saving'))
+    expect(region).toHaveTextContent(/^Saving\.\.\.$/)
+
+    act(() =>
+      useRecorderStore.setState({ recordings: [{ id: 'new-take' } as Recording, { id: 'older-take' } as Recording] })
+    )
+    rerender(floatingFor('idle'))
+    expect(region).toHaveTextContent(/^Saved$/)
+
+    // The next take replaces it.
+    rerender(floatingFor('countdown'))
+    expect(region).toHaveTextContent('Recording starts in 3')
+  })
+
+  it('does not say Saved when the save put nothing new in the library', () => {
+    const { container, rerender } = render(floatingFor('saving'))
+    const region = liveRegion(container)
+
+    rerender(floatingFor('idle'))
+    expect(region).toHaveTextContent(/^$/)
+  })
+
+  it('does not say Saved when the newest take is deleted during a save that adds nothing', () => {
+    useRecorderStore.setState({ recordings: [{ id: 'newest' } as Recording, { id: 'older' } as Recording] })
+    const { container, rerender } = render(floatingFor('saving'))
+    const region = liveRegion(container)
+
+    act(() => useRecorderStore.setState({ recordings: [{ id: 'older' } as Recording] }))
+    rerender(floatingFor('idle'))
+    expect(region).toHaveTextContent(/^$/)
+  })
+
+  it('prints why Record is blocked and describes the button with it', () => {
+    render(floatingFor('idle', 'Turn on a source before recording'))
+
+    expect(screen.getByText('Turn on a source before recording')).toBeVisible()
+    const record = screen.getByRole('button', { name: 'Start recording' })
+    expect(record).toBeDisabled()
+    expect(record).toHaveAccessibleDescription('Turn on a source before recording')
+  })
+
+  it('prints no reason while Record is available', () => {
+    const { container } = render(floatingFor('idle'))
+
+    expect(container.querySelector(`.${styles.recordBlockedReason}`)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Start recording' })).not.toHaveAttribute('aria-describedby')
   })
 })
