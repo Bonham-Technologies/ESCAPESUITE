@@ -1,6 +1,7 @@
 import { appVersionLabel } from '@escapesuite/shared/config';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { CloseIcon } from '../icons';
+import { canFloatControls } from '../../hooks/useFloatingControlsWindow';
 import styles from '../../App.module.css';
 
 interface HelpDialogProps {
@@ -86,6 +87,14 @@ export function HelpDialog({ onClose }: HelpDialogProps) {
                 <strong>Use keyboard shortcuts</strong> - Press <kbd>R</kbd> to start,
                 <kbd>P</kbd> to pause, <kbd>S</kbd> to stop, and <kbd>Esc</kbd> to cancel.
               </li>
+              {/* Only where the Float controls button is drawn (ESCSUITE-446). */}
+              {canFloatControls() && (
+                <li>
+                  <strong>Float controls</strong> - Opens a small window that stays on top of
+                  whatever you are recording, with the timer, level meters and the record, pause
+                  and stop buttons, so you never have to switch back to this tab.
+                </li>
+              )}
             </ul>
           </section>
 
