@@ -55,18 +55,39 @@ describe('LIMITATIONS', () => {
     expect(body).toMatch(/real time/)
     expect(body).toMatch(/speech language pack/)
     expect(body).toMatch(/download/)
-    expect(body).toMatch(/audio never leaves this device/i)
+    // ARTIST's notice (TranscribeControl.tsx), word for word; plan cannot import ARTIST.
+    expect(body).toContain(
+      '“Your browser will download a speech language pack once. Your audio never leaves this device.”'
+    )
     expect(body).not.toMatch(/browser language only/i)
   })
 
+  it('scopes the transcription privacy claim to transcribing, and does not date the browser list', () => {
+    const entry = LIMITATIONS.find((l) => l.id === 'transcribe-captions')!
+    const body = entry.body.join(' ')
+    expect(entry.title).toBe(
+      'Transcribe to captions: only where the browser has on-device speech recognition, and in real time'
+    )
+    expect(body).toMatch(/Transcribing makes no network request of its own/)
+    expect(body).toMatch(/sends no audio or captions anywhere/)
+    expect(body).not.toMatch(/anything else anywhere/)
+    expect(body).toMatch(/Firefox is adding it; the button appears there once your version has it/)
+    expect(body).not.toMatch(/released versions/)
+    expect(body).toMatch(/tells you and does not transcribe/)
+    expect(body).not.toMatch(/hides the button/)
+  })
+
   // ESCSUITE-445: canFloatControls() feature-detects the API, so the entry must
-  // not promise "Chromium only" (some Firefox builds have it).
+  // not promise "Chromium only", nor name browsers the repo has no source for.
   it('says Float controls need Document Picture-in-Picture and a top-level page', () => {
     const entry = LIMITATIONS.find((l) => l.id === 'float-controls')!
     const text = [entry.title, ...entry.body].join(' ')
     expect(text).toMatch(/Document Picture-in-Picture/)
     expect(text).toMatch(/embed/)
     expect(text).not.toMatch(/Chromium (browsers )?only|only Chromium/i)
+    expect(text).toMatch(/Chrome and Edge have it; Safari does not/)
+    expect(text).toMatch(/In any other browser the Float controls button appears only if that browser has it/)
+    expect(text).not.toMatch(/Firefox has it/)
   })
 
   it('does not say ESCAPEARTIST picks where the language pack comes from', () => {

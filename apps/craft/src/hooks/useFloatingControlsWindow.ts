@@ -27,9 +27,9 @@ function documentPictureInPicture(): DocumentPictureInPictureApi | undefined {
 
 /**
  * Whether this page can open the floating window at all: the API must exist
- * (Chromium only — no Firefox, no Safari), and the page must be the top-level
- * document, because `requestWindow()` throws inside an iframe and CRAFT can be
- * embedded in a host page (`docs/reference/embedding.md`).
+ * (feature-detected: Chromium has it, Safari does not), and the page must be
+ * the top-level document, because `requestWindow()` throws inside an iframe
+ * and CRAFT can be embedded in a host page (`docs/reference/embedding.md`).
  */
 export function canFloatControls(): boolean {
   return documentPictureInPicture() !== undefined && !isEmbedded();
