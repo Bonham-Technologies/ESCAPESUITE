@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEPLAN: the Known limitations page now lists the browser limits of Transcribe to captions and Float controls (ESCSUITE-445).
 - ESCAPEARTIST: each pause in Remove silences has Go to and Play, so you can hear a pause, with a second either side, before deciding to keep or cut it (ESCSUITE-443).
 - ESCAPEARTIST: Keep in Remove silences moves keyboard focus to the next pause (or the previous one, or Cancel) instead of dropping it to the page (ESCSUITE-441).
 - ESCAPEARTIST: transcribing again asks whether to replace the existing captions or add to them, instead of stacking a second copy of every caption (ESCSUITE-442).

@@ -97,6 +97,29 @@ export const LIMITATIONS: Limitation[] = [
     sources: [repoFile('docs/reference/shared-infrastructure.md'), ticket('ESCSUITE-397')],
   },
   {
+    id: 'transcribe-captions',
+    title: 'Transcribe to captions: Chrome, Edge, Opera and Brave on desktop, in real time',
+    body: [
+      'ESCAPEARTIST’s Transcribe to captions uses your browser’s own on-device speech recognition. It is offered only in Chrome, Edge, Opera and Brave on a computer. Firefox, Safari and phones do not show it, and neither do Chromium-based apps that are not one of those browsers.',
+      'It listens in real time: a 10-minute timeline takes about 10 minutes, and you can stop it at any point. The language must be one your browser can recognise on this device. If it cannot, ESCAPEARTIST tells you and hides the button.',
+      'The first time, your browser may download a speech language pack, which is its on-device recognition model for one language. ESCAPEARTIST asks first, with the notice “Your browser will download a speech language pack once. Your audio never leaves this device.” The browser fetches the pack from its own maker; ESCAPEARTIST downloads nothing and sends no audio, text or anything else anywhere. Without a network, transcription works only if the pack is already installed.',
+    ],
+    sources: [
+      repoFile('apps/artist/docs/reference/on-device-transcription.md'),
+      repoFile('apps/artist/src/core/speechRecognitionLocal.ts'),
+      ticket('ESCSUITE-404'),
+    ],
+  },
+  {
+    id: 'float-controls',
+    title: 'Float controls: Chromium browsers only, not when embedded',
+    body: [
+      'ESCAPECRAFT’s Float controls keep the timer, level meters and record buttons in a small window on top of whatever you are recording. They use Document Picture-in-Picture, which only Chromium browsers such as Chrome and Edge have. In Firefox and Safari the option is not available.',
+      'It is also unavailable when ESCAPECRAFT is embedded in another website’s page. Open ESCAPECRAFT on its own page to use it.',
+    ],
+    sources: [repoFile('apps/craft/src/hooks/useFloatingControlsWindow.ts'), ticket('ESCSUITE-400')],
+  },
+  {
     id: 'no-mobile',
     title: 'Phones and tablets are not supported',
     body: [

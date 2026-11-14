@@ -27,6 +27,9 @@ describe('LIMITATIONS', () => {
     ['storage-quota', 'docs/reference/shared-infrastructure.md'],
     ['safari-private-browsing', 'docs/reference/shared-infrastructure.md'],
     ['hosted-analytics', 'docs/reference/vercel-analytics.md'],
+    // ESCSUITE-445
+    ['transcribe-captions', 'apps/artist/docs/reference/on-device-transcription.md'],
+    ['float-controls', 'apps/craft/src/hooks/useFloatingControlsWindow.ts'],
   ])('lists %s with its source document %s', (id, path) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation).toBeDefined()
@@ -38,9 +41,28 @@ describe('LIMITATIONS', () => {
     ['safari-export-decoding', 'ESCSUITE-285'],
     ['three-hour-exports', 'ESCSUITE-367'],
     ['safari-private-browsing', 'ESCSUITE-397'],
+    ['transcribe-captions', 'ESCSUITE-404'],
+    ['float-controls', 'ESCSUITE-400'],
   ])('lists %s with its ticket %s', (id, ticket) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation!.sources.some((s) => s.label.startsWith(ticket))).toBe(true)
+  })
+
+  // ESCSUITE-445: claim only what ARTIST's own doc and notice claim.
+  it('states what the transcription language pack is and that no audio leaves the device', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'transcribe-captions')!.body.join(' ')
+    expect(body).toMatch(/Chrome, Edge, Opera and Brave/)
+    expect(body).toMatch(/real time/)
+    expect(body).toMatch(/speech language pack/)
+    expect(body).toMatch(/download/)
+    expect(body).toMatch(/audio never leaves this device/i)
+    expect(body).not.toMatch(/browser language only/i)
+  })
+
+  it('says Float controls need Chromium and a top-level page', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'float-controls')!.body.join(' ')
+    expect(body).toMatch(/Picture-in-Picture/)
+    expect(body).toMatch(/embed/)
   })
 
   it('cites the owner ruling for no mobile support', () => {
