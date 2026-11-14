@@ -191,15 +191,18 @@ test.describe('The network-silence check itself (ESCSUITE-402 negative cases)', 
 
     assertNetworkSilence(tracker)
 
-    // `api.vercel.com` is one of the two hosts the hosted CSP's `connect-src`
-    // lets through, so this becomes a real request — which the tracker records
-    // and then aborts, so nothing actually leaves the machine.
-    await page.evaluate(() => fetch('https://api.vercel.com/escsuite-402-probe').catch(() => {}))
+    // The hosted CSP lets no other host through `connect-src` (ESCSUITE-459),
+    // but it doesn't govern a window the page opens, so this becomes a real
+    // request — which the tracker records and then aborts, so nothing
+    // actually leaves the machine.
+    await page.evaluate(() => {
+      window.open('https://example.com/escsuite-402-probe')
+    })
     await expect
       .poll(() => tracker.violations().map((v) => v.via + ' ' + v.url))
-      .toContain('request https://api.vercel.com/escsuite-402-probe')
+      .toContain('request https://example.com/escsuite-402-probe')
 
-    expect(() => assertNetworkSilence(tracker)).toThrow(/api\.vercel\.com\/escsuite-402-probe/)
+    expect(() => assertNetworkSilence(tracker)).toThrow(/example\.com\/escsuite-402-probe/)
 
     await context.close()
   })
