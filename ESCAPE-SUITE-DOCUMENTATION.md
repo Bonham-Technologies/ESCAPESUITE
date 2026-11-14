@@ -51,6 +51,7 @@ creation tools that run entirely in the browser. The suite consists of:
 - Shared IndexedDB storage with ESCAPEARTIST
 - Full-featured video player with keyboard shortcuts
 - Capability detection with detailed unavailability reasons
+- Float controls: an always-on-top Picture-in-Picture window with the timer, meters and transport buttons, where the browser supports it (see [keyboard shortcuts](apps/craft/docs/reference/keyboard-shortcuts.md#float-controls-escsuite-400))
 
 **Test Coverage:** unit tests covering storage, permissions, thumbnails, store, VideoPlayer, and capability detection — run `pnpm test --filter=@escapesuite/craft` for the current count
 
@@ -74,6 +75,8 @@ creation tools that run entirely in the browser. The suite consists of:
 - Project save/load
 - Audio waveform visualization with extreme zoom support
 - Per-clip thumbnails on the timeline, clipped to that clip's own mask
+- Remove silences: find pauses in the sound and cut them in one undoable step ([details](apps/artist/docs/reference/remove-silences.md))
+- Captions: import SRT/VTT ([details](apps/artist/docs/reference/captions.md)) or transcribe on-device with the browser's own speech recognition, in desktop Chrome 139 or later ([details](apps/artist/docs/reference/on-device-transcription.md))
 
 **Test Coverage:** unit tests covering exporter, waveform, animation, and more — run `pnpm test --filter=@escapesuite/artist` for the current count
 
@@ -155,7 +158,7 @@ A separate workflow (`.github/workflows/standalone-release.yml`) runs after CI s
 `main`: it builds the offline single-file builds for ESCAPECRAFT and ESCAPEARTIST and attaches
 them to a GitHub Release.
 
-See the root [CLAUDE.md](CLAUDE.md#cicd-pipeline) for the full job table.
+See the [CI/CD pipeline reference](docs/reference/ci-cd-pipeline.md) for the full job table.
 
 ---
 

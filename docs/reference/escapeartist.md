@@ -44,3 +44,4 @@
   through one hard request is not terminated — and a source load by a size-scaled deadline
   (ESCSUITE-273). See `apps/artist/CLAUDE.md`'s
   "Video Decode Worker"
+- Editing features with their own reference files (under `apps/artist/docs/reference/`): [`remove-silences.md`](../../apps/artist/docs/reference/remove-silences.md) (cut the pauses in one undoable step), [`captions.md`](../../apps/artist/docs/reference/captions.md) (SRT/VTT import, captions as text clips) and [`on-device-transcription.md`](../../apps/artist/docs/reference/on-device-transcription.md) ("Transcribe to captions" with the browser's own speech recognition)
