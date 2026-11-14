@@ -97,6 +97,29 @@ export const LIMITATIONS: Limitation[] = [
     sources: [repoFile('docs/reference/shared-infrastructure.md'), ticket('ESCSUITE-397')],
   },
   {
+    id: 'transcribe-captions',
+    title: 'Transcribe to captions: only where the browser has on-device speech recognition, and in real time',
+    body: [
+      'ESCAPEARTIST’s Transcribe to captions uses your browser’s own on-device speech recognition, so the button appears only where the browser has it. Today that means Chrome on a computer, and Edge, Opera and Brave, which are built on the same engine, where they have it too. Safari and phones do not have it. Firefox is adding it; the button appears there once your version has it. Other Chromium-based apps that do not identify as Chrome, Edge, Opera or Brave never show it, because asking them can crash the page.',
+      'It listens in real time: a 10-minute timeline takes about 10 minutes, and you can stop it at any point. You pick the language beside the button, starting with your browser’s own; it must be one your browser can recognise on this device. If it cannot, ESCAPEARTIST tells you and does not transcribe.',
+      'The first time, your browser may download a speech language pack, which is its on-device recognition model for one language. ESCAPEARTIST asks first, with a notice that names the language, such as “Your browser will download a speech language pack for English (United States) once. Your audio never leaves this device.” The browser downloads the pack itself, from wherever its maker provides it (Chrome gets it from Google). ESCAPEARTIST does not choose, see or pass on that download. Transcribing makes no network request of its own: ESCAPEARTIST downloads nothing for it and sends no audio or captions anywhere. Without a network, transcription works only if the pack is already installed.',
+    ],
+    sources: [
+      repoFile('apps/artist/docs/reference/on-device-transcription.md'),
+      repoFile('apps/artist/src/core/speechRecognitionLocal.ts'),
+      ticket('ESCSUITE-404'),
+    ],
+  },
+  {
+    id: 'float-controls',
+    title: 'Float controls: not in every browser, and not when embedded',
+    body: [
+      'ESCAPECRAFT’s Float controls keep the timer, level meters and record buttons in a small window on top of whatever you are recording. They need the browser’s Document Picture-in-Picture window. Chrome and Edge have it; Safari does not. In any other browser the Float controls button appears only if that browser has it.',
+      'It is also not shown when ESCAPECRAFT is embedded in another page (in an iframe). Open ESCAPECRAFT on its own page to use it.',
+    ],
+    sources: [repoFile('apps/craft/src/hooks/useFloatingControlsWindow.ts'), ticket('ESCSUITE-400')],
+  },
+  {
     id: 'no-mobile',
     title: 'Phones and tablets are not supported',
     body: [
