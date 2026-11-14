@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.20.0
+
+### Minor Changes
+
+- b97dc65: Remove silences can now move everything after each cut, so blurs, text, shapes, captions, markers and in/out points stay on the moment they were placed on instead of drifting out of step. The new "Move everything after each cut" box in the Remove silences dialog is on by default. Something that spans a removed pause gets shorter rather than being cut in two, a locked track stays where it is, and one undo puts it all back. Clear the box to cut only the take's own tracks, as before.
+- 794361d: Each pause in the Remove silences list now has Go to and Play buttons, so you can check a pause before you cut it. Go to moves the playhead to the start of the pause. Play plays from one second before the pause to one second after it, then stops. Both work from the keyboard, and screen readers announce the pause's time with them. The row you last went to or played is highlighted and scrolled into view. On a narrow screen the buttons wrap below the times.
+- 077c1c5: Transcribe to captions now has a language list beside its button, so you can transcribe a recording in a different language from your browser's. It starts on your browser's language and remembers what you pick. The language-pack notice names the language that will be downloaded, and if the chosen language can't be transcribed in your browser, you're told which one and can pick another.
+
+### Patch Changes
+
+- b97dc65: The Remove silences dialog now warns you when the cut will leave something where it is while the rest closes up: it says how many clips on other tracks will not move (blurs, captions, text or shapes, media clips) and how many markers, so you know what may fall out of step. With "Move everything after each cut" on, only what sits on a locked track, or is linked to something that does, is counted. The message after the cut repeats the count, and nothing is shown when everything moves.
+- 30ca0dc: Starting a new project, opening one, or having the host page load one while "Transcribe to captions" is running now stops the transcription straight away and says "Transcription stopped. No captions were added." Before, the captions from the old project were added to the new one when the sound finished, and the button kept reading "Stop transcribing" until then.
+- c48a84f: "Transcribe to captions" needs much less memory: an hour of timeline now takes about 230 MB instead of nearly 3 GB, so long timelines no longer fail part-way through preparing the sound. A timeline longer than 3 hours is turned down straight away with a message saying so and suggesting you transcribe a section of up to 3 hours, instead of the unexplained "Could not transcribe the timeline."
+- 2be9932: "Remove silences" now listens only to the tracks you will hear in the export. Muted and hidden tracks no longer hide a pause, so a take whose music or system audio track is muted has its pauses found. Those tracks are still cut along with the rest of the take, so nothing falls out of step. If every track with sound is muted or hidden, the dialog says there is no audible sound to judge.
+- 7715351: In the light theme, the Remove silences dialog's "Nothing was cut" message and the red border around a setting that is out of range are now a darker red, so they are easy to read and to spot.
+- f190a49: "Transcribe to captions" now shows how much of the sound it has prepared, as a percentage next to "Preparing the sound…". A transcription no longer gets stuck after the sound has finished playing: if the browser's speech recognition does not finish on its own, the captions it heard are added about 5 seconds later.
+- 2ab8e4b: In the Remove silences dialog, pressing Keep on a pause no longer drops keyboard focus to the page. Focus moves to the next pause's Keep button, or the previous one when you kept the last pause, or to Cancel when none are left, and the status line says how many pauses remain.
+- 2f49073: Transcribing again when the Captions track already has captions now asks whether to replace the existing captions or add to them, instead of stacking a second copy of every caption on top. Replace swaps them in one step that a single undo takes back.
+- 68a3963: Exports no longer sometimes repeat a frame after a cut or trim. WebM and GIF exports, and MP4 exports in Safari, now wait for each frame of a video to be shown before they draw it, so the picture from just before a cut or a trim point no longer slips into the file.
+
 ## 2.19.0
 
 ### Minor Changes
