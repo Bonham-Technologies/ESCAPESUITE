@@ -9,19 +9,25 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { HelpDialog } from './HelpDialog'
 import { installGetClientRectsStub } from '../../test/doubles/browser'
+import {
+  installDocumentPictureInPicture,
+  type DocumentPictureInPictureDouble,
+} from '../../test/doubles/documentPictureInPicture'
 import styles from '../../App.module.css'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 let restoreGetClientRects: () => void
+let pip: DocumentPictureInPictureDouble | null = null
 
 beforeEach(() => {
   restoreGetClientRects = installGetClientRectsStub()
+  pip = null
 })
 
 afterEach(() => {
   restoreGetClientRects()
-  delete (window as unknown as { documentPictureInPicture?: unknown }).documentPictureInPicture
+  pip?.restore()
   document.body.innerHTML = ''
 })
 
@@ -179,9 +185,7 @@ describe('HelpDialog version line', () => {
 
 describe('HelpDialog Float controls line (ESCSUITE-446)', () => {
   it('names Float controls where Document Picture-in-Picture is available', () => {
-    ;(window as unknown as { documentPictureInPicture: unknown }).documentPictureInPicture = {
-      requestWindow: vi.fn(),
-    }
+    pip = installDocumentPictureInPicture()
     renderDialog()
 
     expect(screen.getByText('Float controls')).toBeInTheDocument()
@@ -189,8 +193,22 @@ describe('HelpDialog Float controls line (ESCSUITE-446)', () => {
   })
 
   it('leaves it out where the browser has no Document Picture-in-Picture', () => {
+    expect('documentPictureInPicture' in window).toBe(false)
     renderDialog()
 
     expect(screen.queryByText('Float controls')).not.toBeInTheDocument()
+  })
+
+  it('leaves it out when CRAFT is embedded, where the Float controls button is not drawn either', () => {
+    pip = installDocumentPictureInPicture()
+    const originalParent = window.parent
+    Object.defineProperty(window, 'parent', { value: {}, configurable: true })
+    try {
+      renderDialog()
+
+      expect(screen.queryByText('Float controls')).not.toBeInTheDocument()
+    } finally {
+      Object.defineProperty(window, 'parent', { value: originalParent, configurable: true })
+    }
   })
 })

@@ -38,7 +38,7 @@ Check a download before you use it: every release lists each file's SHA-256 in `
 - Microphone and system audio capture
 - Adjustable PiP position, size, and shape (circle/square)
 - Send recordings directly to ESCAPEARTIST
-- Float controls: a small always-on-top window with the timer, level meters and record/pause/stop buttons (Chromium browsers; see [keyboard shortcuts](apps/craft/docs/reference/keyboard-shortcuts.md))
+- Float controls: a small always-on-top window with the timer, level meters and record/pause/stop buttons (desktop Chrome, Edge and other Chromium browsers; see [keyboard shortcuts](apps/craft/docs/reference/keyboard-shortcuts.md))
 
 ### ESCAPEARTIST - Editor
 
@@ -50,7 +50,7 @@ Check a download before you use it: every release lists each file's SHA-256 in `
 - 11 transition types between clips
 - Blur effect for privacy/focus
 - [Remove silences](apps/artist/docs/reference/remove-silences.md): find the pauses in a recording and cut them in one undoable step
-- [Captions](apps/artist/docs/reference/captions.md): import SRT/VTT files, or [transcribe on-device](apps/artist/docs/reference/on-device-transcription.md) with the browser's own speech recognition (no audio leaves the device)
+- [Captions](apps/artist/docs/reference/captions.md): import SRT/VTT files, or [transcribe on-device](apps/artist/docs/reference/on-device-transcription.md) with the browser's own speech recognition (desktop Chrome 139 or later; no audio leaves the device)
 - Export to WebM (VP9) or MP4 (H.264)
 
 ### ESCAPEPLAN - Landing page & hub
