@@ -13,7 +13,7 @@ export default function Terms() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Terms of Service</h1>
-        <p className={styles.lastUpdated}>Last updated: November 6, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: November 15, 2026</p>
       </header>
 
       <div className={styles.content}>
@@ -180,9 +180,8 @@ export default function Terms() {
         <h2>13. Contact Us</h2>
         <div className={styles.contactInfo}>
           <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
-          <p>Email: legal@escapesuite.io</p>
-          <p>For support inquiries: support@escapesuite.io</p>
-          <p>For privacy-related requests: privacy@escapesuite.io</p>
+          <p>Email: matt@bonham.tech</p>
+          <p>For privacy, data, legal and support requests, write to the same address.</p>
         </div>
       </div>
     </div>

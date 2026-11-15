@@ -55,6 +55,6 @@ describe('Privacy §2.1 usage analytics (ESCSUITE-407)', () => {
 
   it('bumps the last-updated date', () => {
     render(<Privacy />)
-    expect(screen.getByText(/^Last updated:/)).toHaveTextContent('Last updated: November 11, 2026')
+    expect(screen.getByText(/^Last updated:/)).toHaveTextContent('Last updated: November 15, 2026')
   })
 })
