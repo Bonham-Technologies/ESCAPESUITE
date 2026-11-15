@@ -28,6 +28,7 @@ calls whatever it is handed, so the five answers are the five arguments:
 | `ResolutionPicker`'s confirm | `handleCancel` | confirming rewrites the project's resolution, which "may affect overlay positions and scaling" and cannot be undone automatically; cancelling costs nothing, and the select is controlled by the store's resolution so it snaps back to the preset still in force |
 | `SilenceDialog` (ESCSUITE-403) | its Cancel | nothing is cut until "Remove all", so dismissing costs nothing; it is a sixth modal, opened from the inspector, whose open flag is the store's `silenceReview` (App reads `silenceReview !== null` into `modalOpen`), rendered only while open like `SessionRestorePrompt`. See [`remove-silences.md`](remove-silences.md) |
 | `TranscribeControl`'s "Replace or add" (ESCSUITE-442) | its Cancel | asked before a transcription when the Captions track already holds captions; nothing has been heard or changed yet, so dismissing costs nothing. Rendered only while open, and reported to `App`'s `modalOpen` through `onDialogOpenChange` → `TimelinePane`, the same derived-from-the-flag effect `ResolutionPicker` uses. See [`on-device-transcription.md`](on-device-transcription.md) |
+| `ConfirmDialog` (ESCSUITE-448) | Cancel (`answerConfirm(false)`) | it asks only before destroying something, so a dismissal is never a yes. See "The confirm dialog" below |
 | `SessionRestorePrompt` | **nothing** — a module-level `swallowEscape()` no-op | `useSessionRestore`'s `handleDeclineSession` calls `clearSessionState()` on this tab's own slot or the legacy row, so "Start Fresh" **deletes** this tab's own or the legacy session, and leaves another tab's (ESCSUITE-306) — not offered here again until that tab saves newer work. Escape is the key people press to dismiss a thing; routing it to either button would either discard work or silently accept it. The hook still claims the key (so the editor's cascades behind the prompt never see it) and then does nothing: the prompt stays up, focus stays trapped, and the only two ways out are the two buttons — the right shape for a question that must be answered |
 
 **The fifth modal is the odd one out in exactly one way: its open flag is not `App`'s own
@@ -100,11 +101,28 @@ drop it; the focusable-element selector gained arms for `[contenteditable]`, `au
 `video[controls]`, `iframe` and `summary`; and Escape now defers to a module-level stack of open
 dialogs, so only the topmost instance's `onClose` runs if two were ever open together.
 
+#### The confirm dialog (ESCSUITE-448)
+
+Every "are you sure" in ARTIST — Delete track (with clips), Delete clip, New Project (with
+clips), and the media library's Remove, Clear Unused, Clear All and Remove of earlier sessions'
+files — asks through **`confirmAction(message, confirmLabel)`** (`src/app/confirmAction.ts`),
+which resolves `true` or `false`. They used to call the browser's `confirm()`, which an iframe
+sandboxed without `allow-modals` answers false without showing anything, so those buttons silently
+did nothing in such an embed. The messages are the native prompts' word for word.
+
+The question sits in a module-level slot, not a context: `useProjectActions` asks from inside
+`App` itself, above any provider `App` could render. `App` renders one **`ConfirmDialog`**
+(`src/components/ConfirmDialog.tsx`) for its whole life and adds `useConfirmRequest() !== null`
+to `modalOpen`. The dialog is `role="alertdialog"`, labelled by the message (the native prompts
+had no title), with Cancel first (so it has the initial focus) and the destructive button in
+`ProjectLoadDialog`'s Discard fill (white on `#dc3545`, 4.53:1). A second question while one is up
+replaces it and answers the first one no; unmounting with a question up answers it no.
+
 #### The modal gate on the global shortcuts
 
 **While a modal is up, the editor behind it takes no key at all.** `App` computes one flag —
 `const modalOpen = showExport || showShortcuts || showSessionPrompt || showProjectLoadDialog ||
-resolutionConfirmOpen || silenceReviewOpen`
+resolutionConfirmOpen || silenceReviewOpen || transcribeDialogOpen || confirmOpen`
 — and hands it to *both* of the app's `window` cascades: `useAppKeyboardShortcuts` and
 `PlaybackControls` (which owns Space, the arrows, Home and End). Each returns from its handler immediately when it is true,
 below the typing check and above every other branch — the same shape, and the same
@@ -166,7 +184,7 @@ have differently went with the duplication, all of them the App path's and all o
 the load now shows the blocking `LoadingOverlay`, a success reports `Project loaded successfully`
 through the notice channel rather than nothing at all, and a file that cannot be read reports
 `Failed to load project` there too instead of a blocking `alert('Failed to load project file.')`
-— the last `alert()` on any ARTIST *load* path (`confirm()` still guards Clear All and New Project;
+— the last `alert()` on any ARTIST *load* path (Clear All and New Project ask in `ConfirmDialog` since ESCSUITE-448, below;
 the uploader's own refusal of a file that is not media at all stopped being an `alert()` in
 ESCSUITE-249, below). Save-and-load
 also announces its save, and a failed save, which the uploader's copy swallowed to the console.

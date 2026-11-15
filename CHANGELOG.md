@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Delete track, Delete clip, New Project and the media library's Remove, Clear Unused and Clear All ask in the editor's own dialog, so they work in a page that embeds the editor in a frame sandboxed without pop-ups, where they used to do nothing (ESCSUITE-448).
 - Hosted site and docs: security, privacy, legal and support contacts now go to support@bonham.tech at Bonham Technologies in place of escapesuite.io addresses, and the site serves `/.well-known/security.txt` (BORG-91).
 - Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page now explicitly asks browsers to use HTTPS only, for the site's host and any name under it (ESCSUITE-459).
 - ESCAPEPLAN: the Known limitations page now lists the browser limits of Transcribe to captions and Float controls (ESCSUITE-445).

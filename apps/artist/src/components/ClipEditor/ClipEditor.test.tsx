@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ClipEditor } from './ClipEditor'
+import { ConfirmDialog } from '../ConfirmDialog'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
 import { rowControl } from '../../test/domQueries'
 import { useEditorStore } from '../../store/projectStore'
@@ -25,15 +26,8 @@ function slide(input: HTMLInputElement, value: number | string) {
 const clipNow = () => store().project.timeline.clips[0]
 
 describe('ClipEditor', () => {
-  let confirmSpy: ReturnType<typeof vi.spyOn>
-
   beforeEach(() => {
     resetStoreForTest()
-    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
-  })
-
-  afterEach(() => {
-    confirmSpy.mockRestore()
   })
 
   describe('with no clip selected', () => {
@@ -104,23 +98,28 @@ describe('ClipEditor', () => {
       expect(screen.getByText(track.name)).toBeInTheDocument()
     })
 
+    // ESCSUITE-448: asked in the editor's own dialog, not confirm().
     it('deletes the clip once the confirm is accepted', async () => {
       const user = userEvent.setup()
-      render(<ClipEditor />)
+      render(<><ClipEditor /><ConfirmDialog /></>)
 
       await user.click(screen.getByTitle('Delete clip'))
+      const dialog = screen.getByRole('alertdialog', { name: 'Delete clip "clip1"?' })
+      expect(store().project.timeline.clips).toHaveLength(1)
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }))
 
-      expect(confirmSpy).toHaveBeenCalledWith('Delete clip "clip1"?')
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(store().project.timeline.clips).toHaveLength(0)
     })
 
     it('keeps the clip when the confirm is declined', async () => {
-      confirmSpy.mockReturnValue(false)
       const user = userEvent.setup()
-      render(<ClipEditor />)
+      render(<><ClipEditor /><ConfirmDialog /></>)
 
       await user.click(screen.getByTitle('Delete clip'))
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
 
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(store().project.timeline.clips).toHaveLength(1)
     })
 
@@ -439,8 +438,9 @@ describe('ClipEditor', () => {
 
     it('hides the scale controls for a clip with no source media', async () => {
       const user = userEvent.setup()
-      render(<ClipEditor />)
+      render(<><ClipEditor /><ConfirmDialog /></>)
       await user.click(screen.getByTitle('Delete clip'))
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
 
       await user.click(screen.getByRole('button', { name: 'Add Text' }))
 

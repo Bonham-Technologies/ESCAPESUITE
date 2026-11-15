@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } fr
 import { act, renderHook } from '@testing-library/react'
 import { useTrackHeaderActions, type TrackHeaderActionsDeps } from './useTrackHeaderActions'
 import { useEditorStore } from '../../store/projectStore'
+import * as confirmModule from '../../app/confirmAction'
 import { addClip, resetStoreForTest, store } from '../../test/fixtures/projectStore'
 
 let reorderTracks: MockInstance
@@ -23,7 +24,7 @@ let top: string
 
 beforeEach(() => {
   resetStoreForTest()
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  confirmSpy = vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true)
 
   bottom = useEditorStore.getState().project.timeline.tracks[0].id
   store().addTrack('middle')
@@ -140,35 +141,36 @@ describe('useTrackHeaderActions reordering', () => {
 })
 
 describe('useTrackHeaderActions deleting', () => {
-  it('deletes an empty track without asking', () => {
+  it('deletes an empty track without asking', async () => {
     const { result } = mountActions()
 
-    act(() => result.current.handleDeleteTrack(middle))
+    await act(() => result.current.handleDeleteTrack(middle))
 
     expect(confirmSpy).not.toHaveBeenCalled()
     expect(removeTrack).toHaveBeenCalledWith(middle)
     expect(storeOrder()).toEqual([bottom, top])
   })
 
-  it('asks before deleting a track that still holds clips', () => {
+  it('asks before deleting a track that still holds clips', async () => {
     addClip('clip1', 0, 2, middle)
     addClip('clip2', 4, 2, middle)
     const { result } = mountActions()
 
-    act(() => result.current.handleDeleteTrack(middle))
+    await act(() => result.current.handleDeleteTrack(middle))
 
     expect(confirmSpy).toHaveBeenCalledWith(
-      'Delete track with 2 clip(s)? Ctrl+Z will bring it back.'
+      'Delete track with 2 clip(s)? Ctrl+Z will bring it back.',
+      'Delete track'
     )
     expect(removeTrack).toHaveBeenCalledWith(middle)
   })
 
-  it('keeps the track when the question is answered no', () => {
+  it('keeps the track when the question is answered no', async () => {
     addClip('clip1', 0, 2, middle)
-    confirmSpy.mockReturnValue(false)
+    confirmSpy.mockResolvedValue(false)
     const { result } = mountActions()
 
-    act(() => result.current.handleDeleteTrack(middle))
+    await act(() => result.current.handleDeleteTrack(middle))
 
     expect(removeTrack).not.toHaveBeenCalled()
     expect(storeOrder()).toEqual([bottom, middle, top])
@@ -176,25 +178,25 @@ describe('useTrackHeaderActions deleting', () => {
 
   // ESCSUITE-84: the hook asks its question and calls through either way —
   // the store is the authority, and it keeps the track and its clips.
-  it('leaves a locked track and its clips where they are', () => {
+  it('leaves a locked track and its clips where they are', async () => {
     addClip('clip1', 0, 2, middle)
     store().updateTrack(middle, { locked: true })
     const { result } = mountActions()
 
-    act(() => result.current.handleDeleteTrack(middle))
+    await act(() => result.current.handleDeleteTrack(middle))
 
     expect(removeTrack).toHaveBeenCalledWith(middle)
     expect(storeOrder()).toEqual([bottom, middle, top])
     expect(useEditorStore.getState().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
   })
 
-  it('refuses to delete the last track', () => {
+  it('refuses to delete the last track', async () => {
     const { result } = mountActions()
-    act(() => result.current.handleDeleteTrack(middle))
-    act(() => result.current.handleDeleteTrack(top))
+    await act(() => result.current.handleDeleteTrack(middle))
+    await act(() => result.current.handleDeleteTrack(top))
     removeTrack.mockClear()
 
-    act(() => result.current.handleDeleteTrack(bottom))
+    await act(() => result.current.handleDeleteTrack(bottom))
 
     expect(removeTrack).not.toHaveBeenCalled()
     expect(storeOrder()).toEqual([bottom])

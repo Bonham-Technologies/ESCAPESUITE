@@ -405,11 +405,10 @@ test.describe('Project Session', () => {
     await expect(page.getByText(/^1 clip/).first()).toBeVisible()
 
     // `handleNewProject` only confirms when the timeline holds a clip —
-    // which it does here, so accept the native confirm rather than letting
-    // Playwright's default auto-dismiss refuse it.
-    page.once('dialog', (dialog) => dialog.accept())
+    // which it does here, so answer the editor's confirm dialog.
     await page.getByRole('button', { name: 'File menu' }).click()
     await page.getByText('New Project').click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Start new project' }).click()
 
     await expect(page.getByText('Select a clip to edit')).toBeVisible()
     await expect(page.getByText(/^0 clips/)).toBeVisible()

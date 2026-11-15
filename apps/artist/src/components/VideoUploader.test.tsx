@@ -8,6 +8,7 @@ import * as storageModule from '../core/storage'
 import { DEFAULT_IMAGE_DURATION } from '../store/types'
 import type { SourceVideo } from '../store/types'
 import type { ShowNotification } from '../app/useNotification'
+import * as confirmModule from '../app/confirmAction'
 import styles from './VideoUploader.module.css'
 import { lastObjectUrl } from '../test/objectUrls'
 
@@ -124,7 +125,7 @@ describe('VideoUploader', () => {
     mockProcessMediaFile.mockResolvedValue(videoMeta)
     onProjectFile = vi.fn()
     showNotification = vi.fn()
-    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true)
     vi.stubGlobal('alert', vi.fn())
   })
 
@@ -133,8 +134,8 @@ describe('VideoUploader', () => {
     // Blob over the stubs src/test/setup.ts installs, for the whole rest of the
     // file — so every describe after this one ran against jsdom's real
     // createObjectURL (which cannot read a Node Blob at all) instead of the
-    // counting stub (ESCSUITE-117). `confirm` and `alert` are re-stubbed by the
-    // beforeEach above, so nothing needs restoring here.
+    // counting stub (ESCSUITE-117). `alert` is re-stubbed, and `confirmAction`
+    // re-spied, by the beforeEach above, so nothing needs restoring here.
     vi.useRealTimers()
     Reflect.deleteProperty(navigator, 'storage')
   })
@@ -880,9 +881,7 @@ describe('VideoUploader', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
       await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
-      expect(globalThis.confirm).toHaveBeenCalledWith(
-        'Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. Another open editor tab could still be using them. This cannot be undone.'
-      )
+      expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. Another open editor tab could still be using them. This cannot be undone.', 'Remove all')
       // Not `toHaveLength(0)`: this describe's rows accumulate in the real
       // fake-indexeddb across its tests (no per-test reset — see the
       // ESCSUITE-142 review's finding on this file), so an exact length here
@@ -944,14 +943,14 @@ describe('VideoUploader', () => {
     })
 
     it('keeps everything when the confirmation is declined', async () => {
-      vi.mocked(globalThis.confirm).mockReturnValue(false)
+      vi.mocked(confirmModule.confirmAction).mockResolvedValue(false)
       await storeVideo('kept', new Blob(['bytes']), { ...videoMeta, id: 'kept' })
       store().addSourceVideo(videoMeta)
       render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
 
       fireEvent.click(await screen.findByRole('button', { name: 'Clear All' }))
 
-      await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(confirmModule.confirmAction).toHaveBeenCalledTimes(1))
       expect(store().sourceVideos).toHaveLength(1)
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('kept')
     })
@@ -1170,7 +1169,7 @@ describe('VideoUploader', () => {
       fireEvent.click(button)
       await act(async () => { await Promise.resolve() })
 
-      expect(globalThis.confirm).not.toHaveBeenCalled()
+      expect(confirmModule.confirmAction).not.toHaveBeenCalled()
       expect(store().sourceVideos).toHaveLength(1)
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
     })
@@ -1189,7 +1188,7 @@ describe('VideoUploader', () => {
       fireEvent.click(button)
       await act(async () => { await Promise.resolve() })
 
-      expect(globalThis.confirm).not.toHaveBeenCalled()
+      expect(confirmModule.confirmAction).not.toHaveBeenCalled()
     })
 
     it('hides the clear-all button when almost nothing is stored', async () => {
@@ -1210,6 +1209,7 @@ describe('VideoUploader', () => {
       fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
 
       await waitFor(() => expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1']))
+      expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove 1 unused media file? This will free 2.0 KB.', 'Remove')
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('unused')
     })
 
@@ -1471,9 +1471,7 @@ describe('VideoUploader', () => {
 
       fireEvent.click(await removeButton(1))
 
-      expect(globalThis.confirm).toHaveBeenCalledWith(
-        'Remove 1 file imported in earlier sessions (3.0 MB)? Another open editor tab could still be using them.'
-      )
+      expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove 1 file imported in earlier sessions (3.0 MB)? Another open editor tab could still be using them.', 'Remove')
       await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('old')
       expect(await getThumbnail('old')).toBeUndefined()
@@ -1484,13 +1482,13 @@ describe('VideoUploader', () => {
     })
 
     it('keeps everything when the confirmation is declined', async () => {
-      vi.mocked(globalThis.confirm).mockReturnValue(false)
+      vi.mocked(confirmModule.confirmAction).mockResolvedValue(false)
       await seedStored('old')
       renderUploader()
 
       fireEvent.click(await removeButton(1))
 
-      await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(confirmModule.confirmAction).toHaveBeenCalledTimes(1))
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('old')
       expect(screen.getByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
     })
@@ -1604,9 +1602,7 @@ describe('VideoUploader', () => {
       const callsBeforeClick = estimate.mock.calls.length
       fireEvent.click(await removeButton(2))
 
-      expect(globalThis.confirm).toHaveBeenCalledWith(
-        'Remove 2 files imported in earlier sessions (3.0 MB)? Another open editor tab could still be using them.'
-      )
+      expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove 2 files imported in earlier sessions (3.0 MB)? Another open editor tab could still be using them.', 'Remove')
       // The list is read again afterwards: only the one that failed is left.
       expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
       expect(showNotification).toHaveBeenCalledTimes(1)
@@ -1740,13 +1736,13 @@ describe('VideoUploader', () => {
       await act(async () => { release() })
 
       expect(await screen.findByText('1 file from earlier sessions (1.0 MB)')).toBeInTheDocument()
-      expect(globalThis.confirm).toHaveBeenCalledTimes(1)
+      expect(confirmModule.confirmAction).toHaveBeenCalledTimes(1)
       expect(deletes.mock.calls.map(([id]) => id)).toEqual(['a', 'b'])
 
       // And the guard is released afterwards: the next list can be removed.
       fireEvent.click(await removeButton(1))
       await waitFor(() => expect(screen.queryByText(/from earlier sessions/)).not.toBeInTheDocument())
-      expect(globalThis.confirm).toHaveBeenCalledTimes(2)
+      expect(confirmModule.confirmAction).toHaveBeenCalledTimes(2)
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('c')
     })
 
@@ -1773,7 +1769,7 @@ describe('VideoLibrary', () => {
     // (ESCSUITE-117) reads once per thumbnail-less source and sets nothing.
     mockResolveThumbnailUrl.mockReset()
     mockResolveThumbnailUrl.mockResolvedValue(undefined)
-    vi.stubGlobal('confirm', vi.fn(() => true))
+    vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true)
   })
 
   it('shows an empty state when nothing has been imported', () => {
@@ -1908,14 +1904,14 @@ describe('VideoLibrary', () => {
   })
 
   it('keeps the video when the confirmation is declined', async () => {
-    vi.mocked(globalThis.confirm).mockReturnValue(false)
+    vi.mocked(confirmModule.confirmAction).mockResolvedValue(false)
     await storeVideo('video1', new Blob(['bytes']), videoMeta)
     store().addSourceVideo(videoMeta)
     render(<VideoLibrary clearSession={clearSession} />)
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
-    await waitFor(() => expect(globalThis.confirm).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(confirmModule.confirmAction).toHaveBeenCalledTimes(1))
     expect(useEditorStore.getState().sourceVideos).toHaveLength(1)
     expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
   })
@@ -1986,7 +1982,7 @@ describe('VideoLibrary', () => {
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
-    expect(globalThis.confirm).toHaveBeenCalledWith('Remove this video? Another open editor tab could still be using it.')
+    expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove this video? Another open editor tab could still be using it.', 'Remove')
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
@@ -2037,9 +2033,7 @@ describe('VideoLibrary', () => {
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
-    expect(globalThis.confirm).toHaveBeenCalledWith(
-      'Remove this video? This will also remove 1 clip that uses it. Another open editor tab could still be using it.'
-    )
+    expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove this video? This will also remove 1 clip that uses it. Another open editor tab could still be using it.', 'Remove')
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 
@@ -2051,9 +2045,7 @@ describe('VideoLibrary', () => {
 
     fireEvent.click(screen.getByTitle('Remove media'))
 
-    expect(globalThis.confirm).toHaveBeenCalledWith(
-      'Remove this video? This will also remove 2 clips that use it. Another open editor tab could still be using it.'
-    )
+    expect(confirmModule.confirmAction).toHaveBeenCalledWith('Remove this video? This will also remove 2 clips that use it. Another open editor tab could still be using it.', 'Remove')
     await waitFor(() => expect(store().sourceVideos).toHaveLength(0))
   })
 

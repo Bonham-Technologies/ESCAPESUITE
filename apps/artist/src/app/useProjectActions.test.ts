@@ -8,6 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { act, renderHook } from '@testing-library/react'
 import { useProjectActions, type ProjectActionsDeps } from './useProjectActions'
+import * as confirmModule from './confirmAction'
 import { loadProject, saveProject, showOpenProjectDialog } from '../core/projectManager'
 import { ProjectFileError } from '../core/projectFileFormat'
 import { analytics } from '../utils/analytics'
@@ -648,11 +649,15 @@ describe('the safety dialog', () => {
 })
 
 describe('starting a new project', () => {
-  it('does not ask when there is nothing to lose', () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('does not ask when there is nothing to lose', async () => {
+    const confirmSpy = vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true)
     const { result } = mountActions({ clipCount: 0 })
 
-    act(() => result.current.handleNewProject())
+    await act(() => result.current.handleNewProject())
 
     expect(confirmSpy).not.toHaveBeenCalled()
     expect(deps.resetProject).toHaveBeenCalled()
@@ -661,32 +666,32 @@ describe('starting a new project', () => {
     expect(deps.showNotification).toHaveBeenCalledWith('New project created', 'info')
   })
 
-  it('asks, and starts over when the answer is yes', () => {
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  it('asks, and starts over when the answer is yes', async () => {
+    const confirmSpy = vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true)
     const { result } = mountActions({ clipCount: 2 })
 
-    act(() => result.current.handleNewProject())
+    await act(() => result.current.handleNewProject())
 
-    expect(confirmSpy).toHaveBeenCalledWith('Start a new project? Unsaved changes will be lost.')
+    expect(confirmSpy).toHaveBeenCalledWith('Start a new project? Unsaved changes will be lost.', 'Start new project')
     expect(deps.resetProject).toHaveBeenCalled()
   })
 
   // ESCSUITE-274: every tab has its own slot, so New Project empties this
   // tab's and nobody else's — `clearSession` is the autosave's, which knows
   // the tab id and that a host-driven editor writes nothing.
-  it('clears this tab\'s saved session, once', () => {
+  it('clears this tab\'s saved session, once', async () => {
     const { result } = mountActions({ clipCount: 0 })
 
-    act(() => result.current.handleNewProject())
+    await act(() => result.current.handleNewProject())
 
     expect(deps.clearSession).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves everything alone when the answer is no', () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false)
+  it('leaves everything alone when the answer is no', async () => {
+    vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(false)
     const { result } = mountActions({ clipCount: 2 })
 
-    act(() => result.current.handleNewProject())
+    await act(() => result.current.handleNewProject())
 
     expect(deps.resetProject).not.toHaveBeenCalled()
     expect(deps.clearHistory).not.toHaveBeenCalled()

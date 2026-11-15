@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from 'vite
 import { act, renderHook } from '@testing-library/react'
 import { useClipEditorActions } from './useClipEditorActions'
 import { useEditorStore } from '../../store/projectStore'
+import * as confirmModule from '../../app/confirmAction'
 import { addClip, resetStoreForTest, store, video } from '../../test/fixtures/projectStore'
 import { DEFAULT_CLIP_MASK_RADIUS } from '../../store/types'
 import { MAX_CROP_INSET, cropUpdateFor } from '../../core/clipCrop'
@@ -62,7 +63,7 @@ let confirmSpy: ReturnType<typeof vi.spyOn>
 
 beforeEach(() => {
   resetStoreForTest()
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  confirmSpy = vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true)
 
   const state = useEditorStore.getState() as unknown as Record<ActionName, AnyFn>
   if (!captured) {
@@ -331,23 +332,23 @@ describe('useClipEditorActions clip actions', () => {
     expect(store().project.timeline.clips).toHaveLength(1)
   })
 
-  it('deletes the clip once the confirmation is accepted', () => {
+  it('deletes the clip once the confirmation is accepted', async () => {
     const clip = mediaClip()
     const { result } = mount()
 
-    act(() => result.current.handleDeleteClip())
+    await act(() => result.current.handleDeleteClip())
 
-    expect(confirmSpy).toHaveBeenCalledWith(`Delete clip "${clip.name}"?`)
+    expect(confirmSpy).toHaveBeenCalledWith(`Delete clip "${clip.name}"?`, 'Delete')
     expect(spies.removeClipFromTimeline).toHaveBeenCalledWith(clip.id)
     expect(store().project.timeline.clips).toHaveLength(0)
   })
 
-  it('keeps the clip when the confirmation is declined', () => {
+  it('keeps the clip when the confirmation is declined', async () => {
     mediaClip()
-    confirmSpy.mockReturnValue(false)
+    confirmSpy.mockResolvedValue(false)
     const { result } = mount()
 
-    act(() => result.current.handleDeleteClip())
+    await act(() => result.current.handleDeleteClip())
 
     expect(confirmSpy).toHaveBeenCalled()
     expect(spies.removeClipFromTimeline).not.toHaveBeenCalled()

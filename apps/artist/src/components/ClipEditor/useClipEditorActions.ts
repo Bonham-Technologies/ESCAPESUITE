@@ -98,6 +98,7 @@ import { describeClip, relativeTimeInClip, fitToCanvasScale, maxPresetDuration }
 import { useSliderGesture } from './useSliderGesture';
 import type { SliderGestureHandlers } from './useSliderGesture';
 import { useBurstGesture } from './useBurstGesture';
+import { confirmAction } from '../../app/confirmAction';
 import type { BurstGestureHandlers } from './useBurstGesture';
 
 /** The store reads, derived values and handlers `ClipEditor` composes its sections from. */
@@ -141,7 +142,7 @@ export interface ClipEditorActions {
    */
   burstGesture: BurstGestureHandlers;
   handleSplitAtPlayhead: () => void;
-  handleDeleteClip: () => void;
+  handleDeleteClip: () => Promise<void>;
   /** Unlink the selected clip, or `undefined` when it is linked to nothing (ESCSUITE-355). */
   handleUnlinkClip: (() => void) | undefined;
   /**
@@ -280,9 +281,9 @@ export function useClipEditorActions(): ClipEditorActions {
     splitClip(selectedClip.id, timeInClip);
   }, [selectedClip, splitClip]);
 
-  const handleDeleteClip = useCallback(() => {
+  const handleDeleteClip = useCallback(async () => {
     if (!selectedClip) return;
-    if (confirm(`Delete clip "${selectedClip.name}"?`)) {
+    if (await confirmAction(`Delete clip "${selectedClip.name}"?`, 'Delete')) {
       removeClipFromTimeline(selectedClip.id);
     }
   }, [selectedClip, removeClipFromTimeline]);

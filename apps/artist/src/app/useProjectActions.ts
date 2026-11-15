@@ -25,6 +25,7 @@ import { parseProject } from '../store/projectMigration';
 import { applyEditorBlock, currentEditorBlock } from './editorBlock';
 import type { Project, SourceVideo } from '../store/types';
 import type { ShowNotification } from './useNotification';
+import { confirmAction } from './confirmAction';
 
 /** What the project actions need that they cannot reach on their own. */
 export interface ProjectActionsDeps {
@@ -65,7 +66,7 @@ export interface ProjectActions {
    * — where `handleLoadProject` is for the ones that need it picked first.
    */
   handleProjectFile: (file: File) => void;
-  handleNewProject: () => void;
+  handleNewProject: () => Promise<void>;
   handleProjectLoadCancel: () => void;
   handleProjectLoadSaveAndLoad: () => Promise<void>;
   handleProjectLoadDiscardAndLoad: () => Promise<void>;
@@ -243,9 +244,9 @@ export function useProjectActions({
   }, [pendingProjectFile, loadProjectFile]);
 
   // Handle new project
-  const handleNewProject = useCallback(() => {
+  const handleNewProject = useCallback(async () => {
     if (clipCount > 0) {
-      if (!confirm('Start a new project? Unsaved changes will be lost.')) {
+      if (!(await confirmAction('Start a new project? Unsaved changes will be lost.', 'Start new project'))) {
         return;
       }
     }

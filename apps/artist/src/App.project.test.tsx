@@ -1,7 +1,7 @@
 // Project lifecycle: the File menu, saving, loading (including the safety
 // dialog), the session restore prompt, and the chrome around them.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { store, resetStoreForTest } from './test/fixtures/projectStore'
 import { renderApp } from './test/renderApp'
@@ -48,8 +48,6 @@ const savedSession = (): SessionState => ({
 })
 
 describe('App project lifecycle', () => {
-  let confirmSpy: ReturnType<typeof vi.spyOn>
-
   beforeEach(() => {
     resetStoreForTest()
     store().clearHistory()
@@ -57,12 +55,10 @@ describe('App project lifecycle', () => {
     // The timeline-height tests write to localStorage, and artist's test setup
     // installs its own store that the shared afterEach does not clear.
     localStorage.clear()
-    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
   afterEach(() => {
     uninstallCanvasDouble()
-    confirmSpy.mockRestore()
     vi.clearAllMocks()
   })
 
@@ -107,11 +103,13 @@ describe('App project lifecycle', () => {
       await openFileMenu(user)
       await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
 
-      expect(confirmSpy).not.toHaveBeenCalled()
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(clearSessionState).toHaveBeenCalled()
       expect(notification()).toBe('New project created')
     })
 
+    // ESCSUITE-448: asked in the editor's own dialog, not confirm(), which
+    // a sandboxed embed without allow-modals answers no without asking.
     it('asks before throwing away a timeline', async () => {
       const user = userEvent.setup()
       addClip('clip1', 0, 2)
@@ -119,23 +117,44 @@ describe('App project lifecycle', () => {
 
       await openFileMenu(user)
       await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
+      const dialog = screen.getByRole('alertdialog', { name: 'Start a new project? Unsaved changes will be lost.' })
+      expect(store().project.timeline.clips).toHaveLength(1)
+      await user.click(within(dialog).getByRole('button', { name: 'Start new project' }))
 
-      expect(confirmSpy).toHaveBeenCalledWith('Start a new project? Unsaved changes will be lost.')
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(store().project.timeline.clips).toHaveLength(0)
       expect(store().history.past).toHaveLength(0)
     })
 
     it('keeps the work when the question is declined', async () => {
-      confirmSpy.mockReturnValue(false)
       const user = userEvent.setup()
       addClip('clip1', 0, 2)
       await renderApp()
 
       await openFileMenu(user)
       await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
+      await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
 
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
       expect(store().project.timeline.clips).toHaveLength(1)
       expect(clearSessionState).not.toHaveBeenCalled()
+    })
+
+    it('takes no editor shortcut while the question is up', async () => {
+      const user = userEvent.setup()
+      addClip('clip1', 0, 2)
+      store().setSelectedClipId('clip1')
+      await renderApp()
+
+      await openFileMenu(user)
+      await user.click(screen.getByRole('menuitem', { name: /New Project/ }))
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument()
+      fireEvent.keyDown(window, { key: 'Delete' })
+
+      expect(store().project.timeline.clips).toHaveLength(1)
+      await user.keyboard('{Escape}')
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+      expect(store().project.timeline.clips).toHaveLength(1)
     })
   })
 

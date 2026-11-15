@@ -147,4 +147,10 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `PROJECT_SAVED`, and the `?project=` / `?autoplay=` URL params. See `apps/artist/CLAUDE.md`.
 - **`VITE_EDITOR_URL`** (build-time, CRAFT): where standalone CRAFT opens the editor.
   Defaults to `/artist/`; normalised to a single trailing slash.
+- **Sandboxed iframes**: ARTIST needs `allow-scripts allow-same-origin` (scripts, and the
+  IndexedDB library and session slot); `allow-downloads` for a finished export to download.
+  It does **not** need `allow-modals`: since ESCSUITE-448 it asks every confirmation (Delete
+  track, Delete clip, New Project, the media library's Remove, Clear Unused and Clear All) in its
+  own dialog, where it used to call `confirm()`, which a sandbox without `allow-modals` answers no
+  without showing anything. Pinned by `apps/e2e/tests/regressions/ESCSUITE-448.spec.ts`.
 - Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.

@@ -8,6 +8,8 @@ import { Toolbar } from './components/Toolbar';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { ProjectLoadDialog } from './components/ProjectLoadDialog';
 import { SilenceDialog } from './components/SilenceDialog';
+import { ConfirmDialog } from './components/ConfirmDialog';
+import { useConfirmRequest } from './app/confirmAction';
 import { parseUrlParams } from './utils/integration';
 import { AppHeader } from './app/AppHeader';
 import { MediaLibrarySidebar } from './app/MediaLibrarySidebar';
@@ -46,6 +48,8 @@ function App() {
   const [resolutionConfirmOpen, setResolutionConfirmOpen] = useState(false);
   // "Transcribe to captions"'s "Replace or add" dialog (ESCSUITE-442), reported by the control.
   const [transcribeDialogOpen, setTranscribeDialogOpen] = useState(false);
+  // The editor's own confirm (ESCSUITE-448), asked through `confirmAction`.
+  const confirmOpen = useConfirmRequest() !== null;
 
   // URL parameters are read once at startup; later URL changes are ignored.
   const [urlParams] = useState(parseUrlParams);
@@ -176,7 +180,8 @@ function App() {
     showProjectLoadDialog ||
     resolutionConfirmOpen ||
     silenceReviewOpen ||
-    transcribeDialogOpen;
+    transcribeDialogOpen ||
+    confirmOpen;
 
   useAppKeyboardShortcuts({
     canUndo,
@@ -317,6 +322,9 @@ function App() {
 
       {/* "Remove silences" review, opened from the inspector (ESCSUITE-403) */}
       {silenceReviewOpen && <SilenceDialog onRemoved={(message) => showNotification(message, 'success')} />}
+
+      {/* Delete, Remove and New Project ask here, not in confirm() (ESCSUITE-448) */}
+      <ConfirmDialog />
 
       {/* Keyframe panel */}
       <KeyframePanel />

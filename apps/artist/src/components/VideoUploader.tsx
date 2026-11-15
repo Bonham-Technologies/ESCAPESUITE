@@ -26,6 +26,7 @@ import {
   isStorageUnavailable,
   logStorageFailure,
 } from '../core/storageErrors';
+import { confirmAction } from '../app/confirmAction';
 import styles from './VideoUploader.module.css';
 
 /**
@@ -271,7 +272,7 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
   const handleClearUnusedVideos = useCallback(async () => {
     if (unusedVideos.length === 0) return;
     const message = `Remove ${unusedVideos.length} unused media file${unusedVideos.length !== 1 ? 's' : ''}? This will free ${formatFileSize(unusedSize)}.`;
-    if (confirm(message)) {
+    if (await confirmAction(message, 'Remove')) {
       const removedIds: string[] = [];
       try {
         for (const video of unusedVideos) {
@@ -331,7 +332,7 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
   // from handing back a source whose bytes this already deleted.
   const handleClearAllStorage = useCallback(async () => {
     if (clearableVideos.length === 0) return;
-    if (confirm('Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. Another open editor tab could still be using them. This cannot be undone.')) {
+    if (await confirmAction('Remove every file this project imported, including any clip that still uses it? Files on a locked track stay. Another open editor tab could still be using them. This cannot be undone.', 'Remove all')) {
       let failed = 0;
       const removedIds: string[] = [];
       try {
@@ -374,7 +375,7 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
   const handleRemoveOrphans = useCallback(async () => {
     if (removingOrphansRef.current) return;
     const count = orphans.length;
-    if (!confirm(`Remove ${count} file${count !== 1 ? 's' : ''} imported in earlier sessions (${formatFileSize(totalBytes(orphans))})? Another open editor tab could still be using them.`)) return;
+    if (!(await confirmAction(`Remove ${count} file${count !== 1 ? 's' : ''} imported in earlier sessions (${formatFileSize(totalBytes(orphans))})? Another open editor tab could still be using them.`, 'Remove'))) return;
     removingOrphansRef.current = true;
     try {
       let failed = 0;
@@ -878,7 +879,7 @@ export function VideoLibrary({ showNotification, clearSession }: VideoLibraryPro
       const message = affectedClips > 0
         ? `Remove this video? This will also remove ${affectedClips} clip${affectedClips !== 1 ? 's' : ''} that use${affectedClips === 1 ? 's' : ''} it. Another open editor tab could still be using it.`
         : 'Remove this video? Another open editor tab could still be using it.';
-      if (confirm(message)) {
+      if (await confirmAction(message, 'Remove')) {
         // ESCSUITE-154: `deleteVideo` deletes the source's bytes from
         // IndexedDB itself, exactly like Clear Unused and Clear All
         // (ESCSUITE-149) — so this is a storage clear, not an edit, and the
