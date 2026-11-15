@@ -13,7 +13,7 @@ Please **do not** open a public issue for security problems.
 
 - Preferred: report privately via
   [GitHub Security Advisories](https://github.com/Bonham-Technologies/ESCAPESUITE/security/advisories/new)
-- Or email: **security@escapesuite.io**
+- Or email: **support@bonham.tech**
 
 Include reproduction steps and the build you tested (hosted or offline, plus
 version). You should hear back within a few business days; please allow a
