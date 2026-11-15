@@ -55,3 +55,14 @@ test('the returned function stops watching', () => {
   page.log('x')
   assert.deepEqual(testInfo.annotations, [])
 })
+
+test("journey 01's watched text still matches ARTIST's reload warning", async () => {
+  // If ARTIST rewords the warning, journey 01 would silently stop annotating
+  // reloads and every count would read as "never fired". Keep the two in step.
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../../artist/src/core/elementFrames.ts', import.meta.url), 'utf8')
+  const journey = await readFile(new URL('../tests/journeys/01-record-edit-export.spec.ts', import.meta.url), 'utf8')
+  const watched = journey.match(/contains:\s*'([^']+)'/)?.[1]
+  assert.equal(watched, 'stopped completing seeks')
+  assert.match(source, /console\.warn\(`Export: "\$\{name\}" stopped completing seeks; reloaded it from/)
+})
