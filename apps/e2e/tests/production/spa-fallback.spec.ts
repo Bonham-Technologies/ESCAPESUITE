@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { withoutRouteHead } from '../../utils/routeHead'
 
 /**
  * ESCSUITE-196: `vercel.json`'s SPA catch-all used to be a PREFIX test
@@ -41,13 +42,12 @@ test.describe('production: vercel.json rewrite parity (ESCSUITE-196)', () => {
 
   // ESCSUITE-402: the Known limitations page is a hub route like /privacy, served
   // by its own rewrite (ESCSUITE-455) to the hub's page with its own head
-  // (ESCSUITE-458), so everything after the head matches the hub's.
+  // (ESCSUITE-458), so everything but those head values matches the hub's.
   test('/limitations reaches the hub SPA with a 200', async ({ request }) => {
     const response = await request.get('http://localhost:5190/limitations')
     expect(response.status()).toBe(200)
     const indexResponse = await request.get('http://localhost:5190/')
-    const afterHead = (html: string) => html.slice(html.indexOf('</head>'))
-    expect(afterHead(await response.text())).toBe(afterHead(await indexResponse.text()))
+    expect(withoutRouteHead(await response.text())).toBe(withoutRouteHead(await indexResponse.text()))
   })
 
   // Review round 1, finding 1: pin a look-alike path end to end against the

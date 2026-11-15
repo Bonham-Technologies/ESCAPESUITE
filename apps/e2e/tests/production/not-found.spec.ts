@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { withoutRouteHead } from '../../utils/routeHead'
 
 /**
  * ESCSUITE-455: `vercel.json`'s last rewrite sent every path outside craft,
@@ -40,14 +41,14 @@ test.describe('production: unknown paths are real 404s (ESCSUITE-455)', () => {
   })
 
   // Each route's HTML is the hub's page with that route's own head
-  // (ESCSUITE-458), so everything after the head is the same.
-  const afterHead = (html: string) => html.slice(html.indexOf('</head>'))
+  // (ESCSUITE-458), so everything but those head values is the same, the
+  // script and stylesheet tags in <head> included.
   for (const path of ['/', '/privacy', '/terms', '/limitations']) {
     test(`hub route ${path} answers 200 with the hub`, async ({ request }) => {
       const response = await request.get(`${BASE}${path}`)
       expect(response.status()).toBe(200)
       const hub = await request.get(`${BASE}/`)
-      expect(afterHead(await response.text())).toBe(afterHead(await hub.text()))
+      expect(withoutRouteHead(await response.text())).toBe(withoutRouteHead(await hub.text()))
     })
   }
 
