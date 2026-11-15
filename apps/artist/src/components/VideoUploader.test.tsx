@@ -1213,6 +1213,32 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).not.toContain('unused')
     })
 
+    // ESCSUITE-448: the question is asynchronous now, so the project can change
+    // under it (a host's LOAD_PROJECT); a source a clip uses by the answer keeps its bytes.
+    it('keeps a file a clip started using while the question was up', async () => {
+      await storeVideo('unused', new Blob(['bytes']), { ...videoMeta, id: 'unused' })
+      store().addSourceVideo(videoMeta)
+      store().addSourceVideo({ ...videoMeta, id: 'unused', name: 'spare.mp4', size: 2048 })
+      addClip('clip1', 0, 2) // references video1
+      let answer!: (confirmed: boolean) => void
+      vi.mocked(confirmModule.confirmAction).mockImplementation(
+        () => new Promise<boolean>((resolve) => { answer = resolve })
+      )
+      render(<VideoUploader onProjectFile={onProjectFile} showNotification={showNotification} clearSession={clearSession} />)
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Clear Unused (2.0 KB)' }))
+      await waitFor(() => expect(confirmModule.confirmAction).toHaveBeenCalledTimes(1))
+      act(() => {
+        store().addClipToTimeline({ id: 'clip2', sourceVideoId: 'unused', name: 'clip2', startTime: 0, endTime: 2, duration: 2 }, undefined, 2)
+      })
+      const deletes = vi.spyOn(storageModule, 'deleteVideo')
+      await act(async () => { answer(true) })
+
+      expect(deletes).not.toHaveBeenCalled()
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1', 'unused'])
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('unused')
+    })
+
     it('revokes the thumbnail URL of the unused media it clears', async () => {
       const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
       await storeVideo('unused', new Blob(['bytes']), { ...videoMeta, id: 'unused' })

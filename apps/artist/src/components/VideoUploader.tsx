@@ -276,6 +276,10 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
       const removedIds: string[] = [];
       try {
         for (const video of unusedVideos) {
+          // ESCSUITE-448: the list was read before the question; a host's
+          // LOAD_PROJECT can land while it is up (or mid-loop), so a source a
+          // clip uses by now is in use and keeps its bytes.
+          if (useEditorStore.getState().project.timeline.clips.some((c) => c.sourceVideoId === video.id)) continue;
           await deleteVideo(video.id);
           removedIds.push(video.id);
         }
