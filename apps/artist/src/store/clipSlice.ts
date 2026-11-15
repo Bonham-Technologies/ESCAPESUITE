@@ -15,7 +15,7 @@ import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './p
 import { clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock';
 import { deletableWithLinks, linkedPartners, withoutLink } from './linkedClips';
 import { pruneSelection } from './selectionPrune';
-import { cutEditorBlock, cutTimeRanges, linkedRows, normaliseRanges, rowsToMove } from './rippleRanges';
+import { cutEditorBlock, cutHeldByLock, cutTimeRanges, linkedRows, normaliseRanges, rowsToMove } from './rippleRanges';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
 import { startsAtOrAfter } from './timelineSnapping';
@@ -405,7 +405,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
     const cuts = normaliseRanges(ranges);
     if (!clip || cuts.length === 0) return false;
     const rows = linkedRows(clips, clip);
-    if ([...rows].some((id) => isTrackLocked(tracks, id))) return false;
+    if (cutHeldByLock(clips, tracks, clip)) return false;
 
     const moveRows = moveEverything ? rowsToMove(clips, tracks, rows) : new Set<string>();
     const result = cutTimeRanges(clips, get().sourceVideos, rows, cuts, moveRows);
