@@ -166,7 +166,7 @@ export default function Privacy() {
           <li><strong>Objection</strong> - Opt out of certain data processing</li>
         </ul>
         <p>
-          To exercise these rights, contact us at matt@bonham.tech.
+          To exercise these rights, contact us at support@bonham.tech.
         </p>
 
         <h2>9. Cookies</h2>
@@ -198,7 +198,7 @@ export default function Privacy() {
         <h2>13. Contact Us</h2>
         <div className={styles.contactInfo}>
           <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
-          <p>Email: matt@bonham.tech</p>
+          <p>Email: support@bonham.tech</p>
           <p>For privacy, data, legal and support requests, write to the same address.</p>
         </div>
       </div>
