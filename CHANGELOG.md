@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Remove silences says "Ctrl+Z puts it back" for a single pause, warns when the cuts would remove 90 % or more of a clip, and names a locked linked track as soon as it opens, with Remove all disabled (ESCSUITE-449).
 - Hosted site and docs: security, privacy, legal and support contacts now go to support@bonham.tech at Bonham Technologies in place of escapesuite.io addresses, and the site serves `/.well-known/security.txt` (BORG-91).
 - Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page now explicitly asks browsers to use HTTPS only, for the site's host and any name under it (ESCSUITE-459).
 - ESCAPEPLAN: the Known limitations page now lists the browser limits of Transcribe to captions and Float controls (ESCSUITE-445).

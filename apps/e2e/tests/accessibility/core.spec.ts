@@ -1877,7 +1877,7 @@ test.describe('Color Contrast', () => {
   // and an invalid field's border in a hard-coded #f87171: 2.57:1 as text on
   // the light dialog (--bg-secondary), and as a border 2.3:1 on the field's
   // light fill. No audit opened the dialog, so this one does, with a track
-  // locked (Remove all is refused and says why) and a field holding a number
+  // locked (Remove all is disabled and the dialog says why) and a field holding a number
   // out of range, then with Remove all hovered. Both themes: the dark one
   // must keep passing.
   for (const theme of ['dark', 'light'] as const) {
@@ -1905,7 +1905,8 @@ test.describe('Color Contrast', () => {
       await expect(minGap).toHaveAttribute('aria-invalid', 'true')
       await expect(dialog.getByText('Enter a number from 0 to 60.')).toBeVisible()
       const removeAll = dialog.getByRole('button', { name: 'Remove all' })
-      await removeAll.click()
+      // ESCSUITE-449: the lock is named on open and Remove all is disabled.
+      await expect(removeAll).toBeDisabled()
       await expect(dialog.getByRole('alert')).toHaveText(/a track this take sits on is locked/)
 
       await page.mouse.move(0, 0)

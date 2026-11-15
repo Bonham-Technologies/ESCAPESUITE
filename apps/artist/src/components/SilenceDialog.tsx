@@ -11,7 +11,7 @@ import {
   type SilenceOptions,
   type TimeRange,
 } from '../core/silenceDetection';
-import { leftBehind, type LeftBehind } from '../store/rippleRanges';
+import { cutHeldByLock, leftBehind, type LeftBehind } from '../store/rippleRanges';
 import styles from './SilenceDialog.module.css';
 
 interface SilenceDialogProps {
@@ -209,6 +209,11 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
   const candidates = review.candidates;
   const left = leftBehind(clips, tracks, markers, review.clipId, candidates, moveEverything);
   const warningId = `${titleId}-left-behind`;
+  // ESCSUITE-449: the check "Remove all" refuses on, asked up front.
+  const reviewed = clips.find((c) => c.id === review.clipId);
+  const locked = reviewed !== undefined && cutHeldByLock(clips, tracks, reviewed);
+  // ESCSUITE-449: cuts that leave next to nothing of the clip are usually a threshold of 0.
+  const nearlyAll = reviewed !== undefined && reviewed.duration > 0 && totalLength(candidates) >= 0.9 * reviewed.duration;
 
   const parsed = (key: keyof SilenceOptions, raw: string): number | null => {
     const field = FIELDS.find((f) => f.key === key)!;
@@ -257,7 +262,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
       setRefused(there ? 'locked' : 'gone');
       return;
     }
-    const removed = `Removed ${count(candidates.length, 'pause', 'pauses')} (${seconds(totalLength(candidates))}). Ctrl+Z puts them back.`;
+    const removed = `Removed ${count(candidates.length, 'pause', 'pauses')} (${seconds(totalLength(candidates))}). Ctrl+Z puts ${candidates.length === 1 ? 'it' : 'them'} back.`;
     onRemoved(left ? `${removed} ${leftBehindText(left, moveEverything, 'did not move')}` : removed);
     close();
   };
@@ -313,6 +318,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
               : candidates.length === 0
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
+            {nearlyAll && ` This removes 90 % or more of ${reviewed.name || 'a clip'}.`}
           </p>
 
           <div className={styles.option}>
@@ -398,12 +404,16 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
             </ul>
           )}
 
-          {refused && (
+          {locked ? (
             <p className={styles.error} role="alert">
-              {refused === 'locked'
-                ? 'Nothing was cut: a track this take sits on is locked. Unlock it and try again.'
-                : 'Nothing was cut: the clip is no longer on the timeline.'}
+              Nothing can be cut: a track this take sits on is locked. Unlock it to remove silences.
             </p>
+          ) : (
+            refused && (
+              <p className={styles.error} role="alert">
+                Nothing was cut: the clip is no longer on the timeline.
+              </p>
+            )
           )}
 
           <div className={styles.actions}>
@@ -414,7 +424,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
               type="button"
               className={styles.removeButton}
               onClick={handleRemoveAll}
-              disabled={candidates.length === 0}
+              disabled={candidates.length === 0 || locked}
             >
               Remove all
             </button>
