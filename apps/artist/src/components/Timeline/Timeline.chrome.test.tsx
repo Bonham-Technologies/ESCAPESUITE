@@ -4,9 +4,10 @@
 // on its own — see src/test/doubles/layout.ts for the boxes these tests hand
 // the ruler and the track container. At the default zoom one second is 50px.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, render, screen, fireEvent } from '@testing-library/react'
+import { act, render, screen, fireEvent, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Timeline } from './Timeline'
+import { ConfirmDialog } from '../ConfirmDialog'
 import { resetStoreForTest, store, addClip, video } from '../../test/fixtures/projectStore'
 import { setRect } from '../../test/doubles/layout'
 import { installResizeObserverDouble, type ResizeObserverDouble } from '../../test/doubles/resizeObserver'
@@ -257,17 +258,14 @@ describe('Timeline in and out points', () => {
 
 describe('Timeline track headers', () => {
   let resizeObserver: ResizeObserverDouble
-  let confirmSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
     resetStoreForTest()
     resizeObserver = installResizeObserverDouble()
-    confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
   })
 
   afterEach(() => {
     resizeObserver.uninstall()
-    confirmSpy.mockRestore()
   })
 
   const track = () => store().project.timeline.tracks[0]
@@ -371,33 +369,43 @@ describe('Timeline track headers', () => {
     store().addTrack()
     renderTimeline()
 
+    render(<ConfirmDialog />)
+
     await user.click(screen.getAllByTitle('Delete track')[0])
 
-    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
     expect(store().project.timeline.tracks).toHaveLength(1)
   })
 
+  // ESCSUITE-448: asked in the editor's own dialog, not confirm().
   it('asks before deleting a track that still holds clips', async () => {
     const user = userEvent.setup()
     store().addTrack()
     addClip('clip1', 0, 2, store().project.timeline.tracks[1].id)
     renderTimeline()
+    render(<ConfirmDialog />)
 
     await user.click(screen.getAllByTitle('Delete track')[0])
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete track with 1 clip(s)? Ctrl+Z will bring it back.' })
+    expect(store().project.timeline.tracks).toHaveLength(2)
+    await user.click(within(dialog).getByRole('button', { name: 'Delete track' }))
 
-    expect(confirmSpy).toHaveBeenCalledWith('Delete track with 1 clip(s)? Ctrl+Z will bring it back.')
     expect(store().project.timeline.tracks).toHaveLength(1)
   })
 
-  it('keeps the track when the delete is declined', async () => {
-    confirmSpy.mockReturnValue(false)
+  it('keeps the track, and gives focus back to its Delete button, when the delete is declined', async () => {
     const user = userEvent.setup()
     store().addTrack()
     addClip('clip1', 0, 2, store().project.timeline.tracks[1].id)
     renderTimeline()
+    render(<ConfirmDialog />)
+    const deleteButton = screen.getAllByTitle('Delete track')[0]
 
-    await user.click(screen.getAllByTitle('Delete track')[0])
+    await user.click(deleteButton)
+    await user.keyboard('{Escape}')
 
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(deleteButton).toHaveFocus()
     expect(store().project.timeline.tracks).toHaveLength(2)
   })
 })

@@ -5,6 +5,7 @@ import type { ComponentProps } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MediaLibrarySidebar } from './MediaLibrarySidebar';
+import * as confirmModule from './confirmAction';
 import { resetStoreForTest } from '../test/fixtures/projectStore';
 
 // The library's children reach for IndexedDB, the project file reader and the
@@ -117,9 +118,7 @@ describe('MediaLibrarySidebar', () => {
   // through the autosave's own `clearSession`, handed down from `App` here.
   it("passes its caller's clearSession through to the library's Remove", async () => {
     const clearSession = vi.fn();
-    // A spy, restored on its own: `vi.unstubAllGlobals()` would also drop the
-    // URL stubs `src/test/setup.ts` installs (ESCSUITE-119).
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirm = vi.spyOn(confirmModule, 'confirmAction').mockResolvedValue(true);
     try {
       renderSidebar({ clearSession });
 

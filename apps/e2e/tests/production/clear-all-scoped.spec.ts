@@ -121,11 +121,11 @@ test.describe('Clear All in ARTIST is scoped to its own library (ESCSUITE-142)',
     await expect(addToTimeline).toBeVisible({ timeout: 60_000 })
 
     // Clear All, confirmed.
-    artistPage.once('dialog', (dialog) => dialog.accept())
     const clearAll = artistPage.getByRole('button', { name: 'Clear All' })
     await expect(clearAll).toBeVisible({ timeout: 15_000 })
     await expect(clearAll).toBeEnabled()
     await clearAll.click()
+    await artistPage.getByRole('alertdialog').getByRole('button', { name: 'Remove all' }).click()
 
     // ARTIST's own import is gone from its library.
     await expect(addToTimeline).not.toBeVisible({ timeout: 15_000 })

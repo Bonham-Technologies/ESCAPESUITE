@@ -109,8 +109,6 @@ const addButtons = (page: Page) => page.getByRole('button', { name: 'Add to time
 
 async function openEditor(page: Page): Promise<void> {
   await installResourceProbe(page)
-  // Remove media asks before it deletes.
-  page.on('dialog', (dialog) => void dialog.accept())
   await page.goto(ARTIST_URL)
   await waitForAppReady(page, 'artist')
 }
@@ -158,6 +156,8 @@ async function deleteBoth(page: Page, n: number): Promise<void> {
   const remove = page.getByRole('button', { name: 'Remove media' })
   for (const remaining of [1, 0]) {
     await remove.first().click()
+    // Remove media asks before it deletes.
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Remove', exact: true }).click()
     await expect(remove, `cycle ${n}: a file did not leave the library`).toHaveCount(remaining)
   }
   await expect(page.getByText('No media uploaded yet')).toBeVisible()

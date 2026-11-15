@@ -15,10 +15,6 @@ class ResizeObserverMock {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ;(globalThis as any).ResizeObserver = ResizeObserverMock
 
-// Mock window.confirm
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-;(globalThis as any).confirm = vi.fn(() => true)
-
 describe('Timeline', () => {
   beforeEach(() => {
     // Reset store to initial state

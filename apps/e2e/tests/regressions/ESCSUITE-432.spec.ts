@@ -37,9 +37,9 @@ test.describe('ESCSUITE-432: transcription stops when the project is replaced', 
     await page.waitForTimeout(3_000)
 
     // New Project confirms before discarding unsaved clips.
-    page.once('dialog', (dialog) => dialog.accept())
     await page.getByRole('button', { name: 'File menu' }).click()
     await page.getByRole('menuitem', { name: /New Project/ }).click()
+    await page.getByRole('alertdialog').getByRole('button', { name: 'Start new project' }).click()
 
     // Stopped at once, not when the old sound finishes playing.
     await expect(page.getByText(STOPPED)).toBeVisible({ timeout: 2_000 })

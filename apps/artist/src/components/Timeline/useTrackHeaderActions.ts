@@ -13,6 +13,7 @@
 // asks before discarding a track that still holds clips.
 import { useCallback } from 'react';
 import type { Clip, Track } from '../../store/types';
+import { confirmAction } from '../../app/confirmAction';
 
 /** What the header buttons need that they cannot reach on their own. */
 export interface TrackHeaderActionsDeps {
@@ -33,7 +34,7 @@ export interface TrackHeaderActions {
   /** Move a track one row down the visual stack. */
   moveTrackDown: (trackId: string) => void;
   /** Delete a track, after confirming if it still holds clips. */
-  handleDeleteTrack: (trackId: string) => void;
+  handleDeleteTrack: (trackId: string) => Promise<void>;
 }
 
 export function useTrackHeaderActions({
@@ -73,12 +74,12 @@ export function useTrackHeaderActions({
   }, [sortedTracks, reorderTracks]);
 
   // Delete track (with confirmation if it has clips)
-  const handleDeleteTrack = useCallback((trackId: string) => {
+  const handleDeleteTrack = useCallback(async (trackId: string) => {
     if (tracks.length <= 1) return; // Keep at least one track
 
     const trackClips = clips.filter(c => c.trackId === trackId);
     if (trackClips.length > 0) {
-      if (!confirm(`Delete track with ${trackClips.length} clip(s)? Ctrl+Z will bring it back.`)) {
+      if (!(await confirmAction(`Delete track with ${trackClips.length} clip(s)? Ctrl+Z will bring it back.`, 'Delete track'))) {
         return;
       }
     }
