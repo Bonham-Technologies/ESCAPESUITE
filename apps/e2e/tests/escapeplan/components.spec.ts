@@ -88,7 +88,7 @@ test.describe('Per-route SEO', () => {
   // index.html is served for every SPA route, so without per-route tags each
   // route would claim to be the homepage.
   const routes = [
-    { path: '/', canonical: `${CANONICAL_ORIGIN}/`, title: /free, open-source/i },
+    { path: '/', canonical: `${CANONICAL_ORIGIN}/`, title: /screen recorder & video editor/i },
     { path: '/privacy', canonical: `${CANONICAL_ORIGIN}/privacy`, title: /privacy policy/i },
     { path: '/terms', canonical: `${CANONICAL_ORIGIN}/terms`, title: /terms of service/i },
     { path: '/limitations', canonical: `${CANONICAL_ORIGIN}/limitations`, title: /known limitations/i },

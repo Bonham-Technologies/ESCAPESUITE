@@ -1,6 +1,6 @@
 import { Fragment } from 'react'
 import { Link } from 'react-router-dom'
-import { useSeo } from '../../lib/seo'
+import { useRouteSeo } from '../../lib/seo'
 import legal from '../Legal/Legal.module.css'
 import styles from './Limitations.module.css'
 import { LIMITATIONS, NETWORK_SILENCE_SPEC_URL, type LimitationSource } from './limitations'
@@ -16,12 +16,7 @@ function SourceRef({ source }: { source: LimitationSource }) {
 }
 
 export default function Limitations() {
-  useSeo({
-    title: 'Known limitations — ESCAPE Suite',
-    description:
-      'What ESCAPE Suite cannot do yet, browser by browser, what the hosted site sends, and how to check for yourself that your recordings never leave your device.',
-    canonicalPath: '/limitations',
-  })
+  useRouteSeo('/limitations')
 
   return (
     <div className={legal.legal}>

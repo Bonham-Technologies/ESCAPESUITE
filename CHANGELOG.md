@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Hosted site: the Privacy, Terms and Known limitations pages are served with their own title, description and canonical address instead of the home page's, so search engines no longer see them as copies of the home page; the home page, ESCAPECRAFT and ESCAPEARTIST have shorter titles and descriptions that show in full in search results (ESCSUITE-458).
 - Hosted site and docs: security, privacy, legal and support contacts now go to support@bonham.tech at Bonham Technologies in place of escapesuite.io addresses, and the site serves `/.well-known/security.txt` (BORG-91).
 - Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page now explicitly asks browsers to use HTTPS only, for the site's host and any name under it (ESCSUITE-459).
 - ESCAPEPLAN: the Known limitations page now lists the browser limits of Transcribe to captions and Float controls (ESCSUITE-445).

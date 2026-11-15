@@ -13,3 +13,7 @@
   the Layout ("Page not found", with links home, to CRAFT and to ARTIST) instead of redirecting to
   `/`. The hosted site serves those paths `dist/404.html` with status 404. The route list is
   `src/routes.ts`; `vercel.json`'s hub rewrites must match it (`src/routes.test.ts`).
+- Per-route head (ESCSUITE-458): each route's title, description and canonical path are in
+  `src/lib/routeMeta.ts`. Pages call `useRouteSeo(path)` (`src/lib/seo.ts`), and the build writes
+  the same head into each route's own HTML (`dist/privacy/index.html`, ...), so the served HTML
+  and the running page agree. See `docs/reference/vercel-deployment.md`.

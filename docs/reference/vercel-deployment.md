@@ -12,7 +12,8 @@ The monorepo deploys to Vercel with automatic preview deployments:
 **Output Structure:**
 ```
 dist/
-├── index.html        # ESCAPEPLAN
+├── index.html        # ESCAPEPLAN (home page head)
+├── privacy/index.html # ESCAPEPLAN with /privacy's head (also terms/, limitations/)
 ├── 404.html          # Not-found page (status 404)
 ├── craft/index.html  # ESCAPECRAFT (single file)
 └── artist/index.html # ESCAPEARTIST (single file)
@@ -24,20 +25,33 @@ naming the app instead of assembling and reporting success on a half-shaped `dis
 
 ## Rewrites and the 404 page
 
-`vercel.json` rewrites the hub's own routes (`/`, `/privacy`, `/terms`, `/limitations`) to
-`/index.html`, and everything under `/craft/` and `/artist/` to that app's `index.html`. A path
+`vercel.json` rewrites the hub's own routes (`/`, `/privacy`, `/terms`, `/limitations`) to the
+hub's page, each to its own copy (`/index.html`, `/privacy/index.html`, ...), and everything under
+`/craft/` and `/artist/` to that app's `index.html`. A path
 that is neither a file nor one of those routes gets `dist/404.html` with status 404 (ESCSUITE-455;
 before it, a catch-all sent every unknown path to the hub with status 200, a "soft 404"). `404.html`
 is a copy of the hub's page, and the hub's router shows its not-found page, with links home and to
 both tools, for any path it doesn't know.
 
+**Per-route head (ESCSUITE-458).** Each hub route's HTML carries that route's own title,
+description, `rel="canonical"` and `og:`/`twitter:` title, description and url before any
+JavaScript runs; before, every route was served the home page's head and only `seo.ts` corrected
+it after load, so search engines saw `/privacy`, `/terms` and `/limitations` as duplicates of
+`/`. The heads are in `apps/plan/src/lib/routeMeta.ts`, read both by `seo.ts` (in-app navigation)
+and by the `escapeplan-route-heads` plugin in `apps/plan/vite.config.ts`, which writes the copies
+at build time (and serves the right head from the dev server). Titles stay at 60 characters or
+fewer and descriptions at 50 to 160; CRAFT's and ARTIST's are in their own `index.html`.
+`scripts/build-all.mjs` refuses to publish when any rewrite destination is missing from `dist/`,
+and `apps/e2e/tests/production/route-heads.spec.ts` reads every `sitemap.xml` route's served HTML.
+
 Each hub page with a trailing slash (`/privacy/`) redirects permanently (308) to its canonical
 path, since the old catch-all served those too. `/index.html` is the hub's own file (200), so the
-hub's router sends it to `/` instead of showing the not-found page there.
+hub's router sends it to `/` instead of showing the not-found page there; likewise each page's own
+copy (`/privacy/index.html` goes to `/privacy`).
 
 The hub's route list is `PAGES` in `apps/plan/src/routes.ts`; `apps/plan/src/routes.test.ts` fails
-when `vercel.json`'s hub rewrites (or its trailing-slash redirects) and that list disagree, so **add a hub page's rewrite and redirect with the
-page**. `apps/e2e/scripts/serve-dist.mjs` resolves requests from `vercel.json` itself, and
+when `vercel.json`'s hub rewrites (or its trailing-slash redirects), `routeMeta.ts` and that list
+disagree, so **add a hub page's rewrite, redirect and head with the page**. `apps/e2e/scripts/serve-dist.mjs` resolves requests from `vercel.json` itself, and
 `apps/e2e/tests/production/not-found.spec.ts` checks the statuses against the combined build.
 
 ## Security headers

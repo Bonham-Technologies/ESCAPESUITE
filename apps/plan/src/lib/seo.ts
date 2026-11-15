@@ -1,23 +1,13 @@
 import { useEffect } from 'react'
+import { ROUTE_META, SITE_URL, type HubPath } from './routeMeta'
 
-/**
- * Canonical origin. The apex domain 307-redirects to www in production, so www
- * is the indexable host — sitemap.xml, robots.txt, and every canonical here
- * must agree on it or Search Console reports duplicate/alternate-canonical
- * pages.
- */
-export const SITE_URL = 'https://www.escapesuite.io'
-
-export const DEFAULT_TITLE =
-  'ESCAPE Suite — Free, open-source screen recording & video editing in your browser'
-export const DEFAULT_DESCRIPTION =
-  'Record your screen and edit video entirely in the browser — free, open source (Apache-2.0), and private by design. Nothing is uploaded. Run it hosted, self-host it, or download a single-file offline build for air-gapped networks.'
+export { SITE_URL }
 
 interface SeoOptions {
   /** Full <title> for the route. */
   title: string
-  /** Meta description; falls back to the site default. */
-  description?: string
+  /** Meta description. */
+  description: string
   /** Path starting with "/" used to build the canonical URL. */
   canonicalPath: string
 }
@@ -35,17 +25,13 @@ function upsertMeta(attr: 'name' | 'property', key: string, content: string): vo
 /**
  * Applies per-route title, description, canonical, and social tags.
  *
- * This is a single-page app served from one static index.html, so without this
- * every route would inherit the homepage's title and canonical — /privacy and
- * /terms would both claim to be "/" and get folded together by search engines.
- * Tags already present in index.html are mutated in place rather than
+ * The hosted site serves each hub route its own HTML with this head already in
+ * it (ESCSUITE-458, written by `vite.config.ts` from `routeMeta.ts`); this keeps
+ * the head right as the visitor moves between routes inside the app, where no
+ * new HTML is loaded. Tags already present are mutated in place rather than
  * duplicated, so exactly one canonical link exists at any time.
  */
-export function useSeo({
-  title,
-  description = DEFAULT_DESCRIPTION,
-  canonicalPath,
-}: SeoOptions): void {
+export function useSeo({ title, description, canonicalPath }: SeoOptions): void {
   useEffect(() => {
     const canonicalUrl = `${SITE_URL}${canonicalPath}`
 
@@ -65,4 +51,9 @@ export function useSeo({
     }
     canonical.setAttribute('href', canonicalUrl)
   }, [title, description, canonicalPath])
+}
+
+/** `useSeo` with a hub route's head from `routeMeta.ts`, the same head its served HTML has. */
+export function useRouteSeo(path: HubPath): void {
+  useSeo({ ...ROUTE_META[path], canonicalPath: path })
 }
