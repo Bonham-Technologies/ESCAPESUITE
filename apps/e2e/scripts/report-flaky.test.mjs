@@ -11,7 +11,14 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
-import { findFlakyTests, toAnnotations, toSummary } from './report-flaky.mjs'
+import {
+  findAnnotatedTests,
+  findFlakyTests,
+  toAnnotatedSummary,
+  toAnnotations,
+  toNotices,
+  toSummary,
+} from './report-flaky.mjs'
 
 const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'report-flaky.mjs')
 
@@ -148,7 +155,7 @@ test('the CLI notes a missing report without failing', () => {
     encoding: 'utf8',
   })
   assert.match(stdout, /::warning title=Flaky e2e report missing::/)
-  assert.deepEqual(JSON.parse(readFileSync(outPath, 'utf8')), { reportMissing: true, flaky: [] })
+  assert.deepEqual(JSON.parse(readFileSync(outPath, 'utf8')), { reportMissing: true, flaky: [], annotated: [] })
 })
 
 test('the CLI treats a truncated report like a missing one and exits 0', () => {
@@ -165,5 +172,140 @@ test('the CLI treats a truncated report like a missing one and exits 0', () => {
   })
   assert.match(stdout, /::warning title=Flaky e2e report missing::.*could not be parsed/)
   assert.match(readFileSync(summaryPath, 'utf8'), /could not be parsed/)
-  assert.deepEqual(JSON.parse(readFileSync(outPath, 'utf8')), { reportMissing: true, flaky: [] })
+  assert.deepEqual(JSON.parse(readFileSync(outPath, 'utf8')), { reportMissing: true, flaky: [], annotated: [] })
+})
+
+// ESCSUITE-450: tests that carry a reported annotation (such as journey 01's
+// `reload-fired`, from utils/consoleAnnotation.ts) are listed whatever their status.
+
+const reload = 'Export: "e2e-recording.webm" stopped completing seeks; reloaded it from a fresh copy'
+
+/** A journey that passed but logged the reload, beside unrelated annotations. */
+const annotatedReport = {
+  config: { rootDir: '/repo/apps/e2e/tests' },
+  suites: [
+    {
+      title: 'journeys/01-record-edit-export.spec.ts',
+      file: 'journeys/01-record-edit-export.spec.ts',
+      suites: [
+        {
+          title: 'Journey: Record, Edit, Export',
+          file: 'journeys/01-record-edit-export.spec.ts',
+          specs: [
+            {
+              title: 'record in ESCAPECRAFT, edit in ESCAPEARTIST, export a file',
+              file: 'journeys/01-record-edit-export.spec.ts',
+              line: 60,
+              tests: [
+                {
+                  projectName: 'chromium-strict',
+                  status: 'expected',
+                  // Playwright copies the last attempt's runtime annotations to the
+                  // test, so the same entry shows up twice; it is listed once.
+                  annotations: [{ type: 'reload-fired', description: reload }],
+                  results: [
+                    {
+                      retry: 0,
+                      status: 'passed',
+                      annotations: [
+                        { type: 'note', description: 'not reported' },
+                        { type: 'reload-fired', description: reload },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
+      title: 'escapeartist/soak.spec.ts',
+      file: 'escapeartist/soak.spec.ts',
+      specs: [
+        {
+          title: 'soaks',
+          file: 'escapeartist/soak.spec.ts',
+          line: 9,
+          tests: [
+            {
+              projectName: 'chromium-strict',
+              status: 'expected',
+              annotations: [{ type: 'live counts', description: '1 | 2' }],
+              results: [{ retry: 0, status: 'passed', annotations: [{ type: 'live counts', description: '1 | 2' }] }],
+            },
+          ],
+        },
+      ],
+    },
+  ],
+}
+
+test('finds tests with a reported annotation, once each, with the attempt that logged it', () => {
+  assert.deepEqual(findAnnotatedTests(annotatedReport), [
+    {
+      file: 'journeys/01-record-edit-export.spec.ts',
+      line: 60,
+      title: 'Journey: Record, Edit, Export › record in ESCAPECRAFT, edit in ESCAPEARTIST, export a file',
+      project: 'chromium-strict',
+      status: 'expected',
+      retry: 0,
+      type: 'reload-fired',
+      description: reload,
+    },
+  ])
+  assert.equal(findAnnotatedTests(annotatedReport, { repoRoot: '/repo' })[0].file,
+    'apps/e2e/tests/journeys/01-record-edit-export.spec.ts')
+  assert.deepEqual(findAnnotatedTests(annotatedReport, { types: ['live counts'] }).map((t) => t.description), ['1 | 2'])
+  assert.deepEqual(findAnnotatedTests(report), [])
+  assert.deepEqual(findAnnotatedTests({}), [])
+})
+
+test('a test-level annotation with no matching attempt is still listed', () => {
+  const r = structuredClone(annotatedReport)
+  r.suites[0].suites[0].specs[0].tests[0].results = [{ retry: 0, status: 'passed' }]
+  const [only] = findAnnotatedTests(r)
+  assert.equal(only.description, reload)
+  assert.equal(only.retry, null)
+})
+
+test('notices and the summary section name the test and the message; nothing when none', () => {
+  const annotated = findAnnotatedTests(annotatedReport, { repoRoot: '/repo' })
+  const [notice] = toNotices(annotated)
+  assert.match(notice, /^::notice file=apps\/e2e\/tests\/journeys\/01-record-edit-export.spec.ts,line=60,title=e2e annotation%3A reload-fired::/)
+  assert.match(notice, /stopped completing seeks; reloaded it from a fresh copy/)
+  const md = toAnnotatedSummary(annotated)
+  assert.match(md, /### E2E reported annotations \(1\)/)
+  assert.match(md, /\| reload-fired \| Export: "e2e-recording.webm" stopped completing seeks; reloaded it from a fresh copy \|/)
+  assert.equal(toAnnotatedSummary([]), '')
+})
+
+test('the CLI writes annotated tests to the summary and to flaky.json', () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'report-flaky-'))
+  const reportPath = path.join(dir, 'results.json')
+  const outPath = path.join(dir, 'flaky.json')
+  const summaryPath = path.join(dir, 'summary.md')
+  writeFileSync(reportPath, JSON.stringify(annotatedReport))
+  writeFileSync(summaryPath, '')
+  const stdout = execFileSync(process.execPath, [script, reportPath, outPath], {
+    env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath, GITHUB_WORKSPACE: '/repo' },
+    encoding: 'utf8',
+  })
+  assert.equal(stdout.match(/^::notice /gm)?.length, 1)
+  const summary = readFileSync(summaryPath, 'utf8')
+  assert.match(summary, /None: every test passed on its first attempt/)
+  assert.match(summary, /E2E reported annotations \(1\)/)
+  const out = JSON.parse(readFileSync(outPath, 'utf8'))
+  assert.deepEqual(out.flaky, [])
+  assert.equal(out.annotated.length, 1)
+  assert.equal(out.annotated[0].type, 'reload-fired')
+  assert.equal(out.annotated[0].file, 'apps/e2e/tests/journeys/01-record-edit-export.spec.ts')
+})
+
+test('toAnnotatedSummary escapes backslashes before pipes, so a cell cannot break out of its column', () => {
+  const md = toAnnotatedSummary([
+    { file: 'a.spec.ts', line: 1, title: 't', project: 'p', type: 'reload-fired', description: 'C:\\x\\|y|z\nw' },
+  ])
+  assert.match(md, /\| C:\\\\x\\\\\\\|y\\\|z w \|$/m)
 })

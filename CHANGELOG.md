@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: journey 01 records, without failing, each time an export has to reload a video that stopped completing seeks, and the CI and nightly e2e summaries and their e2e-flaky artifacts list those tests (ESCSUITE-450).
 - ESCAPEARTIST: Remove silences says "Ctrl+Z puts it back" for a single pause, warns when the cuts would remove 90 % or more of a clip, and names a locked linked track as soon as it opens, with Remove all disabled (ESCSUITE-449).
 - Hosted site: ESCAPECRAFT and ESCAPEARTIST pages now describe themselves to search engines as free web apps (ESCSUITE-456).
 - Hosted site and docs: security, privacy, legal and support contacts now go to support@bonham.tech at Bonham Technologies in place of escapesuite.io addresses, and the site serves `/.well-known/security.txt` (BORG-91).
