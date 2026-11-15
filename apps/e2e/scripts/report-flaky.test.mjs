@@ -302,3 +302,10 @@ test('the CLI writes annotated tests to the summary and to flaky.json', () => {
   assert.equal(out.annotated[0].type, 'reload-fired')
   assert.equal(out.annotated[0].file, 'apps/e2e/tests/journeys/01-record-edit-export.spec.ts')
 })
+
+test('toAnnotatedSummary escapes backslashes before pipes, so a cell cannot break out of its column', () => {
+  const md = toAnnotatedSummary([
+    { file: 'a.spec.ts', line: 1, title: 't', project: 'p', type: 'reload-fired', description: 'C:\\x\\|y|z\nw' },
+  ])
+  assert.match(md, /\| C:\\\\x\\\\\\\|y\\\|z w \|$/m)
+})

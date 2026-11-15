@@ -139,6 +139,9 @@ const escapeData = (s) => String(s).replace(/%/g, '%25').replace(/\r/g, '%0D').r
 /** Escape a workflow-command property (GitHub's `escapeProperty`). */
 const escapeProperty = (s) => escapeData(s).replace(/:/g, '%3A').replace(/,/g, '%2C')
 
+/** A Markdown table cell: backslashes first, then pipes, and no line breaks. */
+const cell = (s) => String(s).replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/[\r\n]+/g, ' ')
+
 /** One `::warning` line per flaky test. */
 export function toAnnotations(flaky) {
   return flaky.map(
@@ -160,7 +163,6 @@ export function toNotices(annotated) {
 /** Markdown for the job summary's annotations section; empty when there are none. */
 export function toAnnotatedSummary(annotated) {
   if (annotated.length === 0) return ''
-  const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ')
   const rows = annotated.map(
     (t) =>
       `| \`${cell(t.file)}:${t.line}\` | ${cell(t.title)} | ${cell(t.project)} | ${cell(t.type)} | ${cell(t.description)} |`
@@ -180,7 +182,6 @@ export function toAnnotatedSummary(annotated) {
 /** Markdown for the job summary. Always says something, so a clean run is visible too. */
 export function toSummary(flaky) {
   if (flaky.length === 0) return '### E2E flaky tests\n\nNone: every test passed on its first attempt.\n'
-  const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ')
   const rows = flaky.map(
     (t) => `| \`${cell(t.file)}:${t.line}\` | ${cell(t.title)} | ${cell(t.project)} | ${t.retries} |`
   )
