@@ -16,6 +16,13 @@
  * - writes the list to `flaky.json` (uploaded as the `e2e-flaky` artifact, which
  *   is what the steward reads; see docs/reference/ci-cd-pipeline.md).
  *
+ * It also lists every test, whatever its status, that carries an annotation of a
+ * type in `REPORTED_ANNOTATION_TYPES` (ESCSUITE-450): a `::notice` per entry, an
+ * "E2E reported annotations" table in the summary when there are any, and an
+ * `annotated` array in the same `flaky.json`. Specs add such annotations with
+ * `utils/consoleAnnotation.ts`; journey 01 adds `reload-fired` when ARTIST logs
+ * that an export had to reload a wedged video.
+ *
  * It never fails the job: the strict project is what turns a pass-on-retry red,
  * and a missing report (the run died before writing it) is noted, not fatal.
  *
@@ -35,8 +42,24 @@ import { fileURLToPath } from 'node:url'
  * @returns {{ file: string, line: number, title: string, project: string, retries: number }[]}
  */
 export function findFlakyTests(report, { repoRoot } = {}) {
-  const rootDir = report?.config?.rootDir ?? ''
   const flaky = []
+  forEachTest(report, repoRoot, ({ file, line, title, test }) => {
+    if (test.status !== 'flaky') return
+    const results = test.results ?? []
+    flaky.push({
+      file,
+      line,
+      title,
+      project: test.projectName ?? '',
+      retries: results.length ? Math.max(...results.map((r) => r.retry ?? 0)) : 0,
+    })
+  })
+  return flaky
+}
+
+/** Call `visitTest` with each test in the report, its file, line and full title. */
+function forEachTest(report, repoRoot, visitTest) {
+  const rootDir = report?.config?.rootDir ?? ''
 
   const fileFor = (file) => {
     if (!repoRoot || !rootDir) return file
@@ -48,14 +71,11 @@ export function findFlakyTests(report, { repoRoot } = {}) {
     const ownTitles = suite.title && suite.title !== suite.file ? [...titles, suite.title] : titles
     for (const spec of suite.specs ?? []) {
       for (const test of spec.tests ?? []) {
-        if (test.status !== 'flaky') continue
-        const results = test.results ?? []
-        flaky.push({
+        visitTest({
           file: fileFor(spec.file ?? suite.file ?? ''),
           line: spec.line ?? 0,
           title: [...ownTitles, spec.title].join(' › '),
-          project: test.projectName ?? '',
-          retries: results.length ? Math.max(...results.map((r) => r.retry ?? 0)) : 0,
+          test,
         })
       }
     }
@@ -63,7 +83,55 @@ export function findFlakyTests(report, { repoRoot } = {}) {
   }
 
   for (const suite of report?.suites ?? []) visit(suite, [])
-  return flaky
+}
+
+/**
+ * Annotation types worth surfacing from a passing run. `reload-fired`: ARTIST's
+ * export reloaded a video that stopped completing seeks (ESCSUITE-412), recorded
+ * by journey 01; ESCSUITE-417 counts these across nightly runs.
+ */
+export const REPORTED_ANNOTATION_TYPES = ['reload-fired']
+
+/**
+ * Walk a Playwright JSON report and return one entry per reported annotation.
+ *
+ * Runtime annotations sit on each attempt's result, and Playwright also copies
+ * them to the test, so the two are merged: an entry on the test that matches one
+ * on a result is not listed twice.
+ *
+ * @param {object} report parsed JSON reporter output
+ * @param {{ repoRoot?: string, types?: string[] }} [options] `repoRoot` as for
+ *   {@link findFlakyTests}; `types` defaults to {@link REPORTED_ANNOTATION_TYPES}
+ * @returns {{ file: string, line: number, title: string, project: string, status: string,
+ *   retry: number | null, type: string, description: string }[]}
+ */
+export function findAnnotatedTests(report, { repoRoot, types = REPORTED_ANNOTATION_TYPES } = {}) {
+  const wanted = new Set(types)
+  const annotated = []
+  forEachTest(report, repoRoot, ({ file, line, title, test }) => {
+    const seen = new Set()
+    const add = (annotation, retry) => {
+      if (!wanted.has(annotation?.type)) return
+      const key = `${annotation.type}\n${annotation.description ?? ''}`
+      if (retry === null && seen.has(key)) return
+      seen.add(key)
+      annotated.push({
+        file,
+        line,
+        title,
+        project: test.projectName ?? '',
+        status: test.status ?? '',
+        retry,
+        type: annotation.type,
+        description: annotation.description ?? '',
+      })
+    }
+    for (const result of test.results ?? []) {
+      for (const annotation of result.annotations ?? []) add(annotation, result.retry ?? 0)
+    }
+    for (const annotation of test.annotations ?? []) add(annotation, null)
+  })
+  return annotated
 }
 
 /** Escape a workflow-command message (GitHub's `escapeData`). */
@@ -78,6 +146,35 @@ export function toAnnotations(flaky) {
       `::warning file=${escapeProperty(t.file)},line=${t.line},title=${escapeProperty('Flaky e2e test')}::` +
       escapeData(`${t.file} › ${t.title} [${t.project}] failed, then passed on retry ${t.retries}`)
   )
+}
+
+/** One `::notice` line per reported annotation. */
+export function toNotices(annotated) {
+  return annotated.map(
+    (t) =>
+      `::notice file=${escapeProperty(t.file)},line=${t.line},title=${escapeProperty(`e2e annotation: ${t.type}`)}::` +
+      escapeData(`${t.file} › ${t.title} [${t.project}]: ${t.description}`)
+  )
+}
+
+/** Markdown for the job summary's annotations section; empty when there are none. */
+export function toAnnotatedSummary(annotated) {
+  if (annotated.length === 0) return ''
+  const cell = (s) => String(s).replace(/\|/g, '\\|').replace(/\n/g, ' ')
+  const rows = annotated.map(
+    (t) =>
+      `| \`${cell(t.file)}:${t.line}\` | ${cell(t.title)} | ${cell(t.project)} | ${cell(t.type)} | ${cell(t.description)} |`
+  )
+  return [
+    `\n### E2E reported annotations (${annotated.length})`,
+    '',
+    'Tests that recorded one of the annotation types `scripts/report-flaky.mjs` reports. They do not fail the run.',
+    '',
+    '| Spec | Test | Project | Type | Message |',
+    '|---|---|---|---|---|',
+    ...rows,
+    '',
+  ].join('\n')
 }
 
 /** Markdown for the job summary. Always says something, so a clean run is visible too. */
@@ -110,7 +207,7 @@ function main(argv) {
   const giveUp = (note) => {
     console.log(`::warning title=Flaky e2e report missing::${escapeData(note)}`)
     if (summaryPath) appendFileSync(summaryPath, `### E2E flaky tests\n\n${note}\n`)
-    writeFileSync(outPath, JSON.stringify({ reportMissing: true, flaky: [] }, null, 2) + '\n')
+    writeFileSync(outPath, JSON.stringify({ reportMissing: true, flaky: [], annotated: [] }, null, 2) + '\n')
   }
 
   if (!existsSync(reportPath)) {
@@ -126,8 +223,10 @@ function main(argv) {
     return
   }
   const flaky = findFlakyTests(report, { repoRoot })
+  const annotated = findAnnotatedTests(report, { repoRoot })
   for (const line of toAnnotations(flaky)) console.log(line)
-  if (summaryPath) appendFileSync(summaryPath, toSummary(flaky))
+  for (const line of toNotices(annotated)) console.log(line)
+  if (summaryPath) appendFileSync(summaryPath, toSummary(flaky) + toAnnotatedSummary(annotated))
   writeFileSync(
     outPath,
     JSON.stringify(
@@ -136,12 +235,13 @@ function main(argv) {
         ref: process.env.GITHUB_REF ?? null,
         runId: process.env.GITHUB_RUN_ID ?? null,
         flaky,
+        annotated,
       },
       null,
       2
     ) + '\n'
   )
-  console.log(`${flaky.length} flaky test(s) written to ${outPath}`)
+  console.log(`${flaky.length} flaky test(s) and ${annotated.length} reported annotation(s) written to ${outPath}`)
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

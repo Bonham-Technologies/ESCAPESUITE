@@ -3,6 +3,7 @@ import { test, expect, Page } from '@playwright/test'
 import { mockSyntheticMedia, grantMediaPermissions } from '../../utils/media-mocks'
 import { getRecordCount } from '../../utils/indexeddb'
 import { waitForAppReady } from '../../utils/ready'
+import { watchConsoleForAnnotation } from '../../utils/consoleAnnotation'
 
 /**
  * Journey: Record (ESCAPECRAFT) → hand off → Edit (ESCAPEARTIST) → Export
@@ -57,10 +58,10 @@ test.describe('Journey: Record, Edit, Export', () => {
     'Video export uses WebCodecs, which only Chromium-based browsers implement'
   )
 
-  test('record in ESCAPECRAFT, edit in ESCAPEARTIST, export a file', async ({
-    page,
-    context,
-  }) => {
+  test('record in ESCAPECRAFT, edit in ESCAPEARTIST, export a file', async (
+    { page, context },
+    testInfo
+  ) => {
     // Recording plus a real encode pass takes well past the default timeout
     test.setTimeout(180_000)
 
@@ -120,6 +121,14 @@ test.describe('Journey: Record, Edit, Export', () => {
     })
 
     const artist = await context.newPage()
+    // ESCSUITE-450: when an export has to reload a video that stopped completing
+    // seeks (ESCSUITE-412's fallback), ARTIST says so on the console. Record that
+    // as a `reload-fired` annotation, without failing, so the CI summary and the
+    // e2e-flaky artifact show how often it still fires (ESCSUITE-417).
+    watchConsoleForAnnotation(artist, testInfo, {
+      contains: 'stopped completing seeks',
+      type: 'reload-fired',
+    })
 
     await test.step('ESCAPEARTIST opens straight into the editor', async () => {
       // ESCSUITE-177 review "Races" 1: waitForAppReady now resolves at

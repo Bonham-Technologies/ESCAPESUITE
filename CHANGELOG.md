@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- Tests: journey 01 records, without failing, each time an export has to reload a video that stopped completing seeks, and the CI and nightly e2e summaries and their e2e-flaky artifacts list those tests (ESCSUITE-450).
 - Hosted site and docs: security, privacy, legal and support contacts now go to support@bonham.tech at Bonham Technologies in place of escapesuite.io addresses, and the site serves `/.well-known/security.txt` (BORG-91).
 - Hosted site: the Content-Security-Policy no longer allows Vercel's preview-toolbar hosts, and every page now explicitly asks browsers to use HTTPS only, for the site's host and any name under it (ESCSUITE-459).
 - ESCAPEPLAN: the Known limitations page now lists the browser limits of Transcribe to captions and Float controls (ESCSUITE-445).
