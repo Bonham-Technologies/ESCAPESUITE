@@ -149,6 +149,34 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   same thing: `gh api repos/{owner}/{repo}/check-runs/<e2e job id>/annotations --jq '.[] |
   select(.title == "Flaky e2e test") | .message'` (GitHub caps annotations per step, so the
   artifact is the complete list).
+- **Reported annotations** (ESCSUITE-450). Some behaviour should be counted, not failed on: a
+  spec records it with `watchConsoleForAnnotation(page, testInfo, { contains, type })`
+  (`apps/e2e/utils/consoleAnnotation.ts`), which turns each matching console line into a test
+  annotation. `report-flaky.mjs` lists every test, passed or not, carrying an annotation whose type
+  is in its `REPORTED_ANNOTATION_TYPES`: one `::notice` titled `e2e annotation: <type>` each, an
+  "E2E reported annotations" table in the job summary (only when there are any), and an `annotated`
+  array (`file`, `line`, `title`, `project`, `status`, `retry`, `type`, `description`) in the same
+  `flaky.json`, so the `e2e-flaky` and `nightly-e2e-flaky` artifacts carry it with no workflow
+  change. Today the one reported type is `reload-fired`: journey `01-record-edit-export` records
+  ARTIST's `… stopped completing seeks; reloaded it from …` warning (ESCSUITE-412's fallback), which
+  ESCSUITE-417 counts. To read it from the last 10 nightlies (scheduled runs, so not the CI
+  recipe above, which filters on `event=push`), one line per run:
+
+  ```bash
+  for run in $(gh api "repos/{owner}/{repo}/actions/workflows/nightly.yml/runs?branch=main&event=schedule&per_page=10" \
+                 --jq '.workflow_runs[].id'); do
+    url=$(gh api "repos/{owner}/{repo}/actions/runs/$run/artifacts?name=nightly-e2e-flaky" --jq '.artifacts[0].archive_download_url // empty')
+    if [ -z "$url" ]; then echo "{\"run\":\"$run\",\"artifact\":false}"; continue; fi
+    gh api "$url" > "nightly-flaky-$run.zip" &&
+      unzip -p "nightly-flaky-$run.zip" flaky.json | jq -c --arg run "$run" \
+        '{run: $run, reportMissing: (.reportMissing // false), reloads: [(.annotated // [])[] | select(.type == "reload-fired") | .description]}'
+  done
+  ```
+
+  `reloads: []` on a run means the reload did not fire in it. A run with no artifact, or whose
+  `flaky.json` says `reportMissing: true`, proves nothing either way, so count those separately.
+  For `main`'s CI runs, use the recipe above with this `jq` after `unzip`:
+  `'(.annotated // [])[] | select(.type == "reload-fired") + {run: $run}'`.
 
 **Release** (`.github/workflows/release.yml`):
 - A release is cut by adding a changeset and merging it to `main`. `changesets/action` (v2) then pushes a `changeset-release/main` branch with the version bump and opens the "Version Packages" PR itself (the org setting "Allow GitHub Actions to create and approve pull requests" is enabled for this repo). CI on that bot-authored PR is held as "action required" until someone approves it. Relaxing the repository's fork-PR approval policy (now `first_time_contributors_new_to_github`) did not change this, so the hold is enforced at the organisation level (Organization → Settings → Actions → General → "Fork pull request workflows from outside collaborators"; org admin only). Approve the run under Actions ("Approve and run") or with `gh api -X POST repos/Bonham-Technologies/ESCAPESUITE/actions/runs/<run-id>/approve`. Merging the PR tags each changed package and creates a per-package GitHub Release, with the craft/artist standalone HTML and the headless-artist kit tarball attached to their respective releases.

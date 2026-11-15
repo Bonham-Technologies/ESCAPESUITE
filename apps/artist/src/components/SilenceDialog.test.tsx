@@ -182,7 +182,7 @@ describe('Remove silences', () => {
     await user.click(screen.getByRole('button', { name: 'Remove all' }))
 
     expect(store().silenceReview).toBeNull()
-    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back.')
+    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts it back.')
     const rowOf = (trackId: string) =>
       store().project.timeline.clips.filter((c) => c.trackId === trackId).map((c) => [c.timelinePosition, c.startTime, c.endTime].map((n) => +n.toFixed(6)))
     expect(rowOf(part.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])
@@ -191,6 +191,19 @@ describe('Remove silences', () => {
 
     store().undo()
     expect(JSON.stringify(store().project)).toBe(before)
+  })
+
+  it('says Ctrl+Z puts them back when it removes more than one pause (ESCSUITE-449)', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    expect(pauses()).toHaveLength(2)
+
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(onRemoved).toHaveBeenCalledWith('Removed 2 pauses (1.60 s). Ctrl+Z puts them back.')
   })
 
   it('keeps keyboard focus in the list after Keep: next row, else previous, else Cancel (ESCSUITE-441)', async () => {
@@ -290,7 +303,7 @@ describe('Remove silences', () => {
 
       await user.click(screen.getByRole('button', { name: 'Remove all' }))
       expect(onRemoved).toHaveBeenCalledWith(
-        'Removed 1 pause (0.80 s). Ctrl+Z puts them back. 6 clips on other tracks did not move: 1 blur, 2 captions, 2 texts or shapes, 1 media clip. 2 markers did not move.'
+        'Removed 1 pause (0.80 s). Ctrl+Z puts it back. 6 clips on other tracks did not move: 1 blur, 2 captions, 2 texts or shapes, 1 media clip. 2 markers did not move.'
       )
     })
 
@@ -305,7 +318,7 @@ describe('Remove silences', () => {
       expect(warning()).toHaveTextContent('1 clip on a locked track will not move: 1 blur.')
       expect(warning()).not.toHaveTextContent('marker')
       await user.click(screen.getByRole('button', { name: 'Remove all' }))
-      expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back. 1 clip on a locked track did not move: 1 blur.')
+      expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts it back. 1 clip on a locked track did not move: 1 blur.')
       expect(store().project.timeline.clips.find((c) => c.id === blur.id)!.timelinePosition).toBe(4)
     })
 
@@ -338,19 +351,51 @@ describe('Remove silences', () => {
     })
   })
 
-  it('says so and cuts nothing when one of the take\'s tracks is locked', async () => {
+  it('says so on open and disables Remove all when one of the take\'s tracks is locked (ESCSUITE-449)', async () => {
+    const { screen: part, mic: micClip } = placeTake()
+    store().setSelectedClipId(part.id)
+    store().updateTrack(micClip.trackId, { locked: true })
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+
+    expect(screen.getByRole('alert')).toHaveTextContent('a track this take sits on is locked')
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeDisabled()
+    expect(onRemoved).not.toHaveBeenCalled()
+    expect(store().project.timeline.clips).toHaveLength(2)
+  })
+
+  it('shows the locked notice when a track is locked while the dialog is open, and clears it on unlock (ESCSUITE-449)', async () => {
     const { screen: part, mic: micClip } = placeTake()
     store().setSelectedClipId(part.id)
     const user = userEvent.setup()
     const { rerender, onRemoved } = renderEditor()
     await user.click(screen.getByRole('button', { name: 'Find silences' }))
     rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
-    store().updateTrack(micClip.trackId, { locked: true })
+    expect(screen.queryByRole('alert')).toBeNull()
+    act(() => store().updateTrack(micClip.trackId, { locked: true }))
+    expect(screen.getByRole('alert')).toHaveTextContent('is locked')
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeDisabled()
+    act(() => store().updateTrack(micClip.trackId, { locked: false }))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Remove all' })).toBeEnabled()
+  })
 
-    await user.click(screen.getByRole('button', { name: 'Remove all' }))
-    expect(screen.getByRole('alert')).toHaveTextContent('a track this take sits on is locked')
-    expect(onRemoved).not.toHaveBeenCalled()
-    expect(store().project.timeline.clips).toHaveLength(2)
+  it('cautions when the cuts would remove 90 % or more of the clip, and not below it (ESCSUITE-449)', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    expect(screen.getByRole('status')).not.toHaveTextContent('90 %')
+
+    const threshold = screen.getByLabelText('Threshold (dBFS)')
+    await user.clear(threshold)
+    await user.type(threshold, '0')
+    expect(pauses()).toHaveLength(1)
+    expect(screen.getByRole('status')).toHaveTextContent('This removes 90 % or more of screen.')
   })
 
   it('says the clip is gone, and cuts nothing, when the project changed under the dialog', async () => {
@@ -621,7 +666,7 @@ describe('Remove silences: muted and hidden rows (ESCSUITE-435)', () => {
 
     await user.click(screen.getByRole('button', { name: 'Keep the pause at 0:05.10' }))
     await user.click(screen.getByRole('button', { name: 'Remove all' }))
-    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts them back.')
+    expect(onRemoved).toHaveBeenCalledWith('Removed 1 pause (0.80 s). Ctrl+Z puts it back.')
     const rowOf = (trackId: string) =>
       store().project.timeline.clips.filter((c) => c.trackId === trackId).map((c) => [c.timelinePosition, c.startTime, c.endTime].map((n) => +n.toFixed(6)))
     for (const clip of [part, micClip, system]) expect(rowOf(clip.trackId)).toEqual([[0, 0, 2.1], [2.1, 2.9, 7]])

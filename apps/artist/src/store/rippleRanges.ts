@@ -58,6 +58,16 @@ export function linkedRows(clips: readonly Clip[], clip: Clip): Set<string> {
   return withLinkedRows(clips, new Set([clip.trackId]));
 }
 
+/**
+ * Whether a cut through `clip` is refused for a lock: one of the rows it has
+ * to move together (`linkedRows`) is locked. `removeTimeRanges` refuses on
+ * this, and "Remove silences" asks it up front, so the two cannot disagree
+ * (ESCSUITE-449).
+ */
+export function cutHeldByLock(clips: readonly Clip[], tracks: readonly Track[], clip: Clip): boolean {
+  return [...linkedRows(clips, clip)].some((id) => tracks.some((t) => t.id === id && t.locked));
+}
+
 /** `rows` and, round again until nothing is added, every row a link reaches from them. */
 function withLinkedRows(clips: readonly Clip[], rows: Set<string>): Set<string> {
   const groups = new Set<string>();
