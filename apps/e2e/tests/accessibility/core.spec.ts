@@ -1877,7 +1877,7 @@ test.describe('Color Contrast', () => {
   // and an invalid field's border in a hard-coded #f87171: 2.57:1 as text on
   // the light dialog (--bg-secondary), and as a border 2.3:1 on the field's
   // light fill. No audit opened the dialog, so this one does, with a track
-  // locked (Remove all is refused and says why) and a field holding a number
+  // locked (Remove all is disabled and the dialog says why) and a field holding a number
   // out of range, then with Remove all hovered. Both themes: the dark one
   // must keep passing.
   for (const theme of ['dark', 'light'] as const) {
@@ -1893,7 +1893,7 @@ test.describe('Color Contrast', () => {
       await openSilenceTake(page, theme)
       const screenPart = page.locator('[data-clip-id]').filter({ hasText: /^Talk(?! —)/ }).first()
       const micPart = page.locator('[data-clip-id]').filter({ hasText: /microphone/ }).first()
-      // A locked track the cut would move: Remove all is refused.
+      // A locked track the cut would move: Remove all is disabled.
       await (await rowButton(page, micPart, 'Lock track')).click()
 
       await screenPart.click()
@@ -1905,7 +1905,8 @@ test.describe('Color Contrast', () => {
       await expect(minGap).toHaveAttribute('aria-invalid', 'true')
       await expect(dialog.getByText('Enter a number from 0 to 60.')).toBeVisible()
       const removeAll = dialog.getByRole('button', { name: 'Remove all' })
-      await removeAll.click()
+      // ESCSUITE-449: the lock is named on open and Remove all is disabled.
+      await expect(removeAll).toBeDisabled()
       await expect(dialog.getByRole('alert')).toHaveText(/a track this take sits on is locked/)
 
       await page.mouse.move(0, 0)
@@ -1918,6 +1919,15 @@ test.describe('Color Contrast', () => {
       expect.soft(contrast(field.edge, field.fill), `${theme} invalid border on the field`).toBeGreaterThanOrEqual(3)
       expect.soft(contrast(field.edge, field.surface), `${theme} invalid border on the dialog`).toBeGreaterThanOrEqual(3)
 
+      // A disabled Remove all never takes its hover fill (ESCSUITE-449): close,
+      // unlock the row and open again so the hover is measured on a live button.
+      await dialog.getByRole('button', { name: 'Cancel' }).click()
+      await expect(dialog).toBeHidden()
+      // The take stays selected; clicking it again would hit the playhead line.
+      await (await rowButton(page, micPart, 'Unlock track')).click()
+      await page.getByRole('button', { name: 'Find silences' }).click()
+      await expect(dialog.getByRole('status')).toHaveText(/^1 pause found/)
+      await expect(removeAll).toBeEnabled()
       await removeAll.hover()
       await waitForAnimationsToFinish(dialog)
       expect
