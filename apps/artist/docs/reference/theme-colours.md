@@ -125,9 +125,10 @@ than `--text-secondary` (`#4a5568`, 7.53:1 on white) so the two still read as tw
   enabled and Clear Unused shows; axe `color-contrast` at rest and with each button hovered.
 - The same file's "the Remove silences dialog stays readable, refused and with a field invalid
   (ESCSUITE-436)": both themes, a seeded separate-tracks take with its microphone track locked so
-  Remove all is refused and says why, and Minimum gap set out of range; axe `color-contrast` over
-  the dialog at rest and with Remove all hovered, and the invalid border (3:1) against the field
-  and the dialog from computed styles.
+  Remove all is disabled and the dialog says why (ESCSUITE-449), and Minimum gap set out of range;
+  axe `color-contrast` over the dialog at rest, the invalid border (3:1) against the field and the
+  dialog from computed styles, then, with the track unlocked and the dialog opened again, with
+  Remove all hovered.
 - The same file's "the transcribe language-pack notice stays readable, hovered too
   (ESCSUITE-436)": both themes, with the Web Speech API and a Chrome brand stubbed
   (`utils/speechStub.ts`) answering `downloadable`; axe `color-contrast` over the notice at rest

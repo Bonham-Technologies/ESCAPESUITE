@@ -50,7 +50,7 @@ stack (`components/Timeline/TimelineSilenceBands.tsx`, decorative; the list is
 the accessible form). **Move everything after each cut** (a checkbox, on each
 time the dialog opens, ESCSUITE-434) decides whether the rest of the timeline
 moves with the cut (below); its hint, its `aria-describedby`, says which.
-**Remove all** cuts what is listed and closes the dialog with a notice;
+The summary adds "This removes 90 % or more of <clip name>." when the cuts total 90 % or more of the clip (ESCSUITE-449). A locked row in the take (`cutHeldByLock` in `store/rippleRanges.ts`, the check `removeTimeRanges` refuses on) is named by an alert as the dialog opens, and **Remove all** is disabled (ESCSUITE-449). **Remove all** cuts what is listed and closes the dialog with a notice;
 **Cancel** and Escape cut nothing.
 
 The dialog is a modal like the others in [`dialogs.md`](dialogs.md):
