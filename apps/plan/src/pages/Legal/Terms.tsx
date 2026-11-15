@@ -174,7 +174,7 @@ export default function Terms() {
 
         <h2>13. Contact Us</h2>
         <div className={styles.contactInfo}>
-          <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
+          <h3><a href="https://bonham.tech/" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
           <p>Email: support@bonham.tech</p>
           <p>For privacy, data, legal and support requests, write to the same address.</p>
         </div>
