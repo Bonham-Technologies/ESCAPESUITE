@@ -13,7 +13,7 @@ export default function Privacy() {
     <div className={styles.legal}>
       <header className={styles.header}>
         <h1 className={styles.title}>Privacy Policy</h1>
-        <p className={styles.lastUpdated}>Last updated: November 11, 2026</p>
+        <p className={styles.lastUpdated}>Last updated: November 15, 2026</p>
       </header>
 
       <div className={styles.content}>
@@ -166,7 +166,7 @@ export default function Privacy() {
           <li><strong>Objection</strong> - Opt out of certain data processing</li>
         </ul>
         <p>
-          To exercise these rights, contact us at privacy@escapesuite.io.
+          To exercise these rights, contact us at support@bonham.tech.
         </p>
 
         <h2>9. Cookies</h2>
@@ -198,9 +198,8 @@ export default function Privacy() {
         <h2>13. Contact Us</h2>
         <div className={styles.contactInfo}>
           <h3><a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a></h3>
-          <p>Email: privacy@escapesuite.io</p>
-          <p>For data requests: privacy@escapesuite.io</p>
-          <p>For general inquiries: support@escapesuite.io</p>
+          <p>Email: support@bonham.tech</p>
+          <p>For privacy, data, legal and support requests, write to the same address.</p>
         </div>
       </div>
     </div>
