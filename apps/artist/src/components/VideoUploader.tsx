@@ -884,6 +884,11 @@ export function VideoLibrary({ showNotification, clearSession }: VideoLibraryPro
         ? `Remove this video? This will also remove ${affectedClips} clip${affectedClips !== 1 ? 's' : ''} that use${affectedClips === 1 ? 's' : ''} it. Another open editor tab could still be using it.`
         : 'Remove this video? Another open editor tab could still be using it.';
       if (await confirmAction(message, 'Remove')) {
+        // ESCSUITE-448: the lock was read before the question; a host's
+        // LOAD_PROJECT can land while it is up and put this source on a
+        // locked track, so ask the live timeline again before deleting.
+        const { clips: liveClips, tracks: liveTracks } = useEditorStore.getState().project.timeline;
+        if (lockedSourceVideoIds(liveClips, liveTracks).has(id)) return;
         // ESCSUITE-154: `deleteVideo` deletes the source's bytes from
         // IndexedDB itself, exactly like Clear Unused and Clear All
         // (ESCSUITE-149) — so this is a storage clear, not an edit, and the

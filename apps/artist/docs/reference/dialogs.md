@@ -118,8 +118,8 @@ had no title), with Cancel first (so it has the initial focus) and the destructi
 `ProjectLoadDialog`'s Discard fill (white on `#dc3545`, 4.53:1). A second question while one is up
 replaces it and answers the first one no; unmounting with a question up answers it no.
 Because the answer is now asynchronous, a host's `LOAD_PROJECT` can land while the question is
-up: Clear Unused re-checks each id against the live clips before deleting its bytes, the way
-Clear All already re-checks locks.
+up: Clear Unused re-checks each id against the live clips before deleting its bytes, and the
+per-item Remove re-checks the live lock (ESCSUITE-84), the way Clear All already re-checks locks.
 
 #### The modal gate on the global shortcuts
 

@@ -1239,6 +1239,30 @@ describe('VideoUploader', () => {
       expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('unused')
     })
 
+    // ESCSUITE-448: the same for the per-item Remove and the lock (ESCSUITE-84):
+    // a source a locked track's clip uses by the answer keeps its bytes and its tile.
+    it("keeps a file Remove asked about when its clip's track was locked while the question was up", async () => {
+      await storeVideo('video1', new Blob(['bytes']), videoMeta)
+      store().addSourceVideo(videoMeta)
+      const clip = addClip('clip1', 0, 2) // references video1
+      let answer!: (confirmed: boolean) => void
+      vi.mocked(confirmModule.confirmAction).mockImplementation(
+        () => new Promise<boolean>((resolve) => { answer = resolve })
+      )
+      render(<VideoLibrary clearSession={clearSession} />)
+
+      fireEvent.click(screen.getByTitle('Remove media'))
+      await waitFor(() => expect(confirmModule.confirmAction).toHaveBeenCalledTimes(1))
+      act(() => { store().updateTrack(clip.trackId, { locked: true }) })
+      const deletes = vi.spyOn(storageModule, 'deleteVideo')
+      await act(async () => { answer(true) })
+
+      expect(deletes).not.toHaveBeenCalled()
+      expect(store().sourceVideos.map((v) => v.id)).toEqual(['video1'])
+      expect(store().project.timeline.clips.map((c) => c.id)).toEqual(['clip1'])
+      expect((await getAllVideoMetadata()).map((v) => v.id)).toContain('video1')
+    })
+
     it('revokes the thumbnail URL of the unused media it clears', async () => {
       const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL')
       await storeVideo('unused', new Blob(['bytes']), { ...videoMeta, id: 'unused' })
