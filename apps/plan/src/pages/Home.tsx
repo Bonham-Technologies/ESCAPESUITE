@@ -7,11 +7,11 @@ import {
   ARTIST_OFFLINE_BUILD_URL,
   VERIFY_DOWNLOAD_URL,
 } from '../lib/launch'
-import { useSeo, DEFAULT_TITLE, DEFAULT_DESCRIPTION } from '../lib/seo'
+import { useRouteSeo } from '../lib/seo'
 import styles from './Home.module.css'
 
 export default function Home() {
-  useSeo({ title: DEFAULT_TITLE, description: DEFAULT_DESCRIPTION, canonicalPath: '/' })
+  useRouteSeo('/')
 
   return (
     <div className={styles.home}>

@@ -63,8 +63,8 @@
       "destination": "/artist/index.html"
     },
     { "source": "/", "destination": "/index.html" },
-    { "source": "/privacy", "destination": "/index.html" },
-    { "source": "/terms", "destination": "/index.html" },
-    { "source": "/limitations", "destination": "/index.html" }
+    { "source": "/privacy", "destination": "/privacy/index.html" },
+    { "source": "/terms", "destination": "/terms/index.html" },
+    { "source": "/limitations", "destination": "/limitations/index.html" }
   ]
 }

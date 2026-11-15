@@ -1,5 +1,6 @@
 import vercelConfig from '../../../vercel.json'
 import { HUB_PATHS } from './routes'
+import { ROUTE_PATHS, routeHtmlFile, type HubPath } from './lib/routeMeta'
 
 /**
  * ESCSUITE-455: `vercel.json` used to rewrite every path outside craft, artist and
@@ -11,11 +12,21 @@ import { HUB_PATHS } from './routes'
 const rewrites: ReadonlyArray<{ source: string; destination: string }> = vercelConfig.rewrites
 
 describe('vercel.json rewrites and the hub routes (ESCSUITE-455)', () => {
-  it('rewrites exactly the hub routes to the hub, and nothing else', () => {
-    const hubSources = rewrites
-      .filter(({ destination }) => destination === '/index.html')
-      .map(({ source }) => source)
-    expect([...hubSources].sort()).toEqual([...HUB_PATHS].sort())
+  // ESCSUITE-458: each route is rewritten to its own copy of the hub's page (the
+  // build writes `privacy/index.html` and so on with that route's head).
+  it('rewrites exactly the hub routes to the hub, each to its own HTML file', () => {
+    const hubRewrites = rewrites.filter(
+      ({ source }) => !source.startsWith('/craft/') && !source.startsWith('/artist/')
+    )
+    expect([...hubRewrites].sort((a, b) => a.source.localeCompare(b.source))).toEqual(
+      [...HUB_PATHS]
+        .sort()
+        .map((path) => ({ source: path, destination: `/${routeHtmlFile(path as HubPath)}` }))
+    )
+  })
+
+  it('has a served head for exactly the hub routes', () => {
+    expect([...ROUTE_PATHS].sort()).toEqual([...HUB_PATHS].sort())
   })
 
   it('keeps the CRAFT and ARTIST SPA fallbacks', () => {

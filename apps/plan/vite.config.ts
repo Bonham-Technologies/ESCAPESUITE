@@ -1,11 +1,45 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 import { visualizer } from 'rollup-plugin-visualizer'
+import { ROUTE_PATHS, applyRouteHead, hubPathFor, routeHtmlFile } from './src/lib/routeMeta.ts'
+
+/**
+ * Serves each hub route its own head before any JavaScript runs (ESCSUITE-458).
+ * The dev server gets the requested route's head in the `index.html` it serves;
+ * the build sets `/`'s head in `index.html` and writes one more copy per route
+ * (`privacy/index.html`, ...) with that route's title, description, canonical
+ * and social tags. `vercel.json` rewrites each route to its file. The heads come
+ * from `src/lib/routeMeta.ts`, which `seo.ts` reads too.
+ */
+function routeHeads(): Plugin {
+  return {
+    name: 'escapeplan-route-heads',
+    transformIndexHtml(html, ctx) {
+      return applyRouteHead(html, hubPathFor(ctx.originalUrl))
+    },
+    generateBundle: {
+      // After Vite's own HTML plugin has emitted the finished index.html.
+      order: 'post',
+      handler(_options, bundle) {
+        const index = bundle['index.html']
+        if (index?.type !== 'asset') {
+          this.error('escapeplan-route-heads: the build emitted no index.html')
+        }
+        const html = String(index.source)
+        for (const path of ROUTE_PATHS) {
+          if (path === '/') continue
+          this.emitFile({ type: 'asset', fileName: routeHtmlFile(path), source: applyRouteHead(html, path) })
+        }
+      },
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [
     react(),
+    routeHeads(),
     // Run with ANALYZE=true to generate bundle-stats.html
     process.env.ANALYZE === 'true' && visualizer({
       filename: 'bundle-stats.html',

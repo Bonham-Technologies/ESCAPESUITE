@@ -1,13 +1,8 @@
-import { useSeo } from '../../lib/seo'
+import { useRouteSeo } from '../../lib/seo'
 import styles from './Legal.module.css'
 
 export default function Terms() {
-  useSeo({
-    title: 'Terms of Service — ESCAPE Suite',
-    description:
-      'ESCAPE Suite terms of service. The software is open source under the Apache License 2.0 and free to use; you own everything you record and edit with it.',
-    canonicalPath: '/terms',
-  })
+  useRouteSeo('/terms')
 
   return (
     <div className={styles.legal}>

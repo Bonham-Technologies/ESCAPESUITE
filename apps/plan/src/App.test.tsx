@@ -69,6 +69,13 @@ describe('App routes', () => {
     expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument()
   })
 
+  // ESCSUITE-458: each page's own copy of the hub's document is a real file too.
+  it('sends /privacy/index.html to the Privacy page, not the not-found page', () => {
+    renderApp('/privacy/index.html')
+    expect(screen.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Page not found' })).not.toBeInTheDocument()
+  })
+
   it('renders every route inside the shared Layout (header present)', () => {
     renderApp('/privacy')
     expect(screen.getByText('ESCAPE')).toBeInTheDocument()
