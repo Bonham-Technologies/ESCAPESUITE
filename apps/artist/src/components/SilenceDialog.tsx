@@ -318,7 +318,7 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
               : candidates.length === 0
               ? 'No pauses to cut with these settings.'
               : `${candidates.length} ${candidates.length === 1 ? 'pause' : 'pauses'} found · ${seconds(total)} will be cut`}
-            {nearlyAll && ` This removes 90 % or more of ${reviewed.name || 'a clip'}.`}
+            {nearlyAll && ` This removes 90 % or more of ${reviewed.name || 'the clip'}.`}
           </p>
 
           <div className={styles.option}>
@@ -404,12 +404,12 @@ export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
             </ul>
           )}
 
-          {locked ? (
+          {locked || refused === 'locked' ? (
             <p className={styles.error} role="alert">
               Nothing can be cut: a track this take sits on is locked. Unlock it to remove silences.
             </p>
           ) : (
-            refused && (
+            refused === 'gone' && (
               <p className={styles.error} role="alert">
                 Nothing was cut: the clip is no longer on the timeline.
               </p>

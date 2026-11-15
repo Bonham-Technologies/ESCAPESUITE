@@ -1893,7 +1893,7 @@ test.describe('Color Contrast', () => {
       await openSilenceTake(page, theme)
       const screenPart = page.locator('[data-clip-id]').filter({ hasText: /^Talk(?! —)/ }).first()
       const micPart = page.locator('[data-clip-id]').filter({ hasText: /microphone/ }).first()
-      // A locked track the cut would move: Remove all is refused.
+      // A locked track the cut would move: Remove all is disabled.
       await (await rowButton(page, micPart, 'Lock track')).click()
 
       await screenPart.click()
@@ -1919,6 +1919,15 @@ test.describe('Color Contrast', () => {
       expect.soft(contrast(field.edge, field.fill), `${theme} invalid border on the field`).toBeGreaterThanOrEqual(3)
       expect.soft(contrast(field.edge, field.surface), `${theme} invalid border on the dialog`).toBeGreaterThanOrEqual(3)
 
+      // A disabled Remove all never takes its hover fill (ESCSUITE-449): close,
+      // unlock the row and open again so the hover is measured on a live button.
+      await dialog.getByRole('button', { name: 'Cancel' }).click()
+      await expect(dialog).toBeHidden()
+      // The take stays selected; clicking it again would hit the playhead line.
+      await (await rowButton(page, micPart, 'Unlock track')).click()
+      await page.getByRole('button', { name: 'Find silences' }).click()
+      await expect(dialog.getByRole('status')).toHaveText(/^1 pause found/)
+      await expect(removeAll).toBeEnabled()
       await removeAll.hover()
       await waitForAnimationsToFinish(dialog)
       expect

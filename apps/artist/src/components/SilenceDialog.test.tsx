@@ -193,6 +193,19 @@ describe('Remove silences', () => {
     expect(JSON.stringify(store().project)).toBe(before)
   })
 
+  it('says Ctrl+Z puts them back when it removes more than one pause (ESCSUITE-449)', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    const { rerender, onRemoved } = renderEditor()
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    rerender(<><ClipEditor /><Dialog onRemoved={onRemoved} /></>)
+    expect(pauses()).toHaveLength(2)
+
+    await user.click(screen.getByRole('button', { name: 'Remove all' }))
+    expect(onRemoved).toHaveBeenCalledWith('Removed 2 pauses (1.60 s). Ctrl+Z puts them back.')
+  })
+
   it('keeps keyboard focus in the list after Keep: next row, else previous, else Cancel (ESCSUITE-441)', async () => {
     const { screen: part } = placeTake()
     store().setSelectedClipId(part.id)
