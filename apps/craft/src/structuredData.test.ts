@@ -31,7 +31,7 @@ describe('ESCAPECRAFT structured data', () => {
     expect(data.publisher).toEqual({
       '@type': 'Organization',
       name: 'Bonham Technologies, LLC',
-      url: 'https://www.bonham.tech',
+      url: 'https://bonham.tech/',
     })
   })
 })

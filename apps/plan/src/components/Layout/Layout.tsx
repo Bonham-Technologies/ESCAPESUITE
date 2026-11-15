@@ -48,8 +48,10 @@ export default function Layout() {
           <Link to="/limitations">Known limitations</Link>
           <span className={styles.footerDivider}>|</span>
           <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
+          <span className={styles.footerDivider}>|</span>
+          <a href="https://bonham.tech/#sponsors" target="_blank" rel="noopener noreferrer">Support &amp; sponsorship</a>
         </div>
-        <p>&copy; {new Date().getFullYear()} <a href="https://www.bonham.tech" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a> &middot; <a href="https://github.com/Bonham-Technologies/ESCAPESUITE/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Apache License 2.0</a></p>
+        <p>&copy; {new Date().getFullYear()} <a href="https://bonham.tech/" target="_blank" rel="noopener noreferrer">Bonham Technologies, LLC</a> &middot; <a href="https://github.com/Bonham-Technologies/ESCAPESUITE/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">Apache License 2.0</a></p>
       </footer>
     </div>
   )
