@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { withoutRouteHead } from '../../utils/routeHead'
 
 /**
  * ESCSUITE-455: `vercel.json`'s last rewrite sent every path outside craft,
@@ -39,12 +40,15 @@ test.describe('production: unknown paths are real 404s (ESCSUITE-455)', () => {
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
   })
 
+  // Each route's HTML is the hub's page with that route's own head
+  // (ESCSUITE-458), so everything but those head values is the same, the
+  // script and stylesheet tags in <head> included.
   for (const path of ['/', '/privacy', '/terms', '/limitations']) {
     test(`hub route ${path} answers 200 with the hub`, async ({ request }) => {
       const response = await request.get(`${BASE}${path}`)
       expect(response.status()).toBe(200)
       const hub = await request.get(`${BASE}/`)
-      expect(await response.text()).toBe(await hub.text())
+      expect(withoutRouteHead(await response.text())).toBe(withoutRouteHead(await hub.text()))
     })
   }
 
@@ -66,6 +70,15 @@ test.describe('production: unknown paths are real 404s (ESCSUITE-455)', () => {
     await expect(page).toHaveURL(`${BASE}/`)
     await expect(page.getByRole('button', { name: 'Start recording' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Page not found' })).toHaveCount(0)
+  })
+
+  // ESCSUITE-458: each page's own copy of the hub's document is a real file too.
+  test('/privacy/index.html lands on the Privacy page', async ({ page }) => {
+    await page.route('**/va.vercel-scripts.com/**', (route) => route.abort())
+    const response = await page.goto(`${BASE}/privacy/index.html`)
+    expect(response?.status()).toBe(200)
+    await expect(page).toHaveURL(`${BASE}/privacy`)
+    await expect(page.getByRole('heading', { level: 1, name: 'Privacy Policy' })).toBeVisible()
   })
 
   for (const path of ['/craft/', '/craft/index.html', '/artist/', '/artist/index.html']) {

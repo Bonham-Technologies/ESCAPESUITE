@@ -17,7 +17,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -132,6 +132,45 @@ test('verifyDistLayout: reports every missing output when the whole dist is empt
   const dir = makeTmpDir();
   const missing = verifyDistLayout(dir);
   assert.equal(missing.length, 4);
+});
+
+// ESCSUITE-458: the hub's routes are rewritten to their own HTML files
+// (`privacy/index.html`, ...). One missing from dist/ would make Vercel answer
+// that route with the 404 page, so the build must refuse to publish.
+const hubRewrites = [
+  { source: '/craft/(.*)', destination: '/craft/index.html' },
+  { source: '/', destination: '/index.html' },
+  { source: '/privacy', destination: '/privacy/index.html' },
+];
+
+test('verifyDistLayout: reports a vercel.json rewrite destination missing from dist/', () => {
+  const dir = makeTmpDir();
+  makeCompleteDist(dir);
+  assert.deepEqual(verifyDistLayout(dir, hubRewrites), [join(dir, 'privacy', 'index.html')]);
+});
+
+test('verifyDistLayout: control — passes when every rewrite destination is present, and checks its assets', () => {
+  const dir = makeTmpDir();
+  makeCompleteDist(dir);
+  mkdirSync(join(dir, 'privacy'));
+  writeFileSync(join(dir, 'privacy', 'index.html'), '<html>privacy</html>');
+  assert.deepEqual(verifyDistLayout(dir, hubRewrites), []);
+
+  writeFileSync(join(dir, 'privacy', 'index.html'), '<script type="module" src="/assets/gone-1.js"></script>');
+  assert.deepEqual(verifyDistLayout(dir, hubRewrites), [join(dir, 'assets', 'gone-1.js')]);
+});
+
+test('verifyDistLayout: the real vercel.json names only files a full build produces', () => {
+  const { rewrites } = JSON.parse(readFileSync(join(here, '..', 'vercel.json'), 'utf8'));
+  const destinations = rewrites.map(({ destination }) => destination).sort();
+  assert.deepEqual(destinations, [
+    '/artist/index.html',
+    '/craft/index.html',
+    '/index.html',
+    '/limitations/index.html',
+    '/privacy/index.html',
+    '/terms/index.html',
+  ]);
 });
 
 /**

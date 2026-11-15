@@ -8,6 +8,7 @@
  * dist/
  * ├── index.html          (ESCAPEPLAN)
  * ├── 404.html            (not-found page: served with status 404)
+ * ├── privacy/index.html  (ESCAPEPLAN, one per hub route with its own head)
  * ├── assets/             (ESCAPEPLAN assets)
  * ├── craft/
  * │   └── index.html      (ESCAPECRAFT - single file)
@@ -132,13 +133,22 @@ function missingReferencedAssets(distDir, htmlPath) {
  * chunks it references. Returns the list of required or referenced paths
  * that are missing or empty — an empty array means every postcondition
  * holds.
+ *
+ * `rewrites` is `vercel.json`'s `rewrites` array (`main` passes the real
+ * one): each destination must be in `dist/` too, or Vercel answers that
+ * route with the 404 page. Since ESCSUITE-458 the hub's build writes one
+ * HTML file per route (`privacy/index.html`, ...) for its own head, and this
+ * is what stops a build that lost one from publishing.
  */
-export function verifyDistLayout(distDir) {
+export function verifyDistLayout(distDir, rewrites = []) {
   const entryHtmlPaths = [
-    join(distDir, 'index.html'),
-    join(distDir, '404.html'),
-    join(distDir, 'craft', 'index.html'),
-    join(distDir, 'artist', 'index.html'),
+    ...new Set([
+      join(distDir, 'index.html'),
+      join(distDir, '404.html'),
+      join(distDir, 'craft', 'index.html'),
+      join(distDir, 'artist', 'index.html'),
+      ...rewrites.map(({ destination }) => join(distDir, destination)),
+    ]),
   ];
   const missing = entryHtmlPaths.filter((path) => !isNonEmptyFile(path));
 
@@ -252,7 +262,8 @@ function main() {
     failures.push('ESCAPEARTIST');
   }
 
-  const missingOutputs = verifyDistLayout(distDir);
+  const { rewrites } = JSON.parse(readFileSync(join(root, 'vercel.json'), 'utf8'));
+  const missingOutputs = verifyDistLayout(distDir, rewrites);
   if (missingOutputs.length > 0) {
     console.error('\n❌ dist/ is missing required output:');
     for (const path of missingOutputs) {

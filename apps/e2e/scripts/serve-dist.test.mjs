@@ -156,7 +156,8 @@ test('resolveFile 404s a /_vercel path instead of falling through to the SPA', (
  * with), ESCAPECRAFT's and ESCAPEARTIST's own `index.html`, and two
  * ordinary root-level static files (one with an extension, one without —
  * `robots.txt` and a `CNAME`-shaped file) to stand in for ESCAPEPLAN's own
- * build output. Callers must remove the returned directory when done.
+ * build output, plus the hub routes' own copies of its page
+ * (`privacy/index.html`, ...). Callers must remove the returned directory when done.
  */
 function buildTempDist() {
   const dir = mkdtempSync(join(tmpdir(), 'serve-dist-test-'))
@@ -171,6 +172,11 @@ function buildTempDist() {
   writeFileSync(join(dir, 'craft', 'index.html'), '<html><body>CRAFT</body></html>')
   mkdirSync(join(dir, 'artist'))
   writeFileSync(join(dir, 'artist', 'index.html'), '<html><body>ARTIST</body></html>')
+  // ESCSUITE-458: each hub route has its own copy of the hub's page.
+  for (const page of ['privacy', 'terms', 'limitations']) {
+    mkdirSync(join(dir, page))
+    writeFileSync(join(dir, page, 'index.html'), `<html><body>HUB SPA SHELL (${page})</body></html>`)
+  }
   return { dir, hubHtml }
 }
 
@@ -303,15 +309,16 @@ test('resolveFile sends a path that only shares a word-prefix with craft/artist/
 
 test('resolveRequestPath: a path no rewrite claims and absent from disk is a miss', () => {
   const rewrites = realVercelConfig.rewrites ?? []
-  const fileExists = (path) => new Set(['/index.html', '/craft/index.html', '/artist/index.html']).has(path)
+  const fileExists = (path) =>
+    new Set(['/index.html', '/privacy/index.html', '/craft/index.html', '/artist/index.html']).has(path)
   assert.equal(resolveRequestPath('/assets/does-not-exist.js', rewrites, fileExists), null)
   // /favicon.ico (ESCSUITE-240): absent from disk, a real miss.
   assert.equal(resolveRequestPath('/favicon.ico', rewrites, fileExists), null)
   assert.equal(resolveRequestPath('/favicon/does-not-exist.ico', rewrites, fileExists), null)
   // ESCSUITE-455: a hub-shaped path that is not a hub route is a miss too.
   assert.equal(resolveRequestPath('/about', rewrites, fileExists), null)
-  // A real hub route still resolves to the hub SPA.
-  assert.equal(resolveRequestPath('/privacy', rewrites, fileExists), '/index.html')
+  // A real hub route still resolves to the hub SPA, in its own copy (ESCSUITE-458).
+  assert.equal(resolveRequestPath('/privacy', rewrites, fileExists), '/privacy/index.html')
 })
 
 // ESCSUITE-455: vercel.json's last rewrite used to send every path outside
@@ -327,8 +334,10 @@ test('resolveFile: the hub routes and the app fallbacks resolve, a made-up path 
     const craft = join(dir, 'craft', 'index.html')
     const artist = join(dir, 'artist', 'index.html')
 
-    for (const path of ['/', '/privacy', '/terms', '/limitations']) {
-      assert.equal(resolveFile(path, dir), hub, path)
+    assert.equal(resolveFile('/', dir), hub)
+    // ESCSUITE-458: each other hub route has its own copy of the hub's page.
+    for (const path of ['/privacy', '/terms', '/limitations']) {
+      assert.equal(resolveFile(path, dir), join(dir, path, 'index.html'), path)
     }
     for (const path of ['/craft/', '/craft/x', '/craft/deep/link']) {
       assert.equal(resolveFile(path, dir), craft, path)
@@ -357,7 +366,7 @@ test('assertVercelSettingsSupported throws if cleanUrls or trailingSlash is ever
 // not just the pure resolver — a genuine miss comes back 404 with the SPA
 // fallback body (dist/404.html, a byte-for-byte copy of the hub's own
 // index.html per scripts/build-all.mjs), and an ordinary hub route comes
-// back 200 with that same body.
+// back 200 with its own copy of the hub's page (ESCSUITE-458).
 test('HTTP: a genuine miss serves 404.html with status 404; a hub route serves index.html with 200', async () => {
   const { dir, hubHtml } = buildTempDist()
   const server = createServer(dir)
@@ -374,7 +383,7 @@ test('HTTP: a genuine miss serves 404.html with status 404; a hub route serves i
 
     const hitResponse = await fetch(`http://127.0.0.1:${port}/privacy`)
     assert.equal(hitResponse.status, 200)
-    assert.equal(await hitResponse.text(), hubHtml)
+    assert.equal(await hitResponse.text(), '<html><body>HUB SPA SHELL (privacy)</body></html>')
 
     // ESCSUITE-455: a made-up hub-shaped path is a real 404 now, not the hub with 200.
     const madeUp = await fetch(`http://127.0.0.1:${port}/no-such-page-xyz`)
