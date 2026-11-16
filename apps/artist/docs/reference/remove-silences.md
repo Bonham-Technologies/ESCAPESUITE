@@ -22,6 +22,13 @@ the list already filled from the defaults:
 | Minimum gap (s) | 0.7 | Shorter pauses are never cut |
 | Padding (s) | 0.1 | Kept on each side of every cut, so a word is not clipped at its edge |
 
+Each opening starts over (ESCSUITE-463): the fields read these defaults, the
+settings the list was found with, **Move everything after each cut** is on and
+no row is active, whatever a cancelled session typed. App mounts the dialog
+only while the review is open, and `SilenceDialog` does not rely on that: it
+renders its body (`SilenceReview`) only while `silenceReview` is set, keyed by
+the reviewed clip, so the body's state is dropped whenever the review closes.
+
 Changing a setting finds the pauses again. When every clip it would listen to
 is on a muted or hidden track (below), the summary says so ("No audible sound
 to judge: every track with sound here is muted or hidden.") instead of "No
