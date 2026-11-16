@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v22. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward's security sweep
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -217,9 +217,9 @@ reopened and never filed again. The digest counts those advisories as "ignored".
    `security_advisory.severity` on a Dependabot alert and
    `rule.security_severity_level` on a code-scanning alert.
 
-   **Class:** `ap-auto` if the fix is a patch or minor bump or a code change;
-   `ap-owner-merge` if it needs a major bump or removing the package. The class rules
-   in `.claude/rules/autopilot.md` still apply, so a code change to authentication,
+   **Class:** `ap-auto` if the fix is a bump or a code change (a major bump goes through
+   the builder's **Formerly owner-merge**); `ap-owner-merge` if it needs removing the package. The class rules
+   in `.claude/rules/autopilot.md` still apply, so a code change to payments,
    say, is `ap-owner-merge`.
 
    **No patched version exists:** file it `ap-watch` instead. Link
@@ -242,8 +242,8 @@ reopened and never filed again. The digest counts those advisories as "ignored".
      - the severity and its source;
      - `https://osv.dev/vulnerability/<advisory id>`.
    - **Priority** follows the severity, as in step 2.
-   - **Class:** `ap-auto` when the fixed version is a patch or minor bump;
-     `ap-owner-merge` when it is a major bump, or the fix is removing the package.
+   - **Class:** `ap-auto` when the fix is a bump (a major one goes through the builder's
+     **Formerly owner-merge**); `ap-owner-merge` when the fix is removing the package.
    - **No fixed version exists:** file it `ap-watch` instead. Link the osv.dev page.
      The trigger is "a fixed version is released", and the follow-up is the bump.
    - **No longer reported:** if a successful scan of a lockfile no longer reports an

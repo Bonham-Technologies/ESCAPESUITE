@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v22. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -136,7 +136,8 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   ("paused" when the digest says so; that counts as present, not missing),
   each with its trend (this digest's score minus the previous digest's); reverts this
   week; owner interventions this week, counted as decisions answered only (input 4;
-  merges in another repo can't be read from here); the security counts; tickets filed
+  merges in another repo can't be read from here); auto-merged, formerly owner-merge (the
+  count in its digest's list); the security counts; tickets filed
   (input 4) and shipped (the digest's shipped list).
 - **Public sites:** the sites checked with each one's SEO errors and warnings (or "not
   checked"), with `--psi` its LCP, INP and CLS (or "no field data" or "not checked"),
