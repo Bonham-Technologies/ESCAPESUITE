@@ -43,6 +43,8 @@ at build time (and serves the right head from the dev server). Titles stay at 60
 fewer and descriptions at 50 to 160; CRAFT's and ARTIST's are in their own `index.html`.
 `scripts/build-all.mjs` refuses to publish when any rewrite destination is missing from `dist/`,
 and `apps/e2e/tests/production/route-heads.spec.ts` reads every `sitemap.xml` route's served HTML.
+`sitemap.xml` itself is written by the hub's build from its route list (ESCSUITE-457; see
+`docs/reference/escapeplan.md`) and reaches `dist/` with the rest of `apps/plan/dist`.
 
 Each hub page with a trailing slash (`/privacy/`) redirects permanently (308) to its canonical
 path, since the old catch-all served those too. `/index.html` is the hub's own file (200), so the
