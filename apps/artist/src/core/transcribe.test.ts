@@ -890,7 +890,7 @@ describe('transcribeChannels: a run that settles while it starts (ESCSUITE-461)'
         this.onerror?.({ error: 'network' });
       }
     }
-    const { ctx } = makeContext();
+    const { ctx, source } = makeContext();
     const progress = vi.fn();
     const run = transcribeChannels({
       channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition: FailsOnStart as unknown as SpeechRecognitionCtor,
@@ -899,9 +899,10 @@ describe('transcribeChannels: a run that settles while it starts (ESCSUITE-461)'
     const settled = expect(run).rejects.toThrow('On-device speech recognition stopped (network).');
     await vi.advanceTimersByTimeAsync(0);
     await settled;
-    progress.mockClear();
     await vi.advanceTimersByTimeAsync(2000);
     expect(progress).not.toHaveBeenCalled();
+    expect(source.start).not.toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -914,7 +915,7 @@ describe('transcribeChannels: a run that settles while it starts (ESCSUITE-461)'
       channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition,
       createAudioContext: () => ctx, onProgress: progress, signal: controller.signal,
     });
-    const settled = expect(run).rejects.toBeDefined();
+    const settled = expect(run).rejects.toMatchObject({ name: 'AbortError' });
     await vi.advanceTimersByTimeAsync(0);
     await settled;
     expect(progress).toHaveBeenCalledTimes(1);
