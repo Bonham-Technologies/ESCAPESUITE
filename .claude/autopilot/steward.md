@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v24. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -103,7 +103,10 @@ The digest covers:
 - **Waiting on you**, with links:
   - `ap-decision` tickets;
   - `needs-operator` tickets;
-  - `ap-owner-merge` PRs labelled `needs-owner`, and any closed without merging;
+  - PRs labelled `needs-owner`, split into **mergeable now** (base `main`, `behind_by` 0
+    and `ci-status` passed on the head), with its count, and **needs attention** (every
+    other: behind, pending, failing, stacked, or a `keep-fresh-conflict` comment naming
+    its head), and any closed without merging;
   - open PRs whose merge was refused (a `<!-- autopilot:merge-refused -->` comment),
     each as "merge refused: #n";
   - watch triggers that fired, and watch pages that couldn't be reached;

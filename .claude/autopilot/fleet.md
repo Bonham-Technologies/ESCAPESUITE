@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v24. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -103,7 +103,8 @@ statusCategory != Done`.
 A comment on this project's steward log, found as **Weekly digest** says. In order:
 
 - **Waiting on you**, grouped by project, every item linked: each project's waiting
-  tickets and `needs-owner` PRs, and this project's own, with each refresh, paste and
+  tickets and `needs-owner` PRs with its **mergeable now** count (from its digest, else
+  counted as the steward does), and this project's own, with each refresh, paste and
   policy ticket under the project it concerns. This is the owner's inbox.
 - **Missed runs.** A task whose `last_run.status` is not `ROUTINE_RUN_STATUS_SUCCEEDED`,
   or whose last run is older than its previous scheduled time (its cron in
