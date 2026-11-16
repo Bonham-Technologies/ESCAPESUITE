@@ -432,6 +432,38 @@ describe('Remove silences', () => {
     expect(store().project.timeline.clips).toHaveLength(2)
   })
 
+  it('opens with the default settings again after Cancel, matching the list they find, even when kept mounted (ESCSUITE-463)', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    // Mounted for good, not only while the review is open as App mounts it:
+    // the dialog itself has to forget a cancelled session's fields.
+    render(<><ClipEditor /><SilenceDialog onRemoved={vi.fn()} /></>)
+    const field = (label: string) => screen.getByLabelText(label)
+
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    // A valid setting finds the pauses again; an out-of-range one is marked.
+    await user.clear(field('Padding (s)'))
+    await user.type(field('Padding (s)'), '0.3')
+    expect(pauses()[0]).toHaveTextContent('0:02.30 – 0:02.70')
+    await user.clear(field('Minimum gap (s)'))
+    await user.type(field('Minimum gap (s)'), '99')
+    expect(field('Minimum gap (s)')).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('checkbox', { name: 'Move everything after each cut' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(store().silenceReview).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    // The inspector found this list with the defaults, so the fields read them.
+    expect(field('Threshold (dBFS)')).toHaveValue(-40)
+    expect(field('Minimum gap (s)')).toHaveValue(0.7)
+    expect(field('Minimum gap (s)')).not.toHaveAttribute('aria-invalid')
+    expect(field('Padding (s)')).toHaveValue(0.1)
+    expect(pauses()).toHaveLength(2)
+    expect(pauses()[0]).toHaveTextContent('0:02.10 – 0:02.90')
+    expect(screen.getByRole('checkbox', { name: 'Move everything after each cut' })).toBeChecked()
+  })
+
   it('renders nothing while the review is closed', () => {
     const { container } = render(<><SilenceDialog onRemoved={vi.fn()} /><TimelineSilenceBands pixelsPerSecond={50} height={10} /></>)
     expect(container).toBeEmptyDOMElement()
