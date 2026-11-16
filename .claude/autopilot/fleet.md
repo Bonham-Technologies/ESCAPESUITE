@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v25. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -103,7 +103,8 @@ statusCategory != Done`.
 A comment on this project's steward log, found as **Weekly digest** says. In order:
 
 - **Waiting on you**, grouped by project, every item linked: each project's waiting
-  tickets and `needs-owner` PRs, and this project's own, with each refresh, paste and
+  tickets and `needs-owner` PRs with its **mergeable now** count (from its digest, else
+  counted as the steward does), and this project's own, with each refresh, paste and
   policy ticket under the project it concerns. This is the owner's inbox.
 - **Missed runs.** A task whose `last_run.status` is not `ROUTINE_RUN_STATUS_SUCCEEDED`,
   or whose last run is older than its previous scheduled time (its cron in
@@ -116,7 +117,10 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   leaves none, so flag a builder only when ready tickets (`labels in (ap-auto,
   ap-owner-merge)`, not Done) existed at the start of its window and none changed status
   or gained a PR-link comment across two consecutive scheduled runs. The cause is
-  invisible from here: write only "no trace of the <role> run since <date>".
+  invisible from here: write only "no trace of the <role> run since <date>". A steward
+  or scout whose later run says "caught up <date>" for that due day is listed as "caught
+  up <date>", not missed, and doesn't count toward "a missed run in two consecutive weeks"
+  (**Policy tickets**) unless it caught up two weeks running.
 - **Setup:** a table of each project's policy version on `main` (input 6, or "not
   read") and its digest-reported instructions version against `fleet.json`, an agents
   column (`vendored` or `fallback`, from the digest's Setup line), a Refresh PR

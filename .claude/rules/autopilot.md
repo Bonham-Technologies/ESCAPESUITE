@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v25. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -27,7 +27,7 @@ Each run plays the roles named in its prompt, in the order given.
   steward's sweep where `autopilot.local.md` says so.
 
 Every steward, builder and dependabot run starts with **Main must stay green** and then
-**Reconcile**, below (a steward off its control-panel days stops first). The scout skips both.
+**Reconcile**, below (a steward off its control-panel days stops first, unless catching up). The scout skips both.
 
 ## Role files
 
@@ -64,9 +64,10 @@ classes**. "This policy" means this file and the role files.
 
 ## Tools and access
 
-Runs are scheduled tasks in cloud sessions. If the Atlassian tools aren't present in a
-run, write exactly `Atlassian tools: missing` as the first line of the run summary and
-stop; a steward also leaves no digest, which the fleet counts as a missed run.
+Runs are scheduled tasks in cloud sessions. If the Atlassian tools aren't present, search for them
+again up to 3 times, about a minute apart (read-only GitHub steps, or a background `sleep 60`, between);
+if they arrive, go on and put `Atlassian tools: late` in the summary. If not, write exactly
+`Atlassian tools: missing` as the summary's first line and stop; a steward leaves no digest (the fleet's missed run).
 
 - **Jira** (`bonham.atlassian.net`): the Atlassian connector only.
 - **Confluence** (`bonham.atlassian.net`, space `OPS`): the same Atlassian connector.

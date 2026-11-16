@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v25. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -8,7 +8,8 @@ Part of the autopilot policy. `.claude/rules/autopilot.md` and
 
 **Control panel.** First, before **Main must stay green**, read this project's settings
 as **Control panel** (`.claude/autopilot/control-panel.md`) says. The steward task fires
-daily; on a day outside `Steward days`, stop at once and say "not a steward day". While
+daily; on a day outside `Steward days`, stop at once and say "not a steward day", unless
+**Catch-up** (`control-panel.md`) applies. While
 `Steward paused`, skip the dimension sweep and its tickets; the **Security sweep** and
 its tickets and every other step still run, and the digest keeps its Security scan line
 and gives the scores as "paused by control panel". `Steward ticket cap` replaces the cap
@@ -103,7 +104,10 @@ The digest covers:
 - **Waiting on you**, with links:
   - `ap-decision` tickets;
   - `needs-operator` tickets;
-  - `ap-owner-merge` PRs labelled `needs-owner`, and any closed without merging;
+  - PRs labelled `needs-owner`, split into **mergeable now** (base `main`, `behind_by` 0
+    and `ci-status` passed on the head), with its count, and **needs attention** (every
+    other: behind, pending, failing, stacked, or a `keep-fresh-conflict` comment naming
+    its head), and any closed without merging;
   - open PRs whose merge was refused (a `<!-- autopilot:merge-refused -->` comment),
     each as "merge refused: #n";
   - watch triggers that fired, and watch pages that couldn't be reached;
