@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v22. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -94,6 +94,11 @@ The digest is a comment on the **steward log**, a Jira ticket:
 
 The digest covers:
 - what shipped;
+- **Auto-merged, formerly owner-merge:** each PR merged since the last digest whose body
+  or triage comment has a `Formerly owner-merge:` line, linked, with its categories, or
+  "none", so the owner can spot-check them and pull a category back (list them with
+  `gh api 'repos/{owner}/{repo}/pulls?state=closed&sort=updated&direction=desc&per_page=100'`,
+  keeping those merged since the last digest; a Dependabot PR's line is in its triage comment);
 - what's in flight, with each open feature (`ap-feature-<slug>`) and its PRs in merge order;
 - **Waiting on you**, with links:
   - `ap-decision` tickets;

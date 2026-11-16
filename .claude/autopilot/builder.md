@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v22. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -35,12 +35,26 @@ independent tickets still go ahead.
 
 **Stacking.** A ticket that depends on an unmerged PR gets its branch cut from that PR's
 branch, its PR opened against that branch, and "Merge after #N" as the first line of its
-body. A stacked PR goes through step 6 as `ap-owner-merge`, whatever its class: label it
-`needs-owner`, and the owner merges it after its base.
+body. A stacked PR is never merged, nor given auto-merge, while its base is open. If its
+ticket is `ap-owner-merge`, label it `needs-owner`, and the owner merges it after its
+base; otherwise give its ticket the Jira label `ap-merging` and a comment linking the PR
+with its `Head:` sha, and **Auto-merge pending** takes it through step 6 once its base
+has merged and records `Auto-merge on: <head sha>` on the ticket.
 
 **Feature summary.** At the end of the run, comment once on the feature's first ticket
 and on each ticket the run touched: the feature's PRs in merge order, what each
 changed, what is blocked and on what, and what is left.
+
+**Formerly owner-merge** (BORG-104). These `ap-auto` changes used to wait for the owner,
+so each merges only once both the `reviewer` and the `qc` subagent pass with nothing
+left open: auth, sessions, identity and permissions; security headers and CSP; CI/CD and
+build config other than release publishing, production deployment, infrastructure
+config, CI secrets and token permissions, and weakening the `ci-status` job; additive (non-breaking) API, export, format and contract changes;
+migrations that only add (tables, columns, indexes) and that the merge doesn't apply to
+production; dependency majors; `.claude/` setup outside `.claude/rules/`,
+`.claude/autopilot/`, `.claude/agents/`, `.claude/hooks/` and `.claude/settings*.json`; diffs over about 800 lines; and stacked PRs. The PR body names
+them on one line, `Formerly owner-merge: <categories>`, which the digest lists. Anything
+in doubt, or with steps before or after the merge, stays `ap-owner-merge`.
 
 Take the highest priority first, then the oldest first. Stop after the run's ticket
 budget, or after two failures in a row. For each ticket:
@@ -53,8 +67,8 @@ budget, or after two failures in a row. For each ticket:
 3. Run the full verify command. Coverage floors never drop, and no test is skipped
    or deleted to get green.
 4. **Independent review.** Hand the `reviewer` subagent (opus) the diff and the ticket.
-   For `ap-owner-merge`, or a diff over 300 lines, then hand the `qc` subagent (fable)
-   the same. Fix whatever they block on.
+   For `ap-owner-merge`, a **Formerly owner-merge** category, or a diff over 300 lines,
+   then hand the `qc` subagent (fable) the same. Fix whatever they block on.
 5. Open the PR (`gh api repos/{owner}/{repo}/pulls -f title=… -f head=… -f base=main
    -f body=…`; under **Stacking**, `base` is the base PR's branch). It references the
    ticket, lists each acceptance criterion with how it is verified, and states the
@@ -76,7 +90,20 @@ budget, or after two failures in a row. For each ticket:
      `disable_pr_auto_merge`; enable it again once steps 3 and 4 pass on the new head.
      An update-branch merge of `main` is not a new commit.
    - **Auto-merge pending.** After **Reconcile**, for each open PR of an `ap-merging`
-     ticket: bring it up to date (**Always**). If its head moved off the comment's `Head:`
+     ticket: a stacked PR ("Merge after #N") whose ticket has no `Auto-merge on:`
+     comment waits while #N is open. If #N closed without merging, it is stuck (below).
+     Once #N has merged: if the PR still targets #N's branch, retarget it
+     (`gh api -X PATCH repos/{owner}/{repo}/pulls/{n} -f base=main`). If update-branch
+     conflicts because #N was squash-merged, first merge #N's final head into the branch
+     (`git fetch origin pull/N/head && git merge FETCH_HEAD`), then merge `main`, taking
+     this branch's side only where `main`'s side is #N's squash, and push; if either
+     merge conflicts anywhere else, it is stuck. If its head moved off the comment's `Head:` sha by
+     anything but an update-branch merge of `main`, rerun steps 3 and 4 on it. Then take
+     it through step 6 as `ap-auto`; once `enable_pr_auto_merge` succeeds, comment
+     `Auto-merge on: <head sha>` on the ticket (if step 6 merged it instead, Reconcile
+     finishes it), and leave it for this run. From then on
+     it is one of the others, checked against that sha. For the others: bring it up
+     to date (**Always**). If its head moved off the comment's `Head:`
      sha by anything but an update-branch merge of `main`, turn auto-merge off
      (`disable_pr_auto_merge`). If its `auto_merge` is null, someone turned it off, and if
      `ci-status` failed or the update conflicts, it is stuck: either way label the PR
@@ -105,8 +132,8 @@ listed in it; `.claude/rules/autopilot.local.md` is not among them; the head has
 fresh green, or auto-merge waits for one. Otherwise label it `needs-owner` and comment
 which condition failed.
 A refused merge goes as step 6's **Merge refused**.
-This is the one `.claude/` change that isn't owner-merged: the owner approved it when
-it merged in bonham-ops.
+Refresh PRs are the only `.claude/rules/` and `.claude/autopilot/` changes that aren't
+owner-merged: the owner approved them when they merged in bonham-ops.
 
 **A "Refresh <page title> for <changes>" ticket** is a Confluence edit, not a PR. Change
 only the statements the ticket names, keep the page's structure and voice, and never

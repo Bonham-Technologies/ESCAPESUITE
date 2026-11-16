@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v22. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot policy
 
 This repository is on autopilot. Claude finds improvements, files them, builds them and
@@ -119,18 +119,17 @@ Every ticket carries exactly one class label. The steward log ticket is the only
 | `ap-watch` | Tracks something outside the repo, such as an upstream bug or a vendor release; nothing is built | The steward checks it each run |
 
 **`ap-owner-merge`** if the change touches any of these:
-- authentication, sessions, identity or licence checks;
-- payments, billing, plans or pricing logic;
-- database migrations, schema, RLS, data deletion or backfills;
-- security headers, CSP, secrets or permissions;
-- CI/CD, release, deployment or infrastructure config, `.github/workflows/` included;
-- the product site under `site/`, whoever wrote the change;
-- a public or integration API, an export or file format, or any contract other code depends on;
-- a dependency's major version;
+- payments, billing, plans, pricing or licence checks, or anything that spends money;
+- licence or legal terms, privacy wording, or secrets;
+- data deletion, backfills, any migration that does more than add tables, columns or indexes (RLS policy changes included), or one the merge applies to production or that needs steps before or after it;
+- release publishing, production deployment or infrastructure config (Dockerfile, Helm, compose, Terraform, hosting), CI secrets and token permissions, removing, skipping or renaming a check in the `ci-status` job or changing its triggers, or `main`'s ruleset;
+- the product site under `site/`, whoever wrote the change, and anything else outward-facing outside the app (emails, store listings, public docs, social posts);
+- a breaking change to a public or integration API, an export or file format, or any contract other code depends on;
 - removing anything a user can see or rely on;
-- the autopilot's own setup: anything under `.claude/`, such as `.claude/rules/autopilot.local.md`, the agents, hooks and settings.
+- on a public repo, `.github/workflows/`;
+- the autopilot's own rules and permissions: `.claude/rules/`, such as `.claude/rules/autopilot.local.md`, `.claude/autopilot/`, `.claude/agents/`, `.claude/hooks/` and `.claude/settings*.json`.
 
-It also applies if the diff exceeds about 800 changed lines, or the reviewer or QC raises a concern it can't resolve.
+It also applies if the reviewer or QC raises a concern it can't resolve.
 
 **`ap-decision`** if the ticket asks for:
 - a new capability outside the product's current scope;
@@ -159,7 +158,8 @@ Bugzilla bug, a GitHub issue or a release page) and states the **trigger**, for 
 - copy clarity;
 - refactors that pay for themselves;
 - docs and developer experience;
-- patch and minor dependency bumps.
+- patch and minor dependency bumps;
+- once the reviewer and QC both pass (builder, **Formerly owner-merge**): auth, sessions, identity and permissions; security headers and CSP; other CI and build config; additive API, export and format changes; add-only migrations; dependency majors; other `.claude/` setup; large diffs.
 
 When unsure between two classes, pick the stricter one.
 
