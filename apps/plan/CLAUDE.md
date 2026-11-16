@@ -53,6 +53,7 @@ src/
 │   └── themeStorage.ts    # Theme persistence utilities
 ├── lib/
 │   ├── launch.ts          # Tool URLs + "launch tool"/"offline build downloaded" analytics events
+│   ├── sitemap.ts         # sitemap.xml the build writes from the route list (ESCSUITE-457)
 │   └── analytics.ts       # Vercel Analytics tracking
 └── pages/
     ├── Home.tsx            # Landing page — links to ESCAPECRAFT and ESCAPEARTIST

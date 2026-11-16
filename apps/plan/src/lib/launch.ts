@@ -1,4 +1,5 @@
 import { analytics } from './analytics'
+import { TOOL_PATHS } from './sitemap'
 
 export type ToolId = 'craft' | 'artist'
 
@@ -28,7 +29,8 @@ export const ARTIST_OFFLINE_BUILD_URL = `${GITHUB_URL}/releases/latest/download/
  */
 export const VERIFY_DOWNLOAD_URL = `${GITHUB_URL}/blob/main/docs/VERIFY.md`
 
-const PROD_URLS: Record<ToolId, string> = { craft: '/craft/', artist: '/artist/' }
+// The same paths `sitemap.xml` lists for the tools (ESCSUITE-457).
+const PROD_URLS: Record<ToolId, string> = TOOL_PATHS
 const DEV_URLS: Record<ToolId, string> = {
   craft: 'http://localhost:5174',
   artist: 'http://localhost:5175',
