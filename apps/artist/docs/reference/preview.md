@@ -378,6 +378,12 @@ nothing moved. The loop-back arm now runs only when `loopEnd - loopStart >= MIN_
 `usePreviewRenderLoop.ts`); a shorter region falls through to the end-of-timeline arm, which
 pauses the elements, calls `setIsPlaying(false)` and writes the region's out point once
 (`loopEnd`, which is the timeline's end when the loop is off, so that arm is unchanged for it).
+No notice: the play control is left to the user. The comparison sits inside the
+`newTimelineTime >= loopEnd` branch, so it costs nothing on an ordinary frame. An inverted pair
+(`outPoint < inPoint`) would stop the same way, but the store cannot hold one —
+`setInPoint`/`setOutPoint` swap on a cross and every writer goes through them — so there is no
+arm for it. The same comparison also covers a loop with no in/out points over a timeline shorter
+than a frame.
 
 **A suspended loop plays straight on** (ESCSUITE-462). While the store's `loopSuspended` is
 true, `animate()` treats loop playback as off: no in/out region, no wrap at the end, playback
@@ -386,12 +392,6 @@ stops at the timeline's end. Remove silences' Play sets it for its span only (se
 margin of the end, plays where it is. `animate()` reads it with `useEditorStore.getState()`
 every frame rather than through a ref mirrored by an effect, so it holds from the first frame
 of the playback it was set with. `loopPlayback` and the in/out points are not touched.
-No notice: the play control is left to the user. The comparison sits inside the
-`newTimelineTime >= loopEnd` branch, so it costs nothing on an ordinary frame. An inverted pair
-(`outPoint < inPoint`) would stop the same way, but the store cannot hold one —
-`setInPoint`/`setOutPoint` swap on a cross and every writer goes through them — so there is no
-arm for it. The same comparison also covers a loop with no in/out points over a timeline shorter
-than a frame.
 
 **Playback started in a gap plays on from the next clip** (ESCSUITE-280). With the playhead
 between clips, the playback effect in `usePreviewRenderLoop.ts` used to write the next clip's
