@@ -1,5 +1,16 @@
 # @escapesuite/plan
 
+## 2.20.0
+
+### Patch Changes
+
+- 67a7525: Links to Bonham Technologies now go straight to https://bonham.tech/ instead of through the www redirect, and the hub footer has a "Support & sponsorship" link to the support retainer and sponsor tiers on bonham.tech.
+- 6204cbb: The Privacy Policy now lists exactly what the hosted site's analytics records: the page path (never anything after a ? or #), the site that sent you, your browser, operating system and device type, and your approximate city. It explains that Vercel works out the location from your IP address and says it does not store it.
+- abda84d: The Known limitations page now covers two more browser limits: Transcribe to captions in ESCAPEARTIST (it works in browsers with on-device speech recognition, today Chrome-family browsers on a computer, in real time, with a speech language pack your browser may download and no audio leaving your device) and Float controls in ESCAPECRAFT (only in browsers with Document Picture-in-Picture, such as Chrome and Edge, and not when embedded in another page).
+- e7b0155: The ESCAPEARTIST card on the home page now mentions removing silences and adding captions. ESCAPECRAFT's Recording Tips explain Float controls, the always-on-top window with the timer and record, pause and stop buttons, in browsers that can open it.
+- 95549cf: A mistyped or out-of-date link on escapesuite.io now shows a "Page not found" page, with links to the home page, the recorder and the editor, instead of quietly showing the home page. Search engines are told the page does not exist, so they stop listing made-up addresses as copies of the home page.
+- f5f72b0: The Privacy Policy, Terms of Service and Known limitations pages now load with their own title, description and address for search engines, instead of the home page's, so they show up as separate pages in search results. The home page, ESCAPECRAFT and ESCAPEARTIST have shorter titles and descriptions that fit in a search result without being cut off.
+
 ## 2.19.0
 
 ### Patch Changes

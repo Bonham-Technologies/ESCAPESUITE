@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.20.0
+
+### Patch Changes
+
+- 67a7525: Links to Bonham Technologies now go straight to https://bonham.tech/ instead of through the www redirect, and the hub footer has a "Support & sponsorship" link to the support retainer and sponsor tiers on bonham.tech.
+- def4feb: The Float controls window now shows the 3-2-1 countdown where the timer is, tells screen readers when the countdown starts and when the take is recording, paused, saving and saved, and prints why Record is unavailable instead of hiding the reason in a tooltip.
+- e7b0155: The ESCAPEARTIST card on the home page now mentions removing silences and adding captions. ESCAPECRAFT's Recording Tips explain Float controls, the always-on-top window with the timer and record, pause and stop buttons, in browsers that can open it.
+- f5f72b0: The Privacy Policy, Terms of Service and Known limitations pages now load with their own title, description and address for search engines, instead of the home page's, so they show up as separate pages in search results. The home page, ESCAPECRAFT and ESCAPEARTIST have shorter titles and descriptions that fit in a search result without being cut off.
+
 ## 2.19.0
 
 ### Patch Changes
