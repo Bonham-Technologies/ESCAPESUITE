@@ -880,3 +880,47 @@ describe('transcribeTimeline: the default buffer (ESCSUITE-439)', () => {
     expect(made).toEqual([{ numberOfChannels: 1, length: 16_000, sampleRate: 16000 }]);
   });
 });
+
+describe('transcribeChannels: a run that settles while it starts (ESCSUITE-461)', () => {
+  it('stops reporting progress when the recogniser fails inside start()', async () => {
+    vi.useFakeTimers();
+    class FailsOnStart extends FakeRecognition {
+      override start(track?: MediaStreamTrack) {
+        super.start(track);
+        this.onerror?.({ error: 'network' });
+      }
+    }
+    const { ctx, source } = makeContext();
+    const progress = vi.fn();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition: FailsOnStart as unknown as SpeechRecognitionCtor,
+      createAudioContext: () => ctx, onProgress: progress,
+    });
+    const settled = expect(run).rejects.toThrow('On-device speech recognition stopped (network).');
+    await vi.advanceTimersByTimeAsync(0);
+    await settled;
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(progress).not.toHaveBeenCalled();
+    expect(source.start).not.toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('stops reporting progress when the caller aborts from inside onProgress(0)', async () => {
+    vi.useFakeTimers();
+    const { ctx } = makeContext();
+    const controller = new AbortController();
+    const progress = vi.fn(() => controller.abort());
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition,
+      createAudioContext: () => ctx, onProgress: progress, signal: controller.signal,
+    });
+    const settled = expect(run).rejects.toMatchObject({ name: 'AbortError' });
+    await vi.advanceTimersByTimeAsync(0);
+    await settled;
+    expect(progress).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(progress).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
