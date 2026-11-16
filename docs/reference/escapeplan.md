@@ -25,5 +25,7 @@
   disagree. A hub page's `<lastmod>` is the committer date of the last commit to its files in
   `PAGE_SOURCES`; without git, outside a repository, or when the commit found is a shallow
   clone's cut-off end, the entry has no `<lastmod>`. The tools never get one: their sources are
-  other packages', which the hub's Turbo-cached build would not notice change. `robots.txt`
+  other packages', which the hub's Turbo-cached build would not notice change. Vercel builds
+  from a shallow clone, so in production a page keeps its `<lastmod>` only while its last change
+  is within the fetched history; older pages are listed without one. `robots.txt`
   (still in `public/`) names `https://www.escapesuite.io/sitemap.xml`.

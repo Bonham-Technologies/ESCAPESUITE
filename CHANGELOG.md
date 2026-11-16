@@ -6,7 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
-- Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed, and each hub page's last-modified date is the date its content last changed (ESCSUITE-457).
+- Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
 - ESCAPEARTIST: Delete track, Delete clip, New Project and the media library's Remove, Clear Unused and Clear All ask in the editor's own dialog, so they work in a page that embeds the editor in a frame sandboxed without pop-ups, where they used to do nothing (ESCSUITE-448).
 - Hosted site: the Privacy, Terms and Known limitations pages are served with their own title, description and canonical address instead of the home page's, so search engines no longer see them as copies of the home page; the home page, ESCAPECRAFT and ESCAPEARTIST have shorter titles and descriptions that show in full in search results (ESCSUITE-458).
 - Tests: journey 01 records, without failing, each time an export has to reload a video that stopped completing seeks, and the CI and nightly e2e summaries and their e2e-flaky artifacts list those tests (ESCSUITE-450).

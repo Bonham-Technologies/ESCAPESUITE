@@ -109,6 +109,11 @@ describe('lastCommitDate (ESCSUITE-457)', () => {
     expect(lastCommitDate(fakeGit({ [LOG_HOME]: '\n' }), ['src/pages/Home.tsx'])).toBeUndefined()
   })
 
+  it('is omitted when git prints something other than a date', () => {
+    const git = fakeGit({ [LOG_HOME]: 'gpg: Signature made Mon Nov 10\u0000abc123\n' })
+    expect(lastCommitDate(git, ['src/pages/Home.tsx'])).toBeUndefined()
+  })
+
   it('is omitted for a route with no sources, without running git', () => {
     const git = fakeGit({})
     expect(lastCommitDate(git, [])).toBeUndefined()

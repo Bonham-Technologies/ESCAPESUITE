@@ -34,6 +34,9 @@ export const PAGE_SOURCES: Record<HubPath, readonly string[]> = {
 /** Runs `git` with `args` and returns its stdout, or `null` when it failed. */
 export type Git = (args: readonly string[]) => string | null
 
+/** git's strict ISO 8601 committer date (`%cI`). */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})$/
+
 /**
  * The committer date of the last commit that changed any of `sources`, or
  * `undefined` when it isn't known for sure: no sources, no git, not a
@@ -47,6 +50,8 @@ export function lastCommitDate(git: Git, sources: readonly string[]): string | u
   const line = git(['log', '-1', '--format=%cI%x00%P', '--', ...sources])?.trim()
   if (!line) return undefined
   const [date, parents] = line.split('\u0000')
+  // Anything but a plain ISO 8601 date (say, signature lines from a local log.showSignature) is dropped.
+  if (!ISO_DATE.test(date)) return undefined
   if (!parents && git(['rev-parse', '--is-shallow-repository'])?.trim() !== 'false') return undefined
   return date
 }
