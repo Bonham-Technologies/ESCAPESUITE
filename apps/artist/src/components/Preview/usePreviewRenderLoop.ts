@@ -607,19 +607,22 @@ export function usePreviewRenderLoop({
       const elapsed = (performance.now() - playbackStartTime) / 1000;
       const newTimelineTime = startTimelineTime + elapsed;
 
-      // Determine loop boundaries based on in/out points
-      const loopEnd = (loopPlaybackRef.current && inPointRef.current !== null && outPointRef.current !== null)
-        ? outPointRef.current
-        : timelineDuration;
-      const loopStart = (loopPlaybackRef.current && inPointRef.current !== null && outPointRef.current !== null)
-        ? inPointRef.current
-        : 0;
+      // Determine loop boundaries based on in/out points. A suspended loop
+      // (Remove silences' Play, ESCSUITE-462) plays straight on to the end,
+      // as with the loop off; read from the store each frame, so it holds
+      // from the frame playback starts on.
+      const looping = loopPlaybackRef.current && !useEditorStore.getState().loopSuspended;
+      const regionIn = inPointRef.current;
+      const regionOut = outPointRef.current;
+      const inOutRegion = looping && regionIn !== null && regionOut !== null;
+      const loopEnd = inOutRegion ? regionOut : timelineDuration;
+      const loopStart = inOutRegion ? regionIn : 0;
 
       // Check if we've reached the end of the timeline (or out point when looping with in/out)
       if (newTimelineTime >= loopEnd) {
         // A region shorter than one frame does not loop: it stops at its end,
         // like the end of the timeline with the loop off.
-        if (loopPlaybackRef.current && loopEnd - loopStart >= MIN_LOOP_LENGTH_S) {
+        if (looping && loopEnd - loopStart >= MIN_LOOP_LENGTH_S) {
           // Loop back to the beginning (or in point)
           // Reset playback start time to now, starting from loop start position
           playbackStartTime = performance.now();

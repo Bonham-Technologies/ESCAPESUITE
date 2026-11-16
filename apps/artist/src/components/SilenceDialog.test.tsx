@@ -532,6 +532,70 @@ describe('Remove silences: go to and play a pause before cutting it (ESCSUITE-44
     expect(playhead()).toBeCloseTo(2.2, 6)
   })
 
+  it('stops Play at the end of the timeline for a pause less than 1 s from it, never past it (ESCSUITE-462)', async () => {
+    await openDialog(true)
+    expect(store().project.timeline.duration).toBe(7)
+    act(() => store().setSilenceCandidates([{ start: 6.2, end: 6.6 }]))
+    press('Play the pause at 0:06.20')
+    expect(playhead()).toBeCloseTo(5.2, 6)
+    advance(1790)
+    expect(store().isPlaying).toBe(true)
+    advance(10)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBe(7)
+    advance(5000)
+    expect(playhead()).toBe(7)
+  })
+
+  it('plays a pause straight through with loop playback and in/out points set, and leaves both as they were (ESCSUITE-462)', async () => {
+    await openDialog(true)
+    act(() => {
+      store().setLoopPlayback(true)
+      store().setInPoint(0.5)
+      store().setOutPoint(1.5)
+    })
+    press('Play the pause at 0:05.10')
+    // The pause lies past the out point: the preview plays it where it is,
+    // neither jumping back to the in point nor wrapping at the timeline's end.
+    expect(store().loopSuspended).toBe(true)
+    expect(store().loopPlayback).toBe(true)
+    advance(2800)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(6.9, 6)
+    expect(store().loopSuspended).toBe(false)
+    expect(store().loopPlayback).toBe(true)
+    expect([store().inPoint, store().outPoint]).toEqual([0.5, 1.5])
+  })
+
+  it.each([
+    ['the dialog closing', () => press('Cancel')],
+    ['Go to', () => press('Go to the pause at 0:05.10')],
+    ['a pause from elsewhere', () => act(() => store().setIsPlaying(false))],
+    ['a seek from elsewhere', () => act(() => store().seekTo(0.5))],
+  ])('gives the loop back when %s interrupts Play (ESCSUITE-462)', async (_, interrupt) => {
+    await openDialog(true)
+    act(() => store().setLoopPlayback(true))
+    press('Play the pause at 0:02.10')
+    advance(1000)
+    expect(store().loopSuspended).toBe(true)
+    interrupt()
+    expect(store().loopSuspended).toBe(false)
+    expect(store().loopPlayback).toBe(true)
+  })
+
+  it('keeps the loop suspended across a second Play, and gives it back when that one ends (ESCSUITE-462)', async () => {
+    await openDialog(true)
+    act(() => store().setLoopPlayback(true))
+    press('Play the pause at 0:02.10')
+    advance(1000)
+    press('Play the pause at 0:05.10')
+    expect(store().loopSuspended).toBe(true)
+    advance(2800)
+    expect(store().isPlaying).toBe(false)
+    expect(store().loopSuspended).toBe(false)
+    expect(store().loopPlayback).toBe(true)
+  })
+
   it('stops as soon as the playhead passes 1 s after the pause, even before the timer', async () => {
     // The preview's loop can get there early (playback started in a gap jumps
     // to the next clip, ESCSUITE-280); its store writes are the backstop.

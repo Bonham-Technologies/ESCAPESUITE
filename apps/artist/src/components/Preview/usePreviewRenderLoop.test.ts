@@ -186,6 +186,41 @@ describe('usePreviewRenderLoop playback', () => {
     expect(result.current.getDisplayTime()).toBeLessThan(2)
   })
 
+  // ESCSUITE-462: Remove silences' Play suspends the loop for its span, so a
+  // pause past the out point, or near the end, is heard where it is.
+  it('plays straight past the out point while the loop is suspended', async () => {
+    addClip('clip1', 0, 4)
+    store().setLoopPlayback(true)
+    store().setInPoint(1)
+    store().setOutPoint(2)
+    store().setLoopSuspended(true)
+    store().setCurrentTime(1.9)
+    const { deps, play } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(500)
+
+    expect(store().isPlaying).toBe(true)
+    expect(result.current.getDisplayTime()).toBeGreaterThan(2.2)
+  })
+
+  it('stops at the end of the timeline instead of looping while the loop is suspended', async () => {
+    addClip('clip1', 0, 1)
+    store().setLoopPlayback(true)
+    store().setLoopSuspended(true)
+    store().setCurrentTime(0.5)
+    const { deps, play } = harness()
+
+    const { result } = renderHook(() => usePreviewRenderLoop(deps))
+    play()
+    await settle(1200)
+
+    expect(store().isPlaying).toBe(false)
+    expect(store().currentTime).toBe(1)
+    expect(result.current.getDisplayTime()).toBe(1)
+  })
+
   it('stops at the end of the timeline when loop playback is off', async () => {
     addClip('clip1', 0, 1)
     const { deps, play } = harness()

@@ -1,11 +1,11 @@
 // UI slice: the editor's view preferences — timeline zoom, snapping, the active
-// tool, loop playback, the preview's crop mode and the "Remove silences"
+// tool, loop playback (and its suspension for a Remove silences Play), the preview's crop mode and the "Remove silences"
 // review. None of it is part of the project or the undo stack.
 
 import type { StateCreator } from 'zustand';
 import type { EditorState } from './types';
 
-export type UiSlice = Pick<EditorState, 'zoom' | 'snapEnabled' | 'snapThreshold' | 'activeTool' | 'loopPlayback' | 'cropClipId' | 'silenceReview' | 'setZoom' | 'setSnapEnabled' | 'setActiveTool' | 'setLoopPlayback' | 'setCropClipId' | 'setSilenceReviewClip' | 'setSilenceCandidates'>;
+export type UiSlice = Pick<EditorState, 'zoom' | 'snapEnabled' | 'snapThreshold' | 'activeTool' | 'loopPlayback' | 'loopSuspended' | 'cropClipId' | 'silenceReview' | 'setZoom' | 'setSnapEnabled' | 'setActiveTool' | 'setLoopPlayback' | 'setLoopSuspended' | 'setCropClipId' | 'setSilenceReviewClip' | 'setSilenceCandidates'>;
 
 export const createUiSlice: StateCreator<EditorState, [], [], UiSlice> = (set) => ({
   zoom: 1,
@@ -13,6 +13,7 @@ export const createUiSlice: StateCreator<EditorState, [], [], UiSlice> = (set) =
   snapThreshold: 10, // pixels
   activeTool: 'select',
   loopPlayback: false,
+  loopSuspended: false,
   cropClipId: null,
   silenceReview: null,
 
@@ -21,6 +22,7 @@ export const createUiSlice: StateCreator<EditorState, [], [], UiSlice> = (set) =
   setSnapEnabled: (enabled: boolean) => set({ snapEnabled: enabled }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setLoopPlayback: (enabled: boolean) => set({ loopPlayback: enabled }),
+  setLoopSuspended: (suspended: boolean) => set({ loopSuspended: suspended }),
   setCropClipId: (clipId: string | null) => set({ cropClipId: clipId }),
   setSilenceReviewClip: (clipId: string | null) =>
     set({ silenceReview: clipId === null ? null : { clipId, candidates: [] } }),
