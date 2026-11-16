@@ -152,8 +152,21 @@ function leftBehindText(left: LeftBehind, moveEverything: boolean, verb: string)
  *
  * Detection reads the waveform peaks already in the library, so it costs no
  * decode and needs no network. Escape cancels, as the Cancel button does.
+ *
+ * Each opening is a fresh session (ESCSUITE-463): the body below is mounted
+ * only while the review is open, keyed by its clip, so the fields, the
+ * checkbox and the active row start over however this component is mounted.
+ * The inspector fills the list with the defaults, so the fields read the
+ * defaults too, never a cancelled session's values beside a list they did not
+ * find.
  */
 export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
+  const clipId = useEditorStore((state) => state.silenceReview?.clipId ?? null);
+  return clipId === null ? null : <SilenceReview key={clipId} onRemoved={onRemoved} />;
+}
+
+/** The open review: settings, the list of pauses, and the cut. */
+function SilenceReview({ onRemoved }: SilenceDialogProps) {
   const review = useEditorStore((state) => state.silenceReview);
   const setSilenceReviewClip = useEditorStore((state) => state.setSilenceReviewClip);
   const setSilenceCandidates = useEditorStore((state) => state.setSilenceCandidates);

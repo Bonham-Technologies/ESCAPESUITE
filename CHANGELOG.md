@@ -7,6 +7,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
+- ESCAPEARTIST: the Remove silences dialog starts every opening from its default settings on its own, rather than relying on the editor to close it fully, so values typed in a cancelled session can never show beside pauses found with the defaults (ESCSUITE-463).
 - ESCAPEARTIST: Play on a pause in Remove silences now plays that pause even with loop playback on, instead of jumping to the start of the timeline or to the in point, and stops at the end of the timeline rather than past it (ESCSUITE-462).
 - ESCAPEARTIST: Delete track, Delete clip, New Project and the media library's Remove, Clear Unused and Clear All ask in the editor's own dialog, so they work in a page that embeds the editor in a frame sandboxed without pop-ups, where they used to do nothing (ESCSUITE-448).
 - Hosted site: the Privacy, Terms and Known limitations pages are served with their own title, description and canonical address instead of the home page's, so search engines no longer see them as copies of the home page; the home page, ESCAPECRAFT and ESCAPEARTIST have shorter titles and descriptions that show in full in search results (ESCSUITE-458).
