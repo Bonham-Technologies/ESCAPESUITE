@@ -335,9 +335,14 @@ function listen(options: ListenOptions): Promise<CaptionCue[]> {
         };
 
         recognition.start(track);
+        // A recogniser can fail inside start(), or the caller can abort from
+        // onProgress(0, …): the run is settled and cleaned up before the timer exists.
+        if (settled) return;
         startedAt = ctx.currentTime;
         source.start();
+        if (settled) return;
         onProgress?.(0, duration);
+        if (settled) return;
         progressTimer = setInterval(() => onProgress?.(clock(), duration), PROGRESS_INTERVAL_MS);
       } catch (error) {
         fail(error instanceof TranscriptionError ? error : new TranscriptionError('Could not start on-device speech recognition.'));
