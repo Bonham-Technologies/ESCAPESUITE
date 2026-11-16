@@ -150,6 +150,24 @@ describe('Layout', () => {
     expect(repoLink).toHaveAttribute('rel', 'noopener noreferrer')
   })
 
+  // ESCSUITE-460: the footer points teams to paid support, and links Bonham Technologies at
+  // https://bonham.tech/ directly rather than through the www redirect.
+  it('links to paid support and to Bonham Technologies without the www redirect', () => {
+    const { container } = renderLayout()
+    const inFooter = within(container.querySelector('footer') as HTMLElement)
+
+    const supportLink = inFooter.getByRole('link', { name: 'Support & sponsorship' })
+    expect(supportLink).toHaveAttribute('href', 'https://bonham.tech/#sponsors')
+    expect(supportLink).toHaveAttribute('target', '_blank')
+    expect(supportLink).toHaveAttribute('rel', 'noopener noreferrer')
+
+    const companyLink = inFooter.getByRole('link', { name: 'Bonham Technologies, LLC' })
+    expect(companyLink).toHaveAttribute('href', 'https://bonham.tech/')
+
+    const hrefs = Array.from(container.querySelectorAll('a[href]'), (a) => a.getAttribute('href'))
+    expect(hrefs.some((href) => href?.includes('www.bonham.tech'))).toBe(false)
+  })
+
   it('puts the skip link first in the tab order', async () => {
     renderLayout()
 
