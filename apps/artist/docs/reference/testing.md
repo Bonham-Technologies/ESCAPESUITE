@@ -29,7 +29,7 @@ outcome, not on the double.
 - **`src/test/fixtures/`** — shared data and the store reset. `projectStore.ts` exports
   `store()`, `addClip()` and **`resetStoreForTest()`**, which puts the module-singleton store
   back to a freshly loaded editor holding one source video (`resetProject()` alone leaves
-  `zoom`, `activeTool`, `loopPlayback`, `cropClipId`, the keyframe panel and the history behind).
+  `zoom`, `activeTool`, `loopPlayback`, `loopSuspended`, `cropClipId`, the keyframe panel and the history behind).
   `store()`'s action calls run inside `act()`, because a zustand change with a component
   mounted is a React update. `animation.ts` and `clipFixtures.ts` hold the clip/transform
   and export shapes their suites share.

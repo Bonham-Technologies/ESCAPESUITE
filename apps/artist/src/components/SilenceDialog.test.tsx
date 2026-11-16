@@ -432,6 +432,38 @@ describe('Remove silences', () => {
     expect(store().project.timeline.clips).toHaveLength(2)
   })
 
+  it('opens with the default settings again after Cancel, matching the list they find, even when kept mounted (ESCSUITE-463)', async () => {
+    const { screen: part } = placeTake()
+    store().setSelectedClipId(part.id)
+    const user = userEvent.setup()
+    // Mounted for good, not only while the review is open as App mounts it:
+    // the dialog itself has to forget a cancelled session's fields.
+    render(<><ClipEditor /><SilenceDialog onRemoved={vi.fn()} /></>)
+    const field = (label: string) => screen.getByLabelText(label)
+
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    // A valid setting finds the pauses again; an out-of-range one is marked.
+    await user.clear(field('Padding (s)'))
+    await user.type(field('Padding (s)'), '0.3')
+    expect(pauses()[0]).toHaveTextContent('0:02.30 – 0:02.70')
+    await user.clear(field('Minimum gap (s)'))
+    await user.type(field('Minimum gap (s)'), '99')
+    expect(field('Minimum gap (s)')).toHaveAttribute('aria-invalid', 'true')
+    await user.click(screen.getByRole('checkbox', { name: 'Move everything after each cut' }))
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(store().silenceReview).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Find silences' }))
+    // The inspector found this list with the defaults, so the fields read them.
+    expect(field('Threshold (dBFS)')).toHaveValue(-40)
+    expect(field('Minimum gap (s)')).toHaveValue(0.7)
+    expect(field('Minimum gap (s)')).not.toHaveAttribute('aria-invalid')
+    expect(field('Padding (s)')).toHaveValue(0.1)
+    expect(pauses()).toHaveLength(2)
+    expect(pauses()[0]).toHaveTextContent('0:02.10 – 0:02.90')
+    expect(screen.getByRole('checkbox', { name: 'Move everything after each cut' })).toBeChecked()
+  })
+
   it('renders nothing while the review is closed', () => {
     const { container } = render(<><SilenceDialog onRemoved={vi.fn()} /><TimelineSilenceBands pixelsPerSecond={50} height={10} /></>)
     expect(container).toBeEmptyDOMElement()
@@ -530,6 +562,70 @@ describe('Remove silences: go to and play a pause before cutting it (ESCSUITE-44
     advance(2200)
     expect(store().isPlaying).toBe(false)
     expect(playhead()).toBeCloseTo(2.2, 6)
+  })
+
+  it('stops Play at the end of the timeline for a pause less than 1 s from it, never past it (ESCSUITE-462)', async () => {
+    await openDialog(true)
+    expect(store().project.timeline.duration).toBe(7)
+    act(() => store().setSilenceCandidates([{ start: 6.2, end: 6.6 }]))
+    press('Play the pause at 0:06.20')
+    expect(playhead()).toBeCloseTo(5.2, 6)
+    advance(1790)
+    expect(store().isPlaying).toBe(true)
+    advance(10)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBe(7)
+    advance(5000)
+    expect(playhead()).toBe(7)
+  })
+
+  it('plays a pause straight through with loop playback and in/out points set, and leaves both as they were (ESCSUITE-462)', async () => {
+    await openDialog(true)
+    act(() => {
+      store().setLoopPlayback(true)
+      store().setInPoint(0.5)
+      store().setOutPoint(1.5)
+    })
+    press('Play the pause at 0:05.10')
+    // The pause lies past the out point: the preview plays it where it is,
+    // neither jumping back to the in point nor wrapping at the timeline's end.
+    expect(store().loopSuspended).toBe(true)
+    expect(store().loopPlayback).toBe(true)
+    advance(2800)
+    expect(store().isPlaying).toBe(false)
+    expect(playhead()).toBeCloseTo(6.9, 6)
+    expect(store().loopSuspended).toBe(false)
+    expect(store().loopPlayback).toBe(true)
+    expect([store().inPoint, store().outPoint]).toEqual([0.5, 1.5])
+  })
+
+  it.each([
+    ['the dialog closing', () => press('Cancel')],
+    ['Go to', () => press('Go to the pause at 0:05.10')],
+    ['a pause from elsewhere', () => act(() => store().setIsPlaying(false))],
+    ['a seek from elsewhere', () => act(() => store().seekTo(0.5))],
+  ])('gives the loop back when %s interrupts Play (ESCSUITE-462)', async (_, interrupt) => {
+    await openDialog(true)
+    act(() => store().setLoopPlayback(true))
+    press('Play the pause at 0:02.10')
+    advance(1000)
+    expect(store().loopSuspended).toBe(true)
+    interrupt()
+    expect(store().loopSuspended).toBe(false)
+    expect(store().loopPlayback).toBe(true)
+  })
+
+  it('keeps the loop suspended across a second Play, and gives it back when that one ends (ESCSUITE-462)', async () => {
+    await openDialog(true)
+    act(() => store().setLoopPlayback(true))
+    press('Play the pause at 0:02.10')
+    advance(1000)
+    press('Play the pause at 0:05.10')
+    expect(store().loopSuspended).toBe(true)
+    advance(2800)
+    expect(store().isPlaying).toBe(false)
+    expect(store().loopSuspended).toBe(false)
+    expect(store().loopPlayback).toBe(true)
   })
 
   it('stops as soon as the playhead passes 1 s after the pause, even before the timer', async () => {

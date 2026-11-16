@@ -22,6 +22,13 @@ the list already filled from the defaults:
 | Minimum gap (s) | 0.7 | Shorter pauses are never cut |
 | Padding (s) | 0.1 | Kept on each side of every cut, so a word is not clipped at its edge |
 
+Each opening starts over (ESCSUITE-463): the fields read these defaults, the
+settings the list was found with, **Move everything after each cut** is on and
+no row is active, whatever a cancelled session typed. App mounts the dialog
+only while the review is open, and `SilenceDialog` does not rely on that: it
+renders its body (`SilenceReview`) only while `silenceReview` is set, keyed by
+the reviewed clip, so the body's state is dropped whenever the review closes.
+
 Changing a setting finds the pauses again. When every clip it would listen to
 is on a muted or hidden track (below), the summary says so ("No audible sound
 to judge: every track with sound here is muted or hidden.") instead of "No
@@ -37,7 +44,15 @@ pause at m:ss.cc`), which plays from 1 s before the pause to 1 s after it and
 then pauses there (ESCSUITE-443); the modal covers the transport, so these are
 how a pause is heard before it is cut. The row last gone to or played is
 marked `aria-current` and scrolled into view (`block: 'nearest'`). On a narrow
-screen the three buttons wrap under the times. Play's stop
+screen the three buttons wrap under the times. The span
+is the pause's own surroundings whatever the transport is set to
+(ESCSUITE-462): it ends at the timeline's end at the latest, and while it
+plays the store's `loopSuspended` is set, so loop playback neither wraps it
+to 0 at the end of the timeline nor jumps it to the in point from past the out
+point ([`preview.md`](preview.md)). The suspension ends whenever the Play
+does (it finishes, another Play, Go to, the dialog closing, or something else
+pausing or seeking), and the loop setting and in/out points are never
+written. Play's stop
 (`pausePlayer` in the dialog) is a timer for the span's length, as the
 preview's loop runs on its own wall clock, with the loop's 200 ms store writes
 as a backstop (a start in a gap jumps ahead, ESCSUITE-280). Another Play

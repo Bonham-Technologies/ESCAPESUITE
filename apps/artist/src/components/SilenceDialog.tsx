@@ -51,6 +51,13 @@ const PLAY_MARGIN = 1;
  * the end (playback started in a gap jumps to the next clip, ESCSUITE-280)
  * stops it early. Playback the Play did not start is never stopped by it: once
  * something else pauses, or seeks, the Play lets go.
+ *
+ * The span is the pause's own surroundings whatever the transport is set to
+ * (ESCSUITE-462): it ends at the timeline's end at the latest, and while it
+ * plays the loop is suspended (`loopSuspended`), so loop playback neither
+ * wraps it to 0 at the end nor jumps it to the in point from past the out
+ * point. Letting go, however it happens, gives the loop back; the user's loop
+ * setting and in/out points are never written.
  */
 function pausePlayer() {
   let running: { timer: ReturnType<typeof setTimeout>; unsubscribe: () => void } | null = null;
@@ -61,6 +68,7 @@ function pausePlayer() {
     clearTimeout(running.timer);
     running.unsubscribe();
     running = null;
+    useEditorStore.getState().setLoopSuspended(false);
     return true;
   };
 
@@ -75,13 +83,14 @@ function pausePlayer() {
   return {
     play(range: TimeRange) {
       letGo();
+      const { isPlaying, setIsPlaying, seekTo, setLoopSuspended, project } = useEditorStore.getState();
       const from = Math.max(0, range.start - PLAY_MARGIN);
-      const until = range.end + PLAY_MARGIN;
-      const { isPlaying, setIsPlaying, seekTo } = useEditorStore.getState();
+      const until = Math.max(from, Math.min(range.end + PLAY_MARGIN, project.timeline.duration));
       // The loop reads the playhead only as playback starts, and overwrites a
       // seek made while it plays. So a Play during playback pauses first, and
       // the pause has to reach the loop before playback starts again.
       if (isPlaying) flushSync(() => setIsPlaying(false));
+      setLoopSuspended(true);
       seekTo(from);
       setIsPlaying(true);
       const { seekSequence } = useEditorStore.getState();
@@ -143,8 +152,21 @@ function leftBehindText(left: LeftBehind, moveEverything: boolean, verb: string)
  *
  * Detection reads the waveform peaks already in the library, so it costs no
  * decode and needs no network. Escape cancels, as the Cancel button does.
+ *
+ * Each opening is a fresh session (ESCSUITE-463): the body below is mounted
+ * only while the review is open, keyed by its clip, so the fields, the
+ * checkbox and the active row start over however this component is mounted.
+ * The inspector fills the list with the defaults, so the fields read the
+ * defaults too, never a cancelled session's values beside a list they did not
+ * find.
  */
 export function SilenceDialog({ onRemoved }: SilenceDialogProps) {
+  const clipId = useEditorStore((state) => state.silenceReview?.clipId ?? null);
+  return clipId === null ? null : <SilenceReview key={clipId} onRemoved={onRemoved} />;
+}
+
+/** The open review: settings, the list of pauses, and the cut. */
+function SilenceReview({ onRemoved }: SilenceDialogProps) {
   const review = useEditorStore((state) => state.silenceReview);
   const setSilenceReviewClip = useEditorStore((state) => state.setSilenceReviewClip);
   const setSilenceCandidates = useEditorStore((state) => state.setSilenceCandidates);
