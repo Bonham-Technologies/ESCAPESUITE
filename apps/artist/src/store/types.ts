@@ -648,6 +648,15 @@ export interface EditorState {
   activeTool: ToolType;
   loopPlayback: boolean;
   /**
+   * While true, the preview plays straight on and stops at the timeline's end,
+   * as with loop playback off: no loop, no in/out region (ESCSUITE-462). Set
+   * by Remove silences' Play for its span only, so a pause past the out point
+   * or near the end is heard where it is; `loopPlayback` and the in/out points
+   * are never touched. View state: not in the project, the undo history or a
+   * saved file.
+   */
+  loopSuspended: boolean;
+  /**
    * The clip the preview's **crop mode** is open on (ESCSUITE-157), or null.
    *
    * A latch, deliberately not kept in step with anything: every reader requires
@@ -969,6 +978,7 @@ export interface EditorState {
   setSnapEnabled: (enabled: boolean) => void;
   setActiveTool: (tool: ToolType) => void;
   setLoopPlayback: (enabled: boolean) => void;
+  setLoopSuspended: (suspended: boolean) => void;
   setCropClipId: (clipId: string | null) => void;
   /** Open the "Remove silences" review on a clip (no cuts listed yet), or close it with null. */
   setSilenceReviewClip: (clipId: string | null) => void;

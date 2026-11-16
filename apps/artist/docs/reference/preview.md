@@ -385,6 +385,14 @@ No notice: the play control is left to the user. The comparison sits inside the
 arm for it. The same comparison also covers a loop with no in/out points over a timeline shorter
 than a frame.
 
+**A suspended loop plays straight on** (ESCSUITE-462). While the store's `loopSuspended` is
+true, `animate()` treats loop playback as off: no in/out region, no wrap at the end, playback
+stops at the timeline's end. Remove silences' Play sets it for its span only (see
+[`remove-silences.md`](remove-silences.md)), so a pause past the out point, or within its
+margin of the end, plays where it is. `animate()` reads it with `useEditorStore.getState()`
+every frame rather than through a ref mirrored by an effect, so it holds from the first frame
+of the playback it was set with. `loopPlayback` and the in/out points are not touched.
+
 **Playback started in a gap plays on from the next clip** (ESCSUITE-280). With the playhead
 between clips, the playback effect in `usePreviewRenderLoop.ts` used to write the next clip's
 start to the store and return without starting the animation loop; `currentTime` is not one of

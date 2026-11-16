@@ -44,7 +44,15 @@ pause at m:ss.cc`), which plays from 1 s before the pause to 1 s after it and
 then pauses there (ESCSUITE-443); the modal covers the transport, so these are
 how a pause is heard before it is cut. The row last gone to or played is
 marked `aria-current` and scrolled into view (`block: 'nearest'`). On a narrow
-screen the three buttons wrap under the times. Play's stop
+screen the three buttons wrap under the times. The span
+is the pause's own surroundings whatever the transport is set to
+(ESCSUITE-462): it ends at the timeline's end at the latest, and while it
+plays the store's `loopSuspended` is set, so loop playback neither wraps it
+to 0 at the end of the timeline nor jumps it to the in point from past the out
+point ([`preview.md`](preview.md)). The suspension ends whenever the Play
+does (it finishes, another Play, Go to, the dialog closing, or something else
+pausing or seeking), and the loop setting and in/out points are never
+written. Play's stop
 (`pausePlayer` in the dialog) is a timer for the span's length, as the
 preview's loop runs on its own wall clock, with the loop's 200 ms store writes
 as a backstop (a start in a gap jumps ahead, ESCSUITE-280). Another Play
