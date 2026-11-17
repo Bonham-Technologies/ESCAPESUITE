@@ -10,6 +10,8 @@ on:
   # NOTE: Dependabot PRs trigger BOTH pull_request and pull_request_target, so the two
   # entry-point jobs (lint-and-typecheck, test) filter out pull_request_target for
   # Dependabot (pull_request handles it). Everything else hangs off those two jobs.
+  # Those skipped jobs still report skipped check runs, so `ci-status` takes a name
+  # expression that is never `ci-status` when it is skipped (ESCSUITE-477).
   pull_request_target:
     branches: [main]
     types: [opened, synchronize, reopened]
@@ -753,6 +755,13 @@ jobs:
 
   # Summary job that reports overall status — the single required check.
   ci-status:
+    # The check run is `ci-status` exactly when this job runs (the same test as `if:`
+    # below). A skipped job would otherwise report a skipped `ci-status`, which the
+    # ruleset counts as passing: on pull_request_target every PR but the changesets
+    # bot's passed the gate seconds after a push, before the real pull_request run
+    # finished (ESCSUITE-477). GitHub leaves a skipped job's name expression
+    # unevaluated, so the skipped check run is named after this expression's text.
+    name: ${{ (github.event_name != 'pull_request_target' || (github.actor == 'github-actions[bot]' && github.event.pull_request.head.repo.full_name == github.repository)) && 'ci-status' || 'ci-status-not-required-here' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [lint-and-typecheck, test, build, standalone, e2e, kit-docker, deploy]
