@@ -181,7 +181,7 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   the top if needed), in **one** history entry, so one undo takes the whole transcription
   off. The Captions track is marked with the chosen language (`Track.language`,
   ESCSUITE-473) when it is created, on **Replace**, or when it had none, so "Translate
-  captions" knows what it is translating from and the sidecar is named `name.en-US.vtt`. They export through the existing `.srt` / `.vtt` sidecar and burn in like any caption
+  captions" knows what it is translating from and, beside a translation, the sidecar is named `name.en-US.vtt`. They export through the existing `.srt` / `.vtt` sidecar and burn in like any caption
   (see `captions.md`).
 - **Captions already there** (ESCSUITE-442). A second run used to stack a second copy of every
   caption on the first, and both were drawn and burned in. Now, when the Captions track holds

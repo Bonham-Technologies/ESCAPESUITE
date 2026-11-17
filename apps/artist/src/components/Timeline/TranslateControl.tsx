@@ -30,6 +30,8 @@ const DETECT_SAMPLE_CHARS = 2000;
 
 /** What the pending press is translating: the source track and its language, once known. */
 interface Request {
+  /** The project the press was made in: the run belongs to it (ESCSUITE-432's rule). */
+  projectId: string;
   sourceTrackId: string;
   target: string;
   /** The captions' language, as the Translator API is asked for it. */
@@ -142,6 +144,19 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
     if (ownsFocusRef.current && (!active || active === document.body)) mainRef.current?.focus();
   }, [phase.kind]);
 
+  // A question or notice belongs to the project it was asked about: another
+  // project taking its place closes it, so a confirm cannot translate (or
+  // download a model for) captions that are no longer open.
+  useEffect(() => {
+    if (phase.kind !== 'source' && phase.kind !== 'consent') return;
+    const projectId = requestRef.current?.projectId;
+    return useEditorStore.subscribe((state) => {
+      if (state.project.id === projectId) return;
+      requestRef.current = null;
+      setPhase({ kind: 'idle' });
+    });
+  }, [phase.kind]);
+
   useEffect(() => {
     mountedRef.current = true;
     return () => {
@@ -157,10 +172,18 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
    */
   const translate = useCallback(
     async (request: Request, pair: TranslatorLanguagePair, downloads: boolean) => {
+      // ESCSUITE-432's rule: the run belongs to the project the press was made
+      // in. Checked before `create()`, so no model is fetched for captions
+      // that are no longer open.
+      const { id: projectId, timeline } = useEditorStore.getState().project;
+      if (projectId !== request.projectId) {
+        showNotification('Translation stopped. No captions were added.', 'info');
+        if (mountedRef.current) setPhase({ kind: 'idle' });
+        return;
+      }
       const controller = new AbortController();
       abortRef.current = controller;
       const { signal } = controller;
-      const { id: projectId, timeline } = useEditorStore.getState().project;
       const cues = captionsOn(timeline.clips, request.sourceTrackId);
       let translator: TranslatorLike | null = null;
       // A state update, not an await: `create()` below still runs inside the click.
@@ -248,6 +271,10 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
       // on every press: a model may have been installed, or removed, since.
       const answer = await probeTranslation(pair);
       if (!mountedRef.current) return;
+      if (useEditorStore.getState().project.id !== request.projectId) {
+        showNotification('Translation stopped. No captions were added.', 'info');
+        return;
+      }
       requestRef.current = request;
       if (answer === 'available') await translate(request, pair, false);
       else if (answer === 'downloading') await translate(request, pair, true);
@@ -263,7 +290,8 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
   );
 
   const start = useCallback(async () => {
-    const { tracks, clips } = useEditorStore.getState().project.timeline;
+    const { id: projectId, timeline } = useEditorStore.getState().project;
+    const { tracks, clips } = timeline;
     const sourceTrack = sourceTrackOf(tracks);
     const cues = sourceTrack ? captionsOn(clips, sourceTrack.id) : [];
     if (!sourceTrack || cues.length === 0) {
@@ -274,7 +302,7 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
       showNotification(`There is already a ${languageName(target)} caption track.`, 'info');
       return;
     }
-    const request: Request = { sourceTrackId: sourceTrack.id, target };
+    const request: Request = { projectId, sourceTrackId: sourceTrack.id, target };
     if (sourceTrack.language && translatorLanguage(sourceTrack.language)) {
       await probe({ ...request, source: sourceTrack.language });
       return;
@@ -283,7 +311,9 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
     // detector model already installed, never downloading one) and ask.
     const sample = cues.map((cue) => oneLine(cue.textData!.text)).join(' ').slice(0, DETECT_SAMPLE_CHARS);
     const detected = await detectLanguage(sample);
-    if (!mountedRef.current) return;
+    // Nothing has been asked of the translator yet: a project replaced
+    // meanwhile simply ends the press.
+    if (!mountedRef.current || useEditorStore.getState().project.id !== projectId) return;
     const suggestion = translatorLanguage(detected ?? '') ?? translatorLanguage(browserLanguage) ?? 'en';
     requestRef.current = request;
     setSourceChoice(suggestion);

@@ -84,8 +84,11 @@ or `availability()` fails, which reads as unavailable.
 - **Translating:** each cue is translated as one line (its line breaks joined with a space)
   with `translator.translate(text, { signal })`, in sequence; the status reads "Translating on
   this device…" with `n / N` beside it, and the button **Stop translating** ends it, adding
-  nothing. A run belongs to the project it started in (ESCSUITE-432's rule): another project
-  taking its place stops it with "Translation stopped. No captions were added."
+  nothing. A run belongs to the project the press was made in (ESCSUITE-432's rule): another
+  project taking its place stops it with "Translation stopped. No captions were added.", is
+  checked again after `availability()` answers and before `create()`, and closes an open
+  language question or download notice, so a confirm never fetches a model for captions that
+  are no longer open.
 - **Where the cues land:** `addCaptionTranslation` (`store/overlaySlice.ts`) makes a new
   `kind: 'captions'` track named "Captions (*Spanish*)", `language` set to the target, placed
   **directly below the source in the timeline** (every track from the source up moves up one
@@ -99,7 +102,7 @@ or `availability()` fails, which reads as unavailable.
   shows or hides it in the preview and in every export on its own. Two visible caption tracks
   with cues up at once are **stacked** (see `captions.md`, "Two caption tracks"). The export
   dialog offers a sidecar per caption track, named with its language (`name.en.vtt`,
-  `name.es.vtt`).
+  `name.es.vtt`); a project with one caption track keeps its plain `name.vtt`.
 - **Out of scope:** a cloud fallback, a bundled model, translating other text overlays, linked
   editing of the two languages (editing one cue does not change its translation), and
   translating a caption track other than the first.

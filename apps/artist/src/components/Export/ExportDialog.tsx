@@ -353,10 +353,12 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // its track's language when it has one (`name.en.vtt`, `name.es.vtt`); a
   // track whose language is not known keeps the plain `name.vtt`. Two tracks
   // that would share a name get `-2`, `-3`… so no download overwrites another.
+  // With only one sidecar to offer, its name is the plain `name.vtt` it has
+  // always been, language or not: the language only tells two files apart.
   const captionSidecars = useMemo((): CaptionSidecar[] => {
     const base = projectName || 'export';
     const seen = new Map<string, number>();
-    return tracks
+    const sidecars = tracks
       .filter((track) => track.kind === 'captions')
       .sort((a, b) => b.index - a.index)
       .map((track) => ({
@@ -378,6 +380,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         if (count > 1) name = `${name}-${count}`;
         return { id: track.id, label: track.language ? languageName(track.language) : track.name, name, cues };
       });
+    return sidecars.length === 1 ? [{ ...sidecars[0], name: base }] : sidecars;
   }, [clips, tracks, projectName]);
 
   const downloadCaptions = (sidecar: CaptionSidecar, format: CaptionFormat) => {

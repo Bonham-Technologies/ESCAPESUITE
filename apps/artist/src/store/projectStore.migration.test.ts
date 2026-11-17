@@ -526,6 +526,11 @@ describe('parseProject (ESCSUITE-102)', () => {
       ])
     })
 
+    it.each(['zh-Hant-TW', 'sr-Latn-RS', 'es-419', 'yue', 'en-GB-oxendict', 'EN-us'])('accepts the well-formed tag %s, kept as written', (language) => {
+      const result = parseProject(withTracks(captions('t2', 1, { language })))
+      expect(result.ok && result.project.timeline.tracks[1].language).toBe(language)
+    })
+
     it.each([
       ['a number', 1],
       ['null', null],

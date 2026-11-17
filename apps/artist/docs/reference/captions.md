@@ -118,8 +118,8 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   options) only when a caption track holds a clip whose `textData.text` is a string (a damaged clip
   with no text is left out rather than read — the dialog is always mounted, review I1): "Download .srt" and "Download .vtt" write
   that track's text clips as they stand now, in timeline order (`end = timelinePosition +
-  duration`), named `${projectName || 'export'}.srt` / `.vtt` — or, for a track with a language,
-  `${projectName}.<language>.srt` (`Talk.en-US.vtt`, ESCSUITE-473) — through `utils/downloadBlob.ts` —
+  duration`), named `${projectName || 'export'}.srt` / `.vtt` (still, with one caption track,
+  whatever its language: ESCSUITE-473 adds the language only to tell two files apart) — through `utils/downloadBlob.ts` —
   which the video download now calls too. A **hidden** caption track is still offered: hiding it is
   how a caption is kept off the picture and shipped only as a file. The row reads the `clips` /
   `tracks` the dialog already subscribes to. The sidecar always covers the whole timeline; an
@@ -128,8 +128,9 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   captions, the row holds one labelled group per track, top of the timeline first, each named
   with its language's English name ("English", "Spanish"; the track's name where it has no
   language) and its own two buttons; each file is that track's cues alone (`Talk.en.vtt`,
-  `Talk.es.vtt`). Two tracks that would share a file name get `-2`, `-3`… With one caption
-  track the row is exactly as before.
+  `Talk.es.vtt`; a track with no language keeps `Talk.vtt`). Two tracks that would share a file
+  name get `-2`, `-3`… With one caption track the row and its file name are exactly as before
+  (`Talk.vtt`, even for a transcribed track that knows its language).
 - **Two caption tracks** (ESCSUITE-473, `core/captionStack.ts`). A translation copies its
   source's style, position included, so the two would draw on one spot. While cues of two or
   more **visible** caption tracks are up at once, `stackCaptions` raises them apart at drawing

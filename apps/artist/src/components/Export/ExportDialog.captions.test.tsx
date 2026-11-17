@@ -212,11 +212,12 @@ describe('ExportDialog — caption sidecar (ESCSUITE-293)', () => {
       }
     })
 
-    it('names a single track with its language, and keeps two names apart', async () => {
+    it('keeps a single track’s plain name, language or not, and keeps two names apart', async () => {
       store().addCaptionCues([{ start: 1, end: 2, text: 'Hi' }], style, { language: 'en-US' })
       const { unmount } = render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
       fireEvent.click(within(captionsRow()!).getByRole('button', { name: 'Download .vtt' }))
-      expect((await lastDownload(clicked)).name).toBe('Talk.en-US.vtt')
+      // The name a transcribed track's sidecar has had since ESCSUITE-404: the language only tells two files apart.
+      expect((await lastDownload(clicked)).name).toBe('Talk.vtt')
       unmount()
 
       // Two tracks with no language (a second one made by hand) share no file name.

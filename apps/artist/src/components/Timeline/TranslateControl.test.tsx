@@ -246,6 +246,38 @@ describe('TranslateControl: translating (ESCSUITE-473)', () => {
     expect(captionTracks()).toHaveLength(0);
   });
 
+  it('closes the download notice, downloading nothing, when another project takes the open one’s place', async () => {
+    const user = userEvent.setup();
+    const Translator = installTranslator();
+    availability.mockResolvedValue('downloadable');
+    addCaptions('en-US');
+    renderControl();
+    await user.click(button()!);
+    const notice = translationModelNotice('en', 'es');
+    expect(await screen.findByText(notice)).toBeVisible();
+    act(() => store().resetProject());
+    expect(screen.queryByText(notice)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Download translation model' })).toBeNull();
+    expect(Translator.create).not.toHaveBeenCalled();
+    expect(button()).toBeEnabled();
+  });
+
+  it('asks the translator for nothing more when the project is replaced while availability() is answering', async () => {
+    const user = userEvent.setup();
+    const Translator = installTranslator();
+    let answer!: (value: string) => void;
+    availability.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
+    addCaptions('en-US');
+    const { showNotification } = renderControl();
+    await user.click(button()!);
+    await waitFor(() => expect(availability).toHaveBeenCalled());
+    act(() => store().resetProject());
+    await act(async () => answer('downloadable'));
+    expect(showNotification).toHaveBeenCalledWith('Translation stopped. No captions were added.', 'info');
+    expect(screen.queryByRole('button', { name: 'Download translation model' })).toBeNull();
+    expect(Translator.create).not.toHaveBeenCalled();
+  });
+
   it('says a pair is not available, and stays for another', async () => {
     const user = userEvent.setup();
     installTranslator();
