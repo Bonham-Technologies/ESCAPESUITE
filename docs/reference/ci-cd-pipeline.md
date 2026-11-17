@@ -13,7 +13,7 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests; lists pass-on-retry tests (see below) | PRs and pushes |
-| `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot: its PRs get no secrets) |
+| `deploy` | Vercel deployment | After E2E passes, for pushes and PRs from this repository's own branches (skipped for Dependabot and for forks: their PRs get no secrets) |
 | `ci-status` | Summary/gate job | All PRs |
 
 The `pnpm perf` benchmarks run from `.github/workflows/perf.yml` instead: pushes to `main`/`dev`, PRs labelled `perf`, and `workflow_dispatch`; informational only, never gates, skipped for Dependabot.
@@ -276,4 +276,27 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   `VERCEL_TOKEN`.
 - Weekly updates for all apps
 - Grouped PRs: React, testing, linting
-- GitHub Actions version updates
+- GitHub Actions version updates: every action is pinned by commit SHA with its version in a
+  trailing comment, which Dependabot keeps up to date
+
+**Workflow hardening** (ESCSUITE-476, the open-source checklist's GA items):
+- **Permissions.** `ci.yml`, `standalone-release.yml`, `dco.yml`, `nightly.yml` and `perf.yml`
+  declare workflow-level `permissions: contents: read`. A job that needs more widens its own
+  block: `ci.yml`'s `deploy` (`pull-requests: write`, the preview-URL comment), and
+  `standalone-release.yml`'s `prepare` (`actions: read`), `comment-pr` and `release`.
+  `release.yml` (push to `main` only) keeps its workflow-level `contents: write` and
+  `pull-requests: write` for the changesets step.
+- **Pinned actions.** Every `uses:` outside this repository names a full commit SHA with a
+  `# vX.Y.Z` comment, and an action has the same pin in every workflow.
+- **Secrets on pull requests.** In `ci.yml` only `deploy` reads a secret (`VERCEL_TOKEN`). It runs
+  behind the `production` (push to `main`) or `preview` Environment, and only for a push or
+  for a PR whose head branch is in this repository; a fork's PR skips it (it used to run
+  and fail on an empty token).
+- **Event text in scripts.** No `run:` script or `github-script` in `ci.yml` or
+  `standalone-release.yml` expands event payload text or a step or job output with `${{ }}`;
+  those reach the script through `env:`. `standalone-release.yml`'s `prepare` reads the app
+  versions from the triggering commit's `package.json` files, which a PR controls, and stops
+  unless each is a plain version (`X.Y.Z` or `X.Y.Z-pre`).
+- **Tests.** `scripts/oss-workflow-hardening.test.mjs` (in `pnpm test:scripts`) checks all of the
+  above, plus `CODEOWNERS` covering `/.claude/` and the PR template's plain
+  `Ticket: ESCSUITE-N` line.
