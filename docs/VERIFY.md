@@ -144,6 +144,67 @@ Any SPDX tool reads the file, for example `pyspdxtools -i ESCAPEARTIST-<version>
 from [spdx-tools](https://github.com/spdx/tools-python) to validate it, or a vulnerability
 scanner such as `grype sbom:ESCAPEARTIST-<version>.spdx.json`.
 
+## 5. How the offline file is locked down
+
+Each offline file (`ESCAPECRAFT-…html`, `ESCAPEARTIST-…html`) carries a Content-Security-Policy
+in a `<meta>` tag near the top of the file, before any script. The browser enforces it: the page
+may load only what is inside the file itself, and it may not contact any server. No directive
+admits `http:`, `https:`, `ws:`, `wss:` or a host name, and there is no `'self'`.
+
+To read it, run this in the folder with the file (it prints one line, the tag):
+
+```bash
+grep -o '<meta http-equiv="Content-Security-Policy"[^>]*>' ESCAPEARTIST-<version>.html
+```
+
+On Windows (PowerShell):
+
+```powershell
+(Select-String -Path ESCAPEARTIST-<version>.html -Pattern '<meta http-equiv="Content-Security-Policy"[^>]*>').Matches[0].Value
+```
+
+You can also open the file in your browser, press Ctrl+U (⌥⌘U on a Mac) to view its source, and
+read the tag in the first lines. What the policy allows:
+
+- `default-src 'none'`: anything not listed below is refused, including every `fetch`, XHR,
+  WebSocket, font, frame and plug-in.
+- `script-src`: the file's own inline scripts, named by their SHA-256 hashes (not
+  `'unsafe-inline'`). ESCAPECRAFT also allows `blob:` and `data:` here, for the audio-capture
+  module it creates in the page.
+- `worker-src blob:` (ESCAPEARTIST): the video decode worker, which is inside the file.
+- `connect-src data: blob:` (ESCAPEARTIST): a `?video=` address that carries the video itself.
+  A `?video=` address on a server is refused, and the editor says so.
+- `style-src 'unsafe-inline'`, `img-src data: blob:`, `media-src blob:`: the file's own styles,
+  icons, thumbnails and the recordings and clips you play.
+- `base-uri 'none'` and `form-action 'none'`.
+
+Step 2 matters here too: someone who edits the file can remove the tag, and the checksum then
+no longer matches.
+
+**What the policy does not block.** A page's Content-Security-Policy governs what the page
+itself loads and sends. It does not cover:
+
+- **Going to another page.** The policy does not stop the tab, or a new window, from going to
+  another address, such as a link you click. The offline apps show no links to other sites,
+  but that is how they are built, not something the policy enforces. Once the tab is on
+  another page, that page's own rules apply.
+- **Your browser's own traffic.** The browser can still go online for its own reasons:
+  updates, safe-browsing checks, sync, crash reports, and, the first time you transcribe in
+  ESCAPEARTIST, downloading a speech language pack for the language you picked. The browser
+  downloads that pack itself; no page policy covers it. Without a network, transcription works
+  only if the pack is already installed.
+- **Browser extensions.** An extension that can read pages can read this one and make its own
+  requests.
+- **The rest of your computer.** The policy limits one browser tab. For a machine that must
+  not reach a network, disconnect the machine.
+
+CI checks the policy in Chromium on every change: each offline file carries exactly one tag,
+before any script, admitting no network source; an injected `fetch`, WebSocket and remote image
+are each refused with a `securitypolicyviolation` event; and recording, editing, export (WebM,
+MP4 and GIF), the decode worker and transcription (with a stand-in recogniser, as the test
+browser has none) run with no violation. Firefox and Safari enforce the same `<meta>` policy,
+but CI does not run these checks in them.
+
 ## What this does not cover
 
 - The builds are not code-signed with a certificate, and the builds are not reproducible: the

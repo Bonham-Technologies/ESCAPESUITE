@@ -104,8 +104,27 @@ describe('LIMITATIONS', () => {
   it('says the offline build sends nothing', () => {
     const analytics = LIMITATIONS.find((l) => l.id === 'hosted-analytics')
     expect(analytics!.body.join(' ')).toMatch(/offline build contains no analytics code/i)
-    // The one fetch in app code: ESCAPEARTIST's ?video= / LOAD_VIDEO loader.
-    expect(analytics!.body.join(' ')).toMatch(/unless you give ESCAPEARTIST a video address/i)
+    // The one fetch in app code, ESCAPEARTIST's ?video= / LOAD_VIDEO loader, is
+    // refused for a server address by the offline policy (ESCSUITE-467).
+    expect(analytics!.body.join(' ')).toMatch(/makes no network requests/i)
+    expect(analytics!.body.join(' ')).toMatch(/refuses any server address, a video address given to ESCAPEARTIST included/)
+    expect(analytics!.body.join(' ')).not.toMatch(/fetches only that address/)
+  })
+
+  // ESCSUITE-467: say what the offline file's Content-Security-Policy is, and
+  // what it does not cover, without claiming it blocks the browser itself.
+  it('says what the offline lockdown covers and what it does not', () => {
+    const entry = LIMITATIONS.find((l) => l.id === 'offline-lockdown')!
+    const body = entry.body.join(' ')
+    expect(entry.sources.map((s) => s.href)).toContain(REPO_FILE_URL + 'docs/VERIFY.md')
+    expect(entry.sources.some((s) => s.label === 'ESCSUITE-467')).toBe(true)
+    expect(body).toMatch(/Content-Security-Policy/)
+    expect(body).toMatch(/governs the page, not the browser/)
+    expect(body).toMatch(/link you click/)
+    expect(body).toMatch(/speech language pack/)
+    expect(body).toMatch(/extensions/)
+    expect(body).toMatch(/A video address on a server is refused/)
+    expect(body).not.toMatch(/blocks (all|every) (network|connection)/i)
   })
 
   it('names both apps and the host page in the embedding exception', () => {

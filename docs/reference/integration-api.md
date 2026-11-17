@@ -81,15 +81,19 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   its own `connect-src` — on the hosted deployment (`connect-src 'self' ...` in `vercel.json`)
   that means a **same-origin URL only**; a cross-origin one is refused before it leaves the page,
   and `loadVideoFromUrl` says so by naming the origin and the likely Content-Security-Policy
-  cause, rather than a bare `Failed to fetch` (ESCSUITE-130). A self-hosted or standalone build
-  fetches under whatever `connect-src` it sets itself. The same policy's `script-src` carries
+  cause, rather than a bare `Failed to fetch` (ESCSUITE-130). A self-hosted build fetches under
+  whatever `connect-src` it sets itself. The offline single-file build carries its own policy in
+  a `<meta>` tag (ESCSUITE-467, `scripts/offline-csp.mjs`): `connect-src data: blob:`, so there
+  a `data:` address loads and any network address is refused with the same message. The hosted policy's `script-src` carries
   `blob:` (ESCSUITE-299): ESCAPECRAFT loads its AudioWorklet audio-capture module from a `blob:`
   URL, a worklet module is fetched under `script-src`, and without it every hosted take would
   quietly fall back to the ScriptProcessorNode capture. It admits nothing an injected script could
-  not already do under the policy's `'unsafe-inline'`. The offline single-file build has no policy
-  and no origin: opened from `file://`, its module URL is `blob:null/…`, which Chromium's worklet
+  not already do under the policy's `'unsafe-inline'`. The offline single-file build has no origin:
+  opened from `file://`, its module URL is `blob:null/…`, which Chromium's worklet
   loader refuses, so the capture retries the same module as a `data:text/javascript` URL and only
-  then falls back (ESCSUITE-317; `blob:` stays first so the hosted policy never has to admit `data:`). Pinned by
+  then falls back (ESCSUITE-317; `blob:` stays first so the hosted policy never has to admit `data:`).
+  The offline file's own `<meta>` policy (ESCSUITE-467) admits both `blob:` and `data:` in
+  `script-src` for that reason. Pinned by
   `apps/e2e/tests/production/csp-audio-worklet.spec.ts` (under the served policy, and its inverse)
   and by `serve-dist.test.mjs`'s drift guard; a self-hosted build that sends its own policy needs
   the same.

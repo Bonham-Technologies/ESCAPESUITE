@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './cspGuard'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -309,6 +309,37 @@ test.describe('ESCAPECRAFT Standalone - served over http', () => {
     await header.click({ force: true }).catch(() => {})
     await page.waitForTimeout(500)
     expect(opened).toEqual([])
+  })
+
+  // ESCSUITE-467: a worklet module the offline policy refuses raises no
+  // securitypolicyviolation event in Chromium, so the cspGuard fixture cannot
+  // see it; the app's own log line can. Served over http the module loads as
+  // a blob: URL (the file:// case below takes the data: retry), and script-src
+  // must admit it.
+  test('a take records its audio through the AudioWorklet\'s blob module under the offline policy', async ({ page, browserName }) => {
+    test.skip(browserName !== 'chromium', 'The module kind per engine over http is measured in Chromium only')
+    const lines: string[] = []
+    page.on('console', (message) => {
+      const text = message.text()
+      if (/Recording audio through/.test(text)) lines.push(text)
+    })
+
+    await mockSyntheticMedia(page)
+    await grantMediaPermissions(page)
+    await page.goto(CRAFT_URL)
+    await waitForAppReady(page, 'craft')
+
+    const screenSource = page.locator('[class*="sourceToggle"]').filter({ hasText: 'Screen' }).last()
+    await expect(screenSource.getByRole('button')).toBeEnabled({ timeout: 30_000 })
+
+    await page.getByRole('button', { name: 'Start recording' }).click()
+    await expect(page.getByRole('button', { name: 'Pause recording' })).toBeVisible({ timeout: 30_000 })
+    await page.waitForTimeout(1000)
+    await page.getByRole('button', { name: 'Stop recording' }).click()
+    await expect.poll(() => lines.length, { timeout: 10_000 }).toBeGreaterThan(0)
+
+    expect(lines.filter((line) => /through an AudioWorklet \(blob module\)/.test(line))).toHaveLength(1)
+    expect(lines.filter((line) => /ScriptProcessorNode/.test(line))).toHaveLength(0)
   })
 })
 
