@@ -62,6 +62,11 @@
   ESCSUITE-406: `tests/production/analytics-strip-query.spec.ts` is the one spec that needs the
   network: it fetches Vercel's live Web Analytics script from `va.vercel-scripts.com` (Vercel
   publishes it under no licence, so it is not committed) and fails if the CDN is unreachable.
+  ESCSUITE-469: `tests/production/offline.spec.ts` covers the hosted apps' service workers
+  (offline reload of each app, a CRAFT take and an ARTIST WebM import and export while offline,
+  analytics never answered or cached by a worker, installability, a second build id replacing the
+  first cache, the kill switch). It serves its own copy of `dist/` on a free port for the update
+  and kill-switch cases; details in `vercel-deployment.md`, "Offline after the first visit".
 - **Property-based tests**: ESCAPEARTIST's timeline edit logic has a model-based fast-check suite
   (ESCSUITE-349): random edit sequences with invariants checked after every step. What it checks
   and how to add an operation: `apps/artist/docs/reference/testing.md`. PR CI runs 200 sequences on

@@ -42,6 +42,7 @@ import {
 } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
+import { writeOfflineSupport } from './offline.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
@@ -263,6 +264,24 @@ function main() {
   }
 
   const { rewrites } = JSON.parse(readFileSync(join(root, 'vercel.json'), 'utf8'));
+
+  // Offline after the first visit (ESCSUITE-469): one service worker, web
+  // manifest and registration per app, written into the hosted dist/ only.
+  // `ESCAPESUITE_SERVICE_WORKER=off` is the kill switch
+  // (docs/reference/vercel-deployment.md, "Offline after the first visit").
+  if (failures.length === 0) {
+    const killSwitch = process.env.ESCAPESUITE_SERVICE_WORKER === 'off';
+    console.log(`  → Writing offline support${killSwitch ? ' (kill switch: unregistering workers)' : ''}`);
+    try {
+      for (const { app, buildId, precache } of writeOfflineSupport(distDir, rewrites, { killSwitch })) {
+        console.log(`    ${app}: ${buildId ? `build ${buildId}, ${precache.length} files precached` : 'kill switch'}`);
+      }
+    } catch (error) {
+      console.error(`  ❌ Offline support: ${error.message}`);
+      failures.push('offline support');
+    }
+  }
+
   const missingOutputs = verifyDistLayout(distDir, rewrites);
   if (missingOutputs.length > 0) {
     console.error('\n❌ dist/ is missing required output:');
