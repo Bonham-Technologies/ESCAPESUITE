@@ -1,6 +1,8 @@
 import { v4 as uuidv4 } from 'uuid';
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useEditorStore } from '../store/projectStore';
+import { requestStoragePersistence, storagePersistenceMessage } from '@escapesuite/shared/storage';
+import { useStoragePersisted } from '@escapesuite/shared/hooks';
 import { processMediaFile } from '../core/videoProcessor';
 import { getStorageEstimate, deleteVideo, resolveThumbnailUrl, getAllVideoMetadata, listSessionStates } from '../core/storage';
 import { orphanedImports, editorSourceIds, totalBytes } from '../core/orphanedImports';
@@ -154,6 +156,12 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
    * cleared by a read or an import that gets through.
    */
   const [storageBlocked, setStorageBlocked] = useState(false);
+  /**
+   * Whether the browser has agreed to keep the library from its automatic
+   * clean-up (ESCSUITE-468): read on mount, asked for after the session's
+   * first import, re-read after every one. Shown under the storage figure.
+   */
+  const storagePersisted = useStoragePersisted();
   const fileInputRef = useRef<HTMLInputElement>(null);
   /**
    * The "remove from the list" timers still armed, one per finished upload.
@@ -501,6 +509,10 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
 
         // Refresh storage info
         refreshStorageInfo();
+        // ESCSUITE-468: the file is stored, so ask the browser to keep the
+        // library (only the session's first import actually asks) and re-read
+        // its answer. Never rejects.
+        void requestStoragePersistence();
 
         // Remove from upload list after a delay. The id is kept so the unmount
         // cleanup above can call it off (ESCSUITE-120). The removal is a fade
@@ -650,6 +662,9 @@ export function VideoUploader({ onProjectFile, showNotification, clearSession }:
               />
             </div>
           </div>
+          {storagePersisted !== null && (
+            <p className={styles.storagePersistence}>{storagePersistenceMessage(storagePersisted)}</p>
+          )}
           <div className={styles.storageActions}>
             {storageInfo.used > 1024 * 1024 && (
               <button
