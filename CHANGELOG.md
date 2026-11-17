@@ -7,6 +7,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Hosted site: ESCAPEPLAN, ESCAPECRAFT and ESCAPEARTIST work offline after the first visit, each app on its own, in browsers with service workers; Chromium offers to install each one, and a short "Updated" note shows when a new version has been saved. Recordings and projects are stored as before (ESCSUITE-469).
+- ESCAPECRAFT and ESCAPEARTIST: after the first saved recording, import or project save in a visit, both apps ask the browser to keep their stored recordings and media, and say whether it agreed (under the recordings in ESCAPECRAFT, in the media library's storage bar in ESCAPEARTIST); the Known limitations page explains Safari's seven-day clean-up of stored data (ESCSUITE-468).
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
 - ESCAPEARTIST: the Remove silences dialog starts every opening from its default settings on its own, rather than relying on the editor to close it fully, so values typed in a cancelled session can never show beside pauses found with the defaults (ESCSUITE-463).
 - ESCAPEARTIST: a transcription that fails or is stopped the moment it starts no longer keeps updating its progress afterwards (ESCSUITE-461).

@@ -148,7 +148,7 @@ import type {
 
 ### Utils (`@escapesuite/shared/utils`)
 
-Time formatting and utility functions.
+Time formatting, utility functions and the VP9 key frame colour stamper.
 
 ```ts
 import {
@@ -178,6 +178,10 @@ formatFileSize(1024*1024) // "1.0 MB"
 - `roundTo(value, decimals)` - Round to decimal places
 - `pixelsToTime(px, pps)` / `timeToPixels(t, pps)` - Timeline conversions
 - `formatFileSize(bytes)` - Human-readable file size
+- `createVp9ColourSpaceStamper()` - Per VP9 track: writes the encoder's reported colour matrix
+  into each key frame header's `color_space` (a copy of the packet when it changes), as
+  Mediabunny's muxer did up to 1.65. `withVp9ColourSpace(data, matrix)` and
+  `vp9ColourSpaceBitOffset(data)` are the byte-level halves
 
 ---
 

@@ -11,3 +11,11 @@ export {
   timeToPixels,
   formatFileSize,
 } from './time'
+
+export {
+  createVp9ColourSpaceStamper,
+  vp9ColourSpaceBitOffset,
+  withVp9ColourSpace,
+  type Vp9ChunkMetadataLike,
+  type Vp9PacketLike,
+} from './vp9ColourSpace'

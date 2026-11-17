@@ -13,12 +13,18 @@ import { loadProject, saveProject, showOpenProjectDialog } from '../core/project
 import { ProjectFileError } from '../core/projectFileFormat'
 import { analytics } from '../utils/analytics'
 import { revokeSourceThumbnails } from '../core/storage'
+import { requestStoragePersistence } from '@escapesuite/shared/storage'
 import { useEditorStore } from '../store/projectStore'
 import { resetStoreForTest, store } from '../test/fixtures/projectStore'
 import { sampleVideo } from '../test/appDoubles'
 import { installMediaElementDoubles } from '../test/doubles/media'
 
 vi.mock('../core/storage', async () => (await import('../test/appDoubles')).storageDouble())
+// ESCSUITE-468: the request itself is the shared module's, tested there.
+vi.mock('@escapesuite/shared/storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@escapesuite/shared/storage')>()),
+  requestStoragePersistence: vi.fn(async () => false),
+}))
 vi.mock('../core/projectManager', async () =>
   (await import('../test/appDoubles')).projectManagerDouble()
 )
@@ -76,6 +82,31 @@ describe('saving', () => {
     })
     expect(deps.showNotification).toHaveBeenCalledWith('Project saved successfully', 'success')
     expect(result.current.isSaving).toBe(false)
+  })
+
+  // ESCSUITE-468: a saved project asks the browser to keep the library its
+  // media sits in (only the session's first ask reaches the browser).
+  it('asks the browser to keep the library once the project is saved', async () => {
+    const { result } = mountActions()
+
+    expect(requestStoragePersistence).not.toHaveBeenCalled()
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+
+    expect(requestStoragePersistence).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not ask when the save fails', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    vi.mocked(saveProject).mockRejectedValue(new Error('disk full'))
+    const { result } = mountActions()
+
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+
+    expect(requestStoragePersistence).not.toHaveBeenCalled()
   })
 
   it('holds isSaving up for as long as the write takes', async () => {
