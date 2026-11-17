@@ -1,3 +1,6 @@
+import type { EncodedPacket } from 'mediabunny';
+import { createVp9ColourSpaceStamper } from '@escapesuite/shared/utils';
+
 /**
  * Corrects the colour label Firefox's VP9 and VP8 encoders report (ESCSUITE-284).
  *
@@ -13,9 +16,11 @@
  * by hand):
  *
  * - the WebM **Colour** element — what Chromium's `<video>` reads;
- * - every VP9 keyframe header's `color_space` (mediabunny's `fixVP9ColorSpace`
- *   rewrites it from the reported matrix) — what Firefox's `<video>` and ffmpeg
- *   read. VP8 has no such field and both decode it as BT.601 regardless.
+ * - every VP9 keyframe header's `color_space`, rewritten from the reported
+ *   matrix — what Firefox's `<video>` and ffmpeg read. Mediabunny's muxer did
+ *   this (`fixVP9ColorSpace`) up to 1.65; from 1.66.0 it is ours, the shared
+ *   `createVp9ColourSpaceStamper` that {@link createWebMVideoLabeller} runs.
+ *   VP8 has no such field and both decode it as BT.601 regardless.
  *
  * So correcting the report once corrects both labels, and a Firefox export reads
  * back within 3/255 of what was drawn in all three players, against up to 25/255
@@ -56,4 +61,26 @@ export function relabelFirefoxVpxMeta(
     return meta;
   }
   return { ...meta, decoderConfig: { ...config, colorSpace: { ...config.colorSpace, matrix: 'smpte170m' } } };
+}
+
+/**
+ * The colour labels of one WebM export's video track, applied to each encoded
+ * packet and its metadata on their way to the muxer: Firefox's report
+ * corrected when `relabelFirefox` is set ({@link relabelFirefoxVpxMeta}), then,
+ * for VP9, every key frame header's `color_space` written from the (corrected)
+ * report, as mediabunny's muxer did up to 1.65. A packet whose header changes
+ * comes back as a copy; nothing the encoder handed over is written into.
+ */
+export function createWebMVideoLabeller(
+  codec: 'vp8' | 'vp9',
+  relabelFirefox: boolean
+): (
+  packet: EncodedPacket,
+  meta: EncodedVideoChunkMetadata | undefined
+) => { packet: EncodedPacket; meta: EncodedVideoChunkMetadata | undefined } {
+  const stamp = codec === 'vp9' ? createVp9ColourSpaceStamper() : null;
+  return (packet, meta) => {
+    const labelled = relabelFirefox ? relabelFirefoxVpxMeta(meta) : meta;
+    return { packet: stamp ? stamp(packet, labelled) : packet, meta: labelled };
+  };
 }
