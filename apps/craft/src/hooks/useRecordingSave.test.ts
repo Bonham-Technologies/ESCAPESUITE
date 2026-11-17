@@ -10,13 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
 import { act, renderHook } from '@testing-library/react'
 import { useRecordingSave, type RecordingSaveDeps, type CapturedTake } from './useRecordingSave'
-import {
-  getRecordingsMetadata,
-  getThumbnail,
-  storeVideo,
-  storeThumbnail,
-  requestStoragePersistence,
-} from '../core/storage'
+import { getRecordingsMetadata, getThumbnail, storeVideo, storeThumbnail } from '../core/storage'
 import { clearAllRecordings } from '../test/recordingsDb'
 import { converterModule, thumbnailModule, resetAppDoubles } from '../test/appDoubles'
 import { useRecorderStore } from '../store/recorderStore'
@@ -36,8 +30,6 @@ vi.mock('../core/storage', async (importOriginal) => {
     ...actual,
     storeVideo: vi.fn(actual.storeVideo),
     storeThumbnail: vi.fn(actual.storeThumbnail),
-    // ESCSUITE-468: the request itself is the shared module's, tested there.
-    requestStoragePersistence: vi.fn(async () => false),
   }
 })
 
@@ -96,45 +88,6 @@ function captured(overrides: Partial<CapturedTake> = {}): CapturedTake {
     ...overrides,
   }
 }
-
-// ESCSUITE-468: the first save of a session asks the browser to keep the
-// library (navigator.storage.persist()); the shared module makes sure only the
-// first call actually asks. Only after the take is stored, never for a save
-// that failed.
-describe('useRecordingSave asks to keep the library', () => {
-  beforeEach(() => {
-    vi.mocked(requestStoragePersistence).mockClear()
-  })
-
-  it('asks once the take and its list entry are in', async () => {
-    const order: string[] = []
-    vi.mocked(storeVideo).mockImplementationOnce(async () => { order.push('stored') })
-    vi.mocked(requestStoragePersistence).mockImplementationOnce(async () => {
-      order.push(`asked with ${added.length} listed`)
-      return true
-    })
-    const { result } = mountSave()
-
-    await result.current(RAW, 3)
-
-    expect(order).toEqual(['stored', 'asked with 1 listed'])
-  })
-
-  it('does not ask when the save fails', async () => {
-    vi.mocked(storeVideo).mockRejectedValueOnce(new Error('quota exceeded'))
-    const { result } = mountSave()
-
-    await expect(result.current(RAW, 4)).rejects.toThrow('quota exceeded')
-
-    expect(requestStoragePersistence).not.toHaveBeenCalled()
-  })
-
-  it('does not ask on mount', () => {
-    mountSave()
-
-    expect(requestStoragePersistence).not.toHaveBeenCalled()
-  })
-})
 
 describe('useRecordingSave containers', () => {
   it('repairs the metadata a MediaRecorder take is missing, then stores the repaired blob', async () => {

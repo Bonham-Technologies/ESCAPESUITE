@@ -338,17 +338,6 @@ export async function getStorageEstimate(): Promise<{ used: number; quota: numbe
   return { used: 0, quota: 0, available: 0 }
 }
 
-// Persistent storage (ESCSUITE-468): see persistence.ts.
-export {
-  STORAGE_PERSISTED_MESSAGE,
-  STORAGE_NOT_PERSISTED_MESSAGE,
-  storagePersistenceMessage,
-  getStoragePersisted,
-  subscribeStoragePersisted,
-  readStoragePersisted,
-  requestStoragePersistence,
-} from './persistence'
-
 // Blob URL utilities
 
 export function createBlobUrl(blob: Blob): string {

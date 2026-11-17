@@ -15,7 +15,6 @@ export {
   setSetting,
   getSetting,
   getStorageEstimate,
-  requestStoragePersistence,
   createBlobUrl,
   revokeBlobUrl,
   type VideoEditorDB,

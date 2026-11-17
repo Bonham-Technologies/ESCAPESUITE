@@ -166,15 +166,4 @@ describe('ESCAPECRAFT theme tokens', () => {
     expect(contrastOnBlack(colorIn('.errorOverlay'))).toBeGreaterThanOrEqual(4.5)
     expect(contrastOnBlack(colorIn('.errorHint'))).toBeGreaterThanOrEqual(4.5)
   })
-
-  // ESCSUITE-468: the line under the library saying whether the browser will
-  // keep it sits on the sidebar's --bg-secondary in --text-muted, which the
-  // pin above holds at 4.5:1 in both palettes.
-  it('draws the storage persistence line in --text-muted', () => {
-    const appCss = readFileSync(join(process.cwd(), 'src/App.module.css'), 'utf8')
-    const start = appCss.indexOf('.storagePersistence {')
-    expect(start, 'no `.storagePersistence` block in App.module.css').toBeGreaterThan(-1)
-    const block = appCss.slice(start, appCss.indexOf('\n}', start))
-    expect(block).toMatch(/(?<!-)color:\s*var\(--text-muted\);/)
-  })
 })
