@@ -107,7 +107,7 @@ describe('LIMITATIONS', () => {
     // The one fetch in app code, ESCAPEARTIST's ?video= / LOAD_VIDEO loader, is
     // refused for a server address by the offline policy (ESCSUITE-467).
     expect(analytics!.body.join(' ')).toMatch(/makes no network requests/i)
-    expect(analytics!.body.join(' ')).toMatch(/refuses any server address, a video address given to ESCAPEARTIST included/)
+    expect(analytics!.body.join(' ')).toMatch(/refuses any server address the page tries to load, a video address given to ESCAPEARTIST included/)
     expect(analytics!.body.join(' ')).not.toMatch(/fetches only that address/)
   })
 

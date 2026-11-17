@@ -146,7 +146,7 @@ export const LIMITATIONS: Limitation[] = [
       'An event adds at most a few short labels and numbers: which tool, which export format, a length in whole seconds, a media type (video, image or audio), and for a failed export its error type and how far it got. Nothing you record, import, type or export is sent, and neither are file names.',
       'A website that embeds ESCAPECRAFT or ESCAPEARTIST in its own page can put its own address, a video’s address, a title, a whole project or a window name into the app’s address after a ?. None of that is sent, and neither is the random ID ESCAPECRAFT adds when it hands a recording to ESCAPEARTIST.',
       'Both kinds of record go to /_vercel/insights/ on www.escapesuite.io itself, not to another site. Our code sets no cookies.',
-      'The offline build contains no analytics code at all, and makes no network requests. Its built-in lockdown refuses any server address, a video address given to ESCAPEARTIST included (see “Offline file: what its lockdown does not cover”).',
+      'The offline build contains no analytics code at all, and makes no network requests. Its built-in lockdown refuses any server address the page tries to load, a video address given to ESCAPEARTIST included (see “Offline file: what its lockdown does not cover”).',
     ],
     sources: [
       repoFile('docs/reference/vercel-analytics.md'),
