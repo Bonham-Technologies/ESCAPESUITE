@@ -9,6 +9,7 @@ import {
   findUnfinishedTakes,
   NothingToRecoverError,
   repairUnfinishedTake,
+  UnreadableTakeError,
   withTakeClaimed,
   type UnfinishedTake,
 } from './takeRecovery'
@@ -226,5 +227,14 @@ describe('repairUnfinishedTake', () => {
     const take = await takeWith({ 'primary.webm': new Uint8Array([0x1a, 0x45]) })
     await expect(repairUnfinishedTake(take)).rejects.toBeInstanceOf(NothingToRecoverError)
     await expect(repairUnfinishedTake(take)).rejects.toThrow('holds no complete frame or sound')
+  })
+
+  it('rejects a main file that is not a WebM at all, and leaves the copy where it is', async () => {
+    // What Safari's MediaRecorder writes: an MP4, starting with its ftyp box.
+    const mp4 = new Uint8Array([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6d, 0x70, 0x34, 0x32])
+    const take = await takeWith({ 'primary.webm': mp4 })
+    await expect(repairUnfinishedTake(take)).rejects.toBeInstanceOf(UnreadableTakeError)
+    await expect(repairUnfinishedTake(take)).rejects.toThrow('not a WebM file')
+    expect(env.opfs.root.dir(TAKES_DIRECTORY, take.journal.takeId)).toBeDefined()
   })
 })

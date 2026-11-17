@@ -126,7 +126,13 @@ to idle with no file and nothing said — one MP4/M4A guard covers both formats,
 else in that hook.
 
 **`TAKE_NOT_CRASH_PROTECTED` only takes a free channel** (ESCSUITE-466). It says a take is being
-kept in memory only, because this browser will not keep it on the device. Every other start
+kept in memory only, because this browser will not keep it on the device (or, on the
+MediaRecorder path, records MP4, which recovery cannot read). Every other start
 notice names something the take is actually missing, such as the microphone or the system
 audio. This one names only what a crash would cost, so it is set only if nothing else is
 showing when the take store answers.
+
+**`TAKE_STORAGE_FAILED` and `RECOVERY_FAILED` say what to do first** (ESCSUITE-466). A take
+that ran out of storage can't be recovered into the library until about its size is free again,
+so the first says to free space before recovering. A failed recovery sets the take aside for the
+visit, so the second says to reload the page to try again or to discard it.

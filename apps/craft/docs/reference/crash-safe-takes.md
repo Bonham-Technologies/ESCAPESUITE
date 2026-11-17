@@ -65,7 +65,8 @@ A take whose store is not ready (`ready` resolves `false`) records exactly as be
 covers no OPFS, no sync access handle, no Worker, no Web Locks, or a worker that did not
 answer within 5 s. It also covers a lock request the browser rejects (an opaque `file://`
 origin), and Safari before 17, whose draft sync access handle returns promises: the worker
-refuses to open on it rather than appending at byte 0.
+refuses to open on it rather than appending at byte 0. And it covers a MediaRecorder take
+where MediaRecorder records MP4 rather than WebM (see **Not covered** below).
 
 ## Who keeps or deletes the copy
 
@@ -110,8 +111,10 @@ output).
 
 Each part's length is its last block's timestamp. An audio companion that ends at 0 s is given
 the primary's length. If a part's repair throws, it is stored trimmed but unrepaired and the
-prompt says `NOT_SEEKABLE`, as at save. A primary with no whole block is `NothingToRecoverError`:
-the copy is deleted and `NOTHING_TO_RECOVER` is shown.
+prompt says `NOT_SEEKABLE`, as at save. A primary that is a WebM with no whole block is
+`NothingToRecoverError`: the copy is deleted and `NOTHING_TO_RECOVER` is shown. A primary whose
+first bytes are not a WebM's (`UnreadableTakeError`) is never deleted without asking: the
+recovery fails with `RECOVERY_FAILED`, the copy stays, and only the user's Discard removes it.
 
 The recovered take is stored through `saveRecording(..., recovered)`. Its date is the journal's
 `startedAt`, its `systemAudioShared` comes from the journal, and its thumbnail is generated from
@@ -127,7 +130,8 @@ the file rather than taken from this tab's preview.
 
 It is part of `modalOpen`, so the keyboard shortcuts are off while it is up. **Recover** is
 focused first. **Escape** or the backdrop sets the take aside until the next visit. A recovery
-that fails raises `RECOVERY_FAILED`, keeps the copy and sets it aside.
+that fails raises `RECOVERY_FAILED`, keeps the copy and sets it aside, so trying again takes a
+reload (the notice says so, and says to free storage space first if it is full).
 
 ## IndexedDB keeps OPFS files by reference
 
@@ -144,10 +148,15 @@ its own Blob. The page never holds more than one chunk.
   Stop still makes one chunked copy of the file.
 - **Storage**: a take briefly takes about twice its size at Stop, once in OPFS and once in
   IndexedDB, until the OPFS copy is deleted. A full disk mid-take ends a WebCodecs take with
-  `TAKE_STORAGE_FAILED`, and what was written can be recovered. A MediaRecorder take keeps
+  `TAKE_STORAGE_FAILED`, and what was written is kept for recovery. Recovering it needs about
+  its size free again, so the notice says to free space first. A MediaRecorder take keeps
   recording and shows `TAKE_PROTECTION_LOST`.
 - **Not covered**: browsers or profiles with no sync access handle (Safari Private Browsing,
-  some `file://` pages); these get `TAKE_NOT_CRASH_PROTECTED`. Also not covered: a take whose
+  some `file://` pages), and browsers whose MediaRecorder writes MP4 rather than WebM (Safari
+  before 18.4) for a take on the MediaRecorder path (PiP, audio only): recovery can only repair
+  WebM, so `createTakeStore` keeps nothing for such a take. These get
+  `TAKE_NOT_CRASH_PROTECTED`. A WebCodecs take muxes its own WebM and is kept wherever the
+  storage allows. Also not covered: a take whose
   site data was cleared, and anything beyond the unfinished takes themselves (no cloud copy).
 
 ## Tests

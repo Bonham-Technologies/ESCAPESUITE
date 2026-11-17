@@ -32,7 +32,7 @@ vi.mock('../core/takeStore', async (importOriginal) => ({
   },
 }))
 
-const { NothingToRecoverError } = await import('../core/takeRecovery')
+const { NothingToRecoverError, UnreadableTakeError } = await import('../core/takeRecovery')
 
 function take(takeId: string, startedAt: number): UnfinishedTake {
   return {
@@ -178,6 +178,17 @@ describe('useTakeRecovery', () => {
     expect(recovery.discardUnfinishedTake).not.toHaveBeenCalled()
     expect(deps.setState).toHaveBeenLastCalledWith('idle')
     expect(result.current.pendingTake).toBe(B)
+  })
+
+  it('never deletes a take it cannot read: it says recovery failed and keeps the copy', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    recovery.repairUnfinishedTake.mockRejectedValue(new UnreadableTakeError())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.pendingTake).toBe(A))
+    await act(async () => { await result.current.recover() })
+    expect(recovery.discardUnfinishedTake).not.toHaveBeenCalled()
+    expect(deps.setNotice).toHaveBeenCalledWith(RECOVERY_FAILED)
+    expect(deps.setNotice).not.toHaveBeenCalledWith(NOTHING_TO_RECOVER)
   })
 
   it('forgets a take another tab claimed first, without touching it', async () => {

@@ -30,6 +30,7 @@ import type { StreamTargetChunk } from 'mediabunny'
 import type { CompanionRole } from '../store/types'
 import type { CapturedTake } from '../utils/recordingMetadata'
 import { TAKE_STORE_WORKER_SOURCE } from './takeStoreWorker'
+import { getSupportedMimeType } from './permissions'
 
 /** The OPFS directory every take's own directory lives in. */
 export const TAKES_DIRECTORY = 'escapecraft-takes'
@@ -135,6 +136,23 @@ function storageFeatures(): { locks: LockManagerLike; storage: StorageManager } 
     return null
   }
   return { locks: nav.locks, storage: nav.storage }
+}
+
+/**
+ * Whether this browser's MediaRecorder writes WebM — the only container the
+ * recovery repair (`webmTrim.ts`, `fixWebMMetadata`) can read. Safari before
+ * 18.4 records MP4 (`getSupportedMimeType()` falls back to `video/mp4`), and
+ * an MP4 cut off mid-take has no index to recover it by, so such a take is
+ * not kept at all: it records in memory, with the notice that says so.
+ * The audio-only type follows the video one (`recorder.ts`), so asking about
+ * the video type answers for both.
+ */
+function mediaRecorderWritesWebM(): boolean {
+  try {
+    return getSupportedMimeType().startsWith('video/webm')
+  } catch {
+    return false
+  }
 }
 
 /** The OPFS directory that holds every take, or null when there is none yet. */
@@ -245,7 +263,14 @@ export function createTakeStore(journal: TakeJournal): TakeStore {
     for (const listener of failureListeners) listener(failure)
   }
 
-  if (!features) {
+  // A browser whose MediaRecorder writes MP4 could keep the bytes, but no
+  // recovery could read them back: such a take is not kept either.
+  const unreadable = features !== null && journal.recorder === 'mediarecorder' && !mediaRecorderWritesWebM()
+  if (unreadable) console.info('This recording is not being kept on the device as it records: MediaRecorder here does not write WebM')
+  // Whether this take gets a directory of its own at all.
+  const keeps = features !== null && !unreadable
+
+  if (!features || unreadable) {
     state = 'unavailable'
     resolveReady(false)
   } else {
@@ -408,7 +433,7 @@ export function createTakeStore(journal: TakeJournal): TakeStore {
         await closeFiles()
         // Deleted while the lock is still held, so no other tab — and no
         // recovery scan in this one — can find the files in between.
-        if (features) await removeTakeDirectory(journal.takeId)
+        if (keeps) await removeTakeDirectory(journal.takeId)
         releaseLock()
       })()
       return settling

@@ -50,6 +50,15 @@ describe('LIMITATIONS', () => {
     expect(limitation!.sources.some((s) => s.label.startsWith(ticket))).toBe(true)
   })
 
+  // ESCSUITE-466: name every take that is not kept, and what a full disk asks of the user.
+  it('says which recordings are not kept for recovery, and that recovering needs space free', () => {
+    const body = LIMITATIONS.find((l) => l.id === 'unfinished-recordings')!.body.join(' ')
+    expect(body).toMatch(/writes MP4 rather than WebM, such as Safari before version 18\.4/)
+    expect(body).toMatch(/only WebM can be recovered/)
+    expect(body).toMatch(/free up some space first/)
+    expect(body).toMatch(/Nothing is uploaded/)
+  })
+
   // ESCSUITE-445: claim only what ARTIST's own doc and notice claim.
   it('states what the transcription language pack is and that no audio leaves the device', () => {
     const body = LIMITATIONS.find((l) => l.id === 'transcribe-captions')!.body.join(' ')

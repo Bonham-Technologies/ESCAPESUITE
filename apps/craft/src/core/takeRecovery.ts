@@ -162,6 +162,32 @@ interface RepairedPart {
   seekable: boolean
 }
 
+/**
+ * The take's main file is not a WebM at all, so this build cannot tell what
+ * is in it. Unlike `NothingToRecoverError` it is not a reason to delete the
+ * copy: the prompt reports a failed recovery and keeps it, and only the
+ * user's Discard removes it.
+ */
+export class UnreadableTakeError extends Error {
+  constructor() {
+    super('The unfinished recording is not a WebM file, so it cannot be repaired')
+    this.name = 'UnreadableTakeError'
+  }
+}
+
+/** The four bytes every WebM (every EBML file) starts with. */
+const EBML_MAGIC = [0x1a, 0x45, 0xdf, 0xa3]
+
+/**
+ * Whether the file could be a WebM: its first bytes agree with the magic as
+ * far as they go. A file torn inside those four bytes is still a WebM that
+ * holds nothing (`NothingToRecoverError`), not a file of another kind.
+ */
+async function couldBeWebM(file: Blob): Promise<boolean> {
+  const head = new Uint8Array(await file.slice(0, EBML_MAGIC.length).arrayBuffer())
+  return head.every((byte, i) => byte === EBML_MAGIC[i])
+}
+
 /** Trim and repair one part, or null when it holds nothing whole. */
 async function repairPart(file: File, type: string): Promise<RepairedPart | null> {
   const trimmed = await trimToWholeBlocks(new Blob([file], { type }))
@@ -190,13 +216,15 @@ export async function withTakeClaimed(take: UnfinishedTake, work: () => Promise<
 
 /**
  * Turn an unfinished take back into a recording the save path can store.
- * Rejects with `NothingToRecoverError` when the main file holds nothing
- * whole, and with whatever the repair threw when a file will not parse. A
+ * Rejects with `NothingToRecoverError` when the main file is a WebM that
+ * holds nothing whole, `UnreadableTakeError` when it is not a WebM at all,
+ * and with whatever the repair threw when a file will not parse. A
  * companion part that holds nothing whole is left out, as a part the recorder
  * lost would be.
  */
 export async function repairUnfinishedTake(take: UnfinishedTake): Promise<RecoveredTake> {
   const { journal, files } = take
+  if (!(await couldBeWebM(files.primary!))) throw new UnreadableTakeError()
   const primary = await repairPart(files.primary!, 'video/webm')
   if (!primary) throw new NothingToRecoverError()
   let seekable = primary.seekable

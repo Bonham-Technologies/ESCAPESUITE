@@ -286,7 +286,8 @@ export const RECORDING_UNAVAILABLE =
 /**
  * A take is starting and this browser will not let it be kept on the device
  * as it records (no OPFS sync access handle: Safari Private Browsing, some
- * `file://` pages). The take records exactly as before, in memory. Raised
+ * `file://` pages; or a MediaRecorder that records MP4 rather than WebM,
+ * which the recovery repair cannot read). The take records exactly as before, in memory. Raised
  * only when nothing else is being said: every other start notice names
  * something the take is missing, this one only what a crash would cost.
  */
@@ -303,15 +304,20 @@ export const TAKE_PROTECTION_LOST =
 /**
  * A WebCodecs take, which records straight to the device, could not write
  * any more (most likely the storage quota), or its files could not be read
- * back at Stop. The take is ended and what reached the disk is offered for
- * recovery.
+ * back at Stop. The take is ended and what reached the disk is kept and
+ * offered for recovery — which needs about the take's size free again to
+ * store it in the library, so the notice says to free space first.
  */
 export const TAKE_STORAGE_FAILED =
-  'Recording stopped: it could no longer be written to this device, most likely because its storage is full. What was recorded until then can be recovered.'
+  'Recording stopped: it could no longer be written to this device, most likely because its storage is full. What was recorded until then is kept: free up some storage space before you recover it.'
 
-/** Recover was chosen and the take's files would not repair or store. */
+/**
+ * Recover was chosen and the take's files would not repair or store. The
+ * copy is kept, but set aside for this visit (`useTakeRecovery`), so trying
+ * again takes a reload.
+ */
 export const RECOVERY_FAILED =
-  'The unfinished recording could not be recovered. It is still on this device, so you can try again or discard it.'
+  'The unfinished recording could not be recovered. It is still on this device: if storage is full, free up some space, then reload the page to try again or to discard it.'
 
 /** Recover was chosen and the take held no whole frame or sound. */
 export const NOTHING_TO_RECOVER =

@@ -88,6 +88,31 @@ describe('createTakeStore where the browser cannot keep a take', () => {
     expect(await createTakeStore(journal()).ready).toBe(false)
   })
 
+  it('does not keep a MediaRecorder take where MediaRecorder writes MP4, which recovery cannot read', async () => {
+    // Safari before 18.4: only `video/mp4` is supported.
+    const isTypeSupported = vi.mocked(MediaRecorder.isTypeSupported)
+    isTypeSupported.mockImplementation((type: string) => type === 'video/mp4')
+    const store = createTakeStore({ ...journal('mp4'), recorder: 'mediarecorder' })
+    isTypeSupported.mockImplementation(() => true)
+    expect(await store.ready).toBe(false)
+    expect(WorkerDouble.instances).toHaveLength(0)
+    expect(env.locks.held.size).toBe(0)
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('does not write WebM'))
+    // Nothing was made, so a normal stop has nothing to delete — and no warning about it.
+    await store.discard()
+    expect(console.warn).not.toHaveBeenCalled()
+    // A WebCodecs take muxes its own WebM, whatever MediaRecorder writes.
+    expect(await createTakeStore(journal('webcodecs')).ready).toBe(true)
+  })
+
+  it('does not keep a MediaRecorder take where there is no MediaRecorder to ask', async () => {
+    const original = globalThis.MediaRecorder
+    vi.stubGlobal('MediaRecorder', undefined)
+    const store = createTakeStore({ ...journal(), recorder: 'mediarecorder' })
+    vi.stubGlobal('MediaRecorder', original)
+    expect(await store.ready).toBe(false)
+  })
+
   it('is unavailable when the browser refuses the take lock, without an unhandled rejection', async () => {
     vi.spyOn(env.locks, 'request').mockRejectedValueOnce(new DOMException('opaque origin', 'SecurityError'))
     const store = createTakeStore(journal())
