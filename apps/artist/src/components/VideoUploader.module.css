@@ -312,6 +312,21 @@
   color: var(--text-secondary);
 }
 
+/* ESCSUITE-468: whether the browser will keep the library. --text-muted on the
+   plain bar (--bg-tertiary), --text-secondary on the warning tint, as the
+   earlier-sessions note does (ESCSUITE-426); both pinned at 4.5:1 by
+   styles/themeTokens.test.ts. */
+.storagePersistence {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
+.storageWarning .storagePersistence {
+  color: var(--text-secondary);
+}
+
 .storageActions {
   display: flex;
   gap: 4px;

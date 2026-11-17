@@ -4,6 +4,7 @@ import type { Recording } from '../../store/types';
 import { formatDuration } from '../../utils/recordingFormat';
 import { companionPartFor } from '../../utils/companionParts';
 import { DownloadIcon, EditIcon, PlayIcon, RecordIcon, TrashIcon, UploadIcon } from '../icons';
+import { storagePersistenceMessage } from '@escapesuite/shared/storage';
 import styles from '../../App.module.css';
 
 interface RecordingsListProps {
@@ -47,6 +48,13 @@ interface RecordingsListProps {
    * its `aria-describedby` target and one visible note, like the MP4 note.
    */
   editorBlockedReason: string | null;
+  /**
+   * Whether the browser has agreed to keep the library from its automatic
+   * clean-up (`navigator.storage.persisted()`, ESCSUITE-468), or null before
+   * that has been read. The panel reads it; this component draws one line
+   * under the list saying what it means for the user.
+   */
+  storagePersisted: boolean | null;
   onSendToEditor: (id: string) => void;
   onDelete: (id: string) => void;
 }
@@ -122,6 +130,7 @@ export function RecordingsList({
   m4aBlockedReason,
   mp4Note,
   editorBlockedReason,
+  storagePersisted,
   onPlay,
   onDownload,
   onDownloadMp4,
@@ -330,6 +339,11 @@ export function RecordingsList({
       {editorBlockedReason && recordings.length > 0 && (
         <p className={styles.mp4BlockedReason} id={EDITOR_NOTE_ID}>
           {editorBlockedReason}
+        </p>
+      )}
+      {storagePersisted !== null && recordings.length > 0 && (
+        <p className={styles.storagePersistence}>
+          {storagePersistenceMessage(storagePersisted)}
         </p>
       )}
     </section>

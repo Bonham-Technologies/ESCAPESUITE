@@ -31,7 +31,12 @@ what is already stored.
   `ArrayBuffer` — a `BufferTarget` would have been gigabytes for a long take, and an allocation
   that fails is an out-of-memory crash nothing can catch (review round 1). Mediabunny's muxer starts a Cluster at key frames and writes one CuePoint per
   Cluster, except that it **forces** a Cluster on a delta frame once one would pass 32.767 s; the
-  video cue on such a Cluster is dropped (ESCSUITE-359, below). The result keeps the original's MIME type. **Alpha is preserved**: Mediabunny reads a
+  video cue on such a Cluster is dropped (ESCSUITE-359, below). The result keeps the original's MIME type.
+  **Packet bytes are copied exactly** since Mediabunny 1.66.0: up to 1.65 its muxer also rewrote
+  every VP9 key frame header's `color_space` from the source's Colour element
+  (`fixVP9ColorSpace`). The remux does not restore that — the export does, for frames it encodes
+  (`webm-export-reliability.md`, ESCSUITE-284) — so a remuxed take's headers stay as its encoder
+  wrote them (an ESCAPECRAFT WebCodecs take's already carry the reported matrix). **Alpha is preserved**: Mediabunny reads a
   BlockGroup's BlockAdditional (BlockAddID 1) on an `AlphaMode` 1 track as `sideData.alpha` and
   writes it back the same way on a track it marks `AlphaMode` 1 — pinned over a hand-built
   BlockGroup+BlockAdditions WebM (`test/fixtures/webmFixture.ts`) by packet count, timestamp,
@@ -71,7 +76,7 @@ what is already stored.
 
 Mediabunny up to 1.62.1 forces a new Cluster once one would pass 32.767 s (a block's timestamp
 is an int16 of ms from its Cluster's), whatever frame comes next, and still writes a CuePoint for
-every track in it. **From Mediabunny 1.63.0** (ARTIST ships 1.65.0) the muxer writes a cue only for
+every track in it. **From Mediabunny 1.63.0** (ARTIST ships 1.66.0) the muxer writes a cue only for
 each track's first key block in a Cluster, so the remux no longer writes a bad cue by itself; see
 **Upstream** below for why the drop stays. A MediaRecorder take can go minutes between key frames, so between 2026-10-17 and
 this fix the remux stored most of a long take's Clusters with a **video cue on a delta frame**.
