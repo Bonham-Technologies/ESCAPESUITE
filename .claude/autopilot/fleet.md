@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v26. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -94,7 +94,15 @@ statusCategory != Done`.
    `--expect-link <site>` for every other site `bin/fleet sites` lists. SITE ids are filed
    the same way, plus `ap-security` for SITE-1 to 4; SITE-4 (DNS, an owner step) goes to
    BORG as `needs-operator`, one per domain unless an open BORG ticket names that domain.
-4. BTS has no builder: the owner has its tickets built from a bonham-ops thread on
+4. Run `bin/search-console sites` (`docs/seo/search-console.md`), then `bin/search-console review
+   --json <property>` with a 10-minute command timeout for each site whose property,
+   `sc-domain:<its domain without www.>`, `sites` lists; a site it doesn't list is "not read (no
+   property)". File each finding once, its `key` first in the summary, unless an open `ap-seo` ticket
+   in the site's Jira key starts with that key (for SC-3 and SC-5, also one created in the last 28
+   days), with its evidence, labels `ap-site-review`, `ap-seo` and the class step 3 gives; a finding
+   with `cls` (SC-3, SC-5) is `ap-decision` and `ap-asked`. Any non-zero exit, a site's `error`, a
+   timeout or a crash is "not read" with the reason the tool printed; say so and go on.
+5. BTS has no builder: the owner has its tickets built from a bonham-ops thread on
    request, and the digest lists its open findings under **Waiting on you**, as
    "bonham.tech".
 
@@ -103,7 +111,8 @@ statusCategory != Done`.
 A comment on this project's steward log, found as **Weekly digest** says. In order:
 
 - **Waiting on you**, grouped by project, every item linked: each project's waiting
-  tickets and `needs-owner` PRs, and this project's own, with each refresh, paste and
+  tickets and `needs-owner` PRs with its **mergeable now** count (from its digest, else
+  counted as the steward does), and this project's own, with each refresh, paste and
   policy ticket under the project it concerns. This is the owner's inbox.
 - **Missed runs.** A task whose `last_run.status` is not `ROUTINE_RUN_STATUS_SUCCEEDED`,
   or whose last run is older than its previous scheduled time (its cron in
@@ -116,7 +125,10 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   leaves none, so flag a builder only when ready tickets (`labels in (ap-auto,
   ap-owner-merge)`, not Done) existed at the start of its window and none changed status
   or gained a PR-link comment across two consecutive scheduled runs. The cause is
-  invisible from here: write only "no trace of the <role> run since <date>".
+  invisible from here: write only "no trace of the <role> run since <date>". A steward
+  or scout whose later run says "caught up <date>" for that due day is listed as "caught
+  up <date>", not missed, and doesn't count toward "a missed run in two consecutive weeks"
+  (**Policy tickets**) unless it caught up two weeks running.
 - **Setup:** a table of each project's policy version on `main` (input 6, or "not
   read") and its digest-reported instructions version against `fleet.json`, an agents
   column (`vendored` or `fallback`, from the digest's Setup line), a Refresh PR
@@ -142,7 +154,8 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
 - **Public sites:** the sites checked with each one's SEO errors and warnings (or "not
   checked"), with `--psi` its LCP, INP and CLS (or "no field data" or "not checked"),
   the findings filed (linked), and the oldest open
-  finding (`ap-site-review`) with its age, or "none".
+  finding (`ap-site-review`) with its age, or "none". Then one **Search** line per site:
+  `review`'s `line` and the findings filed, or "not read".
 - **Policy findings filed this run**, linked, or "none".
 - The tail of **Weekly digest** for this repo itself: **Open security alerts**,
   **Security scan** and **Setup**. The **Security scan** line adds `pins vs latest:

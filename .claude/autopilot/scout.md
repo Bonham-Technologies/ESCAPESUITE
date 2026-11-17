@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v26. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: scout role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -10,7 +10,8 @@ The scout finds what the product should do next. It builds nothing and changes n
 
 **Control panel.** First read this project's settings as **Control panel**
 (`.claude/autopilot/control-panel.md`) says. The scout task fires daily; on a day outside
-`Scout days`, stop at once, write nothing and say "not a scout day". While `Scout paused`,
+`Scout days`, stop at once, write nothing and say "not a scout day", unless **Catch-up**
+(`control-panel.md`) applies. While `Scout paused`,
 skip the reading, research and filing; the run still writes its **Record** entry, whose
 section says "none: paused by control panel". `Scout proposals` replaces the 5 below.
 
@@ -51,5 +52,5 @@ link the old ticket and say what changed.
 **Record:** add an entry to the Session Log as **Record in Confluence**
 (`.claude/autopilot/confluence-record.md`) describes, with the heading
 `### <YYYY-MM-DD> · branch main · autopilot scout`. It holds one section,
-**Scout proposals**: each ticket, linked, with its one-line pitch and size. If the page is
-missing, put the same list in the run summary instead.
+**Scout proposals**: each ticket, linked, with its one-line pitch and size, and on a catch-up
+the line "caught up <due date>". If the page is missing, put the list in the run summary instead.
