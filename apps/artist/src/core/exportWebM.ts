@@ -12,7 +12,7 @@ import {
 import type { Clip, SourceVideo, Track, ExportOptions } from '../store/types';
 import type { ExportResult, MediaDrawOptions, ProgressCallback } from './exportTypes';
 import { projectToOutputScale } from './outputTransform';
-import { relabelFirefoxVpxMeta } from './vpxColorLabel';
+import { createWebMVideoLabeller } from './vpxColorLabel';
 import { isFirefoxEngine } from './workerDecodeEngine';
 import {
   checkAborted,
@@ -283,15 +283,14 @@ export async function exportToWebM(
     let videoEncoderError: Error | null = null;
     // Firefox's VP9 and VP8 encoders convert with the BT.601 matrix but report
     // BT.709 (ESCSUITE-284); the muxer writes the report into the Colour
-    // element and every VP9 keyframe header, so it is corrected here, once per
-    // export decided, on the one engine it was measured on.
-    const relabelColour = isFirefoxEngine(globalThis.navigator);
+    // element and the labeller writes it into every VP9 keyframe header, so it
+    // is corrected here, once per export decided, on the one engine it was
+    // measured on.
+    const labelVideo = createWebMVideoLabeller(videoCodecFamily, isFirefoxEngine(globalThis.navigator));
     const videoEncoder = new VideoEncoder({
       output: async (chunk, meta) => {
-        await videoSource.add(
-          EncodedPacket.fromEncodedChunk(chunk),
-          relabelColour ? relabelFirefoxVpxMeta(meta) : meta
-        );
+        const labelled = labelVideo(EncodedPacket.fromEncodedChunk(chunk), meta);
+        await videoSource.add(labelled.packet, labelled.meta);
       },
       error: (e) => {
         console.error('Video encoder error:', e);

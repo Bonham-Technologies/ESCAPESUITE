@@ -10,7 +10,10 @@
   (`CompanionPipeline`): a `VideoEncoder` and its own Mediabunny output for the webcam, with its
   own `FrameTiming`, and an `AudioEncoder` and its own Opus-only output for each audio source the
   take really has — all of them on that same clock, and none of them taking the mixed audio off
-  the primary
+  the primary. Every VP9 encoder's packets pass through `createVp9ColourSpaceStamper`
+  (`@escapesuite/shared/utils`), which writes the encoder's reported colour matrix into each key
+  frame header's `color_space` for Firefox's `<video>` and ffmpeg, as Mediabunny's muxer did up to
+  1.65 (ARTIST's `webm-export-reliability.md`, ESCSUITE-284)
 - `frameTiming.ts`: `stampFrame()` — one encoder's `FrameTiming`: the 30 fps slot each frame is
   stamped in, so no two frames share a WebM timecode, and its once-a-second key frame (see "Frame
   timestamps and keyframes", ESCSUITE-417)
