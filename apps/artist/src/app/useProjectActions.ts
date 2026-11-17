@@ -20,6 +20,7 @@ import { useCallback, useState } from 'react';
 import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
 import { ProjectFileError } from '../core/projectFileFormat';
 import { revokeSourceThumbnails } from '../core/storage';
+import { requestStoragePersistence } from '@escapesuite/shared/storage';
 import { analytics } from '../utils/analytics';
 import { parseProject } from '../store/projectMigration';
 import { applyEditorBlock, currentEditorBlock } from './editorBlock';
@@ -97,6 +98,9 @@ export function useProjectActions({
       await saveProject(project, sourceVideos, undefined, currentEditorBlock());
       analytics.projectSaved();
       showNotification('Project saved successfully', 'success');
+      // ESCSUITE-468: ask the browser to keep the library the project's media
+      // sits in (only the session's first save or import actually asks).
+      void requestStoragePersistence();
     } catch (error) {
       console.error('Save failed:', error);
       showNotification(

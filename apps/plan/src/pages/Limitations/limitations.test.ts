@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { LIMITATIONS, NETWORK_SILENCE_SPEC_URL, REPO_FILE_URL } from './limitations'
+import { LIMITATIONS, MDN_URL, NETWORK_SILENCE_SPEC_URL, REPO_FILE_URL } from './limitations'
 
 describe('LIMITATIONS', () => {
   it('names at least one source for every limitation', () => {
@@ -96,6 +96,27 @@ describe('LIMITATIONS', () => {
     expect(body).not.toMatch(/Firefox, Safari and phones do not/)
   })
 
+  // ESCSUITE-468: Safari's seven-day rule, with MDN as its source, and no
+  // promise that asking for persistent storage beats it.
+  it('states Safari’s seven-day eviction rule with its MDN source, without over-claiming persist()', () => {
+    const entry = LIMITATIONS.find((l) => l.id === 'safari-seven-day-eviction')!
+    expect(entry).toBeDefined()
+    const body = entry.body.join(' ')
+    expect(body).toMatch(/seven days without clicking or tapping on that site/)
+    expect(body).toMatch(/stored from script/)
+    expect(body).toMatch(/does not document it as stopping the seven-day rule/)
+    expect(body).toMatch(/may say no/)
+    // CRAFT shows no storage figure: the line sits under the recordings there.
+    expect(body).toMatch(/in ESCAPECRAFT under your recordings, in ESCAPEARTIST beside the storage figure/)
+    expect(body).toContain('“Protected from automatic clean-up”')
+    expect(body).toContain('“Your browser may delete these if it runs low on space; download what you want to keep.”')
+    expect(body).not.toMatch(/guarantee/i)
+    expect(entry.sources.map((s) => s.href)).toContain(
+      `${MDN_URL}Web/API/Storage_API/Storage_quotas_and_eviction_criteria`
+    )
+    expect(entry.sources.some((s) => s.label === 'ESCSUITE-468')).toBe(true)
+  })
+
   it('cites the owner ruling for no mobile support', () => {
     const mobile = LIMITATIONS.find((l) => l.id === 'no-mobile')
     expect(mobile!.sources.map((s) => s.label)).toContain('Owner ruling, 2026-10-01')
@@ -121,10 +142,17 @@ describe('LIMITATIONS', () => {
     expect(body).not.toMatch(/that is sent as part of the address/)
   })
 
-  it('links every document source to the repository on GitHub', () => {
+  // ESCSUITE-468 adds the one outside source, MDN, for a browser's own
+  // behaviour the repository cannot document.
+  it('links every document source to the repository on GitHub, this site, or MDN', () => {
     for (const source of LIMITATIONS.flatMap((l) => l.sources)) {
       if (source.href !== undefined) {
-        expect(source.href.startsWith(REPO_FILE_URL) || source.href.startsWith('/')).toBe(true)
+        expect(
+          source.href.startsWith(REPO_FILE_URL) ||
+            source.href.startsWith('/') ||
+            source.href.startsWith(MDN_URL),
+          source.href
+        ).toBe(true)
       }
     }
   })
