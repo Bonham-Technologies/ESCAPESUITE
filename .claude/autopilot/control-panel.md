@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v27. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: control panel
 
 ## Control panel
@@ -24,3 +24,10 @@ column name still counts (`Paused` is `Builder paused`).
 - **Fallbacks** (paused: `no`) apply per cell, only when the page, row or cell is missing
   or blank or doesn't parse. Never guess. The summary (a steward's digest) names each
   fallback, its column and the value read. `bin/fleet check-panel` applies these rules.
+- **Catch-up** (steward and scout, BORG-99): on a day outside its days, the run goes ahead
+  when its most recent due day (in its days and not paused) is at most 3 days back and left
+  no trace dated that day or later (America/Denver): the steward's digest comment; the
+  scout's `· autopilot scout` Session Log entry, live or archived, or an `ap-scout` ticket.
+  That trace says "caught up <due date>". Never while paused or with no Session Log page; a
+  catch-up leaves a trace, so one per due day. A days fallback isn't a days cell: the
+  steward's needs no catch-up, the scout's is `1,15`. `bin/fleet due` decides the same way.
