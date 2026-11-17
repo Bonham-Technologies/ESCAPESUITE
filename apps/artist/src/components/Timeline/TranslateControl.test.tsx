@@ -315,7 +315,7 @@ describe('TranslateControl: translating (ESCSUITE-473)', () => {
     await user.click(button()!);
     await waitFor(() => expect(captionTracks()).toHaveLength(2));
     await user.click(button()!);
-    expect(showNotification).toHaveBeenLastCalledWith('There is already a English caption track.', 'info');
+    expect(showNotification).toHaveBeenLastCalledWith('This project already has a caption track in English.', 'info');
     expect(availability).toHaveBeenCalledTimes(1);
   });
 

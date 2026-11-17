@@ -77,8 +77,8 @@ or `availability()` fails, which reads as unavailable.
   track is locked), so it is not asked again; a cancelled or failed run writes nothing.
 - **Asked for the language alone:** `translatorLanguage` sends `en` for `en-US`, keeping only
   Chinese's script (`zh` / `zh-Hant`). A target the captions are already in is refused ("The
-  captions are already in Spanish."), and so is one that already has a caption track ("There
-  is already a Spanish caption track."): delete that track to translate again.
+  captions are already in Spanish."), and so is one that already has a caption track ("This
+  project already has a caption track in Spanish."): delete that track to translate again.
 - `unavailable` for the pair says "Translating *English* to *Spanish* is not available in this
   browser." and the control stays, since another pair may work.
 - **Translating:** each cue is translated as one line (its line breaks joined with a space)

@@ -299,7 +299,7 @@ export function TranslateControl({ showNotification }: TranslateControlProps) {
       return;
     }
     if (tracks.some((track) => track.kind === 'captions' && track.id !== sourceTrack.id && sameTranslationLanguage(track.language, target))) {
-      showNotification(`There is already a ${languageName(target)} caption track.`, 'info');
+      showNotification(`This project already has a caption track in ${languageName(target)}.`, 'info');
       return;
     }
     const request: Request = { projectId, sourceTrackId: sourceTrack.id, target };
