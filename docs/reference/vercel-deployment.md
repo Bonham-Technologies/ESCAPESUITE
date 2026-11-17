@@ -134,6 +134,12 @@ up on their next page load (the update check); pages already open keep running a
 reloaded, so a recording in progress is never interrupted, and the load after that goes straight
 to the network. Remove the variable and redeploy to turn offline support back on.
 
+**Never delete `sw.js`.** A later change or rollback must keep shipping `/sw.js`, `/craft/sw.js`
+and `/artist/sw.js` (the kill switch is how to turn offline support off). Without them the update
+check fails (`/craft/*` and `/artist/*` rewrite a missing file to HTML, and `/sw.js` would 404), so
+workers already installed stay registered with their old build until a kill-switch build reaches the
+visitor.
+
 **Tests.** `scripts/offline.test.mjs` (precache list, build id, cache naming, what the worker
 answers and leaves alone, the kill switch, the page block). `apps/e2e/tests/production/offline.spec.ts`
 loads each app, goes offline and reloads; records in CRAFT and imports and exports a WebM in

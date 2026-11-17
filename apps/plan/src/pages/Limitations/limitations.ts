@@ -132,7 +132,7 @@ export const LIMITATIONS: Limitation[] = [
     title: 'The hosted site works offline after the first visit, app by app',
     body: [
       'On www.escapesuite.io, each app works offline after the first visit. Open the hub, ESCAPECRAFT or ESCAPEARTIST once while you are online and let it finish loading; after that, it opens and works with no connection, recording, editing and exporting included. Each app is saved on its own, so open each one you want while you are online.',
-      'It needs a browser with service workers, which current versions of Chrome, Edge, Firefox and Safari have. A private window may not keep the saved copy, or may not allow it at all.',
+      'It needs a browser with service workers, which current versions of Chrome, Edge, Firefox and Safari have. A private window may not keep the saved copy, or may not allow it at all. The browser may also discard the saved copy, for example when the device runs low on space, or in Safari after about seven days without a visit; open the app online again to save it again.',
       'The saved copy is the app itself. Your recordings, imported files and projects are stored in the browser as before, not by this feature. When a new version is published, the app saves it the next time you open it online, and shows a short “Updated” note.',
       'An app shown inside another page (in an iframe) does not save itself for offline use. The offline build from the Releases page needs no first visit at all.',
     ],
