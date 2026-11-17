@@ -152,8 +152,7 @@ its own Blob. The page never holds more than one chunk.
   its size free again, so the notice says to free space first. A MediaRecorder take keeps
   recording and shows `TAKE_PROTECTION_LOST`.
 - **Not covered**: browsers or profiles with no sync access handle (Safari Private Browsing,
-  some `file://` pages), and browsers whose MediaRecorder writes MP4 rather than WebM (Safari
-  before 18.4) for a take on the MediaRecorder path (PiP, audio only): recovery can only repair
+  some `file://` pages), and browsers whose MediaRecorder writes MP4 rather than WebM (older Safari) for a take on the MediaRecorder path (PiP, audio only): recovery can only repair
   WebM, so `createTakeStore` keeps nothing for such a take. These get
   `TAKE_NOT_CRASH_PROTECTED`. A WebCodecs take muxes its own WebM and is kept wherever the
   storage allows. Also not covered: a take whose
