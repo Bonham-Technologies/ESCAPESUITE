@@ -55,6 +55,18 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   file). `parseProject` refuses a present `kind` that is not exactly `'captions'` with
   `timeline.tracks[i].kind must be 'captions'`; the migration passes tracks through by spread, so
   the marker survives every load path. The headless kit needed no change.
+- **The track's language** (ESCSUITE-473). `Track.language?: string`, a BCP 47 tag, optional
+  and additive: absent on ordinary tracks, on a caption track whose language is not known (an
+  imported file's) and in every older file, which opens unchanged. Transcription sets it to the
+  spoken language; "Translate captions" sets it on the track it makes (the target) and on the
+  source once the user confirms that one (`on-device-translation.md`). `parseProject` refuses a
+  present value `Intl.getCanonicalLocales` does not accept with
+  `timeline.tracks[i].language must be a BCP 47 language tag`, and keeps it as written. It
+  names the track's sidecar.
+- **More than one caption track** (ESCSUITE-473). A translation is a second `kind: 'captions'`
+  track. Imports and transcription use the **first** caption track in the project's track list
+  (`tracks.find`), which is the original: a translation track is appended after it. If the
+  original is deleted, the next caption track in the list takes that role.
 - **The store.** `addCaptionCues(cues, style)` (`store/overlaySlice.ts`): the whole file in **one**
   `set` and **one** history entry, the selection untouched — not `addTextOverlayClip` in a loop,
   which pushes an entry and selects per call. The caption track is found by its marker, never by
@@ -63,6 +75,8 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   whole import with `null` (ESCSUITE-84 / 87); a hidden one still takes it. `findEmptyTrack` never
   hands out the caption track, even emptied, so a title or a video looking for an empty track
   cannot land there and be read as a caption (review M2).
+  `addCaptionCues(cues, style, { language })` (ESCSUITE-473) marks a new caption track with the
+  language, gives it to a caption track that had none, and on a `replace` takes the new one.
   `addCaptionCues(cues, style, { replace: true })` (ESCSUITE-442) first takes every text clip
   off the Captions track (a video or audio clip moved there stays), in the same `set` and history entry, and drops any of them from the
   selection; "Transcribe to captions" uses it for its **Replace** answer.
@@ -104,11 +118,36 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   options) only when a caption track holds a clip whose `textData.text` is a string (a damaged clip
   with no text is left out rather than read — the dialog is always mounted, review I1): "Download .srt" and "Download .vtt" write
   that track's text clips as they stand now, in timeline order (`end = timelinePosition +
-  duration`), named `${projectName || 'export'}.srt` / `.vtt`, through `utils/downloadBlob.ts` —
+  duration`), named `${projectName || 'export'}.srt` / `.vtt` — or, for a track with a language,
+  `${projectName}.<language>.srt` (`Talk.en-US.vtt`, ESCSUITE-473) — through `utils/downloadBlob.ts` —
   which the video download now calls too. A **hidden** caption track is still offered: hiding it is
   how a caption is kept off the picture and shipped only as a file. The row reads the `clips` /
   `tracks` the dialog already subscribes to. The sidecar always covers the whole timeline; an
   "Export Section" range does not shift or trim it.
+- **One sidecar per caption track** (ESCSUITE-473). With two or more caption tracks holding
+  captions, the row holds one labelled group per track, top of the timeline first, each named
+  with its language's English name ("English", "Spanish"; the track's name where it has no
+  language) and its own two buttons; each file is that track's cues alone (`Talk.en.vtt`,
+  `Talk.es.vtt`). Two tracks that would share a file name get `-2`, `-3`… With one caption
+  track the row is exactly as before.
+- **Two caption tracks** (ESCSUITE-473, `core/captionStack.ts`). A translation copies its
+  source's style, position included, so the two would draw on one spot. While cues of two or
+  more **visible** caption tracks are up at once, `stackCaptions` raises them apart at drawing
+  time: the caption track **lowest in the timeline keeps its own place**, and each one above
+  it is raised just far enough that its box (`lines × fontSize × 1.2` plus the background's
+  `0.3 × fontSize` padding top and bottom, scaled) clears the boxes below by 1 % of the frame's
+  height. The translation sits directly below its source in the timeline, so the original draws
+  above and the translation below, in the usual caption spot; reordering the tracks swaps them.
+  Hide either and the other draws exactly where its clips say; a caption already clear of the
+  others (moved to the top of the frame, say) is never moved. Nothing is written: the clips keep
+  their own `y`, so the project, the inspector and the sidecar are unchanged. The preview
+  (`drawFrame.ts`), the MP4 exporter and the WebM / GIF compositor (`elementFrames.ts`) all
+  run their active clips through it, so the picture and every export agree (the headless kit
+  renders through the same exporters). A frame with at most one caption track up builds
+  nothing (`drawFrame.perf.test.ts` counts per-frame collections). **Known limit:** the
+  preview's selection box, hit test and drag still use a raised caption's own position, so
+  while both tracks show, the original's handles sit at its stored place, under the
+  translation; hide the translation to drag it, or edit it in the inspector.
 - **Fuzz.** `core/captions.fuzz.test.ts` (house harness): 1000 byte mutations per format, decoded
   non-fatally; every input parses or is a `CaptionParseError`, every parse is a valid cue list whose
   serialization reads back as the same cues — exactly for WebVTT unless a cue holds a `-->` (written
@@ -118,7 +157,8 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   416 / 584, WebVTT 449 / 551 since review round 1).
 - **Automatic captioning** (ESCSUITE-404) is the browser's own on-device speech recognition,
   never a model ESCAPESUITE ships or fetches. Its cues arrive through `addCaptionCues` like a
-  file's; see `on-device-transcription.md`.
+  file's; see `on-device-transcription.md`. **Translation** (ESCSUITE-473) is the browser's
+  own on-device Translator API, into a second caption track; see `on-device-translation.md`.
 - **Out of scope, and why:** a speech model of ESCAPESUITE's own, or any cloud recognition;
   SCC, CEA-608/708 and TTML (broadcast formats no browser tool of this kind is asked for, each a
   parser of its own); captions muxed into the MP4/WebM as a text track (Mediabunny's output path

@@ -22,6 +22,7 @@ import type { Clip, SourceVideo, Track } from '../store/types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
+import { stackCaptions } from './captionStack';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
@@ -574,7 +575,8 @@ export function createFrameComposer({
     const activeTransition = getActiveTransition(clips, tracks, currentTime);
 
     // Get all clips at current time
-    const activeClips = getClipsAtTime(clips, tracks, currentTime);
+    // ESCSUITE-473: two visible caption tracks stack, as in the preview.
+    const activeClips = stackCaptions(getClipsAtTime(clips, tracks, currentTime), projectSize.height);
 
     // Clear the raster to black and put the context in project pixels: every
     // draw below is project-space, exactly as the preview's is.

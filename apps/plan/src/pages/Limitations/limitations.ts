@@ -111,6 +111,20 @@ export const LIMITATIONS: Limitation[] = [
     ],
   },
   {
+    id: 'translate-captions',
+    title: 'Translate captions: only where the browser has on-device translation',
+    body: [
+      'ESCAPEARTIST’s Translate captions uses your browser’s own on-device translation, so the button appears only where the browser has it. Today that means Chrome on a computer, from version 138; another browser shows it once it has the same feature. Phones do not have it, and Chromium-based apps that do not identify as Chrome, Edge, Opera or Brave never show it. It translates the captions into a second caption track in the language you pick, with the same timing; you can show, hide and export each language on its own.',
+      'The first time you translate between two languages, your browser may download a translation model for that pair. ESCAPEARTIST asks first, with a notice that names both languages, such as “Your browser will download a translation model for English to Spanish once. Your captions never leave this device.” Nothing is downloaded until you confirm, and Cancel downloads nothing. The browser downloads the model itself, from wherever its maker provides it (Chrome gets it from Google). ESCAPEARTIST does not choose, see or pass on that download. Translating makes no network request of its own: ESCAPEARTIST downloads nothing for it and sends no captions anywhere.',
+      'Without a network, translation works only if the model for that pair of languages is already installed in that browser profile.',
+    ],
+    sources: [
+      repoFile('apps/artist/docs/reference/on-device-translation.md'),
+      repoFile('apps/artist/src/core/translatorLocal.ts'),
+      ticket('ESCSUITE-473'),
+    ],
+  },
+  {
     id: 'float-controls',
     title: 'Float controls: not in every browser, and not when embedded',
     body: [

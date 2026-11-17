@@ -316,6 +316,17 @@ export interface Track {
    * on every other track. The clips on it are ordinary text clips.
    */
   kind?: 'captions';
+  /**
+   * ESCSUITE-473: the language a caption track's text is in, as a BCP 47 tag
+   * (`en-US`, `es`). Optional and additive: absent on every other track, on a
+   * caption track whose language is not known (an imported file), and in every
+   * older file, which opens unchanged. Set by "Transcribe to captions" (the
+   * spoken language), by "Translate captions" on the track it makes (the
+   * target) and on the source when the user confirmed its language. It names
+   * the track's sidecar (`name.es.vtt`). `parseProject` refuses a present value
+   * that is not a language tag.
+   */
+  language?: string;
 }
 
 export interface Clip {
@@ -899,7 +910,24 @@ export interface EditorState {
   addCaptionCues: (
     cues: CaptionCue[],
     style: CaptionStyle,
-    options?: { replace?: boolean }
+    options?: { replace?: boolean; language?: string }
+  ) => { trackId: string; added: number } | null;
+  /**
+   * ESCSUITE-473: a translation of the caption track `sourceTrackId` as a new
+   * `kind: 'captions'` track marked with `language`, placed directly below the
+   * source in the timeline (so it draws below it in the frame). Each entry of
+   * `translations` names a source text clip and its translated text; the new
+   * clip is a copy of that clip (its position, length, style and all) holding
+   * the new text, so every cue keeps the source cue's start and end exactly.
+   * `sourceLanguage`, when given, is written to the source track too (unless
+   * it is locked). One write, one history entry, the selection untouched.
+   * `null`, writing nothing, when the source track is gone or no named clip
+   * is left on it.
+   */
+  addCaptionTranslation: (
+    sourceTrackId: string,
+    translations: Array<{ clipId: string; text: string }>,
+    options: { language: string; trackName: string; sourceLanguage?: string }
   ) => { trackId: string; added: number } | null;
   /** `boolean` for the same reason as the clip actions above (ESCSUITE-87). */
   updateTextOverlayData: (clipId: string, textData: Partial<TextOverlayData>, skipHistory?: boolean) => boolean;

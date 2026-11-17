@@ -13,6 +13,7 @@ import type { Clip, SourceVideo, Track, ExportOptions, ExportProgress } from '..
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
+import { stackCaptions } from './captionStack';
 import { getAnimatedValues } from '../utils/animation';
 import { isWebCodecsAvailable } from './frameSource';
 import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback, ExportLogEntry } from './exportTypes';
@@ -532,7 +533,8 @@ export async function exportToMP4(
       const activeTransition = getActiveTransition(clips, exportTracks, currentTime);
 
       // Get all clips at current time
-      const activeClips = getClipsAtTime(clips, exportTracks, currentTime);
+      // ESCSUITE-473: two visible caption tracks stack, as in the preview.
+      const activeClips = stackCaptions(getClipsAtTime(clips, exportTracks, currentTime), projectSize.height);
 
       // Clear the raster to black and put the context in project pixels: every
       // draw below is project-space, exactly as the preview's is.

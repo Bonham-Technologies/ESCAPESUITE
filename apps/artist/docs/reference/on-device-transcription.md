@@ -166,7 +166,8 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   press until the control is idle again (asking `available()`, the replace question, the
   notice, downloading, mixing, listening), so the notice names,
   and the run hears, the language chosen when the button was pressed. The button's tooltip
-  names it too. There is no translation and no speaker labels.
+  names it too. There are no speaker labels. Translating the captions is a control of its own
+  (`on-device-translation.md`, ESCSUITE-473).
 - **Times are estimates.** The recogniser reports words, not times. A cue starts
   `HEARD_LEAD_SECONDS` (0.3 s) before the first interim result for its words and ends when
   the recogniser settled on them (their final result), both read from the playback clock.
@@ -178,7 +179,9 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   wrapped with `wrapCaptionText` at `captionWrapColumns`, styled with `captionStyleFor`, and
   added through `addCaptionCues`: ordinary text clips on the one Captions track (created at
   the top if needed), in **one** history entry, so one undo takes the whole transcription
-  off. They export through the existing `.srt` / `.vtt` sidecar and burn in like any caption
+  off. The Captions track is marked with the chosen language (`Track.language`,
+  ESCSUITE-473) when it is created, on **Replace**, or when it had none, so "Translate
+  captions" knows what it is translating from and the sidecar is named `name.en-US.vtt`. They export through the existing `.srt` / `.vtt` sidecar and burn in like any caption
   (see `captions.md`).
 - **Captions already there** (ESCSUITE-442). A second run used to stack a second copy of every
   caption on the first, and both were drawn and burned in. Now, when the Captions track holds

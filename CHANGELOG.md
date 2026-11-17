@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Translate captions turns the captions into a second caption track in another language with the browser's on-device translation (Chrome on a computer), keeping their timing; the two languages stack on screen, show and export on their own, and each gets its own caption file (ESCSUITE-473).
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
 - ESCAPEARTIST: the Remove silences dialog starts every opening from its default settings on its own, rather than relying on the editor to close it fully, so values typed in a cancelled session can never show beside pauses found with the defaults (ESCSUITE-463).
 - ESCAPEARTIST: a transcription that fails or is stopped the moment it starts no longer keeps updating its progress afterwards (ESCSUITE-461).

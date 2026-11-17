@@ -48,6 +48,7 @@ import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
 import { serializeCaptions } from '../../core/captions';
 import type { CaptionCue, CaptionFormat } from '../../core/captions';
+import { languageName } from '../../core/transcriptionLanguage';
 import type { ExportOptions, ExportProgress } from '../../store/types';
 import { formatTime, formatFileSize } from '../../utils/timeUtils';
 import styles from './ExportDialog.module.css';
@@ -96,6 +97,14 @@ const LOUDNESS_TARGET_USES: Record<LoudnessTarget, string> = {
   [-16]: 'podcast/mobile',
   [-23]: 'broadcast',
 };
+
+/** One caption track's sidecar (ESCSUITE-473): its row label, file name (no extension) and cues. */
+interface CaptionSidecar {
+  id: string;
+  label: string;
+  name: string;
+  cues: CaptionCue[];
+}
 
 /** The sidecar files' MIME types (ESCSUITE-293). */
 const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
@@ -338,21 +347,42 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // shut too (it is always mounted), so a damaged clip `parseProject` let
   // through — a text clip with no `textData`, or text that is not a string —
   // is left out rather than read (review I1).
-  const captionCues = useMemo((): CaptionCue[] => {
-    const captionTrackIds = new Set(tracks.filter((track) => track.kind === 'captions').map((track) => track.id));
-    return clips
-      .filter((clip) => captionTrackIds.has(clip.trackId) && typeof clip.textData?.text === 'string')
-      .sort((a, b) => a.timelinePosition - b.timelinePosition)
-      .map((clip) => ({
-        start: clip.timelinePosition,
-        end: clip.timelinePosition + clip.duration,
-        text: clip.textData!.text,
-      }));
-  }, [clips, tracks]);
+  //
+  // ESCSUITE-473: one sidecar per caption track that holds a caption, top of
+  // the timeline first (the original above its translation), each named with
+  // its track's language when it has one (`name.en.vtt`, `name.es.vtt`); a
+  // track whose language is not known keeps the plain `name.vtt`. Two tracks
+  // that would share a name get `-2`, `-3`… so no download overwrites another.
+  const captionSidecars = useMemo((): CaptionSidecar[] => {
+    const base = projectName || 'export';
+    const seen = new Map<string, number>();
+    return tracks
+      .filter((track) => track.kind === 'captions')
+      .sort((a, b) => b.index - a.index)
+      .map((track) => ({
+        track,
+        cues: clips
+          .filter((clip) => clip.trackId === track.id && typeof clip.textData?.text === 'string')
+          .sort((a, b) => a.timelinePosition - b.timelinePosition)
+          .map((clip) => ({
+            start: clip.timelinePosition,
+            end: clip.timelinePosition + clip.duration,
+            text: clip.textData!.text,
+          })),
+      }))
+      .filter(({ cues }) => cues.length > 0)
+      .map(({ track, cues }) => {
+        let name = track.language ? `${base}.${track.language}` : base;
+        const count = (seen.get(name) ?? 0) + 1;
+        seen.set(name, count);
+        if (count > 1) name = `${name}-${count}`;
+        return { id: track.id, label: track.language ? languageName(track.language) : track.name, name, cues };
+      });
+  }, [clips, tracks, projectName]);
 
-  const downloadCaptions = (format: CaptionFormat) => {
-    const blob = new Blob([serializeCaptions(captionCues, format)], { type: CAPTION_MIME_TYPES[format] });
-    downloadBlob(blob, `${projectName || 'export'}.${format}`);
+  const downloadCaptions = (sidecar: CaptionSidecar, format: CaptionFormat) => {
+    const blob = new Blob([serializeCaptions(sidecar.cues, format)], { type: CAPTION_MIME_TYPES[format] });
+    downloadBlob(blob, `${sidecar.name}.${format}`);
   };
   // What the whole timeline exports as, and what the click exports: the
   // section when one is selected. Only the stretch encoded is held to the
@@ -1189,18 +1219,38 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
               </div>
 
               {/* ESCSUITE-293: the Captions track beside the video, as a file
-                  of its own. Only when there is a caption to write. */}
-              {captionCues.length > 0 && (
+                  of its own. Only when there is a caption to write.
+                  ESCSUITE-473: one row per caption track, named for its language. */}
+              {captionSidecars.length > 0 && (
                 <div className={styles.section} role="group" aria-labelledby="export-captions-label">
                   <span className={styles.label} id="export-captions-label">Captions</span>
-                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
-                    <button className={styles.cancelButton} onClick={() => downloadCaptions('srt')}>
-                      Download .srt
-                    </button>
-                    <button className={styles.cancelButton} onClick={() => downloadCaptions('vtt')}>
-                      Download .vtt
-                    </button>
-                  </div>
+                  {captionSidecars.length === 1 ? (
+                    <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                      <button className={styles.cancelButton} onClick={() => downloadCaptions(captionSidecars[0], 'srt')}>
+                        Download .srt
+                      </button>
+                      <button className={styles.cancelButton} onClick={() => downloadCaptions(captionSidecars[0], 'vtt')}>
+                        Download .vtt
+                      </button>
+                    </div>
+                  ) : (
+                    captionSidecars.map((sidecar) => (
+                      <div
+                        key={sidecar.id}
+                        role="group"
+                        aria-label={sidecar.label}
+                        style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-sm)', flexWrap: 'wrap' }}
+                      >
+                        <span style={{ minWidth: '8em' }}>{sidecar.label}</span>
+                        <button className={styles.cancelButton} onClick={() => downloadCaptions(sidecar, 'srt')}>
+                          Download .srt
+                        </button>
+                        <button className={styles.cancelButton} onClick={() => downloadCaptions(sidecar, 'vtt')}>
+                          Download .vtt
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
               )}
             </>

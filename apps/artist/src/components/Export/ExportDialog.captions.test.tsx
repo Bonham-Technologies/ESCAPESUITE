@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, within } from '@testing-library/react'
 import { ExportDialog } from './ExportDialog'
 import { resetStoreForTest, store, addClip } from '../../test/fixtures/projectStore'
-import { captionStyleFor } from '../../core/captions'
+import { captionStyleFor, parseCaptions } from '../../core/captions'
 
 vi.mock('../../core/exporter', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../core/exporter')>()),
@@ -169,5 +169,68 @@ describe('ExportDialog — caption sidecar (ESCSUITE-293)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download .vtt' }))
 
     expect((await lastDownload(clicked)).name).toBe('export.vtt')
+  })
+
+  // ESCSUITE-473: one sidecar per caption track, named with its language, and
+  // each reads back through the parser with the same cues.
+  describe('two caption tracks (ESCSUITE-473)', () => {
+    const translate = () => {
+      const { trackId } = store().addCaptionCues(
+        [
+          { start: 1.25, end: 2.5, text: 'Hello.' },
+          { start: 3, end: 4.125, text: 'Goodbye.' },
+        ],
+        style,
+        { language: 'en' }
+      )!
+      const source = store().project.timeline.clips.filter((clip) => clip.trackId === trackId)
+      store().addCaptionTranslation(
+        trackId,
+        source.map((clip) => ({ clipId: clip.id, text: clip.textData!.text === 'Hello.' ? 'Hola.' : 'Adiós.' })),
+        { language: 'es', trackName: 'Captions (Spanish)' }
+      )
+    }
+
+    it('offers a row per track, original first, each named with its language, that reads back with the same cues', async () => {
+      translate()
+      render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+      const rows = within(captionsRow()!).getAllByRole('group')
+      expect(rows.map((row) => row.getAttribute('aria-label'))).toEqual(['English', 'Spanish'])
+
+      for (const [label, words] of [['English', ['Hello.', 'Goodbye.']], ['Spanish', ['Hola.', 'Adiós.']]] as const) {
+        for (const format of ['srt', 'vtt'] as const) {
+          fireEvent.click(within(screen.getByRole('group', { name: label })).getByRole('button', { name: `Download .${format}` }))
+          const file = await lastDownload(clicked)
+          expect(file.name).toBe(`Talk.${label === 'English' ? 'en' : 'es'}.${format}`)
+          const { cues, dropped } = parseCaptions(file.text, format)
+          expect(dropped).toEqual([])
+          expect(cues).toEqual([
+            { start: 1.25, end: 2.5, text: words[0] },
+            { start: 3, end: 4.125, text: words[1] },
+          ])
+        }
+      }
+    })
+
+    it('names a single track with its language, and keeps two names apart', async () => {
+      store().addCaptionCues([{ start: 1, end: 2, text: 'Hi' }], style, { language: 'en-US' })
+      const { unmount } = render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+      fireEvent.click(within(captionsRow()!).getByRole('button', { name: 'Download .vtt' }))
+      expect((await lastDownload(clicked)).name).toBe('Talk.en-US.vtt')
+      unmount()
+
+      // Two tracks with no language (a second one made by hand) share no file name.
+      const tracks = store().project.timeline.tracks.map((track) => (track.kind === 'captions' ? { ...track, language: undefined } : track))
+      const captions = tracks.find((track) => track.kind === 'captions')!
+      const second = { ...captions, id: 'second', name: 'More captions', index: captions.index - 1 }
+      const clip = store().project.timeline.clips.find((c) => c.trackId === captions.id)!
+      store().setProject({
+        ...store().project,
+        timeline: { ...store().project.timeline, tracks: [...tracks, second], clips: [...store().project.timeline.clips, { ...clip, id: 'c2', trackId: 'second' }] },
+      })
+      render(<ExportDialog isOpen={true} onClose={vi.fn()} />)
+      fireEvent.click(within(screen.getByRole('group', { name: 'More captions' })).getByRole('button', { name: 'Download .srt' }))
+      expect((await lastDownload(clicked)).name).toBe('Talk-2.srt')
+    })
   })
 })

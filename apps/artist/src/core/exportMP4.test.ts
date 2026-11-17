@@ -1431,6 +1431,40 @@ describe('burning in captions (ESCSUITE-293)', () => {
   })
 })
 
+// ESCSUITE-473: two visible caption tracks with cues up at once are burned in
+// stacked — the original above, the translation in the caption spot below —
+// exactly as the preview draws them (`core/captionStack.ts`).
+describe('burning in two caption tracks (ESCSUITE-473)', () => {
+  it('stacks them without overlapping, and draws one alone in its own place', async () => {
+    const style = captionStyleFor({ width: 640, height: 360 })
+    const cue = (id: string, trackId: string, text: string) =>
+      makeClip({
+        id, sourceVideoId: '', trackId, overlayType: 'text',
+        textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...style, text },
+        timelinePosition: 0.15, duration: 0.1, endTime: 0.1,
+      })
+    const clips = [makeClip({ duration: 0.4, endTime: 0.4 }), cue('en', 'captions', 'Hello'), cue('es', 'spanish', 'Hola')]
+    const tracks = (spanishVisible: boolean) => [
+      makeTrack(),
+      makeTrack({ id: 'captions', name: 'Captions', index: 2, kind: 'captions', language: 'en' }),
+      makeTrack({ id: 'spanish', name: 'Captions (Spanish)', index: 1, kind: 'captions', language: 'es', visible: spanishVisible }),
+    ]
+    const ysOf = (text: string) => [
+      ...new Set(ctx().calls.filter((call) => call.method === 'fillText' && call.args[0] === text).map((call) => call.args[2] as number)),
+    ]
+
+    await run({ clips, tracks: tracks(true) })
+    expect(ysOf('Hola')).toEqual([style.y * 360])
+    const [stacked] = ysOf('Hello')
+    expect(ysOf('Hello')).toHaveLength(1)
+    expect(style.y * 360 - stacked).toBeGreaterThanOrEqual(1.8 * style.fontSize)
+
+    await run({ clips, tracks: tracks(false) })
+    expect(ysOf('Hola')).toEqual([])
+    expect(ysOf('Hello')).toEqual([style.y * 360])
+  })
+})
+
 // ESCSUITE-305: the in-page MP4 path seeks a <video> exactly as the element
 // exporters do, and on Firefox a Cues-less WebM source wedged it the same way:
 // every frame handed back an element with no picture. It fails by name.
