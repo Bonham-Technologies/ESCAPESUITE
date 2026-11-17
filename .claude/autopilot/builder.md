@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v23. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v27. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -134,6 +134,20 @@ which condition failed.
 A refused merge goes as step 6's **Merge refused**.
 Refresh PRs are the only `.claude/rules/` and `.claude/autopilot/` changes that aren't
 owner-merged: the owner approved them when they merged in bonham-ops.
+
+**Keep fresh** (BORG-98). Last in every run, after its final merge, unless `Builder
+paused` or `main` is red: keep owner-merge PRs one click from mergeable. List the open
+PRs labelled `needs-owner`, oldest first:
+`gh api 'repos/{owner}/{repo}/issues?labels=needs-owner&state=open&sort=created&direction=asc&per_page=100' --jq '.[] | select(.pull_request) | .number'`.
+Skip one from a fork, one not by the owner on a public repo (`public-repos.md`), one
+with `auto_merge` set, one whose head sha a keep-fresh conflict comment names, and a
+stacked one ("Merge after #N") until #N has merged; then, if it still targets #N's
+branch, retarget it first (`gh api -X PATCH repos/{owner}/{repo}/pulls/{n} -f base=main`).
+For each whose `compare/main...<head sha>` has `behind_by` above 0, call update-branch,
+not waiting for its CI, until 10 have updated in the run. On a conflict, a
+`CHANGELOG.md`-only one included, comment with first line
+`<!-- autopilot:keep-fresh-conflict -->`, then `Head: <sha>` and the files if known, and
+leave it. This step never merges, enables auto-merge or pushes commits.
 
 **A "Refresh <page title> for <changes>" ticket** is a Confluence edit, not a PR. Change
 only the statements the ticket names, keep the page's structure and voice, and never
