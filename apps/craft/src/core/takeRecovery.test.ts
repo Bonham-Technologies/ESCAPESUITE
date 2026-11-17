@@ -109,7 +109,6 @@ describe('findUnfinishedTakes', () => {
     await leaveTake('bad-json', { [JOURNAL_FILE]: '{', 'primary.webm': webm(1) })
     await leaveTake('null-json', { [JOURNAL_FILE]: 'null', 'primary.webm': webm(1) })
     await leaveTake('wrong-id', { [JOURNAL_FILE]: journalText('someone-else'), 'primary.webm': webm(1) })
-    await leaveTake('old-version', { [JOURNAL_FILE]: JSON.stringify({ ...journal('old-version'), version: 2 }), 'primary.webm': webm(1) })
     await leaveTake('no-date', { [JOURNAL_FILE]: JSON.stringify({ ...journal('no-date'), startedAt: 'x' }), 'primary.webm': webm(1) })
     await leaveTake('bad-recorder', { [JOURNAL_FILE]: journalText('bad-recorder', 1, { recorder: 'x' as 'webcodecs' }), 'primary.webm': webm(1) })
     await leaveTake('no-captured', { [JOURNAL_FILE]: JSON.stringify({ ...journal('no-captured'), captured: null }), 'primary.webm': webm(1) })
@@ -119,6 +118,14 @@ describe('findUnfinishedTakes', () => {
     const found = await findUnfinishedTakes()
     expect(found.map((t) => t.journal.takeId)).toEqual(['good'])
     expect([...env.opfs.root.dir(TAKES_DIRECTORY)!.children.keys()]).toEqual(['good'])
+  })
+
+  it('leaves alone a take another version of CRAFT wrote: neither offered nor deleted', async () => {
+    await leaveTake('other-version', { [JOURNAL_FILE]: JSON.stringify({ ...journal('other-version'), version: 2 }), 'primary.webm': webm(1) })
+    // Another version number on someone else's id is not this take's journal.
+    await leaveTake('other-id', { [JOURNAL_FILE]: JSON.stringify({ ...journal('x'), version: 2 }), 'primary.webm': webm(1) })
+    expect(await findUnfinishedTakes()).toEqual([])
+    expect([...env.opfs.root.dir(TAKES_DIRECTORY)!.children.keys()]).toEqual(['other-version'])
   })
 
   it('skips a stray file in the takes directory', async () => {

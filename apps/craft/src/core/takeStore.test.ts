@@ -88,6 +88,14 @@ describe('createTakeStore where the browser cannot keep a take', () => {
     expect(await createTakeStore(journal()).ready).toBe(false)
   })
 
+  it('is unavailable when the browser refuses the take lock, without an unhandled rejection', async () => {
+    vi.spyOn(env.locks, 'request').mockRejectedValueOnce(new DOMException('opaque origin', 'SecurityError'))
+    const store = createTakeStore(journal())
+    expect(await store.ready).toBe(false)
+    expect(WorkerDouble.instances[0].terminated).toBe(true)
+    expect(console.info).toHaveBeenCalledWith(expect.stringContaining('the take lock was refused'))
+  })
+
   it('is unavailable when the Worker cannot be constructed', async () => {
     WorkerDouble.options.constructorError = new Error('blocked by policy')
     const store = createTakeStore(journal())

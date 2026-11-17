@@ -90,7 +90,20 @@ function isJournal(value: unknown, takeId: string): value is TakeJournal {
   )
 }
 
-async function readTake(dir: FileSystemDirectoryHandle): Promise<UnfinishedTake | null> {
+/**
+ * A journal another version of CRAFT wrote: its own take, in a shape this
+ * build cannot read. Not this build's to delete — a rollback would otherwise
+ * erase a newer build's unfinished take without asking.
+ */
+function isOtherVersion(value: unknown, takeId: string): boolean {
+  const journal = value as { version?: unknown; takeId?: unknown } | null
+  return !!journal && typeof journal.version === 'number' && journal.version !== 1 && journal.takeId === takeId
+}
+
+/** Left alone: neither offered nor deleted. */
+const OTHER_VERSION = 'other-version'
+
+async function readTake(dir: FileSystemDirectoryHandle): Promise<UnfinishedTake | typeof OTHER_VERSION | null> {
   let journal: unknown
   try {
     const file = await (await dir.getFileHandle(JOURNAL_FILE)).getFile()
@@ -98,6 +111,7 @@ async function readTake(dir: FileSystemDirectoryHandle): Promise<UnfinishedTake 
   } catch {
     return null
   }
+  if (isOtherVersion(journal, dir.name)) return OTHER_VERSION
   if (!isJournal(journal, dir.name)) return null
   const files: TakeFiles = {}
   let size = 0
@@ -127,6 +141,7 @@ export async function findUnfinishedTakes(): Promise<UnfinishedTake[]> {
     for await (const [name, handle] of (takes as unknown as DirectoryEntries).entries()) {
       if (handle.kind !== 'directory' || !(await isAbandoned(name))) continue
       const take = await readTake(handle as FileSystemDirectoryHandle)
+      if (take === OTHER_VERSION) continue
       if (take) found.push(take)
       else await removeTakeDirectory(name)
     }

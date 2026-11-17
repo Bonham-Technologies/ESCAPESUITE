@@ -249,14 +249,21 @@ export function createTakeStore(journal: TakeJournal): TakeStore {
     state = 'unavailable'
     resolveReady(false)
   } else {
-    void features.locks.request(
-      takeLockName(journal.takeId),
-      () =>
-        new Promise<void>((resolve) => {
-          freeLock = resolve
-          if (lockReleased) resolve()
-        })
-    )
+    // A browser can offer the API and still refuse the lock (an opaque
+    // `file://` origin rejects with a SecurityError). A take with no lock could
+    // be recovered by another tab while this one is still recording it, so a
+    // refusal makes the store unavailable, like any other missing piece — and
+    // is caught, rather than surfacing as an unhandled rejection.
+    features.locks
+      .request(
+        takeLockName(journal.takeId),
+        () =>
+          new Promise<void>((resolve) => {
+            freeLock = resolve
+            if (lockReleased) resolve()
+          })
+      )
+      .catch((error: unknown) => unavailable(`the take lock was refused: ${String(error)}`))
     const url = URL.createObjectURL(
       new Blob([TAKE_STORE_WORKER_SOURCE], { type: 'text/javascript' })
     )

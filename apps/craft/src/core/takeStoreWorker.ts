@@ -84,6 +84,12 @@ async function open(message) {
   const takes = await root.getDirectoryHandle(message.root, { create: true });
   dir = await takes.getDirectoryHandle(message.takeId, { create: true });
   const journal = await fileFor(message.journalName);
+  // Safari before 17 shipped the draft API, whose getSize(), flush(),
+  // truncate() and close() return promises: appends would land at NaN, i.e.
+  // byte 0. Such a browser keeps nothing; the take records in memory.
+  if (typeof journal.end !== 'number') {
+    throw new Error('this browser has only the asynchronous sync access handle');
+  }
   const bytes = new TextEncoder().encode(message.journal);
   journal.access.truncate(0);
   journal.access.write(bytes, { at: 0 });

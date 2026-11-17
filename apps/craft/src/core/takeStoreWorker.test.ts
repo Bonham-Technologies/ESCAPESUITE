@@ -105,6 +105,22 @@ describe('take store worker', () => {
     expect(replies).toEqual([{ op: 'error', message: 'InvalidStateError: Sync access handles are refused' }])
   })
 
+  it('refuses to open on the draft API, whose sync handle answers with promises', async () => {
+    // Safari before 17: getSize() and friends return promises, so an append
+    // would land at NaN — byte 0 — and overwrite the take.
+    const { SyncAccessHandleDouble } = await import('../test/doubles/opfs')
+    const getSize = vi
+      .spyOn(SyncAccessHandleDouble.prototype, 'getSize')
+      .mockReturnValue(Promise.resolve(0) as unknown as number)
+    const worker = startWorker()
+    worker.postMessage(OPEN)
+    await settleWorker()
+    getSize.mockRestore()
+    expect(replies).toEqual([
+      { op: 'error', message: 'Error: this browser has only the asynchronous sync access handle' },
+    ])
+  })
+
   it('describes a thrown value that is not an Error', async () => {
     const getDirectory = vi.mocked(navigator.storage.getDirectory)
     getDirectory.mockRejectedValueOnce('no storage')

@@ -63,7 +63,9 @@ scan probes each lock with `ifAvailable`. Recover and Discard also run under the
 
 A take whose store is not ready (`ready` resolves `false`) records exactly as before. That
 covers no OPFS, no sync access handle, no Worker, no Web Locks, or a worker that did not
-answer within 5 s.
+answer within 5 s. It also covers a lock request the browser rejects (an opaque `file://`
+origin), and Safari before 17, whose draft sync access handle returns promises: the worker
+refuses to open on it rather than appending at byte 0.
 
 ## Who keeps or deletes the copy
 
@@ -88,7 +90,9 @@ go.
 
 `findUnfinishedTakes()` lists every take directory that no tab holds a lock on. It deletes,
 without asking, any directory whose journal is missing or invalid, or whose `primary.webm` is
-missing or empty: those takes died before their first frame. It returns the rest oldest first.
+missing or empty: those takes died before their first frame. A journal with another `version`
+(written by a newer or older CRAFT) is left alone, neither offered nor deleted. It returns the
+rest oldest first.
 
 `repairUnfinishedTake()` runs every part through two steps:
 
