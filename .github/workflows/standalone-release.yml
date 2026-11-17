@@ -104,7 +104,7 @@ jobs:
           # written to GITHUB_OUTPUT, so anything but a plain version stops the run
           # (ESCSUITE-476).
           for v in "$CRAFT_VERSION" "$ARTIST_VERSION" "$BASE_VERSION"; do
-            if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
               echo "::error::'$v' is not a plain version"
               exit 1
             fi
@@ -284,8 +284,10 @@ jobs:
   release:
     name: Create GitHub Release
     needs: prepare
-    # Release only for a push to main (never for PR builds or dev pushes)
-    if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.head_branch == 'main'
+    # Release only for a push to main (never for PR builds or dev pushes). is_pr is
+    # true only for a `pull_request` run, so the event is checked by name as well: a
+    # CI run from `pull_request_target` must never publish (ESCSUITE-476).
+    if: needs.prepare.outputs.is_pr == 'false' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # contents: write creates the release. id-token and attestations sign and

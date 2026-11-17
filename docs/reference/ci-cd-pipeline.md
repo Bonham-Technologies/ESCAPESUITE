@@ -296,7 +296,7 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   `standalone-release.yml` expands event payload text or a step or job output with `${{ }}`;
   those reach the script through `env:`. `standalone-release.yml`'s `prepare` reads the app
   versions from the triggering commit's `package.json` files, which a PR controls, and stops
-  unless each is a plain version (`X.Y.Z` or `X.Y.Z-pre`).
+  unless each is a plain version (`X.Y.Z` or `X.Y.Z-pre`). Its `release` job also requires the CI run's event to be `push`, so a `pull_request_target` run never publishes.
 - **Tests.** `scripts/oss-workflow-hardening.test.mjs` (in `pnpm test:scripts`) checks all of the
   above, plus `CODEOWNERS` covering `/.claude/` and the PR template's plain
   `Ticket: ESCSUITE-N` line.

@@ -180,6 +180,16 @@ test('standalone-release.yml rejects app versions that are not plain semver befo
   );
 });
 
+test('standalone-release.yml publishes only for a CI run triggered by a push (GA-3)', () => {
+  // is_pr is true only for `pull_request`, so a `pull_request_target` run of CI
+  // would otherwise count as a push; the release job names the event itself.
+  const release = jobs(standaloneReleaseYml).find((job) => job.name === 'release');
+  assert.ok(release, 'expected a release job');
+  const condition = release.text.match(/^ {4}if:(.*)$/m)?.[1] ?? '';
+  assert.match(condition, /github\.event\.workflow_run\.event == 'push'/);
+  assert.match(condition, /github\.event\.workflow_run\.head_branch == 'main'/);
+});
+
 test('CODEOWNERS covers /.claude/ (CF-5)', () => {
   const owners = read('.github/CODEOWNERS');
   assert.match(owners, /^\/\.claude\/\s+@\S+/m);
