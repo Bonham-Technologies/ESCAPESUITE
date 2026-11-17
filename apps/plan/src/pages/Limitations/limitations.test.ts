@@ -106,6 +106,8 @@ describe('LIMITATIONS', () => {
     expect(body).toMatch(/stored from script/)
     expect(body).toMatch(/does not document it as stopping the seven-day rule/)
     expect(body).toMatch(/may say no/)
+    // CRAFT shows no storage figure: the line sits under the recordings there.
+    expect(body).toMatch(/in ESCAPECRAFT under your recordings, in ESCAPEARTIST beside the storage figure/)
     expect(body).toContain('“Protected from automatic clean-up”')
     expect(body).toContain('“Your browser may delete these if it runs low on space; download what you want to keep.”')
     expect(body).not.toMatch(/guarantee/i)

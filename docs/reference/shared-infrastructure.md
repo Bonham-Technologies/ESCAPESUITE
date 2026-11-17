@@ -25,9 +25,10 @@
   save has been written, never on load (Firefox prompts, and wants a user action first): CRAFT
   after a take is stored (`useRecordingSave`), ARTIST after an import (`VideoUploader`) and after
   Save Project (`useProjectActions`). `useStoragePersisted()` (`@escapesuite/shared/hooks`) reads
-  on mount and re-renders on every re-read; both apps show `storagePersistenceMessage()` beside
-  their storage figure (CRAFT under the Recordings list once it holds a take, ARTIST in the media
-  library's storage bar). A granted request exempts the origin from storage-pressure eviction; MDN
+  on mount and re-renders on every re-read (only the newest read publishes, so a late mount read
+  cannot overwrite a save's); both apps show `storagePersistenceMessage()`: CRAFT under the
+  Recordings list once it holds a take (CRAFT shows no storage figure), ARTIST beside the storage
+  figure in the media library's storage bar. A granted request exempts the origin from storage-pressure eviction; MDN
   does not say it exempts it from Safari's seven-day rule, and the Limitations page says so.
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism

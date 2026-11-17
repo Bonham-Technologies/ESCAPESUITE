@@ -97,7 +97,7 @@ export const LIMITATIONS: Limitation[] = [
     title: 'Safari can delete stored recordings and projects after seven days away',
     body: [
       'Safari, with its cross-site tracking prevention on (the default), deletes the data a site has stored from script, which is where ESCAPECRAFT and ESCAPEARTIST keep your recordings and projects, once you have used Safari for seven days without clicking or tapping on that site. Other browsers delete stored data only when your device runs low on space, or when you clear it.',
-      'After your first saved recording or import in a visit, both apps ask the browser to keep their storage, and show its answer beside the storage figure: “Protected from automatic clean-up”, or “Your browser may delete these if it runs low on space; download what you want to keep.” Safari, Chrome and Edge answer by themselves without asking you, and may say no; Firefox asks you. A “protected” answer stops the clean-up when space runs low, but Safari does not document it as stopping the seven-day rule, so download or export anything you want to keep.',
+      'After your first saved recording, import or project save in a visit, both apps ask the browser to keep their storage, and show its answer (in ESCAPECRAFT under your recordings, in ESCAPEARTIST beside the storage figure in the media library): “Protected from automatic clean-up”, or “Your browser may delete these if it runs low on space; download what you want to keep.” Safari, Chrome and Edge answer by themselves without asking you, and may say no; Firefox asks you. A “protected” answer stops the clean-up when space runs low, but MDN does not document it as stopping the seven-day rule, so download or export anything you want to keep.',
     ],
     sources: [
       {

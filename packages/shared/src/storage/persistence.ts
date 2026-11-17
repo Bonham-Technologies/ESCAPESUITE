@@ -36,6 +36,9 @@ const listeners = new Set<() => void>()
 /** Set by the first request of this page load; later saves only re-read. */
 let requested = false
 
+/** Numbers each read, so an older one answering late is not published. */
+let latestRead = 0
+
 function publish(persisted: boolean): void {
   if (current === persisted) return
   current = persisted
@@ -61,13 +64,16 @@ export function subscribeStoragePersisted(listener: () => void): () => void {
  * when the API is missing or fails.
  */
 export async function readStoragePersisted(): Promise<boolean> {
+  // Only the newest read publishes: a mount read still pending when a save's
+  // request re-reads must not overwrite the newer answer if it lands last.
+  const read = ++latestRead
   let persisted: boolean
   try {
     persisted = (await navigator.storage?.persisted?.()) === true
   } catch {
     persisted = false
   }
-  publish(persisted)
+  if (read === latestRead) publish(persisted)
   return persisted
 }
 

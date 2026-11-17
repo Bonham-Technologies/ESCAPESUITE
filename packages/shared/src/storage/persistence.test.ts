@@ -167,6 +167,32 @@ describe('requestStoragePersistence', () => {
     await expect(persistence.requestStoragePersistence()).resolves.toBe(false)
     expect(persisted).toHaveBeenCalled()
   })
+
+  // A read started on mount can still be pending when a save's request
+  // re-reads; the older answer, if it lands last, must not overwrite the newer.
+  it('keeps the newest read when an older one answers late', async () => {
+    let persisted = false
+    let answerFirstRead!: (value: boolean) => void
+    let reads = 0
+    Object.defineProperty(navigator, 'storage', {
+      value: {
+        persist: vi.fn(async () => (persisted = true)),
+        persisted: vi.fn(() => {
+          reads += 1
+          if (reads === 1) return new Promise<boolean>((resolve) => { answerFirstRead = resolve })
+          return Promise.resolve(persisted)
+        }),
+      },
+      configurable: true,
+    })
+
+    const mountRead = persistence.readStoragePersisted()
+    expect(await persistence.requestStoragePersistence()).toBe(true)
+    answerFirstRead(false)
+    await mountRead
+
+    expect(persistence.getStoragePersisted()).toBe(true)
+  })
 })
 
 describe('subscribers', () => {
