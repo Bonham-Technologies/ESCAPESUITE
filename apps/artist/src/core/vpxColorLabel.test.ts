@@ -10,9 +10,10 @@
 // double, behind the export's own labeller, over keyframe headers taken from a
 // Firefox 155 export (ESCSUITE-279's `percolour.mp4` fixture at 1920x1080): it
 // pins that the header's colour field really is written from the report
-// (Firefox's own header carries 0, "unknown"), so a change to the labeller or
-// a mediabunny upgrade that rewrote the header itself would turn this red
-// rather than silently re-break Firefox and ffmpeg.
+// (Firefox's own header carries 0, "unknown"), so a change to the labeller
+// that stopped writing it, or wrote it from the report before the relabel,
+// would turn this red rather than silently re-break Firefox and ffmpeg.
+// (`exportWebM.test.ts` pins that the exporter routes every packet through it.)
 import { describe, it, expect } from 'vitest'
 import {
   BufferTarget,
