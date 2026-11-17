@@ -1,9 +1,12 @@
-<!-- Vendored from bonham-ops, policy v27. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v30. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: dependabot role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and `.claude/rules/autopilot.local.md` load in every session and apply here too.
 
 ## Dependabot
+
+**The event task** (BORG-101 pilot), started by a Dependabot PR opening, triages that PR alone. First, before **Main must stay green**, read **Control panel** (`.claude/autopilot/control-panel.md`): while `Builder paused`, stop there. Then check `main` (**Main must stay green**, step 1) only: if it is red, stop and leave the PR untriaged; the revert, the P1 ticket and **Reconcile** are the nightly run's. If the run can't tell which PR started it (a Run now, no event payload), stop and say so; never sweep.
+Go on only when that PR passes **Find them** (author `dependabot[bot]`, head repo this repo) with base `main`; otherwise stop without commenting, labelling or pushing (`public-repos.md`). It never folds, pushes to or closes another PR: it names a sibling PR for the same package or runtime in its triage comment and leaves step 2's fold to the nightly sweep.
 
 Run it as a sweep, one PR at a time: first every open Dependabot PR that fixes an open
 Dependabot alert, then the rest, oldest first within each group. A PR fixes an alert
@@ -25,7 +28,7 @@ gh api 'repos/{owner}/{repo}/pulls?state=open&per_page=100' \
 
 **Skip the triaged ones.** A PR is triaged when one of its comments starts with the
 marker line `<!-- autopilot:dependabot-triage -->` and was posted by the owner (`mrbonha`),
-as autopilot's comments are; no other author counts. The one exception: a triaged
+as autopilot's comments are; no other author counts. On a project with the event task, the sweep also skips an untriaged PR opened less than 2 hours ago. The one exception: a triaged
 PR whose verdict is `merge`, that is still open with no `needs-owner` label, and whose
 head is still the comment's `Head:` sha was waiting on CI or on auto-merge; for a major
 bump or a PR with pushed commits, the comment must also carry the `Review:` line of step
