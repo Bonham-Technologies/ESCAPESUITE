@@ -13,12 +13,16 @@ export const REPO_FILE_URL = `${GITHUB_URL}/blob/main/`
 /** The e2e spec that fails if the hosted build's record, edit and export path leaves the origin. */
 export const NETWORK_SILENCE_SPEC_URL = `${REPO_FILE_URL}apps/e2e/tests/production/network-silence.spec.ts`
 
+/** MDN's documentation, the one outside source: for a browser's own behaviour (ESCSUITE-468). */
+export const MDN_URL = 'https://developer.mozilla.org/en-US/docs/'
+
 export interface LimitationSource {
   /** What the reader sees: a file path, a ticket key or a ruling. */
   label: string
   /**
-   * A GitHub URL for a repository file, or a site path starting with `/` for a
-   * page on this site. Omitted for a ticket or ruling that has no public page.
+   * A GitHub URL for a repository file, a site path starting with `/` for a
+   * page on this site, or an MDN page (`MDN_URL`) for a browser's own
+   * behaviour. Omitted for a ticket or ruling that has no public page.
    */
   href?: string
 }
@@ -86,6 +90,22 @@ export const LIMITATIONS: Limitation[] = [
       repoFile('docs/reference/shared-infrastructure.md'),
       repoFile('apps/craft/src/core/storage.ts'),
       repoFile('apps/artist/src/core/storageErrors.ts'),
+    ],
+  },
+  {
+    id: 'safari-seven-day-eviction',
+    title: 'Safari can delete stored recordings and projects after seven days away',
+    body: [
+      'Safari, with its cross-site tracking prevention on (the default), deletes the data a site has stored from script, which is where ESCAPECRAFT and ESCAPEARTIST keep your recordings and projects, once you have used Safari for seven days without clicking or tapping on that site. Other browsers delete stored data only when your device runs low on space, or when you clear it.',
+      'After your first saved recording or import in a visit, both apps ask the browser to keep their storage, and show its answer beside the storage figure: “Protected from automatic clean-up”, or “Your browser may delete these if it runs low on space; download what you want to keep.” Safari, Chrome and Edge answer by themselves without asking you, and may say no; Firefox asks you. A “protected” answer stops the clean-up when space runs low, but Safari does not document it as stopping the seven-day rule, so download or export anything you want to keep.',
+    ],
+    sources: [
+      {
+        label: 'MDN: Storage quotas and eviction criteria',
+        href: `${MDN_URL}Web/API/Storage_API/Storage_quotas_and_eviction_criteria`,
+      },
+      repoFile('packages/shared/src/storage/persistence.ts'),
+      ticket('ESCSUITE-468'),
     ],
   },
   {
