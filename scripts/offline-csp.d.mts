@@ -27,6 +27,7 @@ export const NETWORK_SCHEMES: readonly string[]
 export const OFFLINE_CSP_EXTRA: Readonly<{ craft: CspExtra; artist: CspExtra }>
 export function scriptHash(text: string): string
 export function findScripts(html: string): FoundScript[]
+export function assertScriptBoundaries(html: string): void
 export function parseCsp(policy: string): CspDirective[]
 export function networkSources(policy: string): { directive: string; source: string }[]
 export function offlineCsp(options: { scriptHashes: readonly string[]; extra?: CspExtra }): string

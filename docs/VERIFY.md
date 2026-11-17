@@ -148,7 +148,8 @@ scanner such as `grype sbom:ESCAPEARTIST-<version>.spdx.json`.
 
 Each offline file (`ESCAPECRAFT-…html`, `ESCAPEARTIST-…html`) carries a Content-Security-Policy
 in a `<meta>` tag near the top of the file, before any script. The browser enforces it: the page
-may load only what is inside the file itself, and it may not contact any server. No directive
+may load only what is inside the file itself, and it may not fetch from, connect to or send to
+any server, with the exceptions under **What the policy does not block** below. No directive
 admits `http:`, `https:`, `ws:`, `wss:` or a host name, and there is no `'self'`.
 
 To read it, run this in the folder with the file (it prints one line, the tag):
@@ -193,6 +194,9 @@ itself loads and sends. It does not cover:
   ESCAPEARTIST, downloading a speech language pack for the language you picked. The browser
   downloads that pack itself; no page policy covers it. Without a network, transcription works
   only if the pack is already installed.
+- **WebRTC.** The policy has no directive for WebRTC peer-to-peer connections, which reach
+  other machines without a `fetch`. Neither offline app contains WebRTC code, so only code added
+  to the page from outside it, such as an extension's, could open one.
 - **Browser extensions.** An extension that can read pages can read this one and make its own
   requests.
 - **The rest of your computer.** The policy limits one browser tab. For a machine that must

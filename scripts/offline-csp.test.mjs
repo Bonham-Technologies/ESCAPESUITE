@@ -21,6 +21,7 @@ import { test } from 'node:test';
 import {
   NETWORK_SCHEMES,
   OFFLINE_CSP_EXTRA,
+  assertScriptBoundaries,
   findCspMetas,
   findScripts,
   injectOfflineCsp,
@@ -151,4 +152,23 @@ test('injectOfflineCsp refuses a page with no <meta charset> to anchor on', () =
 test('injectOfflineCsp refuses a page whose first script comes before <meta charset>', () => {
   const page = PAGE.replace('<head>', '<head>\n    <script>window.early=1</script>');
   assert.throws(() => injectOfflineCsp(page), /before the policy/);
+});
+
+test('findScripts reads a data-type attribute as no type: the script still runs and is hashed', () => {
+  const page = PAGE.replace('<script>window.a=1</script>', '<script data-type="x">window.a=1</script>');
+  assert.equal(findScripts(page)[0].executable, true);
+  const scriptSrc = parseCsp(findCspMetas(injectOfflineCsp(page))[0].policy).find((d) => d.name === 'script-src').sources;
+  assert.ok(scriptSrc.includes(scriptHash('window.a=1')));
+});
+
+test('injectOfflineCsp refuses a script whose end the browser would place elsewhere, rather than ship a wrong hash', () => {
+  // "<!--" then "<script" inside the code puts the parser in its double-escaped
+  // state, so the first </script> does not end the element.
+  const doubleEscaped = PAGE.replace('<script>window.a=1</script>', '<script>var s="<!--<script>";</script>window.a=1</script>');
+  assert.throws(() => assertScriptBoundaries(doubleEscaped), /would not match/);
+  assert.throws(() => injectOfflineCsp(doubleEscaped), /would not match/);
+  // A stray closing tag the scan could not pair with an opening one.
+  assert.throws(() => injectOfflineCsp(PAGE.replace('<title>t</title>', '<title>t</title></script>')), /would not match/);
+  // The real builds' shape passes: an escaped "<\/script" inside the code is fine.
+  assert.doesNotThrow(() => assertScriptBoundaries(PAGE));
 });

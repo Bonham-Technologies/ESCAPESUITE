@@ -6,7 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
-- Offline files: ESCAPECRAFT and ESCAPEARTIST now carry a Content-Security-Policy the browser enforces, so the downloaded page can load only what is inside the file and contact no server; a `?video=` address on a server is refused in the offline editor, and Verify your download and the Known limitations page say what the policy does not cover (ESCSUITE-467).
+- Offline files: ESCAPECRAFT and ESCAPEARTIST now carry a Content-Security-Policy the browser enforces, so the downloaded page can load only what is inside the file and fetch from or send to no server; a `?video=` address on a server is refused in the offline editor, and Verify your download and the Known limitations page say what the policy does not cover (ESCSUITE-467).
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
 - ESCAPEARTIST: the Remove silences dialog starts every opening from its default settings on its own, rather than relying on the editor to close it fully, so values typed in a cancelled session can never show beside pauses found with the defaults (ESCSUITE-463).
 - ESCAPEARTIST: a transcription that fails or is stopped the moment it starts no longer keeps updating its progress afterwards (ESCSUITE-461).

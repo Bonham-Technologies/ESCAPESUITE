@@ -123,6 +123,7 @@ describe('LIMITATIONS', () => {
     expect(body).toMatch(/link you click/)
     expect(body).toMatch(/speech language pack/)
     expect(body).toMatch(/extensions/)
+    expect(body).toMatch(/WebRTC/)
     expect(body).toMatch(/A video address on a server is refused/)
     expect(body).not.toMatch(/blocks (all|every) (network|connection)/i)
   })

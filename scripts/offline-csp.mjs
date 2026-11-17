@@ -97,7 +97,8 @@ export function scriptHash(text) {
 }
 
 const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi
-const NON_JS_TYPE = /\btype\s*=\s*["']?(?!module\b|text\/javascript\b|application\/javascript\b)[^"'\s>]+/i
+// `(?:^|\s)` rather than `\b`, so a `data-type=` attribute is not read as the type.
+const NON_JS_TYPE = /(?:^|\s)type\s*=\s*["']?(?!module\b|text\/javascript\b|application\/javascript\b)[^"'\s>]+/i
 
 /**
  * Every `<script>` element in `html`, in document order.
@@ -121,6 +122,34 @@ export function findScripts(html) {
     })
   }
   return scripts
+}
+
+/**
+ * Throw unless `findScripts` found the same `<script>` elements the browser's
+ * HTML parser will. Removing every element it found must leave no `<script`
+ * or `</script` behind: a leftover means a script's text did not end where
+ * this scan thought (for example a `<!--` … `<script` pair inside the code,
+ * which makes the parser skip the next `</script>`), so its hash would not be
+ * the one the browser computes and the offline file would open blank.
+ */
+export function assertScriptBoundaries(html) {
+  const rest = html.replace(SCRIPT_RE, '')
+  const stray = /<\/?script\b/i.exec(rest)
+  if (stray) {
+    throw new Error(
+      `[offline-csp] found a ${stray[0]} outside every <script> element this build could delimit ` +
+        `(near "${rest.slice(Math.max(0, stray.index - 40), stray.index + 40)}"); ` +
+        'its script hashes would not match what the browser runs.'
+    )
+  }
+  for (const { text } of findScripts(html)) {
+    if (/<!--/.test(text) && /<script[\s/>]/i.test(text)) {
+      throw new Error(
+        '[offline-csp] a <script> contains both "<!--" and "<script", which changes where the browser ends it; ' +
+          'its hash would not match what the browser runs.'
+      )
+    }
+  }
 }
 
 /** Parse a policy string into `{ name, sources }` directives, in order. */
@@ -206,12 +235,14 @@ function encodeAttribute(value) {
 /**
  * `html` with the offline policy injected as the first element after its
  * `<meta charset>`, ahead of every script. Throws if the page already has a
- * CSP `<meta>`, or loads any script from a separate file.
+ * CSP `<meta>`, loads any script from a separate file, or has a `<script>`
+ * whose end this scan cannot place exactly (`assertScriptBoundaries`).
  */
 export function injectOfflineCsp(html, { extra = {} } = {}) {
   if (findCspMetas(html).length > 0) {
     throw new Error('[offline-csp] the page already has a Content-Security-Policy <meta>; refusing to add a second.')
   }
+  assertScriptBoundaries(html)
   const scripts = findScripts(html).filter((script) => script.executable)
   const external = scripts.filter((script) => script.hasSrc)
   if (external.length > 0) {
