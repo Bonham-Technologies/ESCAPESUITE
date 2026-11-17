@@ -13,6 +13,7 @@ import { extractAndMixAudio } from './audioMixer'
 import { storeVideo } from './storage'
 import { elementSeekTarget } from './elementSeek'
 import {
+  fromEncodedChunk,
   getMediabunnyState,
   lastMediabunnyOutput,
   resetMediabunnyDouble,
@@ -1314,6 +1315,43 @@ describe('exportToWebM colour label (ESCSUITE-284)', () => {
     reportColourSpace(REPORTED)
     await run()
     expect(firstVideoMeta().decoderConfig?.colorSpace).toEqual(REPORTED)
+  })
+
+  // Mediabunny 1.66.0 dropped its muxer's `fixVP9ColorSpace`; the export's
+  // labeller writes the header now. Pins that the exporter really routes every
+  // VP9 packet through it, on every engine, after the relabel.
+  it.each([
+    ['Chromium', CHROMIUM_UA, 2], // CS_BT_709, as reported
+    ['Firefox', FIREFOX_UA, 3], // CS_SMPTE_170, as relabelled
+  ] as const)('on %s, writes the matrix into every VP9 key frame header, in a copy', async (_, ua, code) => {
+    engine(ua)
+    reportColourSpace(REPORTED)
+    const { EncodedPacket } = await vi.importActual<typeof import('mediabunny')>('mediabunny')
+    // A VP9 profile 0 key frame header whose color_space (bits 32-34) says 0, "unknown".
+    const keyframe = Uint8Array.from([0x82, 0x49, 0x83, 0x42, 0x00, 0x77, 0xf0, 0x43])
+    const handed: InstanceType<typeof EncodedPacket>[] = []
+    const original = fromEncodedChunk.getMockImplementation()!
+    fromEncodedChunk.mockImplementation((chunk) => {
+      const packet = new EncodedPacket(keyframe.slice(), chunk.type as 'key' | 'delta', handed.length / 30, 1 / 30)
+      handed.push(packet)
+      return packet as unknown as ReturnType<typeof original>
+    })
+    try {
+      await run()
+    } finally {
+      fromEncodedChunk.mockImplementation(original)
+    }
+
+    const added = getMediabunnyState().videoSources[0].packets.map(
+      ({ packet }) => packet as unknown as InstanceType<typeof EncodedPacket>
+    )
+    expect(added.length).toBeGreaterThan(1)
+    expect(added.some((packet) => packet.type === 'delta')).toBe(true)
+    for (const packet of added) {
+      expect(packet.data[4] >> 5).toBe(packet.type === 'key' ? code : 0)
+    }
+    // The encoder's bytes are never written into.
+    for (const packet of handed) expect(Array.from(packet.data)).toEqual(Array.from(keyframe))
   })
 })
 

@@ -19,6 +19,7 @@ import type {
   RecorderStopCallback,
   RecordingConfig,
 } from '../store/types';
+import { createVp9ColourSpaceStamper } from '@escapesuite/shared/utils';
 import { COMPANION_PARTS } from '../utils/companionParts';
 import { isWebCodecsRecordingSupported } from './webcodecsSupport';
 import { CAPTURE_FRAME_RATE } from './captureFrameRate';
@@ -1168,12 +1169,17 @@ export class WebCodecsRecorder {
     height: number,
     onEncoderError: (error: DOMException) => void
   ): Promise<VideoEncoder> {
+    // VP9 encoders leave the key frame header's colour field "unknown" and
+    // report the matrix only in the decoder configuration; Firefox's <video>
+    // and ffmpeg read the header. Mediabunny's muxer copied the report into it
+    // up to 1.65; from 1.66.0 this does.
+    const stampColourSpace = createVp9ColourSpaceStamper();
     const encoder = this.registerCodec(
       new VideoEncoder({
         output: async (chunk, meta) => {
           const source = sourceOf();
           if (source) {
-            await source.add(EncodedPacket.fromEncodedChunk(chunk), meta);
+            await source.add(stampColourSpace(EncodedPacket.fromEncodedChunk(chunk), meta), meta);
           }
         },
         error: onEncoderError,

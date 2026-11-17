@@ -343,6 +343,29 @@ describe('the storage-nearly-full warning', () => {
     })
   }
 
+  // ESCSUITE-468: the line saying whether the browser will keep the library.
+  // --text-muted on the plain bar, --text-secondary on the warning tint.
+  it('paints the persistence line with --text-muted, and --text-secondary on the warning tint', () => {
+    const sheet = moduleCss(UPLOADER)
+    expect(declaration(sheet, '.storagePersistence', 'color')).toBe('var(--text-muted)')
+    expect(declaration(sheet, '.storageWarning .storagePersistence', 'color')).toBe('var(--text-secondary)')
+  })
+
+  for (const palette of [DARK, LIGHT]) {
+    it(`keeps the persistence line at 4.5:1 on the plain bar and the warning tint (${palette})`, () => {
+      expect(
+        contrastRatio(token(palette, '--text-muted'), token(palette, '--bg-tertiary')),
+        `${palette} persistence line, plain bar`
+      ).toBeGreaterThanOrEqual(4.5)
+      for (const surface of ['--bg-primary', '--bg-secondary', '--bg-tertiary']) {
+        expect(
+          contrastRatio(token(palette, '--text-secondary'), over('#ff9800', 0.15, token(palette, surface))),
+          `${palette} persistence line on the warning tint over ${surface}`
+        ).toBeGreaterThanOrEqual(4.5)
+      }
+    })
+  }
+
   it('measured --text-muted under 4.5:1 on the dark warning tint, which is why it is swapped', () => {
     expect(contrastRatio(token(DARK, '--text-muted'), over('#ff9800', 0.15, token(DARK, '--bg-secondary')))).toBeLessThan(4.5)
   })

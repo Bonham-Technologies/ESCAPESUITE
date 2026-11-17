@@ -40,8 +40,9 @@ file and no fallback. WebM's shape now matches MP4's:
   `{ primaries: 'bt709', transfer: 'bt709', matrix: 'bt709', fullRange: false }`. Its own VP9
   keyframe headers say `color_space` 0, "unknown" (a bare encoder probe, at 1920x1080 and 160x120
   alike); the `color_space` 2 ESCSUITE-279 found in an exported file's headers was **mediabunny's**
-  write, not Firefox's: mediabunny's `fixVP9ColorSpace` rewrites every VP9 keyframe header's colour
-  field from the reported matrix, as well as writing the WebM Colour element from the whole report.
+  write, not Firefox's: mediabunny's `fixVP9ColorSpace` (up to 1.65) rewrote every VP9 keyframe
+  header's colour field from the reported matrix, as well as writing the WebM Colour element from the
+  whole report. Mediabunny 1.66.0 removed that rewrite; the export now does it itself (below).
   So one wrong report became two wrong labels, and every player honoured one of them — a Firefox WebM
   read back with colours up to about 25/255 off (a drawn (228,61,99) read (241,80,96)), and a
   nearest-colour match landed on a neighbouring palette entry for 9–10 of 45 frames, which is the
@@ -79,14 +80,24 @@ file and no fallback. WebM's shape now matches MP4's:
   155 was measured giving every time, for VP9 and VP8 at every size probed: `primaries`, `transfer`
   and `matrix` all `'bt709'` and `fullRange` `false` (review M1 narrowed it from the matrix alone).
   Any other report passes through by reference. Primaries, transfer and range stay as reported,
-  because Firefox converted sRGB pixels with the BT.601 *matrix*, not into BT.601 primaries. Mediabunny then writes Colour matrix 6 and, for VP9, header
-  `color_space` 3 on every keyframe — no keyframe-byte patching of our own. A Firefox export from the
-  patched exporter is byte-identical to the hand-patched "both, matrix only" row (VP9) and to its VP8
-  twin, and reads back at 0.81–0.92 / 3 in all three readers (VP8 1.11–1.2 / 5), 0 of 45 misread.
-  `vpxColorLabel.test.ts` runs the **real** mediabunny muxer over Firefox keyframe bytes and pins both
-  writes, so a mediabunny upgrade that stopped rewriting the VP9 header turns red rather than
-  silently re-breaking Firefox and ffmpeg. No per-frame work: delta chunks carry no decoder
-  configuration and pass through by reference, and `exportWebM.perf.test.ts` is unchanged.
+  because Firefox converted sRGB pixels with the BT.601 *matrix*, not into BT.601 primaries. Mediabunny then writes Colour matrix 6, and, for VP9,
+  the export writes header `color_space` 3 on every keyframe. That header write was mediabunny's
+  `fixVP9ColorSpace` until 1.66.0 dropped it; it is now `createVp9ColourSpaceStamper`
+  (`packages/shared/src/utils/vp9ColourSpace.ts`), which `createWebMVideoLabeller`
+  (`core/vpxColorLabel.ts`) runs on every VP9 export, every engine, after the relabel — the same
+  rewrite from the first decoder configuration's matrix, except that it copies the keyframe it
+  changes instead of writing into the packet, and leaves the header alone for a matrix VP9 has no
+  code for here or a `CS_RGB` header (mediabunny wrote 0 over the first and could shift the second's
+  bits). A Firefox export from the patched exporter is byte-identical to the hand-patched "both,
+  matrix only" row (VP9) and to its VP8 twin, and reads back at 0.81–0.92 / 3 in all three readers
+  (VP8 1.11–1.2 / 5), 0 of 45 misread (measured on mediabunny 1.65's rewrite; the port writes the
+  same bits). `vpxColorLabel.test.ts` runs the export's labeller and the **real** mediabunny muxer
+  over Firefox keyframe bytes and pins both writes, so a change to either that stopped labelling the
+  VP9 header turns red rather than silently re-breaking Firefox and ffmpeg. No per-frame work beyond
+  a 5-byte header read per keyframe: delta packets and unlabelled tracks pass through by reference,
+  and `exportWebM.perf.test.ts` is unchanged. ESCAPECRAFT's WebCodecs recorder runs the same stamper
+  on its VP9 tracks (`webcodecs-recorder.ts`'s `createVideoEncoder`), which had relied on the same
+  mediabunny rewrite.
 
   **Limits.** The gate is the measured engine and the measured report, all four fields of it. A
   Firefox that fixes its encoder and changes its report — converting with BT.709 and reporting sRGB

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { isEmbedded } from '@escapesuite/shared/config';
+import { useStoragePersisted } from '@escapesuite/shared/hooks';
 import { useRecorderStore } from '../../store/recorderStore';
 import { useMp4Download } from '../../hooks/useMp4Download';
 import { editorBlockedReasonFor } from '../../utils/sendToEditor';
@@ -49,6 +50,9 @@ export function RecordingsListPanel({
   onDelete,
 }: RecordingsListPanelProps) {
   const setNotice = useRecorderStore((s) => s.setNotice);
+  // ESCSUITE-468: whether the browser will keep the library, read on mount
+  // and again after every save (`useRecordingSave` asks after the first).
+  const storagePersisted = useStoragePersisted();
   // Selected here rather than in `App` for the same reason the conversion
   // state lives here: it is the library's gate and nothing above it draws it.
   // It is written once, by the capability bootstrap, so this panel re-renders
@@ -153,6 +157,7 @@ export function RecordingsListPanel({
       m4aBlockedReason={m4aBlockedReason}
       mp4Note={note}
       editorBlockedReason={editorBlockedReason}
+      storagePersisted={storagePersisted}
       onPlay={onPlay}
       onDownload={onDownload}
       onDownloadMp4={(id, name) => void startMp4Download(id, name)}
