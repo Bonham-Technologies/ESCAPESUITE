@@ -1203,3 +1203,20 @@
     top: 10px;
   }
 }
+
+/* The unfinished-take prompt (ESCSUITE-466): the help modal's shell, narrower. */
+.recoverContent {
+  max-width: 460px;
+}
+
+.recoverText {
+  margin: 0 0 1.25rem 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.recoverActions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: flex-end;
+}

@@ -10,7 +10,9 @@ header's existing `aria-live="polite" aria-atomic="true"` region, and
 `NO_SYSTEM_AUDIO`, `MIC_UNAVAILABLE`, `CAMERA_AND_MIC_UNAVAILABLE`, `MP4_SAVED_WITHOUT_AUDIO`, `UPLOAD_UNAVAILABLE`,
 `UPLOAD_NO_HOST_ORIGIN`,
 `SEPARATE_TRACK_NOT_SAVED`, `MP4_SAVED_WITHOUT_WEBCAM`, `DELETE_FAILED`,
-`RECORDING_UNAVAILABLE`,
+`RECORDING_UNAVAILABLE`, `TAKE_NOT_CRASH_PROTECTED`, `TAKE_PROTECTION_LOST`,
+`TAKE_STORAGE_FAILED`, `RECOVERY_FAILED`, `NOTHING_TO_RECOVER` (the crash-safe-takes set, see
+[`crash-safe-takes.md`](crash-safe-takes.md)),
 `captureFailed()`, `webcamUnavailable()` and `mp4ConversionFailed()` —
 so the vocabulary is readable in one place. `mp4ConversionFailed` is the one that takes an
 argument, because the browser's own words for why an encode failed are the useful half; it
@@ -122,3 +124,9 @@ row whose `getVideo()` read comes back with no `blob` returns from the conversio
 handing the converter nothing, which used to flash "Starting conversion… 0%" and silently return
 to idle with no file and nothing said — one MP4/M4A guard covers both formats, same as everything
 else in that hook.
+
+**`TAKE_NOT_CRASH_PROTECTED` only takes a free channel** (ESCSUITE-466). It says a take is being
+kept in memory only, because this browser will not keep it on the device. Every other start
+notice names something the take is actually missing, such as the microphone or the system
+audio. This one names only what a crash would cost, so it is set only if nothing else is
+showing when the take store answers.

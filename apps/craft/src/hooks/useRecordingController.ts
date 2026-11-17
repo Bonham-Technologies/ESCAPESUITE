@@ -32,6 +32,8 @@ import {
 import { CaptureRequestError, hasSystemAudio, stopStream } from '../core/permissions';
 import { AudioOutputUnavailableError } from '../core/audioContextStart';
 import { FrameCaptureUnavailableError } from '../core/frameCaptureVideo';
+import { createTakeStore, TakeStorageError, type TakeStore } from '../core/takeStore';
+import { v4 as uuidv4 } from 'uuid';
 import {
   AUDIO_UNAVAILABLE,
   VIDEO_CAPTURE_UNAVAILABLE,
@@ -45,6 +47,9 @@ import {
   SAVE_FAILED,
   START_FAILED,
   SEPARATE_TRACK_NOT_SAVED,
+  TAKE_NOT_CRASH_PROTECTED,
+  TAKE_PROTECTION_LOST,
+  TAKE_STORAGE_FAILED,
   type CaptureFailureReason,
 } from '../utils/notices';
 import { Compositor } from '../core/compositor';
@@ -234,6 +239,11 @@ export function useRecordingController({
   refreshStorageSpace,
 }: RecordingControllerDeps): RecordingController {
   const recorderRef = useRef<AnyRecorder | null>(null);
+  // The live take's copy on disk (ESCSUITE-466), set beside `recorderRef` and
+  // owned by whoever ends the take: a cancel deletes it, an error or a
+  // teardown keeps it for recovery, and a stop hands it to the save, which
+  // deletes it once the library has the take (see `settleTake`).
+  const takeStoreRef = useRef<TakeStore | null>(null);
   const durationIntervalRef = useRef<number | null>(null);
   const countdownIntervalRef = useRef<number | null>(null);
   // A recorder can flush its last chunk — and call onStop — after the take has
@@ -307,6 +317,19 @@ export function useRecordingController({
     }
   }, []);
 
+  /**
+   * Hand the live take's copy on disk to its fate and forget it: `keep` leaves
+   * it for the recovery prompt, otherwise it is deleted. Every exit that
+   * disposes the recorder decides one way or the other — a take the user
+   * threw away is deleted, one the app lost (an error, a crash, the page
+   * going away) is kept — so the rule is: keep unless the user said no.
+   */
+  const settleTake = useCallback((keep: boolean) => {
+    const store = takeStoreRef.current;
+    takeStoreRef.current = null;
+    if (store) void (keep ? store.release() : store.discard());
+  }, []);
+
   const clearCountdownTicker = useCallback(() => {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
@@ -358,6 +381,9 @@ export function useRecordingController({
     clearDurationTicker();
     clearCountdownTicker();
     disposeRecorder();
+    // The screen went away under a live take — a render crash or the page
+    // itself closing — which is exactly what the copy on disk is for.
+    settleTake(true);
     stopAllStreamsRef.current();
     zeroAudioLevels();
     // ESCSUITE-176: the frame `handleStopRecording` grabs is written before
@@ -375,7 +401,7 @@ export function useRecordingController({
     recorder.setState('idle');
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
-  }, [capturedThumbnailRef, clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearCountdownTicker, clearDurationTicker, disposeRecorder, settleTake, stopAllStreamsRef, zeroAudioLevels]);
 
   // Registered for as long as this component is mounted, so
   // `disposeLiveRecordingSession` has something to call from outside React —
@@ -400,13 +426,14 @@ export function useRecordingController({
     attemptRef.current = null;
     clearCountdownTicker();
     disposeRecorder();
+    settleTake(false);
     zeroAudioLevels();
     // ESCSUITE-176: see the unmount teardown's comment above — the same frame
     // would otherwise outlive a countdown nobody ever let finish.
     capturedThumbnailRef.current = null;
     setState('idle');
     stopAllStreams();
-  }, [capturedThumbnailRef, clearCountdownTicker, disposeRecorder, setState, stopAllStreams, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearCountdownTicker, disposeRecorder, settleTake, setState, stopAllStreams, zeroAudioLevels]);
 
   // Cancel recording
   const handleCancelRecording = useCallback(() => {
@@ -416,6 +443,7 @@ export function useRecordingController({
     attemptRef.current = null;
     clearDurationTicker();
     disposeRecorder();
+    settleTake(false);
     zeroAudioLevels();
     // ESCSUITE-176: see the unmount teardown's comment above.
     capturedThumbnailRef.current = null;
@@ -423,7 +451,7 @@ export function useRecordingController({
     setState('idle');
     setCurrentDuration(0);
     stopAllStreams();
-  }, [capturedThumbnailRef, clearDurationTicker, disposeRecorder, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
+  }, [capturedThumbnailRef, clearDurationTicker, disposeRecorder, settleTake, setState, setCurrentDuration, stopAllStreams, zeroAudioLevels]);
 
   // Pause recording
   const handlePauseRecording = useCallback(() => {
@@ -752,6 +780,32 @@ export function useRecordingController({
       // (ESCSUITE-118). `cancelledRef` alone cannot stand in for it — a start
       // resets that flag, so a live take B reads as "not cancelled" to a chunk
       // that was actually A's.
+      //
+      // The take is also kept on the device as it records (ESCSUITE-466): a
+      // store made here, before the recorder that writes into it, carrying
+      // everything the save path would need to store the take without this
+      // closure — the same facts `onStop` hands `saveRecording` below — so a
+      // take whose page died can be saved from its journal alone.
+      const recorderType = getRecorderType(isPiP, hasVideoSource, separateTracks);
+      const captured = {
+        micAcquired,
+        separateTracks,
+        systemAudioEnabled,
+        webcamEnabled,
+        overlayPlacement,
+        hasVideoSource,
+      };
+      const takeStore = createTakeStore({
+        version: 1,
+        takeId: uuidv4(),
+        startedAt: Date.now(),
+        recorder: recorderType,
+        captured,
+        systemAudioShared,
+      });
+      // Whether a frame or a sample was ever asked for: an error before that
+      // has nothing worth recovering, so its copy on disk is deleted.
+      let takeStarted = false;
       const me: AnyRecorder = createRecorder({
         onStart: () => {
           // A start from a recorder that is no longer current is stale — it was
@@ -759,6 +813,7 @@ export function useRecordingController({
           // flip the state back to 'recording' or open a second duration ticker
           // over the live one (ESCSUITE-118).
           if (recorderRef.current !== me) return;
+          takeStarted = true;
           setState('recording');
           analytics.recordingStarted();
           // Start duration timer
@@ -789,6 +844,12 @@ export function useRecordingController({
           // called from handleCancelRecording / cancelCountdown / the unmount
           // teardown), so a dropped stop has nothing left to write (ESCSUITE-114).
           if (recorderRef.current !== me) return;
+          // The copy on disk is the save's now: it is deleted once the library
+          // has the take, and kept for recovery if the save fails. Nothing that
+          // disposes the recorder later may touch it. (The guard above makes
+          // this take's store the one in the ref: the two are set and cleared
+          // together.)
+          takeStoreRef.current = null;
           // The take is over the instant this fires — whether it was asked
           // for or the recorder found out on its own (the capture ended) —
           // and neither recorder's monitor ever emits a zero of its own
@@ -828,14 +889,9 @@ export function useRecordingController({
           // the sidebar gives now, which is what the save path would otherwise
           // have to read for the mode (ESCSUITE-68) or for System Audio, the
           // webcam toggle and the overlay geometry (ESCSUITE-104).
-          saveRecording(blob, recordedDuration, companions, {
-            micAcquired,
-            separateTracks,
-            systemAudioEnabled,
-            webcamEnabled,
-            overlayPlacement,
-            hasVideoSource,
-          }).catch((err) => {
+          let saved = true;
+          saveRecording(blob, recordedDuration, companions, captured).catch((err) => {
+            saved = false;
             // The save hook rejects rather than swallowing: without this the
             // take would land back at 'idle' looking exactly like one that
             // had been stored. Said whatever the app is doing by now — the
@@ -866,6 +922,11 @@ export function useRecordingController({
             // writes a state on the way past. A stop that disposed the recorder
             // would have to write `'idle'` itself, or this guard would strand
             // every ordinary save in `'saving'`, which has no other way out.
+            //
+            // Before that guard: the copy on disk belongs to this take whatever
+            // the app is doing now (ESCSUITE-466). Stored, it is deleted; not
+            // stored, it is kept, and the recovery prompt offers it back.
+            void (saved ? takeStore.discard() : takeStore.release());
             if (recorderRef.current !== me) return;
             setState('idle');
           }).finally(() => {
@@ -882,8 +943,15 @@ export function useRecordingController({
           // ticker left running would reach zero and start a sourceless take,
           // and the recorder itself still holds an AudioContext and a level
           // monitor, so both go with the failed take.
+          //
+          // A take that had started is kept on the device for recovery
+          // (ESCSUITE-466): whatever failed, what was recorded before it is
+          // still the user's. One whose disk ran out says so — the recorder
+          // ended it for that reason, and the prompt that follows is why.
+          if (error instanceof TakeStorageError) setNotice(TAKE_STORAGE_FAILED);
           clearCountdownTicker();
           disposeRecorder();
+          settleTake(takeStarted);
           setState('idle');
           setCurrentDuration(0);
           stopAllStreams();
@@ -893,9 +961,26 @@ export function useRecordingController({
         // disposed recorder cannot still be mid-loop when this fires — there is
         // no late meter reading for the guard above to catch.
         onAudioLevels: setAudioLevels,
-      }, isPiP, hasVideoSource, separateTracks);
+      }, isPiP, hasVideoSource, separateTracks, takeStore);
       recorderRef.current = me;
-      recorderTypeRef.current = getRecorderType(isPiP, hasVideoSource, separateTracks);
+      takeStoreRef.current = takeStore;
+      recorderTypeRef.current = recorderType;
+      // Where the browser will not keep the take on the device, it records in
+      // memory as it always has — and says so, but only into a free channel:
+      // every other start notice names something the take is actually
+      // missing, and this one only what a crash would cost.
+      void takeStore.ready.then((kept) => {
+        if (kept || recorderRef.current !== me) return;
+        if (useRecorderStore.getState().notice === null) setNotice(TAKE_NOT_CRASH_PROTECTED);
+      });
+      // A MediaRecorder take keeps its own copy in memory, so a disk that
+      // fails mid-take costs it only its protection. (The WebCodecs recorder
+      // writes nowhere else, and ends the take itself — see its onError.)
+      if (recorderType === 'mediarecorder') {
+        takeStore.onFailure(() => {
+          if (recorderRef.current === me) setNotice(TAKE_PROTECTION_LOST);
+        });
+      }
 
       // This avoids canvas.captureStream() issues with hidden video elements
       let recordingScreen: MediaStream | null = screen;
@@ -989,6 +1074,8 @@ export function useRecordingController({
       // the AudioContext before discovering it has no tracks — so a failed
       // start leaks exactly what a cancelled countdown used to.
       disposeRecorder();
+      // Nothing was recorded, so nothing is kept.
+      settleTake(false);
       setState('idle');
       stopAllStreams();
     } finally {
@@ -1005,6 +1092,7 @@ export function useRecordingController({
     clearDurationTicker,
     config,
     disposeRecorder,
+    settleTake,
     setState,
     setStreams,
     setCurrentDuration,

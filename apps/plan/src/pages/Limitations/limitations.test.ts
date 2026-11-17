@@ -30,6 +30,7 @@ describe('LIMITATIONS', () => {
     // ESCSUITE-445
     ['transcribe-captions', 'apps/artist/docs/reference/on-device-transcription.md'],
     ['float-controls', 'apps/craft/src/hooks/useFloatingControlsWindow.ts'],
+    ['unfinished-recordings', 'apps/craft/docs/reference/crash-safe-takes.md'],
   ])('lists %s with its source document %s', (id, path) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation).toBeDefined()
@@ -43,6 +44,7 @@ describe('LIMITATIONS', () => {
     ['safari-private-browsing', 'ESCSUITE-397'],
     ['transcribe-captions', 'ESCSUITE-404'],
     ['float-controls', 'ESCSUITE-400'],
+    ['unfinished-recordings', 'ESCSUITE-466'],
   ])('lists %s with its ticket %s', (id, ticket) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation!.sources.some((s) => s.label.startsWith(ticket))).toBe(true)

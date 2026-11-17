@@ -10,6 +10,7 @@ import { useRecordingController } from './hooks/useRecordingController';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useRecordingLibrary } from './hooks/useRecordingLibrary';
 import { useFloatingControlsWindow } from './hooks/useFloatingControlsWindow';
+import { useTakeRecovery } from './hooks/useTakeRecovery';
 import { recordBlockedReason } from './utils/recordReadiness';
 import { AppHeader } from './components/AppHeader/AppHeader';
 import type { RecordingSource } from './components/SourceToggles/SourceToggles';
@@ -21,6 +22,7 @@ import { RecorderControls } from './components/RecorderControls/RecorderControls
 import { FloatingControls } from './components/RecorderControls/FloatingControls';
 import { PlaybackDialog } from './components/PlaybackDialog/PlaybackDialog';
 import { HelpDialog } from './components/HelpDialog/HelpDialog';
+import { RecoverTakeDialog } from './components/RecoverTakeDialog/RecoverTakeDialog';
 
 function App() {
   // One selector per field, not a whole-store `useRecorderStore()`: a
@@ -167,6 +169,20 @@ function App() {
     handleDownload,
   } = useRecordingLibrary({ recordings, removeRecording, refreshStorageSpace, setNotice });
 
+  // A take whose page died before Stop, kept on the device as it recorded,
+  // offered back while the app is idle (ESCSUITE-466). Its effects scan the
+  // device and listen for a take this tab leaves behind; neither touches
+  // anything the hooks above own.
+  const { pendingTake, recover, discard, dismiss } = useTakeRecovery({
+    state,
+    saveRecording,
+    setState,
+    setNotice,
+    refreshStorageSpace,
+  });
+  // The prompt waits behind the other two dialogs rather than stacking on them.
+  const showRecoverPrompt = pendingTake !== null && !showHelpModal && playbackUrl === null;
+
   // The "Float controls" Picture-in-Picture window (ESCSUITE-400). It registers
   // its own effects (theme mirroring, closing the window on unmount), which
   // touch nothing the hooks above own; it is called here because the
@@ -181,7 +197,7 @@ function App() {
     // useRecordingLibrary owns playbackUrl, which is why it is called above
     // rather than last; it registers no effect, so the effect order the
     // comment above describes is unchanged.
-    modalOpen: showHelpModal || playbackUrl !== null,
+    modalOpen: showHelpModal || playbackUrl !== null || showRecoverPrompt,
     handleStartRecording,
     handlePauseRecording,
     handleResumeRecording,
@@ -302,6 +318,17 @@ function App() {
           duration={playbackDuration}
           mediaType={playbackMediaType}
           onClose={handleClosePlayback}
+        />
+      )}
+
+      {/* An unfinished take from a page that died (ESCSUITE-466) */}
+      {showRecoverPrompt && (
+        <RecoverTakeDialog
+          startedAt={pendingTake.journal.startedAt}
+          size={pendingTake.size}
+          onRecover={() => void recover()}
+          onDiscard={() => void discard()}
+          onClose={dismiss}
         />
       )}
 

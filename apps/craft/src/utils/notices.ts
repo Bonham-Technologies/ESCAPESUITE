@@ -280,3 +280,39 @@ export const DELETE_FAILED =
  */
 export const RECORDING_UNAVAILABLE =
   'That recording could not be read from your library — its file is no longer in storage.'
+
+// Crash-safe takes (ESCSUITE-466): see `core/takeStore.ts`.
+
+/**
+ * A take is starting and this browser will not let it be kept on the device
+ * as it records (no OPFS sync access handle: Safari Private Browsing, some
+ * `file://` pages). The take records exactly as before, in memory. Raised
+ * only when nothing else is being said: every other start notice names
+ * something the take is missing, this one only what a crash would cost.
+ */
+export const TAKE_NOT_CRASH_PROTECTED =
+  'This recording is kept in memory only: if the tab closes or crashes before you stop, it is lost.'
+
+/**
+ * A MediaRecorder take whose copy on the device stopped being written
+ * mid-take (most likely the storage quota). It keeps recording in memory.
+ */
+export const TAKE_PROTECTION_LOST =
+  'This recording is no longer being kept on your device as it records: if the tab closes or crashes before you stop, it is lost.'
+
+/**
+ * A WebCodecs take, which records straight to the device, could not write
+ * any more (most likely the storage quota), or its files could not be read
+ * back at Stop. The take is ended and what reached the disk is offered for
+ * recovery.
+ */
+export const TAKE_STORAGE_FAILED =
+  'Recording stopped: it could no longer be written to this device, most likely because its storage is full. What was recorded until then can be recovered.'
+
+/** Recover was chosen and the take's files would not repair or store. */
+export const RECOVERY_FAILED =
+  'The unfinished recording could not be recovered. It is still on this device, so you can try again or discard it.'
+
+/** Recover was chosen and the take held no whole frame or sound. */
+export const NOTHING_TO_RECOVER =
+  'The unfinished recording held nothing that could be played, so it was discarded.'

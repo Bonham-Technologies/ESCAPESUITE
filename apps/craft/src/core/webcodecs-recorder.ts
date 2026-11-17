@@ -7,6 +7,7 @@
 import {
   Output,
   BufferTarget,
+  StreamTarget,
   WebMOutputFormat,
   EncodedVideoPacketSource,
   EncodedAudioPacketSource,
@@ -26,6 +27,7 @@ import { newFrameTiming, stampFrame, type FrameTiming } from './frameTiming';
 import { createAudioCapture, type AudioCapture, type AudioCaptureOptions } from './audioWorkletCapture';
 import { startAudioContext } from './audioContextStart';
 import { openFrameCaptureVideo, releaseFrameCaptureVideo, type FrameCaptureVideo } from './frameCaptureVideo';
+import { detachFromDisk, TakeStorageError, type TakeFiles, type TakePart, type TakeStore } from './takeStore';
 
 // Moved to `webcodecsSupport.ts` so a component can ask without importing the
 // muxer; re-exported here because this is where every caller imports it from.
@@ -43,6 +45,28 @@ export interface WebCodecsRecorderCallbacks {
   onStop?: RecorderStopCallback;
   onError?: (error: Error) => void;
   onAudioLevels?: (levels: AudioLevels) => void;
+}
+
+export interface WebCodecsRecorderOptions {
+  /**
+   * Where the take is kept on disk as it records (ESCSUITE-466). When it is
+   * ready, every output muxes into it through a `StreamTarget` instead of a
+   * `BufferTarget`, so nothing the take records stays in the page's memory
+   * and `onStop` delivers `File`s read back from disk. When it is not, the
+   * take is muxed into memory exactly as before. The controller owns it.
+   */
+  takeStore?: TakeStore | null;
+}
+
+/** Where a Mediabunny output writes: memory, or the take's file on disk. */
+type MuxTarget = BufferTarget | StreamTarget;
+
+/** A companion that finalized, waiting for its bytes to be read back. */
+interface FinishedCompanion {
+  role: CompanionRole;
+  kind: 'video' | 'audio';
+  target: MuxTarget;
+  duration?: number;
 }
 
 // Type for MediaStreamTrackProcessor (not yet in TypeScript lib)
@@ -108,7 +132,7 @@ const CONTEXT_CLOCK_REFRESH_MS = 2000;
 interface CompanionPipelineBase {
   readonly role: CompanionRole;
   output: Output | null;
-  target: BufferTarget | null;
+  target: MuxTarget | null;
   /**
    * Units this pipeline encoded — video frames, or audio buffers. 0 means
    * there is nothing worth storing: an empty row in the library and a second
@@ -218,7 +242,10 @@ export class WebCodecsRecorder {
   private videoEncoder: VideoEncoder | null = null;
   private audioEncoder: AudioEncoder | null = null;
   private output: Output | null = null;
-  private target: BufferTarget | null = null;
+  private target: MuxTarget | null = null;
+  private readonly takeStore: TakeStore | null;
+  /** Whether this take's outputs write to `takeStore` rather than memory. */
+  private durable = false;
   private videoSource: EncodedVideoPacketSource | null = null;
   private audioSource: EncodedAudioPacketSource | null = null;
 
@@ -365,8 +392,9 @@ export class WebCodecsRecorder {
   // Track ended handlers
   private trackEndedHandlers: Map<MediaStreamTrack, () => void> = new Map();
 
-  constructor(callbacks: WebCodecsRecorderCallbacks = {}) {
+  constructor(callbacks: WebCodecsRecorderCallbacks = {}, options: WebCodecsRecorderOptions = {}) {
     this.callbacks = callbacks;
+    this.takeStore = options.takeStore ?? null;
   }
 
   /**
@@ -549,8 +577,28 @@ export class WebCodecsRecorder {
     this.videoTrack.addEventListener('ended', handler);
     this.trackEndedHandlers.set(this.videoTrack, handler);
 
+    // Keep the take on disk where the browser lets us (ESCSUITE-466). Asked
+    // before the first output exists, because it decides which target every
+    // output of the take writes to. `ready` never rejects.
+    if (this.takeStore) {
+      this.durable = await this.takeStore.ready;
+      this.abortIfDisposed();
+      // A write that fails mid-take means the bytes from then on are going
+      // nowhere: the take cannot be finished, so it is ended now and whatever
+      // reached the disk is left for recovery. Once stop() is under way it
+      // reads the store's own answer instead, and an onError in that window
+      // would dispose the muxer mid-finalize.
+      if (this.durable) {
+        this.takeStore.onFailure((error) => {
+          if (!this.disposed && (this.isRecordingActive || !this.hasStarted)) {
+            this.callbacks.onError?.(error);
+          }
+        });
+      }
+    }
+
     // Set up Mediabunny output
-    const primary = this.createVideoOutput();
+    const primary = this.createVideoOutput('primary');
     this.target = primary.target;
     this.output = primary.output;
     this.videoSource = primary.packetSource;
@@ -692,7 +740,7 @@ export class WebCodecsRecorder {
     // here means the catch below has exactly two definite things to release —
     // the camera and the output — rather than a set of maybes.
     const reader = new MediaStreamTrackProcessor({ track }).readable.getReader();
-    const { output, target, packetSource } = this.createVideoOutput();
+    const { output, target, packetSource } = this.createVideoOutput('webcam');
 
     let companion: VideoCompanionPipeline;
     try {
@@ -838,7 +886,7 @@ export class WebCodecsRecorder {
     // Built before the guarded section, exactly as the webcam companion's is:
     // nothing here can fail on its own, and holding the output out here means
     // the catch below has one definite thing to release.
-    const { output, target, packetSource } = this.createAudioOutput();
+    const { output, target, packetSource } = this.createAudioOutput(role);
     let companion: AudioCompanionPipeline;
 
     try {
@@ -1029,8 +1077,8 @@ export class WebCodecsRecorder {
    * warning on purpose — the primary blob is the take, and losing it because a
    * companion's finalize threw would be the worse outcome by far.
    */
-  private async finalizeCompanions(): Promise<CompanionPart[]> {
-    const parts: CompanionPart[] = [];
+  private async finalizeCompanions(): Promise<FinishedCompanion[]> {
+    const finished: FinishedCompanion[] = [];
     for (const companion of this.companions) {
       // Both non-null for every companion on this list: only `cleanup()` nulls
       // them, and it runs after this.
@@ -1044,16 +1092,10 @@ export class WebCodecsRecorder {
       }
       try {
         await output.finalize();
-        const buffer = companion.target!.buffer;
-        if (!buffer) continue;
-        parts.push({
+        finished.push({
           role: companion.role,
-          blob: new Blob([buffer], {
-            type: companion.kind === 'video' ? 'video/webm' : 'audio/webm',
-          }),
-          // 0 for every pipeline in this build: one clock, one start(), every
-          // first unit stamped from the same origin.
-          startOffset: 0,
+          kind: companion.kind,
+          target: companion.target!,
           // An audio part says how long it is, because it can be shorter than
           // the take: its track may have ended early (ESCSUITE-318). The
           // webcam part's file is probed for its length at save.
@@ -1068,6 +1110,51 @@ export class WebCodecsRecorder {
         );
       }
     }
+    return finished;
+  }
+
+  /**
+   * A finished output's bytes as a Blob: the `BufferTarget`'s buffer, or the
+   * take's file read back from disk. Null when there is nothing — a muxer that
+   * wrote no buffer, or a part whose file the store could not hand back.
+   */
+  private async blobOf(
+    target: MuxTarget,
+    part: TakePart,
+    type: string,
+    files: TakeFiles | null
+  ): Promise<Blob | null> {
+    if (!this.durable) {
+      const buffer = (target as BufferTarget).buffer;
+      return buffer ? new Blob([buffer], { type }) : null;
+    }
+    // Copied off the disk, a chunk at a time, rather than handed on as a Blob
+    // over the File: IndexedDB would store that by reference, and the
+    // controller deletes the file once the library has the take.
+    const file = files?.[part];
+    return file && file.size > 0 ? detachFromDisk(file, type) : null;
+  }
+
+  /** The companions that finalized, as the parts `onStop` delivers. */
+  private async partsOf(finished: FinishedCompanion[], files: TakeFiles | null): Promise<CompanionPart[]> {
+    const parts: CompanionPart[] = [];
+    for (const companion of finished) {
+      const blob = await this.blobOf(
+        companion.target,
+        companion.role,
+        companion.kind === 'video' ? 'video/webm' : 'audio/webm',
+        files
+      );
+      if (!blob) continue;
+      parts.push({
+        role: companion.role,
+        blob,
+        // 0 for every pipeline in this build: one clock, one start(), every
+        // first unit stamped from the same origin.
+        startOffset: 0,
+        ...(companion.duration !== undefined ? { duration: companion.duration } : {}),
+      });
+    }
     return parts;
   }
 
@@ -1076,12 +1163,12 @@ export class WebCodecsRecorder {
    * then starts it, because the primary output mixes audio in and the webcam
    * companion does not.
    */
-  private createVideoOutput(): {
+  private createVideoOutput(part: TakePart): {
     output: Output;
-    target: BufferTarget;
+    target: MuxTarget;
     packetSource: EncodedVideoPacketSource;
   } {
-    const target = new BufferTarget();
+    const target = this.createTarget(part);
     const output = new Output({ format: new WebMOutputFormat(), target });
     const packetSource = new EncodedVideoPacketSource('vp9');
     output.addVideoTrack(packetSource, { frameRate: this.frameRate });
@@ -1094,17 +1181,26 @@ export class WebCodecsRecorder {
    * ARTIST read path and CRAFT's own converter are single-track by
    * construction, which is the whole reason an audio companion is its own file.
    */
-  private createAudioOutput(): {
+  private createAudioOutput(part: TakePart): {
     output: Output;
-    target: BufferTarget;
+    target: MuxTarget;
     packetSource: EncodedAudioPacketSource;
   } {
-    const target = new BufferTarget();
+    const target = this.createTarget(part);
     const output = new Output({ format: new WebMOutputFormat(), target });
     const packetSource = new EncodedAudioPacketSource('opus');
     output.addAudioTrack(packetSource);
     this.outputs.push(output);
     return { output, target, packetSource };
+  }
+
+  /**
+   * The target one part muxes into: its file in the take store when the take
+   * is kept on disk, memory otherwise. Unchunked, so each Cluster reaches the
+   * store as soon as Mediabunny has written it.
+   */
+  private createTarget(part: TakePart): MuxTarget {
+    return this.durable ? new StreamTarget(this.takeStore!.writable(part)) : new BufferTarget();
   }
 
   /**
@@ -1648,16 +1744,25 @@ export class WebCodecsRecorder {
         await this.output.finalize();
       }
 
-      const parts = await this.finalizeCompanions();
+      const finished = await this.finalizeCompanions();
+
+      // Every output is finalized, so every byte has been handed to the store:
+      // close its files and read them back. Null when the store failed, which
+      // leaves no primary to deliver.
+      const files = this.durable ? await this.takeStore!.finish() : null;
+      const parts = await this.partsOf(finished, files);
 
       // Get the result blob
-      const buffer = this.target?.buffer;
-      if (buffer) {
-        const blob = new Blob([buffer], { type: 'video/webm' });
+      const blob = this.target ? await this.blobOf(this.target, 'primary', 'video/webm', files) : null;
+      if (blob) {
         // A list, because a take can have up to three companions — and `null`
         // rather than `[]` for none, because that is what an ordinary take has
         // always delivered on this callback.
         this.callbacks.onStop?.(blob, parts.length > 0 ? parts : null);
+      } else if (this.durable && !files) {
+        // The store failed or could not hand its files back: the take is not
+        // lost, it is on disk for recovery, and the error says which.
+        this.callbacks.onError?.(new TakeStorageError('its files could not be read back'));
       } else {
         this.callbacks.onError?.(new Error('Recording failed: no data was written'));
       }

@@ -19,7 +19,10 @@ the outcome, not on the double.
   converter build on it), `webcodecs.ts` (`VideoEncoder`, `AudioEncoder`, `VideoDecoder`,
   `VideoFrame`, `AudioData`), `mediabunny.ts` (the muxer, recorded rather than run),
   `documentPictureInPicture.ts` (`window.documentPictureInPicture`, each window a real jsdom
-  iframe whose `close()` fires `pagehide`, plus a counted page `window.focus()`; ESCSUITE-400) and
+  iframe whose `close()` fires `pagehide`, plus a counted page `window.focus()`; ESCSUITE-400),
+  `opfs.ts` (an in-memory origin private file system with sync access handles, Web Locks, and
+  a `Worker` that runs the take store's real worker source in-process; ESCSUITE-466),
+  `takeStore.ts` (a recording `createTakeStore` for the controller and App suites) and
   `browser.ts` (the prototype-level gaps `installBrowserStubs()` fills — media playback,
   navigation from an anchor click, `window.open`).
 - **`src/test/appDoubles.ts`** — the collaborator modules the `App.*.test.tsx` files hand to

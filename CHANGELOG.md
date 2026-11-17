@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPECRAFT: a recording is kept on your device while it records, so one whose tab closed or crashed, or that ended in an error, is offered back for recovery the next time ESCAPECRAFT opens. Where the browser cannot keep it, a notice says the recording is in memory only (ESCSUITE-466).
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
 - ESCAPEARTIST: the Remove silences dialog starts every opening from its default settings on its own, rather than relying on the editor to close it fully, so values typed in a cancelled session can never show beside pauses found with the defaults (ESCSUITE-463).
 - ESCAPEARTIST: a transcription that fails or is stopped the moment it starts no longer keeps updating its progress afterwards (ESCSUITE-461).

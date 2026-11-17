@@ -89,6 +89,22 @@ export const LIMITATIONS: Limitation[] = [
     ],
   },
   {
+    id: 'unfinished-recordings',
+    title: 'Recovering an unfinished recording: what it needs and what it can lose',
+    body: [
+      'ESCAPECRAFT keeps each recording on your device while it records, in the browser’s private storage for the site. If the tab closes or crashes, or the recording ends in an error before it is saved, ESCAPECRAFT offers it back the next time you open it. You can then recover what was recorded into your library, or discard it.',
+      'A recovered recording can be missing its last few seconds. The recording is written to the device about once a second and made safe on disk every 2 seconds, so a tab that closes or crashes can lose the last second or so, and a power cut or computer crash a little more.',
+      'It needs a browser that lets the page write to the site’s private storage from the background. Where it cannot, for example in some private windows or when ESCAPECRAFT is opened as a file on your computer, ESCAPECRAFT records in memory as before and says the recording is not protected if the tab closes.',
+      'While a recording is being saved it briefly takes about twice its size in storage: the copy kept while recording is deleted once the recording is in your library. If storage runs out during a recording, ESCAPECRAFT says so. Depending on the kind of recording, it either stops and offers back what was recorded, or keeps recording in memory without this protection.',
+      'Clearing your browser’s data for the site deletes an unfinished recording too. Nothing is uploaded: the copy stays on your device.',
+    ],
+    sources: [
+      repoFile('apps/craft/docs/reference/crash-safe-takes.md'),
+      repoFile('apps/craft/src/core/takeStore.ts'),
+      ticket('ESCSUITE-466'),
+    ],
+  },
+  {
     id: 'safari-private-browsing',
     title: 'Safari Private Browsing keeps nothing',
     body: [

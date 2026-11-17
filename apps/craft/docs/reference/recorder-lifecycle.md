@@ -553,3 +553,17 @@ off and only the microphone on — which `recordReadiness.ts` allows — was the
 `companionPartFor` could never see, because a plain take's primary carries no `role` at all: it was
 stored exactly like a screen recording, and ESCAPEARTIST placed it on a video track with a picture
 that never came.
+
+## The take's copy on the device (ESCSUITE-466)
+
+Every take also gets a take store (`core/takeStore.ts`), created in `handleStartRecording` just
+before the recorder that writes into it, and handed to `createRecorder` as its fifth argument.
+`takeStoreRef` is set and cleared together with `recorderRef`. Every exit that disposes the
+recorder also settles the store, through `settleTake(keep)`:
+
+- the copy is **deleted** when the user threw the take away, or when nothing had started;
+- it is **kept** for the recovery prompt whenever the app lost the take.
+
+A stopped take's store belongs to the save chain. The chain deletes the copy once
+`saveRecording` resolves and keeps it if the save rejects. The full table and the reasons are
+in [`crash-safe-takes.md`](crash-safe-takes.md).

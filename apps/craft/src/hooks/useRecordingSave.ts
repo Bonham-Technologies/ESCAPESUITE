@@ -60,6 +60,19 @@ const NOTHING_CAPTURED: CapturedTake = {
   hasVideoSource: true,
 };
 
+/**
+ * A take recovered from the device after its page died (ESCSUITE-466),
+ * rather than one the recorder just finished. Its file is already repaired
+ * (`core/takeRecovery.ts`), its date is when it was recorded, and the two
+ * facts this hook would otherwise read from the live session — the preview's
+ * thumbnail and the store's `systemAudioShared` — belong to whatever this tab
+ * is doing now, so they come from the take's journal instead.
+ */
+export interface RecoveredSave {
+  createdAt: number;
+  systemAudioShared: boolean;
+}
+
 /** Save a finished take. `recordedDuration` is what the recorder timed. */
 export type SaveRecording = (
   rawBlob: Blob,
@@ -74,7 +87,9 @@ export type SaveRecording = (
    * this hook has no `config` of its own to fall back on. Optional so the
    * three-argument call still reads — see `NOTHING_CAPTURED`.
    */
-  captured?: CapturedTake
+  captured?: CapturedTake,
+  /** Set for a take recovered from the device — see `RecoveredSave`. */
+  recovered?: RecoveredSave
 ) => Promise<void>;
 
 export function useRecordingSave({
@@ -89,14 +104,18 @@ export function useRecordingSave({
     rawBlob: Blob,
     recordedDuration: number,
     companions?: CompanionPart[] | null,
-    captured: CapturedTake = NOTHING_CAPTURED
+    captured: CapturedTake = NOTHING_CAPTURED,
+    recovered?: RecoveredSave
   ) => {
     setState('saving');
 
     // No catch: a save that failed is the caller's to report. Swallowing it
     // here left the controller setting 'idle' as if the take had been stored.
     let blob: Blob;
-    if (recorderTypeRef.current === 'webcodecs') {
+    if (recovered) {
+      // Repaired by the recovery path, part by part, before it got here.
+      blob = rawBlob;
+    } else if (recorderTypeRef.current === 'webcodecs') {
       // WebCodecs output is already a proper WebM with Cues — no fix needed
       blob = rawBlob;
     } else {
@@ -124,7 +143,7 @@ export function useRecordingSave({
     const metadata = captured.hasVideoSource
       ? await extractVideoMetadata(blob, recordedDuration) // Pass the known duration since WebM from MediaRecorder often has issues
       : { duration: recordedDuration, width: 0, height: 0 };
-    const now = Date.now();
+    const now = recovered ? recovered.createdAt : Date.now();
 
     // A take with no picture has nothing to decode a thumbnail from either —
     // same reasoning as the metadata probe above, and the same contract an
@@ -133,8 +152,9 @@ export function useRecordingSave({
     let thumbnail: Blob | null = null;
     if (captured.hasVideoSource) {
       // Use pre-captured thumbnail from live preview (more reliable than from blob)
-      // Fall back to generating from blob if capture failed
-      thumbnail = capturedThumbnailRef.current;
+      // Fall back to generating from blob if capture failed. A recovered take
+      // has no preview: the frame in the ref, if any, is this tab's.
+      thumbnail = recovered ? null : capturedThumbnailRef.current;
       if (!thumbnail) {
         try {
           thumbnail = await generateThumbnail(blob);
@@ -144,7 +164,7 @@ export function useRecordingSave({
         }
       }
     }
-    capturedThumbnailRef.current = null; // Clear for next recording
+    if (!recovered) capturedThumbnailRef.current = null; // Clear for next recording
 
     // Use recorded duration if metadata extraction failed. Both halves matter:
     // `> 0` rejects the zero a failed extraction reports, and `isFinite`
@@ -189,7 +209,9 @@ export function useRecordingSave({
     // `App`, and a subscription here would re-render the whole screen on a
     // field the save path reads once. Still the streams' answer rather than the
     // blob's — reading the file back would mean a decode on the save path.
-    const { systemAudioShared } = useRecorderStore.getState();
+    const systemAudioShared = recovered
+      ? recovered.systemAudioShared
+      : useRecorderStore.getState().systemAudioShared;
     // `resolveHasAudio` still takes `systemAudioEnabled` as its own argument
     // rather than reading it off `captured` itself — deliberately narrow
     // (`Pick<CapturedTake, 'micAcquired'>`, `utils/recordingMetadata.ts`)

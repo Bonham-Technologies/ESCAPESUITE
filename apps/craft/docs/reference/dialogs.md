@@ -32,7 +32,9 @@ Its own tests moved with it (`packages/shared/src/hooks/useDialogBehaviour.test.
 
 Stopping Escape is not enough on its own, because R, P and S never reach the dialog at all.
 `useKeyboardShortcuts` therefore takes **`modalOpen`** and ignores every key while it is true —
-`App` computes it as `showHelpModal || playbackUrl !== null`. Before that gate, pressing R inside
+`App` computes it as `showHelpModal || playbackUrl !== null || showRecoverPrompt`. The third
+dialog, `RecoverTakeDialog` (ESCSUITE-466, see [`crash-safe-takes.md`](crash-safe-takes.md)),
+uses the same hook and waits until the other two are closed rather than opening on top of them. Before that gate, pressing R inside
 the Help dialog put a screen-capture prompt up from behind it.
 
 **No dialog in either app can reach a two-open state today**: each backdrop is
