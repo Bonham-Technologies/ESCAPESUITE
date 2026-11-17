@@ -96,7 +96,7 @@ export function scriptHash(text) {
   return `'sha256-${createHash('sha256').update(normalized, 'utf8').digest('base64')}'`
 }
 
-const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi
+const SCRIPT_RE = /<script\b([^>]*)>([\s\S]*?)<\/script\b[^>]*>/gi
 // `(?:^|\s)` rather than `\b`, so a `data-type=` attribute is not read as the type.
 const NON_JS_TYPE = /(?:^|\s)type\s*=\s*["']?(?!module\b|text\/javascript\b|application\/javascript\b)[^"'\s>]+/i
 

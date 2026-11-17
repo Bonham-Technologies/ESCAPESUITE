@@ -161,6 +161,13 @@ test('findScripts reads a data-type attribute as no type: the script still runs 
   assert.ok(scriptSrc.includes(scriptHash('window.a=1')));
 });
 
+test('findScripts ends a script at any end tag the browser accepts, such as </script\t\n bar>', () => {
+  const page = PAGE.replace('<script>window.a=1</script>', '<script>window.a=1</script\t\n bar>');
+  assert.equal(findScripts(page).length, findScripts(PAGE).length);
+  assert.ok(findScripts(page).some((s) => s.text === 'window.a=1'));
+  assert.doesNotThrow(() => assertScriptBoundaries(page));
+});
+
 test('injectOfflineCsp refuses a script whose end the browser would place elsewhere, rather than ship a wrong hash', () => {
   // "<!--" then "<script" inside the code puts the parser in its double-escaped
   // state, so the first </script> does not end the element.
