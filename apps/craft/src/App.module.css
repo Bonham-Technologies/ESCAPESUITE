@@ -540,6 +540,16 @@
   color: var(--text-secondary);
 }
 
+/* ESCSUITE-468: whether the browser will keep the library. --text-muted on the
+   sidebar's --bg-secondary, pinned at 4.5:1 in both palettes by
+   themeTokens.test.ts. */
+.storagePersistence {
+  margin: 0.25rem 0 0;
+  font-size: 0.6875rem;
+  line-height: 1.4;
+  color: var(--text-muted);
+}
+
 /* Empty state */
 .emptyState {
   display: flex;

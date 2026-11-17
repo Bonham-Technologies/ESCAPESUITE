@@ -36,6 +36,7 @@ function renderList(
     m4aBlockedReason?: string | null
     mp4Note?: string | null
     editorBlockedReason?: string | null
+    storagePersisted?: boolean | null
   } = {},
   // Absent by default, because that is what standalone CRAFT passes: no host,
   // no button. The panel is what decides; this component only draws.
@@ -58,6 +59,7 @@ function renderList(
       m4aBlockedReason={mp4.m4aBlockedReason ?? null}
       mp4Note={mp4.mp4Note ?? null}
       editorBlockedReason={mp4.editorBlockedReason ?? null}
+      storagePersisted={mp4.storagePersisted ?? null}
       onUploadToHost={onUploadToHost}
       {...calls}
     />
@@ -68,6 +70,38 @@ function renderList(
 function items(container: HTMLElement): HTMLElement[] {
   return [...container.querySelectorAll<HTMLElement>(`.${styles.recordingItem}`)]
 }
+
+// ESCSUITE-468: under the list, whether the browser has agreed to keep it.
+describe('RecordingsList storage persistence line', () => {
+  it('says the library is protected when the browser agreed', () => {
+    const { container } = renderList([makeRecording()], { storagePersisted: true })
+
+    const line = screen.getByText('Protected from automatic clean-up')
+    expect(line).toHaveClass(styles.storagePersistence)
+    expect(container.querySelector(`.${styles.recordingsList}`)).not.toContainElement(line)
+  })
+
+  it('says the browser may delete them, and to download, when it did not', () => {
+    renderList([makeRecording()], { storagePersisted: false })
+
+    expect(
+      screen.getByText('Your browser may delete these if it runs low on space; download what you want to keep.')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('Protected from automatic clean-up')).not.toBeInTheDocument()
+  })
+
+  it('says nothing before the state has been read', () => {
+    const { container } = renderList([makeRecording()], { storagePersisted: null })
+
+    expect(container.querySelector(`.${styles.storagePersistence}`)).toBeNull()
+  })
+
+  it('says nothing with no recordings to keep', () => {
+    const { container } = renderList([], { storagePersisted: false })
+
+    expect(container.querySelector(`.${styles.storagePersistence}`)).toBeNull()
+  })
+})
 
 describe('RecordingsList empty state', () => {
   it('says there is nothing yet, under the Recordings heading', () => {

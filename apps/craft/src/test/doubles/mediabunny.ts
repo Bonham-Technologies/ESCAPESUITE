@@ -179,6 +179,12 @@ export interface EncodedPacketDouble {
   chunk: unknown
   type: unknown
   timestamp: unknown
+  /**
+   * Empty: no chunk double carries real bitstream, so the VP9 colour stamper
+   * (`@escapesuite/shared/utils`) finds no key frame header and passes the
+   * packet through as it came.
+   */
+  data: Uint8Array
 }
 
 /**
@@ -216,6 +222,7 @@ export function createMediabunnyDouble() {
         chunk,
         type: chunk?.type,
         timestamp: chunk?.timestamp,
+        data: new Uint8Array(0),
       })),
     },
   }

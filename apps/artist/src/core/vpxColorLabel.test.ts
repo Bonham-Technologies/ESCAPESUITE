@@ -1,16 +1,19 @@
 // ESCSUITE-284: Firefox 155's VP9 and VP8 `VideoEncoder`s convert a canvas
 // frame with the BT.601 matrix but report `decoderConfig.colorSpace.matrix:
-// 'bt709'`. Mediabunny copies that report into two places — the WebM Colour
-// element, which Chromium's `<video>` reads, and (VP9 only, its
-// `fixVP9ColorSpace`) every keyframe header's `color_space`, which Firefox's
+// 'bt709'`. The export writes that report into two places — the WebM Colour
+// element (mediabunny's muxer), which Chromium's `<video>` reads, and (VP9
+// only) every keyframe header's `color_space` (our `createWebMVideoLabeller`,
+// since mediabunny 1.66.0 dropped its `fixVP9ColorSpace`), which Firefox's
 // `<video>` and ffmpeg read — so correcting the report once corrects both.
 //
 // The byte half of this file runs the **real** mediabunny muxer, not the
-// double, over keyframe headers taken from a Firefox 155 export
-// (ESCSUITE-279's `percolour.mp4` fixture at 1920x1080): it pins that the
-// header's colour field really is written from the report (Firefox's own
-// header carries 0, "unknown"), so a mediabunny upgrade that stopped doing it
+// double, behind the export's own labeller, over keyframe headers taken from a
+// Firefox 155 export (ESCSUITE-279's `percolour.mp4` fixture at 1920x1080): it
+// pins that the header's colour field really is written from the report
+// (Firefox's own header carries 0, "unknown"), so a change to the labeller
+// that stopped writing it, or wrote it from the report before the relabel,
 // would turn this red rather than silently re-break Firefox and ffmpeg.
+// (`exportWebM.test.ts` pins that the exporter routes every packet through it.)
 import { describe, it, expect } from 'vitest'
 import {
   BufferTarget,
@@ -19,7 +22,7 @@ import {
   Output,
   WebMOutputFormat,
 } from 'mediabunny'
-import { relabelFirefoxVpxMeta } from './vpxColorLabel'
+import { createWebMVideoLabeller, relabelFirefoxVpxMeta } from './vpxColorLabel'
 
 /** What Firefox 155 reports for both VP9 and VP8 (measured 2026-10-11). */
 const FIREFOX_REPORT: VideoColorSpaceInit = {
@@ -103,19 +106,28 @@ const FIREFOX_VP8_KEYFRAME = Uint8Array.from([
   0x08, 0x85, 0x85, 0x88, 0x85, 0x84, 0x88, 0x06, 0x02, 0x03, 0x15, 0x35,
 ])
 
+/** What `exportToWebM` does with each encoded chunk: our labeller, then the real muxer. */
 async function mux(
   codec: 'vp9' | 'vp8',
   keyframe: Uint8Array,
-  meta: EncodedVideoChunkMetadata | undefined
+  meta: EncodedVideoChunkMetadata | undefined,
+  relabelFirefox: boolean
 ): Promise<Uint8Array> {
   const target = new BufferTarget()
   const output = new Output({ format: new WebMOutputFormat(), target })
   const source = new EncodedVideoPacketSource(codec)
   output.addVideoTrack(source, { frameRate: 30 })
   await output.start()
-  // Two keyframes: the header field has to be right on every one, not just the first.
-  await source.add(new EncodedPacket(keyframe.slice(), 'key', 0, 1 / 30), meta)
-  await source.add(new EncodedPacket(keyframe.slice(), 'key', 1 / 30, 1 / 30))
+  const label = createWebMVideoLabeller(codec, relabelFirefox)
+  // Two keyframes: the header field has to be right on every one, not just
+  // the first, though only the first carries a decoder configuration.
+  for (const [timestamp, packetMeta] of [[0, meta], [1 / 30, undefined]] as const) {
+    const encoded = keyframe.slice()
+    const labelled = label(new EncodedPacket(encoded, 'key', timestamp, 1 / 30), packetMeta)
+    await source.add(labelled.packet, labelled.meta)
+    // The encoder's bytes are never written into: a changed header is a copy.
+    expect(Array.from(encoded)).toEqual(Array.from(keyframe))
+  }
   await output.finalize()
   return new Uint8Array(target.buffer!)
 }
@@ -144,20 +156,16 @@ const TRANSFER = 0x55ba
 const PRIMARIES = 0x55bb
 const RANGE = 0x55b9
 
-describe('what mediabunny writes from the report (real muxer, Firefox keyframe bytes)', () => {
+describe('what the export writes from the report (our labeller and the real muxer, Firefox keyframe bytes)', () => {
   it('as Firefox reports it: BT.709 in the Colour element and in every VP9 keyframe header', async () => {
-    const bytes = await mux('vp9', FIREFOX_VP9_KEYFRAME, metaWith('vp09.00.10.08', FIREFOX_REPORT))
+    const bytes = await mux('vp9', FIREFOX_VP9_KEYFRAME, metaWith('vp09.00.10.08', FIREFOX_REPORT), false)
     expect(colourValue(bytes, MATRIX)).toBe(1)
-    // 2 = CS_BT_709 — written by mediabunny, not by Firefox, whose own header says 0.
+    // 2 = CS_BT_709 — written by the labeller, not by Firefox, whose own header says 0.
     expect(vp9HeaderColourSpaces(bytes)).toEqual([2, 2])
   })
 
   it('relabelled: BT.601 in the Colour element and in every VP9 keyframe header, primaries and transfer kept', async () => {
-    const bytes = await mux(
-      'vp9',
-      FIREFOX_VP9_KEYFRAME,
-      relabelFirefoxVpxMeta(metaWith('vp09.00.10.08', FIREFOX_REPORT))
-    )
+    const bytes = await mux('vp9', FIREFOX_VP9_KEYFRAME, metaWith('vp09.00.10.08', FIREFOX_REPORT), true)
     expect(colourValue(bytes, MATRIX)).toBe(6)
     expect(colourValue(bytes, PRIMARIES)).toBe(1)
     expect(colourValue(bytes, TRANSFER)).toBe(1)
@@ -167,7 +175,7 @@ describe('what mediabunny writes from the report (real muxer, Firefox keyframe b
   })
 
   it('relabelled VP8: BT.601 in the Colour element, the frame bytes untouched (VP8 has no matrix field)', async () => {
-    const bytes = await mux('vp8', FIREFOX_VP8_KEYFRAME, relabelFirefoxVpxMeta(metaWith('vp8', FIREFOX_REPORT)))
+    const bytes = await mux('vp8', FIREFOX_VP8_KEYFRAME, metaWith('vp8', FIREFOX_REPORT), true)
     expect(colourValue(bytes, MATRIX)).toBe(6)
     const at = bytes.findIndex(
       (_, i) => bytes[i] === 0x9d && bytes[i + 1] === 0x01 && bytes[i + 2] === 0x2a
