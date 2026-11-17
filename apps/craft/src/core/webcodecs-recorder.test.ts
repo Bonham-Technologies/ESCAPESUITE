@@ -44,6 +44,8 @@ import {
   type TrackProcessorControl,
 } from '../test/doubles/mediastream'
 
+import { EncodedPacket } from 'mediabunny'
+
 vi.mock('mediabunny', async () => {
   const { createMediabunnyDouble } = await import('../test/doubles/mediabunny')
   return createMediabunnyDouble()
@@ -509,6 +511,34 @@ describe('WebCodecsRecorder', () => {
       const source = getMediabunnyState().videoSources[0]
       expect(source.packets.length).toBe(lastVideoEncoder().encodes.length)
       expect(source.packets[0].packet).toMatchObject({ type: 'key' })
+    })
+
+    // Mediabunny 1.66.0 stopped writing the reported matrix into VP9 key
+    // frame headers (its muxer's `fixVP9ColorSpace`); the recorder does it
+    // now, so Firefox's <video> and ffmpeg read the same colours as Chromium.
+    it('writes the reported colour matrix into every VP9 key frame header, in a copy', async () => {
+      const { EncodedPacket: RealPacket } = await vi.importActual<typeof import('mediabunny')>('mediabunny')
+      // A VP9 profile 0 key frame header whose color_space (bits 32-34) says 0, "unknown".
+      const keyframe = Uint8Array.from([0x82, 0x49, 0x83, 0x42, 0x00, 0x77, 0xf0, 0x43])
+      const encoded = [new RealPacket(keyframe.slice(), 'key', 0, 1 / 30), new RealPacket(keyframe.slice(), 'key', 1 / 30, 1 / 30)]
+      // Before the take's first frame: the stamper reads the first decoder configuration, as the muxer does.
+      expect(lastVideoEncoder().encodes).toHaveLength(0)
+      vi.mocked(EncodedPacket.fromEncodedChunk).mockReturnValueOnce(encoded[0]).mockReturnValueOnce(encoded[1])
+      const { init } = lastVideoEncoder()
+      const meta = { decoderConfig: { codec: 'vp09.00.10.08', colorSpace: { matrix: 'bt709' as const } } }
+      // The chunks are stand-ins: fromEncodedChunk hands back the real packets above.
+      init.output({} as never, meta)
+      init.output({} as never)
+      await flush()
+
+      const packets = getMediabunnyState().videoSources[0].packets
+      expect(packets).toHaveLength(2)
+      for (const added of packets) {
+        const data = (added.packet as InstanceType<typeof RealPacket>).data
+        expect(data[4] >> 5).toBe(2) // CS_BT_709
+      }
+      expect(packets[0].meta).toBe(meta)
+      expect(encoded.map((packet) => Array.from(packet.data))).toEqual([Array.from(keyframe), Array.from(keyframe)])
     })
 
     it('stops encoding while paused and resumes afterwards', () => {
