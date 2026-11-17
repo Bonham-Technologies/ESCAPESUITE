@@ -94,8 +94,11 @@ else: not the dev servers, the standalone single files or the headless kit), wri
   to the network and falls back to the cached page only when the network fails (the hub maps each
   route to its own page from `vercel.json`'s rewrites; anything else gets `index.html`). It
   answers nothing else: no other origin, nothing under `/_vercel/` (analytics are never cached or
-  replayed), no request with a query string, no media, so imported or recorded files never enter
-  its cache. The hub's worker also passes everything under `/craft/` and `/artist/` straight
+  replayed), no file request with a query string, no media, so imported or recorded files never
+  enter its cache. A page load keeps its query string (an integration URL such as
+  `/artist/?video=…` included): online it goes to the network as is, offline it gets the app's
+  cached page with the URL unchanged, so the app still reads its parameters; a `?video=` URL then
+  fails to load with no connection, as any network fetch does. The hub's worker also passes everything under `/craft/` and `/artist/` straight
   through.
 - **`manifest.webmanifest`** and **`icon.svg`** (the app's favicon), so Chromium offers install.
 - A `<link rel="manifest">` and an inline registration script, right after the `<title>` of each
@@ -110,8 +113,13 @@ changes any precached file changes the build id, so the next load's update check
 new worker, which precaches the new files, takes over at once (`skipWaiting`) and deletes the
 older caches of its own app. The page that triggered it was itself loaded from the network, so
 it already is the new version; when the new worker takes over a page an older one controlled,
-the page shows a small note, "Updated to the latest version of <app>.", with a Dismiss button,
-for 15 seconds. A first install shows nothing. A tab left open from before a deploy loses its
+the page asks the worker for its build id (a `postMessage` with a reply port) and, only if it is
+the page's own build id (baked into the registration script), shows a small note, "Updated to the
+latest version of <app>.", with a Dismiss button, for 15 seconds. So a tab left open on the older
+build, which the new worker also takes over, shows no note, and neither does any page the kill
+switch takes over. A first install shows nothing. The build id is hashed with each page's offline
+block left out (the block carries the id) and with `offline.mjs`'s own worker and registration
+source in, so a change to either still makes a new cache. A tab left open from before a deploy loses its
 old lazily loaded files exactly as it did without a worker.
 
 **CSP.** `worker-src 'self' blob:` already allowed the workers; `manifest-src 'self'` is now
@@ -131,6 +139,7 @@ answers and leaves alone, the kill switch, the page block). `apps/e2e/tests/prod
 loads each app, goes offline and reloads; records in CRAFT and imports and exports a WebM in
 ARTIST while offline; checks analytics responses never come from the worker and the cache holds
 only the app's own files; checks Chromium's installability report; serves a copy of `dist/` with
-a second build id and shows the next load serves (and caches) the new files and says "Updated";
+a second build id and shows the next load serves (and caches) the new files and says "Updated"
+while a second tab left on the old build does not;
 and runs the kill switch. `apps/e2e/tests/standalone/dist-single-file.spec.ts` fails if a
 standalone HTML file ever mentions `serviceWorker` or links a manifest.

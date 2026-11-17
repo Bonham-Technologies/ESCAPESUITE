@@ -53,6 +53,14 @@ export const ICON_FILE = 'icon.svg';
 
 const BLOCK_START = '<!-- escapesuite-offline:start -->';
 const BLOCK_END = '<!-- escapesuite-offline:end -->';
+const BLOCK_PATTERN = new RegExp(`\\n?\\s*${BLOCK_START}[\\s\\S]*?${BLOCK_END}`);
+
+/**
+ * What a page posts to its controlling worker to learn that worker's build id,
+ * so it shows the "Updated" note only when the worker now in charge is the
+ * page's own build (`registerMain`).
+ */
+export const BUILD_ID_MESSAGE = 'escapesuite-offline:build-id';
 
 /**
  * The three hosted apps. `dir` is the app's directory inside `dist/`, and
@@ -117,17 +125,26 @@ export function precacheList(distDir, app) {
 }
 
 /**
- * A short id for one build of one app: a hash of every precached path and its
- * bytes. Two builds with identical output get the same id (so a redeploy of
- * the same code does not make every visitor download it again); any change to
- * any precached file changes it.
+ * A short id for one build of one app: a hash of `salt`, every precached path
+ * and its bytes. Two builds with identical output get the same id (so a
+ * redeploy of the same code does not make every visitor download it again);
+ * any change to any precached file changes it.
+ *
+ * An HTML file is hashed without this script's own block
+ * ({@link stripOfflineBlock}), so the id can be computed before the block (which
+ * carries the id itself) is written into the pages, and a second run over the
+ * same `dist/` gives the same id. `writeOfflineSupport` passes the generator's
+ * own source as `salt`, so a change to the block or the worker still changes it.
  */
-export function buildIdFor(distDir, paths) {
+export function buildIdFor(distDir, paths, salt = '') {
   const hash = createHash('sha256');
+  hash.update(salt);
+  hash.update('\0');
   for (const path of paths) {
     hash.update(path);
     hash.update('\0');
-    hash.update(readFileSync(join(distDir, path)));
+    const bytes = readFileSync(join(distDir, path));
+    hash.update(path.endsWith('.html') ? stripOfflineBlock(bytes.toString('utf8')) : bytes);
     hash.update('\0');
   }
   return hash.digest('hex').slice(0, 16);
@@ -182,6 +199,12 @@ export function serviceWorkerMain(config) {
         await self.skipWaiting();
       })()
     );
+  });
+
+  // A page asks which build this worker is (see `registerMain`).
+  self.addEventListener('message', (event) => {
+    const port = event.ports && event.ports[0];
+    if (port && event.data && event.data.type === config.buildIdMessage) port.postMessage(config.buildId);
   });
 
   self.addEventListener('activate', (event) => {
@@ -262,8 +285,11 @@ export function killSwitchMain(config) {
  * The inline registration script, serialised like {@link serviceWorkerMain}.
  * Registers the app's worker after the page has loaded, and shows an
  * "Updated" note when a new version of this app's worker takes over a page
- * that an older one controlled. Does nothing inside a frame: a host page that
- * embeds an app (the integration API) keeps exactly the behaviour it had.
+ * that an older one controlled, and only if that new worker is this page's
+ * own build: a tab left open from an older build that a newer worker takes
+ * over (another tab loaded the new version) is still the old version, so it
+ * gets no note. Does nothing inside a frame: a host page that embeds an app
+ * (the integration API) keeps exactly the behaviour it had.
  */
 /* global window, document, navigator */
 export function registerMain(config) {
@@ -326,9 +352,16 @@ export function registerMain(config) {
 
   container.addEventListener('controllerchange', () => {
     const controller = container.controller;
-    const ours = controller && new URL(controller.scriptURL).pathname === config.workerUrl;
-    if (controlled && ours) showUpdatedNote();
+    const wasControlled = controlled;
     controlled = Boolean(controller);
+    if (!wasControlled || !controller) return;
+    if (new URL(controller.scriptURL).pathname !== config.workerUrl) return;
+    const channel = new MessageChannel();
+    channel.port1.onmessage = (event) => {
+      channel.port1.close();
+      if (event.data === config.buildId) showUpdatedNote();
+    };
+    controller.postMessage({ type: config.buildIdMessage }, [channel.port2]);
   });
 
   const register = () => {
@@ -402,10 +435,7 @@ export function manifestFor(app, html) {
  * their whole bundle in the head, and only the title is sure to precede it.
  */
 export function injectOfflineBlock(html, { manifestHref, script }) {
-  const withoutBlock = html.replace(
-    new RegExp(`\\n?\\s*${BLOCK_START}[\\s\\S]*?${BLOCK_END}`),
-    ''
-  );
+  const withoutBlock = stripOfflineBlock(html);
   const titleEnd = withoutBlock.indexOf('</title>');
   if (titleEnd === -1) throw new Error('page has no <title> to place the offline block after');
   const at = titleEnd + '</title>'.length;
@@ -414,6 +444,20 @@ export function injectOfflineBlock(html, { manifestHref, script }) {
     (script ? `    <script>${script}</script>\n` : '') +
     `    ${BLOCK_END}`;
   return withoutBlock.slice(0, at) + block + withoutBlock.slice(at);
+}
+
+/** `html` without the block {@link injectOfflineBlock} adds, if it has one. */
+export function stripOfflineBlock(html) {
+  return html.replace(BLOCK_PATTERN, '');
+}
+
+/**
+ * The generator's own source: hashed into every build id, so a change to the
+ * worker, the registration script or the block makes a new cache even when
+ * the apps' own files did not change.
+ */
+function generatorSource() {
+  return [serviceWorkerMain, registerMain, injectOfflineBlock, serialise].map(String).join('\n');
 }
 
 /** The HTML files of one app inside `distDir` (the hub's route copies and 404 page included). */
@@ -443,30 +487,38 @@ export function writeOfflineSupport(distDir, rewrites = [], { killSwitch = false
     writeFileSync(join(appDir, ICON_FILE), icon);
     writeFileSync(join(appDir, MANIFEST_FILE), JSON.stringify(manifestFor(app, html), null, 2) + '\n');
 
-    const script = killSwitch
-      ? ''
-      : registrationSource({
-          workerUrl,
-          scope: app.scope,
-          updatedMessage: `Updated to the latest version of ${app.name}.`,
-        });
-    for (const file of htmlFilesOf(distDir, app)) {
-      const page = readFileSync(file, 'utf8');
-      writeFileSync(file, injectOfflineBlock(page, { manifestHref: app.scope + MANIFEST_FILE, script }));
-    }
+    const injectAll = (script) => {
+      for (const file of htmlFilesOf(distDir, app)) {
+        const page = readFileSync(file, 'utf8');
+        writeFileSync(file, injectOfflineBlock(page, { manifestHref: app.scope + MANIFEST_FILE, script }));
+      }
+    };
 
     if (killSwitch) {
+      injectAll('');
       writeFileSync(join(appDir, WORKER_FILE), killSwitchSource({ scope: app.scope, cachePrefix }));
       summary.push({ app: app.id, buildId: null, precache: [] });
       continue;
     }
 
+    // The build id first (it ignores the block, see buildIdFor), then the
+    // block, which carries it, into the pages.
     const precache = precacheList(distDir, app);
-    const buildId = buildIdFor(distDir, precache);
+    const buildId = buildIdFor(distDir, precache, `${generatorSource()}\n${JSON.stringify(app)}`);
+    injectAll(
+      registrationSource({
+        workerUrl,
+        scope: app.scope,
+        buildId,
+        buildIdMessage: BUILD_ID_MESSAGE,
+        updatedMessage: `Updated to the latest version of ${app.name}.`,
+      })
+    );
     const navigationFallback = app.scope + 'index.html';
     const config = {
       scope: app.scope,
       buildId,
+      buildIdMessage: BUILD_ID_MESSAGE,
       cachePrefix,
       precache,
       navigationRoutes: navigationRoutesFor(app, rewrites, precache),

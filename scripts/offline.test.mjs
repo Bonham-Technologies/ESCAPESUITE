@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { after, test } from 'node:test';
 
 import {
+  BUILD_ID_MESSAGE,
   OFFLINE_APPS,
   buildIdFor,
   injectOfflineBlock,
@@ -102,6 +103,16 @@ test('buildIdFor: stable for the same bytes, different when any precached file c
   assert.equal(buildIdFor(dist, paths), first);
   writeFileSync(join(dist, 'assets', 'index-abc.js'), 'console.log(2)');
   assert.notEqual(buildIdFor(dist, paths), first);
+  assert.notEqual(buildIdFor(dist, paths, 'another generator'), buildIdFor(dist, paths));
+});
+
+test("buildIdFor: a page's offline block (which carries the id) does not change the id", () => {
+  const dist = makeDist();
+  const paths = precacheList(dist, HUB);
+  const before = buildIdFor(dist, paths);
+  const file = join(dist, 'index.html');
+  writeFileSync(file, injectOfflineBlock(readFileSync(file, 'utf8'), { manifestHref: '/m', script: 'run()' }));
+  assert.equal(buildIdFor(dist, paths), before);
 });
 
 test("navigationRoutesFor: the hub's routes come from vercel.json's rewrites; the apps have none", () => {
@@ -163,6 +174,9 @@ test('writeOfflineSupport: a worker, manifest and icon per app, and every page r
     assert.ok(html.includes(`<link rel="manifest" href="${scope}manifest.webmanifest" />`));
     assert.ok(html.includes('navigator.serviceWorker.register('));
     assert.ok(html.includes(`"workerUrl":"${scope}sw.js"`));
+    // The page knows its own build, so its "Updated" note can tell whether
+    // the worker that took it over is that build (registerMain).
+    assert.ok(html.includes(`"buildId":"${buildId}"`), `${app}: the page carries its build id`);
   }
   // The hub's other pages register too; the not-found page as well.
   for (const file of ['404.html', 'privacy/index.html']) {
@@ -387,6 +401,22 @@ test('worker: a page load uses the network while there is one, and the cached pa
     assert.equal(await offline.fire('fetch', get('https://suite.test/artist', 'navigate')), undefined);
   } finally {
     offline.restore();
+  }
+});
+
+test('worker: tells a page which build it is, and answers no other message', async () => {
+  const worker = runWorker(serviceWorkerMain, { ...WORKER_CONFIG, buildIdMessage: BUILD_ID_MESSAGE });
+  try {
+    const replies = [];
+    const port = { postMessage: (value) => replies.push(value) };
+    await worker.fire('message', { data: { type: BUILD_ID_MESSAGE }, ports: [port] });
+    assert.deepEqual(replies, ['b2']);
+    await worker.fire('message', { data: { type: 'something-else' }, ports: [port] });
+    await worker.fire('message', { data: null, ports: [port] });
+    await worker.fire('message', { data: { type: BUILD_ID_MESSAGE }, ports: [] });
+    assert.deepEqual(replies, ['b2']);
+  } finally {
+    worker.restore();
   }
 });
 

@@ -229,7 +229,7 @@ async function serveCopy(dir: string, port: number): Promise<ChildProcess> {
 }
 
 test.describe('A new deploy replaces the old offline copy (ESCSUITE-469)', () => {
-  test('two build ids: the second load serves the new assets, online and offline, and says Updated', async ({
+  test('two build ids: the second load serves the new assets, online and offline, and says Updated (a stale tab does not)', async ({
     browser,
   }) => {
     test.setTimeout(120_000)
@@ -247,6 +247,12 @@ test.describe('A new deploy replaces the old offline copy (ESCSUITE-469)', () =>
       await waitForWorker(page, origin, '/')
       const [firstCache] = Object.keys(await cachedUrls(page))
       expect(firstCache).toMatch(/^escapesuite-offline-plan-/)
+      // A second tab left open on the first build: the new worker takes it
+      // over too, but it is still the old version, so it must not say Updated.
+      const staleTab = await context.newPage()
+      await staleTab.goto(`${origin}/privacy`)
+      await waitForAppReady(staleTab, 'plan')
+      await expect.poll(() => staleTab.evaluate(() => Boolean(navigator.serviceWorker.controller))).toBe(true)
 
       // The second deploy: the hub's script under a new hashed name that also
       // marks the window, then the same offline step build:deploy runs.
@@ -281,6 +287,15 @@ test.describe('A new deploy replaces the old offline copy (ESCSUITE-469)', () =>
       expect(secondCache).not.toBe(firstCache)
       expect(cached[secondCache]).toContain(`${origin}/assets/${newScript}`)
       expect(cached[secondCache]).not.toContain(`${origin}/assets/${oldScript}`)
+
+      // The stale tab now has the new worker as its controller, and no note.
+      await expect
+        .poll(() => staleTab.evaluate(() => navigator.serviceWorker.controller?.state ?? null))
+        .toBe('activated')
+      await staleTab.waitForTimeout(1000)
+      expect(await staleTab.evaluate(() => (window as { __escsuite469Build?: string }).__escsuite469Build)).toBeUndefined()
+      await expect(staleTab.getByRole('status').filter({ hasText: 'Updated' })).toHaveCount(0)
+      await staleTab.close()
 
       // Dismiss works.
       await page.getByRole('button', { name: 'Dismiss' }).click()
