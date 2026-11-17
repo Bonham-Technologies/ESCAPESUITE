@@ -127,10 +127,12 @@ describe('withVp9ColourSpace', () => {
 })
 
 class PacketDouble implements Vp9PacketLike<PacketDouble> {
-  constructor(
-    readonly type: 'key' | 'delta',
-    readonly data: Uint8Array
-  ) {}
+  readonly type: 'key' | 'delta'
+  readonly data: Uint8Array
+  constructor(type: 'key' | 'delta', data: Uint8Array) {
+    this.type = type
+    this.data = data
+  }
   clone = vi.fn((options: { data: Uint8Array }) => new PacketDouble(this.type, options.data))
 }
 
