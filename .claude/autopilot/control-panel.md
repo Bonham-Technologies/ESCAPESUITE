@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v27. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: control panel
 
 ## Control panel
@@ -11,6 +11,7 @@ column name still counts (`Paused` is `Builder paused`).
 | Role | Days | Paused | Numbers | Fallbacks |
 |---|---|---|---|---|
 | builder | `Build days` | `Builder paused` | `Builder budget`, `Feature cap` | every day; the prompt's `Fallback ticket budget: N` (or `Ticket budget: N`); 8 |
+| dependabot task | every day | `Builder paused`: while paused it stops untriaged; the builder's nightly sweep still runs | none | not paused |
 | steward | `Steward days` | `Steward paused` | `Steward ticket cap` | when the newest digest is 7 or more days old; 25 |
 | scout | `Scout days` | `Scout paused` | `Scout proposals` | the 1st and 15th; 5 |
 
