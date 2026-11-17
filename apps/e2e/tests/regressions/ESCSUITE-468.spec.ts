@@ -29,7 +29,10 @@ async function stubPersistence(page: Page, grant: boolean): Promise<void> {
     const w = window as unknown as { __persistCalls: number }
     w.__persistCalls = 0
     let persisted = false
-    Object.defineProperty(navigator.storage, 'persist', {
+    // On the prototype, not on `navigator.storage`: WebKit hands the page a
+    // different StorageManager object than the one an init script sees, so a
+    // stub on the instance never reaches the app there.
+    Object.defineProperty(StorageManager.prototype, 'persist', {
       configurable: true,
       value: async () => {
         w.__persistCalls += 1
@@ -37,7 +40,7 @@ async function stubPersistence(page: Page, grant: boolean): Promise<void> {
         return grant
       },
     })
-    Object.defineProperty(navigator.storage, 'persisted', {
+    Object.defineProperty(StorageManager.prototype, 'persisted', {
       configurable: true,
       value: async () => persisted,
     })
