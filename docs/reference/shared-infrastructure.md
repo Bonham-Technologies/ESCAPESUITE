@@ -16,20 +16,6 @@
   request fails; `getDB()` remembers that error, so `isStorageUnavailable(error)` (read through
   `error.cause ?? error`) tells a refused open from a read or write that failed once open. A
   `VersionError` or `QuotaExceededError` is not counted. Nothing is cached, so the next call asks again (ESCSUITE-414).
-- **Persistent storage** (`packages/shared/src/storage/persistence.ts`, ESCSUITE-468): the
-  database is best-effort storage the browser may delete without asking (storage pressure; in
-  Safari, script-written data after seven days of browser use with no interaction with the site).
-  `requestStoragePersistence()` calls `navigator.storage.persist()` at most once per page load and
-  then re-reads `navigator.storage.persisted()`; `readStoragePersisted()` only reads. Both answer
-  `false`, never throw, where the API is missing, rejects or throws. Call the request only after a
-  save has been written, never on load (Firefox prompts, and wants a user action first): CRAFT
-  after a take is stored (`useRecordingSave`), ARTIST after an import (`VideoUploader`) and after
-  Save Project (`useProjectActions`). `useStoragePersisted()` (`@escapesuite/shared/hooks`) reads
-  on mount and re-renders on every re-read (only the newest read publishes, so a late mount read
-  cannot overwrite a save's); both apps show `storagePersistenceMessage()`: CRAFT under the
-  Recordings list once it holds a take (CRAFT shows no storage figure), ARTIST beside the storage
-  figure in the media library's storage bar. A granted request exempts the origin from storage-pressure eviction; MDN
-  does not say it exempts it from Safari's seven-day rule, and the Limitations page says so.
 - **Single-file Builds**: `vite-plugin-singlefile` inlines all assets into one HTML file,
   but not a Web Worker — ESCAPEARTIST's `decodeWorker` needs a second mechanism
   (`isSingleFileBuild`, `apps/artist/singleFileBuild.js`, read by `apps/artist/vite.config.ts`)

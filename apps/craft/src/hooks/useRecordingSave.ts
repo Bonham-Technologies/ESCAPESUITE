@@ -8,7 +8,7 @@
 // one from before the take started.
 import { useCallback, type RefObject } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { storeVideo, storeThumbnail, createBlobUrl, requestStoragePersistence } from '../core/storage';
+import { storeVideo, storeThumbnail, createBlobUrl } from '../core/storage';
 import { generateThumbnail, extractVideoMetadata } from '../core/thumbnailGenerator';
 import { fixWebMMetadata } from '../core/converter';
 import { useRecorderStore } from '../store/recorderStore';
@@ -387,13 +387,6 @@ export function useRecordingSave({
       hasWebcam: captured.webcamEnabled,
       hasAudio,
     }));
-
-    // ESCSUITE-468: the take is stored, so ask the browser to keep the
-    // library from its automatic clean-up. Only the session's first save
-    // actually asks (Firefox prompts, and wants it to follow the user's own
-    // action, here Stop); every save re-reads the answer the library shows.
-    // It never rejects, and the save does not wait for the answer.
-    void requestStoragePersistence();
   }, [setState, addRecording, setNotice, recorderTypeRef, capturedThumbnailRef]);
 
   return saveRecording;
