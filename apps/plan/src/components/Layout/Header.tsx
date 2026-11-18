@@ -6,20 +6,16 @@ import styles from './Layout.module.css'
 export default function Header() {
   return (
     <header className={styles.header}>
-      <Link to="/" className={styles.logo} aria-label="ESCAPE Suite Home">
-        <svg className={styles.logoIcon} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"/>
-        </svg>
-        {/* A real space between the two words (ESCSUITE-334): the visible text must read "ESCAPE Suite"
-            so the link's name contains it (WCAG 2.5.3 Label in Name). It replaces the CSS margin. */}
-        <span className={styles.logoText}>ESCAPE</span>{' '}
-        <span className={styles.logoSuite}>Suite</span>
-      </Link>
+      {/* The product lockup: accent square, name, parent. "by Bonham Technologies" sits beside
+          the link, not in it, so the link's visible text stays "ESCAPE Suite" (ESCSUITE-334:
+          WCAG 2.5.3 Label in Name). */}
+      <div className={styles.lockup}>
+        <Link to="/" className={styles.logo} aria-label="ESCAPE Suite Home">
+          <span className={styles.logoText}>ESCAPE</span>{' '}
+          <span className={styles.logoSuite}>Suite</span>
+        </Link>
+        <span className={styles.logoParent}>by Bonham Technologies</span>
+      </div>
 
       <nav className={styles.nav} aria-label="Main navigation">
         <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">GitHub</a>
