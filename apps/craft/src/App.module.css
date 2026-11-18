@@ -996,6 +996,60 @@
   background-color: #000;
 }
 
+/* Confirm dialog (ESCSUITE-483): the same backdrop as the other two modals,
+   a smaller panel, Cancel and one destructive button. */
+.confirmModal {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 2rem;
+}
+
+.confirmContent {
+  width: 100%;
+  max-width: 420px;
+  padding: 1.25rem;
+  background-color: var(--bg-secondary);
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.confirmTitle {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+.confirmMessage {
+  color: var(--text-secondary);
+  margin: 0 0 1.25rem;
+  line-height: 1.5;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* White text on the strong accent, like the editor button (AA 4.5:1). */
+.confirmDanger {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+  color: white;
+}
+
+.confirmDanger:hover:not(:disabled) {
+  background: var(--accent-strong-hover);
+}
+
 /* Help Modal */
 .helpModal {
   position: fixed;
