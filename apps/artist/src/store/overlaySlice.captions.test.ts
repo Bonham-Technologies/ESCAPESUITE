@@ -198,6 +198,24 @@ describe('addCaptionCues (ESCSUITE-293)', () => {
       expect(state().history.past).toHaveLength(1)
     })
 
+    it('with `before` takes off only the captions that start before it, as one undo step (ESCSUITE-484)', () => {
+      // A transcription stopped at 4 s heard nothing after it: the captions
+      // from there on stay rather than being lost to a partial run.
+      const { trackId } = state().addCaptionCues(cues, style)!
+      const before = onCaptions(trackId)
+      const later: CaptionCue[] = [{ start: 4, end: 5, text: 'Starts where it stopped.' }]
+      state().addCaptionCues(later, style)
+      const entries = state().history.past.length
+
+      expect(state().addCaptionCues(newer, style, { replace: { before: 4 } })).toEqual({ trackId, added: 1 })
+
+      expect(onCaptions(trackId).map((clip) => clip.name)).toEqual(['Starts where it stopped.', 'A newer take.'])
+      expect(state().history.past).toHaveLength(entries + 1)
+      state().undo()
+      expect(onCaptions(trackId).filter((clip) => before.some((old) => old.id === clip.id))).toEqual(before)
+      expect(onCaptions(trackId)).toHaveLength(before.length + 1)
+    })
+
     it('refuses on a locked Captions track, removing nothing', () => {
       const { trackId } = state().addCaptionCues(cues, style)!
       state().updateTrack(trackId, { locked: true })
