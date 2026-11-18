@@ -7,6 +7,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 ## Unreleased
 
 - Tests: a regression spec opens Remove silences on an imported clip, changes the threshold and minimum gap, cancels and reopens it, and checks the fields read the defaults beside the pause the defaults find, in Chromium, Firefox and WebKit (ESCSUITE-480).
+- ESCAPECRAFT: Delete in the recordings list asks first, naming the recording and, for a take recorded as several files, saying how many go; Cancel and Escape keep it (ESCSUITE-483).
 - Tests: a regression spec exports a WebM of a timeline cut into 120 short pieces of a frame-numbered source and checks that every exported frame, each cut's first included, is the source frame the timeline puts there, so an export that writes the frame from before a seek fails in Chromium again (ESCSUITE-479).
 - ESCAPECRAFT and ESCAPEARTIST: after the first saved recording, import or project save in a visit, both apps ask the browser to keep their stored recordings and media, and say whether it agreed (under the recordings in ESCAPECRAFT, in the media library's storage bar in ESCAPEARTIST); the Known limitations page explains Safari's seven-day clean-up of stored data (ESCSUITE-468).
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
