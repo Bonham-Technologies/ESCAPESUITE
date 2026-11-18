@@ -29,3 +29,34 @@
   from a shallow clone, so in production a page keeps its `<lastmod>` only while its last change
   is within the fetched history; older pages are listed without one. `robots.txt`
   (still in `public/`) names `https://www.escapesuite.io/sitemap.xml`.
+
+## Design (ESCSUITE-493)
+
+The hub is built on the Bonham Technologies design system (the parent brand at bonham.tech): warm
+paper and ink, Archivo for text, IBM Plex Mono for technical content only (code), square corners,
+hairlines, open columns under a rule instead of boxed cards, no shadows or gradients. Safety
+orange (`--signal-fill`, text on it `--signal-on`) is the action colour: one primary button per
+view (the hero's "Start recording"); every other button is outlined. Focus rings are blue
+(`--focus-ring`).
+
+ESCAPE Suite's own identity inside that system (owner, 2026-11-17):
+
+- **Accent: teal** (`--accent`, `#0f6b70` Daylight, `#6cc7c9` Night): the square in the lockup,
+  icons, link underlines, list markers and the frame's corners. It never fills a button.
+- **Motif: the frame.** A recording frame with its picture-in-picture panel and the timeline's
+  panels under it: the drawing in the hero (`.frame` in `Home.module.css`, coloured from tokens),
+  and the favicon.
+- **Lockup:** accent square, `ESCAPE SUITE`, "by Bonham Technologies". The parent's name sits
+  beside the home link, not in it, so the link's visible text stays "ESCAPE Suite" (ESCSUITE-334).
+  There is no logo mark.
+- The parent's terrain imagery and forest green stay on bonham.tech and are not used here.
+
+Tokens live in `apps/plan/src/index.css` and keep the names the shared components read
+(`--bg-primary` ground, `--bg-secondary` surface, `--bg-tertiary` raised or sunken, `--text-*`,
+`--border`, `--accent`), so `ThemeToggle` and `ErrorBoundary` follow the palette without a change
+to `packages/shared`. Night is `:root` and Daylight is `:root[data-theme="light"]`, as the shared
+theme module switches them. ESCAPECRAFT and ESCAPEARTIST keep their own look.
+
+Fonts are self-hosted from `apps/plan/src/assets/fonts/` (latin subsets, SIL Open Font License;
+the licences are served from `/licenses/` and named in `NOTICE`). `public/og.png` is
+`apps/plan/tools/og.html` rendered in Chromium at 1200 × 630.

@@ -17,34 +17,56 @@ export default function Home() {
     <div className={styles.home}>
       {/* Hero Section */}
       <section className={styles.hero}>
-        <div className={styles.heroContent}>
-          <h1 className={styles.heroTitle}>
-            How-to videos for networks<br />
-            <span className={styles.gradient}>the cloud can't reach.</span>
-          </h1>
-          <p className={styles.heroSubtitle}>
-            ESCAPE Suite records and edits screencasts entirely in the browser — free and
-            open source. Capture a walkthrough, trim the mistakes, blur anything sensitive,
-            and share it with shift workers and remote sites — without a single byte
-            leaving the building.
-          </p>
-          <div className={styles.heroCta}>
-            <button className="primary" onClick={() => launchTool('craft')}>
-              Start recording
-            </button>
-            <button onClick={() => launchTool('artist')}>Open the editor</button>
+        <div className={styles.heroInner}>
+          <div className={styles.heroContent}>
+            <h1 className={styles.heroTitle}>
+              How-to videos for networks<br />
+              <span className={styles.mark}>the cloud can't reach.</span>
+            </h1>
+            <p className={styles.heroSubtitle}>
+              ESCAPE Suite records and edits screencasts entirely in the browser — free and
+              open source. Capture a walkthrough, trim the mistakes, blur anything sensitive,
+              and share it with shift workers and remote sites — without a single byte
+              leaving the building.
+            </p>
+            <div className={styles.heroCta}>
+              <button className="primary" onClick={() => launchTool('craft')}>
+                Start recording
+              </button>
+              <button onClick={() => launchTool('artist')}>Open the editor</button>
+            </div>
+            <p className={styles.heroLinks}>
+              <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">View on GitHub</a>
+              {' · '}
+              {/* GitHub's bare "latest release" listing — kept as the secondary
+                  escape hatch, since it can land on a per-package release with
+                  no offline build attached. The per-app downloads below are
+                  the primary CTA (ESCSUITE-195). */}
+              <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" onClick={() => trackOfflineDownload()}>
+                All downloads
+              </a>
+            </p>
           </div>
-          <p className={styles.heroLinks}>
-            <a href={GITHUB_URL} target="_blank" rel="noopener noreferrer">View on GitHub</a>
-            {' · '}
-            {/* GitHub's bare "latest release" listing — kept as the secondary
-                escape hatch, since it can land on a per-package release with
-                no offline build attached. The per-app downloads below are
-                the primary CTA (ESCSUITE-195). */}
-            <a href={RELEASES_URL} target="_blank" rel="noopener noreferrer" onClick={() => trackOfflineDownload()}>
-              All downloads
-            </a>
-          </p>
+          {/* The frame motif: a recording frame with its picture-in-picture panel, and the
+              timeline's panels under it. Decorative. */}
+          <svg className={styles.frame} viewBox="0 0 400 300" aria-hidden="true" focusable="false">
+            <path className={styles.frameCorner} d="M1 25V1h24M375 1h24v24M399 195v24h-24M25 219H1v-24" />
+            <rect className={styles.framePanel} x="16.5" y="16.5" width="367" height="187" />
+            <rect className={styles.frameAccent} x="32" y="32" width="8" height="8" />
+            <rect className={styles.frameNote} x="48" y="33" width="56" height="6" />
+            <rect className={styles.frameLine} x="32" y="64" width="200" height="6" />
+            <rect className={styles.frameLine} x="32" y="84" width="168" height="6" />
+            <rect className={styles.frameLine} x="32" y="104" width="216" height="6" />
+            <rect className={styles.frameLine} x="32" y="124" width="136" height="6" />
+            <rect className={styles.framePanel} x="280.5" y="124.5" width="87" height="63" />
+            <rect className={styles.frameLine} x="292" y="136" width="64" height="40" />
+            <rect className={styles.frameLine} x="0" y="244" width="124" height="16" />
+            <rect className={styles.frameAccent} x="128" y="244" width="96" height="16" />
+            <rect className={styles.frameLine} x="228" y="244" width="172" height="16" />
+            <rect className={styles.frameNote} x="40" y="268" width="208" height="16" />
+            <rect className={styles.frameLine} x="252" y="268" width="88" height="16" />
+            <line className={styles.framePlayhead} x1="176.5" y1="236" x2="176.5" y2="292" />
+          </svg>
         </div>
       </section>
 
@@ -70,7 +92,7 @@ export default function Home() {
               <li>Picture-in-Picture mode</li>
               <li>Saves locally, instantly</li>
             </ul>
-            <button className="primary" onClick={() => launchTool('craft')}>
+            <button onClick={() => launchTool('craft')}>
               Use ESCAPECRAFT
             </button>
           </div>
@@ -93,7 +115,7 @@ export default function Home() {
               <li>Remove silences, add captions</li>
               <li>MP4 &amp; WebM export</li>
             </ul>
-            <button className="primary" onClick={() => launchTool('artist')}>
+            <button onClick={() => launchTool('artist')}>
               Use ESCAPEARTIST
             </button>
           </div>
@@ -160,7 +182,7 @@ export default function Home() {
         </p>
         <div className={styles.heroCta}>
           <a
-            className={`${styles.btnLink} ${styles.btnLinkPrimary}`}
+            className={styles.btnLink}
             href={GITHUB_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -168,7 +190,7 @@ export default function Home() {
             View on GitHub
           </a>
           <a
-            className={`${styles.btnLink} ${styles.btnLinkPrimary}`}
+            className={styles.btnLink}
             href={CRAFT_OFFLINE_BUILD_URL}
             target="_blank"
             rel="noopener noreferrer"
@@ -177,7 +199,7 @@ export default function Home() {
             Download ESCAPECRAFT
           </a>
           <a
-            className={`${styles.btnLink} ${styles.btnLinkPrimary}`}
+            className={styles.btnLink}
             href={ARTIST_OFFLINE_BUILD_URL}
             target="_blank"
             rel="noopener noreferrer"
