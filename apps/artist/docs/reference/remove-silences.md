@@ -200,11 +200,21 @@ later pieces' partners move too. On those rows `cutTimeRanges`:
   pieces outside it (the first piece keeps the clip's id, so the selection
   survives; each piece is a window on the same source; keyframes are trimmed
   to it; the in preset stays only on a piece that starts where the clip did,
-  the out preset only on one that ends where it did, as a split leaves them);
+  the out preset only on one that ends where it did, as a split leaves them;
+  only the last piece keeps the clip's **Transition Out**, the others get
+  none, ESCSUITE-482);
 - moves every clip and piece left by the time removed before it, which is the
   same at the same timeline time on every row, so a take's parts stay in step;
 - keeps link groups segments, as `splitClip` does: in each group, the clips in
   its earliest slot between cuts keep the id, each later slot shares a fresh one.
+
+A transition plays at a clip's end, into whatever starts there
+(`getActiveTransition` in `core/exportTypes.ts`), and every piece but the last
+now ends where the next one starts. Before ESCSUITE-482 every piece kept the
+clip's transition, so a take with a wipe played it at every cut: a 20-cut take
+played 20 wipes. Now only the last piece, which ends where the clip now
+ends, keeps it. One undo gives the clip back with its transition. `splitClip` does the same: the first half gets
+`DEFAULT_TRANSITION`, the second keeps the clip's.
 
 With the box cleared, rows no link reaches are left where they are, as a
 clip's ripple delete leaves them, and markers and in/out points do not move
@@ -295,7 +305,8 @@ description, when nothing is left behind.
   `videoProcessor.test.ts`, `takeImport.test.ts`: every writer stores it, a
   save round-trips it, a rebuild and a stored row carry their own.
 - `src/store/rippleRanges.test.ts`: both rows cut and closed, a late part cut at
-  its own offset, link groups per slot, one undo, locks; with everything moved,
+  its own offset, link groups per slot, one undo, locks, the transition kept on
+  the last piece only and none active at a join (ESCSUITE-482); with everything moved,
   other rows moved and shortened, overlays not split, captions, keyframes,
   markers and in/out points (a swallowed range cleared), a locked other row and
   a linked pair half on one, a linked pair on other rows kept in step, one undo
@@ -339,3 +350,8 @@ description, when nothing is left behind.
   system audio (captured 1.5 s late) covers the microphone's pause; nothing is
   found until its row is muted, then the pause is, and Remove all cuts all
   three rows in step.
+- `apps/e2e/tests/regressions/ESCSUITE-482.spec.ts`: the take's screen part
+  given a Wipe Left; after Remove all the piece before the cut has no
+  transition and none plays at the join (read from the store), the last piece
+  keeps the wipe, and one Ctrl+Z gives it back; a Split leaves it on the
+  second half only.
