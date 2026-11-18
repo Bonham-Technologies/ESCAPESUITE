@@ -96,7 +96,8 @@ function clock(seconds: number): string {
  * so far (ESCSUITE-484): the core hands them back in a `TranscriptionCutShort`
  * and the notice says how many were added and where it stopped. Stop while
  * the sound is prepared, or before anything was heard, adds nothing, and a
- * project replaced mid-run never gets any (ESCSUITE-432).
+ * project replaced mid-run never gets any (ESCSUITE-432). **Replace** then
+ * replaces only the captions before where it stopped.
  *
  * When the Captions track already holds text clips, a press first asks
  * `REPLACE_QUESTION` in a modal dialog (ESCSUITE-442): **Replace** has
@@ -268,33 +269,50 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
         showNotification('No speech was heard, so no captions were added.', 'info');
         return;
       }
-      const resolution = useEditorStore.getState().project.resolution;
+      const { resolution, timeline: now } = useEditorStore.getState().project;
       const style = captionStyleFor(resolution);
       const columns = captionWrapColumns(resolution, style.fontSize);
+      // ESCSUITE-484: Replace on a run cut short replaces only the captions
+      // before where it stopped; the ones after it were never heard again, so
+      // they stay (and the notice says so).
+      const captionTrack = now.tracks.find((track) => track.kind === 'captions');
+      const keptAfter =
+        replace && cut && captionTrack
+          ? now.clips.filter(
+              (clip) =>
+                clip.trackId === captionTrack.id && clip.overlayType === 'text' && clip.timelinePosition >= cut.stoppedAt
+            ).length
+          : 0;
       const result = addCaptionCues(
         cues.map((cue) => ({ ...cue, text: wrapCaptionText(cue.text, columns) })),
         style,
-        { replace }
+        { replace: replace && cut ? { before: cut.stoppedAt } : replace }
       );
       if (!result) {
-        showNotification('The Captions track is locked, so no captions were added.', 'error');
+        const locked = 'The Captions track is locked, so no captions were added.';
+        // A recogniser error is still said, not only the lock (ESCSUITE-484).
+        showNotification(cut && cut.reason.name !== 'AbortError' ? `${cut.reason.message} ${locked}` : locked, 'error');
         return;
       }
       const hidden = useEditorStore
         .getState()
         .project.timeline.tracks.some((track) => track.id === result.trackId && !track.visible);
       const count = `${result.added} caption${result.added !== 1 ? 's' : ''}`;
-      const hiddenNote = hidden ? ' The Captions track is hidden.' : '';
+      const keptNote =
+        cut && keptAfter > 0
+          ? ` The ${keptAfter === 1 ? 'caption' : `${keptAfter} captions`} already there from ${clock(cut.stoppedAt)} on ${keptAfter === 1 ? 'was' : 'were'} kept.`
+          : '';
+      const notes = keptNote + (hidden ? ' The Captions track is hidden.' : '');
       if (!cut) {
-        showNotification(`Transcribed ${count} onto the Captions track.${hiddenNote}`, 'success');
+        showNotification(`Transcribed ${count} onto the Captions track.${notes}`, 'success');
       } else if (cut.reason.name === 'AbortError') {
         showNotification(
-          `Transcription stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${hiddenNote}`,
+          `Transcription stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${notes}`,
           'success'
         );
       } else {
         showNotification(
-          `${cut.reason.message} It stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${hiddenNote}`,
+          `${cut.reason.message} It stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${notes}`,
           'error'
         );
       }

@@ -144,7 +144,12 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   clock when it stopped) and `reason` (the `AbortError`, or the `TranscriptionError`), with
   the reason's message. The recogniser is still aborted at once, not asked to `stop()`. The
   control adds the cues through `addCaptionCues` as usual, one history entry (one undo takes
-  them off; **Replace** applies as chosen), and says "Transcription stopped at m:ss. Added N
+  them off). **Replace** on a run cut short replaces only the old captions that start before
+  `stoppedAt` (`addCaptionCues(…, { replace: { before: stoppedAt } })`): the ones after it were
+  never heard again, so they stay, and the notice ends "The caption(s) already there from m:ss
+  on was/were kept." (A caption just before `stoppedAt` whose words the recogniser had not yet
+  reported is still replaced.) A Captions track locked meanwhile adds nothing, as before; for a
+  recogniser error the notice gives the error before the lock. The control says "Transcription stopped at m:ss. Added N
   caption(s) heard before then to the Captions track." or, for an error, the error in words
   followed by "It stopped at m:ss. Added N caption(s) heard before then to the Captions track."
   (m:ss as the status clock shows it). They are kept without asking: Ctrl+Z is the way back.
@@ -290,8 +295,10 @@ on demand.
   context, and reports no progress after; an abort before any speech still rejects with a plain
   `AbortError`. `TranscribeControl.test.tsx` ("a run cut short"): Stop while listening adds the
   heard captions in one undo step with the m:ss notice; Stop before speech adds nothing; an
-  error keeps them and gives the error and where it stopped; a project replaced while listening
-  adds nothing; no progress after Stop. `apps/e2e/tests/regressions/ESCSUITE-484.spec.ts`
+  error keeps them and gives the error and where it stopped; Replace on a stopped run keeps the
+  old captions from where it stopped; a locked track after an error gives both; a project
+  replaced while listening adds nothing; no progress after Stop. `store/overlaySlice.captions.test.ts`:
+  `replace: { before }` takes off only the captions before it. `apps/e2e/tests/regressions/ESCSUITE-484.spec.ts`
   (chromium-strict, firefox, webkit; the stub; skipped where the browser has no running
   `AudioContext`, as headless Firefox without a sound device): Stop once the stub's own record
   shows its first final words leaves them on the Captions track with "Transcription stopped at m:ss", and one Ctrl+Z

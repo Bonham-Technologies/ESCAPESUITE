@@ -1031,6 +1031,60 @@ describe('TranscribeControl: a run cut short keeps what was heard (ESCSUITE-484)
     expect(showNotification).not.toHaveBeenCalledWith(expect.stringMatching(/^Transcription stopped at/), expect.anything());
   });
 
+  it('Replace on a run stopped while listening replaces only the captions before where it stopped', async () => {
+    store().addCaptionCues(
+      [
+        { start: 0.5, end: 2, text: 'an earlier take' },
+        { start: 30, end: 32, text: 'never heard again' },
+      ],
+      { fontSize: 40 } as never
+    );
+    useEditorStore.setState({ history: { past: [], future: [] } });
+    const before = captionClips();
+    listeningRun([STUB_WORDS[0]], 4.6);
+    const user = userEvent.setup();
+    installRecognition();
+    available.mockResolvedValue('available');
+    const { showNotification } = renderControl();
+    await user.click((await screen.findByRole('button', { name: 'Transcribe to captions' }))!);
+    await user.click(screen.getByRole('button', { name: 'Replace' }));
+    await screen.findByText('Transcribing on this device…');
+
+    await user.click(screen.getByRole('button', { name: 'Stop transcribing' }));
+
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith(
+        'Transcription stopped at 0:04. Added 1 caption heard before then to the Captions track. The caption already there from 0:04 on was kept.',
+        'success'
+      )
+    );
+    expect(captionClips().map((c) => c.textData?.text)).toEqual(['never heard again', 'the quick brown fox']);
+    expect(useEditorStore.getState().history.past).toHaveLength(1);
+    store().undo();
+    expect(captionClips()).toEqual(before);
+  });
+
+  it('a recogniser error on a Captions track locked meanwhile gives the error as well as the lock', async () => {
+    const seen = listeningRun(STUB_WORDS, 7.2);
+    const { showNotification } = await start();
+    act(() => {
+      store().addCaptionCues([{ start: 9, end: 10, text: 'meanwhile' }], { fontSize: 40 } as never);
+      const captions = useEditorStore.getState().project.timeline.tracks.find((t) => t.kind === 'captions')!;
+      store().updateTrack(captions.id, { locked: true });
+    });
+    const error = Object.assign(new Error('On-device speech recognition stopped (network).'), { name: 'TranscriptionError' });
+
+    await act(async () => seen.fail!(cutShort(error, STUB_WORDS, 7.2)));
+
+    await waitFor(() =>
+      expect(showNotification).toHaveBeenCalledWith(
+        'On-device speech recognition stopped (network). The Captions track is locked, so no captions were added.',
+        'error'
+      )
+    );
+    expect(captionClips().map((c) => c.textData?.text)).toEqual(['meanwhile']);
+  });
+
   it('reports no progress after Stop (ESCSUITE-461)', async () => {
     const seen = listeningRun([STUB_WORDS[0]], 4.6);
     const { user, showNotification } = await start();
