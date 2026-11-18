@@ -1,7 +1,7 @@
 <!-- Moved verbatim from apps/craft/CLAUDE.md on 2026-10-19. Edit here; CLAUDE.md only indexes this file. -->
 # Dialogs
 
-Both modals — Recording Tips and playback — get their keyboard behaviour from one hook,
+All three modals — Recording Tips, playback and the delete confirmation — get their keyboard behaviour from one hook,
 `useDialogBehaviour`, which lives in **`packages/shared/src/hooks`** and is imported as
 `@escapesuite/shared/hooks`. ESCAPEARTIST's export dialog uses the same hook; it is the one
 implementation for all three dialogs in the suite, and the place to change any of this.
@@ -32,9 +32,9 @@ Its own tests moved with it (`packages/shared/src/hooks/useDialogBehaviour.test.
 
 Stopping Escape is not enough on its own, because R, P and S never reach the dialog at all.
 `useKeyboardShortcuts` therefore takes **`modalOpen`** and ignores every key while it is true —
-`App` computes it as `showHelpModal || playbackUrl !== null || showRecoverPrompt`. The third
-dialog, `RecoverTakeDialog` (ESCSUITE-466, see [`crash-safe-takes.md`](crash-safe-takes.md)),
-uses the same hook and waits until the other two are closed rather than opening on top of them. Before that gate, pressing R inside
+`App` computes it as `showHelpModal || playbackUrl !== null || confirmRequest !== null || showRecoverPrompt`.
+The recovery dialog, `RecoverTakeDialog` (ESCSUITE-466, see [`crash-safe-takes.md`](crash-safe-takes.md)),
+uses the same hook and waits until the other dialogs are closed rather than opening on top of them. Before that gate, pressing R inside
 the Help dialog put a screen-capture prompt up from behind it.
 
 **No dialog in either app can reach a two-open state today**: each backdrop is
@@ -95,3 +95,49 @@ theme only, and a single-theme or single-browser axe run can miss it either way.
 `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` proves the round trip in a real
 browser: open Help from the keyboard, Tab six times without leaving it, Escape, focus back on
 the Help button.
+
+## The delete confirmation (ESCSUITE-483)
+
+The library's Delete button used to delete at once — a take and every companion file of it, with
+no question and no undo, from an icon next to "Open in Editor". It now asks first, in CRAFT's own
+**`ConfirmDialog`** (`src/components/ConfirmDialog/`), not the browser's `confirm()`: in an iframe
+sandboxed without `allow-modals`, `confirm()` answers false without showing anything, so an
+embedded CRAFT's Delete would silently do nothing (ESCAPEARTIST's ESCSUITE-448 found that for its
+own confirmations; this is the same shape, kept in CRAFT because the apps share no state).
+
+- **Asking.** `utils/confirmAction.ts` holds the one question in a module-level slot:
+  `confirmAction({ title, message, confirmLabel, returnFocus })` returns a promise of the answer,
+  `answerConfirm` answers it, `useConfirmRequest` reads it. A second question replaces the first,
+  which resolves false. `RecordingsListPanel` asks; `App` draws the dialog and reads the same slot
+  for `modalOpen`, so **R, P, S and Escape are inert while it is up** — it can be up mid-take,
+  since the library is not locked while recording.
+- **Wording** (`utils/deleteConfirmation.ts`): the title names the row — `Delete "<name>"?` — and
+  the message is "This cannot be undone.", preceded, when the row is a take with companion parts,
+  by how many files go and which: "This take is 3 files, and all of them will be deleted: the
+  recording, the webcam track and the microphone track." `companionsOf` is the same
+  `takeId === id && id !== id` test the cascade delete uses. A companion row deletes only itself
+  and gets no count.
+- **Answers.** Only the dialog's own Delete button is a yes. Cancel (which has the initial focus,
+  so Enter straight away is a no), Escape and a click on the backdrop are all no, and a no deletes
+  nothing and leaves an MP4/M4A conversion of that take running.
+- **Focus** goes back to the row's Delete button on a no. The hook's own restore is not enough
+  there: WebKit does not focus a button on click, so what was focused when the dialog opened can
+  be the page body. The row hands its button over as `returnFocus`, and the dialog focuses it in an
+  effect declared after the hook's, so its cleanup runs after the hook's restore.
+- **Always mounted.** Unlike the other two dialogs, `ConfirmDialog` is rendered for the life of
+  the app and draws nothing while no question is up, passing the hook its own `isOpen` as
+  ARTIST's export dialog does. It answers no if the app unmounts with a question up, and an
+  unmount effect on a dialog mounted per question answered every question at once in development:
+  React's StrictMode mounts, unmounts and remounts each new component once.
+- **After the answer, the panel re-reads.** The question can stay up for as long as the user
+  likes, and meanwhile a take can be saved (the "Float controls" window is not behind the
+  backdrop) or a conversion can finish. So the panel reads the list, the conversion in flight and
+  `onDelete` (whose closure holds the list the cascade runs over) as they are *after* the yes,
+  through a ref an effect keeps current: a take already gone is not deleted again, and a
+  conversion of it is cancelled only then (ESCSUITE-103's rule, applied to a yes rather than a
+  click).
+
+Pinned by `ConfirmDialog.test.tsx` (StrictMode included), `deleteConfirmation.test.ts`,
+`RecordingsListPanel.test.tsx`, `App.library.test.tsx` (Cancel, Escape and the inert R) and the
+Playwright `apps/e2e/tests/regressions/ESCSUITE-483.spec.ts` (Cancel, Escape and Delete on a real
+take, focus, storage after a reload, axe in both themes, in Chromium, Firefox and WebKit).

@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v27. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -45,8 +45,8 @@ For each project, read:
 **Read the source systems, not only the digests.** Digests report what their run saw,
 often before a later merge; a digest-reported version is only a cross-check on input 6.
 Also read, once per run:
-- **the scheduled tasks:** `list_triggers` with `recurring: true` and `limit: 100`, saved
-  as JSON. If the tool isn't present, write "scheduled tasks: not readable" and skip
+- **the scheduled tasks:** `list_triggers` with `limit: 100` and no `recurring` filter (the dependabot
+  event task has no cron), saved as JSON. If the tool isn't present, write "scheduled tasks: not readable" and skip
   **Drift** and the `last_run` half of **Missed runs**;
 - **the control panel:** the OPS page "Autopilot control panel" as Markdown, saved to a
   file; `bin/fleet check-panel <file>` prints its `Settings check` line, the cells that
@@ -91,7 +91,7 @@ statusCategory != Done`.
    only; exit 2, a timeout or a crash is "not checked". Add `--psi` when the previous fleet
    digest is from an earlier calendar month (America/Denver): an SEO-18 ticket names the
    metric, its p75, the threshold and the PageSpeed report link. On bonham.tech add
-   `--expect-link <site>` for every other site `bin/fleet sites` lists. SITE ids are filed
+   `--expect-link <site>` for each site `bin/fleet hub-links` lists (not one marked `"hubLink": false`). SITE ids are filed
    the same way, plus `ap-security` for SITE-1 to 4; SITE-4 (DNS, an owner step) goes to
    BORG as `needs-operator`, one per domain unless an open BORG ticket names that domain.
 4. Run `bin/search-console sites` (`docs/seo/search-console.md`), then `bin/search-console review
@@ -118,7 +118,7 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   or whose last run is older than its previous scheduled time (its cron in
   `fleet.json`), is missed: quote the status and time. Skip this run's own task and a
   run still in progress; a task with no `last_run` is missed only if it was created
-  before its previous scheduled time. The steward and scout tasks fire daily, so judge
+  before its previous scheduled time. A dependabot event task has no cron: it is missed when its `last_run.status` is not SUCCEEDED, or when a Dependabot PR (author `dependabot[bot]`, base `main`) opened after the task was created and over 2 hours ago has no `last_run` at or after its `created_at`: say "dependabot trigger: not firing, check the task's GitHub trigger". With no `last_run` and no such PR it is not missed. The steward and scout tasks fire daily, so judge
   them by trace alone. Without the task listing, fall back to traces: a
   steward or scout always leaves one on its days (input 3), a digest comment or a Session
   Log entry, so one whose scheduled time passed with no trace is missed. A builder with nothing to do
@@ -194,7 +194,7 @@ comment the ticket's link on the issue
 Run `bin/fleet drift <saved listing>` in this checkout. For each project with lines,
 file or update one `needs-operator` ticket in this project titled
 **`<project>: fix scheduled tasks`** (search for an open one with that title first).
-Its body lists every edit per task: name, cron, model and the full prompt, from
+Its body lists every edit per task: name, cron, model, effort where `bin/fleet tasks` gives one, and the full prompt, from
 `bin/fleet tasks <name>`. When a later run finds no drift for that project, comment so
 on the open ticket and move it to Done.
 

@@ -17,6 +17,8 @@ import type { RecordingSource } from './components/SourceToggles/SourceToggles';
 import { SourceTogglesPanel } from './components/SourceToggles/SourceTogglesPanel';
 import { WebcamOverlaySettingsPanel } from './components/WebcamOverlaySettings/WebcamOverlaySettingsPanel';
 import { RecordingsListPanel } from './components/RecordingsList/RecordingsListPanel';
+import { ConfirmDialog } from './components/ConfirmDialog/ConfirmDialog';
+import { useConfirmRequest } from './utils/confirmAction';
 import { RecordingPreview } from './components/RecordingPreview/RecordingPreview';
 import { RecorderControls } from './components/RecorderControls/RecorderControls';
 import { FloatingControls } from './components/RecorderControls/FloatingControls';
@@ -73,6 +75,8 @@ function App() {
   const recorderTypeRef = useRef<'webcodecs' | 'mediarecorder'>('mediarecorder');
   const capturedThumbnailRef = useRef<Blob | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  // The question the confirm dialog is asking, or null (ESCSUITE-483).
+  const confirmRequest = useConfirmRequest();
 
   // The hooks are called in the order their effects ran in when they were
   // inline, because that order is the behaviour: theme, capability bootstrap,
@@ -181,7 +185,7 @@ function App() {
     refreshStorageSpace,
   });
   // The prompt waits behind the other two dialogs rather than stacking on them.
-  const showRecoverPrompt = pendingTake !== null && !showHelpModal && playbackUrl === null;
+  const showRecoverPrompt = pendingTake !== null && !showHelpModal && playbackUrl === null && confirmRequest === null;
 
   // The "Float controls" Picture-in-Picture window (ESCSUITE-400). It registers
   // its own effects (theme mirroring, closing the window on unmount), which
@@ -193,11 +197,12 @@ function App() {
   useKeyboardShortcuts({
     state,
     canRecord: blockedReason === null,
-    // Either dialog makes the app behind it deaf to R / P / S / Escape.
+    // Any dialog makes the app behind it deaf to R / P / S / Escape — the
+    // delete confirmation included (ESCSUITE-483), which can be up mid-take.
     // useRecordingLibrary owns playbackUrl, which is why it is called above
     // rather than last; it registers no effect, so the effect order the
     // comment above describes is unchanged.
-    modalOpen: showHelpModal || playbackUrl !== null || showRecoverPrompt,
+    modalOpen: showHelpModal || playbackUrl !== null || confirmRequest !== null || showRecoverPrompt,
     handleStartRecording,
     handlePauseRecording,
     handleResumeRecording,
@@ -334,6 +339,10 @@ function App() {
 
       {/* Help Modal */}
       {showHelpModal && <HelpDialog onClose={() => setShowHelpModal(false)} />}
+
+      {/* Confirm dialog — what the library asks before deleting a take. Always
+          mounted; it draws nothing while no question is up (see its doc). */}
+      <ConfirmDialog />
 
       {/* The "Float controls" window's contents, drawn into its own document */}
       {floatingWindow && createPortal(<FloatingControls {...transport} />, floatingWindow.document.body)}
