@@ -19,7 +19,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { Clip, ClipAnimation, EditorBlock, Keyframe, Marker, SourceVideo, Track } from './types';
-import { DEFAULT_ANIMATION } from './types';
+import { DEFAULT_ANIMATION, DEFAULT_TRANSITION } from './types';
 import type { TimeRange } from '../core/silenceDetection';
 import { cloneClip } from '../utils/deepClone';
 import { trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
@@ -214,7 +214,9 @@ function slotAt(ranges: readonly TimeRange[], time: number): number {
  * A clip a range crosses becomes the pieces outside it: the first keeps the
  * clip's id (so a selection of it survives), the rest get new ones. Each piece
  * is a window on the same source at the same offset, with its animation
- * trimmed to it. A clip wholly inside a range is dropped.
+ * trimmed to it. Only the last piece keeps the clip's transition, which plays
+ * at the clip's end; the others get none, so no join plays one
+ * (ESCSUITE-482). A clip wholly inside a range is dropped.
  *
  * Link groups follow `splitClip`'s rule that a group is a segment. A slot is
  * the stretch between two cuts; a group's clips in its earliest slot keep its
@@ -271,6 +273,10 @@ export function cutTimeRanges(
         duration: end - start,
         timelinePosition: piece.start - removedBefore(ranges, piece.start),
         ...(clip.animation ? { animation: pieceAnimation(clip.animation, start, end, clip.duration) } : {}),
+        // A transition plays at a clip's end (`getActiveTransition`), and
+        // every piece but the last now ends where the next one starts: one
+        // that kept it played a fade or wipe at every cut (ESCSUITE-482).
+        ...(i < pieces.length - 1 ? { transition: { ...DEFAULT_TRANSITION } } : {}),
       };
       placed.push({ clip: cut, slot: slotAt(ranges, piece.start) });
     });
