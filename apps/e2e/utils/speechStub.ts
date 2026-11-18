@@ -43,6 +43,8 @@ export interface StubRecord {
   starts: Array<{ processLocally: unknown; isTrack: boolean; kind: string | null; readyState: string | null }>
   constructed: number
   maxLevel: number
+  /** Every result it has reported, in order (ESCSUITE-484: a test can wait for words to be heard). */
+  said: Array<{ index: number; transcript: string; isFinal: boolean }>
 }
 
 export async function installSpeechStub(page: Page, mode: StubMode, brands: Brand[] = CHROME_BRANDS): Promise<void> {
@@ -53,7 +55,7 @@ export async function installSpeechStub(page: Page, mode: StubMode, brands: Bran
         configurable: true,
         get: () => ({ brands, mobile: false, platform: 'Linux' }),
       })
-      const record = { available: [] as unknown[], install: [] as unknown[], starts: [] as unknown[], constructed: 0, maxLevel: 0 }
+      const record = { available: [] as unknown[], install: [] as unknown[], starts: [] as unknown[], constructed: 0, maxLevel: 0, said: [] as unknown[] }
       w.__speechStub = record
       w.webkitSpeechRecognition = undefined
       if (mode.api === 'none') {
@@ -97,6 +99,7 @@ export async function installSpeechStub(page: Page, mode: StubMode, brands: Bran
             const result = Object.assign([{ transcript, confidence: 0.9 }], { isFinal })
             const results: unknown[] = []
             results[index] = result
+            record.said.push({ index, transcript, isFinal })
             this.onresult?.({ resultIndex: index, results })
           }
           const at = (ms: number, fn: () => void) => this.timers.push(window.setTimeout(fn, ms))

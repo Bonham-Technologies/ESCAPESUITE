@@ -8,7 +8,7 @@
 // host asked for is no longer in storage or cannot be read at all.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import 'fake-indexeddb/auto'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RecordingsListPanel } from './RecordingsListPanel'
 import { useRecorderStore } from '../../store/recorderStore'
@@ -20,6 +20,7 @@ import { storeVideo } from '../../core/storage'
 import { EDITOR_UNREACHABLE_REASON } from '../../utils/sendToEditor'
 import { clearAllRecordings } from '../../test/recordingsDb'
 import type { Recording } from '../../store/types'
+import { ConfirmDialog } from '../ConfirmDialog/ConfirmDialog'
 
 const { isEmbedded, isFileOrigin, isStandaloneMode, editorUrlIsRelative } = vi.hoisted(() => ({
   isEmbedded: vi.fn(() => false),
@@ -297,6 +298,29 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
     return { started, get signal() { return signal } }
   }
 
+  /** The panel with the confirm dialog `App` draws beside it. */
+  function renderWithConfirm(onDelete: (id: string) => void, recordings = [baseRecording, secondRecording]) {
+    const panel = (rows: Recording[], handler: (id: string) => void) => (
+      <>
+        <RecordingsListPanel
+          recordings={rows}
+          onPlay={vi.fn()}
+          onDownload={vi.fn()}
+          onSendToEditor={vi.fn()}
+          onDelete={handler}
+        />
+        <ConfirmDialog />
+      </>
+    )
+    const view = render(panel(recordings, onDelete))
+    return {
+      rerender: (rows: Recording[], handler = onDelete) => view.rerender(panel(rows, handler)),
+    }
+  }
+
+  const confirmDelete = async (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Delete' }))
+
   it('aborts the conversion in flight, so deleting it frees the slot for other rows', async () => {
     // ESCSUITE-103: the row being deleted is the row holding the one
     // conversion slot. Its progress readout and its Cancel button unmount with
@@ -307,15 +331,7 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
     const user = userEvent.setup()
     const conversion = deferConversion()
     const onDelete = vi.fn()
-    render(
-      <RecordingsListPanel
-        recordings={[baseRecording, secondRecording]}
-        onPlay={vi.fn()}
-        onDownload={vi.fn()}
-        onSendToEditor={vi.fn()}
-        onDelete={onDelete}
-      />
-    )
+    renderWithConfirm(onDelete)
 
     await user.click(screen.getByRole('button', { name: 'Download Take Seven as MP4' }))
     await act(async () => {
@@ -326,6 +342,12 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
     expect(screen.getByRole('button', { name: 'Download Take Eight as MP4' })).toBeDisabled()
 
     await user.click(screen.getByRole('button', { name: 'Delete Take Seven' }))
+    // ESCSUITE-483: asking is not deleting — the conversion runs on until
+    // the user says yes.
+    expect(conversion.signal?.aborted).toBe(false)
+    expect(onDelete).not.toHaveBeenCalled()
+
+    await confirmDelete(user)
 
     // The conversion is aborted before the caller's own delete runs — "the
     // user asked for the take to go" is honoured before the row goes.
@@ -345,15 +367,7 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
     const user = userEvent.setup()
     const conversion = deferConversion()
     const onDelete = vi.fn()
-    render(
-      <RecordingsListPanel
-        recordings={[baseRecording, secondRecording]}
-        onPlay={vi.fn()}
-        onDownload={vi.fn()}
-        onSendToEditor={vi.fn()}
-        onDelete={onDelete}
-      />
-    )
+    renderWithConfirm(onDelete)
 
     await user.click(screen.getByRole('button', { name: 'Download Take Seven as MP4' }))
     await act(async () => {
@@ -361,12 +375,83 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
     })
 
     await user.click(screen.getByRole('button', { name: 'Delete Take Eight' }))
+    await confirmDelete(user)
 
     expect(conversion.signal?.aborted).toBe(false)
     expect(onDelete).toHaveBeenCalledWith('r8')
     expect(
       screen.getByRole('button', { name: 'Cancel MP4 conversion of Take Seven' })
     ).toBeInTheDocument()
+  })
+
+  it('Cancel deletes nothing, keeps the conversion and puts focus back on the row', async () => {
+    // ESCSUITE-483: a No must cost the user nothing — not the take, and not
+    // the conversion of it that was running when they pressed Delete.
+    const user = userEvent.setup()
+    const conversion = deferConversion()
+    const onDelete = vi.fn()
+    renderWithConfirm(onDelete)
+
+    await user.click(screen.getByRole('button', { name: 'Download Take Seven as MP4' }))
+    await act(async () => {
+      await conversion.started
+    })
+    const rowDelete = screen.getByRole('button', { name: 'Delete Take Seven' })
+
+    await user.click(rowDelete)
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }))
+    await act(async () => {})
+
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(conversion.signal?.aborted).toBe(false)
+    expect(document.activeElement).toBe(rowDelete)
+  })
+
+  it('names the take and every file that goes with it', async () => {
+    const user = userEvent.setup()
+    const primary: Recording = { ...baseRecording, takeId: 'r7', role: 'screen' }
+    const webcam: Recording = { ...baseRecording, id: 'r7-cam', name: 'Take Seven — webcam', takeId: 'r7', role: 'webcam' }
+    const mic: Recording = { ...baseRecording, id: 'r7-mic', name: 'Take Seven — microphone', takeId: 'r7', role: 'mic' }
+    renderWithConfirm(vi.fn(), [primary, webcam, mic])
+
+    await user.click(screen.getByRole('button', { name: 'Delete Take Seven' }))
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete "Take Seven"?' })
+    expect(dialog).toHaveAccessibleDescription(
+      'This take is 3 files, and all of them will be deleted: the recording, the webcam track and the microphone track. This cannot be undone.'
+    )
+  })
+
+  it('does nothing when the take is already gone by the time the user says yes', async () => {
+    // Re-read after the answer, not at the click (the ESCSUITE-448 lesson):
+    // the list can change while the question is up.
+    const user = userEvent.setup()
+    const onDelete = vi.fn()
+    const view = renderWithConfirm(onDelete)
+
+    await user.click(screen.getByRole('button', { name: 'Delete Take Eight' }))
+    view.rerender([baseRecording])
+    await confirmDelete(user)
+
+    expect(onDelete).not.toHaveBeenCalled()
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+  })
+
+  it('deletes through the handler current when the user says yes', async () => {
+    // `onDelete`'s closure holds the list it cascades over; the one from the
+    // render the click happened in may be out of date by the answer.
+    const user = userEvent.setup()
+    const stale = vi.fn()
+    const current = vi.fn()
+    const view = renderWithConfirm(stale)
+
+    await user.click(screen.getByRole('button', { name: 'Delete Take Eight' }))
+    view.rerender([baseRecording, secondRecording], current)
+    await confirmDelete(user)
+
+    expect(stale).not.toHaveBeenCalled()
+    expect(current).toHaveBeenCalledWith('r8')
   })
 })
 
