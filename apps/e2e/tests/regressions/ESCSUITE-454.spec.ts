@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url'
 import { test, expect, type Page } from '@playwright/test'
 import { ARTIST_URL, importMediaAndAddToTimeline, openExportAdvancedOptions, openExportDialog } from '../../utils/artist'
 import { waitForAppReady } from '../../utils/ready'
-import { readWebmLayout } from '../../utils/webmLayout'
 
 /**
  * ESCSUITE-454: an export through the in-page `<video>` path (WebM, GIF, and
@@ -32,7 +31,9 @@ import { readWebmLayout } from '../../utils/webmLayout'
  * Firefox runs it too, and passed 10 of 10 with the wait removed: the race is
  * Chromium's. WebKit's Linux port, which Playwright runs, paints a
  * `<video>` outside the document as black, so the export it would test is
- * black whatever the fix; the case skips where the probe below sees that.
+ * black whatever the fix; the case skips in WebKit where the probe below sees
+ * that. In any other engine a failed probe fails the case rather than
+ * skipping it, so a probe that misreads cannot hide the check.
  */
 
 const FIXTURE = resolvePath(
@@ -198,7 +199,7 @@ async function readBarcodes(page: Page, bytes: Buffer, times: number[]): Promise
 }
 
 test.describe('ESCSUITE-454: a WebM export writes the frame after each seek, not the one before', () => {
-  test('every frame of an export cut into 120 pieces, each cut’s first included, is the source frame the timeline puts there', async ({ page }) => {
+  test('every frame of an export cut into 120 pieces, each cut’s first included, is the source frame the timeline puts there', async ({ page, browserName }) => {
     test.setTimeout(180_000)
     await page.goto(`${ARTIST_URL}/?suppressRestore=1`)
     await waitForAppReady(page, 'artist')
@@ -207,9 +208,10 @@ test.describe('ESCSUITE-454: a WebM export writes the frame after each seek, not
     // detached-element reader the export is checked with.
     const probe = await readBarcodes(page, readFileSync(FIXTURE), [51.5 / SOURCE_FPS])
     test.skip(
-      probe[0] !== 51,
+      browserName === 'webkit' && probe[0] !== 51,
       `This engine paints a <video> outside the document as ${probe[0] === 0 ? 'black' : `source frame ${probe[0]}`} (WebKit's Linux port does), so the in-page export draws no picture to check`
     )
+    expect(probe[0], 'source frame 51 read from the fixture by the detached-element reader').toBe(51)
 
     await importMediaAndAddToTimeline(page, FIXTURE)
     const expected = await cutIntoPieces(page)
@@ -219,16 +221,10 @@ test.describe('ESCSUITE-454: a WebM export writes the frame after each seek, not
     test.skip(!(await page.getByRole('radio', { name: /WebM/ }).isEnabled()), 'This browser cannot export WebM')
     const bytes = await exportWebm(page)
 
-    // The frames the file holds, by their place on the timeline.
-    const frameMs = 1000 / FPS
-    const frames = readWebmLayout(bytes).videoBlocks.map((block) => Math.round(block.time / frameMs))
-    const cuts = PIECE_STARTS.map((_, k) => k * PIECE_FRAMES)
-    expect(
-      cuts.filter((n) => !frames.includes(n)),
-      'cuts whose first frame is not in the exported file'
-    ).toEqual([])
-
-    // Mid-frame, so a read cannot land on the frame before by rounding.
+    // Every export frame, read mid-frame so a read cannot land on the frame
+    // before by rounding. A frame missing from the file reads as the one
+    // before it, so it fails here too.
+    const frames = expected.map((_, n) => n)
     const read = await readBarcodes(page, bytes, frames.map((n) => (n + 0.5) / FPS))
     const wrong = frames.flatMap((n, i) => {
       if (read[i] === expected[n]) return []
