@@ -227,8 +227,13 @@ export const createOverlaySlice: StateCreator<EditorState, [], [], OverlaySlice>
         textData: { ...DEFAULT_TEXT_OVERLAY_DATA, ...style, text: cue.text },
       };
     });
-    const kept = options?.replace
-      ? clips.filter((clip) => !(clip.trackId === trackId && clip.overlayType === 'text'))
+    const replace = options?.replace;
+    // ESCSUITE-484: a transcription cut short replaces only what it covered.
+    const before = typeof replace === 'object' ? replace.before : Infinity;
+    const kept = replace
+      ? clips.filter(
+          (clip) => !(clip.trackId === trackId && clip.overlayType === 'text' && clip.timelinePosition < before)
+        )
       : clips;
     const newClips = [...kept, ...added];
 

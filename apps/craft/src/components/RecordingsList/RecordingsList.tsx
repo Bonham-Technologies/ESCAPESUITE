@@ -56,7 +56,12 @@ interface RecordingsListProps {
    */
   storagePersisted: boolean | null;
   onSendToEditor: (id: string) => void;
-  onDelete: (id: string) => void;
+  /**
+   * Asked to delete a row. The whole row comes, because the confirmation the
+   * panel puts up (ESCSUITE-483) names it, and so does the button itself, so
+   * that confirmation can hand focus back to it on Cancel.
+   */
+  onDelete: (recording: Recording, trigger: HTMLElement) => void;
 }
 
 /**
@@ -290,7 +295,7 @@ export function RecordingsList({
                   </button>
                   <button
                     className={styles.iconButton}
-                    onClick={() => onDelete(recording.id)}
+                    onClick={(e) => onDelete(recording, e.currentTarget)}
                     title="Delete"
                     aria-label={`Delete ${recording.name}`}
                   >

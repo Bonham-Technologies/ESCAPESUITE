@@ -906,11 +906,14 @@ export interface EditorState {
    * ESCSUITE-442: `replace` first takes every text clip off that track (the
    * captions; a video or audio clip moved there stays), in the same write and
    * history entry, dropping any removed cue from the selection.
+   * ESCSUITE-484: `replace: { before }` takes off only the text clips that
+   * start before `before` seconds (a transcription cut short there): the
+   * captions from that point on stay.
    */
   addCaptionCues: (
     cues: CaptionCue[],
     style: CaptionStyle,
-    options?: { replace?: boolean; language?: string }
+    options?: { replace?: boolean | { before: number }; language?: string }
   ) => { trackId: string; added: number } | null;
   /**
    * ESCSUITE-473: a translation of the caption track `sourceTrackId` as a new

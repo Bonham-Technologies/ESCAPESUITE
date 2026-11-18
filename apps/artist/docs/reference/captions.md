@@ -79,7 +79,9 @@ holds that a caption is drawn while its cue is up and not a frame before or afte
   language, gives it to a caption track that had none, and on a `replace` takes the new one.
   `addCaptionCues(cues, style, { replace: true })` (ESCSUITE-442) first takes every text clip
   off the Captions track (a video or audio clip moved there stays), in the same `set` and history entry, and drops any of them from the
-  selection; "Transcribe to captions" uses it for its **Replace** answer.
+  selection; "Transcribe to captions" uses it for its **Replace** answer. `{ replace: { before } }`
+  (ESCSUITE-484) takes off only the text clips that start before `before` seconds: a
+  transcription cut short there keeps the captions after it.
 - **Overlapping cues and the gestures** (ESCSUITE-308). The import keeps overlapping cues where
   the file put them, on the one track, and does not move them apart. The timeline's gestures
   treat such a pair as an overlap they **found**: the long cue's trim handles run past the cue
