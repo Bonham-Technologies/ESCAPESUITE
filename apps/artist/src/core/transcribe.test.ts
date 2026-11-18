@@ -6,6 +6,7 @@ import {
   END_WAIT_MS,
   HEARD_LEAD_SECONDS,
   MAX_CUE_CHARS,
+  TranscriptionCutShort,
   TranscriptionError,
   createLocalRecognition,
   cuesFromSegments,
@@ -277,14 +278,15 @@ describe('transcribeChannels (ESCSUITE-404)', () => {
     await expect(run).resolves.toEqual([{ start: 0, end: 1, text: 'only this' }]);
   });
 
-  it('stops at once and keeps nothing when aborted', async () => {
+  it('stops at once and keeps nothing when aborted before anything was heard', async () => {
     const { ctx, source } = makeContext();
     const controller = new AbortController();
     const run = transcribeChannels({
       channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, signal: controller.signal,
     });
     await flush();
-    FakeRecognition.instances[0].say(0, 'half a', false);
+    // Words that trim to nothing make no cue: there is nothing to keep.
+    FakeRecognition.instances[0].say(0, '  ', false);
     controller.abort();
     await expect(run).rejects.toMatchObject({ name: 'AbortError' });
     expect(FakeRecognition.instances[0].abort).toHaveBeenCalled();
@@ -922,5 +924,67 @@ describe('transcribeChannels: a run that settles while it starts (ESCSUITE-461)'
     await vi.advanceTimersByTimeAsync(2000);
     expect(progress).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('transcribeChannels: a run cut short keeps what was heard (ESCSUITE-484)', () => {
+  async function listening(signal?: AbortSignal) {
+    const { ctx, source } = makeContext();
+    const progress = vi.fn();
+    const run = transcribeChannels({
+      channels: TEN_SECONDS, sampleRate: 48000, lang: 'en-US', Recognition, createAudioContext: () => ctx, onProgress: progress, signal,
+    });
+    const settled = run.then(
+      () => { throw new Error('expected the run to be cut short'); },
+      (error: unknown) => error
+    );
+    await flush();
+    const [recognition] = FakeRecognition.instances;
+    ctx.currentTime = 1;
+    recognition.say(0, 'the quick', false);
+    ctx.currentTime = 3;
+    recognition.say(0, 'the quick brown fox', true);
+    ctx.currentTime = 5;
+    recognition.say(1, 'jumps', false);
+    ctx.currentTime = 5.6;
+    return { ctx, source, progress, recognition, settled };
+  }
+
+  it('hands back the cues heard so far, interim words included, and where it stopped, when aborted', async () => {
+    const controller = new AbortController();
+    const { ctx, source, progress, recognition, settled } = await listening(controller.signal);
+    progress.mockClear();
+    controller.abort();
+    const error = await settled;
+
+    expect(error).toBeInstanceOf(TranscriptionCutShort);
+    const cut = error as TranscriptionCutShort;
+    expect(cut.name).toBe('TranscriptionCutShort');
+    expect(cut.reason).toMatchObject({ name: 'AbortError' });
+    expect(cut.stoppedAt).toBe(5.6);
+    expect(cut.cues).toEqual([
+      { start: 0.7, end: 3, text: 'the quick brown fox' },
+      { start: 4.7, end: 5.7, text: 'jumps' },
+    ]);
+    // It still stops at once, and nothing is left running or reporting.
+    expect(recognition.abort).toHaveBeenCalled();
+    expect(recognition.stop).not.toHaveBeenCalled();
+    expect(source.stop).toHaveBeenCalled();
+    expect(ctx.close).toHaveBeenCalled();
+    expect(progress).not.toHaveBeenCalled();
+  });
+
+  it('hands back the cues heard so far with the error in words when the recogniser fails mid-run', async () => {
+    const { recognition, settled } = await listening();
+    recognition.onerror?.({ error: 'network' });
+    const cut = (await settled) as TranscriptionCutShort;
+
+    expect(cut).toBeInstanceOf(TranscriptionCutShort);
+    expect(cut.reason).toBeInstanceOf(TranscriptionError);
+    expect(cut.message).toBe('On-device speech recognition stopped (network).');
+    expect(cut.reason.message).toBe('On-device speech recognition stopped (network).');
+    expect(cut.stoppedAt).toBe(5.6);
+    expect(cut.cues.map((c) => c.text)).toEqual(['the quick brown fox', 'jumps']);
+    expect(recognition.abort).toHaveBeenCalled();
   });
 });

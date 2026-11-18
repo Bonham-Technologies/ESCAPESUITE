@@ -115,7 +115,8 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   failing read only "Could not transcribe the timeline.") The mix plays in real time into a `MediaStreamAudioDestinationNode`, never the
   speakers, and that node's audio track goes to `recognition.start(track)`. **The microphone
   is never opened.** A 10-minute timeline takes about 10 minutes. The status line reads
-  "Transcribing on this device… m:ss / m:ss". **Stop transcribing** ends it and adds nothing.
+  "Transcribing on this device… m:ss / m:ss". **Stop transcribing** ends it at once (see
+  **Cut short** below for what it keeps).
   When the sound has finished playing, the recogniser is asked to `stop()` and its `onend`
   ends the run. If `onend` has not come `END_WAIT_MS` (5 s) later, the run finishes anyway
   with what was heard and the recogniser is aborted (ESCSUITE-438): a recogniser that never
@@ -135,6 +136,24 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   the button at once. The mixer sees the same signal and stops after the chunk it is mixing
   (ESCSUITE-433); a new run still shows "Preparing the sound…" and waits for the stopped mix
   to end before mixing, so two mixes never hold memory at once.
+- **Cut short keeps what was heard (ESCSUITE-484).** Stop while it listens, or a recogniser
+  error then (anything but the benign `no-speech` and `aborted`), no longer throws away the
+  captions heard so far. The core's `fail()` turns everything heard up to then into cues, as a
+  finished run does (interim words included, cues capped at the timeline's end), and, when there
+  is at least one, rejects with `TranscriptionCutShort`: the cues, `stoppedAt` (the playback
+  clock when it stopped) and `reason` (the `AbortError`, or the `TranscriptionError`), with
+  the reason's message. The recogniser is still aborted at once, not asked to `stop()`. The
+  control adds the cues through `addCaptionCues` as usual, one history entry (one undo takes
+  them off; **Replace** applies as chosen), and says "Transcription stopped at m:ss. Added N
+  caption(s) heard before then to the Captions track." or, for an error, the error in words
+  followed by "It stopped at m:ss. Added N caption(s) heard before then to the Captions track."
+  (m:ss as the status clock shows it). They are kept without asking: Ctrl+Z is the way back.
+  Stop before anything was heard, or while the sound is being prepared, adds nothing and says
+  "Transcription stopped. No captions were added." as before. **Stop** aborts with the reason
+  `'user-stop'`: once the run is listening, the control waits for the core (which settles on
+  the abort synchronously) instead of its own immediate stop. A project replaced (ESCSUITE-432)
+  aborts with no reason, is never waited for, and the id check before `addCaptionCues` keeps
+  its cues out, so it still adds nothing.
 - **Preparing shows progress (ESCSUITE-438).** While the sound is mixed, the control shows
   "Preparing the sound…" and a percentage. `extractSpeechMix` reports after every decoded
   chunk of a streamed source (the export mix still reports once per source, unchanged), and
@@ -196,7 +215,7 @@ that embeds ARTIST in a **cross-origin** iframe has to delegate it with
   transcribe.`; `No speech was heard, so no captions were added.`; `The Captions track is
   locked, so no captions were added.` (checked before listening and again at the end);
   `Transcription stopped. No captions were added.`; the recogniser's errors in words
-  (`describeRecognitionError`). If `available()` answers `unavailable` on a press for the
+  (`describeRecognitionError`); the two cut-short notices above (ESCSUITE-484). If `available()` answers `unavailable` on a press for the
   browser's own, listed language, the control hides itself and says "On-device speech
   recognition is not available in this browser."; for any other language it stays and says
   "On-device speech recognition is not available for *language* in this browser."
@@ -265,6 +284,18 @@ on demand.
   track change and an undo; a new run mixing nothing until a stopped run's mix is done (ESCSUITE-432).
 - `apps/e2e/tests/regressions/ESCSUITE-432.spec.ts`: File > New Project mid-run stops the
   transcription at once and the new project stays empty past the old clip's end.
+- ESCSUITE-484: `core/transcribe.test.ts` ("a run cut short keeps what was heard"): an abort,
+  and a recogniser error, after speech rejects with `TranscriptionCutShort` holding the cues
+  heard (interim words included) and `stoppedAt`, still aborts the recogniser and closes the
+  context, and reports no progress after; an abort before any speech still rejects with a plain
+  `AbortError`. `TranscribeControl.test.tsx` ("a run cut short"): Stop while listening adds the
+  heard captions in one undo step with the m:ss notice; Stop before speech adds nothing; an
+  error keeps them and gives the error and where it stopped; a project replaced while listening
+  adds nothing; no progress after Stop. `apps/e2e/tests/regressions/ESCSUITE-484.spec.ts`
+  (chromium-strict, firefox, webkit; the stub; skipped where the browser has no running
+  `AudioContext`, as headless Firefox without a sound device): Stop once the stub's own record
+  shows its first final words leaves them on the Captions track with "Transcription stopped at m:ss", and one Ctrl+Z
+  takes them off.
 - `apps/e2e/tests/regressions/ESCSUITE-404.spec.ts` (Chromium, API stubbed with
   `page.addInitScript` by `apps/e2e/utils/speechStub.ts`, with a Google Chrome brand in `navigator.userAgentData`): no control
   with no API, no on-device mode or a Chromium-only brand, and no `available()` call; nothing

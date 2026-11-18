@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
 import { useEditorStore } from '../../store/projectStore';
 import { captionStyleFor, captionWrapColumns, wrapCaptionText } from '../../core/captions';
+import type { CaptionCue } from '../../core/captions';
 import {
   getLocalRecognitionCtor,
   installLocalLanguagePack,
@@ -44,6 +45,26 @@ function stoppedError(): DOMException {
   return new DOMException('Transcription stopped', 'AbortError');
 }
 
+/** The abort reason the Stop button gives, so a run can tell it from a project replaced (ESCSUITE-484). */
+const USER_STOP = 'user-stop';
+
+/** The core's `TranscriptionCutShort` (ESCSUITE-484), known by name: the core is a dynamic import. */
+interface CutShort {
+  reason: Error;
+  cues: CaptionCue[];
+  stoppedAt: number;
+}
+
+function asCutShort(error: unknown): CutShort | null {
+  if (!(error instanceof Error) || error.name !== 'TranscriptionCutShort') return null;
+  const cut = error as Error & Partial<CutShort>;
+  // `reason` is often a DOMException, from another realm in tests: no `instanceof`.
+  if (!Array.isArray(cut.cues) || typeof cut.stoppedAt !== 'number' || typeof cut.reason !== 'object' || !cut.reason) {
+    return null;
+  }
+  return { reason: cut.reason, cues: cut.cues, stoppedAt: cut.stoppedAt };
+}
+
 function clock(seconds: number): string {
   const whole = Math.max(0, Math.floor(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
@@ -70,6 +91,12 @@ function clock(seconds: number): string {
  * downloads the pack only when the user presses "Download language pack". The
  * cues land on the Captions track through `addCaptionCues`: one history
  * entry, so one undo takes the whole transcription back off.
+ *
+ * Stop while it listens, or a recogniser error then, keeps the captions heard
+ * so far (ESCSUITE-484): the core hands them back in a `TranscriptionCutShort`
+ * and the notice says how many were added and where it stopped. Stop while
+ * the sound is prepared, or before anything was heard, adds nothing, and a
+ * project replaced mid-run never gets any (ESCSUITE-432).
  *
  * When the Captions track already holds text clips, a press first asks
  * `REPLACE_QUESTION` in a modal dialog (ESCSUITE-442): **Replace** has
@@ -169,8 +196,19 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
     });
     // Settles the moment the run is stopped, so the button and the notice do
     // not wait for the core to notice (it cannot while the sound is mixed).
+    // ESCSUITE-484: once it listens, the core settles on the abort at once,
+    // handing back what it heard, so Stop waits for that instead. A project
+    // replaced (no reason given) is never waited for: nothing is kept then.
+    let listening = false;
     const stopped = new Promise<never>((_, reject) => {
-      controller.signal.addEventListener('abort', () => reject(stoppedError()), { once: true });
+      controller.signal.addEventListener(
+        'abort',
+        () => {
+          if (listening && controller.signal.reason === USER_STOP) return;
+          reject(stoppedError());
+        },
+        { once: true }
+      );
     });
     // Handled even when the run ends before `stopped` is raced (an abort while loading).
     stopped.catch(() => {});
@@ -189,6 +227,7 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
         signal: controller.signal,
         onProgress: (stage, played, total) => {
           if (controller.signal.aborted) return;
+          if (stage === 'listening') listening = true;
           setPhase(
             stage === 'mixing'
               ? { kind: 'mixing', percent: total > 0 ? Math.floor((played / total) * 100) : 0 }
@@ -204,10 +243,21 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       void settling.then(() => {
         if (settlingRef.current === settling) settlingRef.current = null;
       });
-      const cues = await Promise.race([run, stopped]);
+      // ESCSUITE-484: a Stop or a recogniser error mid-run hands back the
+      // cues heard up to then; they are kept like a finished run's (one undo
+      // takes them off), and the notice says where it stopped.
+      let cues: CaptionCue[] | null;
+      let cut: CutShort | null = null;
+      try {
+        cues = await Promise.race([run, stopped]);
+      } catch (error) {
+        cut = asCutShort(error);
+        if (!cut) throw error;
+        cues = cut.cues;
+      }
       // Checked again here, not only by the subscription: nothing is ever
       // added to a project the sound was not heard in.
-      if (controller.signal.aborted || useEditorStore.getState().project.id !== projectId) {
+      if (useEditorStore.getState().project.id !== projectId || (controller.signal.aborted && !cut)) {
         throw stoppedError();
       }
       if (cues === null) {
@@ -233,11 +283,21 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       const hidden = useEditorStore
         .getState()
         .project.timeline.tracks.some((track) => track.id === result.trackId && !track.visible);
-      showNotification(
-        `Transcribed ${result.added} caption${result.added !== 1 ? 's' : ''} onto the Captions track.` +
-          (hidden ? ' The Captions track is hidden.' : ''),
-        'success'
-      );
+      const count = `${result.added} caption${result.added !== 1 ? 's' : ''}`;
+      const hiddenNote = hidden ? ' The Captions track is hidden.' : '';
+      if (!cut) {
+        showNotification(`Transcribed ${count} onto the Captions track.${hiddenNote}`, 'success');
+      } else if (cut.reason.name === 'AbortError') {
+        showNotification(
+          `Transcription stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${hiddenNote}`,
+          'success'
+        );
+      } else {
+        showNotification(
+          `${cut.reason.message} It stopped at ${clock(cut.stoppedAt)}. Added ${count} heard before then to the Captions track.${hiddenNote}`,
+          'error'
+        );
+      }
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         showNotification('Transcription stopped. No captions were added.', 'info');
@@ -398,7 +458,7 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
           ref={mainRef}
           type="button"
           className={styles.button}
-          onClick={busy ? () => abortRef.current?.abort() : () => void runOnce(start)}
+          onClick={busy ? () => abortRef.current?.abort(USER_STOP) : () => void runOnce(start)}
           disabled={phase.kind === 'consent'}
           title={
             busy

@@ -67,6 +67,27 @@ export class TranscriptionError extends Error {
   }
 }
 
+/**
+ * A transcription stopped mid-run, by the caller's abort or by a recogniser
+ * error, after it had heard some speech (ESCSUITE-484). It carries the cues
+ * heard so far and where on the timeline it stopped, so the caller can keep
+ * them; a caller that does not know it treats it as any other failure and
+ * keeps nothing. `message` is the reason's, shown to the user as it is.
+ */
+export class TranscriptionCutShort extends Error {
+  constructor(
+    /** What stopped the run: the `AbortError` (a `DOMException`), or the recogniser's `TranscriptionError`. */
+    readonly reason: Error,
+    /** The cues heard before it stopped, as a finished run makes them. Never empty. */
+    readonly cues: CaptionCue[],
+    /** Seconds of the mix played when it stopped. */
+    readonly stoppedAt: number
+  ) {
+    super(reason.message);
+    this.name = 'TranscriptionCutShort';
+  }
+}
+
 /** One stretch of speech as the recogniser reported it, on the playback clock (seconds). */
 export interface HeardSegment {
   text: string;
@@ -166,7 +187,10 @@ export interface TranscribeOptions {
   Recognition: SpeechRecognitionCtor;
   /** Defaults to `new AudioContext({ sampleRate })`. */
   createAudioContext?: (sampleRate: number) => TranscribeAudioContext;
-  /** Aborting stops at once and rejects with an `AbortError`; nothing is kept. */
+  /**
+   * Aborting stops at once and rejects with an `AbortError`, or, once speech
+   * has been heard, with a {@link TranscriptionCutShort} carrying it.
+   */
   signal?: AbortSignal;
   /** Seconds of the mix played so far, and its length. */
   onProgress?: (playedSeconds: number, totalSeconds: number) => void;
@@ -256,12 +280,17 @@ function listen(options: ListenOptions): Promise<CaptionCue[]> {
       try { source?.disconnect(); } catch { /* not connected */ }
       void ctx.close().catch(() => {});
     };
-    const fail = (error: unknown) => {
+    const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      // ESCSUITE-484: a stop or a recogniser error mid-run hands back what was
+      // heard up to then rather than throwing it away. Read before cleaning
+      // up, while the playback clock still runs.
+      const cues = cuesFromSegments([...heard.values()], duration);
+      const stoppedAt = clock();
       try { recognition.abort(); } catch { /* not running */ }
       cleanUp();
-      reject(error);
+      reject(cues.length > 0 ? new TranscriptionCutShort(error, cues, stoppedAt) : error);
     };
     const finish = () => {
       if (settled) return;
