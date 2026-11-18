@@ -1031,6 +1031,22 @@ describe('TranscribeControl: a run cut short keeps what was heard (ESCSUITE-484)
     expect(showNotification).not.toHaveBeenCalledWith(expect.stringMatching(/^Transcription stopped at/), expect.anything());
   });
 
+  it('the editor closing as a recogniser error hands back the words adds nothing: only Stop or an error left alone keeps them', async () => {
+    const seen = listeningRun(STUB_WORDS, 5);
+    const { unmount } = await start();
+    const error = Object.assign(new Error('On-device speech recognition stopped (network).'), { name: 'TranscriptionError' });
+
+    // The run settles with the words, and the editor goes before that is handled.
+    await act(async () => {
+      seen.fail!(cutShort(error, STUB_WORDS, 5));
+      unmount();
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    expect(seen.signal?.aborted).toBe(true);
+    expect(captionClips()).toHaveLength(0);
+  });
+
   it('Replace on a run stopped while listening replaces only the captions before where it stopped', async () => {
     store().addCaptionCues(
       [

@@ -964,8 +964,10 @@ describe('transcribeChannels: a run cut short keeps what was heard (ESCSUITE-484
     expect(cut.stoppedAt).toBe(5.6);
     expect(cut.cues).toEqual([
       { start: 0.7, end: 3, text: 'the quick brown fox' },
-      { start: 4.7, end: 5.7, text: 'jumps' },
+      { start: 4.6, end: 5.6, text: 'jumps' },
     ]);
+    // A kept caption never runs past the point the listening stopped.
+    expect(cut.cues.every((c) => c.end <= cut.stoppedAt)).toBe(true);
     // It still stops at once, and nothing is left running or reporting.
     expect(recognition.abort).toHaveBeenCalled();
     expect(recognition.stop).not.toHaveBeenCalled();
@@ -985,6 +987,7 @@ describe('transcribeChannels: a run cut short keeps what was heard (ESCSUITE-484
     expect(cut.reason.message).toBe('On-device speech recognition stopped (network).');
     expect(cut.stoppedAt).toBe(5.6);
     expect(cut.cues.map((c) => c.text)).toEqual(['the quick brown fox', 'jumps']);
+    expect(cut.cues.every((c) => c.end <= cut.stoppedAt)).toBe(true);
     expect(recognition.abort).toHaveBeenCalled();
   });
 });

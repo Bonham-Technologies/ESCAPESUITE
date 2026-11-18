@@ -26,7 +26,7 @@ const CLIP_SECONDS = 20
 test.describe('ESCSUITE-484: a stopped transcription keeps the captions heard so far', () => {
   test.describe.configure({ timeout: 60_000 })
 
-  test('Stop mid-run leaves the words heard so far on the Captions track, in one undo step', async ({ page }) => {
+  test('Stop mid-run leaves the words heard so far on the Captions track, in one undo step', async ({ page, browserName }) => {
     await installSpeechStub(page, { api: 'local', answer: 'available' })
     await page.goto(ARTIST_URL)
     await waitForAppReady(page, 'artist')
@@ -46,7 +46,10 @@ test.describe('ESCSUITE-484: a stopped transcription keeps the captions heard so
       void ctx.close()
       return resumed
     })
-    test.skip(!audioRuns, 'this browser has no running AudioContext (no audio output), so a transcription never listens')
+    // Only Firefox is allowed this skip: Chromium and WebKit always run audio
+    // here, so a context that won't run there must fail the test, not hide it.
+    test.skip(browserName === 'firefox' && !audioRuns, 'this browser has no running AudioContext (no audio output), so a transcription never listens')
+    expect(audioRuns, 'an AudioContext must run in this browser').toBe(true)
 
     await transcribeButton(page).click()
     await expect(page.getByText(/Transcribing on this device/)).toBeVisible({ timeout: 15_000 })

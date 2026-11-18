@@ -258,7 +258,12 @@ export function TranscribeControl({ showNotification, onDialogOpenChange }: Tran
       }
       // Checked again here, not only by the subscription: nothing is ever
       // added to a project the sound was not heard in.
-      if (useEditorStore.getState().project.id !== projectId || (controller.signal.aborted && !cut)) {
+      // Only a user's Stop keeps what was heard; any other abort (the project
+      // replaced, the control unmounted) adds nothing, whichever settled first.
+      if (
+        useEditorStore.getState().project.id !== projectId
+        || (controller.signal.aborted && !(cut && controller.signal.reason === USER_STOP))
+      ) {
         throw stoppedError();
       }
       if (cues === null) {

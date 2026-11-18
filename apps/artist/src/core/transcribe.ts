@@ -286,8 +286,10 @@ function listen(options: ListenOptions): Promise<CaptionCue[]> {
       // ESCSUITE-484: a stop or a recogniser error mid-run hands back what was
       // heard up to then rather than throwing it away. Read before cleaning
       // up, while the playback clock still runs.
-      const cues = cuesFromSegments([...heard.values()], duration);
       const stoppedAt = clock();
+      // Capped where it stopped, so no kept caption runs past that point (and
+      // past the old captions a Replace keeps from there on).
+      const cues = cuesFromSegments([...heard.values()], Math.min(duration, Math.max(stoppedAt, MIN_CUE_SECONDS)));
       try { recognition.abort(); } catch { /* not running */ }
       cleanUp();
       reject(cues.length > 0 ? new TranscriptionCutShort(error, cues, stoppedAt) : error);
