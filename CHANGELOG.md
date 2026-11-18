@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- CI: a pull request's new or changed end-to-end tests now also run in Firefox and WebKit before it can merge, and a Playwright update runs the accessibility checks in both, so a test that only fails in those browsers is caught on the pull request instead of in the next nightly run on main (ESCSUITE-478).
 - ESCAPECRAFT and ESCAPEARTIST: after the first saved recording, import or project save in a visit, both apps ask the browser to keep their stored recordings and media, and say whether it agreed (under the recordings in ESCAPECRAFT, in the media library's storage bar in ESCAPEARTIST); the Known limitations page explains Safari's seven-day clean-up of stored data (ESCSUITE-468).
 - Hosted site: sitemap.xml is now generated from the site's routes at build time, so new pages are always listed; a hub page that changed recently also carries the date of that change (ESCSUITE-457).
 - ESCAPEARTIST: the Remove silences dialog starts every opening from its default settings on its own, rather than relying on the editor to close it fully, so values typed in a cancelled session can never show beside pauses found with the defaults (ESCSUITE-463).

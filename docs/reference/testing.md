@@ -67,9 +67,14 @@
   and how to add an operation: `apps/artist/docs/reference/testing.md`. PR CI runs 200 sequences on
   a fixed seed; the nightly runs 5,000 on a seed from the run id (`ARTIST_FUZZ_RUNS`,
   `ARTIST_FUZZ_SEED`; ESCSUITE-353).
-- **Cross-browser and `@nightly` e2e**: CI runs Chromium only. `E2E_CROSS_BROWSER=1` adds the
+- **Cross-browser and `@nightly` e2e**: CI's `e2e` job runs Chromium only. `E2E_CROSS_BROWSER=1` adds the
   Firefox and WebKit projects under `CI`, and specs tagged `@nightly` run only when `E2E_NIGHTLY=1`.
-  The nightly workflow sets both (ESCSUITE-353, `ci-cd-pipeline.md`).
+  The nightly workflow sets both (ESCSUITE-353, `ci-cd-pipeline.md`). On a pull request, the
+  `e2e-cross-browser` job (ESCSUITE-478) also runs every spec the PR adds or changes under
+  `apps/e2e/tests/` in `firefox` and `webkit`, and the accessibility suite when the PR bumps
+  Playwright; a failure there fails `ci-status`. So a new regression spec must pass in all three
+  browsers, or `test.skip(browserName …, reason)` where a browser cannot run it, before it merges.
+  `apps/e2e/scripts/changed-specs.mjs` picks the list (`ci-cd-pipeline.md` has the details).
 - **axe audits in Firefox 159** (ESCSUITE-453): Playwright 1.65's Firefox kills the tab when an
   element's `ariaLabelledByElements` is read in one JavaScript world after another world read it.
   axe runs in the page's world and Playwright's named locators (`getByLabel`, `getByRole` with a

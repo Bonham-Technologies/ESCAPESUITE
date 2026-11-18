@@ -3,7 +3,7 @@
 
 GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every push and PR:
 
-Eight jobs, with `ci-status` as the single required check. The benchmarks live in a separate workflow, `perf.yml`, which is informational and was never one of its dependencies:
+Nine jobs, with `ci-status` as the single required check. The benchmarks live in a separate workflow, `perf.yml`, which is informational and was never one of its dependencies:
 
 | Job | Purpose | Runs On |
 |-----|---------|---------|
@@ -13,6 +13,7 @@ Eight jobs, with `ci-status` as the single required check. The benchmarks live i
 | `kit-docker` | Builds the reference headless-artist Docker image and smoke-tests it (a real `docker run` render + `--version`) | PRs and pushes |
 | `standalone` | Offline single-file builds + standalone E2E, then the combined `dist/` build + production-layout (single-origin) E2E | PRs and pushes |
 | `e2e` | Full Playwright suite (journey included) + headless-artist Chromium tests; lists pass-on-retry tests (see below) | PRs and pushes |
+| `e2e-cross-browser` | The e2e specs a PR adds or changes, in Firefox and WebKit (plus the accessibility suite on a Playwright bump); a no-op success when there are none (see below, ESCSUITE-478) | PRs (no-op on pushes) |
 | `deploy` | Vercel deployment | After E2E passes (skipped for Dependabot: its PRs get no secrets) |
 | `ci-status` | Summary/gate job | All PRs |
 
@@ -77,6 +78,52 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   `ARTIST_FUZZ_SEED=<seed> ARTIST_FUZZ_RUNS=5000 pnpm --filter=@escapesuite/artist exec vitest run src/store/__tests__/timelineInvariants.property.test.ts`.
   The soak at nightly size:
   `SOAK_CYCLES=200 SOAK_RELOADS=30 pnpm --filter=@escapesuite/e2e exec playwright test tests/escapeartist/soak.spec.ts --project=chromium-strict`.
+
+**Changed specs in Firefox and WebKit** (`e2e-cross-browser`, ESCSUITE-478):
+- **Why.** `e2e` runs Chromium only and the full Firefox/WebKit suite runs only in the Nightly,
+  so a PR that added a regression spec passed `ci-status`, merged, and turned the next Nightly
+  red in another browser (reverts #1078 and #1119, both WebKit; #1061, a Playwright bump whose
+  Firefox crashed under axe, ESCSUITE-453).
+- **What it runs.** On a pull request, "Pick changed specs" runs
+  `node apps/e2e/scripts/changed-specs.mjs --base <PR base sha>` on the runner's own Node, before
+  any install. It reads `git diff --name-status <base>...HEAD -- apps/e2e/tests/` and keeps every
+  added, modified or renamed `*.spec.ts` under `apps/e2e/tests/`, except the folders
+  `playwright.config.ts` ignores (`standalone/`, `production/`, `perf/`); deleted files and
+  non-spec files are dropped. When the PR changes the `@playwright/test` or `playwright` line of
+  any `package.json` (a Dependabot bump brings new Firefox and WebKit builds), it adds the
+  accessibility suite: every spec in `tests/accessibility/` and every spec that runs axe
+  (imports `utils/accessibility` or `@axe-core/playwright`), about 260 tests over both browsers.
+  The job then runs `playwright test <specs> --project=firefox --project=webkit
+  --pass-with-no-tests` from `apps/e2e` with `CI=true`, `E2E_CROSS_BROWSER=1` and
+  `E2E_PULSE_NULL_SINK=1`: the Nightly's projects and retries (2), each spec's own
+  `test.skip(browserName …)` honoured. `@nightly` tests stay out, as in every non-nightly run.
+  The step summary lists each spec and why it runs.
+- **No-op path.** With no spec to run (most PRs), or on a push (the Nightly covers `main`), the
+  script outputs `count=0` and every later step is skipped by its own `if:`, so the job succeeds
+  in well under a minute and adds no browser time. It has no job-level `if:` on purpose:
+  `ci-status` fails any need whose result is not `success`, so a skipped job would block every PR.
+  Like every job, it hangs off `lint-and-typecheck` and `test` (not `build`; it starts its own dev
+  servers), so it runs beside `e2e`.
+- **Safety.** The spec list reaches the run step through `env` and is word-split there, so the
+  script refuses (exits 1, failing the job) any spec path with characters other than
+  `A-Z a-z 0-9 . _ - /`; it reads git's `-z` output so an odd name is checked as itself.
+- **Setup** mirrors the Nightly: the capped and retried `playwright install firefox webkit` and
+  `install-deps firefox webkit`, and the same PulseAudio pipe sink (see **Audio sink** above),
+  without which Firefox recording tests time out at Start. Browser cache key
+  `playwright-firefox-webkit-…`, restoring from the Nightly's `playwright-all-…` cache on a miss.
+- **Output.** `e2e-cross-browser-flaky` (the `report-flaky.mjs` list; the steward's recipe reads
+  `e2e-flaky` and is unaffected), `playwright-report-cross-browser` (30 days) and
+  `test-results-cross-browser` (on failure, 7 days).
+- **Cost.** One regression spec (16 tests over both browsers) took 81 s locally, dev-server start
+  included; add about 2–3 min of setup on a runner. A Playwright bump's accessibility suite is
+  an estimated 15–20 min. Replace these with measured CI times once runs exist.
+- **Locally:** `node apps/e2e/scripts/changed-specs.mjs --base origin/main` prints the list;
+  `CI=true E2E_CROSS_BROWSER=1 pnpm --filter=@escapesuite/e2e exec playwright test <specs>
+  --project=firefox --project=webkit` runs it (start the PulseAudio sink first for Firefox).
+  Tests: `apps/e2e/scripts/changed-specs.test.mjs` (`pnpm test:scripts`), which also checks the
+  job's wiring in `ci.yml`.
+- **Not covered:** a PR that changes only a helper in `apps/e2e/utils/`, `playwright.config.ts`
+  or app code runs nothing here; the Nightly still catches those.
 
 **CI Optimizations:**
 - Concurrency control cancels in-progress runs when new commits are pushed to a PR or to
@@ -274,6 +321,8 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   green `ci-status`, and #913 (`@axe-core/playwright`) once merged green without a browser run
   and turned main's e2e red. `deploy` alone stays skipped, because Dependabot PRs get no
   `VERCEL_TOKEN`.
+- A bump of `@playwright/test` or `playwright` also runs the accessibility suite in Firefox and
+  WebKit in `e2e-cross-browser` (ESCSUITE-478), since a new Playwright brings new builds of both.
 - Weekly updates for all apps
 - Grouped PRs: React, testing, linting
 - GitHub Actions version updates

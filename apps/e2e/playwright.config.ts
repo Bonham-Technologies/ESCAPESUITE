@@ -4,7 +4,8 @@ const isCI = !!process.env.CI
 
 // ESCSUITE-353: CI runs Chromium only, so the Firefox and WebKit projects are
 // local-only unless E2E_CROSS_BROWSER=1; the nightly workflow
-// (.github/workflows/nightly.yml) sets it to run all three browsers on main.
+// (.github/workflows/nightly.yml) sets it to run all three browsers on main, and
+// ci.yml's e2e-cross-browser job (ESCSUITE-478) to run a PR's changed specs.
 const crossBrowser = !isCI || process.env.E2E_CROSS_BROWSER === '1'
 
 // ESCSUITE-353: a test tagged @nightly (too slow for every PR) runs only when
