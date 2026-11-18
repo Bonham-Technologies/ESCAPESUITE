@@ -3,16 +3,18 @@ import { ARTIST_URL, importMediaAndAddToTimeline, makeToneWav } from '../../util
 import { waitForAppReady } from '../../utils/ready'
 
 /**
- * ESCSUITE-463: Remove silences opened with its fields at the defaults and the
- * list of pauses found with them. Values typed in a session that was then
- * cancelled could show on the next opening beside a list found with the
- * defaults. Every opening now starts over from the defaults.
+ * ESCSUITE-463: every opening of Remove silences shows its fields at the
+ * defaults, beside the list of pauses the inspector found with them. Before
+ * #1098, `SilenceDialog` kept the values typed in a cancelled session in its
+ * own state, so had it stayed mounted they would have shown on the next
+ * opening beside a list found with the defaults; #1098 makes every opening
+ * start over on its own.
  *
- * In today's editor App mounts the dialog only while a review is open, so the
- * fields reset even without #1098's change to `SilenceDialog`; this spec
- * guards the whole open, change, Cancel, reopen flow. With the dialog mounted
- * for good and that change undone it fails in every browser (the threshold
- * reads -30 on reopening).
+ * Limit: in today's editor this spec does not catch a revert of #1098. App
+ * mounts the dialog only while a review is open, so Cancel unmounts it and
+ * the fields reset anyway. The spec guards the whole open, change, Cancel,
+ * reopen flow instead. With the dialog mounted for good and #1098 undone it
+ * fails in Chromium, Firefox and WebKit (the threshold reads -30 on reopening).
  *
  * The clip is a synthesised WAV, imported through the media library, so the
  * spec runs in every browser: tone, a 1 s pause at 2–3 s, tone, a 0.4 s pause
