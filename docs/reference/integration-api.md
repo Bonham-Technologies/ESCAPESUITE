@@ -159,5 +159,7 @@ the first visit".
   Unused and Clear All) in its own dialog, where it used to call `confirm()`, which a sandbox
   without `allow-modals` answers no without showing anything. Pinned by
   `apps/e2e/tests/regressions/ESCSUITE-448.spec.ts`, whose frame gets
-  `allow-scripts allow-same-origin allow-forms allow-popups allow-downloads`.
+  `allow-scripts allow-same-origin allow-forms allow-popups allow-downloads`. CRAFT does not need
+  it either: its one confirmation, the library's Delete (ESCSUITE-483), is its own dialog too, and
+  no host message deletes a recording.
 - Proved end to end in a real iframe by `apps/e2e/tests/integration/host-embedding.spec.ts`.

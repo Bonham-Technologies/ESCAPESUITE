@@ -101,7 +101,9 @@ same degradation `takeImport` already gives a non-primary id: imported and place
 Download on any row whose bytes are no longer in storage do something rather than nothing — see
 `RECORDING_UNAVAILABLE` under "Errors and notices" (ESCSUITE-146), which is not specific to a
 companion row. Deleting the
-primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`);
+primary deletes its companions (`useRecordingLibrary.handleDeleteRecording`), so the library asks
+first and says how many files go and which (ESCSUITE-483, "The delete confirmation" in
+`dialogs.md`); a companion row's question has no count, because it deletes only itself;
 deleting the companion alone **demotes the primary by construction** — its own `takeId` stays,
 and with nothing grouped under it the row renders as a plain take, so no stored metadata is
 rewritten on a delete.
