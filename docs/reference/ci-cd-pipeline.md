@@ -98,15 +98,17 @@ The DCO check (`.github/workflows/dco.yml`, ESCSUITE-419) is a fourth workflow, 
   `E2E_PULSE_NULL_SINK=1`: the Nightly's projects and retries (2), each spec's own
   `test.skip(browserName …)` honoured. `@nightly` tests stay out, as in every non-nightly run.
   The step summary lists each spec and why it runs.
-- **No-op path.** With no spec to run (most PRs), or on a push (the Nightly covers `main`), the
-  script outputs `count=0` and every later step is skipped by its own `if:`, so the job succeeds
-  in well under a minute and adds no browser time. It has no job-level `if:` on purpose:
-  `ci-status` fails any need whose result is not `success`, so a skipped job would block every PR.
+- **No-op path.** With no spec to run (most PRs), or on a push (the Nightly covers `main`; the
+  step skips the script there), "Pick changed specs" outputs `count=0` and every later step is
+  skipped by its own `if:`, so the job succeeds in well under a minute and adds no browser
+  time. It has no job-level `if:` on purpose: `ci-status` fails any need whose result is not `success`, so a skipped job would block every PR.
   Like every job, it hangs off `lint-and-typecheck` and `test` (not `build`; it starts its own dev
   servers), so it runs beside `e2e`.
 - **Safety.** The spec list reaches the run step through `env` and is word-split there, so the
   script refuses (exits 1, failing the job) any spec path with characters other than
-  `A-Z a-z 0-9 . _ - /`; it reads git's `-z` output so an odd name is checked as itself.
+  `A-Z a-z 0-9 . _ - /`; it reads git's `-z` output so an odd name is checked as itself. The job
+  runs the PR's code with a read-only token (`permissions: contents: read`), no secrets, and
+  checks out with `persist-credentials: false`.
 - **Setup** mirrors the Nightly: the capped and retried `playwright install firefox webkit` and
   `install-deps firefox webkit`, and the same PulseAudio pipe sink (see **Audio sink** above),
   without which Firefox recording tests time out at Start. Browser cache key

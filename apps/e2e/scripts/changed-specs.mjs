@@ -109,12 +109,17 @@ export function selectChangedSpecs(nameStatus) {
   return [...specs].sort()
 }
 
-/** True when a package.json diff adds or removes an `@playwright/test` or `playwright` entry. */
+/**
+ * True when a package.json diff adds or removes an `@playwright/test` or
+ * `playwright` entry. The key may sit anywhere on the line:
+ * services/headless-artist writes `"dependencies": { "playwright": "1.65.0" },`
+ * on one line. The opening quote keeps `"@axe-core/playwright":` out.
+ */
 export function isPlaywrightBump(packageDiff) {
   return packageDiff
     .split('\n')
     .filter((line) => /^[+-]/.test(line) && !/^(\+\+\+|---)/.test(line))
-    .some((line) => /^[+-]\s*"(@playwright\/test|playwright)"\s*:/.test(line))
+    .some((line) => /"(@playwright\/test|playwright)"\s*:/.test(line))
 }
 
 /** Every runnable spec under `<e2eDir>/tests`, relative to e2eDir. */

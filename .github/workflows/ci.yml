@@ -652,6 +652,9 @@ jobs:
     # Hangs off the entry points only (not `build`): it starts its own dev servers, so
     # it runs beside `e2e` instead of after it, and inherits their pull_request_target filter.
     needs: [lint-and-typecheck, test]
+    # It runs the PR's own code (install, dev servers, specs) and writes nothing to GitHub.
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -660,6 +663,8 @@ jobs:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || '' }}
           # The whole history, so `git diff <base>...HEAD` finds the merge base (~11 MB).
           fetch-depth: 0
+          # Nothing after checkout talks to the remote, so the token is not left in .git/config.
+          persist-credentials: false
 
       # Plain `node` (the runner's own) and git: nothing to install for this step.
       - name: Pick changed specs

@@ -129,6 +129,16 @@ test('isPlaywrightBump spots a changed @playwright/test or playwright line in a 
     '+    "playwright": "1.66.0",',
   ].join('\n')
   assert.equal(isPlaywrightBump(runtime), true)
+
+  // services/headless-artist keeps its one dependency on a single line.
+  const oneLine = [
+    '--- a/services/headless-artist/package.json',
+    '+++ b/services/headless-artist/package.json',
+    '@@ -38 +38 @@',
+    '-  "dependencies": { "playwright": "1.65.0" },',
+    '+  "dependencies": { "playwright": "1.66.0" },',
+  ].join('\n')
+  assert.equal(isPlaywrightBump(oneLine), true)
 })
 
 test('isPlaywrightBump ignores other dependencies, context lines and the axe plugin', () => {
