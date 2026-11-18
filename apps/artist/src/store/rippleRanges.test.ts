@@ -9,6 +9,8 @@ import { cutEditorBlock, leftBehind, normaliseRanges } from './rippleRanges'
 import { scrubRemovedSources } from './storeHistory'
 import { useEditorStore } from './projectStore'
 import type { Clip } from './types'
+import { DEFAULT_TRANSITION } from './types'
+import { getActiveTransition } from '../core/exportTypes'
 
 /** Each clip on a row as `[timelinePosition, startTime, endTime]`, in time order. */
 function row(trackId: string): number[][] {
@@ -169,6 +171,52 @@ describe('removeTimeRanges', () => {
     expect(left.animation!.out.type).toBe('none')
     expect(right.animation!.in.type).toBe('none')
     expect(right.animation!.keyframes.opacity![0]).toMatchObject({ time: 0, value: 0.6 })
+  })
+
+  // ESCSUITE-482: a clip's transition plays at its end. Every piece but the
+  // last now ends where the next piece starts, so a piece that kept it played
+  // a fade or wipe at every cut.
+  it('keeps the clip\'s transition on its last piece only', () => {
+    const { screen, screenRow } = placeTake()
+    store().updateClipTransition(screen.id, { type: 'wipe-left', duration: 0.5 })
+    store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }, { start: 6, end: 7 }])
+    const pieces = clipsOn(screenRow)
+    expect(pieces).toHaveLength(3)
+    expect(pieces.map((c) => c.transition)).toEqual([
+      DEFAULT_TRANSITION,
+      DEFAULT_TRANSITION,
+      { type: 'wipe-left', duration: 0.5 },
+    ])
+    // Each piece has a transition object of its own.
+    expect(pieces[0].transition).not.toBe(pieces[1].transition)
+  })
+
+  it('plays no transition at any join a cut makes', () => {
+    const { screen, screenRow } = placeTake()
+    store().updateClipTransition(screen.id, { type: 'fade', duration: 0.5 })
+    store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }, { start: 6, end: 7 }])
+    const { clips, tracks } = store().project.timeline
+    for (const join of clipsOn(screenRow).slice(1).map((c) => c.timelinePosition)) {
+      expect(getActiveTransition(clips, tracks, join - 0.1)).toBeNull()
+    }
+  })
+
+  it('keeps the transition of a clip a range only moves or trims at its start', () => {
+    store().addClipToTimeline({ id: 'solo', sourceVideoId: audioSource.id, name: 'solo', startTime: 0, endTime: 8, duration: 8 }, undefined, 0)
+    store().updateClipTransition('solo', { type: 'fade', duration: 1 })
+    store().removeTimeRanges('solo', [{ start: 0, end: 2 }])
+    const [only] = store().project.timeline.clips
+    expect(only.transition).toEqual({ type: 'fade', duration: 1 })
+  })
+
+  it('gives the transition back on one undo', () => {
+    const { screen } = placeTake()
+    store().updateClipTransition(screen.id, { type: 'wipe-left', duration: 0.5 })
+    const before = JSON.stringify(store().project)
+    store().removeTimeRanges(screen.id, [{ start: 2, end: 3 }, { start: 6, end: 7 }])
+    store().undo()
+    expect(JSON.stringify(store().project)).toBe(before)
+    expect(store().project.timeline.clips.find((c) => c.id === screen.id)!.transition).toEqual({ type: 'wipe-left', duration: 0.5 })
   })
 
   it('refuses whole when a part is on a locked track, and records no step', () => {
