@@ -213,8 +213,9 @@ A transition plays at a clip's end, into whatever starts there
 now ends where the next one starts. Before ESCSUITE-482 every piece kept the
 clip's transition, so a take with a wipe played it at every cut: a 20-cut take
 played 20 wipes. Now only the last piece, which ends where the clip now
-ends, keeps it. One undo gives the clip back with its transition. `splitClip` does the same: the first half gets
-`DEFAULT_TRANSITION`, the second keeps the clip's.
+ends, keeps it. One undo gives the clip back with its transition. `splitClip`
+does the same: the first half gets `DEFAULT_TRANSITION`, the second keeps the
+clip's.
 
 With the box cleared, rows no link reaches are left where they are, as a
 clip's ripple delete leaves them, and markers and in/out points do not move
@@ -351,7 +352,6 @@ description, when nothing is left behind.
   found until its row is muted, then the pause is, and Remove all cuts all
   three rows in step.
 - `apps/e2e/tests/regressions/ESCSUITE-482.spec.ts`: the take's screen part
-  given a Wipe Left; after Remove all the piece before the cut has no
-  transition and none plays at the join (read from the store), the last piece
-  keeps the wipe, and one Ctrl+Z gives it back; a Split leaves it on the
-  second half only.
+  given a Wipe Left; after Remove all the inspector's Transition Out shows
+  None on the piece before the cut and Wipe Left on the last piece, and one
+  Ctrl+Z gives it back; a Split leaves it on the second half only.
