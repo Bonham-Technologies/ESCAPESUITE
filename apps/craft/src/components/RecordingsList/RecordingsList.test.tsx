@@ -49,7 +49,7 @@ function renderList(
     onDownloadM4a: vi.fn<(id: string, name: string) => void>(),
     onCancelMp4: vi.fn<() => void>(),
     onSendToEditor: vi.fn<(id: string) => void>(),
-    onDelete: vi.fn<(id: string) => void>(),
+    onDelete: vi.fn<(recording: Recording, trigger: HTMLElement) => void>(),
   }
   const { container } = render(
     <RecordingsList
@@ -189,13 +189,17 @@ describe('RecordingsList actions', () => {
     expect(calls.onSendToEditor).toHaveBeenCalledWith('r7')
   })
 
-  it('deletes by id', async () => {
+  it('asks to delete the row, handing over the row and the button pressed', async () => {
+    // ESCSUITE-483: the panel asks before deleting, so it needs the row to
+    // name it and the button to hand focus back to on Cancel.
     const user = userEvent.setup()
-    const { calls } = renderList([makeRecording({ id: 'r7', name: 'Take Seven' })])
+    const recording = makeRecording({ id: 'r7', name: 'Take Seven' })
+    const { calls } = renderList([recording])
+    const button = screen.getByRole('button', { name: 'Delete Take Seven' })
 
-    await user.click(screen.getByRole('button', { name: 'Delete Take Seven' }))
+    await user.click(button)
 
-    expect(calls.onDelete).toHaveBeenCalledWith('r7')
+    expect(calls.onDelete).toHaveBeenCalledWith(recording, button)
   })
 
   it('acts on the row that was clicked, not the first one', async () => {
@@ -207,7 +211,10 @@ describe('RecordingsList actions', () => {
 
     await user.click(screen.getByRole('button', { name: 'Delete Second' }))
 
-    expect(calls.onDelete).toHaveBeenCalledWith('r2')
+    expect(calls.onDelete).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'r2' }),
+      screen.getByRole('button', { name: 'Delete Second' })
+    )
   })
 })
 
