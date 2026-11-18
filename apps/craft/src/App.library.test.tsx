@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import 'fake-indexeddb/auto';
-import { act, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useRecorderStore } from './store/recorderStore';
 import {
@@ -12,6 +12,7 @@ import {
 import { clearAllRecordings } from './test/recordingsDb';
 import type { SourceVideo } from './store/types';
 import {
+  recorderFactory,
   sendToEditorModule,
   analyticsModule,
   converterModule,
@@ -54,6 +55,16 @@ afterEach(() => {
 });
 
 const user = () => userEvent.setup();
+
+/**
+ * Press a row's Delete and say yes in the confirmation it puts up
+ * (ESCSUITE-483) — the dialog's own Delete, not the row's.
+ */
+async function deleteAndConfirm(rowLabel: string): Promise<void> {
+  await user().click(screen.getByRole('button', { name: rowLabel }));
+  const dialog = await screen.findByRole('alertdialog');
+  await user().click(within(dialog).getByRole('button', { name: 'Delete' }));
+}
 
 function metadata(overrides: Partial<SourceVideo> & { id: string; name: string }): SourceVideo {
   return {
@@ -233,7 +244,7 @@ describe('App recording hand-off and deletion', () => {
     await seedRecording({ id: 'drop', name: 'Drop Me', recordedAt: 1_000 });
     await renderAppWithLibrary(2);
 
-    await user().click(screen.getByRole('button', { name: 'Delete Drop Me' }));
+    await deleteAndConfirm('Delete Drop Me');
     // deleteVideo is a real fake-indexeddb transaction; wait for its outcome
     // rather than a fixed number of turns (ESCSUITE-114).
     await waitFor(() => expect(items()).toHaveLength(1));
@@ -252,17 +263,65 @@ describe('App recording hand-off and deletion', () => {
     );
     await renderAppWithLibrary(2);
 
-    await user().click(screen.getByRole('button', { name: 'Delete Take' }));
+    await deleteAndConfirm('Delete Take');
     await waitFor(() => expect(items()).toHaveLength(0));
 
     expect(await getRecordingsMetadata()).toEqual([]);
+  });
+
+  // ESCSUITE-483: one click used to delete the take, every file of it.
+  it('asks before deleting, and Cancel deletes nothing', async () => {
+    await seedRecording({ id: 'take-1', name: 'Take', takeId: 'take-1', role: 'screen', recordedAt: 2_000 });
+    await seedRecording({ id: 'part-2', name: 'Take — webcam', takeId: 'take-1', role: 'webcam', recordedAt: 2_000 });
+    await renderAppWithLibrary(2);
+    const rowDelete = screen.getByRole('button', { name: 'Delete Take' });
+
+    await user().click(rowDelete);
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete "Take"?' });
+    expect(dialog).toHaveAccessibleDescription(
+      'This take is 2 files, and all of them will be deleted: the recording and the webcam track. This cannot be undone.'
+    );
+
+    await user().click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(document.activeElement).toBe(rowDelete);
+    expect(items()).toHaveLength(2);
+    expect((await getRecordingsMetadata()).map((m) => m.id).sort()).toEqual(['part-2', 'take-1']);
+  });
+
+  it('keeps the take when the confirmation is dismissed with Escape', async () => {
+    await seedRecording({ id: 'only', name: 'Only Take' });
+    await renderAppWithLibrary(1);
+
+    await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(items()).toHaveLength(1);
+    expect(await getRecordingsMetadata()).toHaveLength(1);
+  });
+
+  it('keeps the recorder shortcuts inactive while the confirmation is up', async () => {
+    await seedRecording({ id: 'only', name: 'Only Take' });
+    await renderAppWithLibrary(1);
+
+    await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
+    fireEvent.keyDown(window, { key: 'r' });
+    await act(async () => {});
+
+    expect(recorderFactory.createRecorder).not.toHaveBeenCalled();
+    expect(useRecorderStore.getState().state).toBe('idle');
+    expect(screen.getByRole('alertdialog')).toBeTruthy();
   });
 
   it('shows the empty state again once the last recording is deleted', async () => {
     await seedRecording({ id: 'only', name: 'Only Take' });
     await renderAppWithLibrary(1);
 
-    await user().click(screen.getByRole('button', { name: 'Delete Only Take' }));
+    await deleteAndConfirm('Delete Only Take');
     await waitFor(() => expect(screen.getByText('No recordings yet')).toBeTruthy());
   });
 });
