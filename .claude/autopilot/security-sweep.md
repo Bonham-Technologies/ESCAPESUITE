@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v33. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward's security sweep
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -37,14 +37,14 @@ non-zero, run no scanner, and report the failure in the digest. Never run an
 unverified binary.
 
 ```
-OSV=2.7.0 GL=8.30.1 SCAN=/tmp/autopilot-scan
+OSV=2.7.1 GL=8.30.1 SCAN=/tmp/autopilot-scan
 rm -rf "$SCAN" && mkdir -p "$SCAN"
 case "$(uname -m)" in
   x86_64) A=amd64 G=x64
-    OSV_SHA=160c6253e2922e9e0a6a9771c5c4c40a4b3c6090b34a3cdd5e80c96cc2e4218b
+    OSV_SHA=fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8
     GL_SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb ;;
   aarch64|arm64) A=arm64 G=arm64
-    OSV_SHA=4061ef4c021ed3c47f203b818f337e351336cc5cd67c0274fc36bd1dfc728dd7
+    OSV_SHA=983d22fbad9724514e3fcc6acc83b5fa64c5ffa6b0d9f510028f22c1b223ff81
     GL_SHA=e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;;
 esac
 O="osv-scanner_linux_$A" T="gitleaks_${GL}_linux_$G.tar.gz"

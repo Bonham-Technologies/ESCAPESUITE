@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v33. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: steward role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -114,7 +114,7 @@ The digest covers:
 - reverts;
 - **Open security alerts:** one line with the counts, for example
   "Dependabot 3 (high 1, medium 2) · code scanning not available · secret scanning 0";
-- **Security scan:** one line, for example "main@1a2b3c4 · osv-scanner 2.7.0: 4
+- **Security scan:** one line, for example "main@1a2b3c4 · osv-scanner 2.7.1: 4
   lockfiles (pnpm-lock.yaml, api/uv.lock, …), critical 0 · high 2 · medium 3 · low 1 ·
   gitleaks 8.30.1: history since 9f8e7d6 (14 commits) and tree, 0 new, 2 fakes ·
   uncovered: jsr: packages in deno.lock". It gives:
