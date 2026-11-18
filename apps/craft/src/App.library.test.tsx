@@ -280,7 +280,7 @@ describe('App recording hand-off and deletion', () => {
 
     const dialog = screen.getByRole('alertdialog', { name: 'Delete "Take"?' });
     expect(dialog).toHaveAccessibleDescription(
-      "This take is 2 files, and all of them will be deleted: the recording and the webcam track. This can't be undone."
+      'This take is 2 files, and all of them will be deleted: the recording and the webcam track. This cannot be undone.'
     );
 
     await user().click(within(dialog).getByRole('button', { name: 'Cancel' }));

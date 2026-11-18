@@ -36,13 +36,13 @@ describe('deleteConfirmation', () => {
     // Out of order on purpose: the question lists them as the library does.
     const list = [system, primary, mic, webcam]
     expect(deleteConfirmation(primary, list).message).toBe(
-      "This take is 4 files, and all of them will be deleted: the recording, the webcam track, the microphone track and the system audio track. This can't be undone."
+      'This take is 4 files, and all of them will be deleted: the recording, the webcam track, the microphone track and the system audio track. This cannot be undone.'
     )
   })
 
   it('says two files as "a and b"', () => {
     expect(deleteConfirmation(primary, [primary, webcam]).message).toBe(
-      "This take is 2 files, and all of them will be deleted: the recording and the webcam track. This can't be undone."
+      'This take is 2 files, and all of them will be deleted: the recording and the webcam track. This cannot be undone.'
     )
   })
 
@@ -57,7 +57,7 @@ describe('deleteConfirmation', () => {
   it('still counts a part whose role this CRAFT does not know', () => {
     const future = row('t-x', 'Standup — x', { takeId: 't', role: 'hologram' as RecordingRole })
     expect(deleteConfirmation(primary, [primary, future]).message).toBe(
-      "This take is 2 files, and all of them will be deleted: the recording and another track. This can't be undone."
+      'This take is 2 files, and all of them will be deleted: the recording and another track. This cannot be undone.'
     )
   })
 })

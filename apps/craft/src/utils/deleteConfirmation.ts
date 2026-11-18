@@ -8,8 +8,8 @@ import type { Recording } from '../store/types';
 import { companionPartFor, companionRank } from './companionParts';
 import type { ConfirmRequest } from './confirmAction';
 
-/** The tail every question ends with: there is no undo. */
-export const DELETE_IS_PERMANENT = "This can't be undone.";
+/** The tail every question ends with: there is no undo. ESCAPEARTIST's confirmations say it in the same words. */
+export const DELETE_IS_PERMANENT = 'This cannot be undone.';
 
 /**
  * The files deleting `id` takes with it — its companion parts, in the order

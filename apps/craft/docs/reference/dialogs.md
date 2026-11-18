@@ -110,7 +110,7 @@ own confirmations; this is the same shape, kept in CRAFT because the apps share 
   for `modalOpen`, so **R, P, S and Escape are inert while it is up** — it can be up mid-take,
   since the library is not locked while recording.
 - **Wording** (`utils/deleteConfirmation.ts`): the title names the row — `Delete "<name>"?` — and
-  the message is "This can't be undone.", preceded, when the row is a take with companion parts,
+  the message is "This cannot be undone.", preceded, when the row is a take with companion parts,
   by how many files go and which: "This take is 3 files, and all of them will be deleted: the
   recording, the webcam track and the microphone track." `companionsOf` is the same
   `takeId === id && id !== id` test the cascade delete uses. A companion row deletes only itself

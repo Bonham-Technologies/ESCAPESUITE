@@ -419,7 +419,7 @@ describe('RecordingsListPanel deleting the row that is converting', () => {
 
     const dialog = screen.getByRole('alertdialog', { name: 'Delete "Take Seven"?' })
     expect(dialog).toHaveAccessibleDescription(
-      "This take is 3 files, and all of them will be deleted: the recording, the webcam track and the microphone track. This can't be undone."
+      'This take is 3 files, and all of them will be deleted: the recording, the webcam track and the microphone track. This cannot be undone.'
     )
   })
 

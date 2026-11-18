@@ -26,7 +26,7 @@ afterEach(() => {
 
 const QUESTION: ConfirmRequest = {
   title: 'Delete "Take Seven"?',
-  message: "This can't be undone.",
+  message: 'This cannot be undone.',
   confirmLabel: 'Delete',
 }
 
@@ -70,7 +70,7 @@ describe('ConfirmDialog framing', () => {
     const dialog = screen.getByRole('alertdialog')
     expect(dialog).toHaveAttribute('aria-modal', 'true')
     expect(dialog).toHaveAccessibleName('Delete "Take Seven"?')
-    expect(dialog).toHaveAccessibleDescription("This can't be undone.")
+    expect(dialog).toHaveAccessibleDescription('This cannot be undone.')
     expect(dialog).toHaveClass(styles.confirmModal)
     expect(screen.getByRole('heading', { level: 2 })).toHaveClass(styles.confirmTitle)
     expect(screen.getByRole('button', { name: 'Delete' })).toHaveClass(styles.confirmDanger)
@@ -117,7 +117,7 @@ describe('ConfirmDialog answers', () => {
     const { answer } = ask()
     const user = userEvent.setup()
 
-    await user.click(screen.getByText("This can't be undone."))
+    await user.click(screen.getByText('This cannot be undone.'))
     expect(screen.getByRole('alertdialog')).toBeTruthy()
 
     await user.click(screen.getByRole('alertdialog'))
