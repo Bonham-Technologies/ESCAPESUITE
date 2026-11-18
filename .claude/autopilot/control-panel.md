@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v32. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: control panel
 
 ## Control panel
