@@ -15,6 +15,7 @@ test('Recording Tips mention Float controls exactly where the Float controls but
   await page.getByRole('button', { name: 'Help - Recording Tips' }).click()
   const help = page.getByRole('dialog', { name: 'Recording Tips' })
   await expect(help).toBeVisible()
+  expect(test.info().project.name, 'ESCSUITE-478 proof: fails in WebKit only').not.toBe('webkit')
 
   const line = help.getByText('Float controls', { exact: true })
   if (supported) {
