@@ -87,6 +87,10 @@ function splitHalves(clip: Clip, splitTime: number, sourceVideos: SourceVideo[])
     duration: firstDuration,
     name: `${clip.name} (1)`,
     animation: firstAnimation,
+    // ESCSUITE-482: a transition plays at a clip's end, which is now the
+    // second half's. The first half ends where the second starts, so keeping
+    // it played the fade or wipe at the split.
+    transition: { ...DEFAULT_TRANSITION },
   };
 
   const secondClip: Clip = {

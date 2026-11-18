@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isEmbedded } from '@escapesuite/shared/config';
 import { useStoragePersisted } from '@escapesuite/shared/hooks';
 import { useRecorderStore } from '../../store/recorderStore';
@@ -6,6 +6,8 @@ import { useMp4Download } from '../../hooks/useMp4Download';
 import { editorBlockedReasonFor } from '../../utils/sendToEditor';
 import { uploadToHost } from '../../utils/uploadToHost';
 import { UPLOAD_UNAVAILABLE, UPLOAD_NO_HOST_ORIGIN } from '../../utils/notices';
+import { confirmAction } from '../../utils/confirmAction';
+import { deleteConfirmation } from '../../utils/deleteConfirmation';
 import { RecordingsList } from './RecordingsList';
 import type { Recording } from '../../store/types';
 
@@ -97,6 +99,24 @@ export function RecordingsListPanel({
   // renders on every MP4 progress tick.
   const [uploadsInFlight] = useState(() => ({ current: new Set<string>() }));
 
+  // What the delete below needs after its confirmation has been answered,
+  // read then rather than when the button was pressed (ESCSUITE-483). The
+  // dialog can stay up for as long as the user likes, and meanwhile a
+  // conversion can finish or start, a take can be saved (the floating
+  // controls window is not behind the dialog's backdrop), and `onDelete` —
+  // whose closure holds the list it cascades over — is replaced on every
+  // render. Kept current by an effect rather than an assignment in the render
+  // body, which `react-hooks/refs` refuses.
+  const latest = useRef({ recordings, converting, onDelete });
+  useEffect(() => {
+    latest.current = { recordings, converting, onDelete };
+  });
+
+  // Delete asks first (ESCSUITE-483): one click used to take a whole take,
+  // every file of it, with no undo, from a button next to "Open in Editor".
+  // The question names the take and, when it is several files, says how many
+  // go; Cancel, Escape and the backdrop delete nothing.
+  //
   // Deleting the row that is converting must not strand the one conversion
   // slot: the row unmounting takes the progress readout and the only Cancel
   // button with it, while `useMp4Download`'s `converting` and `abortRef` stay
@@ -104,14 +124,25 @@ export function RecordingsListPanel({
   // `MP4_BUSY_REASON` for however long the orphaned conversion still needs. So
   // a delete that matches the recording in flight cancels it first, before the
   // row underneath it is asked to go — the honest reading of "the user asked
-  // for the take to go" (ESCSUITE-103). `useMp4Download` also re-checks the
-  // recording still exists before handing back a file, for the completion that
-  // races this instead of losing to it.
-  const handleDelete = (id: string): void => {
-    if (converting?.id === id) {
+  // for the take to go" (ESCSUITE-103). That is decided once the user has said
+  // yes, against the conversion running then: a No must not cost the user a
+  // conversion. `useMp4Download` also re-checks the recording still exists
+  // before handing back a file, for the completion that races this instead
+  // of losing to it.
+  const handleDelete = async (recording: Recording, trigger: HTMLElement): Promise<void> => {
+    const confirmed = await confirmAction({
+      ...deleteConfirmation(recording, recordings),
+      returnFocus: trigger,
+    });
+    if (!confirmed) return;
+    const now = latest.current;
+    // Gone while the question was up: there is nothing left to delete, and
+    // deleting it again would report a second deletion.
+    if (!now.recordings.some((r) => r.id === recording.id)) return;
+    if (now.converting?.id === recording.id) {
       cancelMp4Download();
     }
-    onDelete(id);
+    now.onDelete(recording.id);
   };
 
   const handleUploadToHost = async (id: string, name: string): Promise<void> => {
@@ -167,7 +198,7 @@ export function RecordingsListPanel({
         embedded ? (id, name) => void handleUploadToHost(id, name) : undefined
       }
       onSendToEditor={onSendToEditor}
-      onDelete={handleDelete}
+      onDelete={(recording, trigger) => void handleDelete(recording, trigger)}
     />
   );
 }
