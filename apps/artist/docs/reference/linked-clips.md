@@ -20,6 +20,8 @@ wholly after the cut, join a new one. So dragging one piece of a cut take moves
 its partners, not every piece of the take. A cut within 1 ms
 (`LINK_EDGE_EPSILON`) of a partner's edge leaves that partner whole rather than
 cutting a sliver off it, and a partner starting at the cut goes to the right.
+Each clip's **Transition Out** stays on its right half only: it plays at the
+clip's end, and a left half that kept it played it at the cut (ESCSUITE-482).
 
 **What acts on the group.** Unless the user holds **Alt** (`alone`):
 

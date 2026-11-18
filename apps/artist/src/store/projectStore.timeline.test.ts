@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useEditorStore } from './projectStore'
 import type { SourceVideo } from './types'
+import { DEFAULT_TRANSITION } from './types'
+import { getActiveTransition } from '../core/exportTypes'
+import { audioSource } from '../test/renderPreview'
 import { addClip, resetStoreForTest, store, video } from '../test/fixtures/projectStore'
 
 describe('projectStore integration', () => {
@@ -1030,6 +1033,53 @@ describe('projectStore remaining behaviours', () => {
       const [first, second] = halves()
       expect(first).toMatchObject({ timelinePosition: 0, startTime: 2, endTime: 6, duration: 4 })
       expect(second).toMatchObject({ timelinePosition: 4, startTime: 6, endTime: 12, duration: 6 })
+    })
+  })
+
+  // ESCSUITE-482: a clip's transition plays at its end, which after a split
+  // is the second half's end. The first half ends where the second starts,
+  // and kept the transition there, so it played at the split.
+  describe('splitClip and the clip\'s transition (ESCSUITE-482)', () => {
+    const halves = () => {
+      const clips = store().project.timeline.clips
+      return [clips.find((c) => c.name.endsWith('(1)'))!, clips.find((c) => c.name.endsWith('(2)'))!]
+    }
+
+    it('keeps the transition on the second half only', () => {
+      store().addClipToTimeline({ id: 'm', sourceVideoId: video.id, name: 'm', startTime: 0, endTime: 10, duration: 10 }, undefined, 0)
+      store().updateClipTransition('m', { type: 'wipe-right', duration: 1 })
+      store().splitClip('m', 4)
+      const [first, second] = halves()
+      expect(first.transition).toEqual(DEFAULT_TRANSITION)
+      expect(second.transition).toEqual({ type: 'wipe-right', duration: 1 })
+      const { clips, tracks } = store().project.timeline
+      expect(getActiveTransition(clips, tracks, 3.9)).toBeNull()
+    })
+
+    it('keeps it on each linked partner\'s second half only', () => {
+      store().addSourceVideo(audioSource)
+      store().placeTakeOnTimeline([
+        { sourceVideoId: video.id, name: 'screen', duration: 10, startOffset: 0, width: 1920, height: 1080 },
+        { sourceVideoId: audioSource.id, name: 'mic', duration: 10, startOffset: 0, width: 0, height: 0, mediaType: 'audio' },
+      ])
+      for (const c of store().project.timeline.clips) store().updateClipTransition(c.id, { type: 'fade', duration: 0.5 })
+      const screen = store().project.timeline.clips.find((c) => c.name === 'screen')!
+      store().splitClip(screen.id, 4)
+      const clips = store().project.timeline.clips
+      expect(clips).toHaveLength(4)
+      for (const c of clips) {
+        expect(c.transition).toEqual(c.timelinePosition === 0 ? DEFAULT_TRANSITION : { type: 'fade', duration: 0.5 })
+      }
+    })
+
+    it('gives the transition back on one undo', () => {
+      store().addClipToTimeline({ id: 'm', sourceVideoId: video.id, name: 'm', startTime: 0, endTime: 10, duration: 10 }, undefined, 0)
+      store().updateClipTransition('m', { type: 'wipe-right', duration: 1 })
+      store().splitClip('m', 4)
+      store().undo()
+      const clips = store().project.timeline.clips
+      expect(clips).toHaveLength(1)
+      expect(clips[0]).toMatchObject({ id: 'm', transition: { type: 'wipe-right', duration: 1 } })
     })
   })
 
