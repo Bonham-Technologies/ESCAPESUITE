@@ -28,11 +28,11 @@
 - [ ] Cross-browser E2E tests pass (`pnpm test:e2e:browsers`) — Chromium, Firefox, WebKit
 - [ ] Manually tested in browser
 
-## Jira Issue
+## Ticket
 
-<!-- Link to the Jira issue if applicable -->
+<!-- The ticket key as plain text, e.g. "Ticket: ESCSUITE-123". No link: the tracker is private. Leave it blank if there is none. -->
 
-Resolves: [ESCSUITE-](https://bonham.atlassian.net/browse/ESCSUITE-)
+Ticket: ESCSUITE-
 
 ## Screenshots
 

@@ -96,7 +96,7 @@ test('headersFor, called with no config, reads the real vercel.json — the serv
 
 // ESCSUITE-240: the hub's content-hashed /assets/* chunks are immutable, so
 // they carry a year-long cache header, and nothing else does.
-test('headersFor gives /assets/* an immutable Cache-Control and no other path one', () => {
+test('headersFor gives /assets/* an immutable Cache-Control and no page or chunk one', () => {
   const cacheControl = (path) =>
     headersFor(path).filter((header) => header.key === 'Cache-Control')
   assert.deepEqual(cacheControl('/assets/index-Ch5NE3Oq.js'), [
@@ -105,6 +105,35 @@ test('headersFor gives /assets/* an immutable Cache-Control and no other path on
   assert.deepEqual(cacheControl('/'), [])
   assert.deepEqual(cacheControl('/artist/decodeWorker-abc.js'), [])
   assert.deepEqual(cacheControl('/craft/'), [])
+})
+
+// ESCSUITE-469: each app's service worker is revalidated on every update check
+// (no-cache), never given the immutable header, so a new deploy reaches it.
+test('headersFor gives each app\'s sw.js no-cache, and serves a manifest as a manifest', async () => {
+  for (const path of ['/sw.js', '/craft/sw.js', '/artist/sw.js']) {
+    assert.deepEqual(
+      headersFor(path).filter((header) => header.key === 'Cache-Control'),
+      [{ key: 'Cache-Control', value: 'no-cache' }],
+      path
+    )
+  }
+  const dir = mkdtempSync(join(tmpdir(), 'serve-dist-469-'))
+  mkdirSync(join(dir, 'craft'))
+  writeFileSync(join(dir, 'craft', 'sw.js'), '/* worker */')
+  writeFileSync(join(dir, 'craft', 'manifest.webmanifest'), '{}')
+  const server = createServer(dir)
+  await new Promise((done) => server.listen(0, '127.0.0.1', done))
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`
+    const worker = await fetch(`${base}/craft/sw.js`)
+    assert.equal(worker.headers.get('cache-control'), 'no-cache')
+    assert.match(worker.headers.get('content-type'), /^text\/javascript/)
+    const manifest = await fetch(`${base}/craft/manifest.webmanifest`)
+    assert.match(manifest.headers.get('content-type'), /^application\/manifest\+json/)
+  } finally {
+    await new Promise((done) => server.close(done))
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('a served /assets file keeps vercel.json\'s Cache-Control; other files stay no-store (ESCSUITE-240)', async () => {

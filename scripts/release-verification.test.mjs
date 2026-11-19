@@ -97,7 +97,11 @@ test('only the release job of standalone-release.yml can mint attestations', () 
   for (const name of ['prepare', 'comment-pr', 'verify-release']) {
     assert.doesNotMatch(job(standaloneReleaseYml, name), /id-token:\s*write|attestations:\s*write/);
   }
-  assert.doesNotMatch(standaloneReleaseYml, /^permissions:/m, 'no workflow-level permissions');
+  // The workflow-level default is read-only (ESCSUITE-476), so no job gets a
+  // write scope or OIDC token without declaring it in its own block.
+  const workflowLevel = standaloneReleaseYml.match(/^permissions:[^\n]*\n((?: {2}.*\n)*)/m);
+  assert.ok(workflowLevel, 'expected workflow-level permissions');
+  assert.doesNotMatch(workflowLevel[0], /write/, 'workflow-level permissions must be read-only');
 });
 
 test('standalone-release.yml verifies the published release and fails on a mismatch', () => {

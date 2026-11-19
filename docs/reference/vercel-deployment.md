@@ -17,6 +17,8 @@ dist/
 ├── 404.html          # Not-found page (status 404)
 ├── craft/index.html  # ESCAPECRAFT (single file)
 └── artist/index.html # ESCAPEARTIST (single file)
+# plus sw.js, manifest.webmanifest and icon.svg at /, /craft/ and /artist/
+# (offline support, see "Offline after the first visit" below)
 ```
 
 `scripts/build-all.mjs` (`pnpm build:deploy`) refuses to publish: if `turbo build` left any of
@@ -75,3 +77,75 @@ framing of the hosted site is already refused by `frame-ancestors 'self'`). A sa
 counts as `self`, so its camera, microphone and screen capture keep working with no `allow`
 attribute needed (`apps/e2e/tests/integration/host-embedding.spec.ts` sets none). A self-hosted
 build served without these headers is unaffected.
+
+## Offline after the first visit (ESCSUITE-469)
+
+After one full visit, each hosted app loads with no connection: the hub at `/`, ESCAPECRAFT at
+`/craft/` and ESCAPEARTIST at `/artist/`, each on its own, in a browser with service workers.
+`scripts/offline.mjs`, run by `scripts/build-all.mjs` on the assembled `dist/` (and nowhere
+else: not the dev servers, the standalone single files or the headless kit), writes per app:
+
+- **`sw.js`**, a small hand-written service worker (no dependency) whose scope is the app's own
+  directory, so no `Service-Worker-Allowed` header is needed. On install it precaches that app's
+  own build output (the hub: its pages and `/assets/*`; CRAFT: `index.html`; ARTIST: `index.html`
+  and its `decodeWorker-*.js`, plus each app's manifest and icon). The list comes from the files
+  on disk, and the cache is named `escapesuite-offline-<app>-<build id>`, the build id being a hash
+  of those files' paths and bytes. A precached file is answered from the cache; a page load goes
+  to the network and falls back to the cached page only when the network fails (the hub maps each
+  route to its own page from `vercel.json`'s rewrites; anything else gets `index.html`). It
+  answers nothing else: no other origin, nothing under `/_vercel/` (analytics are never cached or
+  replayed), no file request with a query string, no media, so imported or recorded files never
+  enter its cache. A page load keeps its query string (an integration URL such as
+  `/artist/?video=…` included): online it goes to the network as is, offline it gets the app's
+  cached page with the URL unchanged, so the app still reads its parameters; a `?video=` URL then
+  fails to load with no connection, as any network fetch does. The hub's worker also passes everything under `/craft/` and `/artist/` straight
+  through.
+- **`manifest.webmanifest`** and **`icon.svg`** (the app's favicon), so Chromium offers install.
+- A `<link rel="manifest">` and an inline registration script, right after the `<title>` of each
+  of the app's HTML files (the hub's route copies and `404.html` included). The script registers
+  the worker after the page's `load` event, only in a secure context, and **never inside a frame**:
+  a host page that embeds CRAFT or ARTIST (`integration-api.md`) registers nothing and shows no
+  note. A frame of a page whose worker a top-level visit already registered is still answered by
+  it, which changes nothing online (page loads go to the network first).
+
+**Updates.** `vercel.json` serves each `sw.js` with `Cache-Control: no-cache`. A deploy that
+changes any precached file changes the build id, so the next load's update check installs the
+new worker, which precaches the new files, takes over at once (`skipWaiting`) and deletes the
+older caches of its own app. The page that triggered it was itself loaded from the network, so
+it already is the new version; when the new worker takes over a page an older one controlled,
+the page asks the worker for its build id (a `postMessage` with a reply port) and, only if it is
+the page's own build id (baked into the registration script), shows a small note, "Updated to the
+latest version of <app>.", with a Dismiss button, for 15 seconds. So a tab left open on the older
+build, which the new worker also takes over, shows no note, and neither does any page the kill
+switch takes over. A first install shows nothing. The build id is hashed with each page's offline
+block left out (the block carries the id) and with `offline.mjs`'s own worker and registration
+source in, so a change to either still makes a new cache. A tab left open from before a deploy loses its
+old lazily loaded files exactly as it did without a worker.
+
+**CSP.** `worker-src 'self' blob:` already allowed the workers; `manifest-src 'self'` is now
+explicit. `scripts/security-headers.test.mjs` pins both and the `no-cache` entries.
+
+**Kill switch.** If a worker misbehaves, deploy with the environment variable
+`ESCAPESUITE_SERVICE_WORKER=off` (Vercel project settings, then redeploy; locally
+`ESCAPESUITE_SERVICE_WORKER=off pnpm build:deploy`, or `node scripts/offline.mjs dist --kill-switch`
+on a built `dist/`). Each `sw.js` is then a worker with no fetch handler that deletes its app's
+caches and unregisters itself, and the pages no longer register one. A visitor's browser picks it
+up on their next page load (the update check); pages already open keep running and are not
+reloaded, so a recording in progress is never interrupted, and the load after that goes straight
+to the network. Remove the variable and redeploy to turn offline support back on.
+
+**Never delete `sw.js`.** A later change or rollback must keep shipping `/sw.js`, `/craft/sw.js`
+and `/artist/sw.js` (the kill switch is how to turn offline support off). Without them the update
+check fails (`/craft/*` and `/artist/*` rewrite a missing file to HTML, and `/sw.js` would 404), so
+workers already installed stay registered with their old build until a kill-switch build reaches the
+visitor.
+
+**Tests.** `scripts/offline.test.mjs` (precache list, build id, cache naming, what the worker
+answers and leaves alone, the kill switch, the page block). `apps/e2e/tests/production/offline.spec.ts`
+loads each app, goes offline and reloads; records in CRAFT and imports and exports a WebM in
+ARTIST while offline; checks analytics responses never come from the worker and the cache holds
+only the app's own files; checks Chromium's installability report; serves a copy of `dist/` with
+a second build id and shows the next load serves (and caches) the new files and says "Updated"
+while a second tab left on the old build does not;
+and runs the kill switch. `apps/e2e/tests/standalone/dist-single-file.spec.ts` fails if a
+standalone HTML file ever mentions `serviceWorker` or links a manifest.

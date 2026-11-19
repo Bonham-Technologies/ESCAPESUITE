@@ -86,6 +86,7 @@ const CONTENT_TYPES = {
   '.wasm': 'application/wasm',
   '.wav': 'audio/wav',
   '.webm': 'video/webm',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.webp': 'image/webp',
   '.woff': 'font/woff',
   '.woff2': 'font/woff2',
