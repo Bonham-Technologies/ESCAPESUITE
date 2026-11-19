@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v36. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -13,7 +13,7 @@ tickets**, **Decision Log** and **Record in Confluence**; the **Fleet digest** b
 replaces the **Weekly digest**. bonham-ops is the only repo where the role runs. The
 projects are the `autopilot` entries of `autopilot/fleet.json` in this checkout; skip the
 entry with `"fleet": true`, which is this repo. `on-request` and `tracked` entries
-(`repos.md`) get only **Other repos** in the digest. Its panel row's `Steward paused: yes` skips only
+(`repos.md`) are only read, in their lane's section of the digest (`bin/fleet lanes`). Its panel row's `Steward paused: yes` skips only
 the signal table's **Policy tickets**; the digest still runs. Its `Steward ticket cap`
 caps security tickets only; Policy tickets keep their cap of 10.
 
@@ -109,20 +109,23 @@ statusCategory != Done`.
 
 ### Fleet digest
 
-A comment on this project's steward log, found as **Weekly digest** says. In order:
+A comment on this project's steward log, found as **Weekly digest** says. **Waiting on
+you** comes first, then **Missed runs**, then one section per lane in `bin/fleet lanes`
+order, headed by its title (**Products**, **Sites and brand**, **Platform**,
+**Prototypes**), then **Policy findings filed this run**, linked, or "none".
 
-- **Waiting on you**, grouped by project, every item linked: each project's waiting
+- **Waiting on you**, every lane, grouped by project, every item linked: each project's waiting
   tickets and `needs-owner` PRs with its **mergeable now** count (from its digest, else
   counted as the steward does), and this project's own, with each refresh, paste and
   policy ticket under the project it concerns. This is the owner's inbox.
 - **Missed runs.** A task whose `last_run.status` is not `ROUTINE_RUN_STATUS_SUCCEEDED`,
-  or whose last run is older than its previous scheduled time (its cron in
-  `fleet.json`), is missed: quote the status and time. Skip this run's own task and a
+  or whose last run is older than its previous scheduled time (a builder's `builder` cron, the shared
+  tasks' `fleetTasks`, in `fleet.json`), is missed: quote the status and time. The expected tasks are `bin/fleet tasks`. Skip this run's own task and a
   run still in progress; a task with no `last_run` is missed only if it was created
-  before its previous scheduled time. A dependabot event task has no cron: it is missed when its `last_run.status` is not SUCCEEDED, or when a Dependabot PR (author `dependabot[bot]`, base `main`) opened after the task was created and over 2 hours ago has no `last_run` at or after its `created_at`: say "dependabot trigger: not firing, check the task's GitHub trigger". With no `last_run` and no such PR it is not missed. The steward and scout tasks fire daily, so judge
-  them by trace alone. Without the task listing, fall back to traces: a
-  steward or scout always leaves one on its days (input 3), a digest comment or a Session
-  Log entry, so one whose scheduled time passed with no trace is missed. A builder with nothing to do
+  before its previous scheduled time. A dependabot event task has no cron: it is missed when its `last_run.status` is not SUCCEEDED, or when a Dependabot PR (author `dependabot[bot]`, base `main`) opened after the task was created and over 2 hours ago has no `last_run` at or after its `created_at`: say "dependabot trigger: not firing, check the task's GitHub trigger". With no `last_run` and no such PR it is not missed. The shared steward and scout tasks fire daily, so judge
+  them per repo by trace alone. Without the task listing, fall back to traces: a
+  steward or scout always leaves one per repo on its days (input 3), a digest comment or a Session
+  Log entry, so a repo whose day passed with no trace is missed. A builder with nothing to do
   leaves none, so flag a builder only when ready tickets (`labels in (ap-auto,
   ap-owner-merge)`, not Done) existed at the start of its window and none changed status
   or gained a PR-link comment across two consecutive scheduled runs. The cause is
@@ -130,6 +133,9 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   or scout whose later run says "caught up <date>" for that due day is listed as "caught
   up <date>", not missed, and doesn't count toward "a missed run in two consecutive weeks"
   (**Policy tickets**) unless it caught up two weeks running.
+
+**Products**, the `autopilot` products. Setup, Capacity and the control panel list only
+`autopilot` repos: an `on-request` or `tracked` repo gets no panel row; its level is its switch.
 - **Setup:** a table of each project's policy version on `main` (input 6, or "not
   read") and its digest-reported instructions version against `fleet.json`, an agents
   column (`vendored` or `fallback`, from the digest's Setup line), a Refresh PR
@@ -152,21 +158,31 @@ A comment on this project's steward log, found as **Weekly digest** says. In ord
   merges in another repo can't be read from here); auto-merged, formerly owner-merge (the
   count in its digest's list); the security counts; tickets filed
   (input 4) and shipped (the digest's shipped list).
-- **Public sites:** the sites checked with each one's SEO errors and warnings (or "not
+- **Public sites:** the product sites checked with each one's SEO errors and warnings (or "not
   checked"), with `--psi` its LCP, INP and CLS (or "no field data" or "not checked"),
   the findings filed (linked), and the oldest open
   finding (`ap-site-review`) with its age, or "none". Then one **Search** line per site:
   `review`'s `line` and the findings filed, or "not read".
-- **Other repos:** the weekly review, one line per `on-request` and `tracked` entry,
-  read only (attached read-only like input 6): its lane and level, `ci-status` on `main`'s
-  head and the newest commit's date; for `on-request`, also its open `needs-owner` PRs
-  and its Jira project's ready tickets, linked. A repo that can't be read is "not read".
-- **Policy findings filed this run**, linked, or "none".
-- The tail of **Weekly digest** for this repo itself: **Open security alerts**,
-  **Security scan** and **Setup**. The **Security scan** line adds `pins vs latest:
-  osv-scanner <pin>/<latest> · gitleaks <pin>/<latest> · checked <date>` from the
-  `scanner-releases` issue, flagging a `checked:` date older than 14 days as stale, or
-  `pins vs latest: not checked yet` if the issue is missing.
+
+**Sites and brand** (bonham.tech, `on-request`): its **Public sites** and **Search** lines
+as above, its open PRs (`needs-owner` first) and its Jira project's open tickets by class,
+linked, so the owner sees what a thread could build on request.
+
+**Platform:** this repo's tail of **Weekly digest** (**Open security alerts**, **Security
+scan**, **Setup**); the **Security scan** line adds `pins vs latest: osv-scanner
+<pin>/<latest> · gitleaks <pin>/<latest> · checked <date>` from the `scanner-releases`
+issue, flagging a `checked:` date older than 14 days as stale, or `pins vs latest: not
+checked yet` if the issue is missing. Then each `tracked` repo, read-only (attached read-only
+like input 6): open PRs with their age; `main`'s latest CI result (its head's check runs,
+else "no CI"); commits on `main` in the last 7 days
+(`gh api 'repos/<repo>/commits?sha=main&since=<7 days ago>'`); open tickets in its Jira
+project (`parent = <epic>` where it has one, else labelled `proj:<name>`); and open
+Dependabot alerts if the API answers, else "alerts: not read". A red `main` or a PR open
+over 14 days also goes under **Waiting on you**. Never write to these repos, and never
+file product-style tickets for them.
+
+**Prototypes:** one line each: the last commit's date, open PRs and open tickets; "none"
+when the lane is empty. A repo that can't be read, in any lane, is "not read".
 
 ### Policy tickets
 
@@ -196,11 +212,11 @@ comment the ticket's link on the issue
 
 ### Drift
 
-Run `bin/fleet drift <saved listing>` in this checkout. For each project with lines,
-file or update one `needs-operator` ticket in this project titled
-**`<project>: fix scheduled tasks`** (search for an open one with that title first).
-Its body lists every edit per task: name, cron, model, effort where `bin/fleet tasks` gives one, and the full prompt, from
-`bin/fleet tasks <name>`. When a later run finds no drift for that project, comment so
+Run `bin/fleet drift <saved listing>` in this checkout. For each project with lines (`fleet`
+is the shared steward and scout), file or update one `needs-operator` ticket in this project titled
+**`<project>: fix scheduled tasks`** (search for an open one with that title first). Its body lists every edit per
+task from `bin/fleet tasks <name>`: name, cron, model, effort where given, and the full prompt; `in another project`:
+create it here, then delete the old; `retired`: delete it (a paused task still shows as `paused: delete it`). When a later run finds no drift for that project, comment so
 on the open ticket and move it to Done.
 
 ### Refresh and paste tickets
@@ -216,15 +232,15 @@ only the owner can do the work. Search for an open one with the same title first
   the line is `FAILED …`, `kept-edits issue #n` or anything else (such as `nothing to
   do`), the project has no line, or the comment is for another version, file the
   ticket and quote the line.
-- **`<project>: paste Project instructions v<M>`**, when a project reports an older
-  instructions version, or two that differ. The body is the text to paste, from
-  `bin/fleet render-instructions <name>` in this checkout. Task edits go on the
-  project's **Drift** ticket, not here.
+- **`Fleet: paste Project instructions v<M>`**, one ticket, when a project reports an older
+  instructions version, or two that differ. The body is the text to paste into this
+  project once, from `bin/fleet render-instructions` in this checkout. Task edits go on
+  the **Drift** tickets, not here.
 
-**Close them** when the work is done: once a project's Setup line reports the version
-a refresh or paste ticket names, or a newer one, comment that on the ticket and move it
-to Done. When you file a ticket for a newer version, close the open one for the older
-version the same way.
+**Close them** once a project's Setup line reports a refresh ticket's version, or
+bonham-ops's own the instructions version a paste ticket names (every run reads the one
+set), or a newer one: comment that and move it to Done. When you file a ticket for a newer
+version, close the open one for the older version the same way.
 
 ### Never
 
