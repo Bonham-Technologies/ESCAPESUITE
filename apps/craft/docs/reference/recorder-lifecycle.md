@@ -553,3 +553,12 @@ off and only the microphone on — which `recordReadiness.ts` allows — was the
 `companionPartFor` could never see, because a plain take's primary carries no `role` at all: it was
 stored exactly like a screen recording, and ESCAPEARTIST placed it on a video track with a picture
 that never came.
+
+## Screen wake lock (ESCSUITE-474)
+
+`useRecordingController` holds a screen wake lock (`holdScreenAwake`, `packages/shared`) in an
+effect on the rendered recorder `state`: held while it is `recording` or `paused`, released by the
+effect's cleanup when the state leaves those (Stop, Cancel, a failed take, unmount). The browser
+drops the lock when the tab is hidden and the hold asks again when it is shown, so recording another
+window with ESCAPECRAFT hidden lets the screen sleep (listed on the Known limitations page). No
+setting, prompt or message; a missing API changes nothing.

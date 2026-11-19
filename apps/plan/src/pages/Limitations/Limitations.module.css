@@ -9,12 +9,11 @@
 }
 
 .content code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.875em;
   color: var(--text-primary);
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 4px;
   padding: 0.1em 0.35em;
   overflow-wrap: anywhere;
 }

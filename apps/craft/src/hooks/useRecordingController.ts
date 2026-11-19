@@ -50,6 +50,7 @@ import {
 import { Compositor } from '../core/compositor';
 import { analytics } from '../utils/analytics';
 import { drawThumbnail } from '../utils/previewThumbnail';
+import { holdScreenAwake } from '@escapesuite/shared/utils';
 import { useRecorderStore } from '../store/recorderStore';
 import type { AudioLevels, RecordingConfig, RecordingState } from '../store/types';
 import type { AcquiredStreams, AcquisitionResult } from './useMediaStreams';
@@ -376,6 +377,18 @@ export function useRecordingController({
     recorder.setCurrentDuration(0);
     recorder.setCountdown(0);
   }, [capturedThumbnailRef, clearCountdownTicker, clearDurationTicker, disposeRecorder, stopAllStreamsRef, zeroAudioLevels]);
+
+  // Keep the screen on while a take is recording (or paused), and let go on
+  // Stop, Cancel, a failed start or unmount: the cleanup runs whenever the
+  // state leaves these two (ESCSUITE-474). The browser drops the lock by itself
+  // while the tab is hidden and the hold asks again when it is shown.
+  const recordingState = useRecorderStore((s) => s.state);
+  const keepAwake = recordingState === 'recording' || recordingState === 'paused';
+  useEffect(() => {
+    if (!keepAwake) return;
+    const hold = holdScreenAwake();
+    return () => hold.release();
+  }, [keepAwake]);
 
   // Registered for as long as this component is mounted, so
   // `disposeLiveRecordingSession` has something to call from outside React —

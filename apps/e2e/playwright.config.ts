@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { NO_LOCAL_FILE_PICKERS } from './utils/filePickers'
 
 const isCI = !!process.env.CI
 
@@ -17,18 +18,22 @@ const nightly = process.env.E2E_NIGHTLY === '1'
 // (currentTime stops advancing), so Chromium gets an unreachable PULSE_SERVER and falls back
 // to the fake audio output it uses on every PR run, where no PulseAudio exists.
 // `env` replaces the browser's whole environment, so the rest of process.env is copied in.
-const chromiumUse = process.env.E2E_PULSE_NULL_SINK === '1'
-  ? {
-      launchOptions: {
-        env: {
-          ...Object.fromEntries(
-            Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-          ),
-          PULSE_SERVER: 'unix:/nonexistent/pulse-native',
-        },
-      },
-    }
-  : {}
+// Every Chromium project also runs without the local file pickers (`utils/filePickers.ts`).
+const chromiumUse = {
+  launchOptions: {
+    args: [NO_LOCAL_FILE_PICKERS],
+    ...(process.env.E2E_PULSE_NULL_SINK === '1'
+      ? {
+          env: {
+            ...Object.fromEntries(
+              Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+            ),
+            PULSE_SERVER: 'unix:/nonexistent/pulse-native',
+          },
+        }
+      : {}),
+  },
+}
 
 // Standalone, production-layout and perf tests use separate configs. The perf
 // benchmarks in particular must never run here: they assert nothing, they take

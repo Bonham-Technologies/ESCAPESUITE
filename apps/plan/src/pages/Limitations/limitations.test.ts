@@ -30,6 +30,8 @@ describe('LIMITATIONS', () => {
     // ESCSUITE-445
     ['transcribe-captions', 'apps/artist/docs/reference/on-device-transcription.md'],
     ['float-controls', 'apps/craft/src/hooks/useFloatingControlsWindow.ts'],
+    // ESCSUITE-474
+    ['screen-stays-on', 'packages/shared/src/utils/screenWakeLock.ts'],
   ])('lists %s with its source document %s', (id, path) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation).toBeDefined()
@@ -43,9 +45,17 @@ describe('LIMITATIONS', () => {
     ['safari-private-browsing', 'ESCSUITE-397'],
     ['transcribe-captions', 'ESCSUITE-404'],
     ['float-controls', 'ESCSUITE-400'],
+    ['screen-stays-on', 'ESCSUITE-474'],
   ])('lists %s with its ticket %s', (id, ticket) => {
     const limitation = LIMITATIONS.find((l) => l.id === id)
     expect(limitation!.sources.some((s) => s.label.startsWith(ticket))).toBe(true)
+  })
+
+  // ESCSUITE-474: the screen-on lock holds only while the tab is visible.
+  it('says the screen-on lock holds only while the ESCAPECRAFT tab is visible', () => {
+    const limitation = LIMITATIONS.find((l) => l.id === 'screen-stays-on')!
+    expect(limitation.title).toMatch(/only while the ESCAPECRAFT tab is visible/)
+    expect(limitation.body.join(' ')).toMatch(/hidden/)
   })
 
   // ESCSUITE-445: claim only what ARTIST's own doc and notice claim.

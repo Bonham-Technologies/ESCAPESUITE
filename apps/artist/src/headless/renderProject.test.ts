@@ -94,6 +94,25 @@ describe('renderProject', () => {
     expect(typeof res.base64).toBe('string')
   })
 
+  // ESCSUITE-471: the headless page runs the editor's own exporters, so a sped
+  // clip renders as the browser exports it as long as it reaches them intact.
+  it('hands a sped clip to the exporter as the editor does, and renders its sped length', async () => {
+    const input = baseInput()
+    input.options = { format: 'webm' } as RenderInput['options']
+    const clip = input.project.timeline.clips[0] as Clip
+    Object.assign(clip, { endTime: 2, duration: 1, speed: 2 })
+    const res = await renderProject(input)
+    const [clips] = exportToWebM.mock.calls[0] as unknown as [Clip[]]
+    expect(clips[0]).toMatchObject({ startTime: 0, endTime: 2, duration: 1, speed: 2 })
+    expect(res.meta.durationSec).toBe(1)
+  })
+
+  it('refuses a sped clip whose duration is still the unsped length', async () => {
+    const input = baseInput()
+    Object.assign(input.project.timeline.clips[0] as Clip, { endTime: 2, duration: 2, speed: 2 })
+    await expect(renderProject(input)).rejects.toThrow(/speed 2, so its duration must be/)
+  })
+
   it('routes webm to exportToWebM', async () => {
     const input = baseInput(); input.options = { format: 'webm' } as RenderInput['options']
     const res = await renderProject(input)
