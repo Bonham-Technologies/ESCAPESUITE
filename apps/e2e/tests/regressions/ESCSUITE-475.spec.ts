@@ -24,8 +24,9 @@ import { waitForAppReady } from '../../utils/ready'
  *
  * WebKit's Linux port paints a `<video>` outside the document black, so the
  * in-page WebM export there has no picture to check (see ESCSUITE-454): the
- * export case skips in WebKit where the probe sees that, and fails rather than
- * skips anywhere else.
+ * export case skips its export half in WebKit where the probe sees that, after
+ * the tool and undo/redo have been checked, and fails rather than skips
+ * anywhere else.
  */
 
 const FIXTURE = resolvePath(dirname(fileURLToPath(import.meta.url)), '../../fixtures/zoom-region/quadrants.webm')
@@ -112,9 +113,16 @@ async function seek(page: Page, seconds: number): Promise<void> {
   await page.mouse.click(clip.x + (seconds / CLIP_SECONDS) * clip.width, ruler.y + ruler.height / 2)
 }
 
-async function openZoomToRegion(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Zoom to region' }).click()
+async function openZoomToRegion(page: Page, by: 'mouse' | 'keyboard' = 'mouse'): Promise<void> {
+  const button = page.getByRole('button', { name: 'Zoom to region' })
+  if (by === 'keyboard') {
+    await button.focus()
+    await page.keyboard.press('Enter')
+  } else {
+    await button.click()
+  }
   await expect(page.getByRole('heading', { name: 'Zoom to region' })).toBeVisible()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
 }
 
 /** Type a number into one of the form's fields and commit it. */
@@ -212,15 +220,18 @@ test.describe('ESCSUITE-475: Zoom to region', () => {
     test.setTimeout(180_000)
     await openFixture(page)
 
+    // Read first, judged only before the export: the tool, the keyframes and
+    // undo/redo below are checked in every engine, WebKit's included.
     const probe = await readColours(page, readFileSync(FIXTURE), [1], QUADRANTS.map(([x, y]) => [x, y]))
-    test.skip(
-      browserName === 'webkit' && probe[0].every((c) => c === 'black'),
-      'This engine paints a <video> outside the document black (WebKit’s Linux port does), so the in-page export draws no picture to check'
-    )
-    expect(probe[0], 'the fixture read by the detached-element reader').toEqual(QUADRANTS.map(([, , c]) => c))
+    const blackDetachedVideo = browserName === 'webkit' && probe[0].every((c) => c === 'black')
+    if (!blackDetachedVideo) {
+      expect(probe[0], 'the fixture read by the detached-element reader').toEqual(QUADRANTS.map(([, , c]) => c))
+    }
 
     await seek(page, 1)
-    await openZoomToRegion(page)
+    await openZoomToRegion(page, 'keyboard')
+    // Opened from the keyboard, focus lands on the form's first field.
+    await expect(page.getByLabel('Region X', { exact: true })).toBeFocused()
     await setField(page, 'Region width', 320)
     await setField(page, 'Region X', 240)
     await setField(page, 'Region Y', 0)
@@ -243,6 +254,10 @@ test.describe('ESCSUITE-475: Zoom to region', () => {
       await expect.poll(() => zoomKeyframes(page)).toEqual(written)
     })
 
+    test.skip(
+      blackDetachedVideo,
+      'This engine paints a <video> outside the document black (WebKit’s Linux port does), so the in-page export draws no picture to check'
+    )
     await openExportDialog(page)
     await openExportAdvancedOptions(page)
     test.skip(!(await page.getByRole('radio', { name: /WebM/ }).isEnabled()), 'This browser cannot export WebM')
@@ -266,7 +281,18 @@ test.describe('ESCSUITE-475: Zoom to region', () => {
     await seek(page, 1)
     await openZoomToRegion(page)
 
-    const picture = (await page.getByTestId('zoom-region-picker').boundingBox())!
+    // The form opening under the picture shrinks it a frame or two later (the
+    // canvas' ResizeObserver): measure the picture once it has stopped moving.
+    const picker = page.getByTestId('zoom-region-picker')
+    let picture = (await picker.boundingBox())!
+    await expect
+      .poll(async () => {
+        const next = (await picker.boundingBox())!
+        const settled = JSON.stringify(next) === JSON.stringify(picture)
+        picture = next
+        return settled
+      })
+      .toBe(true)
     const scale = picture.width / WIDTH
     const at = (x: number, y: number) => [picture.x + x * scale, picture.y + y * scale] as const
 
@@ -277,9 +303,12 @@ test.describe('ESCSUITE-475: Zoom to region', () => {
     await page.mouse.move(...at(600, 80), { steps: 4 })
     await page.mouse.up()
     const [x, y, width, height] = await regionFields(page)
-    expect(Math.abs(x - 400)).toBeLessThanOrEqual(2)
-    expect(Math.abs(y - 40)).toBeLessThanOrEqual(2)
-    expect(Math.abs(width - 200)).toBeLessThanOrEqual(3)
+    // A pointer lands on whole CSS pixels, and the picture is only a third of
+    // the project's size here: allow one CSS pixel, in project pixels, per end.
+    const cssPixel = 1 / scale
+    expect(Math.abs(x - 400)).toBeLessThanOrEqual(cssPixel + 0.5)
+    expect(Math.abs(y - 40)).toBeLessThanOrEqual(cssPixel + 0.5)
+    expect(Math.abs(width - 200)).toBeLessThanOrEqual(2 * cssPixel + 0.5)
     expect(width / height).toBeCloseTo(16 / 9, 1)
 
     // Dragged past the picture's right edge: moved back on, not cut short.
@@ -289,5 +318,11 @@ test.describe('ESCSUITE-475: Zoom to region', () => {
     await page.mouse.up()
     const [x2, , width2] = await regionFields(page)
     expect(x2 + width2).toBeLessThanOrEqual(WIDTH + 0.01)
+
+    // Escape leaves the tool and keeps the clip selected, writing nothing.
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('heading', { name: 'Zoom to region' })).toBeHidden()
+    await expect(page.getByRole('button', { name: 'Zoom to region' })).toHaveAttribute('aria-pressed', 'false')
+    expect(await zoomKeyframes(page)).toEqual({ x: [], y: [], scaleX: [], scaleY: [] })
   })
 })

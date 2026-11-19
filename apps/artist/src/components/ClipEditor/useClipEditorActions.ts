@@ -461,8 +461,11 @@ export function useClipEditorActions(): ClipEditorActions {
   // clip, so the guard would be an operand no caller can reach. Deleted rather
   // than tested, per the ESCSUITE-110/118 precedent for exactly that situation.
   const handleCropOnCanvasToggle = useCallback(() => {
+    // Opening crop mode closes Zoom to region (ESCSUITE-475), as opening that
+    // closes crop mode below: the two never share the preview.
+    if (!cropOnCanvas) setZoomRegionClipId(null);
     setCropClipId(cropOnCanvas ? null : selectedClip!.id);
-  }, [selectedClip, cropOnCanvas, setCropClipId]);
+  }, [selectedClip, cropOnCanvas, setCropClipId, setZoomRegionClipId]);
 
   const zoomToRegionOpen = selectedClip != null && zoomRegionClipId === selectedClip.id;
   // No `!selectedClip` guard, for the reason `handleCropOnCanvasToggle` gives.

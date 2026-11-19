@@ -8,18 +8,27 @@
 1. Select a video clip and put the playhead where the zoom should start.
 2. Press **Zoom to region** in the inspector's Actions section (video clips only: not images,
    overlays or audio). It is a toggle (`aria-pressed`), and it closes crop mode, whose handles
-   would sit in the same place.
+   would sit in the same place; opening crop mode closes it in turn. Opened from that button, the
+   form takes focus on **Region X**; closed with focus inside it, focus goes back to the button.
 3. Drag a box on the preview, or type **Region X / Y / width / height** in project pixels. Width and
    height follow each other at the output's aspect ratio. Pick **Hold** (default 3 s),
    **Transition** (default 0.5 s, each of the ease in and the ease out) and **Easing** (default
    Ease In-Out, the inspector's own list).
 4. **Apply zoom** writes the keyframes and closes the tool; **Cancel** or Escape closes it writing
-   nothing. A refusal is shown under the fields (`role="alert"`) and writes nothing.
+   nothing. Escape works from the form and, with focus elsewhere, from the app's Escape cascade
+   (after the shortcuts sheet and crop mode, before the in/out points and the selection), so it
+   never deselects the clip while the tool is open. A refusal is shown under the fields
+   (`role="alert"`) and writes nothing.
 
 The tool is a latch in the UI slice, `zoomRegionClipId`, read exactly like crop mode's
 `cropClipId`: it shows only while it names the selected clip, on a visible track, with a video
 source, and never while crop mode is open. View state: not in the project, the undo history or a
-saved file. The picker layer hides during playback; the form stays.
+saved file. The picker layer hides during playback; the form stays. While the tool is open the
+canvas' own pointer handling is off and the transform handles are not drawn, as in crop mode.
+
+The form sits between the picture and the info bar. The picture keeps its 120 px floor
+(`.videoWrapper`); when the preview is too short for both (a phone, a short window) the form
+gives way and scrolls rather than hiding **Apply** under the info bar.
 
 ## What it writes
 

@@ -128,6 +128,9 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
             onClick={onZoomToRegion}
             disabled={disabled}
             aria-pressed={zoomToRegionOpen}
+            // The preview's form moves focus into itself when it opens from
+            // here, and gives it back here when it closes (ZoomRegion.tsx).
+            data-zoom-region-toggle=""
             title="Draw a box on the preview: the clip zooms in to it at the playhead, holds, and zooms back out"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">

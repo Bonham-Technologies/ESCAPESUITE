@@ -174,6 +174,36 @@ describe('Zoom to region on the preview', () => {
     expect(keyframes()).toBeUndefined()
   })
 
+  it('takes focus from the inspector button that opens it, and gives it back on close', async () => {
+    const clip = addClip('clip1', 0, 10)
+    store().setSelectedClipId(clip.id)
+    store().setCurrentTime(2)
+    await openPreview()
+    const toggle = document.createElement('button')
+    toggle.setAttribute('data-zoom-region-toggle', '')
+    document.body.appendChild(toggle)
+    toggle.focus()
+
+    act(() => store().setZoomRegionClipId(clip.id))
+    expect(document.activeElement).toBe(field('Region X'))
+
+    fireEvent.keyDown(field('Region X'), { key: 'Escape' })
+    expect(store().zoomRegionClipId).toBeNull()
+    expect(document.activeElement).toBe(toggle)
+
+    // Shown again for another reason (here, straight from the store) with focus
+    // elsewhere: focus stays where it is, open and closed.
+    const elsewhere = document.createElement('input')
+    document.body.appendChild(elsewhere)
+    elsewhere.focus()
+    act(() => store().setZoomRegionClipId(clip.id))
+    expect(document.activeElement).toBe(elsewhere)
+    act(() => store().setZoomRegionClipId(null))
+    expect(document.activeElement).toBe(elsewhere)
+    toggle.remove()
+    elsewhere.remove()
+  })
+
   it('ends a drag the tool closes in the middle of', async () => {
     zoomingClip()
     await openPreview()

@@ -4,7 +4,7 @@
 // **The order of the branches is the behaviour.** `c` sits below Ctrl+C, `v`
 // below Ctrl+V and `o` below Ctrl+O, so each bare letter only ever sees the
 // chords that fell through; the Escape cascade runs shortcuts sheet → crop mode
-// → in/out points → multi-selection → single selection, and tests assert
+// → Zoom to region → in/out points → multi-selection → single selection, and tests assert
 // exactly that sequence. The block moves as one unit; nothing in it is reordered.
 //
 // Above the whole cascade sits `modalOpen`: while a dialog is up, the editor
@@ -150,6 +150,9 @@ export interface AppKeyboardShortcutsDeps {
   /** The clip the preview's crop mode is open on, and how to close it (ESCSUITE-157). */
   cropClipId: string | null;
   setCropClipId: (clipId: string | null) => void;
+  /** The clip the preview's Zoom to region tool is open on, and how to close it (ESCSUITE-475). */
+  zoomRegionClipId: string | null;
+  setZoomRegionClipId: (clipId: string | null) => void;
 }
 
 export function useAppKeyboardShortcuts({
@@ -195,6 +198,8 @@ export function useAppKeyboardShortcuts({
   outPoint,
   cropClipId,
   setCropClipId,
+  zoomRegionClipId,
+  setZoomRegionClipId,
 }: AppKeyboardShortcutsDeps): void {
   // Global keyboard shortcuts
   useEffect(() => {
@@ -493,6 +498,16 @@ export function useAppKeyboardShortcuts({
           setCropClipId(null);
           return;
         }
+        // Zoom to region is a mode the same way (ESCSUITE-475), gated the same
+        // way: Escape typed in its own form never gets here (the form closes
+        // itself and stops it), but one pressed after a drag on the picture,
+        // with focus outside the form, closes the tool and keeps the clip
+        // selected.
+        if (zoomRegionClipId && zoomRegionClipId === selectedClipId) {
+          e.preventDefault();
+          setZoomRegionClipId(null);
+          return;
+        }
         if (inPoint !== null || outPoint !== null) {
           e.preventDefault();
           clearInOutPoints();
@@ -522,6 +537,7 @@ export function useAppKeyboardShortcuts({
     setSelectedClipId, setActiveTool, snapEnabled, setSnapEnabled, addMarker,
     goToNextMarker, goToPreviousMarker, showShortcuts, splitClip,
     selectedClipIds, deleteSelectedClips, copySelectedClips, pasteClips, clipboard, clearMultiSelection,
-    setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint, cropClipId, setCropClipId
+    setInPoint, setOutPoint, clearInOutPoints, inPoint, outPoint, cropClipId, setCropClipId,
+    zoomRegionClipId, setZoomRegionClipId
   ]);
 }

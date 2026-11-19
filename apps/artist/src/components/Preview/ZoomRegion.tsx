@@ -28,6 +28,9 @@ import { regionCssBox, type ZoomRegionTarget } from './zoomRegionTarget';
 import type { ProjectSize } from './types';
 import styles from './ZoomRegion.module.css';
 
+/** The inspector's "Zoom to region" button (`ClipEditor/ActionsSection.tsx`). */
+const TOGGLE_SELECTOR = '[data-zoom-region-toggle]';
+
 /** How far, in CSS pixels, a press has to move before it draws a new box. */
 const DRAG_THRESHOLD = 3;
 
@@ -162,9 +165,35 @@ const round = (n: number) => Math.round(n * 100) / 100;
 export function ZoomRegionForm({ target, projectSize, region, onRegionChange, locked, onLeave }: ZoomRegionFormProps) {
   const headingId = useId();
   const easingId = useId();
+  const sectionRef = useRef<HTMLElement>(null);
+  const messageRef = useRef<HTMLParagraphElement>(null);
+  // Focus follows the tool: opened from the inspector's button, the form takes
+  // focus on its first field, so a keyboard user lands where the box is typed
+  // rather than a whole layout away from it; closed (Apply, Cancel, Escape)
+  // with focus inside it, focus goes back to that button instead of dropping
+  // to the page. A form that appears for any other reason (the clip selected
+  // again) leaves focus where the user put it.
+  useEffect(() => {
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active.matches(TOGGLE_SELECTOR) ? active : null;
+    if (opener) sectionRef.current?.querySelector('input')?.focus();
+    const section = sectionRef.current;
+    return () => {
+      const now = document.activeElement;
+      const focusWasInside = !now || now === document.body || (section != null && section.contains(now));
+      if (!focusWasInside) return;
+      const toggle = opener?.isConnected ? opener : document.querySelector<HTMLElement>(TOGGLE_SELECTOR);
+      toggle?.focus();
+    };
+  }, []);
   const [settings, setSettings] = useState<ZoomSettings>(DEFAULT_ZOOM_SETTINGS);
   const [message, setMessage] = useState<string | null>(null);
   const updateClipAnimation = useEditorStore((state) => state.updateClipAnimation);
+  // A refusal is the last thing in a form that scrolls when the preview is
+  // short (a phone): bring it into view rather than leave it below the fold.
+  useEffect(() => {
+    if (message) messageRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [message]);
   const { clip, source } = target;
   const aspect = projectSize.width / projectSize.height;
   const r = region ?? { x: 0, y: 0, width: 0, height: 0 };
@@ -207,13 +236,15 @@ export function ZoomRegionForm({ target, projectSize, region, onRegionChange, lo
   };
 
   return (
-    <section className={styles.form} aria-labelledby={headingId} onKeyDown={onKeyDown}>
-      <h2 id={headingId} className={styles.heading}>
-        Zoom to region
-      </h2>
-      <p className={styles.hint}>
-        Drag a box on the preview, or type it in project pixels. The zoom starts at the playhead.
-      </p>
+    <section ref={sectionRef} className={styles.form} aria-labelledby={headingId} onKeyDown={onKeyDown}>
+      <div className={styles.header}>
+        <h2 id={headingId} className={styles.heading}>
+          Zoom to region
+        </h2>
+        <p className={styles.hint}>
+          Drag a box on the preview, or type it in project pixels. The zoom starts at the playhead.
+        </p>
+      </div>
       <div className={styles.fields}>
         <NumberField label="Region X" unit="px" value={round(r.x)} min={0} max={projectSize.width} step={1}
           onCommit={(x) => changeRegion({ ...r, x })} />
@@ -241,20 +272,22 @@ export function ZoomRegionForm({ target, projectSize, region, onRegionChange, lo
             ))}
           </select>
         </div>
+        {/* In the fields' wrapping row rather than a row of their own: the
+            form takes its height from the preview's picture. */}
+        <div className={styles.buttons}>
+          <button type="button" className={styles.apply} onClick={apply}>
+            Apply zoom
+          </button>
+          <button type="button" className={styles.cancel} onClick={onLeave}>
+            Cancel
+          </button>
+        </div>
       </div>
       {message && (
-        <p className={styles.message} role="alert">
+        <p ref={messageRef} className={styles.message} role="alert">
           {message}
         </p>
       )}
-      <div className={styles.buttons}>
-        <button type="button" className={styles.apply} onClick={apply}>
-          Apply zoom
-        </button>
-        <button type="button" className={styles.cancel} onClick={onLeave}>
-          Cancel
-        </button>
-      </div>
     </section>
   );
 }

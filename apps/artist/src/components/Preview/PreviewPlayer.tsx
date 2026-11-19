@@ -320,6 +320,9 @@ export function PreviewPlayer() {
       );
       return;
     }
+    // The Zoom to region box replaces it too (ESCSUITE-475), for the same
+    // reason: the canvas' pointer handling is off while the tool is open.
+    if (zoomTarget) return;
 
     selectionOverlay.drawSelectionHandles(canvas, time, {
       clips,
@@ -331,7 +334,7 @@ export function PreviewPlayer() {
       transition: getActiveTransition(clips, tracks, time),
     }, canvasDimensions, handleScreenScale(canvas));
   }, [canvasDimensions, clips, tracks, sourceVideos, selectedClipId, isPlaying, keyframePanelOpen,
-      handleScreenScale, cropping, cropScene, cropElementFor]);
+      handleScreenScale, cropping, cropScene, cropElementFor, zoomTarget]);
 
   // Draw lightweight bounding boxes for multi-selected overlay clips (no resize handles)
   const drawMultiSelectHandles = useCallback((time: number) => {

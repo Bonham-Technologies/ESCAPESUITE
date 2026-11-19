@@ -24,7 +24,13 @@
 }
 
 .form {
-  flex-shrink: 0;
+  /* Below the picture, which keeps its own 120px floor (.videoWrapper): when
+     the preview is too short for both (a phone, a short window), the form
+     gives way and scrolls rather than being cut off under the info bar with
+     Apply out of reach. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--spacing-xs);
@@ -33,6 +39,14 @@
   border-top: 1px solid var(--border-color);
   color: var(--text-primary);
   font-size: 12px;
+}
+
+/* The heading and the hint share a line where there is room for both. */
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--spacing-sm);
 }
 
 .heading {
@@ -49,6 +63,7 @@
 .fields {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--spacing-xs) var(--spacing-sm);
 }
 
