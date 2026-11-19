@@ -7,8 +7,9 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
 - **PostMessage**: bidirectional communication with the parent window. ARTIST posts `READY` on
   init, and `EXPORT_COMPLETE` with
   `{ blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string, audio?: boolean }`
-  after a successful export (`name` is the download filename; not sent on failure or
-  cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
+  after a successful export (`name` is the download filename, or the name of the file the user
+  picked where ARTIST saves to a picked file, ESCSUITE-470, when `blob` is a disk-backed `File`; not
+  sent on failure or cancellation). `'gif'` is additive (ESCSUITE-34): a host that handles the two video formats sees
   a new value of a field it already reads, and needs no change unless it wants to treat a GIF
   differently. `audio` is additive too (ESCSUITE-175) and says whether the file carries an audio
   track: `false` for every GIF (no audio track in the container), for an MP4 exported in a browser
@@ -125,6 +126,10 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   cross-origin host must delegate them with `allow="translator; language-detector"`, or a press
   finds translation unavailable. The same brand gate hides that control in a bare Chromium
   embedder (`apps/artist/docs/reference/on-device-translation.md`).
+  Keeping the screen on during exports, transcription and CRAFT recording (ESCSUITE-474) uses the
+  `screen-wake-lock` feature, also `self` by default: a cross-origin host must delegate it with
+  `allow="screen-wake-lock"`, or the job runs as before with the screen left to the OS settings
+  and nothing is shown.
 - **Project files (`.veditor`, a host's `LOAD_PROJECT`)**: ESCSUITE-473 adds one **optional**
   field, `timeline.tracks[i].language` (a BCP 47 tag such as `en-US` or `es`) on caption tracks
   (`kind: 'captions'`), and a project may now hold more than one caption track. The change is

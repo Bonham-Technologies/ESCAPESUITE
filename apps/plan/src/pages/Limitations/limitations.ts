@@ -154,6 +154,15 @@ export const LIMITATIONS: Limitation[] = [
     sources: [repoFile('apps/craft/src/hooks/useFloatingControlsWindow.ts'), ticket('ESCSUITE-400')],
   },
   {
+    id: 'screen-stays-on',
+    title: 'Screen-on lock: only while the ESCAPECRAFT tab is visible',
+    body: [
+      'While ESCAPECRAFT records, and while ESCAPEARTIST exports or transcribes, the app asks your browser to keep the screen on. Browsers give that lock up whenever the tab is hidden, and the app asks for it again when the tab is shown.',
+      'So if you record another window and leave ESCAPECRAFT hidden behind it, the screen can still go to sleep, following your system’s power settings. The lock also does not stop your computer sleeping when you close its lid. For a long take with ESCAPECRAFT hidden, lengthen your screen timeout.',
+    ],
+    sources: [repoFile('packages/shared/src/utils/screenWakeLock.ts'), ticket('ESCSUITE-474')],
+  },
+  {
     id: 'no-mobile',
     title: 'Phones and tablets are not supported',
     body: [

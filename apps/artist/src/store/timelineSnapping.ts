@@ -42,6 +42,7 @@
 // unchanged. Paste and duplicate keep the strict rule: they make clips, and a
 // clip made now has no overlap to have found.
 import type { Clip, Track, TrimOrigin } from './types';
+import { clipTimelineLength } from './clipSpeed';
 
 // Get snap points from all clip edges
 export function getSnapPoints(clips: Clip[], excludeClipId?: string): number[] {
@@ -364,7 +365,7 @@ export function clampTrimToNeighbours(
   // overlap rather than made it. Two numbers, not a set, because the clamp
   // runs on every mousemove and must allocate nothing — and the clips it is
   // handed besides the trimmed one do not move while a trim runs.
-  const originEnd = origin.timelinePosition + (origin.endTime - origin.startTime);
+  const originEnd = origin.timelinePosition + clipTimelineLength(origin);
   const fixedEdge = edge === 'end' ? clip.timelinePosition : originEnd;
 
   let limit: number | null = null;

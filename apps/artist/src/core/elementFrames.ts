@@ -23,6 +23,7 @@ import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
 import { stackCaptions } from './captionStack';
+import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { openOutputFrame, type PixelSize } from './outputTransform';
 import { elementSeekTarget } from './elementSeek';
@@ -614,7 +615,7 @@ export function createFrameComposer({
       const video = videoFor(clip);
       if (!video) continue;
 
-      const sourceTime = clip.startTime + clipTime;
+      const sourceTime = sourceTimeAt(clip, clipTime);
       activeVideos.add(video);
       syncPromises.push(syncCounted(clip.sourceVideoId, video, sourceTime));
     }
@@ -626,7 +627,7 @@ export function createFrameComposer({
         const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
         const incomingClipTime = currentTime - clipEnd;
         const sourceTime = incomingClipTime >= 0
-          ? activeTransition.incomingClip.startTime + incomingClipTime
+          ? sourceTimeAt(activeTransition.incomingClip, incomingClipTime)
           : activeTransition.incomingClip.startTime;
         activeVideos.add(incomingVideo);
         syncPromises.push(syncCounted(activeTransition.incomingClip.sourceVideoId, incomingVideo, sourceTime));

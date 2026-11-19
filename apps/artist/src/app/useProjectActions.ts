@@ -16,8 +16,15 @@
 // `clipCount` arrives as a number rather than the clips array: the two
 // callbacks that need it only ever read `clips.length`, and it is the
 // dependency both of them carried inline.
-import { useCallback, useState } from 'react';
-import { saveProject, loadProject, showOpenProjectDialog } from '../core/projectManager';
+import { useCallback, useRef, useState } from 'react';
+import {
+  PROJECT_FILE_TYPE,
+  saveProject,
+  saveProjectToFile,
+  loadProject,
+  showOpenProjectDialog,
+} from '../core/projectManager';
+import { FileWriteError, canPickSaveFile, chooseSaveDestination, fileHandleOf, mayWrite } from '../core/saveFile';
 import { ProjectFileError } from '../core/projectFileFormat';
 import { revokeSourceThumbnails } from '../core/storage';
 import { requestStoragePersistence } from '@escapesuite/shared/storage';
@@ -58,6 +65,18 @@ export interface ProjectActions {
   /** The "you have unsaved work" dialog is up. */
   showProjectLoadDialog: boolean;
   handleSaveProject: () => Promise<void>;
+  /**
+   * Save to a file picked now, which later saves then write over
+   * (ESCSUITE-470). Only where the browser can pick one (`canPickSaveFile`).
+   */
+  handleSaveProjectAs: () => Promise<void>;
+  /**
+   * Forget the file Save writes over (ESCSUITE-470), for a project that
+   * replaced the current one some other way than Open or Save (a host's
+   * `LOAD_PROJECT`), so the next Save asks rather than overwrite a file that
+   * holds a different project. Stable across renders.
+   */
+  forgetProjectFile: () => void;
   handleLoadProject: () => Promise<void>;
   /**
    * Open the project in `file`: ask first if the timeline holds work, load it
@@ -90,12 +109,58 @@ export function useProjectActions({
   // Held here rather than in `App`: the three dialog handlers below are the
   // only readers, and the dialog itself is driven by showProjectLoadDialog.
   const [pendingProjectFile, setPendingProjectFile] = useState<File | null>(null);
+  // ESCSUITE-470: the file Save writes over, where the browser can write to
+  // one: the file Open read through the picker, or the one the first save
+  // picked. None after New Project, or after opening a file that arrived any
+  // other way (a drop, the `<input>` fallback), so the next save asks.
+  const projectFileRef = useRef<FileSystemFileHandle | null>(null);
 
-  // Handle save project
-  const handleSaveProject = useCallback(async () => {
+  // Write the project: over the file it came from, to a file picked now, or
+  // (in a browser with no picker) as a download. False when the user
+  // cancelled the picker. The picker and the permission prompt both need the
+  // click's activation, so each is reached before anything is awaited.
+  const writeProject = useCallback(async (saveAs: boolean): Promise<boolean> => {
+    const editor = currentEditorBlock();
+    if (!canPickSaveFile()) {
+      await saveProject(project, sourceVideos, undefined, editor);
+      return true;
+    }
+    let handle = saveAs ? null : projectFileRef.current;
+    if (handle) {
+      if (!(await mayWrite(handle))) {
+        throw new FileWriteError(
+          `Not saved: permission to write to "${handle.name}" was not given. Use Save Project As... to choose a file.`
+        );
+      }
+    } else {
+      const destination = await chooseSaveDestination(`${project.name || 'project'}.veditor`, PROJECT_FILE_TYPE);
+      if (destination.kind === 'cancelled') return false;
+      if (destination.kind === 'download') {
+        await saveProject(project, sourceVideos, undefined, editor);
+        return true;
+      }
+      handle = destination.handle;
+    }
+    await saveProjectToFile(handle, project, sourceVideos, undefined, editor);
+    projectFileRef.current = handle;
+    return true;
+  }, [project, sourceVideos]);
+
+  const forgetProjectFile = useCallback(() => {
+    projectFileRef.current = null;
+  }, []);
+
+  // One save at a time, whichever way it was asked for (the button, the menu,
+  // Ctrl+S): a second one would open a second picker, and its `finally` would
+  // clear isSaving while the first was still writing. A ref, not the state,
+  // so a press in the same tick as the first is refused too.
+  const savingRef = useRef(false);
+  const save = useCallback(async (saveAs: boolean) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setIsSaving(true);
     try {
-      await saveProject(project, sourceVideos, undefined, currentEditorBlock());
+      if (!(await writeProject(saveAs))) return;
       analytics.projectSaved();
       showNotification('Project saved successfully', 'success');
       // ESCSUITE-468: ask the browser to keep the library the project's media
@@ -104,13 +169,19 @@ export function useProjectActions({
     } catch (error) {
       console.error('Save failed:', error);
       showNotification(
-        error instanceof ProjectFileError ? error.message : 'Failed to save project',
+        error instanceof ProjectFileError || error instanceof FileWriteError ? error.message : 'Failed to save project',
         'error'
       );
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
-  }, [project, sourceVideos, showNotification]);
+  }, [writeProject, showNotification]);
+
+  // Two callbacks rather than a flag: both are handed straight to `onClick`,
+  // which would pass its event as the flag.
+  const handleSaveProject = useCallback(() => save(false), [save]);
+  const handleSaveProjectAs = useCallback(() => save(true), [save]);
 
   // Load a project file (shared by Ctrl+O and drag-drop paths)
   const loadProjectFile = useCallback(async (file: File) => {
@@ -123,6 +194,8 @@ export function useProjectActions({
     let mintedButNotYetOwned: SourceVideo[] | undefined;
     try {
       const { project: loadedProject, sourceVideos: loadedVideos, editor: loadedEditor } = await loadProject(file);
+      // Taken up only once the load has gone through, below.
+      const openedFrom = fileHandleOf(file) ?? null;
       mintedButNotYetOwned = loadedVideos;
 
       // Validate (and migrate) before touching anything: ensureTimelineHasTracks
@@ -161,6 +234,9 @@ export function useProjectActions({
       // parseProject. resetProject() has already cleared the outgoing ones, so
       // a file without the block simply keeps those defaults.
       if (parsed.editor) applyEditorBlock(parsed.editor);
+
+      // Save now writes back over this file, where it came through the picker.
+      projectFileRef.current = openedFrom;
 
       // ESCSUITE-164: resetProject() and setProject() each push a history
       // entry (addSourceVideo pushes none; it grafts its source into every
@@ -224,11 +300,12 @@ export function useProjectActions({
     // fails for any reason did not happen, so the load must not either, and
     // the user has to be able to choose again.
     try {
-      await saveProject(project, sourceVideos, undefined, currentEditorBlock());
+      // A cancelled picker saved nothing, so nothing is loaded either.
+      if (!(await writeProject(false))) return;
     } catch (error) {
       console.error('Failed to save current project:', error);
       showNotification(
-        error instanceof ProjectFileError ? error.message : 'Failed to save project',
+        error instanceof ProjectFileError || error instanceof FileWriteError ? error.message : 'Failed to save project',
         'error'
       );
       return;
@@ -237,7 +314,7 @@ export function useProjectActions({
     setShowProjectLoadDialog(false);
     setPendingProjectFile(null);
     await loadProjectFile(file);
-  }, [pendingProjectFile, project, sourceVideos, loadProjectFile, showNotification]);
+  }, [pendingProjectFile, writeProject, loadProjectFile, showNotification]);
 
   const handleProjectLoadDiscardAndLoad = useCallback(async () => {
     setShowProjectLoadDialog(false);
@@ -256,6 +333,8 @@ export function useProjectActions({
     }
     resetProject();
     clearHistory();
+    // A new project has no file yet: its first save asks for one.
+    projectFileRef.current = null;
     // This tab's own slot, and no other tab's (ESCSUITE-274).
     clearSession();
     analytics.projectCreated();
@@ -267,6 +346,8 @@ export function useProjectActions({
     isLoading,
     showProjectLoadDialog,
     handleSaveProject,
+    handleSaveProjectAs,
+    forgetProjectFile,
     handleLoadProject,
     handleProjectFile,
     handleNewProject,

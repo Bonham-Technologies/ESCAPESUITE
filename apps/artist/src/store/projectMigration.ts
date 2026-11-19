@@ -7,6 +7,14 @@ import { convertLegacyOverlays } from './legacyOverlays';
 import { createDefaultTrack, calculateTimelineDuration } from './projectFactory';
 import { isValidCrop } from '../core/clipCrop';
 import { isExtendableClip, MIN_CLIP_DURATION } from './extendableClip';
+import { isValidClipSpeed, MAX_CLIP_SPEED, MIN_CLIP_SPEED, sourceSpanToTimeline } from './clipSpeed';
+
+/**
+ * How far a sped clip's stored `duration` may sit from its source span over
+ * its speed (ESCSUITE-471), relative to the length: float noise, not a
+ * different length.
+ */
+const SPEED_DURATION_TOLERANCE = 1e-6;
 
 /**
  * Repair a clip transform the app itself once wrote (ESCSUITE-255): a scale
@@ -650,6 +658,35 @@ export function parseProject(input: unknown, editorInput?: unknown): ParseProjec
     }
     if (typeof endTime !== 'number' || !Number.isFinite(endTime) || endTime <= startTime) {
       return { ok: false, reason: `Clip "${id}" has an invalid endTime` };
+    }
+
+    // ESCSUITE-471. Absent is every clip never sped and every clip of a
+    // project written before speeds existed, which opens exactly as it did.
+    // A present one must be in range, on a media clip, and agree with the
+    // clip's length: the app writes `duration` as the source span over the
+    // speed, and a hand-made file (a headless job spec) that left `duration`
+    // at the unsped length would otherwise play the source at one rate and
+    // lay the clip out at another.
+    if (present.speed !== undefined) {
+      if (!isValidClipSpeed(present.speed)) {
+        return { ok: false, reason: `Clip "${id}" has an invalid speed: it must be a number from ${MIN_CLIP_SPEED} to ${MAX_CLIP_SPEED}` };
+      }
+      if (present.overlayType && present.speed !== 1) {
+        return { ok: false, reason: `Clip "${id}" is an overlay and cannot have a speed` };
+      }
+      // A speed of 1 (written by hand: the app drops the key) is no speed, so
+      // its clip is held to nothing a clip without one is not, and an
+      // overlay's pair is left to `repairExtendableClipPairs` as before.
+      const expected = sourceSpanToTimeline(startTime, endTime, present.speed);
+      if (
+        present.speed !== 1 &&
+        Math.abs((timed.duration as number) - expected) > SPEED_DURATION_TOLERANCE * Math.max(1, expected)
+      ) {
+        return {
+          ok: false,
+          reason: `Clip "${id}" has speed ${present.speed}, so its duration must be (endTime - startTime) / speed = ${expected}`,
+        };
+      }
     }
 
     // ESCSUITE-173. Checked here, against the RAW input, for the same reason

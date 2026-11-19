@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { useDialogBehaviour } from '@escapesuite/shared/hooks';
+import { holdScreenAwake } from '@escapesuite/shared/utils';
 import { useEditorStore } from '../../store/projectStore';
 import {
   exportToWebM,
@@ -46,7 +47,10 @@ import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
+import { FileWriteError, canPickSaveFile, chooseSaveDestination, errorMessage, openFileSink } from '../../core/saveFile';
+import type { FileSink, SaveDestination, SaveFileType } from '../../core/saveFile';
 import { serializeCaptions } from '../../core/captions';
+import { buildYoutubeChapters } from '../../utils/youtubeChapters';
 import type { CaptionCue, CaptionFormat } from '../../core/captions';
 import { languageName } from '../../core/transcriptionLanguage';
 import type { ExportOptions, ExportProgress } from '../../store/types';
@@ -112,9 +116,17 @@ const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
   vtt: 'text/vtt',
 };
 
+/** Each format's entry in the save picker's type list (ESCSUITE-470). */
+const EXPORT_FILE_TYPES: Record<ExportOptions['format'], SaveFileType> = {
+  webm: { description: 'WebM video', accept: { 'video/webm': ['.webm'] } },
+  mp4: { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } },
+  gif: { description: 'GIF animation', accept: { 'image/gif': ['.gif'] } },
+};
+
 /** The visible length notices the disabled downloads point at (ESCSUITE-385). */
 const LENGTH_REASON_ID = 'export-length-reason';
 const FULL_LENGTH_REASON_ID = 'export-full-length-reason';
+const CHAPTERS_EMPTY_ID = 'export-chapters-empty';
 
 /**
  * How to set a section, from the keys `useAppKeyboardShortcuts` binds: I and O
@@ -152,6 +164,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   const projectResolution = useEditorStore((state) => state.project.resolution);
   const inPoint = useEditorStore((state) => state.inPoint);
   const outPoint = useEditorStore((state) => state.outPoint);
+  const markers = useEditorStore((state) => state.markers);
 
   // Use prop timeRange if provided, otherwise derive from in/out points.
   // Memoised so handleExport, which lists it as a dependency, is not rebuilt
@@ -194,6 +207,9 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
   // needs stopping" and never a stale one — which is not the same question
   // as "am I still the run being displayed" below.
   const abortControllerRef = useRef<AbortController | null>(null);
+  // The run whose screen wake lock is actually held (ESCSUITE-474), or null.
+  // Keyed by run so a cancelled export's late release cannot clear a newer one.
+  const [awakeRun, setAwakeRun] = useState<AbortController | null>(null);
   // Identity of the most recently *started* export. Unlike abortControllerRef,
   // this is never cleared by a run's own completion — only overwritten when a
   // *newer* run starts, and explicitly nulled by handleCancel so a cancelled
@@ -387,6 +403,37 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     const blob = new Blob([serializeCaptions(sidecar.cues, format)], { type: CAPTION_MIME_TYPES[format] });
     downloadBlob(blob, `${sidecar.name}.${format}`);
   };
+  // ESCSUITE-472: the markers as YouTube chapters, timed from the start of the
+  // file the user exports. With a section selected the dialog exports either
+  // the section or the full video, so the row asks which: the section by
+  // default, and whichever the last export from this dialog wrote (set in
+  // `handleExport`). Without a section, the whole timeline. Shown when a
+  // marker falls in either range.
+  const [chaptersForFullVideo, setChaptersForFullVideo] = useState(false);
+  const fullChapters = useMemo(
+    () => buildYoutubeChapters(markers, { start: 0, end: calculateTimelineDuration(clips) }),
+    [markers, clips]
+  );
+  const sectionChapters = useMemo(
+    () => (timeRange ? buildYoutubeChapters(markers, timeRange) : null),
+    [markers, timeRange]
+  );
+  const chapters = sectionChapters && !chaptersForFullVideo ? sectionChapters : fullChapters;
+  const showChaptersRow = fullChapters.chapters.length > 0 || (sectionChapters?.chapters.length ?? 0) > 0;
+  const [chaptersCopy, setChaptersCopy] = useState<'copied' | 'failed' | null>(null);
+  useEffect(() => setChaptersCopy(null), [chapters.text, isOpen]);
+  const copyChapters = async () => {
+    try {
+      await navigator.clipboard.writeText(chapters.text);
+      setChaptersCopy('copied');
+    } catch {
+      setChaptersCopy('failed');
+    }
+  };
+  const downloadChapters = () => {
+    downloadBlob(new Blob([chapters.text + '\n'], { type: 'text/plain' }), `${projectName || 'export'}-chapters.txt`);
+  };
+
   // What the whole timeline exports as, and what the click exports: the
   // section when one is selected. Only the stretch encoded is held to the
   // three-hour limit (ESCSUITE-367), so a section of a longer timeline exports.
@@ -471,7 +518,37 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       return;
     }
 
+    // Determine options: primary button uses defaults, advanced button uses configured options
+    const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
+    const exportOptions: ExportOptions = useAdvanced
+      ? { ...advancedOptions, timeRange: effectiveTimeRange }
+      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
+
+    const requestedFormat = formatOverride || exportOptions.format;
+    // GIF needs no WebCodecs, so it never falls back; MP4 still does.
+    const format: ExportOptions['format'] =
+      requestedFormat === 'gif' ? 'gif' : requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
+    const fileName = `${projectName || 'export'}.${format}`;
+
+    // ESCSUITE-470: where the browser can write to a file, ask for it first,
+    // from the click itself: nothing above awaits, and the picker needs the
+    // gesture's activation. A cancelled picker starts nothing. Elsewhere the
+    // export downloads, as it always has, with no `await` added in front.
+    let destination: SaveDestination = { kind: 'download' };
+    if (canPickSaveFile()) {
+      try {
+        destination = await chooseSaveDestination(fileName, EXPORT_FILE_TYPES[format]);
+      } catch (pickError) {
+        setError(`Could not choose where to save: ${errorMessage(pickError)}`);
+        return;
+      }
+      if (destination.kind === 'cancelled') return;
+    }
+
     setError(null);
+    // ESCSUITE-472: the Chapters row then times its list from this file's
+    // start. Set once the run is going, so a cancelled picker changes nothing.
+    setChaptersForFullVideo(exportFullVideo === true);
     setOfferMp4Fallback(false);
     setMp4FailedError(null);
     setExportedWithoutSound(null);
@@ -500,16 +577,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     registerLiveExport(abortController);
     const isCurrentRun = () => latestExportRef.current === abortController;
 
-    // Determine options: primary button uses defaults, advanced button uses configured options
-    const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
-    const exportOptions: ExportOptions = useAdvanced
-      ? { ...advancedOptions, timeRange: effectiveTimeRange }
-      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
-
-    const requestedFormat = formatOverride || exportOptions.format;
-    // GIF needs no WebCodecs, so it never falls back; MP4 still does.
-    const format: ExportOptions['format'] =
-      requestedFormat === 'gif' ? 'gif' : requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
     analytics.exportStarted(format);
 
     // Save advanced settings if using advanced options
@@ -544,7 +611,26 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // the value from before the run began, never where the run failed.
     let lastProgress = 0;
 
+    // The picked file the muxer writes into, once it is open. A write it
+    // refuses (a full disk, permission taken away) stops the run through its
+    // abort signal and is reported below in the run's place.
+    let sink: FileSink | undefined;
+
+    // Keep the screen on for the whole run (ESCSUITE-474). Cancel aborts the
+    // controller, which releases the lock at once; the `finally` below covers
+    // success and failure. Taken right before the `try`, so nothing can throw
+    // between it and that `finally`. Best effort: no API or a refusal changes
+    // nothing.
+    const awake = holdScreenAwake({
+      signal: abortController.signal,
+      onChange: (held) => setAwakeRun((prev) => (held ? abortController : prev === abortController ? null : prev)),
+    });
+
     try {
+      if (destination.kind === 'file') {
+        sink = await openFileSink(destination.handle, () => abortController.abort());
+      }
+
       const onProgress = (p: ExportProgress) => {
         lastProgress = p.progress;
         if (isCurrentRun()) report(p);
@@ -557,21 +643,22 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         result = await exportToGIF(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'gif';
       } else if (format === 'mp4') {
-        result = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution, sink);
         extension = 'mp4';
       } else {
-        result = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution, sink);
         extension = 'webm';
       }
-      const blob = result.blob;
+      // A GIF is encoded whole, so it cannot stream: its finished bytes are
+      // written to the picked file in one go (ESCSUITE-470).
+      const blob = sink && format === 'gif' ? await sink.writeAll(result.blob) : result.blob;
 
       // A superseded run must neither download nor notify a host: both are
       // user/host-visible side effects that belong only to the export the
       // user is actually looking at.
       if (isCurrentRun()) {
-        const fileName = `${projectName || 'export'}.${extension}`;
-
-        downloadBlob(blob, fileName);
+        // Already in the picked file, when there is one.
+        if (!sink) downloadBlob(blob, fileName);
 
         // Hand the finished file to an embedding host (no-op when not embedded).
         // The download above has already happened, so a host channel that throws
@@ -582,7 +669,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             // `audio` is additive (ESCSUITE-175): a host that only reads the
             // three fields it has always read is unaffected, and one that wants
             // to know whether the file it was handed has sound in it can.
-            payload: { blob, format: extension, name: fileName, audio: result.audio },
+            payload: { blob, format: extension, name: sink?.name ?? fileName, audio: result.audio },
           });
         } catch (hostError) {
           console.error('Failed to notify host of completed export:', hostError);
@@ -613,12 +700,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         // The mix's measured loudness, and the gain a target applied, ride on
         // the completion sentence itself (ESCSUITE-292), so the one live
         // region announces them with it rather than a second region competing.
+        const saved = sink ? ` Saved to ${sink.name}.` : '';
         report({
           phase: 'complete',
           progress: 100,
           message: result.loudness
-            ? `Export complete! ${formatLoudnessSummary(result.loudness)}`
-            : 'Export complete!',
+            ? `Export complete!${saved} ${formatLoudnessSummary(result.loudness)}`
+            : `Export complete!${saved}`,
         });
 
         // Close dialog after a delay
@@ -629,7 +717,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
           }
         }, 2000);
       }
-    } catch (err) {
+    } catch (caught) {
+      // A write the picked file refused ended the run through its abort
+      // signal: that write is the failure, not a cancel.
+      const err: unknown = sink?.failure ?? caught;
+      // Cancelled or failed, the picked file keeps none of this run's bytes.
+      await sink?.discard();
+
       // Don't show error for user-initiated cancellation
       if (err instanceof ExportAbortedError) {
         if (isCurrentRun()) setProgress(null);
@@ -658,8 +752,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // from the same <video> — and the refusal itself says to use Chrome or
       // Edge (ESCSUITE-305 review round 1); a source with no stored bytes is
       // gone for every exporter (ESCSUITE-330).
+      // Nor is a file that could not be written (ESCSUITE-470): the other format
+      // would go to the same file.
       const noOtherFormat =
-        err instanceof ExportError && (err.code === 'SOURCE_NOT_SEEKABLE' || err.code === 'SOURCE_MISSING');
+        err instanceof FileWriteError ||
+        (err instanceof ExportError && (err.code === 'SOURCE_NOT_SEEKABLE' || err.code === 'SOURCE_MISSING'));
 
       // If MP4 failed, show the fallback dialog instead of just an error
       if (isCurrentRun()) {
@@ -679,6 +776,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         setProgress(null);
       }
     } finally {
+      awake.release();
       // Clear the abort controller reference — but only if it is still this
       // run's own controller. A cancelled run's `finally` can fire after a
       // later run has already stored its controller here (the cancelled
@@ -820,6 +918,10 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                 <span className={styles.summary} role="status">
                   Estimated size: ~{formatFileSize(progress.estimatedBytes)}
                 </span>
+              )}
+              {/* ESCSUITE-474: shown only while the lock is really held. */}
+              {awakeRun && progress.phase !== 'complete' && (
+                <span className={styles.summary}>Keeping the screen on until the export finishes.</span>
               )}
               {/* The after-the-fact half of `noAudioNote` (ESCSUITE-175): the
                   file is already downloaded by the time this renders, so it
@@ -1254,6 +1356,74 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
                       </div>
                     ))
                   )}
+                </div>
+              )}
+
+              {/* ESCSUITE-472: the markers as YouTube chapters. Only when a
+                  marker falls in a range the dialog can export; with a
+                  section selected, the user picks which file the times are
+                  for. */}
+              {showChaptersRow && (
+                <div className={styles.section} role="group" aria-labelledby="export-chapters-label">
+                  <span className={styles.label} id="export-chapters-label">Chapters</span>
+                  {timeRange && (
+                    <div className={styles.radioGroup} role="radiogroup" aria-label="Chapter times for">
+                      <label className={styles.radio}>
+                        <input
+                          type="radio"
+                          name="export-chapters-range"
+                          checked={!chaptersForFullVideo}
+                          onChange={() => setChaptersForFullVideo(false)}
+                        />
+                        <span>Section ({formatTime(timeRange.start)} - {formatTime(timeRange.end)})</span>
+                      </label>
+                      <label className={styles.radio}>
+                        <input
+                          type="radio"
+                          name="export-chapters-range"
+                          checked={chaptersForFullVideo}
+                          onChange={() => setChaptersForFullVideo(true)}
+                        />
+                        <span>Full video</span>
+                      </label>
+                    </div>
+                  )}
+                  {chapters.chapters.length === 0 && (
+                    <div className={styles.summary} id={CHAPTERS_EMPTY_ID}>
+                      {chaptersForFullVideo ? 'No markers in the video.' : 'No markers in the section.'}
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: 'var(--spacing-sm)' }}>
+                    <button
+                      className={styles.cancelButton}
+                      onClick={copyChapters}
+                      disabled={chapters.chapters.length === 0}
+                      aria-describedby={chapters.chapters.length === 0 ? CHAPTERS_EMPTY_ID : undefined}
+                    >
+                      Copy chapters
+                    </button>
+                    <button
+                      className={styles.cancelButton}
+                      onClick={downloadChapters}
+                      disabled={chapters.chapters.length === 0}
+                      aria-describedby={chapters.chapters.length === 0 ? CHAPTERS_EMPTY_ID : undefined}
+                    >
+                      Download chapters .txt
+                    </button>
+                  </div>
+                  <span className={styles.srOnly} role="status" aria-live="polite" aria-atomic="true">
+                    {chaptersCopy === 'copied' ? 'Chapters copied' : chaptersCopy === 'failed' ? 'Could not copy chapters' : ''}
+                  </span>
+                  {chaptersCopy && (
+                    <div className={styles.summary} aria-hidden="true">
+                      {chaptersCopy === 'copied' ? 'Copied' : 'Could not copy: use Download chapters .txt'}
+                    </div>
+                  )}
+                  {chapters.warnings.map((warning) => (
+                    <div className={styles.summary} role="status" key={warning}>
+                      {warning}
+                    </div>
+                  ))}
                 </div>
               )}
             </>

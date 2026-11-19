@@ -265,6 +265,29 @@ describe('exportToWebM muxing', () => {
     expect(audio).toBe(true)
   })
 
+
+  // ESCSUITE-470: an export to a picked file writes into that file's sink,
+  // and the file it commits is the result.
+  it('writes into the sink it is handed, and hands back what the sink finishes', async () => {
+    const written = new WritableStream<{ type: 'write'; data: Uint8Array; position: number }>()
+    const committed = new Blob([new Uint8Array(3)])
+    const finish = vi.fn(async () => committed)
+    const result = await exportToWebM(
+      [makeClip({ duration: CLIP_DURATION, endTime: CLIP_DURATION })],
+      [makeSourceVideo({ width: 640, height: 360 })],
+      makeExportOptions({ format: 'webm' }),
+      vi.fn(),
+      [makeTrack()],
+      undefined,
+      undefined,
+      { writable: written, finish }
+    )
+
+    expect((lastMediabunnyOutput().target as StreamTargetDouble).writable).toBe(written)
+    expect(finish).toHaveBeenCalledWith('video/webm')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(result.blob).toBe(committed)
+  })
   it('muxes a WebM with one VP9 video track, streamed', async () => {
     await run()
 
@@ -442,6 +465,15 @@ describe('exportToWebM rendering', () => {
     expect(media.seeks.slice(1)).toEqual(
       [2, 2 + 1 / 30, 2 + 2 / 30, 2 + 3 / 30, 2 + 4 / 30, 2 + 5 / 30].map(elementSeekTarget)
     )
+  })
+
+  it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
+    await run({
+      clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
+    })
+
+    // Half a source frame per timeline frame.
+    expect(media.seeks.slice(1)).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 60)))
   })
 
   it('draws the video element for each timeline frame', async () => {

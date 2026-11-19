@@ -998,3 +998,31 @@ export function trimAnimation(
 
   return result;
 }
+
+// ============================================
+// SPEED (ESCSUITE-471)
+// ============================================
+
+/**
+ * `animation` for a clip whose speed changed so that every moment of it now
+ * lasts `ratio` times as long on the timeline (old speed / new speed), and
+ * whose new length is `duration`. Each keyframe's time is multiplied by
+ * `ratio`, so it stays on the source moment it was set on: a zoom keyed to
+ * when a dialog opens still lands when the dialog opens. The presets keep
+ * their length, capped as a trim caps them (`maxPresetDuration`).
+ *
+ * `animation` is read, never written: the result shares no keyframe, preset
+ * or array with it.
+ */
+export function scaleAnimationTime(animation: ClipAnimation, ratio: number, duration: number): ClipAnimation {
+  const cap = maxPresetDuration(duration);
+  const clampPreset = (preset: ClipAnimation['in']): ClipAnimation['in'] =>
+    preset.type === 'none' ? { ...preset } : { ...preset, duration: Math.min(preset.duration, cap) };
+  const keyframes: ClipAnimation['keyframes'] = {};
+  for (const property of Object.keys(animation.keyframes) as AnimatableProperty[]) {
+    const track = animation.keyframes[property];
+    if (!track) continue;
+    keyframes[property] = track.map((keyframe) => ({ ...keyframe, time: keyframe.time * ratio }));
+  }
+  return { in: clampPreset(animation.in), out: clampPreset(animation.out), keyframes };
+}
