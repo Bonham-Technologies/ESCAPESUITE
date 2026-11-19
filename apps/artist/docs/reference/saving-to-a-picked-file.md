@@ -44,7 +44,9 @@ checked before anything is awaited, and the download path adds no `await` in fro
   than restoring it. Mediabunny closes its target on cancel as well as on finalize, so the sink's
   `WritableStream` is not the file's own stream: closing it commits nothing. A Cancel that lands
   after the exporter's last abort check, while `finish()` is committing, leaves the finished
-  (complete) file in place.
+  (complete) file in place. A run that wrote no bytes is not committed: `finish()` throws the
+  exporters' own "no data was written" error instead, and the `discard()` after it removes the
+  empty file.
 - **A failed write stops the export.** The first write the stream refuses is worded for the user
   (`fileWriteError`: `QuotaExceededError` "the disk is full", `NotAllowedError`/`SecurityError`
   "permission to write to it was taken away", `NotFoundError` "it was moved or deleted",
@@ -66,9 +68,21 @@ checked before anything is awaited, and the download path adds no `await` in fro
   read-only until `mayWrite` asks for `readwrite` access, also before any `await`; refused, the
   save says `Not saved: permission to write to "<name>" was not given. Use Save Project As... to
   choose a file.`
+- **Never a project file with a source left out.** The download has always skipped a used source
+  whose bytes are no longer in IndexedDB (ESCSUITE-330's missing source, a take deleted in CRAFT,
+  ESCSUITE-151), which only ever made a new file. Writing to a handle could overwrite the one file
+  that still holds those bytes, so `saveProjectToFile` refuses before it opens the file, naming
+  each source: `Not saved: the media for "<name>" is no longer stored in this browser, so the
+  project file would lose it. The file was left as it was. Import the media again, or remove the
+  clips that use it, then save.` (a `ProjectFileError`, shown as the save's error). The download
+  path is unchanged.
 - **Save As** (File menu, only where the picker exists; no shortcut) always asks and makes the new
   file the project's. New Project forgets the file, and so does opening a file that arrived any
-  other way (a drop, the `<input>` fallback), so the next Save asks.
+  other way (a drop, the `<input>` fallback) and a host's `LOAD_PROJECT` (`App` wraps the
+  `setProject` it hands `useHostIntegration` with `forgetProjectFile`), so the next Save asks.
+- **One save at a time.** `save` ignores a second Save, Save As or Ctrl+S while one is running (a
+  ref, so a press in the same tick is caught): it would open a second picker and clear `isSaving`
+  while the first still wrote.
 - **Save & Load** in the "unsaved work" dialog saves the same way; a cancelled picker loads
   nothing and leaves the dialog up.
 - `.veditor` is unchanged.

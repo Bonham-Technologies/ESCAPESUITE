@@ -921,6 +921,40 @@ describe('saving to a file (ESCSUITE-470)', () => {
     expect(picker()).toHaveBeenCalledTimes(3)
   })
 
+  it('forgets the file when told to (a host replaced the project), so the next save asks', async () => {
+    const { result } = mountActions()
+    await save(result)
+    act(() => result.current.forgetProjectFile())
+    await save(result)
+    expect(picker()).toHaveBeenCalledTimes(2)
+  })
+
+  it('runs one save at a time: a second press while the first is picking opens no second picker', async () => {
+    let choose!: (handle: FileSystemFileHandle) => void
+    uninstall()
+    uninstall = installSavePicker(() => new Promise((resolve) => (choose = resolve)))
+    const { result } = mountActions()
+
+    let first!: Promise<void>
+    act(() => {
+      first = result.current.handleSaveProject()
+    })
+    expect(result.current.isSaving).toBe(true)
+    await act(async () => {
+      await result.current.handleSaveProject()
+    })
+    expect(picker()).toHaveBeenCalledTimes(1)
+    // The refused press did not end the first save early.
+    expect(result.current.isSaving).toBe(true)
+
+    await act(async () => {
+      choose(picked.handle)
+      await first
+    })
+    expect(saveProjectToFile).toHaveBeenCalledTimes(1)
+    expect(result.current.isSaving).toBe(false)
+  })
+
   it('saves nothing, and says nothing, when the picker is cancelled', async () => {
     uninstall()
     uninstall = installSavePicker(() => Promise.reject(domError('AbortError')))

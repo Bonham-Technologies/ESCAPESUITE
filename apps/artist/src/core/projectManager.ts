@@ -154,7 +154,11 @@ export async function saveProjectToFile(
   onProgress?: (progress: number, message: string) => void,
   editor?: EditorBlock
 ): Promise<void> {
-  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor);
+  // Every source's bytes, or nothing written: the download this replaces made
+  // a new file and left the old one alone, but this writes over the file the
+  // project came from, which may hold the only copy of a source this browser
+  // no longer has (ESCSUITE-330, ESCSUITE-151).
+  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor, { requireEverySource: true });
   await writeBlobToFile(handle, blob);
   onProgress?.(100, 'Project saved!');
 }
@@ -164,7 +168,12 @@ async function buildProjectFile(
   project: Project,
   sourceVideos: SourceVideo[],
   onProgress: ((progress: number, message: string) => void) | undefined,
-  editor: EditorBlock | undefined
+  editor: EditorBlock | undefined,
+  /**
+   * Refuse, naming them, when a source a clip uses has no stored bytes,
+   * rather than leave it out of the file as the download always has.
+   */
+  { requireEverySource = false }: { requireEverySource?: boolean } = {}
 ): Promise<Blob> {
   onProgress?.(0, 'Preparing project data...');
 
@@ -172,10 +181,21 @@ async function buildProjectFile(
   const usedVideoIds = new Set(project.timeline.clips.map((c) => c.sourceVideoId));
   const usedVideos = sourceVideos.filter((v) => usedVideoIds.has(v.id));
 
+  // Used sources with no bytes to write: one the library no longer lists, or
+  // one whose stored bytes are gone. An overlay clip's empty id uses none.
+  const missing: string[] = [];
+  if (requireEverySource) {
+    const listed = new Set(usedVideos.map((v) => v.id));
+    for (const id of usedVideoIds) if (id && !listed.has(id)) missing.push(`"${id}"`);
+  }
+
   const sources: ProjectFileSource[] = [];
   for (const video of usedVideos) {
     const videoData = await getVideo(video.id);
-    if (!videoData) continue;
+    if (!videoData) {
+      missing.push(`"${video.name}"`);
+      continue;
+    }
     const thumbnail = await getThumbnail(video.id);
 
     // A value JSON cannot carry (Infinity and NaN become null) or the kit would refuse is left
@@ -208,6 +228,14 @@ async function buildProjectFile(
       blob: videoData.blob,
       thumbnail,
     });
+  }
+
+  if (requireEverySource && missing.length > 0) {
+    const what = missing.length === 1 ? `the media for ${missing[0]} is` : `the media for ${missing.join(', ')} are`;
+    throw new ProjectFileError(
+      `Not saved: ${what} no longer stored in this browser, so the project file would lose it. ` +
+        'The file was left as it was. Import the media again, or remove the clips that use it, then save.'
+    );
   }
 
   onProgress?.(90, 'Creating project file...');

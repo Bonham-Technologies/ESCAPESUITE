@@ -192,8 +192,13 @@ export async function openFileSink(
     }
     return failure;
   };
+  // Bytes handed to the file. A run that wrote none is not committed: the
+  // exporters refuse an empty result anyway, and committing first would leave
+  // an empty file behind that `discard` no longer removes.
+  let written = 0;
   const finish = async (): Promise<Blob> => {
     if (failure) throw failure;
+    if (written === 0) throw new Error('Export failed: no data was written to buffer');
     try {
       await stream.close();
     } catch (error) {
@@ -217,6 +222,7 @@ export async function openFileSink(
         if (failure) return;
         try {
           await stream.write(chunk);
+          written += chunk.data.byteLength;
         } catch (error) {
           fail(error);
         }
@@ -226,6 +232,7 @@ export async function openFileSink(
     async writeAll(blob) {
       try {
         await stream.write(blob);
+        written += blob.size;
       } catch (error) {
         throw fail(error);
       }

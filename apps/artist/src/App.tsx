@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useEditorStore } from './store/projectStore';
 import { PreviewPlayer } from './components/Preview/PreviewPlayer';
 import { PlaybackControls } from './components/Preview/PlaybackControls';
@@ -31,6 +31,7 @@ import { useTimelineHeight } from './app/useTimelineHeight';
 import { useHostIntegration } from './app/useHostIntegration';
 import { useInspectorCollapsed } from './app/useInspectorCollapsed';
 import { canPickSaveFile } from './core/saveFile';
+import type { Project } from './store/types';
 import styles from './App.module.css';
 
 function App() {
@@ -147,6 +148,7 @@ function App() {
     showProjectLoadDialog,
     handleSaveProject,
     handleSaveProjectAs,
+    forgetProjectFile,
     handleLoadProject,
     handleProjectFile,
     handleNewProject,
@@ -164,6 +166,17 @@ function App() {
     showNotification,
     clearSession,
   });
+
+  // A host's LOAD_PROJECT replaces the project, so Save must not write it over
+  // the file the previous one was opened from (ESCSUITE-470). Both are stable,
+  // so the host listener installed once on mount calls the live pair.
+  const setHostProject = useCallback(
+    (hostProject: Project) => {
+      forgetProjectFile();
+      setProject(hostProject);
+    },
+    [forgetProjectFile, setProject]
+  );
 
   const { handleZoomIn, handleZoomOut } = useTimelineZoom({ zoom, setZoom });
 
@@ -243,7 +256,7 @@ function App() {
   useHostIntegration({
     urlParams,
     addSourceVideo,
-    setProject,
+    setProject: setHostProject,
     showNotification,
     sessionDecisionPending: !sessionRestored,
   });

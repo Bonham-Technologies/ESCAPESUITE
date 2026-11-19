@@ -70,6 +70,13 @@ export interface ProjectActions {
    * (ESCSUITE-470). Only where the browser can pick one (`canPickSaveFile`).
    */
   handleSaveProjectAs: () => Promise<void>;
+  /**
+   * Forget the file Save writes over (ESCSUITE-470), for a project that
+   * replaced the current one some other way than Open or Save (a host's
+   * `LOAD_PROJECT`), so the next Save asks rather than overwrite a file that
+   * holds a different project. Stable across renders.
+   */
+  forgetProjectFile: () => void;
   handleLoadProject: () => Promise<void>;
   /**
    * Open the project in `file`: ask first if the timeline holds work, load it
@@ -139,7 +146,18 @@ export function useProjectActions({
     return true;
   }, [project, sourceVideos]);
 
+  const forgetProjectFile = useCallback(() => {
+    projectFileRef.current = null;
+  }, []);
+
+  // One save at a time, whichever way it was asked for (the button, the menu,
+  // Ctrl+S): a second one would open a second picker, and its `finally` would
+  // clear isSaving while the first was still writing. A ref, not the state,
+  // so a press in the same tick as the first is refused too.
+  const savingRef = useRef(false);
   const save = useCallback(async (saveAs: boolean) => {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setIsSaving(true);
     try {
       if (!(await writeProject(saveAs))) return;
@@ -155,6 +173,7 @@ export function useProjectActions({
         'error'
       );
     } finally {
+      savingRef.current = false;
       setIsSaving(false);
     }
   }, [writeProject, showNotification]);
@@ -328,6 +347,7 @@ export function useProjectActions({
     showProjectLoadDialog,
     handleSaveProject,
     handleSaveProjectAs,
+    forgetProjectFile,
     handleLoadProject,
     handleProjectFile,
     handleNewProject,

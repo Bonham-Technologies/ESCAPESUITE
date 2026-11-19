@@ -173,6 +173,7 @@ describe('ExportDialog: saving to a picked file (ESCSUITE-470)', () => {
   it('shows a failed MP4 write as the error it is, not as a reason to try WebM', async () => {
     mockExportToMP4.mockImplementation(async (...args: unknown[]) => {
       const sink = args[7] as ExportSink
+      await sink.writable.getWriter().write({ type: 'write', data: new Uint8Array([1]), position: 0 })
       ;(file.streams[0].close as ReturnType<typeof vi.fn>).mockRejectedValueOnce(domError('NotAllowedError'))
       try {
         return { blob: await sink.finish('video/mp4'), audio: true }

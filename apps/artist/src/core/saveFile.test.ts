@@ -185,6 +185,7 @@ describe('openFileSink', () => {
     const fake = fakeFileHandle('out.webm')
     const onFailure = vi.fn()
     const sink = await openFileSink(fake.handle, onFailure)
+    await sink.writable.getWriter().write(chunk([1], 0))
     fake.streams[0].close.mockRejectedValueOnce(domError('QuotaExceededError'))
     await expect(sink.finish('video/webm')).rejects.toThrow('the disk is full')
     expect(onFailure).toHaveBeenCalledTimes(1)
@@ -236,10 +237,30 @@ describe('openFileSink', () => {
 
     const done = fakeFileHandle('b.webm')
     const committed = await openFileSink(done.handle, vi.fn())
+    const writer = committed.writable.getWriter()
+    await writer.write(chunk([1], 0))
+    await writer.close()
     await committed.finish('video/webm')
     await committed.discard()
     expect(done.streams[0].abort).not.toHaveBeenCalled()
     expect(done.remove).not.toHaveBeenCalled()
+  })
+
+  it('commits nothing when nothing was written, so the discard after it still removes the file', async () => {
+    const fake = fakeFileHandle('out.webm')
+    const sink = await openFileSink(fake.handle, vi.fn())
+    await sink.writable.getWriter().close()
+
+    await expect(sink.finish('video/webm')).rejects.toThrow('no data was written')
+    expect(fake.streams[0].close).not.toHaveBeenCalled()
+    await sink.discard()
+    expect(fake.streams[0].abort).toHaveBeenCalled()
+    expect(fake.bytes()).toBeNull()
+
+    const gif = fakeFileHandle('out.gif')
+    const gifSink = await openFileSink(gif.handle, vi.fn())
+    await expect(gifSink.writeAll(new Blob([]))).rejects.toThrow('no data was written')
+    expect(gif.streams[0].close).not.toHaveBeenCalled()
   })
 
   it('discards where the browser has no remove()', async () => {
