@@ -48,6 +48,24 @@ describe('FileMenu', () => {
     expect(screen.getByText('Export Video...')).toBeInTheDocument();
   });
 
+  // ESCSUITE-470: only where the browser can pick a file to save to.
+  it('offers Save Project As... only when given one', async () => {
+    renderMenu();
+    expect(screen.queryByText('Save Project As...')).not.toBeInTheDocument();
+
+    const onSaveProjectAs = vi.fn();
+    const { onClose } = renderMenu({ onSaveProjectAs });
+    const item = screen.getByRole('menuitem', { name: 'Save Project As...' });
+    await userEvent.click(item);
+    expect(onSaveProjectAs).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('disables Save Project As... while a save runs', () => {
+    renderMenu({ onSaveProjectAs: vi.fn(), isSaving: true });
+    expect(screen.getByRole('menuitem', { name: 'Save Project As...' })).toBeDisabled();
+  });
+
   it('labels each item with its keyboard shortcut', () => {
     renderMenu();
 

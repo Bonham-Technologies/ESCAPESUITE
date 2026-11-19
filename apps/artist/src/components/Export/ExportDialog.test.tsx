@@ -1706,6 +1706,114 @@ describe('ExportDialog', () => {
     })
   })
 
+  describe('screen wake lock (ESCSUITE-474)', () => {
+    const STATUS = 'Keeping the screen on until the export finishes.'
+    let request: ReturnType<typeof vi.fn>
+    let releases: ReturnType<typeof vi.fn>[]
+
+    beforeEach(() => {
+      releases = []
+      request = vi.fn(async () => {
+        const release = vi.fn(async () => {})
+        releases.push(release)
+        return Object.assign(new EventTarget(), { release })
+      })
+      Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } })
+    })
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, 'wakeLock')
+    })
+
+    const report = (p: ExportProgress) => {
+      const send = (mockExportToWebM.mock.calls[0] as unknown as ExportArgs)[3]
+      return act(async () => send(p))
+    }
+
+    it('holds a lock for the run, says so, and releases it when the export finishes', async () => {
+      let finish: () => void = () => {}
+      mockExportToWebM.mockImplementation(
+        () => new Promise((resolve) => { finish = () => resolve(exported(new Blob())) })
+      )
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalled())
+      await report({ phase: 'encoding', progress: 10, message: 'Encoding' })
+
+      expect(request).toHaveBeenCalledExactlyOnceWith('screen')
+      expect(await screen.findByText(STATUS)).toBeInTheDocument()
+      expect(releases[0]).not.toHaveBeenCalled()
+
+      await act(async () => finish())
+      await settle()
+      expect(releases[0]).toHaveBeenCalledTimes(1)
+    })
+
+    it('requests a lock for MP4 and GIF exports too', async () => {
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(advancedToggle())
+      fireEvent.click(screen.getByRole('radio', { name: /mp4/i }))
+      fireEvent.click(advancedExport())
+      await waitFor(() => expect(mockExportToMP4).toHaveBeenCalledTimes(1))
+      await settle()
+      expect(request).toHaveBeenCalledTimes(1)
+      await waitFor(() => expect(releases[0]).toHaveBeenCalledTimes(1))
+    })
+
+    it('releases the lock and drops the line when the export fails', async () => {
+      mockExportToWebM.mockRejectedValue(new Error('boom'))
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(releases[0]).toHaveBeenCalledTimes(1))
+      expect(screen.queryByText(STATUS)).not.toBeInTheDocument()
+    })
+
+    it('releases the lock at once when the export is cancelled', async () => {
+      mockExportToWebM.mockImplementation(() => new Promise(() => {}))
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalled())
+      await report({ phase: 'encoding', progress: 10, message: 'Encoding' })
+      expect(await screen.findByText(STATUS)).toBeInTheDocument()
+
+      fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
+      await settle()
+      expect(releases[0]).toHaveBeenCalledTimes(1)
+      expect(screen.queryByText(STATUS)).not.toBeInTheDocument()
+    })
+
+    it('exports as before and shows no line where the API is missing', async () => {
+      Reflect.deleteProperty(navigator, 'wakeLock')
+      let finish: () => void = () => {}
+      mockExportToWebM.mockImplementation(
+        () => new Promise((resolve) => { finish = () => resolve(exported(new Blob())) })
+      )
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalled())
+      await report({ phase: 'encoding', progress: 10, message: 'Encoding' })
+      expect(screen.queryByText(STATUS)).not.toBeInTheDocument()
+      await act(async () => finish())
+      await settle()
+      expect(clickedLinks).toHaveLength(1)
+    })
+
+    it('shows no line when the request is refused', async () => {
+      request.mockRejectedValue(new DOMException('no', 'NotAllowedError'))
+      let finish: () => void = () => {}
+      mockExportToWebM.mockImplementation(
+        () => new Promise((resolve) => { finish = () => resolve(exported(new Blob())) })
+      )
+      render(<ExportDialog isOpen={true} onClose={onClose} />)
+      fireEvent.click(primaryExport())
+      await waitFor(() => expect(mockExportToWebM).toHaveBeenCalled())
+      await report({ phase: 'encoding', progress: 10, message: 'Encoding' })
+      expect(screen.queryByText(STATUS)).not.toBeInTheDocument()
+      await act(async () => finish())
+      await settle()
+    })
+  })
+
   describe('failures', () => {
     it('reports a WebM failure and keeps the export controls available', async () => {
       mockExportToWebM.mockRejectedValue(new Error('Encoding failed'))

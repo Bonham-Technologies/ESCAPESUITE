@@ -27,6 +27,7 @@ import type { Clip, Track } from '../store/types';
 import { isVisibleTrack } from '../store/trackVisibility';
 import { getVideoBlob } from './storage';
 import { getAnimatedVolume } from '../utils/animation';
+import { clipSpeed, isAudibleSpeed } from '../store/clipSpeed';
 import { PacketClock, TimestampPlacer, placeDecodedFile, placesByTimestamp } from '../utils/audioPlacement';
 
 const SAMPLE_RATE = 48000;
@@ -100,8 +101,22 @@ interface Placement {
   outStart: number;
   /** Source frame the clip reads from. */
   srcStart: number;
-  /** Frames the clip covers. */
+  /** Output frames the clip covers. */
   frames: number;
+  /**
+   * Source frames per output frame (ESCSUITE-471): the clip's speed. At 1
+   * each source frame lands on one output frame; otherwise the source is
+   * resampled, so the sound changes pitch with the picture's speed.
+   */
+  speed: number;
+  /** Source frames the clip reads: `frames` at speed 1, about `frames * speed` otherwise. */
+  srcFrames: number;
+  /**
+   * A sped clip's last source frame of the previous chunk, per channel
+   * (`mixResampled`): the frames after it were written held, and are
+   * corrected to the interpolation once the next chunk shows the frame after.
+   */
+  tail?: { index: number; values: number[] };
   trackVolume: number;
   hasVolumeKeyframes: boolean;
 }
@@ -192,12 +207,20 @@ async function mixInto(
     // track (ESCSUITE-127: the preview is already silent for a hidden track
     // — `getClipsAtTime` filters on it too — so an export agrees).
     if (!track || track.muted || !isVisibleTrack(track)) continue;
+    // A clip faster than MAX_AUDIBLE_SPEED is silent (ESCSUITE-471), as it
+    // is in the preview.
+    const speed = clipSpeed(clip);
+    if (!isAudibleSpeed(speed)) continue;
 
+    const frames = Math.floor(clip.duration * SAMPLE_RATE);
     const placement: Placement = {
       clip,
       outStart: Math.floor(clip.timelinePosition * SAMPLE_RATE) - first,
       srcStart: Math.floor(clip.startTime * SAMPLE_RATE),
-      frames: Math.floor(clip.duration * SAMPLE_RATE),
+      frames,
+      speed,
+      // One frame past the last one read, for the interpolation's partner.
+      srcFrames: speed === 1 ? frames : Math.ceil(frames * speed) + 1,
       trackVolume: track.volume ?? 1,
       hasVolumeKeyframes: !!clip.animation?.keyframes?.volume && clip.animation.keyframes.volume.length > 0,
     };
@@ -272,6 +295,7 @@ function normalise(output: readonly Float32Array[]): void {
 
 /** Whether any of a placement's frames land inside an output of `frameCount` frames. */
 function intersects(p: Placement, frameCount: number): boolean {
+  // In output frames, whatever the speed: `frames` is the clip's timeline length.
   return p.frames > 0 && p.outStart < frameCount && p.outStart + p.frames > 0;
 }
 
@@ -291,6 +315,10 @@ function mixChunk(
   // The downmix: both channels into one plane, averaged over `step` frames.
   const downmixGain = 1 / (CHANNELS * step);
   for (const p of placements) {
+    if (p.speed !== 1) {
+      mixResampled(planes, chunkStart, count, p, target, downmixGain);
+      continue;
+    }
     // Source frames the clip reads, within this chunk, that land in the output.
     const lo = Math.max(p.srcStart, chunkStart, p.srcStart - p.outStart);
     const hi = Math.min(p.srcStart + p.frames, chunkStart + count, p.srcStart - p.outStart + outLength);
@@ -316,10 +344,70 @@ function mixChunk(
   }
 }
 
+/**
+ * `mixChunk` for a sped clip (ESCSUITE-471): output frame `k` of the clip
+ * reads source position `srcStart + k * speed`, linearly interpolated between
+ * the two source frames either side of it. Each output frame is written by
+ * the chunk holding the frame at or before its position, so a clip's frames
+ * are each written once whatever the chunking. Where the frame after is in the
+ * next chunk, the frame is written held, and the next chunk, if it follows on
+ * with no hole, adds the difference the interpolation makes (the mix is a
+ * sum, so the correction is exact). Clip-relative time for the volume
+ * keyframes is output time, the timeline's, as the preview reads them.
+ */
+function mixResampled(
+  planes: readonly Float32Array[],
+  chunkStart: number,
+  count: number,
+  p: Placement,
+  target: MixTarget,
+  downmixGain: number
+): void {
+  const { planes: output, step, frames: outLength } = target;
+  const chunkEnd = chunkStart + count;
+  // The output frames whose position falls in this chunk, give or take one
+  // for rounding, clipped to the clip and to the output; the loop tests each.
+  // The frames the previous chunk wrote held are corrected only when this
+  // chunk carries on right after it.
+  const tail = p.tail && p.tail.index === chunkStart - 1 ? p.tail : null;
+  const kFrom = Math.max(0, -p.outStart, Math.floor((chunkStart - 1 - p.srcStart) / p.speed) - 1);
+  const kTo = Math.min(p.frames, outLength - p.outStart, Math.ceil((chunkEnd - p.srcStart) / p.speed) + 1);
+  const last = planes.length - 1;
+  for (let k = kFrom; k < kTo; k++) {
+    const position = p.srcStart + k * p.speed;
+    const index = Math.floor(position);
+    const frac = position - index;
+    // A frame of the previous chunk (`correcting`), of this one, or neither.
+    const correcting = index === chunkStart - 1;
+    if (correcting ? !tail || frac === 0 : index < chunkStart || index >= chunkEnd) continue;
+    const from = index - chunkStart;
+    const clipVolume = p.hasVolumeKeyframes ? getAnimatedVolume(k / SAMPLE_RATE, p.clip.animation, 1) : 1;
+    const combinedVolume = p.trackVolume * clipVolume;
+    const at = p.outStart + k;
+    let sum = 0;
+    for (let ch = 0; ch < (step === 1 ? output.length : CHANNELS); ch++) {
+      const plane = planes[Math.min(ch, last)];
+      const value = correcting
+        ? (plane[0] - tail!.values[Math.min(ch, tail!.values.length - 1)]) * frac
+        : interpolate(plane, from, count, frac);
+      if (step === 1) output[ch][at] += value * combinedVolume;
+      else sum += value;
+    }
+    if (step !== 1) output[0][Math.floor(at / step)] += sum * combinedVolume * downmixGain;
+  }
+  if (count > 0) p.tail = { index: chunkEnd - 1, values: planes.map((plane) => plane[count - 1]) };
+}
+
+/** `plane` read `frac` of the way from frame `from` to the next, or held at `from` when it is the last. */
+function interpolate(plane: Float32Array, from: number, count: number, frac: number): number {
+  const a = plane[from];
+  return from + 1 < count ? a + (plane[from + 1] - a) * frac : a;
+}
+
 /** The source frame after the last one any placement reads. */
 function neededEnd(placements: readonly Placement[]): number {
   let end = 0;
-  for (const p of placements) end = Math.max(end, p.srcStart + p.frames);
+  for (const p of placements) end = Math.max(end, p.srcStart + p.srcFrames);
   return end;
 }
 

@@ -7,14 +7,15 @@
 .header {
   margin-bottom: 3rem;
   padding-bottom: 2rem;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--line-strong);
 }
 
 .title {
   font-size: 2.5rem;
-  font-weight: 700;
+  font-weight: 800;
+  line-height: 1.05;
   margin-bottom: 0.5rem;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 .lastUpdated {
@@ -64,6 +65,7 @@
      ESCSUITE-413), as on /limitations. */
   color: var(--accent-link);
   text-decoration: underline;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.15em;
 }
 
@@ -79,7 +81,6 @@
 .highlight {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 8px;
   padding: 1.25rem;
   margin: 1.5rem 0;
 }
@@ -115,7 +116,6 @@
 .contactInfo {
   background-color: var(--bg-secondary);
   border: 1px solid var(--border);
-  border-radius: 12px;
   padding: 1.5rem;
   margin-top: 2rem;
 }

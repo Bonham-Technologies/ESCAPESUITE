@@ -9,6 +9,7 @@
 import { findNearestSnapPoint } from '../../store/timelineSnapping';
 import { pixelsToTime, timeToPixels } from '../../utils/timeUtils';
 import { isExtendableClip, MIN_CLIP_DURATION } from '../../store/extendableClip';
+import { clipSpeed, sourceTimeAt } from '../../store/clipSpeed';
 import type { Clip, SourceVideo, TrimOrigin } from '../../store/types';
 
 /**
@@ -209,7 +210,7 @@ export interface TrimUpdateParams {
   /** The time the pointer is over. */
   mouseTime: number;
   /** The clip as it stands now — the end trim measures against its live values. */
-  clip: Pick<Clip, 'overlayType' | 'startTime' | 'timelinePosition'>;
+  clip: Pick<Clip, 'overlayType' | 'startTime' | 'timelinePosition' | 'speed'>;
   /** Its source media, if it has any. */
   sourceVideo: Pick<SourceVideo, 'mediaType' | 'duration'> | undefined;
   /** Its values when the trim started — the start trim measures against these. */
@@ -254,23 +255,26 @@ export function computeTrimUpdate({
       return null;
     }
     if (sourceVideo) {
-      // For video/audio: trim start point within source
+      // For video/audio: trim start point within source. A sped clip
+      // (ESCSUITE-471) covers `speed` seconds of source per second of
+      // timeline, so the pointer's travel is scaled into the source by it.
+      const speed = clipSpeed(origin);
       const deltaFromOriginalStart = mouseTime - origin.timelinePosition;
-      let newStartTime = origin.startTime + deltaFromOriginalStart;
+      let newStartTime = origin.startTime + deltaFromOriginalStart * speed;
       // ESCSUITE-363: the in point stops where the clip reaches timeline 0 as
       // well as at source 0. Clamping only the position below would let the
       // in point run on while the clip stays put, moving its end and slipping
       // picture and sound against the timeline.
-      const inPointAtTimelineZero = origin.startTime - origin.timelinePosition;
+      const inPointAtTimelineZero = origin.startTime - origin.timelinePosition * speed;
       // The floors go inside the MIN_CLIP_DURATION cap, so even a clip with a
       // (migrated) negative position can never get an in point past its out
       // point; for a valid clip the order makes no difference.
       newStartTime = Math.min(
         Math.max(0, inPointAtTimelineZero, newStartTime),
-        origin.endTime - MIN_CLIP_DURATION
+        origin.endTime - MIN_CLIP_DURATION * speed
       );
 
-      const newTimelinePosition = origin.timelinePosition + (newStartTime - origin.startTime);
+      const newTimelinePosition = origin.timelinePosition + (newStartTime - origin.startTime) / speed;
 
       return {
         startTime: newStartTime,
@@ -301,9 +305,10 @@ export function computeTrimUpdate({
     // For video/audio: trim end point within source
     const newEndTimelinePosition = mouseTime;
     const clipPlaybackTime = newEndTimelinePosition - clip.timelinePosition;
-    let newEndTime = clip.startTime + clipPlaybackTime;
+    const speed = clipSpeed(clip);
+    let newEndTime = sourceTimeAt(clip, clipPlaybackTime);
     newEndTime = Math.max(
-      clip.startTime + MIN_CLIP_DURATION,
+      clip.startTime + MIN_CLIP_DURATION * speed,
       Math.min(newEndTime, sourceVideo.duration)
     );
 

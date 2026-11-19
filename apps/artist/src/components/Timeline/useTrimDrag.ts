@@ -100,6 +100,7 @@ import { useDocumentListener } from '../../hooks/useDocumentListener';
 import { useGestureHistory } from '../../hooks/useGestureHistory';
 import { linkedPartners } from '../../store/linkedClips';
 import { clampTrimToNeighbours } from '../../store/timelineSnapping';
+import { clipTimelineLength } from '../../store/clipSpeed';
 import { isTrackLocked } from '../../store/trackLock';
 import type { Clip, SourceVideo, ToolType, Track } from '../../store/types';
 import { computeTrimUpdate, pointerTime, type TrimOrigin } from './timelineGeometry';
@@ -124,8 +125,8 @@ function changesClip(clip: Clip, update: Partial<Clip>): boolean {
 }
 
 /** Where `edge` of a clip (or of its trim origin) sits on the timeline. */
-function edgeTime(clip: Pick<Clip, 'timelinePosition' | 'startTime' | 'endTime'>, edge: 'start' | 'end'): number {
-  return edge === 'start' ? clip.timelinePosition : clip.timelinePosition + clip.endTime - clip.startTime;
+function edgeTime(clip: Pick<Clip, 'timelinePosition' | 'startTime' | 'endTime' | 'speed'>, edge: 'start' | 'end'): number {
+  return edge === 'start' ? clip.timelinePosition : clip.timelinePosition + clipTimelineLength(clip);
 }
 
 /** The trim origin of a clip as it stands now. */
@@ -135,6 +136,7 @@ function originOf(clip: Clip): TrimOrigin {
     endTime: clip.endTime,
     timelinePosition: clip.timelinePosition,
     animation: clip.animation,
+    speed: clip.speed,
   };
 }
 
@@ -419,6 +421,9 @@ export function useTrimDrag({
           // in place by anything else in the app, so capturing the reference
           // needs no clone.
           animation: clip.animation,
+          // A trim keeps the clip's speed (ESCSUITE-471); the geometry scales
+          // the pointer's travel into the source by it.
+          speed: clip.speed,
         },
       };
       trimRef.current = initial;
