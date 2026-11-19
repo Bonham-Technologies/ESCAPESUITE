@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v35. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: fleet role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -196,11 +196,11 @@ comment the ticket's link on the issue
 
 ### Drift
 
-Run `bin/fleet drift <saved listing>` in this checkout. For each project with lines,
-file or update one `needs-operator` ticket in this project titled
-**`<project>: fix scheduled tasks`** (search for an open one with that title first).
-Its body lists every edit per task: name, cron, model, effort where `bin/fleet tasks` gives one, and the full prompt, from
-`bin/fleet tasks <name>`. When a later run finds no drift for that project, comment so
+Run `bin/fleet drift <saved listing>` in this checkout. For each project with lines (`fleet`
+is the shared steward and scout), file or update one `needs-operator` ticket in this project titled
+**`<project>: fix scheduled tasks`** (search for an open one with that title first). Its body lists every edit per
+task from `bin/fleet tasks <name>`: name, cron, model, effort where given, and the full prompt; `in another project`:
+create it here, then delete the old; `retired`: delete it (a paused task still shows as `paused: delete it`). When a later run finds no drift for that project, comment so
 on the open ticket and move it to Done.
 
 ### Refresh and paste tickets
@@ -216,15 +216,15 @@ only the owner can do the work. Search for an open one with the same title first
   the line is `FAILED …`, `kept-edits issue #n` or anything else (such as `nothing to
   do`), the project has no line, or the comment is for another version, file the
   ticket and quote the line.
-- **`<project>: paste Project instructions v<M>`**, when a project reports an older
-  instructions version, or two that differ. The body is the text to paste, from
-  `bin/fleet render-instructions <name>` in this checkout. Task edits go on the
-  project's **Drift** ticket, not here.
+- **`Fleet: paste Project instructions v<M>`**, one ticket, when a project reports an older
+  instructions version, or two that differ. The body is the text to paste into this
+  project once, from `bin/fleet render-instructions` in this checkout. Task edits go on
+  the **Drift** tickets, not here.
 
-**Close them** when the work is done: once a project's Setup line reports the version
-a refresh or paste ticket names, or a newer one, comment that on the ticket and move it
-to Done. When you file a ticket for a newer version, close the open one for the older
-version the same way.
+**Close them** once a project's Setup line reports a refresh ticket's version, or
+bonham-ops's own the instructions version a paste ticket names (every run reads the one
+set), or a newer one: comment that and move it to Done. When you file a ticket for a newer
+version, close the open one for the older version the same way.
 
 ### Never
 
