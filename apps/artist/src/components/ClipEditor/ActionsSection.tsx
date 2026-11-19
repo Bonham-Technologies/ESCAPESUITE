@@ -28,6 +28,13 @@ interface ActionsSectionProps {
    */
   onFindSilences?: () => void;
   /**
+   * Open or close the preview's "Zoom to region" tool (ESCSUITE-475). The
+   * button shows only when this is given — a video clip.
+   */
+  onZoomToRegion?: () => void;
+  /** Whether that tool is open on this clip: the button's pressed state. */
+  zoomToRegionOpen?: boolean;
+  /**
    * Freeze the two editing actions — the clip's track is locked
    * (ESCSUITE-84). "Go to" only moves the playhead, so it stays live; that
    * is why this section carries the flag on its own buttons instead of
@@ -46,7 +53,7 @@ interface ActionsSectionProps {
  * the clip's position and duration rather than a `timeInClip` its parent would
  * have had to recompute on every playback tick.
  */
-export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, onUnlink, onFindSilences, disabled }: ActionsSectionProps) {
+export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, onGoToClip, onDuplicate, onSplit, onUnlink, onFindSilences, onZoomToRegion, zoomToRegionOpen = false, disabled }: ActionsSectionProps) {
   return (
     <CollapsibleSection title="Actions">
       <div className={styles.actions}>
@@ -112,6 +119,22 @@ export function ActionsSection({ isVideo, isAudio, clipPosition, clipDuration, o
               <line x1="16" y1="12" x2="22" y2="12" strokeDasharray="2 2" />
             </svg>
             Find silences
+          </button>
+        )}
+
+        {onZoomToRegion && (
+          <button
+            className={styles.actionButton}
+            onClick={onZoomToRegion}
+            disabled={disabled}
+            aria-pressed={zoomToRegionOpen}
+            title="Draw a box on the preview: the clip zooms in to it at the playhead, holds, and zooms back out"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+              <path d="M3 8V3h5M16 3h5v5M21 16v5h-5M8 21H3v-5" />
+              <rect x="9" y="9" width="6" height="6" />
+            </svg>
+            Zoom to region
           </button>
         )}
       </div>

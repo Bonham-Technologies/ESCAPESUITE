@@ -6,6 +6,7 @@ Notable changes to ESCAPE Suite, newest first. The format follows
 
 ## Unreleased
 
+- ESCAPEARTIST: Zoom to region: drag a box on the preview (or type it) and a video clip eases in to fill the frame with it at the playhead, holds, and eases back out, written as ordinary keyframes that one undo removes (ESCSUITE-475).
 - Tests: a regression spec opens Remove silences on an imported clip, changes the threshold and minimum gap, cancels and reopens it, and checks the fields read the defaults beside the pause the defaults find, in Chromium, Firefox and WebKit (ESCSUITE-480).
 - ESCAPECRAFT: Delete in the recordings list asks first, naming the recording and, for a take recorded as several files, saying how many go; Cancel and Escape keep it (ESCSUITE-483).
 - Tests: a regression spec exports a WebM of a timeline cut into 120 short pieces of a frame-numbered source and checks that every exported frame, each cut's first included, is the source frame the timeline puts there, so an export that writes the frame from before a seek fails in Chromium again (ESCSUITE-479).
