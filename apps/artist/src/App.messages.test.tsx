@@ -1,7 +1,7 @@
 // The host integration surface: inbound postMessage cases and the URL
 // parameters App acts on at startup.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
 import { store, resetStoreForTest } from './test/fixtures/projectStore'
 import { renderApp } from './test/renderApp'
 import { installCanvasDouble, uninstallCanvasDouble } from './test/doubles/canvas'
@@ -11,6 +11,8 @@ import { OBJECT_URL_PATTERN } from './test/objectUrls'
 import { initIntegration, loadVideoFromUrl, parseUrlParams, sendMessage } from './utils/integration'
 import { processMediaFile } from './core/videoProcessor'
 import { getAllVideoMetadata, getThumbnail, getVideo } from './core/storage'
+import { saveProjectToFile } from './core/projectManager'
+import { fakeFileHandle, installSavePicker } from './test/doubles/fileHandle'
 import { getTheme, setTheme } from '@escapesuite/shared/theme'
 
 vi.mock('./core/storage', async () => (await import('./test/appDoubles')).storageDouble())
@@ -107,6 +109,33 @@ describe('App inbound messages', () => {
       await dispatchToApp({ type: 'LOAD_PROJECT', payload: hostProject })
 
       expect(store().project.name).toBe('From Host')
+    })
+
+    // ESCSUITE-470 QC: the host's project is not the one the remembered file
+    // holds, so the next Save asks again instead of writing over that file.
+    it('forgets the file Save writes over, so the next Save asks where to go', async () => {
+      const first = fakeFileHandle('Mine.veditor')
+      const second = fakeFileHandle('Host.veditor')
+      const picks = [first.handle, second.handle]
+      const uninstall = installSavePicker(async () => picks.shift()!)
+      try {
+        await renderApp()
+        const save = () => act(async () => {
+          fireEvent.click(screen.getByRole('button', { name: 'Save project' }))
+        })
+        await save()
+        await waitFor(() => expect(saveProjectToFile).toHaveBeenCalledTimes(1))
+        expect(vi.mocked(saveProjectToFile).mock.calls[0][0]).toBe(first.handle)
+
+        await dispatchToApp({ type: 'LOAD_PROJECT', payload: { ...store().project, name: 'From Host' } })
+        await save()
+
+        await waitFor(() => expect(saveProjectToFile).toHaveBeenCalledTimes(2))
+        expect(vi.mocked(saveProjectToFile).mock.calls[1][0]).toBe(second.handle)
+        expect(picks).toHaveLength(0)
+      } finally {
+        uninstall()
+      }
     })
 
     it('ignores an empty payload', async () => {

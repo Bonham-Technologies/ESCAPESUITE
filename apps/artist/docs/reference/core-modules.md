@@ -432,6 +432,9 @@
   `DedicatedWorker`, so `getWorkerSupport()` always resolved `false` and the worker path never
   ran in production. Every export already went through the main-thread mixer; deleting the dead
   path just stops paying for the Worker spin-up and probe on every export.
+- `audioMixer.ts`, sped clips (ESCSUITE-471): a clip with a `speed` other than 1 is resampled
+  (`mixResampled`, linear interpolation, so it is pitched with the picture) up to 2× and left out
+  of the mix above it; see [`clip-speed.md`](clip-speed.md)
 - `audioMixer.ts`, `extractSpeechMix` (ESCSUITE-433): the same mix for on-device
   transcription, written as one channel at 16 kHz (`SPEECH_MIX_SAMPLE_RATE`) into a plane the
   caller allocates. Every write in `mixChunk` is `+=`, so summing both channels of each 48 kHz

@@ -1,7 +1,8 @@
 // What an edit burst costs the global keyboard cascade.
 //
-// `useAppKeyboardShortcuts` closes over 40 values (ESCSUITE-157 added
-// `cropClipId` and `setCropClipId`) and lists all of them in its dependency
+// `useAppKeyboardShortcuts` closes over 42 values (ESCSUITE-157 added
+// `cropClipId` and `setCropClipId`, ESCSUITE-475 `zoomRegionClipId` and
+// `setZoomRegionClipId`) and lists all of them in its dependency
 // array, so every change to one of them tears the `keydown` listener off
 // `window` and binds a fresh closure. `apps/artist/CLAUDE.md` records that
 // array as deliberate — the Ctrl+B branch depends on the staleness the array
@@ -75,6 +76,8 @@ function ShortcutHost() {
     outPoint: useEditorStore((s) => s.outPoint),
     cropClipId: useEditorStore((s) => s.cropClipId),
     setCropClipId: useEditorStore((s) => s.setCropClipId),
+    zoomRegionClipId: useEditorStore((s) => s.zoomRegionClipId),
+    setZoomRegionClipId: useEditorStore((s) => s.setZoomRegionClipId),
     ...appCallbacks,
   })
   return null

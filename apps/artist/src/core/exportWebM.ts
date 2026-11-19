@@ -48,6 +48,7 @@ import {
 } from './elementFrames';
 import { extractAndMixAudio } from './audioMixer';
 import { createChunkCollector } from './chunkCollector';
+import type { ExportSink } from './saveFile';
 import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
 /**
@@ -61,7 +62,12 @@ export async function exportToWebM(
   onProgress: ProgressCallback,
   tracks?: Track[],
   signal?: AbortSignal,
-  projectResolution?: { width: number; height: number }
+  projectResolution?: { width: number; height: number },
+  /**
+   * Where the muxer writes: a file the user picked (ESCSUITE-470), or, by
+   * default, Blob parts joined at the end for the download.
+   */
+  sink: ExportSink = createChunkCollector()
 ): Promise<ExportResult> {
   // WebM never decodes through WebCodecs (this exporter seeks
   // HTMLVideoElements directly), so only VideoEncoder/VideoFrame need to
@@ -227,10 +233,9 @@ export async function exportToWebM(
     // Create Mediabunny output with WebM format
     // Streamed into Blob parts, never one ArrayBuffer, which Chromium refuses
     // past 2 GiB (ESCSUITE-367).
-    const collector = createChunkCollector();
     const output = new Output({
       format: new WebMOutputFormat(),
-      target: new StreamTarget(collector.writable),
+      target: new StreamTarget(sink.writable),
     });
     muxerOutput = output;
 
@@ -485,13 +490,16 @@ export async function exportToWebM(
     // so the catch below does the cleanup and rethrows the abort as-is.
     checkAborted(signal);
 
+    // The finished file: committed to the picked file (ESCSUITE-470) before
+    // the export says it is complete, so a write the disk refuses at the end
+    // still fails the export.
+    const blob = await sink.finish('video/webm');
+
     // Clean up media elements
     releaseSources();
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-    // Get the final file
-    const blob = collector.toBlob('video/webm');
     if (blob.size === 0) {
       throw new Error('Export failed: no data was written to buffer');
     }

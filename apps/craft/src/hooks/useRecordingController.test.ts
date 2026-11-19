@@ -3080,3 +3080,53 @@ describe('useRecordingController keeping the take on the device (ESCSUITE-466)',
     expect(useRecorderStore.getState().notice).toBeNull()
   })
 })
+
+// ESCSUITE-474: the screen stays on while a take records, and not a moment after.
+describe('screen wake lock', () => {
+  function installWakeLock() {
+    const released: number[] = []
+    const request = vi.fn(async () => {
+      const sentinel = Object.assign(new EventTarget(), {
+        release: vi.fn(async () => { released.push(request.mock.calls.length) }),
+      })
+      return sentinel
+    })
+    Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } })
+    return { request, released }
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, 'wakeLock')
+  })
+
+  it('holds a lock while recording or paused and releases it on Stop', async () => {
+    const { request, released } = installWakeLock()
+    mountController({ countdownSeconds: 0 })
+    expect(request).not.toHaveBeenCalled()
+
+    await act(async () => { useRecorderStore.setState({ state: 'recording' }) })
+    expect(request).toHaveBeenCalledExactlyOnceWith('screen')
+
+    await act(async () => { useRecorderStore.setState({ state: 'paused' }) })
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(released).toEqual([])
+
+    await act(async () => { useRecorderStore.setState({ state: 'saving' }) })
+    expect(released).toEqual([1])
+  })
+
+  it('releases the lock when the take is abandoned by unmounting', async () => {
+    const { request, released } = installWakeLock()
+    const view = mountController({ countdownSeconds: 0 })
+    await act(async () => { useRecorderStore.setState({ state: 'recording' }) })
+    expect(request).toHaveBeenCalledTimes(1)
+    view.unmount()
+    expect(released).toEqual([1])
+  })
+
+  it('records as usual where the API is missing', async () => {
+    mountController({ countdownSeconds: 0 })
+    await act(async () => { useRecorderStore.setState({ state: 'recording' }) })
+    expect(useRecorderStore.getState().state).toBe('recording')
+  })
+})

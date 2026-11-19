@@ -263,6 +263,29 @@ describe('exportToMP4 muxing', () => {
   // ESCSUITE-367: `'in-memory'` into a BufferTarget built the file in one
   // ArrayBuffer, which Chromium refuses past 2 GiB. `'reserve'` keeps the moov
   // at the front with the file streamed into Blob parts.
+
+  // ESCSUITE-470: an export to a picked file writes into that file's sink,
+  // and the file it commits is the result.
+  it('writes into the sink it is handed, and hands back what the sink finishes', async () => {
+    const written = new WritableStream<{ type: 'write'; data: Uint8Array; position: number }>()
+    const committed = new Blob([new Uint8Array(3)])
+    const finish = vi.fn(async () => committed)
+    const result = await exportToMP4(
+      [makeClip({ duration: CLIP_DURATION, endTime: CLIP_DURATION })],
+      [makeSourceVideo({ width: 640, height: 360 })],
+      makeExportOptions({}),
+      vi.fn(),
+      [makeTrack()],
+      undefined,
+      undefined,
+      { writable: written, finish }
+    )
+
+    expect((lastMediabunnyOutput().target as StreamTargetDouble).writable).toBe(written)
+    expect(finish).toHaveBeenCalledWith('video/mp4')
+    expect(lastMediabunnyOutput().finalizeCalls).toBe(1)
+    expect(result.blob).toBe(committed)
+  })
   it('muxes a reserved fast-start MP4 with one AVC video track, streamed', async () => {
     await run()
 
@@ -685,6 +708,15 @@ describe('exportToMP4 rendering', () => {
     // other frame and served the previous frame twice), and each seek goes just past
     // its frame's start (ESCSUITE-265).
     expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 30)))
+  })
+
+  it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
+    await run({
+      clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION * 2, speed: 2 })],
+    })
+
+    // Two source frames per timeline frame: 2, 2 + 2/30, 2 + 4/30, ...
+    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + (i * 2) / 30)))
   })
 
   it('draws an image source without a frame source', async () => {

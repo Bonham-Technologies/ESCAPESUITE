@@ -567,3 +567,12 @@ recorder also settles the store, through `settleTake(keep)`:
 A stopped take's store belongs to the save chain. The chain deletes the copy once
 `saveRecording` resolves and keeps it if the save rejects. The full table and the reasons are
 in [`crash-safe-takes.md`](crash-safe-takes.md).
+
+## Screen wake lock (ESCSUITE-474)
+
+`useRecordingController` holds a screen wake lock (`holdScreenAwake`, `packages/shared`) in an
+effect on the rendered recorder `state`: held while it is `recording` or `paused`, released by the
+effect's cleanup when the state leaves those (Stop, Cancel, a failed take, unmount). The browser
+drops the lock when the tab is hidden and the hold asks again when it is shown, so recording another
+window with ESCAPECRAFT hidden lets the screen sleep (listed on the Known limitations page). No
+setting, prompt or message; a missing API changes nothing.

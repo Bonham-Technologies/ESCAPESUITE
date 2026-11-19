@@ -97,6 +97,8 @@ beforeEach(() => {
     outPoint: null,
     cropClipId: null,
     setCropClipId: vi.fn(),
+    zoomRegionClipId: null,
+    setZoomRegionClipId: vi.fn(),
   }
 })
 
@@ -831,6 +833,23 @@ describe('the Escape cascade, in order', () => {
     expect(deps.clearInOutPoints).not.toHaveBeenCalled()
     expect(deps.clearMultiSelection).not.toHaveBeenCalled()
     expect(deps.setSelectedClipId).not.toHaveBeenCalled()
+  })
+
+  it('then closes Zoom to region, keeping the selection (ESCSUITE-475)', () => {
+    mountShortcuts({ ...everything, showShortcuts: false, zoomRegionClipId: 'clip-1' })
+
+    expect(press('Escape')).toBe(false)
+    expect(deps.setZoomRegionClipId).toHaveBeenCalledWith(null)
+    expect(deps.clearInOutPoints).not.toHaveBeenCalled()
+    expect(deps.setSelectedClipId).not.toHaveBeenCalled()
+  })
+
+  it('falls through a Zoom to region latch that names another clip (ESCSUITE-475)', () => {
+    mountShortcuts({ ...everything, showShortcuts: false, zoomRegionClipId: 'clip-2' })
+
+    expect(press('Escape')).toBe(false)
+    expect(deps.setZoomRegionClipId).not.toHaveBeenCalled()
+    expect(deps.clearInOutPoints).toHaveBeenCalled()
   })
 
   it('then clears the in/out points', () => {

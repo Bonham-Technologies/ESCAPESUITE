@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useEditorStore } from './store/projectStore';
 import { PreviewPlayer } from './components/Preview/PreviewPlayer';
 import { PlaybackControls } from './components/Preview/PlaybackControls';
@@ -30,6 +30,8 @@ import { useAppKeyboardShortcuts } from './app/useAppKeyboardShortcuts';
 import { useTimelineHeight } from './app/useTimelineHeight';
 import { useHostIntegration } from './app/useHostIntegration';
 import { useInspectorCollapsed } from './app/useInspectorCollapsed';
+import { canPickSaveFile } from './core/saveFile';
+import type { Project } from './store/types';
 import styles from './App.module.css';
 
 function App() {
@@ -97,9 +99,11 @@ function App() {
   const setOutPoint = useEditorStore((state) => state.setOutPoint);
   const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
   const cropClipId = useEditorStore((state) => state.cropClipId);
+  const zoomRegionClipId = useEditorStore((state) => state.zoomRegionClipId);
   // A boolean, so the review's list changing does not re-render App (ESCSUITE-403).
   const silenceReviewOpen = useEditorStore((state) => state.silenceReview !== null);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);
+  const setZoomRegionClipId = useEditorStore((state) => state.setZoomRegionClipId);
 
   // The hooks below are called in a fixed order, because that order is the
   // order their effects run in — and it is the order the six effects ran in
@@ -145,6 +149,8 @@ function App() {
     isLoading,
     showProjectLoadDialog,
     handleSaveProject,
+    handleSaveProjectAs,
+    forgetProjectFile,
     handleLoadProject,
     handleProjectFile,
     handleNewProject,
@@ -162,6 +168,17 @@ function App() {
     showNotification,
     clearSession,
   });
+
+  // A host's LOAD_PROJECT replaces the project, so Save must not write it over
+  // the file the previous one was opened from (ESCSUITE-470). Both are stable,
+  // so the host listener installed once on mount calls the live pair.
+  const setHostProject = useCallback(
+    (hostProject: Project) => {
+      forgetProjectFile();
+      setProject(hostProject);
+    },
+    [forgetProjectFile, setProject]
+  );
 
   const { handleZoomIn, handleZoomOut } = useTimelineZoom({ zoom, setZoom });
 
@@ -226,6 +243,8 @@ function App() {
     outPoint,
     cropClipId,
     setCropClipId,
+    zoomRegionClipId,
+    setZoomRegionClipId,
   });
 
   const { timelineHeight, isResizing, handleResizeStart, handleResizeDoubleClick } = useTimelineHeight({
@@ -241,7 +260,7 @@ function App() {
   useHostIntegration({
     urlParams,
     addSourceVideo,
-    setProject,
+    setProject: setHostProject,
     showNotification,
     sessionDecisionPending: !sessionRestored,
   });
@@ -258,6 +277,7 @@ function App() {
         onNewProject={handleNewProject}
         onLoadProject={handleLoadProject}
         onSaveProject={handleSaveProject}
+        onSaveProjectAs={canPickSaveFile() ? handleSaveProjectAs : undefined}
         onExport={() => setShowExport(true)}
         isLoading={isLoading}
         isSaving={isSaving}

@@ -25,3 +25,11 @@ under `aria-expanded="false"`). Held in jsdom by `app/FileMenu.test.tsx` and
 `app/menuNavigation.test.ts`, and in Chromium by two cases in
 `apps/e2e/tests/accessibility/keyboard-navigation.spec.ts` plus an axe audit of the open menu in
 `core.spec.ts` — the one that is red against the old markup.
+
+**Save Project As... (ESCSUITE-470).** Where the browser has `showSaveFilePicker`, the menu has a
+fifth item after Save Project, Save Project As..., disabled while a save runs like Save, with no
+shortcut hint (no chord binds it). `App` passes `onSaveProjectAs` only when `canPickSaveFile()`
+answers yes, and the item is absent otherwise, so Firefox and Safari see the four items they
+always had. Save Project itself (the item, the header button and Ctrl+S) writes over the file the
+project was opened from or first saved to there; elsewhere it downloads. See
+[`saving-to-a-picked-file.md`](saving-to-a-picked-file.md).

@@ -25,6 +25,23 @@ import type { Clip, Track } from '../../store/types';
 import { getActiveTransition } from './transitions';
 import { createStickySlotAssigner, videoForSlot } from '../../core/elementSlots';
 import { previewVideoForSlot } from './usePreviewMedia';
+import { clipSpeed, isAudibleSpeed, sourceTimeAt } from '../../store/clipSpeed';
+
+/**
+ * Play `media` at `clip`'s speed (ESCSUITE-471) and say whether it may sound.
+ * The pitch moves with the speed (`preservesPitch` off), as the export's mix
+ * resamples it; a clip faster than `MAX_AUDIBLE_SPEED` plays silent, as it
+ * exports. Set on every start, since one element can play clips of one source
+ * at different speeds one after another.
+ */
+function playAtClipSpeed(media: HTMLMediaElement, clip: Clip): boolean {
+  const speed = clipSpeed(clip);
+  if (media.playbackRate !== speed) media.playbackRate = speed;
+  const pitched = media as HTMLMediaElement & { preservesPitch?: boolean; webkitPreservesPitch?: boolean };
+  if (pitched.preservesPitch !== false) pitched.preservesPitch = false;
+  if ('webkitPreservesPitch' in pitched && pitched.webkitPreservesPitch !== false) pitched.webkitPreservesPitch = false;
+  return isAudibleSpeed(speed);
+}
 
 /** Everything the render loop needs that does not come from the store. */
 export interface PreviewRenderLoopDeps {
@@ -274,13 +291,13 @@ export function usePreviewRenderLoop({
 
       for (const { clip, clipTime } of activeClips) {
         if (clip.overlayType) continue; // Text/shape overlays don't need seeking
-        wantSeek(clip, clip.startTime + clipTime);
+        wantSeek(clip, sourceTimeAt(clip, clipTime));
       }
 
       if (activeTransition) {
         const { incomingClip } = activeTransition;
         const inClipTime = Math.max(0, currentTime - incomingClip.timelinePosition);
-        wantSeek(incomingClip, incomingClip.startTime + inClipTime);
+        wantSeek(incomingClip, sourceTimeAt(incomingClip, inClipTime));
       }
     }
 
@@ -525,12 +542,12 @@ export function usePreviewRenderLoop({
       if (!video) continue;
 
       const track = tracks.find(t => t.id === clip.trackId);
-      const sourceTime = clip.startTime + clipTime;
+      const sourceTime = sourceTimeAt(clip, clipTime);
       video.currentTime = sourceTime;
 
       // Set audio for ALL video clips (browser will mix them)
       // Apply both track volume and animated clip volume
-      video.muted = track?.muted ?? false;
+      video.muted = (track?.muted ?? false) || !playAtClipSpeed(video, clip);
       const trackVolume = track?.volume ?? 1;
       const clipVolume = getAnimatedVolume(clipTime, clip.animation, 1);
       video.volume = trackVolume * clipVolume;
@@ -546,8 +563,9 @@ export function usePreviewRenderLoop({
       const audio = audioElementsRef.current.get(clipData.clip.sourceVideoId);
       if (!audio) continue;
 
-      const sourceTime = clipData.clip.startTime + clipData.clipTime;
+      const sourceTime = sourceTimeAt(clipData.clip, clipData.clipTime);
       audio.currentTime = sourceTime;
+      audio.muted = !playAtClipSpeed(audio, clipData.clip);
       // Apply both track volume and animated clip volume
       const trackVolume = clipData.track?.volume ?? 1;
       const clipVolume = getAnimatedVolume(clipData.clipTime, clipData.clip.animation, 1);
@@ -714,7 +732,7 @@ export function usePreviewRenderLoop({
           if (!video) continue;
 
           const track = tracks.find(t => t.id === clip.trackId);
-          const sourceTime = clip.startTime + clipTime;
+          const sourceTime = sourceTimeAt(clip, clipTime);
 
           // Seek if needed
           if (Math.abs(video.currentTime - sourceTime) > 0.1) {
@@ -723,7 +741,7 @@ export function usePreviewRenderLoop({
 
           // Set audio for ALL video clips (browser will mix them)
           // Apply both track volume and animated clip volume
-          video.muted = track?.muted ?? false;
+          video.muted = (track?.muted ?? false) || !playAtClipSpeed(video, clip);
           const trackVolume = track?.volume ?? 1;
           const clipVolume = getAnimatedVolume(clipTime, clip.animation, 1);
           video.volume = trackVolume * clipVolume;
@@ -743,12 +761,13 @@ export function usePreviewRenderLoop({
           const audio = audioElementsRef.current.get(clipData.clip.sourceVideoId);
           if (!audio) continue;
 
-          const sourceTime = clipData.clip.startTime + clipData.clipTime;
+          const sourceTime = sourceTimeAt(clipData.clip, clipData.clipTime);
 
           // Seek if needed
           if (Math.abs(audio.currentTime - sourceTime) > 0.1) {
             audio.currentTime = sourceTime;
           }
+          audio.muted = !playAtClipSpeed(audio, clipData.clip);
 
           // Apply both track volume and animated clip volume
           const trackVolume = clipData.track?.volume ?? 1;

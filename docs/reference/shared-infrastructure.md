@@ -64,3 +64,16 @@
 
   would otherwise leave dangling. CRAFT's disposes a live recorder; ARTIST's stops an export in
   flight through `disposeLiveExport()` (ESCSUITE-220). See each app's CLAUDE.md
+- **Screen wake lock** (`packages/shared/src/utils/screenWakeLock.ts`, ESCSUITE-474):
+  `holdScreenAwake({ signal?, onChange? })` (`@escapesuite/shared/utils`) asks `navigator.wakeLock`
+  for a `screen` lock and returns `{ release() }`. Best effort: a missing API, a refused or
+  throwing request, or a hidden page at call time does nothing and never throws. The browser drops
+  the lock whenever the page is hidden, so the hold requests again on `visibilitychange` to
+  visible while it is not released; a request still in flight when the page comes back is
+  asked again once it settles without a live lock. `release()` is idempotent, removes the listeners, and a lock
+  whose request resolves after `release()` is released at once, so none outlives its job. `signal`
+  releases on abort (a cancelled job); `onChange(held)` reports only a lock actually held, which is
+  what the export dialog's status line reads. Users: ARTIST export and transcription, CRAFT while
+  recording. Out of scope: OS sleep on lid close. The Known limitations page says the lock only
+  holds while the ESCAPECRAFT tab is visible. e2e stubs it on `WakeLock.prototype.request` where
+  that exists (WebKit rejects an instance stub), else defines `navigator.wakeLock`.

@@ -32,6 +32,7 @@ clip's end, and a left half that kept it played it at the cut (ESCSUITE-482).
 | Ripple delete (ripple tool + `Delete`) | Removes them and closes the gap on each one's own row |
 | Ripple trim (ripple tool + an edge drag) | Moves the same edge of every linked clip by the same amount, the least any of them can follow, and closes the gap on each one's own row, one undo step (`useTrimDrag`, ESCSUITE-360) |
 | Remove silences (ESCSUITE-403) | Cuts each pause out of every row a link reaches and closes it there, one undo step; a pause is one only where every linked part with sound is silent ([`remove-silences.md`](remove-silences.md)) |
+| Speed (the inspector's Speed section, ESCSUITE-471) | Always sets every linked media clip to the same speed (there is no Alt variant), rescaling their offsets so they stay in step, and moves the clips after the group on each of their rows by the same time, one undo step; refused whole when a partner is on a locked track ([`clip-speed.md`](clip-speed.md)) |
 | Drag | Moves the linked clips by the same time and rows, through `moveClips`; refused whole when any of them cannot land (`canMoveSelectedClips`), and their boxes follow the ghost (`DragState.companions`) |
 
 `Ctrl+Alt+B` is matched on `e.code === 'KeyB'` because macOS reports Option+B

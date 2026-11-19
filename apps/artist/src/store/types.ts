@@ -324,7 +324,7 @@ export interface Clip {
   name: string;
   startTime: number;        // Trim start point in source video (seconds), 0 for overlays
   endTime: number;          // Trim end point in source video (seconds), same as duration for overlays
-  duration: number;         // Calculated: endTime - startTime
+  duration: number;         // Calculated: (endTime - startTime) / speed — the clip's length on the timeline
 
   // Multi-track positioning
   trackId: string;          // Which track this clip is on
@@ -365,6 +365,14 @@ export interface Clip {
    * `store/linkedClips.ts`.
    */
   linkGroupId?: string;
+  /**
+   * How fast the clip plays its source (ESCSUITE-471): 0.25 to 4, where 2
+   * plays two seconds of source per second of timeline. Media clips only.
+   * Absent means 1, which is every clip never sped and every clip of a
+   * project written before speeds existed. `duration` is the source span
+   * divided by it. Read it through `clipSpeed` in `store/clipSpeed.ts`.
+   */
+  speed?: number;
 }
 
 /**
@@ -607,6 +615,8 @@ export interface TrimOrigin {
   endTime: number;
   timelinePosition: number;
   animation?: ClipAnimation;
+  /** The clip's speed (ESCSUITE-471); absent means 1. A trim never changes it. */
+  speed?: number;
 }
 
 // Store state types
@@ -667,6 +677,14 @@ export interface EditorState {
    * not in the undo history, not in a saved file.
    */
   cropClipId: string | null;
+  /**
+   * The clip the preview's **Zoom to region** tool is open on (ESCSUITE-475),
+   * or null. A latch exactly like `cropClipId`: the tool shows only while it
+   * names the selected clip (`components/Preview/zoomRegionTarget.ts`'s
+   * `zoomRegionTarget`), so a selection change leaves it with nothing to clear.
+   * View state — not in the project, the undo history or a saved file.
+   */
+  zoomRegionClipId: string | null;
   /**
    * The "Remove silences" review (ESCSUITE-403), or null while closed: the
    * clip it was opened on and the cuts still on the list, in timeline
@@ -868,6 +886,19 @@ export interface EditorState {
    * the timeline; one undo step otherwise.
    */
   unlinkClip: (clipId: string) => boolean;
+  /**
+   * Play `clipId` at `speed` (ESCSUITE-471, `store/clipSpeed.ts`), and every
+   * media clip linked to it with it, so a take's picture and sound stay in
+   * step. Each keeps its source span; its length on the timeline becomes the
+   * span divided by the speed, its keyframes stay on the source moments they
+   * were on, and the clips after it on its rows (its partners' rows, and
+   * every row a link reaches from them: `linkedRows`) move by the length
+   * gained or lost. `false`, and nothing written, for a speed outside 0.25 to
+   * 4, an overlay or an image, a clip already at that speed, a clip, partner
+   * or clip it would move on a locked track, or a change that would overlap a
+   * clip it does not move; one undo step otherwise.
+   */
+  setClipSpeed: (clipId: string, speed: number) => boolean;
   moveClipToTrack: (clipId: string, trackId: string) => boolean;
   setClipTimelinePosition: (clipId: string, position: number, skipHistory?: boolean) => boolean;
   updateClipTransform: (clipId: string, transform: Partial<ClipTransform>, skipHistory?: boolean) => boolean;
@@ -983,6 +1014,7 @@ export interface EditorState {
   setLoopPlayback: (enabled: boolean) => void;
   setLoopSuspended: (suspended: boolean) => void;
   setCropClipId: (clipId: string | null) => void;
+  setZoomRegionClipId: (clipId: string | null) => void;
   /** Open the "Remove silences" review on a clip (no cuts listed yet), or close it with null. */
   setSilenceReviewClip: (clipId: string | null) => void;
   /** Replace the review's list of cuts. Does nothing while the review is closed. */
