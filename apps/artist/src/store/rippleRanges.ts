@@ -24,6 +24,7 @@ import type { TimeRange } from '../core/silenceDetection';
 import { cloneClip } from '../utils/deepClone';
 import { trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
 import { isExtendableClip } from './extendableClip';
+import { sourceTimeAt } from './clipSpeed';
 
 /**
  * A piece shorter than this is not kept (a millisecond, the tolerance a split
@@ -269,7 +270,8 @@ export function cutTimeRanges(
       const copy = i === 0 ? { ...clip } : { ...cloneClip(clip), id: uuidv4() };
       const cut: Clip = {
         ...copy,
-        ...(extendable ? { startTime: 0, endTime: end - start } : { startTime: clip.startTime + start, endTime: clip.startTime + end }),
+        // A sped clip's piece is `speed` times as long in its source (ESCSUITE-471).
+        ...(extendable ? { startTime: 0, endTime: end - start } : { startTime: sourceTimeAt(clip, start), endTime: sourceTimeAt(clip, end) }),
         duration: end - start,
         timelinePosition: piece.start - removedBefore(ranges, piece.start),
         ...(clip.animation ? { animation: pieceAnimation(clip.animation, start, end, clip.duration) } : {}),
@@ -321,7 +323,7 @@ function shortenClip(clip: Clip, sourceVideos: readonly SourceVideo[], ranges: r
     ...clip,
     timelinePosition: from - before,
     duration,
-    ...(extendable ? { startTime: 0, endTime: duration } : { endTime: clip.startTime + duration }),
+    ...(extendable ? { startTime: 0, endTime: duration } : { endTime: sourceTimeAt(clip, duration) }),
     ...(clip.animation ? { animation: shortenAnimation(clip.animation, from, ranges, duration) } : {}),
   };
 }

@@ -444,6 +444,15 @@ describe('exportToWebM rendering', () => {
     )
   })
 
+  it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
+    await run({
+      clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION / 2, speed: 0.5 })],
+    })
+
+    // Half a source frame per timeline frame.
+    expect(media.seeks.slice(1)).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 60)))
+  })
+
   it('draws the video element for each timeline frame', async () => {
     await run()
 
