@@ -99,9 +99,11 @@ function App() {
   const setOutPoint = useEditorStore((state) => state.setOutPoint);
   const clearInOutPoints = useEditorStore((state) => state.clearInOutPoints);
   const cropClipId = useEditorStore((state) => state.cropClipId);
+  const zoomRegionClipId = useEditorStore((state) => state.zoomRegionClipId);
   // A boolean, so the review's list changing does not re-render App (ESCSUITE-403).
   const silenceReviewOpen = useEditorStore((state) => state.silenceReview !== null);
   const setCropClipId = useEditorStore((state) => state.setCropClipId);
+  const setZoomRegionClipId = useEditorStore((state) => state.setZoomRegionClipId);
 
   // The hooks below are called in a fixed order, because that order is the
   // order their effects run in — and it is the order the six effects ran in
@@ -241,6 +243,8 @@ function App() {
     outPoint,
     cropClipId,
     setCropClipId,
+    zoomRegionClipId,
+    setZoomRegionClipId,
   });
 
   const { timelineHeight, isResizing, handleResizeStart, handleResizeDoubleClick } = useTimelineHeight({

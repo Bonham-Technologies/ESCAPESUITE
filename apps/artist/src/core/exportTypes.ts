@@ -2,6 +2,7 @@
 
 import type { Clip, Track, ExportOptions, ExportProgress, BlendMode, SourceVideo } from '../store/types';
 import { isTrackVisible, isVisibleTrack } from '../store/trackVisibility';
+import { clipSpeed, isAudibleSpeed } from '../store/clipSpeed';
 import { PRESET_SUPPRESSION } from '../utils/animation';
 import type { AnimatedValuesOptions, PresetSide } from '../utils/animation';
 import type { ExportLoudness } from './loudness';
@@ -626,7 +627,8 @@ export function projectHasAudio(
 
 /**
  * The sources {@link projectHasAudio} is true because of, each once, in first-use order: the
- * source of every clip on a present, visible, unmuted track, unless it is an image. The headless
+ * source of every clip on a present, visible, unmuted track, unless it is an image or the clip
+ * plays too fast to be heard (above 2×, ESCSUITE-471). The headless
  * render's no-AAC mp4 refusal reads each one's container headers to make the approximation exact
  * (ESCSUITE-312, `headless/audioTrackProbe.ts`); the dialog only needs to know the list is empty.
  */
@@ -639,6 +641,8 @@ export function audioCandidateSources(
   for (const clip of clips) {
     const track = tracks.find((t) => t.id === clip.trackId);
     if (!track || track.muted || !track.visible) continue;
+    // A clip faster than 2× is silent in every export (ESCSUITE-471, `mixInto`).
+    if (!isAudibleSpeed(clipSpeed(clip))) continue;
     const source = sourceVideos.find((v) => v.id === clip.sourceVideoId);
     if (source !== undefined && source.mediaType !== 'image') candidates.add(source);
   }

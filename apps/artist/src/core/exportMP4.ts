@@ -13,6 +13,7 @@ import type { Clip, SourceVideo, Track, ExportOptions, ExportProgress } from '..
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS } from '../store/types';
 import { getVideoBlob } from './storage';
 import { getClipsAtTime } from '../store/projectStore';
+import { sourceTimeAt } from '../store/clipSpeed';
 import { getAnimatedValues } from '../utils/animation';
 import { isWebCodecsAvailable } from './frameSource';
 import type { DrawableMediaSource, MediaDrawOptions, ProgressCallback, ExportLogEntry } from './exportTypes';
@@ -571,7 +572,7 @@ export async function exportToMP4(
 
       for (const { clip, clipTime } of mediaClips) {
         // Check if this is a video source (in frameManager.sources)
-        const sourceTime = clip.startTime + clipTime;
+        const sourceTime = sourceTimeAt(clip, clipTime);
         if (frameManager.sources.has(clip.sourceVideoId)) {
           framePromises.push({
             clip,
@@ -612,12 +613,12 @@ export async function exportToMP4(
 
       if (activeTransition) {
         const outClipTime = currentTime - activeTransition.outgoingClip.timelinePosition;
-        const outSourceTime = activeTransition.outgoingClip.startTime + outClipTime;
+        const outSourceTime = sourceTimeAt(activeTransition.outgoingClip, outClipTime);
 
         const clipEnd = activeTransition.outgoingClip.timelinePosition + activeTransition.outgoingClip.duration;
         const inClipTime = currentTime - clipEnd;
         const inSourceTime = inClipTime >= 0
-          ? activeTransition.incomingClip.startTime + inClipTime
+          ? sourceTimeAt(activeTransition.incomingClip, inClipTime)
           : activeTransition.incomingClip.startTime;
 
         // Fetch outgoing frame

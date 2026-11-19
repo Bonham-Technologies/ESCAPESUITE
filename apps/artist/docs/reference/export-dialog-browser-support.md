@@ -312,3 +312,14 @@ is the end-to-end pin, driving a real MP4 export.
 every export button asks for the destination file first and the export is written straight into
 it (MP4 and WebM stream, GIF is written once encoded); everywhere else it downloads as before.
 See [`saving-to-a-picked-file.md`](saving-to-a-picked-file.md).
+
+## Keeping the screen on (ESCSUITE-474)
+
+`handleExport` holds a screen wake lock (`holdScreenAwake`, `packages/shared`) from the start of
+every MP4, WebM and GIF export. Cancel aborts the run's controller, which releases it at once;
+the run's `finally` releases it on success and failure. While the lock is actually held, and the
+export has not completed, the progress view shows "Keeping the screen on until the export
+finishes." (not a live region). Where the API is missing or the request is refused nothing is
+shown and the export is unchanged. The hold is keyed by run, so a cancelled run's late release
+cannot clear a newer run's line. Transcription (`TranscribeControl.tsx`) holds one the same way
+for the whole run (no status line).

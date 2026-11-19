@@ -121,6 +121,10 @@ the doc comment at the bottom of `apps/artist/src/utils/integration.ts`.
   `allow="on-device-speech-recognition"`, or the control hides on its first press. A host that
   is a bare Chromium embedder (Electron, CEF: a `Chromium` brand and no vendor brand) gets no
   control at all, because there `available()` would kill the renderer (`on-device-transcription.md`).
+  Keeping the screen on during exports, transcription and CRAFT recording (ESCSUITE-474) uses the
+  `screen-wake-lock` feature, also `self` by default: a cross-origin host must delegate it with
+  `allow="screen-wake-lock"`, or the job runs as before with the screen left to the OS settings
+  and nothing is shown.
 - **`?tabKey=<name>`** (ARTIST): the host's name for this frame, so two or more editors framed in
   one host page keep a saved session each (ESCSUITE-332). **Every host should pass one — a page that
   frames a single editor included — and a different one to each frame** when it frames several: every same-origin frame of a page shares the top-level

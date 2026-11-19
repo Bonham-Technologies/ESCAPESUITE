@@ -769,6 +769,17 @@ describe('audioCandidateSources', () => {
     expect(audioCandidateSources(clips, tracks, sources).map((s) => s.id)).toEqual(['v', 'a'])
   })
 
+  // ESCSUITE-471: a clip above 2× is mixed silent, so its source is no reason for sound.
+  it('leaves out a clip too fast to be heard, and keeps one at 2×', () => {
+    const tracks = [track('t', 0)]
+    const sources = [media('v', 'video'), media('w', 'video')]
+    const fast = { ...clip('c1', 'v', 't'), speed: 4 }
+    const heard = { ...clip('c2', 'w', 't'), speed: 2 }
+    expect(audioCandidateSources([fast], tracks, sources)).toEqual([])
+    expect(projectHasAudio([fast], tracks, sources)).toBe(false)
+    expect(audioCandidateSources([fast, heard], tracks, sources).map((s) => s.id)).toEqual(['w'])
+  })
+
   it('is empty exactly when projectHasAudio is false', () => {
     const tracks = [{ ...track('t', 0), muted: true }]
     const sources = [media('v', 'video')]

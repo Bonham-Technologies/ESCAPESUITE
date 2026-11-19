@@ -9,7 +9,7 @@ import type { StateCreator } from 'zustand';
 import type { EditorState, Clip, ClipTransform, ClipEffects, BlendMode, Transition, ClipAnimation, TakeClipPart, TrimOrigin, SourceVideo } from './types';
 import { DEFAULT_TRANSFORM, DEFAULT_EFFECTS, DEFAULT_TRANSITION, DEFAULT_ANIMATION } from './types';
 import { cloneClip } from '../utils/deepClone';
-import { splitAnimation, trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
+import { maxPresetDuration, scaleAnimationTime, splitAnimation, trimAnimation, KEYFRAME_TIME_EPSILON } from '../utils/animation';
 import { pushToHistory } from './storeHistory';
 import { createTrackAtTop, findEmptyTrack, calculateTimelineDuration } from './projectFactory';
 import { clipOnLockedTrack, isTrackLocked, lockedTrackIds } from './trackLock';
@@ -18,14 +18,15 @@ import { pruneSelection } from './selectionPrune';
 import { cutEditorBlock, cutHeldByLock, cutTimeRanges, linkedRows, normaliseRanges, rowsToMove } from './rippleRanges';
 import { isSaneTransformWrite } from './transformGuard';
 import { isExtendableClip } from './extendableClip';
-import { startsAtOrAfter } from './timelineSnapping';
+import { overlapsSpan, startsAtOrAfter } from './timelineSnapping';
+import { canHaveSpeed, clipSpeed, clipTimelineLength, isValidClipSpeed, sourceTimeAt } from './clipSpeed';
 import {
   maskForPlacement,
   overlayPlacementToTransform,
   strokeForPlacement,
 } from '../utils/overlayPlacement';
 
-export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'removeTimeRanges' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'unlinkClip' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
+export type ClipSlice = Pick<EditorState, 'addClipToTimeline' | 'placeTakeOnTimeline' | 'removeClipFromTimeline' | 'rippleDeleteClip' | 'removeTimeRanges' | 'shiftClipsAfter' | 'updateClip' | 'trimClip' | 'splitClip' | 'unlinkClip' | 'setClipSpeed' | 'moveClipToTrack' | 'setClipTimelinePosition' | 'updateClipTransform' | 'updateClipBlendMode' | 'updateClipEffects' | 'updateClipTransition' | 'updateClipAnimation' | 'duplicateClip' | 'recalculateTimelineDuration'>;
 
 /**
  * How near a linked clip's edge a cut may fall and still count as falling on
@@ -41,16 +42,19 @@ const LINK_EDGE_EPSILON = KEYFRAME_TIME_EPSILON;
 function splitHalves(clip: Clip, splitTime: number, sourceVideos: SourceVideo[]): [Clip, Clip] | null {
   // splitTime is relative to the clip's start on the timeline, which is
   // also the unit keyframes are stored in (0 = clip start) — so it doubles
-  // as the split offset splitAnimation needs.
-  const sourceTime = clip.startTime + splitTime;
+  // as the split offset splitAnimation needs. A sped clip (ESCSUITE-471)
+  // covers `speed` seconds of source per second of it; both halves keep the
+  // speed, so each half's timeline length is its source span over it.
+  const sourceTime = sourceTimeAt(clip, splitTime);
 
   // Validate split point is within clip bounds
   if (sourceTime <= clip.startTime || sourceTime >= clip.endTime) {
     return null;
   }
 
-  const firstDuration = sourceTime - clip.startTime;
-  const secondDuration = clip.endTime - sourceTime;
+  const speed = clipSpeed(clip);
+  const firstDuration = (sourceTime - clip.startTime) / speed;
+  const secondDuration = (clip.endTime - sourceTime) / speed;
 
   // ESCSUITE-95: `{ ...clip }` alone would hand both halves the same
   // `animation` and `transform` (and effects/transition/mask/stroke/
@@ -362,7 +366,7 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         // the length of every deleted clip before them on that row.
         let shift = 0;
         for (const gone of doomed) {
-          const goneDuration = gone.endTime - gone.startTime;
+          const goneDuration = clipTimelineLength(gone);
           // ESCSUITE-364: within the overlap tolerance counts as after.
           if (gone.trackId === clip.trackId && startsAtOrAfter(clip, gone.timelinePosition + goneDuration)) {
             shift += goneDuration;
@@ -519,9 +523,10 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         if (clip.id !== clipId) return clip;
 
         const updated = { ...clip, ...updates };
-        // Recalculate duration if start/end times changed
+        // Recalculate duration if start/end times changed (over the clip's
+        // speed, ESCSUITE-471)
         if (updates.startTime !== undefined || updates.endTime !== undefined) {
-          updated.duration = updated.endTime - updated.startTime;
+          updated.duration = clipTimelineLength(updated);
         }
         return updated;
       });
@@ -602,10 +607,10 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
         if (clip.id !== clipId) return clip;
 
         const updated = { ...clip, ...updates };
-        updated.duration = updated.endTime - updated.startTime;
+        updated.duration = clipTimelineLength(updated);
 
         if (origin.animation) {
-          const originDuration = origin.endTime - origin.startTime;
+          const originDuration = clipTimelineLength(origin);
           const start = edge === 'end' ? 0 : (updates.timelinePosition as number) - origin.timelinePosition;
 
           if (updated.duration < originDuration - KEYFRAME_TIME_EPSILON) {
@@ -743,6 +748,103 @@ export const createClipSlice: StateCreator<EditorState, [], [], ClipSlice> = (se
       };
     });
 
+    return true;
+  },
+
+  // ESCSUITE-471. See the doc comment on `EditorState.setClipSpeed` and
+  // `docs/reference/clip-speed.md`.
+  setClipSpeed: (clipId: string, speed: number) => {
+    if (!isValidClipSpeed(speed)) return false;
+    const { clips, tracks } = get().project.timeline;
+    const sourceVideos = get().sourceVideos;
+    const clip = clips.find((c) => c.id === clipId);
+    if (!clip || !canHaveSpeed(clip, sourceVideos)) return false;
+
+    // The clip and every linked media clip: a take's parts play in step.
+    const group = [clip, ...linkedPartners(clips, clip).filter((p) => canHaveSpeed(p, sourceVideos))];
+    if (group.some((c) => isTrackLocked(tracks, c.trackId))) return false; // ESCSUITE-84
+    if (group.every((c) => clipSpeed(c) === speed)) return false;
+
+    // Each part keeps its source span and is rescaled about the group's
+    // earliest start, so a part that began half a second after the screen
+    // (a microphone) begins half a second / ratio after it, still in step.
+    const anchor = Math.min(...group.map((c) => c.timelinePosition));
+    const oldEnd = Math.max(...group.map((c) => c.timelinePosition + c.duration));
+    const changed = new Map<string, Clip>();
+    for (const c of group) {
+      const ratio = clipSpeed(c) / speed;
+      // `speed` 1 is no speed: the key is dropped, so a clip set back to 1 is
+      // the clip it was before it was ever sped.
+      const { speed: _old, ...rest } = c;
+      const duration = clipTimelineLength({ ...c, speed });
+      const transition =
+        c.transition && c.transition.type !== 'none' && c.transition.duration > maxPresetDuration(duration)
+          ? { ...c.transition, duration: maxPresetDuration(duration) }
+          : c.transition;
+      changed.set(c.id, {
+        ...rest,
+        ...(speed === 1 ? {} : { speed }),
+        duration,
+        timelinePosition: anchor + (c.timelinePosition - anchor) * ratio,
+        transition,
+        ...(c.animation ? { animation: scaleAnimationTime(c.animation, ratio, duration) } : {}),
+      });
+    }
+    const newEnd = Math.max(...[...changed.values()].map((c) => c.timelinePosition + c.duration));
+    const delta = newEnd - oldEnd;
+
+    // The clips after the group on its rows move by the length it gained or
+    // lost, all by the same time, so a later take on those rows stays in step.
+    // The rows are the group's and every row a link reaches from them
+    // (`linkedRows`, the rows a cut moves together): a later take with a part
+    // on a row the group never reaches (its camera) moves whole. A clip that
+    // would move on a locked row refuses the change, as a cut's lock does.
+    const rows = linkedRows(clips, clip);
+    let heldByLock = false;
+    const newClips = clips.map((c) => {
+      const sped = changed.get(c.id);
+      if (sped) return sped;
+      if (delta !== 0 && rows.has(c.trackId) && startsAtOrAfter(c, oldEnd)) {
+        if (isTrackLocked(tracks, c.trackId)) heldByLock = true;
+        return { ...c, timelinePosition: Math.max(0, c.timelinePosition + delta) };
+      }
+      return c;
+    });
+    if (heldByLock) return false;
+
+    // A clip that sat between a part's end and the group's end (on a part's
+    // row) does not move: refuse a change that would run a part, or a clip
+    // the ripple moved, into it — a slow-down's longer part, or a speed-up's
+    // later clips pulled back over it. An overlap the moved clip already had
+    // (ESCSUITE-308's imported cues) is not new. `newClips` is `clips` mapped,
+    // so the two line up by index, and an unmoved clip is the same object.
+    for (let i = 0; i < newClips.length; i++) {
+      const now = newClips[i];
+      const was = clips[i];
+      if (now === was) continue;
+      const end = now.timelinePosition + now.duration;
+      const blocked = newClips.some(
+        (c, j) =>
+          c === clips[j] &&
+          c.trackId === now.trackId &&
+          overlapsSpan(c, now.timelinePosition, end) &&
+          !overlapsSpan(c, was.timelinePosition, was.timelinePosition + was.duration)
+      );
+      if (blocked) return false;
+    }
+
+    set((state) => ({
+      project: {
+        ...state.project,
+        modified: Date.now(),
+        timeline: {
+          ...state.project.timeline,
+          clips: newClips,
+          duration: calculateTimelineDuration(newClips),
+        },
+      },
+      history: pushToHistory(state),
+    }));
     return true;
   },
 

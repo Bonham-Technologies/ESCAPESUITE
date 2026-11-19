@@ -1436,3 +1436,46 @@ describe('useClipEditorActions crop (ESCSUITE-6)', () => {
     expect(store().cropClipId).toBe(clip.id)
   })
 })
+
+describe('the Zoom to region toggle (ESCSUITE-475)', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('opens the tool on the selected clip, closing crop mode', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    store().setCropClipId(clip.id)
+    const { result } = renderHook(() => useClipEditorActions())
+
+    act(() => result.current.handleZoomToRegionToggle())
+
+    expect(store().zoomRegionClipId).toBe(clip.id)
+    expect(store().cropClipId).toBeNull()
+    expect(result.current.zoomToRegionOpen).toBe(true)
+  })
+
+  it('closes when crop mode opens, so the two never share the preview', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    const { result } = renderHook(() => useClipEditorActions())
+    act(() => result.current.handleZoomToRegionToggle())
+
+    act(() => result.current.handleCropOnCanvasToggle())
+    expect(store().cropClipId).toBe(clip.id)
+    expect(store().zoomRegionClipId).toBeNull()
+  })
+
+  it('closes it again, and reads it as off while the latch names another clip', () => {
+    const clip = addClip('clip1', 0, 4)
+    store().setSelectedClipId(clip.id)
+    const { result } = renderHook(() => useClipEditorActions())
+    act(() => result.current.handleZoomToRegionToggle())
+
+    act(() => result.current.handleZoomToRegionToggle())
+    expect(store().zoomRegionClipId).toBeNull()
+
+    act(() => store().setZoomRegionClipId('some-other-clip'))
+    expect(result.current.zoomToRegionOpen).toBe(false)
+  })
+})

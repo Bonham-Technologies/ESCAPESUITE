@@ -126,3 +126,34 @@ describe('ActionsSection', () => {
     })
   })
 })
+
+describe('ActionsSection: Zoom to region (ESCSUITE-475)', () => {
+  beforeEach(() => {
+    resetStoreForTest()
+  })
+
+  it('is offered only when given a handler, and shows whether the tool is open', async () => {
+    const user = userEvent.setup()
+    const onZoomToRegion = vi.fn()
+    const { unmount } = render(
+      <ActionsSection isVideo isAudio={false} clipPosition={0} clipDuration={2}
+        onGoToClip={vi.fn()} onDuplicate={vi.fn()} onSplit={vi.fn()}
+        onZoomToRegion={onZoomToRegion} zoomToRegionOpen />
+    )
+    const button = screen.getByRole('button', { name: 'Zoom to region' })
+    expect(button).toHaveAttribute('aria-pressed', 'true')
+    await user.click(button)
+    expect(onZoomToRegion).toHaveBeenCalledTimes(1)
+    unmount()
+
+    renderSection()
+    expect(screen.queryByRole('button', { name: 'Zoom to region' })).toBeNull()
+  })
+
+  it('is disabled on a locked track, and not pressed by default', () => {
+    renderSection({ onZoomToRegion: vi.fn(), disabled: true })
+    const button = screen.getByRole('button', { name: 'Zoom to region' })
+    expect(button).toBeDisabled()
+    expect(button).toHaveAttribute('aria-pressed', 'false')
+  })
+})

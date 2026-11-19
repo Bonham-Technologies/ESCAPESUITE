@@ -710,6 +710,15 @@ describe('exportToMP4 rendering', () => {
     expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + i / 30)))
   })
 
+  it('seeks a sped clip to the source time its speed puts under each frame (ESCSUITE-471)', async () => {
+    await run({
+      clips: [makeClip({ startTime: 2, duration: CLIP_DURATION, endTime: 2 + CLIP_DURATION * 2, speed: 2 })],
+    })
+
+    // Two source frames per timeline frame: 2, 2 + 2/30, 2 + 4/30, ...
+    expect(media.seeks).toEqual([0, 1, 2, 3, 4, 5].map((i) => elementSeekTarget(2 + (i * 2) / 30)))
+  })
+
   it('draws an image source without a frame source', async () => {
     await storeSource('image1', 'image/png')
     const sources = [makeSourceVideo({ id: 'image1', mediaType: 'image' })]
