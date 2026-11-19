@@ -205,6 +205,64 @@ describe('TranscribeControl: transcribing (ESCSUITE-404)', () => {
     expect(button()).toBeEnabled();
   });
 
+  describe('screen wake lock (ESCSUITE-474)', () => {
+    let request: ReturnType<typeof vi.fn>;
+    let release: ReturnType<typeof vi.fn>;
+
+    beforeEach(() => {
+      release = vi.fn(async () => {});
+      request = vi.fn(async () => Object.assign(new EventTarget(), { release }));
+      Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: { request } });
+    });
+
+    afterEach(() => {
+      Reflect.deleteProperty(navigator, 'wakeLock');
+    });
+
+    it('holds a lock while it listens and releases it when the run finishes', async () => {
+      const user = userEvent.setup();
+      installRecognition();
+      available.mockResolvedValue('available');
+      let finish: (cues: CaptionCue[]) => void = () => {};
+      transcribeTimeline.mockImplementation(() => new Promise((resolve) => { finish = resolve; }));
+      renderControl();
+
+      await user.click(await screen.findByRole('button', { name: 'Transcribe to captions' }));
+      await waitFor(() => expect(request).toHaveBeenCalledExactlyOnceWith('screen'));
+      expect(release).not.toHaveBeenCalled();
+
+      await act(async () => finish(STUB_WORDS));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    });
+
+    it('releases the lock when it is stopped', async () => {
+      const user = userEvent.setup();
+      installRecognition();
+      available.mockResolvedValue('available');
+      transcribeTimeline.mockImplementation(({ signal }) => new Promise((_, reject) => {
+        signal!.addEventListener('abort', () => reject(new DOMException('stopped', 'AbortError')));
+      }));
+      renderControl();
+
+      await user.click(await screen.findByRole('button', { name: 'Transcribe to captions' }));
+      await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+      await user.click(await screen.findByRole('button', { name: 'Stop transcribing' }));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+    });
+
+    it('releases the lock when the run fails', async () => {
+      const user = userEvent.setup();
+      installRecognition();
+      available.mockResolvedValue('available');
+      transcribeTimeline.mockRejectedValue(new Error('boom'));
+      renderControl();
+
+      await user.click(await screen.findByRole('button', { name: 'Transcribe to captions' }));
+      await waitFor(() => expect(release).toHaveBeenCalledTimes(1));
+      expect(request).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('shows the preparing line while the sound is mixed', async () => {
     const user = userEvent.setup();
     installRecognition();

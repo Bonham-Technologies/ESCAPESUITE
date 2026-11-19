@@ -120,8 +120,20 @@ describe('Layout', () => {
   })
 
   it('renders footer', () => {
-    renderLayout()
-    expect(screen.getByText(/Bonham Technologies/)).toBeInTheDocument()
+    const { container } = renderLayout()
+    const inFooter = within(container.querySelector('footer') as HTMLElement)
+    expect(inFooter.getByText(/Bonham Technologies/)).toBeInTheDocument()
+  })
+
+  // The product lockup names the parent beside the home link, not inside it: the link's
+  // visible text has to stay "ESCAPE Suite" (ESCSUITE-334, WCAG 2.5.3 Label in Name).
+  it('names the parent company in the header, outside the home link', () => {
+    const { container } = renderLayout()
+    const inHeader = within(container.querySelector('header') as HTMLElement)
+    const parent = inHeader.getByText('by Bonham Technologies')
+    const home = inHeader.getByRole('link', { name: 'ESCAPE Suite Home' })
+    expect(home).not.toContainElement(parent)
+    expect(home).toHaveTextContent(/^ESCAPE Suite$/)
   })
 
   it('links to the legal pages, the known limitations and the GitHub repository from the footer', () => {

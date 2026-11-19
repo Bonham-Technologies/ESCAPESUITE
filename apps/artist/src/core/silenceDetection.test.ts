@@ -208,6 +208,28 @@ describe('findTakeSilences', () => {
     expect(Math.abs(gaps[0].end - 13)).toBeLessThanOrEqual(TOLERANCE);
   });
 
+  // ESCSUITE-471: a sped clip's source is read through its speed.
+  it('maps a sped clip\'s silences through its speed', () => {
+    // The mic's whole 6 s at 2×, 3 s of timeline from 10 s: its 2–4 s pause is at 11–12.
+    const sped = { ...clip('m', 'mic', 10, 0, 6), speed: 2, duration: 3 };
+    const gaps = findTakeSilences([sped], [mic], 'm', { ...options, minGap: 0.5 });
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 11)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gaps[0].end - 12)).toBeLessThanOrEqual(TOLERANCE);
+  });
+
+  it('does not listen to a clip too fast to be heard', () => {
+    // The mic at 4× (silent above 2×) over 0–1.5 s, linked to a silent part:
+    // heard, its tone at source 0–2 would keep 0–0.5 s loud; unheard, the
+    // whole 1.5 s is a pause.
+    const quiet = source('quiet', speech([[6, false]]));
+    const fast = { ...clip('m', 'mic', 0, 0, 6, 'g'), speed: 4, duration: 1.5 };
+    const gaps = findTakeSilences([fast, clip('q', 'quiet', 0, 0, 1.5, 'g')], [mic, quiet], 'm', options);
+    expect(gaps).toHaveLength(1);
+    expect(Math.abs(gaps[0].start - 0)).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.abs(gaps[0].end - 1.5)).toBeLessThanOrEqual(TOLERANCE);
+  });
+
   it('cuts a take only where every linked part with sound is silent', () => {
     const clips = [clip('s', 'screen', 0, 0, 6, 'g'), clip('m', 'mic', 0, 0, 6, 'g'), clip('y', 'system', 0, 0, 6, 'g')];
     const gaps = findTakeSilences(clips, [screen, mic, system], 's', options);

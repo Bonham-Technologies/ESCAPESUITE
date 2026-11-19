@@ -27,6 +27,7 @@ import {
   type ProjectFileIndex,
   type ProjectFileSource,
 } from './projectFileFormat';
+import { rememberFileHandle, writeBlobToFile } from './saveFile';
 
 /**
  * The `SourceVideo` fields a saved project persists alongside each video's
@@ -126,16 +127,75 @@ export async function saveProject(
   /** Handed in, as `sourceVideos` is, rather than read from the store here. */
   editor?: EditorBlock
 ): Promise<void> {
+  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor);
+
+  // Download file
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${project.name || 'project'}.veditor`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  onProgress?.(100, 'Project saved!');
+}
+
+/**
+ * Save the project over the file `handle` names (ESCSUITE-470): the one it was
+ * opened from, or one the save picker chose. The same bytes `saveProject`
+ * downloads, written whole or not at all.
+ */
+export async function saveProjectToFile(
+  handle: FileSystemFileHandle,
+  project: Project,
+  sourceVideos: SourceVideo[],
+  onProgress?: (progress: number, message: string) => void,
+  editor?: EditorBlock
+): Promise<void> {
+  // Every source's bytes, or nothing written: the download this replaces made
+  // a new file and left the old one alone, but this writes over the file the
+  // project came from, which may hold the only copy of a source this browser
+  // no longer has (ESCSUITE-330, ESCSUITE-151).
+  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor, { requireEverySource: true });
+  await writeBlobToFile(handle, blob);
+  onProgress?.(100, 'Project saved!');
+}
+
+/** The `.veditor` both saves write. */
+async function buildProjectFile(
+  project: Project,
+  sourceVideos: SourceVideo[],
+  onProgress: ((progress: number, message: string) => void) | undefined,
+  editor: EditorBlock | undefined,
+  /**
+   * Refuse, naming them, when a source a clip uses has no stored bytes,
+   * rather than leave it out of the file as the download always has.
+   */
+  { requireEverySource = false }: { requireEverySource?: boolean } = {}
+): Promise<Blob> {
   onProgress?.(0, 'Preparing project data...');
 
   // Get all videos used in the timeline
   const usedVideoIds = new Set(project.timeline.clips.map((c) => c.sourceVideoId));
   const usedVideos = sourceVideos.filter((v) => usedVideoIds.has(v.id));
 
+  // Used sources with no bytes to write: one the library no longer lists, or
+  // one whose stored bytes are gone. An overlay clip's empty id uses none.
+  const missing: string[] = [];
+  if (requireEverySource) {
+    const listed = new Set(usedVideos.map((v) => v.id));
+    for (const id of usedVideoIds) if (id && !listed.has(id)) missing.push(`"${id}"`);
+  }
+
   const sources: ProjectFileSource[] = [];
   for (const video of usedVideos) {
     const videoData = await getVideo(video.id);
-    if (!videoData) continue;
+    if (!videoData) {
+      missing.push(`"${video.name}"`);
+      continue;
+    }
     const thumbnail = await getThumbnail(video.id);
 
     // A value JSON cannot carry (Infinity and NaN become null) or the kit would refuse is left
@@ -170,21 +230,17 @@ export async function saveProject(
     });
   }
 
+  if (requireEverySource && missing.length > 0) {
+    const what = missing.length === 1 ? `the media for ${missing[0]} is` : `the media for ${missing.join(', ')} are`;
+    throw new ProjectFileError(
+      `Not saved: ${what} no longer stored in this browser, so the project file would lose it. ` +
+        'The file was left as it was. Import the media again, or remove the clips that use it, then save.'
+    );
+  }
+
   onProgress?.(90, 'Creating project file...');
 
-  const blob = new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
-
-  // Download file
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${project.name || 'project'}.veditor`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  onProgress?.(100, 'Project saved!');
+  return new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
 }
 
 /**
@@ -797,6 +853,12 @@ export async function extractMetadataFromBlob(
   };
 }
 
+/** A `.veditor` in the open and save pickers' type lists. */
+export const PROJECT_FILE_TYPE = {
+  description: 'Video Editor Project',
+  accept: { 'application/octet-stream': ['.veditor'] },
+};
+
 /**
  * The part of the File System Access API `showOpenProjectDialog` uses. The DOM
  * lib does not declare `showOpenFilePicker` (Chromium only), so it is typed here.
@@ -804,7 +866,7 @@ export async function extractMetadataFromBlob(
 interface WindowWithOpenFilePicker extends Window {
   showOpenFilePicker(options: {
     types: { description: string; accept: Record<string, string[]> }[];
-  }): Promise<{ getFile(): Promise<File> }[]>;
+  }): Promise<FileSystemFileHandle[]>;
 }
 
 /**
@@ -815,14 +877,12 @@ export async function showOpenProjectDialog(): Promise<File | null> {
   if ('showOpenFilePicker' in window) {
     try {
       const [handle] = await (window as WindowWithOpenFilePicker).showOpenFilePicker({
-        types: [
-          {
-            description: 'Video Editor Project',
-            accept: { 'application/octet-stream': ['.veditor'] },
-          },
-        ],
+        types: [PROJECT_FILE_TYPE],
       });
-      return await handle.getFile();
+      const file = await handle.getFile();
+      // So Save can write back over it (ESCSUITE-470).
+      rememberFileHandle(file, handle);
+      return file;
     } catch (e) {
       // User cancelled or API not available
       if ((e as Error).name !== 'AbortError') {

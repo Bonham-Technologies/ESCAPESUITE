@@ -402,6 +402,8 @@ export function generateShareUrl(
  * - EXPORT_COMPLETE: { blob: Blob, format: 'mp4' | 'webm' | 'gif', name: string,
  *   audio?: boolean } - Export finished ('gif' since ESCSUITE-34; a host that only knows the
  *   two video formats sees it only for an export the user explicitly chose GIF for).
+ *   Where the export went to a file the user picked (ESCSUITE-470), `blob` is a `File`
+ *   backed by that file on disk and `name` the name the user chose; the shape is the same.
  *   `audio` is additive (ESCSUITE-175) and says whether the file carries an audio track:
  *   `false` for every GIF (the container has none), for an MP4 exported in a browser with
  *   no AAC encoder and for a WebM exported in one with no Opus encoder; `true` otherwise.
