@@ -1,4 +1,4 @@
-<!-- Vendored from bonham-ops, policy v31. Edit there and re-run bin/vendor-claude-setup. -->
+<!-- Vendored from bonham-ops, policy v34. Edit there and re-run bin/vendor-claude-setup. -->
 # Autopilot: builder role
 
 Part of the autopilot policy. `.claude/rules/autopilot.md` and
@@ -72,7 +72,9 @@ budget, or after two failures in a row. For each ticket:
 5. Open the PR (`gh api repos/{owner}/{repo}/pulls -f title=… -f head=… -f base=main
    -f body=…`; under **Stacking**, `base` is the base PR's branch). It references the
    ticket, lists each acceptance criterion with how it is verified, and states the
-   class and any risk. Comment the PR link on the ticket.
+   class and any risk. Comment the PR link on the ticket. Then, unless `executeRead`
+   `listJiraIssueRemoteIssueLinks` shows it already, add it as the ticket's web link with
+   `executeWrite` `createJiraIssueRemoteIssueLink`; a missing, prompting or failing tool: skip it.
 6. **Merging:**
    - **Public repo:** merge, or enable auto-merge, only when the PR's head is a branch
      of this repo and its author the owner or Dependabot (`public-repos.md`).
