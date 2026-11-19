@@ -30,6 +30,7 @@ import { useAppKeyboardShortcuts } from './app/useAppKeyboardShortcuts';
 import { useTimelineHeight } from './app/useTimelineHeight';
 import { useHostIntegration } from './app/useHostIntegration';
 import { useInspectorCollapsed } from './app/useInspectorCollapsed';
+import { canPickSaveFile } from './core/saveFile';
 import styles from './App.module.css';
 
 function App() {
@@ -145,6 +146,7 @@ function App() {
     isLoading,
     showProjectLoadDialog,
     handleSaveProject,
+    handleSaveProjectAs,
     handleLoadProject,
     handleProjectFile,
     handleNewProject,
@@ -258,6 +260,7 @@ function App() {
         onNewProject={handleNewProject}
         onLoadProject={handleLoadProject}
         onSaveProject={handleSaveProject}
+        onSaveProjectAs={canPickSaveFile() ? handleSaveProjectAs : undefined}
         onExport={() => setShowExport(true)}
         isLoading={isLoading}
         isSaving={isSaving}

@@ -73,6 +73,7 @@ one and list it here). Don't add narrative, ticket history or measurements to th
 | Analytics | [`analytics.md`](docs/reference/analytics.md) |
 | Dialogs | [`dialogs.md`](docs/reference/dialogs.md) |
 | The File menu (`src/app/FileMenu.tsx`, `src/app/menuNavigation.ts`) | [`the-file-menu.md`](docs/reference/the-file-menu.md) |
+| Saving to a picked file: export streaming, Save in place, Save As (`src/core/saveFile.ts`, ESCSUITE-470) | [`saving-to-a-picked-file.md`](docs/reference/saving-to-a-picked-file.md) |
 | Export Resolution (`src/core/outputTransform.ts`, `src/core/exportTypes.ts`) | [`export-resolution.md`](docs/reference/export-resolution.md) |
 | Export Performance Optimizations (`src/core/exportMP4.ts`, `src/core/exportWebM.ts`, `src/core/frameSource.ts`, `src/core/frameManager.ts`) | [`export-performance-optimizations.md`](docs/reference/export-performance-optimizations.md) |
 | MP4 Export Reliability (`src/core/exportMP4.ts`) | [`mp4-export-reliability.md`](docs/reference/mp4-export-reliability.md) |

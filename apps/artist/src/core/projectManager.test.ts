@@ -6,6 +6,7 @@ import {
   importProjectMetadata,
   loadProject,
   saveProject,
+  saveProjectToFile,
   showOpenProjectDialog,
   type ProjectFile,
   type SourceVideoMeta,
@@ -38,6 +39,8 @@ import { DEFAULT_TEXT_OVERLAY_DATA } from '../store/types'
 import { extractWaveformData } from '../utils/waveform'
 import { installMediaElementDoubles, type MediaDoubles } from '../test/doubles/media'
 import { OBJECT_URL_PATTERN, lastObjectUrl } from '../test/objectUrls'
+import { fakeFileHandle } from '../test/doubles/fileHandle'
+import { fileHandleOf } from './saveFile'
 
 // Pass-through spies, so a test can see (and, for the 2 GiB and quota cases,
 // fake) what save and load ask storage for. Everything else is the real layer.
@@ -2249,10 +2252,13 @@ describe('showOpenProjectDialog', () => {
   it('uses the File System Access API when available', async () => {
     const file = new File(['{}'], 'picked.veditor')
     const getFile = vi.fn().mockResolvedValue(file)
-    const picker = vi.fn().mockResolvedValue([{ getFile }])
+    const handle = { getFile }
+    const picker = vi.fn().mockResolvedValue([handle])
     win.showOpenFilePicker = picker
 
     await expect(showOpenProjectDialog()).resolves.toBe(file)
+    // Remembered, so Save can write back over it (ESCSUITE-470).
+    expect(fileHandleOf(file)).toBe(handle)
     expect(picker).toHaveBeenCalledWith({
       types: [{ description: 'Video Editor Project', accept: { 'application/octet-stream': ['.veditor'] } }],
     })
@@ -2337,6 +2343,26 @@ describe('the editor block in the project file (ESCSUITE-245)', () => {
         inPoint: 1, outPoint: 4, markers: [marker('a', 2), marker('b', 5), marker('c', 9)],
       })
     }
+  })
+
+  // ESCSUITE-470: Save over an opened (or picked) file writes what the
+  // download would have, and it opens again.
+  it('writes over a picked file the bytes the download would, and they load back', async () => {
+    const id = uniqueId('fs')
+    const editor = { inPoint: 1, outPoint: 4, markers: [marker('a', 2)] }
+    const picked = fakeFileHandle('p.veditor', [7, 7, 7])
+    const progress: Array<[number, string]> = []
+
+    await saveProjectToFile(picked.handle, createTestProject(id), [], (p, m) => progress.push([p, m]), editor)
+    await saveProject(createTestProject(id), [], undefined, editor)
+
+    const written = picked.bytes()!
+    const downloaded = new Uint8Array(await (await lastFile()).arrayBuffer())
+    expect(written).toEqual([...downloaded])
+    expect(progress[progress.length - 1]).toEqual([100, 'Project saved!'])
+    const loaded = await loadProject(fileOf([new Uint8Array(written)], 'p.veditor'))
+    expect(loaded.project.id).toBe('project1')
+    expect(loaded.editor).toEqual(editor)
   })
 
   it('an old file without the block loads with no editor state', async () => {

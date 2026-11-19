@@ -46,6 +46,8 @@ import { getSetting, setSetting } from '../../core/storage';
 import { analytics } from '../../utils/analytics';
 import { sendMessage } from '../../utils/integration';
 import { downloadBlob } from '../../utils/downloadBlob';
+import { FileWriteError, canPickSaveFile, chooseSaveDestination, errorMessage, openFileSink } from '../../core/saveFile';
+import type { FileSink, SaveDestination, SaveFileType } from '../../core/saveFile';
 import { serializeCaptions } from '../../core/captions';
 import type { CaptionCue, CaptionFormat } from '../../core/captions';
 import type { ExportOptions, ExportProgress } from '../../store/types';
@@ -101,6 +103,13 @@ const LOUDNESS_TARGET_USES: Record<LoudnessTarget, string> = {
 const CAPTION_MIME_TYPES: Record<CaptionFormat, string> = {
   srt: 'application/x-subrip',
   vtt: 'text/vtt',
+};
+
+/** Each format's entry in the save picker's type list (ESCSUITE-470). */
+const EXPORT_FILE_TYPES: Record<ExportOptions['format'], SaveFileType> = {
+  webm: { description: 'WebM video', accept: { 'video/webm': ['.webm'] } },
+  mp4: { description: 'MP4 video', accept: { 'video/mp4': ['.mp4'] } },
+  gif: { description: 'GIF animation', accept: { 'image/gif': ['.gif'] } },
 };
 
 /** The visible length notices the disabled downloads point at (ESCSUITE-385). */
@@ -438,6 +447,33 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       return;
     }
 
+    // Determine options: primary button uses defaults, advanced button uses configured options
+    const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
+    const exportOptions: ExportOptions = useAdvanced
+      ? { ...advancedOptions, timeRange: effectiveTimeRange }
+      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
+
+    const requestedFormat = formatOverride || exportOptions.format;
+    // GIF needs no WebCodecs, so it never falls back; MP4 still does.
+    const format: ExportOptions['format'] =
+      requestedFormat === 'gif' ? 'gif' : requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
+    const fileName = `${projectName || 'export'}.${format}`;
+
+    // ESCSUITE-470: where the browser can write to a file, ask for it first,
+    // from the click itself: nothing above awaits, and the picker needs the
+    // gesture's activation. A cancelled picker starts nothing. Elsewhere the
+    // export downloads, as it always has, with no `await` added in front.
+    let destination: SaveDestination = { kind: 'download' };
+    if (canPickSaveFile()) {
+      try {
+        destination = await chooseSaveDestination(fileName, EXPORT_FILE_TYPES[format]);
+      } catch (pickError) {
+        setError(`Could not choose where to save: ${errorMessage(pickError)}`);
+        return;
+      }
+      if (destination.kind === 'cancelled') return;
+    }
+
     setError(null);
     setOfferMp4Fallback(false);
     setMp4FailedError(null);
@@ -467,16 +503,6 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     registerLiveExport(abortController);
     const isCurrentRun = () => latestExportRef.current === abortController;
 
-    // Determine options: primary button uses defaults, advanced button uses configured options
-    const effectiveTimeRange = exportFullVideo ? undefined : timeRange;
-    const exportOptions: ExportOptions = useAdvanced
-      ? { ...advancedOptions, timeRange: effectiveTimeRange }
-      : { format: 'webm', quality: 'medium', resolution: 'project', timeRange: effectiveTimeRange };
-
-    const requestedFormat = formatOverride || exportOptions.format;
-    // GIF needs no WebCodecs, so it never falls back; MP4 still does.
-    const format: ExportOptions['format'] =
-      requestedFormat === 'gif' ? 'gif' : requestedFormat === 'mp4' && mp4Supported ? 'mp4' : 'webm';
     analytics.exportStarted(format);
 
     // Save advanced settings if using advanced options
@@ -511,7 +537,16 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
     // the value from before the run began, never where the run failed.
     let lastProgress = 0;
 
+    // The picked file the muxer writes into, once it is open. A write it
+    // refuses (a full disk, permission taken away) stops the run through its
+    // abort signal and is reported below in the run's place.
+    let sink: FileSink | undefined;
+
     try {
+      if (destination.kind === 'file') {
+        sink = await openFileSink(destination.handle, () => abortController.abort());
+      }
+
       const onProgress = (p: ExportProgress) => {
         lastProgress = p.progress;
         if (isCurrentRun()) report(p);
@@ -524,21 +559,22 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         result = await exportToGIF(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
         extension = 'gif';
       } else if (format === 'mp4') {
-        result = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToMP4(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution, sink);
         extension = 'mp4';
       } else {
-        result = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution);
+        result = await exportToWebM(clips, sourceVideos, exportOptions, onProgress, tracks, abortController.signal, projectResolution, sink);
         extension = 'webm';
       }
-      const blob = result.blob;
+      // A GIF is encoded whole, so it cannot stream: its finished bytes are
+      // written to the picked file in one go (ESCSUITE-470).
+      const blob = sink && format === 'gif' ? await sink.writeAll(result.blob) : result.blob;
 
       // A superseded run must neither download nor notify a host: both are
       // user/host-visible side effects that belong only to the export the
       // user is actually looking at.
       if (isCurrentRun()) {
-        const fileName = `${projectName || 'export'}.${extension}`;
-
-        downloadBlob(blob, fileName);
+        // Already in the picked file, when there is one.
+        if (!sink) downloadBlob(blob, fileName);
 
         // Hand the finished file to an embedding host (no-op when not embedded).
         // The download above has already happened, so a host channel that throws
@@ -549,7 +585,7 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
             // `audio` is additive (ESCSUITE-175): a host that only reads the
             // three fields it has always read is unaffected, and one that wants
             // to know whether the file it was handed has sound in it can.
-            payload: { blob, format: extension, name: fileName, audio: result.audio },
+            payload: { blob, format: extension, name: sink?.name ?? fileName, audio: result.audio },
           });
         } catch (hostError) {
           console.error('Failed to notify host of completed export:', hostError);
@@ -580,12 +616,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
         // The mix's measured loudness, and the gain a target applied, ride on
         // the completion sentence itself (ESCSUITE-292), so the one live
         // region announces them with it rather than a second region competing.
+        const saved = sink ? ` Saved to ${sink.name}.` : '';
         report({
           phase: 'complete',
           progress: 100,
           message: result.loudness
-            ? `Export complete! ${formatLoudnessSummary(result.loudness)}`
-            : 'Export complete!',
+            ? `Export complete!${saved} ${formatLoudnessSummary(result.loudness)}`
+            : `Export complete!${saved}`,
         });
 
         // Close dialog after a delay
@@ -596,7 +633,13 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
           }
         }, 2000);
       }
-    } catch (err) {
+    } catch (caught) {
+      // A write the picked file refused ended the run through its abort
+      // signal: that write is the failure, not a cancel.
+      const err: unknown = sink?.failure ?? caught;
+      // Cancelled or failed, the picked file keeps none of this run's bytes.
+      await sink?.discard();
+
       // Don't show error for user-initiated cancellation
       if (err instanceof ExportAbortedError) {
         if (isCurrentRun()) setProgress(null);
@@ -625,8 +668,11 @@ export function ExportDialog({ isOpen, onClose, timeRange: timeRangeProp }: Expo
       // from the same <video> — and the refusal itself says to use Chrome or
       // Edge (ESCSUITE-305 review round 1); a source with no stored bytes is
       // gone for every exporter (ESCSUITE-330).
+      // Nor is a file that could not be written (ESCSUITE-470): the other format
+      // would go to the same file.
       const noOtherFormat =
-        err instanceof ExportError && (err.code === 'SOURCE_NOT_SEEKABLE' || err.code === 'SOURCE_MISSING');
+        err instanceof FileWriteError ||
+        (err instanceof ExportError && (err.code === 'SOURCE_NOT_SEEKABLE' || err.code === 'SOURCE_MISSING'));
 
       // If MP4 failed, show the fallback dialog instead of just an error
       if (isCurrentRun()) {

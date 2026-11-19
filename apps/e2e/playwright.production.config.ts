@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { NO_LOCAL_FILE_PICKERS } from './utils/filePickers'
 
 const isCI = !!process.env.CI
 
@@ -33,7 +34,8 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      // Without the local file pickers, so exports download (`utils/filePickers.ts`).
+      use: { ...devices['Desktop Chrome'], launchOptions: { args: [NO_LOCAL_FILE_PICKERS] } },
     },
   ],
 

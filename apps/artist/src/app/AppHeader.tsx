@@ -19,6 +19,8 @@ interface AppHeaderProps {
   onLoadProject: () => void | Promise<void>;
   /** Save the current project to disk — both the menu item and the quick button. */
   onSaveProject: () => void | Promise<void>;
+  /** Save to a newly chosen file; absent where the browser cannot pick one (ESCSUITE-470). */
+  onSaveProjectAs?: () => void | Promise<void>;
   /** Open the export dialog — both the menu item and the Export button. */
   onExport: () => void;
   /** A project load is in flight. */
@@ -46,6 +48,7 @@ export function AppHeader({
   onNewProject,
   onLoadProject,
   onSaveProject,
+  onSaveProjectAs,
   onExport,
   isLoading,
   isSaving,
@@ -81,6 +84,7 @@ export function AppHeader({
           onNewProject={onNewProject}
           onLoadProject={onLoadProject}
           onSaveProject={onSaveProject}
+          onSaveProjectAs={onSaveProjectAs}
           onExport={onExport}
           isLoading={isLoading}
           isSaving={isSaving}

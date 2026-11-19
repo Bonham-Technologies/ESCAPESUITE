@@ -27,6 +27,7 @@ import {
   type ProjectFileIndex,
   type ProjectFileSource,
 } from './projectFileFormat';
+import { rememberFileHandle, writeBlobToFile } from './saveFile';
 
 /**
  * The `SourceVideo` fields a saved project persists alongside each video's
@@ -126,6 +127,45 @@ export async function saveProject(
   /** Handed in, as `sourceVideos` is, rather than read from the store here. */
   editor?: EditorBlock
 ): Promise<void> {
+  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor);
+
+  // Download file
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${project.name || 'project'}.veditor`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  onProgress?.(100, 'Project saved!');
+}
+
+/**
+ * Save the project over the file `handle` names (ESCSUITE-470): the one it was
+ * opened from, or one the save picker chose. The same bytes `saveProject`
+ * downloads, written whole or not at all.
+ */
+export async function saveProjectToFile(
+  handle: FileSystemFileHandle,
+  project: Project,
+  sourceVideos: SourceVideo[],
+  onProgress?: (progress: number, message: string) => void,
+  editor?: EditorBlock
+): Promise<void> {
+  const blob = await buildProjectFile(project, sourceVideos, onProgress, editor);
+  await writeBlobToFile(handle, blob);
+  onProgress?.(100, 'Project saved!');
+}
+
+/** The `.veditor` both saves write. */
+async function buildProjectFile(
+  project: Project,
+  sourceVideos: SourceVideo[],
+  onProgress: ((progress: number, message: string) => void) | undefined,
+  editor: EditorBlock | undefined
+): Promise<Blob> {
   onProgress?.(0, 'Preparing project data...');
 
   // Get all videos used in the timeline
@@ -172,19 +212,7 @@ export async function saveProject(
 
   onProgress?.(90, 'Creating project file...');
 
-  const blob = new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
-
-  // Download file
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${project.name || 'project'}.veditor`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  onProgress?.(100, 'Project saved!');
+  return new Blob(encodeProjectFile(project, editor, sources), { type: 'application/octet-stream' });
 }
 
 /**
@@ -797,6 +825,12 @@ export async function extractMetadataFromBlob(
   };
 }
 
+/** A `.veditor` in the open and save pickers' type lists. */
+export const PROJECT_FILE_TYPE = {
+  description: 'Video Editor Project',
+  accept: { 'application/octet-stream': ['.veditor'] },
+};
+
 /**
  * The part of the File System Access API `showOpenProjectDialog` uses. The DOM
  * lib does not declare `showOpenFilePicker` (Chromium only), so it is typed here.
@@ -804,7 +838,7 @@ export async function extractMetadataFromBlob(
 interface WindowWithOpenFilePicker extends Window {
   showOpenFilePicker(options: {
     types: { description: string; accept: Record<string, string[]> }[];
-  }): Promise<{ getFile(): Promise<File> }[]>;
+  }): Promise<FileSystemFileHandle[]>;
 }
 
 /**
@@ -815,14 +849,12 @@ export async function showOpenProjectDialog(): Promise<File | null> {
   if ('showOpenFilePicker' in window) {
     try {
       const [handle] = await (window as WindowWithOpenFilePicker).showOpenFilePicker({
-        types: [
-          {
-            description: 'Video Editor Project',
-            accept: { 'application/octet-stream': ['.veditor'] },
-          },
-        ],
+        types: [PROJECT_FILE_TYPE],
       });
-      return await handle.getFile();
+      const file = await handle.getFile();
+      // So Save can write back over it (ESCSUITE-470).
+      rememberFileHandle(file, handle);
+      return file;
     } catch (e) {
       // User cancelled or API not available
       if ((e as Error).name !== 'AbortError') {

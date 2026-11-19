@@ -60,6 +60,7 @@ import {
 } from './frameManager';
 import { extractAndMixAudio } from './audioMixer';
 import { createChunkCollector } from './chunkCollector';
+import type { ExportSink } from './saveFile';
 import { assignElementSlots } from './elementSlots';
 import { MEASURING_LOUDNESS, exportLoudness, formatLoudnessSummary } from './loudness';
 
@@ -109,7 +110,12 @@ export async function exportToMP4(
   onProgress: ProgressCallback,
   tracks?: Track[],
   signal?: AbortSignal,
-  projectResolution?: { width: number; height: number }
+  projectResolution?: { width: number; height: number },
+  /**
+   * Where the muxer writes: a file the user picked (ESCSUITE-470), or, by
+   * default, Blob parts joined at the end for the download.
+   */
+  sink: ExportSink = createChunkCollector()
 ): Promise<ExportResult> {
   if (!hasMP4EncodeGlobals()) {
     throw new Error('MP4 export requires WebCodecs API (Chrome/Edge)');
@@ -403,12 +409,11 @@ export async function exportToMP4(
     // export failed at `finalize()` after the whole encode (ESCSUITE-367).
     // `'reserve'` keeps the moov at the front, as `'in-memory'` did, by
     // reserving room for it sized from each track's most packets.
-    const collector = createChunkCollector();
     const output = new Output({
       format: new Mp4OutputFormat({
         fastStart: 'reserve',
       }),
-      target: new StreamTarget(collector.writable),
+      target: new StreamTarget(sink.writable),
     });
 
     // Create video packet source: one packet per frame.
@@ -810,13 +815,16 @@ export async function exportToMP4(
     // so the catch below does the cleanup and rethrows the abort as-is.
     checkAborted(signal);
 
+    // The finished file: committed to the picked file (ESCSUITE-470) before
+    // the export says it is complete, so a write the disk refuses at the end
+    // still fails the export.
+    const blob = await sink.finish('video/mp4');
+
     // Release the worker and the media, once.
     await release();
 
     onProgress({ phase: 'complete', progress: 100, message: 'Export complete!' });
 
-    // Get the final file
-    const blob = collector.toBlob('video/mp4');
     if (blob.size === 0) {
       throw new Error('Export failed: no data was written to buffer');
     }

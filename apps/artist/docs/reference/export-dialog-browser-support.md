@@ -307,3 +307,8 @@ frame. Two consequences outside this file: a Playwright `getByText` of "Encoding
 "Export complete!" now matches twice and needs `.first()` (four call sites carry that note), and
 `apps/e2e/tests/accessibility/screen-reader.spec.ts` › "ESCAPEARTIST announces export progress"
 is the end-to-end pin, driving a real MP4 export.
+
+**Where the file goes (ESCSUITE-470).** In a browser with `showSaveFilePicker` (Chromium, Edge)
+every export button asks for the destination file first and the export is written straight into
+it (MP4 and WebM stream, GIF is written once encoded); everywhere else it downloads as before.
+See [`saving-to-a-picked-file.md`](saving-to-a-picked-file.md).

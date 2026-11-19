@@ -20,7 +20,7 @@ Message types: `LOAD_VIDEO`, `LOAD_PROJECT`, `GET_STATE`, `EXPORT`, `SET_THEME`,
 
 **Inbound message filtering**: `initIntegration`'s listener acts only on events whose `event.source` is `window.parent` — the framing window is the only one that drives the editor. When `?hostOrigin=` is set, `event.origin` must match it as well.
 
-**Outgoing `EXPORT_COMPLETE`**: sent from `ExportDialog` right after a successful export (alongside the normal browser download, which is unchanged). Not sent when the export fails or is cancelled.
+**Outgoing `EXPORT_COMPLETE`**: sent from `ExportDialog` right after a successful export (alongside the normal browser download, which is unchanged; where the browser has the save picker and the page may open it, the export goes to the file the user chose instead, and `blob` is that file read back from disk and `name` its name, ESCSUITE-470). Not sent when the export fails or is cancelled.
 
 **Inbound `LOAD_PROJECT` is validated (ESCSUITE-102)**: the payload is the project object itself
 (not wrapped in a `data` field), and `useHostIntegration` runs a *present* payload through the
