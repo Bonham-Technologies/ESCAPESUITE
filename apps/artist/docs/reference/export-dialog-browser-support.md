@@ -307,3 +307,14 @@ frame. Two consequences outside this file: a Playwright `getByText` of "Encoding
 "Export complete!" now matches twice and needs `.first()` (four call sites carry that note), and
 `apps/e2e/tests/accessibility/screen-reader.spec.ts` › "ESCAPEARTIST announces export progress"
 is the end-to-end pin, driving a real MP4 export.
+
+## Keeping the screen on (ESCSUITE-474)
+
+`handleExport` holds a screen wake lock (`holdScreenAwake`, `packages/shared`) from the start of
+every MP4, WebM and GIF export. Cancel aborts the run's controller, which releases it at once;
+the run's `finally` releases it on success and failure. While the lock is actually held, and the
+export has not completed, the progress view shows "Keeping the screen on until the export
+finishes." (not a live region). Where the API is missing or the request is refused nothing is
+shown and the export is unchanged. The hold is keyed by run, so a cancelled run's late release
+cannot clear a newer run's line. Transcription (`TranscribeControl.tsx`) holds one the same way
+for the whole run (no status line).
